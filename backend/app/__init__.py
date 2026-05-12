@@ -1,0 +1,1 @@
+"""CheckWise backend application package."""

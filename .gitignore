@@ -1,0 +1,42 @@
+# OS
+.DS_Store
+
+# Env
+.env
+.env.*
+!.env.example
+!frontend/.env.local.example
+
+# Python
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+.venv/
+venv/
+backend/.venv/
+backend/storage/
+backend/*.egg-info/
+
+# Node / Next.js
+node_modules/
+.next/
+out/
+dist/
+coverage/
+frontend/node_modules/
+frontend/.next/
+frontend/out/
+frontend/.turbo/
+*.tsbuildinfo
+
+# Logs
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+
+# Local database
+postgres-data/
