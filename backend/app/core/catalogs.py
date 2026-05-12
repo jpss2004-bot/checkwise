@@ -5,6 +5,7 @@ DOCUMENT_STATUSES = [
     {"code": "recibido", "label": "Recibido"},
     {"code": "pendiente_revision", "label": "Pendiente de revisión"},
     {"code": "prevalidado", "label": "Prevalidado"},
+    {"code": "posible_mismatch", "label": "Posible mismatch"},
     {"code": "aprobado", "label": "Aprobado"},
     {"code": "rechazado", "label": "Rechazado"},
     {"code": "vencido", "label": "Vencido"},
@@ -33,6 +34,9 @@ INSTITUTIONS = [
 VALIDATION_RULES = [
     {"code": "file_exists", "label": "Archivo existe", "type": "tecnica"},
     {"code": "allowed_file_type", "label": "Tipo de archivo permitido", "type": "tecnica"},
+    {"code": "pdf_magic_header", "label": "Estructura PDF básica", "type": "tecnica"},
+    {"code": "pdf_encrypted", "label": "PDF bloqueado o protegido", "type": "tecnica"},
+    {"code": "pdf_readable_text", "label": "Texto legible en PDF", "type": "tecnica"},
     {"code": "max_file_size", "label": "Tamaño máximo", "type": "tecnica"},
     {"code": "sha256_hash", "label": "Hash de archivo", "type": "tecnica"},
     {"code": "vendor_match", "label": "Proveedor coincide", "type": "fiscal"},
@@ -41,6 +45,7 @@ VALIDATION_RULES = [
     {"code": "duplicate_hash", "label": "Duplicado por hash", "type": "tecnica"},
     {"code": "expired_document", "label": "Documento vencido", "type": "temporal"},
     {"code": "human_review_required", "label": "Requiere revisión humana", "type": "legal"},
+    {"code": "document_intelligence", "label": "Señales documentales", "type": "inteligencia"},
 ]
 
 REQUIREMENT_EXAMPLES = [

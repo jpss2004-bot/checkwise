@@ -20,7 +20,9 @@ class Settings(BaseSettings):
     LOCAL_STORAGE_PATH: str = "./storage"
 
     MAX_UPLOAD_SIZE_BYTES: int = 15 * 1024 * 1024
-    ALLOWED_FILE_EXTENSIONS: str = ".pdf,.xml,.docx,.jpg,.jpeg,.png"
+    ALLOWED_FILE_EXTENSIONS: str = ".pdf"
+    SUPPORT_WHATSAPP_URL: str = ""
+    SUPPORT_QR_PLACEHOLDER_URL: str = ""
 
     model_config = SettingsConfigDict(env_file=".env", env_file_encoding="utf-8", extra="ignore")
 

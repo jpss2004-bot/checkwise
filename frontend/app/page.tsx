@@ -1,6 +1,7 @@
 import { Activity, Database, FileCheck2, ShieldCheck } from "lucide-react";
 
-import { DocumentSubmissionForm } from "@/components/checkwise/document-submission-form";
+import { IntakeWizard } from "@/components/checkwise/intake-wizard";
+import { SupportCard } from "@/components/checkwise/support-card";
 import { Badge } from "@/components/ui/badge";
 
 const metrics = [
@@ -26,7 +27,7 @@ export default function Home() {
               </div>
             </div>
           </div>
-          <Badge variant="outline">V1 foundation</Badge>
+          <Badge variant="outline">V1.1 native intake</Badge>
         </div>
       </header>
 
@@ -48,7 +49,7 @@ export default function Home() {
       </section>
 
       <div className="mx-auto grid max-w-7xl gap-5 px-5 py-6 lg:grid-cols-[minmax(0,1fr)_360px]">
-        <DocumentSubmissionForm />
+        <IntakeWizard />
 
         <aside className="space-y-4">
           <section className="rounded-md border border-border bg-white p-5 shadow-soft">
@@ -73,6 +74,8 @@ export default function Home() {
             </div>
           </section>
 
+          <SupportCard />
+
           <section className="rounded-md border border-border bg-white p-5 shadow-soft">
             <h2 className="text-base font-semibold">Estados base</h2>
             <div className="mt-4 flex flex-wrap gap-2">
@@ -81,6 +84,7 @@ export default function Home() {
                 "recibido",
                 "pendiente_revision",
                 "prevalidado",
+                "posible_mismatch",
                 "aprobado",
                 "rechazado",
                 "vencido",

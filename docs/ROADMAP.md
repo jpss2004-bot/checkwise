@@ -1,6 +1,16 @@
 # Roadmap V1
 
-## Fase Actual: Foundation
+## Fase Actual: V1.1 Native Intake Foundation
+
+- Wizard nativo de carga documental.
+- PDF-only intake.
+- Inspección técnica PDF.
+- Señales documentales determinísticas.
+- Eventos de validación trazables.
+- Soporte contextual WhatsApp preparado por configuración.
+- Estrategia documentada de salida progresiva de JotForm.
+
+## Fase Anterior: Foundation
 
 - Monorepo con frontend, backend, DB local y documentación.
 - Modelo regulatorio versionable.
@@ -9,13 +19,14 @@
 - Prevalidaciones objetivas iniciales.
 - Auditabilidad base.
 
-## Siguiente Fase Recomendada: Importador Canónico
+## Siguiente Fase Recomendada: Importador Canónico + Seed Regulatorio
 
 1. Auditar estructura actual de JotForm y Google Sheets.
 2. Crear diccionario de campos fuente.
 3. Mapear cada campo a entidades canónicas.
 4. Implementar importador idempotente hacia PostgreSQL.
 5. Reportar diferencias, duplicados y datos no mapeables.
+6. Sembrar `requirements` y `requirement_versions` desde la matriz REPSE 2026.
 
 ## Fases Posteriores
 

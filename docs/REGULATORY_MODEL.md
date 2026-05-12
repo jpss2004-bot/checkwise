@@ -52,6 +52,10 @@ La arquitectura queda preparada para:
 - Tipo de archivo permitido.
 - Tamaño máximo.
 - Hash SHA-256.
+- Estructura PDF básica.
+- PDF bloqueado/corrupto.
+- Texto legible o posible escaneo.
+- Señales documentales determinísticas.
 - Proveedor coincide.
 - Periodo coincide.
 - Requisito correcto.
@@ -61,4 +65,4 @@ La arquitectura queda preparada para:
 
 ## Regla de Aprobación
 
-Los requisitos críticos o con criterio legal/fiscal nunca deben aprobarse únicamente por automatización. La automatización puede marcar `prevalidado`, `rechazado` técnico o `requiere_aclaracion`; la aprobación final requiere actor humano autorizado.
+Los requisitos críticos o con criterio legal/fiscal nunca deben aprobarse únicamente por automatización. La automatización puede marcar `prevalidado`, `posible_mismatch`, `rechazado` técnico o `requiere_aclaracion`; la aprobación final requiere actor humano autorizado.

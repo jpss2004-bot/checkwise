@@ -30,6 +30,7 @@ The current operation uses JotForm, Google Sheets, human/legal review, and Looke
 - Keep domain terms in English for code identifiers and Spanish for user-facing copy where appropriate.
 - Add migrations for schema changes.
 - Add audit events for important state transitions.
+- For native intake, record validation events and document inspection signals instead of hiding decisions in UI-only state.
 - Avoid broad refactors unless they directly support the requested change.
 - Do not hardcode regulation into form-only logic; update requirements/catalogs or seed data instead.
 

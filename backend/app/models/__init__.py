@@ -3,6 +3,7 @@ from app.models.entities import (
     Client,
     Contract,
     Document,
+    DocumentInspection,
     DocumentStatusHistory,
     Institution,
     Period,
@@ -11,6 +12,7 @@ from app.models.entities import (
     RequirementVersion,
     Submission,
     Validation,
+    ValidationEvent,
     Vendor,
 )
 
@@ -19,6 +21,7 @@ __all__ = [
     "Client",
     "Contract",
     "Document",
+    "DocumentInspection",
     "DocumentStatusHistory",
     "Institution",
     "Period",
@@ -27,5 +30,6 @@ __all__ = [
     "RequirementVersion",
     "Submission",
     "Validation",
+    "ValidationEvent",
     "Vendor",
 ]

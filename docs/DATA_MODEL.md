@@ -14,6 +14,8 @@
 | `submissions` | Carga documental recibida | Une cliente, proveedor, contrato, periodo, institución, requisito y estado. |
 | `documents` | Metadatos de archivo | Storage key, hash, MIME, tamaño, OCR status. |
 | `validations` | Señales automáticas y revisión humana | Resultado, severidad, comentario, escalamiento. |
+| `validation_events` | Eventos trazables de intake/prevalidación | Bitácora granular por evento, regla, severidad, confidence y payload. |
+| `document_inspections` | Resultado técnico e inteligente del PDF | Estructura PDF, texto, señales detectadas, posible mismatch. |
 | `document_status_history` | Historial de estados | Trazabilidad de cambios documentales. |
 | `reports` | Salidas ejecutivas | Generación futura desde datos normalizados. |
 | `audit_log` | Auditoría transversal | Actor, acción, entidad, antes/después y metadata. |
@@ -24,6 +26,7 @@
 - `recibido`
 - `pendiente_revision`
 - `prevalidado`
+- `posible_mismatch`
 - `aprobado`
 - `rechazado`
 - `vencido`
@@ -52,3 +55,5 @@ Todo documento debe poder responder:
 - Campos regulatorios variables viven en `requirement_versions`, no como columnas sueltas.
 - `documents.sha256` habilita deduplicación futura.
 - `audit_log.metadata` se implementa como columna `metadata` mapeada a atributo `event_metadata` para evitar conflicto interno con SQLAlchemy.
+- `validation_events` complementa `validations`: `validations` resume reglas; `validation_events` conserva cronología y payload auditable.
+- `document_inspections` concentra señales técnicas/inteligentes sin convertirlas en aprobación legal.

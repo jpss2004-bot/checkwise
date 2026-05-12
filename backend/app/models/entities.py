@@ -214,6 +214,7 @@ class Document(TimestampMixin, Base):
     submission: Mapped[Submission] = relationship(back_populates="documents")
     validations: Mapped[list[Validation]] = relationship(back_populates="document")
     status_history: Mapped[list[DocumentStatusHistory]] = relationship(back_populates="document")
+    inspection: Mapped[DocumentInspection | None] = relationship(back_populates="document")
 
 
 class Validation(TimestampMixin, Base):
@@ -233,6 +234,52 @@ class Validation(TimestampMixin, Base):
 
     submission: Mapped[Submission] = relationship(back_populates="validations")
     document: Mapped[Document | None] = relationship(back_populates="validations")
+
+
+class ValidationEvent(Base):
+    __tablename__ = "validation_events"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=new_id)
+    submission_id: Mapped[str] = mapped_column(ForeignKey("submissions.id"), nullable=False)
+    document_id: Mapped[str | None] = mapped_column(ForeignKey("documents.id"))
+    event_type: Mapped[str] = mapped_column(String(120), nullable=False)
+    rule_code: Mapped[str | None] = mapped_column(String(120))
+    result: Mapped[str] = mapped_column(String(40), nullable=False)
+    severity: Mapped[str] = mapped_column(String(40), default="info", nullable=False)
+    message: Mapped[str | None] = mapped_column(Text)
+    confidence: Mapped[float | None] = mapped_column(Float)
+    payload: Mapped[dict | None] = mapped_column(JSON)
+    actor_type: Mapped[str] = mapped_column(String(60), default="system", nullable=False)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=utc_now, nullable=False
+    )
+
+
+class DocumentInspection(TimestampMixin, Base):
+    __tablename__ = "document_inspections"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=new_id)
+    document_id: Mapped[str] = mapped_column(
+        ForeignKey("documents.id"), unique=True, nullable=False
+    )
+    is_pdf: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
+    is_corrupt: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
+    is_encrypted: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
+    page_count: Mapped[int | None] = mapped_column(Integer)
+    text_char_count: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+    has_text: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
+    is_probably_scanned: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
+    detected_institution: Mapped[str | None] = mapped_column(String(80))
+    detected_document_type: Mapped[str | None] = mapped_column(String(120))
+    detected_rfcs: Mapped[list | None] = mapped_column(JSON)
+    detected_dates: Mapped[list | None] = mapped_column(JSON)
+    period_mentions: Mapped[list | None] = mapped_column(JSON)
+    requirement_match_confidence: Mapped[float | None] = mapped_column(Float)
+    mismatch_reason: Mapped[str | None] = mapped_column(Text)
+    inspection_error: Mapped[str | None] = mapped_column(Text)
+    raw_metadata: Mapped[dict | None] = mapped_column(JSON)
+
+    document: Mapped[Document] = relationship(back_populates="inspection")
 
 
 class DocumentStatusHistory(Base):
