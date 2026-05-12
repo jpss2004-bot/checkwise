@@ -154,7 +154,7 @@ export function DocumentSubmissionForm() {
                   id="file"
                   name="file"
                   type="file"
-                  accept=".pdf,.xml,.docx,.jpg,.jpeg,.png"
+                  accept=".pdf,application/pdf"
                   required
                 />
               </Field>

@@ -1,0 +1,698 @@
+%PDF-1.4
+%âãÏÓ
+1 0 obj
+<< /Type /Catalog /Pages 2 0 R >>
+endobj
+2 0 obj
+<< /Type /Pages /Kids [4 0 R 6 0 R 8 0 R 10 0 R 12 0 R 14 0 R 16 0 R] /Count 7 >>
+endobj
+3 0 obj
+<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>
+endobj
+4 0 obj
+<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Resources << /Font << /F1 3 0 R >> >> /Contents 5 0 R >>
+endobj
+5 0 obj
+<< /Length 2232 >>
+stream
+BT
+/F1 10 Tf
+72 738 Td
+14 TL
+(CheckWise Demo Guide) Tj
+T*
+T*
+(CheckWise V1 Demo) Tj
+T*
+() Tj
+T*
+(Trazabilidad documental REPSE) Tj
+T*
+() Tj
+T*
+(Esta guía prepara una demo honesta de CheckWise V1: una base técnica funcional para) Tj
+T*
+(convertir una carga documental en evidencia trazable por cliente, proveedor, periodo,) Tj
+T*
+(institución, requisito, archivo, validación, estado y revisión humana.) Tj
+T*
+() Tj
+T*
+(Objetivo de la demo) Tj
+T*
+() Tj
+T*
+(Mostrar cómo CheckWise deja de tratar los documentos como archivos sueltos y los) Tj
+T*
+(convierte en evidencia regulatoria organizada. La demo debe comunicar que el sistema ya) Tj
+T*
+(tiene una base seria para migrar gradualmente desde JotForm, Google Sheets, revisión) Tj
+T*
+(humana/legal y Looker Studio hacia PostgreSQL como fuente futura de verdad.) Tj
+T*
+() Tj
+T*
+(Historia de usuario) Tj
+T*
+() Tj
+T*
+(Un proveedor carga un documento fiscal/REPSE correspondiente a un periodo. CheckWise) Tj
+T*
+(relaciona esa evidencia con un cliente, proveedor, contrato si aplica, periodo,) Tj
+T*
+(institución y requisito documental. El sistema guarda el archivo fuera de la base de) Tj
+T*
+(datos, registra metadata, hash, señales de validación, estado documental y deja claro) Tj
+T*
+(que la aprobación crítica sigue requiriendo revisión humana autorizada.) Tj
+T*
+() Tj
+T*
+(Datos seguros de demo) Tj
+T*
+() Tj
+T*
+(- Cliente: Cliente Piloto CheckWise) Tj
+T*
+(- Proveedor: Servicios Especializados Demo SA de CV) Tj
+T*
+(- RFC proveedor: DEM260512AB1) Tj
+T*
+(- Periodo: 2026-05) Tj
+T*
+(- Tipo de carga: Mensual) Tj
+T*
+(- Institución: SAT) Tj
+T*
+(- Requisito: Opinión de cumplimiento SAT positiva) Tj
+T*
+(- PDF: demo_assets/sample_documents/checkwise_demo_opinion_sat.pdf) Tj
+T*
+() Tj
+T*
+(El PDF es ficticio, no contiene datos reales sensibles y declara explícitamente que no) Tj
+T*
+(tiene validez oficial.) Tj
+T*
+() Tj
+T*
+(Flujo demo paso a paso) Tj
+T*
+() Tj
+T*
+(1. Abrir el frontend en http://127.0.0.1:3000.) Tj
+T*
+(2. Presentar el encabezado y explicar que CheckWise es una plataforma de cumplimiento) Tj
+T*
+(documental REPSE, no un repositorio genérico.) Tj
+T*
+(3. En el paso Contexto, capturar cliente, proveedor, RFC, periodo, tipo de carga,) Tj
+T*
+(institución y requisito.) Tj
+T*
+ET
+endstream
+endobj
+6 0 obj
+<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Resources << /Font << /F1 3 0 R >> >> /Contents 7 0 R >>
+endobj
+7 0 obj
+<< /Length 2192 >>
+stream
+BT
+/F1 10 Tf
+72 738 Td
+14 TL
+(CheckWise Demo Guide) Tj
+T*
+T*
+(4. En el paso Requisito, explicar que el documento esperado se entiende como requisito) Tj
+T*
+(regulatorio versionable.) Tj
+T*
+(5. En el paso Upload, cargar checkwise_demo_opinion_sat.pdf.) Tj
+T*
+(6. En Prevalidación, mostrar que la evidencia queda asociada a los campos clave antes de) Tj
+T*
+(enviar.) Tj
+T*
+(7. Enviar la carga y revisar el resultado: submission_id, document_id, estado, hash) Tj
+T*
+(SHA-256, páginas PDF, validaciones y eventos.) Tj
+T*
+(8. Abrir http://127.0.0.1:8000/docs para mostrar que el backend expone una API) Tj
+T*
+(versionada y documentada.) Tj
+T*
+() Tj
+T*
+(Screenshots reales) Tj
+T*
+() Tj
+T*
+(Los screenshots de esta guía se capturan desde el sistema local corriendo. No son) Tj
+T*
+(mockups.) Tj
+T*
+() Tj
+T*
+(Screenshot: ../demo_assets/screenshots/01_home_form.png) Tj
+T*
+() Tj
+T*
+(Screenshot: ../demo_assets/screenshots/02_context_step.png) Tj
+T*
+() Tj
+T*
+(Screenshot: ../demo_assets/screenshots/03_requirement_step.png) Tj
+T*
+() Tj
+T*
+(Screenshot: ../demo_assets/screenshots/04_upload_pdf.png) Tj
+T*
+() Tj
+T*
+(Screenshot: ../demo_assets/screenshots/05_submission_result.png) Tj
+T*
+() Tj
+T*
+(Screenshot: ../demo_assets/screenshots/06_fastapi_docs.png) Tj
+T*
+() Tj
+T*
+(Guion de 5 minutos) Tj
+T*
+() Tj
+T*
+(0:00 - 0:45 | Problema actual) Tj
+T*
+() Tj
+T*
+(?Hoy el cumplimiento REPSE suele vivir en flujos dispersos: JotForm, correos, carpetas,) Tj
+T*
+(Sheets, revisiones manuales y dashboards que no siempre tienen trazabilidad completa. El) Tj
+T*
+(riesgo no es solo perder un archivo; es no poder demostrar qué proveedor entregó qué) Tj
+T*
+(evidencia, para qué periodo, contra qué requisito y bajo qué revisión.?) Tj
+T*
+() Tj
+T*
+(0:45 - 1:30 | Qué es CheckWise) Tj
+T*
+() Tj
+T*
+(?CheckWise es una plataforma de cumplimiento documental REPSE. No está pensada como un) Tj
+T*
+(uploader genérico. Cada documento entra con contexto: cliente, proveedor, periodo,) Tj
+T*
+(institución, requisito, estado y evidencia técnica. La meta de V1 es construir la base) Tj
+T*
+(confiable para que PostgreSQL sea la fuente futura de verdad, manteniendo JotForm y) Tj
+T*
+(Sheets como puentes de migración.?) Tj
+T*
+() Tj
+T*
+ET
+endstream
+endobj
+8 0 obj
+<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Resources << /Font << /F1 3 0 R >> >> /Contents 9 0 R >>
+endobj
+9 0 obj
+<< /Length 2311 >>
+stream
+BT
+/F1 10 Tf
+72 738 Td
+14 TL
+(CheckWise Demo Guide) Tj
+T*
+T*
+(1:30 - 2:45 | Demo del flujo) Tj
+T*
+() Tj
+T*
+(?Aquí capturamos el contexto regulatorio: cliente, proveedor, RFC, periodo e) Tj
+T*
+(institución. Después elegimos el requisito documental esperado. Para la demo usaremos) Tj
+T*
+(una opinión de cumplimiento SAT ficticia. Al cargar el PDF, CheckWise calcula hash,) Tj
+T*
+(inspecciona estructura PDF, busca texto legible y prepara señales de prevalidación.) Tj
+T*
+(Antes de enviar, vemos el resumen de trazabilidad.?) Tj
+T*
+() Tj
+T*
+(2:45 - 3:45 | Trazabilidad) Tj
+T*
+() Tj
+T*
+(?El resultado no es solo ?archivo subido?. Tenemos submission_id, document_id, estado) Tj
+T*
+(documental, SHA-256, páginas detectadas, validaciones y eventos. El documento vive fuera) Tj
+T*
+(de la base; la base conserva metadata, relaciones y evidencia de validación. La) Tj
+T*
+(aprobación crítica no se automatiza: queda pendiente de revisión humana autorizada.?) Tj
+T*
+() Tj
+T*
+(3:45 - 4:30 | Valor) Tj
+T*
+() Tj
+T*
+(?Esto reduce errores operativos, evita que el equipo revise documentos sin contexto y) Tj
+T*
+(permite defender la evidencia por periodo y requisito. También abre la puerta a reportes) Tj
+T*
+(ejecutivos más confiables porque cada carga ya nace estructurada.?) Tj
+T*
+() Tj
+T*
+(4:30 - 5:00 | Siguiente evolución) Tj
+T*
+() Tj
+T*
+(?Los siguientes pasos naturales son sembrar el catálogo regulatorio completo, importar) Tj
+T*
+(JotForm/Sheets, fortalecer validaciones PDF/OCR, habilitar revisión humana y construir) Tj
+T*
+(dashboard interno y reportes ejecutivos desde datos normalizados.?) Tj
+T*
+() Tj
+T*
+(Checklist antes de demo) Tj
+T*
+() Tj
+T*
+(- Docker Desktop activo si se usará PostgreSQL real.) Tj
+T*
+(- Backend corriendo en http://127.0.0.1:8000.) Tj
+T*
+(- Frontend corriendo en http://127.0.0.1:3000.) Tj
+T*
+(- PDF de demo disponible en demo_assets/sample_documents/checkwise_demo_opinion_sat.pdf.) Tj
+T*
+(- Screenshots disponibles en demo_assets/screenshots/.) Tj
+T*
+(- http://127.0.0.1:8000/health responde 200.) Tj
+T*
+(- http://127.0.0.1:8000/api/v1/catalogs responde 200.) Tj
+T*
+(- http://127.0.0.1:8000/docs abre Swagger UI.) Tj
+T*
+(- Browser limpio, sin datos reales ni sesiones sensibles visibles.) Tj
+T*
+() Tj
+T*
+(Instrucciones locales) Tj
+T*
+() Tj
+T*
+(Desde el repo:) Tj
+T*
+() Tj
+T*
+(bash) Tj
+T*
+ET
+endstream
+endobj
+10 0 obj
+<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Resources << /Font << /F1 3 0 R >> >> /Contents 11 0 R >>
+endobj
+11 0 obj
+<< /Length 1341 >>
+stream
+BT
+/F1 10 Tf
+72 738 Td
+14 TL
+(CheckWise Demo Guide) Tj
+T*
+T*
+(cd /Users/josepablosamano/Desktop/Personal/legalshelf/checkwise/CheckWise) Tj
+T*
+(./scripts/checkwise_safe_v1.sh doctor) Tj
+T*
+(./scripts/checkwise_safe_v1.sh backend-deps) Tj
+T*
+(./scripts/checkwise_safe_v1.sh frontend-deps) Tj
+T*
+() Tj
+T*
+() Tj
+T*
+(Si se quiere correr con PostgreSQL local:) Tj
+T*
+() Tj
+T*
+(bash) Tj
+T*
+(./scripts/checkwise_safe_v1.sh postgres) Tj
+T*
+(./scripts/checkwise_safe_v1.sh migrate) Tj
+T*
+() Tj
+T*
+() Tj
+T*
+(Docker/PostgreSQL es necesario para la demo completa con persistencia real. Los tests de) Tj
+T*
+(backend usan SQLite en memoria, por lo que pueden correr aunque PostgreSQL no esté) Tj
+T*
+(activo.) Tj
+T*
+() Tj
+T*
+(Terminal 1:) Tj
+T*
+() Tj
+T*
+(bash) Tj
+T*
+(./scripts/checkwise_safe_v1.sh backend) Tj
+T*
+() Tj
+T*
+() Tj
+T*
+(Terminal 2:) Tj
+T*
+() Tj
+T*
+(bash) Tj
+T*
+(./scripts/checkwise_safe_v1.sh frontend) Tj
+T*
+() Tj
+T*
+() Tj
+T*
+(Terminal 3:) Tj
+T*
+() Tj
+T*
+(bash) Tj
+T*
+(./scripts/checkwise_safe_v1.sh verify) Tj
+T*
+() Tj
+T*
+() Tj
+T*
+(URLs:) Tj
+T*
+() Tj
+T*
+(- Frontend: http://127.0.0.1:3000) Tj
+T*
+(- Backend: http://127.0.0.1:8000) Tj
+T*
+(- FastAPI docs: http://127.0.0.1:8000/docs) Tj
+T*
+(- Health: http://127.0.0.1:8000/health) Tj
+T*
+(- Catalogs: http://127.0.0.1:8000/api/v1/catalogs) Tj
+T*
+() Tj
+T*
+(Tests y verificación técnica) Tj
+T*
+ET
+endstream
+endobj
+12 0 obj
+<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Resources << /Font << /F1 3 0 R >> >> /Contents 13 0 R >>
+endobj
+13 0 obj
+<< /Length 1011 >>
+stream
+BT
+/F1 10 Tf
+72 738 Td
+14 TL
+(CheckWise Demo Guide) Tj
+T*
+T*
+() Tj
+T*
+(Backend:) Tj
+T*
+() Tj
+T*
+(bash) Tj
+T*
+(cd backend) Tj
+T*
+(.venv/bin/ruff check .) Tj
+T*
+(.venv/bin/pytest) Tj
+T*
+() Tj
+T*
+() Tj
+T*
+(Frontend:) Tj
+T*
+() Tj
+T*
+(bash) Tj
+T*
+(cd frontend) Tj
+T*
+(npm run lint) Tj
+T*
+(npm run typecheck) Tj
+T*
+(npm run build) Tj
+T*
+() Tj
+T*
+() Tj
+T*
+(Verificación HTTP:) Tj
+T*
+() Tj
+T*
+(bash) Tj
+T*
+(curl http://127.0.0.1:8000/health) Tj
+T*
+(curl http://127.0.0.1:8000/api/v1/catalogs) Tj
+T*
+(curl http://127.0.0.1:8000/docs) Tj
+T*
+() Tj
+T*
+() Tj
+T*
+(Regenerar assets de demo) Tj
+T*
+() Tj
+T*
+(bash) Tj
+T*
+(python3 tools/generate_demo_assets.py) Tj
+T*
+() Tj
+T*
+() Tj
+T*
+(Este comando genera:) Tj
+T*
+() Tj
+T*
+(- demo_assets/sample_documents/checkwise_demo_opinion_sat.pdf) Tj
+T*
+(- demo_assets/CheckWise_Demo_Guide.pdf si existe docs/DEMO_GUIDE.md) Tj
+T*
+() Tj
+T*
+(Troubleshooting rápido) Tj
+T*
+() Tj
+T*
+(Puerto 3000 ocupado) Tj
+T*
+() Tj
+T*
+(bash) Tj
+T*
+(lsof -i :3000) Tj
+T*
+(kill -9 $\(lsof -ti :3000\)) Tj
+T*
+ET
+endstream
+endobj
+14 0 obj
+<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Resources << /Font << /F1 3 0 R >> >> /Contents 15 0 R >>
+endobj
+15 0 obj
+<< /Length 1315 >>
+stream
+BT
+/F1 10 Tf
+72 738 Td
+14 TL
+(CheckWise Demo Guide) Tj
+T*
+T*
+(./scripts/checkwise_safe_v1.sh frontend) Tj
+T*
+() Tj
+T*
+() Tj
+T*
+(Puerto 8000 ocupado) Tj
+T*
+() Tj
+T*
+(bash) Tj
+T*
+(lsof -i :8000) Tj
+T*
+(kill -9 $\(lsof -ti :8000\)) Tj
+T*
+(./scripts/checkwise_safe_v1.sh backend) Tj
+T*
+() Tj
+T*
+() Tj
+T*
+(Backend no responde) Tj
+T*
+() Tj
+T*
+(1. Confirmar que el backend está corriendo.) Tj
+T*
+(2. Si se usa PostgreSQL, confirmar Docker Desktop y migraciones.) Tj
+T*
+(3. Ejecutar:) Tj
+T*
+() Tj
+T*
+(bash) Tj
+T*
+(./scripts/checkwise_safe_v1.sh verify) Tj
+T*
+() Tj
+T*
+() Tj
+T*
+(Frontend no compila) Tj
+T*
+() Tj
+T*
+(bash) Tj
+T*
+(rm -rf frontend/.next frontend/tsconfig.tsbuildinfo) Tj
+T*
+(cd frontend) Tj
+T*
+(npm run typecheck) Tj
+T*
+(npm run build) Tj
+T*
+() Tj
+T*
+() Tj
+T*
+(Docker/PostgreSQL no disponible) Tj
+T*
+() Tj
+T*
+(Abrir Docker Desktop y esperar a que termine de iniciar. Luego:) Tj
+T*
+() Tj
+T*
+(bash) Tj
+T*
+(./scripts/checkwise_safe_v1.sh postgres) Tj
+T*
+(./scripts/checkwise_safe_v1.sh migrate) Tj
+T*
+() Tj
+T*
+() Tj
+T*
+(El formulario no envía) Tj
+T*
+() Tj
+T*
+(- Confirmar que el backend responde en http://127.0.0.1:8000/health.) Tj
+T*
+(- Confirmar que frontend/.env.local usa NEXT_PUBLIC_API_BASE_URL=http://127.0.0.1:8000.) Tj
+T*
+(- Confirmar que el archivo seleccionado sea PDF y pese menos de 15 MB.) Tj
+T*
+ET
+endstream
+endobj
+16 0 obj
+<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Resources << /Font << /F1 3 0 R >> >> /Contents 17 0 R >>
+endobj
+17 0 obj
+<< /Length 595 >>
+stream
+BT
+/F1 10 Tf
+72 738 Td
+14 TL
+(CheckWise Demo Guide) Tj
+T*
+T*
+(- Usar el PDF de demo incluido.) Tj
+T*
+() Tj
+T*
+(Próximos pasos después de la demo) Tj
+T*
+() Tj
+T*
+(- Sembrar catálogo regulatorio versionado completo.) Tj
+T*
+(- Crear importador JotForm/Google Sheets hacia PostgreSQL.) Tj
+T*
+(- Construir dashboard interno de revisión.) Tj
+T*
+(- Fortalecer validaciones PDF, OCR y señales determinísticas.) Tj
+T*
+(- Modelar revisión humana autorizada y comentarios legales.) Tj
+T*
+(- Generar reporte ejecutivo desde datos normalizados.) Tj
+T*
+(- Preparar portal proveedor/cliente multirol.) Tj
+T*
+ET
+endstream
+endobj
+xref
+0 18
+0000000000 65535 f 
+0000000015 00000 n 
+0000000064 00000 n 
+0000000161 00000 n 
+0000000231 00000 n 
+0000000357 00000 n 
+0000002641 00000 n 
+0000002767 00000 n 
+0000005011 00000 n 
+0000005137 00000 n 
+0000007500 00000 n 
+0000007628 00000 n 
+0000009022 00000 n 
+0000009150 00000 n 
+0000010214 00000 n 
+0000010342 00000 n 
+0000011710 00000 n 
+0000011838 00000 n 
+trailer
+<< /Size 18 /Root 1 0 R >>
+startxref
+12485
+%%EOF
