@@ -48,3 +48,4 @@ postgres-data/
 # Local session artifacts
 CodexConvo.txt
 .claude/
+.claude/settings.local.json
