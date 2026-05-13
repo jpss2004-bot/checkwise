@@ -90,6 +90,7 @@ export function IntakeWizard() {
     () => process.env.NEXT_PUBLIC_API_BASE_URL ?? "http://localhost:8000",
     [],
   );
+  const demoModeEnabled = process.env.NEXT_PUBLIC_DEMO_MODE === "true";
   const [step, setStep] = useState(0);
   const [form, setForm] = useState<IntakeForm>(initialForm);
   const [file, setFile] = useState<File | null>(null);
@@ -279,7 +280,7 @@ export function IntakeWizard() {
               file={file}
               fileError={fileError}
               onFileSelected={selectFile}
-              onUseDemoFile={useDemoFile}
+              onUseDemoFile={demoModeEnabled ? useDemoFile : undefined}
               comments={form.comments}
               onCommentsChange={(value) => updateField("comments", value)}
             />
@@ -486,7 +487,7 @@ function UploadStep({
   file: File | null;
   fileError: string | null;
   onFileSelected: (file: File | null) => void;
-  onUseDemoFile: () => void;
+  onUseDemoFile?: () => void;
   comments: string;
   onCommentsChange: (value: string) => void;
 }) {
@@ -525,16 +526,18 @@ function UploadStep({
         </div>
       ) : null}
       {fileError ? <p className="text-sm text-destructive">{fileError}</p> : null}
-      <Button
-        type="button"
-        variant="outline"
-        className="w-fit"
-        data-testid="use-demo-pdf"
-        onClick={onUseDemoFile}
-      >
-        <FileText className="h-4 w-4" aria-hidden="true" />
-        Usar PDF demo
-      </Button>
+      {onUseDemoFile ? (
+        <Button
+          type="button"
+          variant="outline"
+          className="w-fit"
+          data-testid="use-demo-pdf"
+          onClick={onUseDemoFile}
+        >
+          <FileText className="h-4 w-4" aria-hidden="true" />
+          Usar PDF demo
+        </Button>
+      ) : null}
       <Field label="Comentarios o aclaraciones" htmlFor="comments">
         <Textarea
           id="comments"

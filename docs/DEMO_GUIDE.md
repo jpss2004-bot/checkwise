@@ -84,6 +84,7 @@ Los screenshots de esta guía se capturan desde el sistema local corriendo. No s
 - Backend corriendo en `http://127.0.0.1:8000`.
 - Frontend corriendo en `http://127.0.0.1:3000`.
 - PDF de demo disponible en `demo_assets/sample_documents/checkwise_demo_opinion_sat.pdf`.
+- `frontend/.env.local` con `NEXT_PUBLIC_DEMO_MODE=true` para exponer el botón "Usar PDF demo" (oculto en producción).
 - Screenshots disponibles en `demo_assets/screenshots/`.
 - `http://127.0.0.1:8000/health` responde `200`.
 - `http://127.0.0.1:8000/api/v1/catalogs` responde `200`.
