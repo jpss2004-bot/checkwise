@@ -8,6 +8,8 @@ import {
   ChevronRight,
   FileText,
   Loader2,
+  Lock,
+  Pencil,
   ShieldCheck,
   UploadCloud,
 } from "lucide-react";
@@ -87,7 +89,38 @@ const initialForm: IntakeForm = {
 
 export type IntakeWizardPrefill = Partial<IntakeForm>;
 
-export function IntakeWizard({ prefill }: { prefill?: IntakeWizardPrefill } = {}) {
+export type IntakeLockedField = keyof IntakeForm;
+
+const LOCKED_FIELD_LABELS: Record<IntakeLockedField, string> = {
+  client_name: "Cliente",
+  vendor_name: "Proveedor",
+  vendor_rfc: "RFC proveedor",
+  contract_reference: "Contrato",
+  period_code: "Periodo",
+  load_type: "Tipo de carga",
+  institution_code: "Institución",
+  requirement_name: "Requisito",
+  comments: "Comentarios",
+};
+
+const LOCKED_FIELD_SOURCE: Partial<Record<IntakeLockedField, string>> = {
+  client_name: "Viene de tu sesión",
+  vendor_name: "Viene de tu sesión",
+  vendor_rfc: "Viene de tu sesión",
+  contract_reference: "Viene de tu sesión",
+  period_code: "Viene del calendario",
+  load_type: "Viene del expediente o calendario",
+  institution_code: "Viene del expediente o calendario",
+  requirement_name: "Viene del expediente o calendario",
+};
+
+export function IntakeWizard({
+  prefill,
+  lockedFields,
+}: {
+  prefill?: IntakeWizardPrefill;
+  lockedFields?: IntakeLockedField[];
+} = {}) {
   const apiBaseUrl = useMemo(
     () => process.env.NEXT_PUBLIC_API_BASE_URL ?? "http://localhost:8000",
     [],
@@ -100,6 +133,16 @@ export function IntakeWizard({ prefill }: { prefill?: IntakeWizardPrefill } = {}
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [result, setResult] = useState<SubmissionResponse | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [unlockedOverride, setUnlockedOverride] = useState(false);
+
+  const lockedSet = useMemo(() => {
+    if (unlockedOverride) return new Set<IntakeLockedField>();
+    const effective = (lockedFields ?? []).filter((field) => {
+      const value = form[field];
+      return typeof value === "string" && value.trim().length > 0;
+    });
+    return new Set<IntakeLockedField>(effective);
+  }, [lockedFields, form, unlockedOverride]);
 
   const selectedRequirement =
     requirementGuides.find((requirement) => requirement.name === form.requirement_name) ??
@@ -275,7 +318,16 @@ export function IntakeWizard({ prefill }: { prefill?: IntakeWizardPrefill } = {}
       </CardHeader>
       <CardContent>
         <form onSubmit={handleSubmit} data-testid="native-intake-form">
-          {step === 0 ? <ContextStep form={form} updateField={updateField} /> : null}
+          {step === 0 ? (
+            <ContextStep
+              form={form}
+              updateField={updateField}
+              lockedSet={lockedSet}
+              canUnlock={(lockedFields?.length ?? 0) > 0}
+              unlocked={unlockedOverride}
+              onToggleUnlock={() => setUnlockedOverride((current) => !current)}
+            />
+          ) : null}
           {step === 1 ? <RequirementStep requirement={selectedRequirement} /> : null}
           {step === 2 ? (
             <UploadStep
@@ -349,99 +401,190 @@ export function IntakeWizard({ prefill }: { prefill?: IntakeWizardPrefill } = {}
 function ContextStep({
   form,
   updateField,
+  lockedSet,
+  canUnlock,
+  unlocked,
+  onToggleUnlock,
 }: {
   form: IntakeForm;
   updateField: (field: keyof IntakeForm, value: string) => void;
+  lockedSet: Set<IntakeLockedField>;
+  canUnlock: boolean;
+  unlocked: boolean;
+  onToggleUnlock: () => void;
 }) {
+  const lockedItems = Array.from(lockedSet);
+  const lockedItemDisplay = (field: IntakeLockedField): string => {
+    if (field === "load_type") {
+      return loadTypes.find((option) => option.value === form.load_type)?.label ?? form.load_type;
+    }
+    if (field === "institution_code") {
+      return (
+        institutions.find((option) => option.value === form.institution_code)?.label ??
+        form.institution_code
+      );
+    }
+    return form[field] ?? "";
+  };
+
   return (
     <section className="space-y-4">
       <StepHeading title="Contexto regulatorio" />
+
+      {lockedItems.length > 0 ? (
+        <div className="rounded-md border border-primary/20 bg-primary/5 p-4">
+          <div className="flex flex-wrap items-start justify-between gap-3">
+            <div className="flex items-start gap-2">
+              <Lock className="mt-0.5 h-4 w-4 text-primary" aria-hidden="true" />
+              <div className="min-w-0">
+                <p className="text-sm font-semibold text-primary">
+                  Contexto bloqueado para evitar errores
+                </p>
+                <p className="mt-0.5 text-xs text-muted-foreground">
+                  Estos datos vienen de tu sesión y del calendario REPSE. Si necesitas cambiarlos,
+                  desbloquéalos abajo.
+                </p>
+              </div>
+            </div>
+          </div>
+          <dl className="mt-3 grid gap-2 sm:grid-cols-2">
+            {lockedItems.map((field) => (
+              <div
+                key={field}
+                className="rounded-md border border-primary/15 bg-white px-3 py-2"
+                data-locked-field={field}
+              >
+                <dt className="flex items-center gap-1.5 text-[11px] uppercase tracking-wide text-muted-foreground">
+                  <Lock className="h-3 w-3" aria-hidden="true" />
+                  {LOCKED_FIELD_LABELS[field]}
+                </dt>
+                <dd className="mt-0.5 break-words text-sm font-medium text-foreground">
+                  {lockedItemDisplay(field)}
+                </dd>
+                {LOCKED_FIELD_SOURCE[field] ? (
+                  <p className="mt-0.5 text-[11px] text-muted-foreground">
+                    {LOCKED_FIELD_SOURCE[field]}
+                  </p>
+                ) : null}
+              </div>
+            ))}
+          </dl>
+        </div>
+      ) : null}
+
+      {canUnlock ? (
+        <button
+          type="button"
+          onClick={onToggleUnlock}
+          className="inline-flex items-center gap-1.5 text-xs font-medium text-primary underline-offset-4 hover:underline"
+        >
+          <Pencil className="h-3 w-3" aria-hidden="true" />
+          {unlocked ? "Volver a bloquear el contexto" : "Necesito cambiar algo del contexto"}
+        </button>
+      ) : null}
+
       <div className="grid gap-4 md:grid-cols-2">
-        <Field label="Cliente" htmlFor="client_name">
-          <Input
-            id="client_name"
-            value={form.client_name}
-            onChange={(event) => updateField("client_name", event.target.value)}
-            placeholder="Cliente o filial"
-            required
-          />
-        </Field>
-        <Field label="Proveedor" htmlFor="vendor_name">
-          <Input
-            id="vendor_name"
-            value={form.vendor_name}
-            onChange={(event) => updateField("vendor_name", event.target.value)}
-            placeholder="Razón social del proveedor"
-            required
-          />
-        </Field>
-        <Field label="RFC proveedor" htmlFor="vendor_rfc">
-          <Input
-            id="vendor_rfc"
-            value={form.vendor_rfc}
-            onChange={(event) => updateField("vendor_rfc", event.target.value.toUpperCase())}
-            placeholder="ABC010203AB1"
-            minLength={12}
-            maxLength={13}
-            required
-          />
-        </Field>
-        <Field label="Contrato, si aplica" htmlFor="contract_reference">
-          <Input
-            id="contract_reference"
-            value={form.contract_reference}
-            onChange={(event) => updateField("contract_reference", event.target.value)}
-            placeholder="Referencia interna"
-          />
-        </Field>
-        <Field label="Periodo" htmlFor="period_code">
-          <Input
-            id="period_code"
-            value={form.period_code}
-            onChange={(event) => updateField("period_code", event.target.value)}
-            placeholder="2026-05 / Ene-Abr 2026"
-            required
-          />
-        </Field>
-        <Field label="Tipo de carga" htmlFor="load_type">
-          <Select
-            id="load_type"
-            value={form.load_type}
-            onChange={(event) => updateField("load_type", event.target.value)}
-          >
-            {loadTypes.map((option) => (
-              <option key={option.value} value={option.value}>
-                {option.label}
-              </option>
-            ))}
-          </Select>
-        </Field>
-        <Field label="Institución" htmlFor="institution_code">
-          <Select
-            id="institution_code"
-            value={form.institution_code}
-            onChange={(event) => updateField("institution_code", event.target.value)}
-          >
-            {institutions.map((option) => (
-              <option key={option.value} value={option.value}>
-                {option.label}
-              </option>
-            ))}
-          </Select>
-        </Field>
-        <Field label="Requisito / documento" htmlFor="requirement_name">
-          <Select
-            id="requirement_name"
-            value={form.requirement_name}
-            onChange={(event) => updateField("requirement_name", event.target.value)}
-          >
-            {requirements.map((requirement) => (
-              <option key={requirement} value={requirement}>
-                {requirement}
-              </option>
-            ))}
-          </Select>
-        </Field>
+        {!lockedSet.has("client_name") ? (
+          <Field label="Cliente" htmlFor="client_name">
+            <Input
+              id="client_name"
+              value={form.client_name}
+              onChange={(event) => updateField("client_name", event.target.value)}
+              placeholder="Cliente o filial"
+              required
+            />
+          </Field>
+        ) : null}
+        {!lockedSet.has("vendor_name") ? (
+          <Field label="Proveedor" htmlFor="vendor_name">
+            <Input
+              id="vendor_name"
+              value={form.vendor_name}
+              onChange={(event) => updateField("vendor_name", event.target.value)}
+              placeholder="Razón social del proveedor"
+              required
+            />
+          </Field>
+        ) : null}
+        {!lockedSet.has("vendor_rfc") ? (
+          <Field label="RFC proveedor" htmlFor="vendor_rfc">
+            <Input
+              id="vendor_rfc"
+              value={form.vendor_rfc}
+              onChange={(event) => updateField("vendor_rfc", event.target.value.toUpperCase())}
+              placeholder="ABC010203AB1"
+              minLength={12}
+              maxLength={13}
+              required
+            />
+          </Field>
+        ) : null}
+        {!lockedSet.has("contract_reference") ? (
+          <Field label="Contrato, si aplica" htmlFor="contract_reference">
+            <Input
+              id="contract_reference"
+              value={form.contract_reference}
+              onChange={(event) => updateField("contract_reference", event.target.value)}
+              placeholder="Referencia interna"
+            />
+          </Field>
+        ) : null}
+        {!lockedSet.has("period_code") ? (
+          <Field label="Periodo" htmlFor="period_code">
+            <Input
+              id="period_code"
+              value={form.period_code}
+              onChange={(event) => updateField("period_code", event.target.value)}
+              placeholder="2026-05 / Ene-Abr 2026"
+              required
+            />
+          </Field>
+        ) : null}
+        {!lockedSet.has("load_type") ? (
+          <Field label="Tipo de carga" htmlFor="load_type">
+            <Select
+              id="load_type"
+              value={form.load_type}
+              onChange={(event) => updateField("load_type", event.target.value)}
+            >
+              {loadTypes.map((option) => (
+                <option key={option.value} value={option.value}>
+                  {option.label}
+                </option>
+              ))}
+            </Select>
+          </Field>
+        ) : null}
+        {!lockedSet.has("institution_code") ? (
+          <Field label="Institución" htmlFor="institution_code">
+            <Select
+              id="institution_code"
+              value={form.institution_code}
+              onChange={(event) => updateField("institution_code", event.target.value)}
+            >
+              {institutions.map((option) => (
+                <option key={option.value} value={option.value}>
+                  {option.label}
+                </option>
+              ))}
+            </Select>
+          </Field>
+        ) : null}
+        {!lockedSet.has("requirement_name") ? (
+          <Field label="Requisito / documento" htmlFor="requirement_name">
+            <Select
+              id="requirement_name"
+              value={form.requirement_name}
+              onChange={(event) => updateField("requirement_name", event.target.value)}
+            >
+              {requirements.map((requirement) => (
+                <option key={requirement} value={requirement}>
+                  {requirement}
+                </option>
+              ))}
+            </Select>
+          </Field>
+        ) : null}
       </div>
     </section>
   );
