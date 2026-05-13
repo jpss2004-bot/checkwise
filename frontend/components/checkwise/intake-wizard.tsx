@@ -70,6 +70,12 @@ type IntakeForm = {
   institution_code: string;
   requirement_name: string;
   comments: string;
+  // Canonical IDs introduced by the Reconciliation Patch. Both empty by
+  // default; populated by deep-links from the calendar / onboarding and sent
+  // to the backend so /submissions can bind to the catalog instead of
+  // creating phantom requirements / periods.
+  requirement_code: string;
+  period_key: string;
 };
 
 const steps = ["Contexto", "Requisito", "Upload", "Prevalidación", "Confirmación"];
@@ -85,6 +91,8 @@ const initialForm: IntakeForm = {
   institution_code: "sat",
   requirement_name: requirements[5] ?? requirements[0],
   comments: "",
+  requirement_code: "",
+  period_key: "",
 };
 
 export type IntakeWizardPrefill = Partial<IntakeForm>;
@@ -101,6 +109,9 @@ const LOCKED_FIELD_LABELS: Record<IntakeLockedField, string> = {
   institution_code: "Institución",
   requirement_name: "Requisito",
   comments: "Comentarios",
+  // Canonical IDs — carried in state, never rendered as a locked field.
+  requirement_code: "Código canónico",
+  period_key: "Periodo canónico",
 };
 
 const LOCKED_FIELD_SOURCE: Partial<Record<IntakeLockedField, string>> = {

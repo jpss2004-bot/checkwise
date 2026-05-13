@@ -60,6 +60,7 @@ export type CalendarItem = {
   name: string;
   frequency: "mensual" | "bimestral" | "cuatrimestral" | "anual";
   period_label: string;
+  period_key: string;
   status: RequirementStatus;
   submission_id: string | null;
 };

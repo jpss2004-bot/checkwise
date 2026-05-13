@@ -449,7 +449,17 @@ function buildRecommendedActions(
 }
 
 function buildCalendarUploadHref(institution: string, item: CalendarItem): string {
-  return `/portal/upload?requirement=${encodeURIComponent(item.name)}&institution=${institution}&load_type=${item.frequency}&period_label=${encodeURIComponent(item.period_label)}`;
+  // Emit both canonical keys (preferred by the wizard + backend) and the
+  // legacy name + label (still accepted during the deprecation window).
+  const params = new URLSearchParams({
+    requirement: item.name,
+    requirement_code: item.code,
+    institution,
+    load_type: item.frequency,
+    period_label: item.period_label,
+    period_key: item.period_key,
+  });
+  return `/portal/upload?${params.toString()}`;
 }
 
 function resolveCurrentMonth(year: number): number | null {

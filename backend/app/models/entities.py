@@ -99,6 +99,12 @@ class Period(TimestampMixin, Base):
 
     id: Mapped[str] = mapped_column(String(36), primary_key=True, default=new_id)
     code: Mapped[str] = mapped_column(String(60), nullable=False)
+    # Canonical machine key for the period this row represents. Matches the
+    # catalog's ``period_key``: ``YYYY-Mxx`` (monthly), ``YYYY-Bx`` (bimonthly,
+    # x ∈ 1..6), ``YYYY-Qx`` (cuatrimestral, x ∈ 1..3), ``YYYY-A`` (annual).
+    # Nullable for historic ``period_type`` rows (alta_inicial, contrato,
+    # evento) that have no canonical key.
+    period_key: Mapped[str | None] = mapped_column(String(20), index=True)
     year: Mapped[int | None] = mapped_column(Integer)
     month: Mapped[int | None] = mapped_column(Integer)
     period_type: Mapped[str] = mapped_column(String(40), nullable=False)
@@ -184,6 +190,13 @@ class Submission(TimestampMixin, Base):
     load_type: Mapped[str] = mapped_column(String(40), nullable=False)
     source: Mapped[str] = mapped_column(String(60), default="portal", nullable=False)
     status: Mapped[str] = mapped_column(String(40), default="pendiente_revision", nullable=False)
+    # Canonical denormalized keys, populated from the catalog at intake. Kept
+    # alongside the requirement_id/requirement_version_id FKs so a submission
+    # remains attributable even if requirements are renamed or migrated. Both
+    # are nullable to keep historic rows valid; new intake paths must populate
+    # them.
+    requirement_code: Mapped[str | None] = mapped_column(String(80), index=True)
+    period_key: Mapped[str | None] = mapped_column(String(20), index=True)
     comments: Mapped[str | None] = mapped_column(Text)
     submitted_by: Mapped[str | None] = mapped_column(String(255))
 

@@ -20,7 +20,7 @@ from dataclasses import asdict, dataclass, field
 from typing import Literal
 
 CATALOG_SOURCE = "C.Árbol Plataforma Proveedores REPSE VF"
-CATALOG_VERSION = "2026.05.0"
+CATALOG_VERSION = "2026.06.0"
 
 PersonaType = Literal["moral", "fisica"]
 Frequency = Literal["mensual", "bimestral", "cuatrimestral", "anual", "alta_inicial"]
@@ -68,6 +68,11 @@ class RecurringRequirement:
     # Human readable description of the period the document covers
     # (e.g. "Enero", "Diciembre año anterior", "B1 Enero-Febrero", "Q1 Enero-Abril").
     period_label: str
+    # Canonical, machine-friendly key for the period the document COVERS (not
+    # the month it is due). Examples: "2026-M01", "2025-M12", "2026-B1",
+    # "2025-B6", "2026-Q1", "2025-Q3", "2025-A". Stable across years and the
+    # canonical join key against ``periods.period_key``.
+    period_key: str
     # Persona types this applies to (both by default).
     persona_types: tuple[PersonaType, ...] = ("moral", "fisica")
 
@@ -208,11 +213,30 @@ _INFONAVIT_DUE_MONTH_TO_PERIOD: dict[int, str] = {
     11: "B5 Septiembre-Octubre",
 }
 
+# INFONAVIT bimonthly slots: due month -> (year offset, bimester number 1..6).
+# B6 (the November-December bimester) is due in January and covers the previous
+# year, hence the -1 offset.
+_INFONAVIT_DUE_MONTH_TO_BIMESTER: dict[int, tuple[int, int]] = {
+    1: (-1, 6),
+    3: (0, 1),
+    5: (0, 2),
+    7: (0, 3),
+    9: (0, 4),
+    11: (0, 5),
+}
+
 # Acuses Contratos-Reportes cuatrimestral: due month -> covered period label.
 _ACUSES_DUE_MONTH_TO_PERIOD: dict[int, str] = {
     1: "Q3 Septiembre-Diciembre año anterior",
     5: "Q1 Enero-Abril",
     9: "Q2 Mayo-Agosto",
+}
+
+# Acuses cuatrimestral: due month -> (year offset, quarter number 1..3).
+_ACUSES_DUE_MONTH_TO_QUARTER: dict[int, tuple[int, int]] = {
+    1: (-1, 3),
+    5: (0, 1),
+    9: (0, 2),
 }
 
 
@@ -221,6 +245,38 @@ def _previous_month_label(due_month: int, *, year: int) -> str:
     if due_month == 1:
         return f"Diciembre {year - 1}"
     return MONTHS_ES[due_month - 2]
+
+
+def _monthly_period_key(due_month: int, *, year: int) -> str:
+    """Return the canonical period_key for a monthly obligation due in ``due_month``.
+
+    Monthly obligations cover the month *before* the due month. The January
+    slot covers December of the previous year.
+    """
+    if due_month == 1:
+        return f"{year - 1}-M12"
+    return f"{year}-M{due_month - 1:02d}"
+
+
+def _bimonthly_period_key(due_month: int, *, year: int) -> str:
+    """Return the canonical period_key for an INFONAVIT bimestral slot."""
+    offset, bimester = _INFONAVIT_DUE_MONTH_TO_BIMESTER[due_month]
+    return f"{year + offset}-B{bimester}"
+
+
+def _quarter_period_key(due_month: int, *, year: int) -> str:
+    """Return the canonical period_key for an Acuses cuatrimestral slot."""
+    offset, quarter = _ACUSES_DUE_MONTH_TO_QUARTER[due_month]
+    return f"{year + offset}-Q{quarter}"
+
+
+def _annual_period_key(*, year: int) -> str:
+    """Return the canonical period_key for the annual SAT obligation.
+
+    The acuse de declaración anual filed in April covers the previous fiscal
+    year, so the period_key always points one year back.
+    """
+    return f"{year - 1}-A"
 
 
 def expediente_for_persona(persona_type: PersonaType) -> list[OnboardingRequirement]:
@@ -237,6 +293,7 @@ def recurring_for_year(
     for due_month in range(1, 13):
         # IMSS monthly (covers previous month).
         imss_period = _previous_month_label(due_month, year=year)
+        monthly_key = _monthly_period_key(due_month, year=year)
         for doc_name in _IMSS_DOCS:
             result.append(
                 RecurringRequirement(
@@ -246,6 +303,7 @@ def recurring_for_year(
                     frequency="mensual",
                     due_month=due_month,
                     period_label=f"IMSS {imss_period}",
+                    period_key=monthly_key,
                     persona_types=("moral", "fisica"),
                 )
             )
@@ -261,6 +319,7 @@ def recurring_for_year(
                     frequency="mensual",
                     due_month=due_month,
                     period_label=f"SAT {sat_period}",
+                    period_key=monthly_key,
                     persona_types=("moral", "fisica"),
                 )
             )
@@ -268,6 +327,7 @@ def recurring_for_year(
         # INFONAVIT bimonthly.
         if due_month in _INFONAVIT_DUE_MONTH_TO_PERIOD:
             inf_period = _INFONAVIT_DUE_MONTH_TO_PERIOD[due_month]
+            bimonthly_key = _bimonthly_period_key(due_month, year=year)
             for doc_name in _INFONAVIT_DOCS:
                 result.append(
                     RecurringRequirement(
@@ -277,6 +337,7 @@ def recurring_for_year(
                         frequency="bimestral",
                         due_month=due_month,
                         period_label=f"INFONAVIT {inf_period}",
+                        period_key=bimonthly_key,
                         persona_types=("moral", "fisica"),
                     )
                 )
@@ -284,6 +345,7 @@ def recurring_for_year(
         # Acuses SISUB / ICSOE cuatrimestral.
         if due_month in _ACUSES_DUE_MONTH_TO_PERIOD:
             ac_period = _ACUSES_DUE_MONTH_TO_PERIOD[due_month]
+            quarter_key = _quarter_period_key(due_month, year=year)
             for doc_name in _ACUSES_DOCS:
                 result.append(
                     RecurringRequirement(
@@ -293,6 +355,7 @@ def recurring_for_year(
                         frequency="cuatrimestral",
                         due_month=due_month,
                         period_label=f"Acuses Contratos-Reportes {ac_period}",
+                        period_key=quarter_key,
                         persona_types=("moral", "fisica"),
                     )
                 )
@@ -307,6 +370,7 @@ def recurring_for_year(
                     frequency="anual",
                     due_month=4,
                     period_label=f"SAT Anual {year - 1}",
+                    period_key=_annual_period_key(year=year),
                     persona_types=("moral", "fisica"),
                 )
             )
@@ -326,6 +390,35 @@ def recurring_as_dicts(year: int, persona_type: PersonaType) -> list[dict]:
     return [asdict(r) for r in recurring_for_year(year, persona_type)]
 
 
+def lookup_onboarding_by_code(code: str) -> OnboardingRequirement | None:
+    """Lookup an onboarding requirement by canonical ``ONB-*`` code."""
+    for req in _ONBOARDING_MORAL:
+        if req.code == code:
+            return req
+    return None
+
+
+def lookup_recurring_by_code(code: str) -> RecurringRequirement | None:
+    """Lookup a recurring requirement by canonical ``REC-*`` code.
+
+    The catalog generates recurring items per year, so the year is recovered
+    from the code itself (``REC-<INST>-<YEAR>-<DUE_MONTH>-<slug>``). When the
+    code does not parse to a known shape the function returns ``None`` and the
+    caller should treat the input as unknown.
+    """
+    parts = code.split("-")
+    if len(parts) < 4 or parts[0] != "REC":
+        return None
+    try:
+        year = int(parts[2])
+    except ValueError:
+        return None
+    for req in recurring_for_year(year):
+        if req.code == code:
+            return req
+    return None
+
+
 def _slug(value: str) -> str:
     import re
     import unicodedata
@@ -338,6 +431,8 @@ def _slug(value: str) -> str:
 __all__ = [
     "CATALOG_SOURCE",
     "CATALOG_VERSION",
+    "lookup_onboarding_by_code",
+    "lookup_recurring_by_code",
     "MONTHS_ES",
     "OnboardingRequirement",
     "RecurringRequirement",

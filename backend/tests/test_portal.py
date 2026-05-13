@@ -145,3 +145,75 @@ def test_portal_calendar_shape(api_client: TestClient) -> None:
         sum(inst["expected"] for inst in m["institutions"]) == m["expected"]
         for m in payload["months"]
     )
+
+
+def test_portal_calendar_emits_period_key_on_every_item(api_client: TestClient) -> None:
+    """Patch 3: provider calendar must expose period_key so the wizard can
+    submit canonical keys back to /submissions."""
+    access = api_client.post("/api/v1/portal/access", json=_access_payload()).json()
+    headers = {"X-Workspace-Token": access["access_token"]}
+    payload = api_client.get(
+        f"/api/v1/portal/workspaces/{access['workspace_id']}/calendar?year=2026",
+        headers=headers,
+    ).json()
+    items = [
+        item
+        for month in payload["months"]
+        for inst in month["institutions"]
+        for item in inst["items"]
+    ]
+    assert items
+    for item in items:
+        assert item["period_key"], item
+
+
+def test_portal_calendar_canonical_match_does_not_overflow_across_months(
+    api_client: TestClient,
+) -> None:
+    """Patch 3 regression: an INFONAVIT B1 upload must light up only the B1
+    slot in the calendar, not every 2026-bearing INFONAVIT slot."""
+    from app.core.compliance_catalog import recurring_for_year
+
+    access = api_client.post("/api/v1/portal/access", json=_access_payload()).json()
+    headers = {"X-Workspace-Token": access["access_token"]}
+
+    catalog_item = next(
+        item
+        for item in recurring_for_year(2026)
+        if item.institution == "infonavit" and item.period_key == "2026-B1"
+    )
+
+    submitted = api_client.post(
+        "/api/v1/submissions",
+        data={
+            "client_name": "Cliente Piloto CheckWise",
+            "vendor_name": "Servicios Demo SA de CV",
+            "vendor_rfc": "DEM260512AB1",
+            "period_code": "2026-B1",
+            "period_key": catalog_item.period_key,
+            "load_type": "bimestral",
+            "institution_code": "infonavit",
+            "requirement_name": catalog_item.name,
+            "requirement_code": catalog_item.code,
+            "initial_status": "pendiente_revision",
+        },
+        files={"file": ("inf.pdf", _pdf_bytes(), "application/pdf")},
+    )
+    assert submitted.status_code == 202, submitted.text
+
+    calendar = api_client.get(
+        f"/api/v1/portal/workspaces/{access['workspace_id']}/calendar?year=2026",
+        headers=headers,
+    ).json()
+
+    matches = [
+        (month["month"], item)
+        for month in calendar["months"]
+        for inst in month["institutions"]
+        if inst["institution"] == "infonavit"
+        for item in inst["items"]
+        if item["submission_id"] is not None and item["code"] == catalog_item.code
+    ]
+    # Exactly the B1 slot (due in March, month=3) lights up.
+    assert len(matches) == 1, matches
+    assert matches[0][0] == 3

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import re
 import unicodedata
+from dataclasses import dataclass
 from typing import Annotated
 
 from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile, status
@@ -15,6 +16,12 @@ from app.core.catalogs import (
     LOAD_TYPES,
     REQUIREMENT_EXAMPLES,
     VALIDATION_RULES,
+)
+from app.core.compliance_catalog import (
+    OnboardingRequirement,
+    RecurringRequirement,
+    lookup_onboarding_by_code,
+    lookup_recurring_by_code,
 )
 from app.core.config import settings
 from app.db.session import get_db
@@ -93,6 +100,13 @@ async def create_submission(
     comments: Annotated[str | None, Form()] = None,
     initial_status: Annotated[str, Form()] = "pendiente_revision",
     contract_reference: Annotated[str | None, Form()] = None,
+    # Canonical IDs introduced by the Reconciliation Patch. Both optional for
+    # the deprecation window (one minor version): when provided, the canonical
+    # path takes precedence over ``requirement_name`` / ``period_code`` and
+    # the submission is bound to the catalog. When absent, the legacy free-
+    # text path runs with a deprecation event recorded against the submission.
+    requirement_code: Annotated[str | None, Form()] = None,
+    period_key: Annotated[str | None, Form()] = None,
 ) -> SubmissionResponse:
     _assert_pdf_upload(file)
 
@@ -136,20 +150,26 @@ async def create_submission(
         vendor = _get_or_create_vendor(
             db, client.id, vendor_name.strip(), vendor_rfc.upper().strip()
         )
-        period = _get_or_create_period(db, period_code.strip(), load_type)
-        requirement, requirement_version = _get_or_create_requirement(
+        resolved_requirement = _resolve_requirement(
             db,
+            requirement_code=(requirement_code or "").strip() or None,
+            requirement_name=requirement_name.strip(),
             institution_id=institution.id,
             institution_code=institution.code,
             load_type=load_type,
-            requirement_name=requirement_name.strip(),
+        )
+        resolved_period = _resolve_period(
+            db,
+            period_key=(period_key or "").strip() or None,
+            period_code=period_code.strip(),
+            load_type=load_type,
         )
         contract = _get_or_create_contract(db, client.id, vendor.id, contract_reference)
 
         pdf_inspection = inspect_pdf(stored_file.path)
         document_signals = analyze_document_text(
             pdf_inspection.text_sample,
-            expected_requirement=requirement_name.strip(),
+            expected_requirement=resolved_requirement.canonical_name,
             expected_institution=institution.code,
             expected_period=period_code.strip(),
         )
@@ -159,10 +179,12 @@ async def create_submission(
             client_id=client.id,
             vendor_id=vendor.id,
             contract_id=contract.id if contract else None,
-            period_id=period.id,
+            period_id=resolved_period.period.id,
             institution_id=institution.id,
-            requirement_id=requirement.id,
-            requirement_version_id=requirement_version.id,
+            requirement_id=resolved_requirement.requirement.id,
+            requirement_version_id=resolved_requirement.requirement_version.id,
+            requirement_code=resolved_requirement.canonical_code,
+            period_key=resolved_period.canonical_period_key,
             load_type=load_type,
             source="portal",
             status=final_status,
@@ -210,7 +232,7 @@ async def create_submission(
             duplicate_found=duplicate is not None,
             pdf_inspection=pdf_inspection,
             document_signals=document_signals,
-            human_review_required=requirement_version.human_review_required,
+            human_review_required=resolved_requirement.requirement_version.human_review_required,
         )
         for signal in signals:
             db.add(
@@ -244,7 +266,9 @@ async def create_submission(
             duplicate_found=duplicate is not None,
             pdf_inspection=pdf_inspection,
             document_signals=document_signals,
-            human_review_required=requirement_version.human_review_required,
+            human_review_required=resolved_requirement.requirement_version.human_review_required,
+            requirement_used_legacy=resolved_requirement.used_legacy,
+            period_used_legacy=resolved_period.used_legacy,
         )
         add_audit_event(
             db,
@@ -254,14 +278,24 @@ async def create_submission(
             after={
                 "client_id": client.id,
                 "vendor_id": vendor.id,
-                "period_id": period.id,
-                "requirement_id": requirement.id,
+                "period_id": resolved_period.period.id,
+                "requirement_id": resolved_requirement.requirement.id,
+                "requirement_code": resolved_requirement.canonical_code,
+                "period_key": resolved_period.canonical_period_key,
                 "status": final_status,
             },
             metadata={
                 "source": "native_intake",
                 "storage_key": stored_file.storage_key,
                 "sha256": stored_file.sha256,
+                "requirement_intake": (
+                    "legacy_free_text" if resolved_requirement.used_legacy else "canonical_code"
+                ),
+                "period_intake": (
+                    "legacy_period_code"
+                    if resolved_period.used_legacy
+                    else "canonical_period_key"
+                ),
                 "validation_events": [event.event_type for event in validation_events],
             },
         )
@@ -373,6 +407,8 @@ def _add_native_intake_events(
     pdf_inspection: PdfInspectionResult,
     document_signals: DocumentSignals,
     human_review_required: bool,
+    requirement_used_legacy: bool = False,
+    period_used_legacy: bool = False,
 ) -> list:
     events = [
         add_validation_event(
@@ -506,6 +542,40 @@ def _add_native_intake_events(
             )
         )
 
+    if requirement_used_legacy:
+        events.append(
+            add_validation_event(
+                db,
+                submission_id=submission_id,
+                document_id=document_id,
+                event_type="legacy_requirement_intake",
+                rule_code="canonical_requirement_code",
+                result="warning",
+                severity="warning",
+                message=(
+                    "Intake aceptado sin requirement_code canónico. La forma libre "
+                    "queda deprecated; envía requirement_code desde el catálogo."
+                ),
+            )
+        )
+
+    if period_used_legacy:
+        events.append(
+            add_validation_event(
+                db,
+                submission_id=submission_id,
+                document_id=document_id,
+                event_type="legacy_period_intake",
+                rule_code="canonical_period_key",
+                result="warning",
+                severity="warning",
+                message=(
+                    "Intake aceptado sin period_key canónico. La forma libre "
+                    "queda deprecated; envía period_key desde el catálogo."
+                ),
+            )
+        )
+
     return events
 
 
@@ -544,15 +614,38 @@ def _get_or_create_institution(db: Session, code: str) -> Institution:
     return institution
 
 
-def _get_or_create_period(db: Session, code: str, period_type: str) -> Period:
-    period = db.scalar(
-        select(Period).where(Period.code == code, Period.period_type == period_type).limit(1)
-    )
-    if period:
+def _get_or_create_period(
+    db: Session,
+    *,
+    code: str,
+    period_type: str,
+    period_key: str | None = None,
+) -> Period:
+    # Prefer canonical-key lookup: if the catalog says this is ``2026-B1``,
+    # an existing row carrying that key is the right Period regardless of how
+    # legacy code spelled the ``code`` field.
+    period: Period | None = None
+    if period_key:
+        period = db.scalar(select(Period).where(Period.period_key == period_key).limit(1))
+    if period is None:
+        period = db.scalar(
+            select(Period).where(Period.code == code, Period.period_type == period_type).limit(1)
+        )
+    if period is not None:
+        # Backfill canonical key onto pre-existing legacy rows so subsequent
+        # lookups go through the fast path.
+        if period_key and not period.period_key:
+            period.period_key = period_key
         return period
 
     year, month = _parse_year_month(code)
-    period = Period(code=code, year=year, month=month, period_type=period_type)
+    period = Period(
+        code=code,
+        year=year,
+        month=month,
+        period_type=period_type,
+        period_key=period_key,
+    )
     db.add(period)
     db.flush()
     return period
@@ -651,3 +744,165 @@ def _requirement_code(institution_code: str, load_type: str, name: str) -> str:
     slug = re.sub(r"[^A-Za-z0-9]+", "-", slug).strip("-").upper()
     slug = slug[:34] or "REQUISITO"
     return f"REQ-{institution_code.upper()}-{load_type.upper()}-{slug}"
+
+
+@dataclass(frozen=True)
+class _ResolvedRequirement:
+    """Result of resolving a submission requirement, canonical or legacy."""
+
+    requirement: Requirement
+    requirement_version: RequirementVersion
+    canonical_name: str
+    canonical_code: str | None
+    used_legacy: bool
+
+
+@dataclass(frozen=True)
+class _ResolvedPeriod:
+    """Result of resolving a submission period, canonical or legacy."""
+
+    period: Period
+    canonical_period_key: str | None
+    used_legacy: bool
+
+
+def _lookup_canonical_requirement(
+    code: str,
+) -> RecurringRequirement | OnboardingRequirement | None:
+    """Resolve a canonical requirement_code against the in-code catalog."""
+    rec = lookup_recurring_by_code(code)
+    if rec is not None:
+        return rec
+    return lookup_onboarding_by_code(code)
+
+
+def _get_requirement_for_catalog_item(
+    db: Session,
+    catalog_item: RecurringRequirement | OnboardingRequirement,
+    *,
+    institution_id: str,
+) -> tuple[Requirement, RequirementVersion]:
+    """Find or create the DB row mirroring a canonical catalog item."""
+    requirement = db.scalar(
+        select(Requirement).where(Requirement.code == catalog_item.code).limit(1)
+    )
+    if requirement is None:
+        if isinstance(catalog_item, RecurringRequirement):
+            frequency = catalog_item.frequency
+            load_type_value = catalog_item.frequency
+        else:
+            frequency = "alta_inicial"
+            load_type_value = "alta_inicial"
+        requirement = Requirement(
+            code=catalog_item.code,
+            name=catalog_item.name,
+            institution_id=institution_id,
+            load_type=load_type_value,
+            frequency=frequency,
+            risk_level="alto",
+            current_version=1,
+        )
+        db.add(requirement)
+        db.flush()
+
+    version = db.scalar(
+        select(RequirementVersion)
+        .where(
+            RequirementVersion.requirement_id == requirement.id,
+            RequirementVersion.version == requirement.current_version,
+        )
+        .limit(1)
+    )
+    if version is None:
+        version = RequirementVersion(
+            requirement_id=requirement.id,
+            version=requirement.current_version,
+            legal_basis=(
+                "Sembrado desde compliance_catalog en el flujo de Reconciliación "
+                "(canonical_code)."
+            ),
+            applicability_rule=(
+                "Aplica según cliente, proveedor, contrato, periodo e institución."
+            ),
+            minimum_validation=(
+                "Archivo legible, tipo permitido, hash calculado y revisión humana."
+            ),
+            automatic_signals=(
+                "archivo existe; tipo permitido; tamaño máximo; hash; duplicado por hash"
+            ),
+            human_review_required=True,
+            missing_state="pendiente_revision",
+            implementation_notes=(
+                "Requisito creado desde canonical_code. La semilla completa de "
+                "requirement_versions ocurrirá en una migración posterior."
+            ),
+        )
+        db.add(version)
+        db.flush()
+    return requirement, version
+
+
+def _resolve_requirement(
+    db: Session,
+    *,
+    requirement_code: str | None,
+    requirement_name: str,
+    institution_id: str,
+    institution_code: str,
+    load_type: str,
+) -> _ResolvedRequirement:
+    """Resolve a requirement from canonical code when present, else legacy."""
+    if requirement_code:
+        catalog_item = _lookup_canonical_requirement(requirement_code)
+        if catalog_item is None:
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                detail=f"requirement_code desconocido: {requirement_code}",
+            )
+        requirement, version = _get_requirement_for_catalog_item(
+            db, catalog_item, institution_id=institution_id
+        )
+        return _ResolvedRequirement(
+            requirement=requirement,
+            requirement_version=version,
+            canonical_name=catalog_item.name,
+            canonical_code=catalog_item.code,
+            used_legacy=False,
+        )
+
+    requirement, version = _get_or_create_requirement(
+        db,
+        institution_id=institution_id,
+        institution_code=institution_code,
+        load_type=load_type,
+        requirement_name=requirement_name,
+    )
+    return _ResolvedRequirement(
+        requirement=requirement,
+        requirement_version=version,
+        canonical_name=requirement_name,
+        canonical_code=None,
+        used_legacy=True,
+    )
+
+
+def _resolve_period(
+    db: Session,
+    *,
+    period_key: str | None,
+    period_code: str,
+    load_type: str,
+) -> _ResolvedPeriod:
+    """Resolve a Period from canonical key when present, else legacy code."""
+    canonical_key = period_key.strip() if period_key else None
+    period = _get_or_create_period(
+        db,
+        code=period_code,
+        period_type=load_type,
+        period_key=canonical_key,
+    )
+    return _ResolvedPeriod(
+        period=period,
+        canonical_period_key=canonical_key,
+        used_legacy=canonical_key is None,
+    )

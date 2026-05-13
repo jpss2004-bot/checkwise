@@ -98,17 +98,19 @@ def _match_submission(
     submissions: list[Submission],
     *,
     period_label: str | None = None,
+    requirement_code: str | None = None,
+    period_key: str | None = None,
 ) -> Submission | None:
     """Return the best matching submission for an expected requirement.
 
-    Matches loosely by (institution_code, requirement name substring). For
-    recurring requirements that include a period label, also prefer submissions
-    whose ``period_code`` overlaps the expected period token (e.g. ``2026-02``).
+    Preferred path: exact match on ``(institution, requirement_code, period_key)``
+    when both canonical keys are provided and the stored submission carries
+    them. Falls back to the legacy name + year heuristic so historic
+    submissions written before canonical keys still light up the dashboard.
     """
     expected_norm = _normalize(expected_name)
     period_year = ""
     if period_label:
-        # Try to pull the YYYY-MM hint from the period label (best-effort).
         digits = "".join(c for c in period_label if c.isdigit() or c in "-/ ")
         period_year = digits.strip()
     candidates: list[tuple[int, Submission]] = []
@@ -116,6 +118,14 @@ def _match_submission(
         inst_code = sub.institution.code if sub.institution else ""
         if inst_code != expected_institution:
             continue
+
+        # Canonical-code fast path. When both the catalog row and the stored
+        # submission carry canonical keys, that pair is the truth.
+        if requirement_code and getattr(sub, "requirement_code", None) == requirement_code:
+            if period_key is None or getattr(sub, "period_key", None) == period_key:
+                candidates.append((200, sub))
+                continue
+
         req_name = sub.requirement.name if sub.requirement else ""
         name_score = 0
         if _normalize(req_name) == expected_norm:
@@ -125,7 +135,9 @@ def _match_submission(
         if name_score == 0:
             continue
         period_score = 0
-        if period_year and sub.period and sub.period.code:
+        if period_key and getattr(sub, "period_key", None) == period_key:
+            period_score = 50
+        elif period_year and sub.period and sub.period.code:
             if period_year[:4] and period_year[:4] in sub.period.code:
                 period_score = 10
         candidates.append((name_score + period_score, sub))
@@ -274,7 +286,12 @@ def get_workspace_onboarding(
     received_required = 0
     total_required = 0
     for req in expediente:
-        match = _match_submission(req.name, req.institution, subs)
+        match = _match_submission(
+            req.name,
+            req.institution,
+            subs,
+            requirement_code=req.code,
+        )
         section = sections.setdefault(
             req.section,
             {"section": req.section, "items": [], "received": 0, "required": 0},
@@ -336,7 +353,12 @@ def get_workspace_calendar(
     }
     for req in recurring:
         match = _match_submission(
-            req.name, req.institution, subs, period_label=req.period_label
+            req.name,
+            req.institution,
+            subs,
+            period_label=req.period_label,
+            requirement_code=req.code,
+            period_key=req.period_key,
         )
         bucket = months[req.due_month]["institutions"]
         inst = bucket.setdefault(
@@ -350,6 +372,7 @@ def get_workspace_calendar(
                 "name": req.name,
                 "frequency": req.frequency,
                 "period_label": req.period_label,
+                "period_key": req.period_key,
                 "status": item_status,
                 "submission_id": match.id if match else None,
             }

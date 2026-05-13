@@ -29,9 +29,11 @@ function PortalUploadInner() {
   }, [router]);
 
   const requirementName = params.get("requirement") ?? undefined;
+  const requirementCode = params.get("requirement_code") ?? undefined;
   const institutionCode = params.get("institution") ?? undefined;
   const loadType = params.get("load_type") ?? undefined;
   const periodLabel = params.get("period_label") ?? undefined;
+  const periodKey = params.get("period_key") ?? undefined;
 
   const prefill = useMemo<IntakeWizardPrefill | undefined>(() => {
     if (!session) return undefined;
@@ -41,11 +43,21 @@ function PortalUploadInner() {
       vendor_rfc: session.vendor_rfc,
       contract_reference: session.contract_reference ?? "",
       ...(requirementName ? { requirement_name: requirementName } : {}),
+      ...(requirementCode ? { requirement_code: requirementCode } : {}),
       ...(institutionCode ? { institution_code: institutionCode } : {}),
       ...(loadType ? { load_type: loadType } : {}),
       ...(periodLabel ? { period_code: periodLabel } : {}),
+      ...(periodKey ? { period_key: periodKey } : {}),
     };
-  }, [session, requirementName, institutionCode, loadType, periodLabel]);
+  }, [
+    session,
+    requirementName,
+    requirementCode,
+    institutionCode,
+    loadType,
+    periodLabel,
+    periodKey,
+  ]);
 
   const lockedFields = useMemo<IntakeLockedField[]>(() => {
     if (!session) return [];
