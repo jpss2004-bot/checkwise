@@ -66,7 +66,10 @@ export default function DashboardPage() {
 
   return (
     <>
-      <ProviderContextBar session={session} />
+      <ProviderContextBar
+        session={session}
+        onboardingPct={onboarding?.summary.completion_pct ?? null}
+      />
       <main className="mx-auto max-w-7xl space-y-5 px-5 py-6">
         {!isComplete ? (
           <Card>
