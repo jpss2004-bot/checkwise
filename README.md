@@ -1,8 +1,15 @@
-# CheckWise V1.1
+# CheckWise V1.2
 
-Base técnica inicial para CheckWise, una plataforma de cumplimiento documental REPSE para México. Esta fase crea el monorepo deployable para migrar gradualmente desde JotForm + Google Sheets + revisión humana/legal + Looker Studio hacia una fuente canónica en PostgreSQL.
+Base técnica de CheckWise, una plataforma de cumplimiento documental REPSE para México. Esta fase mueve el producto de un wizard suelto a un portal de proveedor: acceso, expediente inicial, calendario REPSE recurrente y carga prellenada — todo trazable contra el catálogo regulatorio derivado de `C.Árbol Plataforma Proveedores REPSE VF`.
 
-V1.1 agrega el primer intake nativo: wizard documental, PDF-only, inspección técnica PDF, señales determinísticas, eventos de validación y soporte contextual preparado.
+V1.2 agrega:
+
+- `/` Acceso de proveedor (demo, sin autenticación de producción).
+- `/portal/onboarding` Expediente Corporativo gated por persona moral / física.
+- `/portal/dashboard` Calendario REPSE 2026 mensual / bimestral / cuatrimestral / anual.
+- `/portal/upload` Wizard V1.1 reutilizado, prellenado desde el calendario.
+- Endpoints `/api/v1/compliance/*` y `/api/v1/portal/*`.
+- Tabla `provider_workspaces` y migración `0003`.
 
 ## Estructura
 
@@ -62,6 +69,7 @@ cd frontend && npm run lint && npm run typecheck && npm run build
 ## Demo preparada
 
 - Guía: `docs/DEMO_GUIDE.md`
+- Portal flow: `docs/PROVIDER_PORTAL_FLOW.md`
 - PDF ficticio: `demo_assets/sample_documents/checkwise_demo_opinion_sat.pdf`
 - Screenshots reales: `demo_assets/screenshots/`
 - Regenerar PDFs de demo: `python3 tools/generate_demo_assets.py`

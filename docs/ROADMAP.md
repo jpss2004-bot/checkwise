@@ -1,6 +1,17 @@
 # Roadmap V1
 
-## Fase Actual: V1.1 Native Intake Foundation
+## Fase Actual: V1.2 Provider Portal Foundation
+
+- Página de acceso de proveedor (demo, sin auth de producción).
+- Catálogo regulatorio expuesto vía API derivado de
+  `C.Árbol Plataforma Proveedores REPSE VF`.
+- Expediente Corporativo gated antes del calendario recurrente.
+- Calendario REPSE año por mes por institución, con estado por requisito.
+- Workspaces de proveedor persistidos en PostgreSQL con `access_token` demo.
+- Wizard V1.1 reutilizado en `/portal/upload` con prefill desde el calendario.
+- Documentación dedicada en `docs/PROVIDER_PORTAL_FLOW.md`.
+
+## Fase Previa: V1.1 Native Intake Foundation
 
 - Wizard nativo de carga documental.
 - PDF-only intake.
@@ -19,7 +30,17 @@
 - Prevalidaciones objetivas iniciales.
 - Auditabilidad base.
 
-## Siguiente Fase Recomendada: Importador Canónico + Seed Regulatorio
+## Siguiente Fase Recomendada: V1.3 — Auth real + Seed regulatorio
+
+1. Autenticación real (Clerk / Auth0 / Supabase) reemplazando `access_token` demo.
+2. Roles: proveedor, cliente, revisor; ownership por workspace.
+3. Sembrar `requirements` y `requirement_versions` desde el catálogo
+   (`compliance_catalog.py`) hacia PostgreSQL.
+4. Persistir `onboarding_completed_at` desde la revisión humana, no del cliente.
+5. Reconciliar `period_code` con la taxonomía bimestral (B1–B6) y
+   cuatrimestral (Q1–Q3) del Árbol.
+
+## Fase Posterior: Importador Canónico + Vista del Cliente
 
 1. Auditar estructura actual de JotForm y Google Sheets.
 2. Crear diccionario de campos fuente.
