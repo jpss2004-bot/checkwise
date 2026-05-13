@@ -63,11 +63,13 @@ class Vendor(TimestampMixin, Base):
     contact_name: Mapped[str | None] = mapped_column(String(255))
     contact_email: Mapped[str | None] = mapped_column(String(255))
     repse_id: Mapped[str | None] = mapped_column(String(120))
+    persona_type: Mapped[str | None] = mapped_column(String(20))
     status: Mapped[str] = mapped_column(String(40), default="active", nullable=False)
 
     client: Mapped[Client] = relationship(back_populates="vendors")
     contracts: Mapped[list[Contract]] = relationship(back_populates="vendor")
     submissions: Mapped[list[Submission]] = relationship(back_populates="vendor")
+    workspaces: Mapped[list[ProviderWorkspace]] = relationship(back_populates="vendor")
 
 
 class Contract(TimestampMixin, Base):
@@ -313,6 +315,34 @@ class Report(TimestampMixin, Base):
 
     client: Mapped[Client] = relationship(back_populates="reports")
     period: Mapped[Period] = relationship(back_populates="reports")
+
+
+class ProviderWorkspace(TimestampMixin, Base):
+    """Demo-grade provider session/workspace tying a vendor to a client+contract.
+
+    This model represents the identity of "the provider currently using the
+    portal." V1.2 does not implement real auth: an opaque ``access_token`` is
+    issued at access time and stored client-side. V1.3 is expected to replace
+    this with real authentication and add proper ownership/role checks.
+    """
+
+    __tablename__ = "provider_workspaces"
+    __table_args__ = (UniqueConstraint("access_token", name="uq_provider_workspaces_token"),)
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=new_id)
+    client_id: Mapped[str] = mapped_column(ForeignKey("clients.id"), nullable=False)
+    vendor_id: Mapped[str] = mapped_column(ForeignKey("vendors.id"), nullable=False)
+    contract_id: Mapped[str | None] = mapped_column(ForeignKey("contracts.id"))
+    filial_name: Mapped[str | None] = mapped_column(String(255))
+    persona_type: Mapped[str] = mapped_column(String(20), nullable=False)
+    display_name: Mapped[str | None] = mapped_column(String(255))
+    access_token: Mapped[str] = mapped_column(String(64), nullable=False)
+    onboarding_completed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    status: Mapped[str] = mapped_column(String(40), default="active", nullable=False)
+
+    client: Mapped[Client] = relationship()
+    vendor: Mapped[Vendor] = relationship(back_populates="workspaces")
+    contract: Mapped[Contract | None] = relationship()
 
 
 class AuditLog(Base):
