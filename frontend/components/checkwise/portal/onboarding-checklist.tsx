@@ -299,5 +299,16 @@ function findNextAction(data: OnboardingSummary): OnboardingItem | null {
 }
 
 function buildUploadHref(item: OnboardingItem): string {
-  return `/portal/upload?requirement=${encodeURIComponent(item.name)}&institution=${item.institution}&load_type=alta_inicial`;
+  // Attention items already submitted route through the Correction Flow so
+  // the provider sees the reviewer reason / signals before re-uploading.
+  if (item.submission_id && ATTENTION_STATUSES.includes(item.status)) {
+    return `/portal/submissions/${item.submission_id}`;
+  }
+  const params = new URLSearchParams({
+    requirement: item.name,
+    requirement_code: item.code,
+    institution: item.institution,
+    load_type: "alta_inicial",
+  });
+  return `/portal/upload?${params.toString()}`;
 }

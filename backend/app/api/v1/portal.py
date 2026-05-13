@@ -33,7 +33,15 @@ from app.core.compliance_catalog import (
     recurring_for_year,
 )
 from app.db.session import get_db
-from app.models import ProviderWorkspace, Submission
+from app.models import (
+    Document,
+    DocumentInspection,
+    DocumentStatusHistory,
+    ProviderWorkspace,
+    Submission,
+    Validation,
+    ValidationEvent,
+)
 
 router = APIRouter(prefix="/portal", tags=["portal"])
 DbSession = Annotated[Session, Depends(get_db)]
@@ -398,3 +406,279 @@ def get_workspace_calendar(
             for m in months.values()
         ],
     }
+
+
+# ---------------------------------------------------------------------------
+# Submission detail (correction flow)
+# ---------------------------------------------------------------------------
+
+
+class SubmissionRequirementSummary(BaseModel):
+    code: str | None
+    name: str | None
+    institution: str | None
+    load_type: str | None
+    requirement_code: str | None
+    requirement_version: int | None
+
+
+class SubmissionPeriodSummary(BaseModel):
+    code: str | None
+    period_key: str | None
+    period_type: str | None
+
+
+class SubmissionDocumentSummary(BaseModel):
+    document_id: str
+    filename: str
+    sha256: str
+    size_bytes: int
+    page_count: int | None
+    has_text: bool | None
+    is_probably_scanned: bool | None
+    detected_institution: str | None
+    detected_document_type: str | None
+    mismatch_reason: str | None
+
+
+class SubmissionReason(BaseModel):
+    rule_code: str
+    severity: str
+    message: str | None
+    requires_human_review: bool
+
+
+class SubmissionEvent(BaseModel):
+    event_type: str
+    result: str
+    severity: str
+    message: str | None
+    confidence: float | None
+    actor_type: str
+    occurred_at: str
+
+
+class SubmissionHistoryEntry(BaseModel):
+    from_status: str | None
+    to_status: str
+    reason: str | None
+    actor: str
+    occurred_at: str
+
+
+class SubmissionPreviousAttempt(BaseModel):
+    submission_id: str
+    status: str
+    submitted_at: str
+    filename: str | None
+
+
+class SubmissionDetailResponse(BaseModel):
+    submission_id: str
+    workspace_id: str
+    status: str
+    load_type: str
+    submitted_at: str
+    comments: str | None
+    requirement: SubmissionRequirementSummary
+    period: SubmissionPeriodSummary
+    document: SubmissionDocumentSummary | None
+    reasons: list[SubmissionReason]
+    events: list[SubmissionEvent]
+    history: list[SubmissionHistoryEntry]
+    previous_attempts: list[SubmissionPreviousAttempt]
+    suggested_action: Literal[
+        "reupload", "wait_for_review", "no_action", "verify_and_reupload"
+    ]
+
+
+# Statuses that mean "you, the provider, must act now."
+_ACTIONABLE_STATUSES: set[str] = {
+    "rechazado",
+    "vencido",
+    "posible_mismatch",
+    "requiere_aclaracion",
+}
+# Statuses that resolve the slot.
+_RESOLVED_STATUSES: set[str] = {"aprobado", "excepcion_legal", "no_aplica"}
+
+
+def _suggested_action(status: str) -> str:
+    if status == "posible_mismatch":
+        return "verify_and_reupload"
+    if status in _ACTIONABLE_STATUSES:
+        return "reupload"
+    if status in _RESOLVED_STATUSES:
+        return "no_action"
+    return "wait_for_review"
+
+
+@router.get(
+    "/workspaces/{workspace_id}/submissions/{submission_id}",
+    response_model=SubmissionDetailResponse,
+)
+def get_workspace_submission(
+    workspace_id: str,
+    submission_id: str,
+    db: DbSession,
+    x_workspace_token: Annotated[str, Header(alias="X-Workspace-Token")] = "",
+) -> SubmissionDetailResponse:
+    workspace = _load_workspace(db, workspace_id, x_workspace_token)
+    submission = db.scalar(
+        select(Submission).where(Submission.id == submission_id).limit(1)
+    )
+    if submission is None or submission.client_id != workspace.client_id or (
+        submission.vendor_id != workspace.vendor_id
+    ):
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Submission no encontrado para este workspace.",
+        )
+
+    # Document + inspection.
+    document = db.scalar(
+        select(Document).where(Document.submission_id == submission.id).limit(1)
+    )
+    inspection = None
+    if document is not None:
+        inspection = db.scalar(
+            select(DocumentInspection)
+            .where(DocumentInspection.document_id == document.id)
+            .limit(1)
+        )
+
+    # Reasons: filter validations to the ones a provider should see.
+    validations = list(
+        db.scalars(
+            select(Validation)
+            .where(Validation.submission_id == submission.id)
+            .order_by(Validation.created_at.asc())
+        )
+    )
+    reasons: list[SubmissionReason] = []
+    for v in validations:
+        if v.severity in {"warning", "error"} or v.requires_human_review:
+            reasons.append(
+                SubmissionReason(
+                    rule_code=v.rule_code,
+                    severity=v.severity,
+                    message=v.message,
+                    requires_human_review=v.requires_human_review,
+                )
+            )
+
+    # Events: chronological, full.
+    events = [
+        SubmissionEvent(
+            event_type=ev.event_type,
+            result=ev.result,
+            severity=ev.severity,
+            message=ev.message,
+            confidence=ev.confidence,
+            actor_type=ev.actor_type,
+            occurred_at=ev.created_at.isoformat(),
+        )
+        for ev in db.scalars(
+            select(ValidationEvent)
+            .where(ValidationEvent.submission_id == submission.id)
+            .order_by(ValidationEvent.created_at.asc())
+        )
+    ]
+
+    # Status history.
+    history = [
+        SubmissionHistoryEntry(
+            from_status=h.from_status,
+            to_status=h.to_status,
+            reason=h.reason,
+            actor=h.actor,
+            occurred_at=h.created_at.isoformat(),
+        )
+        for h in db.scalars(
+            select(DocumentStatusHistory)
+            .where(DocumentStatusHistory.submission_id == submission.id)
+            .order_by(DocumentStatusHistory.created_at.asc())
+        )
+    ]
+
+    # Previous attempts on the same canonical slot for the same provider.
+    previous_attempts: list[SubmissionPreviousAttempt] = []
+    if submission.requirement_code and submission.period_key:
+        previous_query = (
+            select(Submission)
+            .where(
+                Submission.client_id == workspace.client_id,
+                Submission.vendor_id == workspace.vendor_id,
+                Submission.requirement_code == submission.requirement_code,
+                Submission.period_key == submission.period_key,
+                Submission.id != submission.id,
+            )
+            .order_by(Submission.created_at.desc())
+            .limit(10)
+        )
+        for prev in db.scalars(previous_query):
+            prev_doc = db.scalar(
+                select(Document).where(Document.submission_id == prev.id).limit(1)
+            )
+            previous_attempts.append(
+                SubmissionPreviousAttempt(
+                    submission_id=prev.id,
+                    status=prev.status,
+                    submitted_at=prev.created_at.isoformat(),
+                    filename=prev_doc.original_filename if prev_doc else None,
+                )
+            )
+
+    return SubmissionDetailResponse(
+        submission_id=submission.id,
+        workspace_id=workspace.id,
+        status=submission.status,
+        load_type=submission.load_type,
+        submitted_at=submission.created_at.isoformat(),
+        comments=submission.comments,
+        requirement=SubmissionRequirementSummary(
+            code=submission.requirement.code if submission.requirement else None,
+            name=submission.requirement.name if submission.requirement else None,
+            institution=submission.institution.code if submission.institution else None,
+            load_type=submission.load_type,
+            requirement_code=submission.requirement_code,
+            requirement_version=(
+                submission.requirement_version.version
+                if submission.requirement_version
+                else None
+            ),
+        ),
+        period=SubmissionPeriodSummary(
+            code=submission.period.code if submission.period else None,
+            period_key=submission.period_key
+            or (submission.period.period_key if submission.period else None),
+            period_type=submission.period.period_type if submission.period else None,
+        ),
+        document=(
+            SubmissionDocumentSummary(
+                document_id=document.id,
+                filename=document.original_filename,
+                sha256=document.sha256,
+                size_bytes=document.size_bytes,
+                page_count=inspection.page_count if inspection else None,
+                has_text=inspection.has_text if inspection else None,
+                is_probably_scanned=(
+                    inspection.is_probably_scanned if inspection else None
+                ),
+                detected_institution=(
+                    inspection.detected_institution if inspection else None
+                ),
+                detected_document_type=(
+                    inspection.detected_document_type if inspection else None
+                ),
+                mismatch_reason=inspection.mismatch_reason if inspection else None,
+            )
+            if document is not None
+            else None
+        ),
+        reasons=reasons,
+        events=events,
+        history=history,
+        previous_attempts=previous_attempts,
+        suggested_action=_suggested_action(submission.status),  # type: ignore[arg-type]
+    )

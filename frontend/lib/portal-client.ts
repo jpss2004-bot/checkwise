@@ -157,6 +157,100 @@ export async function getCalendar(
   );
 }
 
+export type SubmissionRequirementSummary = {
+  code: string | null;
+  name: string | null;
+  institution: string | null;
+  load_type: string | null;
+  requirement_code: string | null;
+  requirement_version: number | null;
+};
+
+export type SubmissionPeriodSummary = {
+  code: string | null;
+  period_key: string | null;
+  period_type: string | null;
+};
+
+export type SubmissionDocumentSummary = {
+  document_id: string;
+  filename: string;
+  sha256: string;
+  size_bytes: number;
+  page_count: number | null;
+  has_text: boolean | null;
+  is_probably_scanned: boolean | null;
+  detected_institution: string | null;
+  detected_document_type: string | null;
+  mismatch_reason: string | null;
+};
+
+export type SubmissionReason = {
+  rule_code: string;
+  severity: string;
+  message: string | null;
+  requires_human_review: boolean;
+};
+
+export type SubmissionEvent = {
+  event_type: string;
+  result: string;
+  severity: string;
+  message: string | null;
+  confidence: number | null;
+  actor_type: string;
+  occurred_at: string;
+};
+
+export type SubmissionHistoryEntry = {
+  from_status: string | null;
+  to_status: string;
+  reason: string | null;
+  actor: string;
+  occurred_at: string;
+};
+
+export type SubmissionPreviousAttempt = {
+  submission_id: string;
+  status: string;
+  submitted_at: string;
+  filename: string | null;
+};
+
+export type SubmissionSuggestedAction =
+  | "reupload"
+  | "verify_and_reupload"
+  | "wait_for_review"
+  | "no_action";
+
+export type SubmissionDetail = {
+  submission_id: string;
+  workspace_id: string;
+  status: RequirementStatus;
+  load_type: string;
+  submitted_at: string;
+  comments: string | null;
+  requirement: SubmissionRequirementSummary;
+  period: SubmissionPeriodSummary;
+  document: SubmissionDocumentSummary | null;
+  reasons: SubmissionReason[];
+  events: SubmissionEvent[];
+  history: SubmissionHistoryEntry[];
+  previous_attempts: SubmissionPreviousAttempt[];
+  suggested_action: SubmissionSuggestedAction;
+};
+
+export async function getSubmissionDetail(
+  session: PortalSession,
+  submissionId: string,
+): Promise<SubmissionDetail> {
+  return await fetchJson<SubmissionDetail>(
+    `/api/v1/portal/workspaces/${session.workspace_id}/submissions/${submissionId}`,
+    { method: "GET" },
+    session,
+  );
+}
+
 export const INSTITUTION_LABELS: Record<string, string> = {
   sat: "SAT",
   imss: "IMSS",

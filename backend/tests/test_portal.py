@@ -217,3 +217,117 @@ def test_portal_calendar_canonical_match_does_not_overflow_across_months(
     # Exactly the B1 slot (due in March, month=3) lights up.
     assert len(matches) == 1, matches
     assert matches[0][0] == 3
+
+
+# ---------------------------------------------------------------------------
+# Patch 3 — Correction Flow: submission-detail endpoint
+# ---------------------------------------------------------------------------
+
+
+def _submit_canonical(api_client: TestClient, *, vendor_rfc: str) -> dict:
+    """Helper: post a canonical submission for the demo workspace pair."""
+    from app.core.compliance_catalog import recurring_for_year
+
+    catalog_item = next(
+        item
+        for item in recurring_for_year(2026)
+        if item.institution == "imss" and item.due_month == 5
+    )
+    response = api_client.post(
+        "/api/v1/submissions",
+        data={
+            "client_name": "Cliente Piloto CheckWise",
+            "vendor_name": "Servicios Demo SA de CV",
+            "vendor_rfc": vendor_rfc,
+            "period_code": "2026-04",
+            "period_key": catalog_item.period_key,
+            "load_type": "mensual",
+            "institution_code": "imss",
+            "requirement_name": catalog_item.name,
+            "requirement_code": catalog_item.code,
+            "initial_status": "pendiente_revision",
+        },
+        files={"file": ("imss.pdf", _pdf_bytes(), "application/pdf")},
+    )
+    assert response.status_code == 202, response.text
+    return response.json()
+
+
+def test_submission_detail_returns_shape(api_client: TestClient) -> None:
+    """Patch 3: detail endpoint returns identity, reasons, events, history."""
+    access = api_client.post("/api/v1/portal/access", json=_access_payload()).json()
+    headers = {"X-Workspace-Token": access["access_token"]}
+    submitted = _submit_canonical(api_client, vendor_rfc=access["vendor_rfc"])
+
+    detail = api_client.get(
+        f"/api/v1/portal/workspaces/{access['workspace_id']}"
+        f"/submissions/{submitted['submission_id']}",
+        headers=headers,
+    )
+    assert detail.status_code == 200, detail.text
+    body = detail.json()
+    assert body["submission_id"] == submitted["submission_id"]
+    assert body["status"] == "pendiente_revision"
+    assert body["requirement"]["requirement_code"]
+    assert body["requirement"]["requirement_code"].startswith("REC-IMSS-2026-")
+    assert body["period"]["period_key"] == "2026-M04"
+    assert body["document"]["sha256"] == submitted["sha256"]
+    assert any(
+        ev["event_type"] == "upload_started" for ev in body["events"]
+    )
+    assert any(h["to_status"] == "pendiente_revision" for h in body["history"])
+    # No prior attempts on the slot yet.
+    assert body["previous_attempts"] == []
+    # pendiente_revision suggests waiting.
+    assert body["suggested_action"] == "wait_for_review"
+
+
+def test_submission_detail_lists_previous_attempts_for_same_slot(
+    api_client: TestClient,
+) -> None:
+    """Patch 3: repeat submissions on the same (requirement_code, period_key)
+    should show the older attempts in the correction page."""
+    access = api_client.post("/api/v1/portal/access", json=_access_payload()).json()
+    headers = {"X-Workspace-Token": access["access_token"]}
+
+    first = _submit_canonical(api_client, vendor_rfc=access["vendor_rfc"])
+    second = _submit_canonical(api_client, vendor_rfc=access["vendor_rfc"])
+
+    detail = api_client.get(
+        f"/api/v1/portal/workspaces/{access['workspace_id']}"
+        f"/submissions/{second['submission_id']}",
+        headers=headers,
+    ).json()
+    assert len(detail["previous_attempts"]) == 1
+    assert detail["previous_attempts"][0]["submission_id"] == first["submission_id"]
+
+
+def test_submission_detail_requires_correct_token(api_client: TestClient) -> None:
+    access = api_client.post("/api/v1/portal/access", json=_access_payload()).json()
+    submitted = _submit_canonical(api_client, vendor_rfc=access["vendor_rfc"])
+    bad = api_client.get(
+        f"/api/v1/portal/workspaces/{access['workspace_id']}"
+        f"/submissions/{submitted['submission_id']}",
+        headers={"X-Workspace-Token": "wrong-token"},
+    )
+    assert bad.status_code == 401
+
+
+def test_submission_detail_refuses_submission_from_other_workspace(
+    api_client: TestClient,
+) -> None:
+    """Patch 3: a workspace must not be able to read another workspace's submission."""
+    access_a = api_client.post("/api/v1/portal/access", json=_access_payload()).json()
+    access_b = api_client.post(
+        "/api/v1/portal/access",
+        json=_access_payload(vendor_name="Proveedor Externo SA", vendor_rfc="EXT260512AB1"),
+    ).json()
+    submitted_a = _submit_canonical(api_client, vendor_rfc=access_a["vendor_rfc"])
+
+    # access_b tries to read submission of access_a — must 404.
+    cross = api_client.get(
+        f"/api/v1/portal/workspaces/{access_b['workspace_id']}"
+        f"/submissions/{submitted_a['submission_id']}",
+        headers={"X-Workspace-Token": access_b["access_token"]},
+    )
+    assert cross.status_code == 404

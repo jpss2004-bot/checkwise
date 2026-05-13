@@ -449,6 +449,16 @@ function buildRecommendedActions(
 }
 
 function buildCalendarUploadHref(institution: string, item: CalendarItem): string {
+  // Attention items with an existing submission go through the Correction
+  // Flow page so the provider sees *why* and the timeline before
+  // re-uploading. Everything else goes straight to the wizard with locked
+  // context.
+  if (
+    item.submission_id &&
+    ATTENTION_STATUSES.includes(item.status)
+  ) {
+    return `/portal/submissions/${item.submission_id}`;
+  }
   // Emit both canonical keys (preferred by the wizard + backend) and the
   // legacy name + label (still accepted during the deprecation window).
   const params = new URLSearchParams({
