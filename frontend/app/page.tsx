@@ -1,33 +1,53 @@
+"use client";
+
+import { useEffect, useState } from "react";
+import { useRouter } from "next/navigation";
 import { Activity, Database, FileCheck2, ShieldCheck } from "lucide-react";
 
-import { IntakeWizard } from "@/components/checkwise/intake-wizard";
-import { SupportCard } from "@/components/checkwise/support-card";
+import { ProviderAccessForm } from "@/components/checkwise/portal/provider-access-form";
 import { Badge } from "@/components/ui/badge";
+import { readPortalSession } from "@/lib/portal-session";
 
 const metrics = [
-  { label: "Modelo", value: "REPSE V1", icon: ShieldCheck },
-  { label: "Estado inicial", value: "pendiente_revision", icon: FileCheck2 },
+  { label: "Plataforma", value: "REPSE V1.2", icon: ShieldCheck },
+  { label: "Trazabilidad", value: "Cliente → Periodo", icon: FileCheck2 },
   { label: "Fuente futura", value: "PostgreSQL", icon: Database },
   { label: "Validación", value: "Humana + señales", icon: Activity },
 ];
 
-export default function Home() {
+export default function HomePage() {
+  const router = useRouter();
+  const [checked, setChecked] = useState(false);
+
+  useEffect(() => {
+    const existing = readPortalSession();
+    if (existing) {
+      router.replace("/portal/onboarding");
+      return;
+    }
+    setChecked(true);
+  }, [router]);
+
+  if (!checked) {
+    return null;
+  }
+
   return (
     <main className="min-h-screen bg-background">
       <header className="border-b border-border bg-white">
         <div className="mx-auto flex max-w-7xl flex-col gap-5 px-5 py-5 md:flex-row md:items-center md:justify-between">
-          <div>
-            <div className="flex items-center gap-3">
-              <div className="flex h-10 w-10 items-center justify-center rounded-md bg-primary text-primary-foreground">
-                <ShieldCheck className="h-5 w-5" aria-hidden="true" />
-              </div>
-              <div>
-                <p className="text-sm font-semibold text-primary">CheckWise</p>
-                <h1 className="text-2xl font-semibold text-foreground">Carga documental REPSE</h1>
-              </div>
+          <div className="flex items-center gap-3">
+            <div className="flex h-10 w-10 items-center justify-center rounded-md bg-primary text-primary-foreground">
+              <ShieldCheck className="h-5 w-5" aria-hidden="true" />
+            </div>
+            <div>
+              <p className="text-sm font-semibold text-primary">CheckWise</p>
+              <h1 className="text-2xl font-semibold text-foreground">
+                Plataforma de cumplimiento REPSE
+              </h1>
             </div>
           </div>
-          <Badge variant="outline">V1.1 native intake</Badge>
+          <Badge variant="outline">V1.2 portal proveedor</Badge>
         </div>
       </header>
 
@@ -36,7 +56,10 @@ export default function Home() {
           {metrics.map((item) => {
             const Icon = item.icon;
             return (
-              <div key={item.label} className="flex items-center gap-3 rounded-md border border-border px-3 py-3">
+              <div
+                key={item.label}
+                className="flex items-center gap-3 rounded-md border border-border px-3 py-3"
+              >
                 <Icon className="h-5 w-5 text-primary" aria-hidden="true" />
                 <div className="min-w-0">
                   <p className="text-xs text-muted-foreground">{item.label}</p>
@@ -48,58 +71,33 @@ export default function Home() {
         </div>
       </section>
 
-      <div className="mx-auto grid max-w-7xl gap-5 px-5 py-6 lg:grid-cols-[minmax(0,1fr)_360px]">
-        <IntakeWizard />
+      <section className="mx-auto max-w-7xl px-5 py-6">
+        <ProviderAccessForm />
+      </section>
 
-        <aside className="space-y-4">
-          <section className="rounded-md border border-border bg-white p-5 shadow-soft">
+      <section className="mx-auto max-w-7xl px-5 pb-10">
+        <div className="grid gap-5 md:grid-cols-3">
+          <div className="rounded-md border border-border bg-white p-5">
+            <h2 className="text-base font-semibold">Expediente inicial</h2>
+            <p className="mt-2 text-sm text-muted-foreground">
+              Contrato, documentación corporativa, registro REPSE y registro patronal.
+            </p>
+          </div>
+          <div className="rounded-md border border-border bg-white p-5">
+            <h2 className="text-base font-semibold">Calendario REPSE</h2>
+            <p className="mt-2 text-sm text-muted-foreground">
+              SAT mensual, IMSS mensual, INFONAVIT bimestral, Acuses cuatrimestrales y anual.
+            </p>
+          </div>
+          <div className="rounded-md border border-border bg-white p-5">
             <h2 className="text-base font-semibold">Trazabilidad mínima</h2>
-            <div className="mt-4 space-y-3 text-sm">
-              {[
-                "cliente",
-                "proveedor",
-                "contrato si aplica",
-                "periodo",
-                "institución",
-                "requisito versionable",
-                "archivo + hash",
-                "validación + estado",
-                "audit_log",
-              ].map((item) => (
-                <div key={item} className="flex items-center gap-2">
-                  <FileCheck2 className="h-4 w-4 text-primary" aria-hidden="true" />
-                  <span>{item}</span>
-                </div>
-              ))}
-            </div>
-          </section>
-
-          <SupportCard />
-
-          <section className="rounded-md border border-border bg-white p-5 shadow-soft">
-            <h2 className="text-base font-semibold">Estados base</h2>
-            <div className="mt-4 flex flex-wrap gap-2">
-              {[
-                "pendiente",
-                "recibido",
-                "pendiente_revision",
-                "prevalidado",
-                "posible_mismatch",
-                "aprobado",
-                "rechazado",
-                "vencido",
-                "no_aplica",
-                "requiere_aclaracion",
-                "excepcion_legal",
-              ].map((status) => (
-                <Badge key={status} variant={status === "pendiente_revision" ? "default" : "secondary"}>
-                  {status}
-                </Badge>
-              ))}
-            </div>
-          </section>
-        </aside>
-      </div>
+            <p className="mt-2 text-sm text-muted-foreground">
+              Cliente, proveedor, periodo, institución, requisito, archivo + hash, validación,
+              auditoría.
+            </p>
+          </div>
+        </div>
+      </section>
     </main>
   );
 }

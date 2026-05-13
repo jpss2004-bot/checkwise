@@ -85,14 +85,16 @@ const initialForm: IntakeForm = {
   comments: "",
 };
 
-export function IntakeWizard() {
+export type IntakeWizardPrefill = Partial<IntakeForm>;
+
+export function IntakeWizard({ prefill }: { prefill?: IntakeWizardPrefill } = {}) {
   const apiBaseUrl = useMemo(
     () => process.env.NEXT_PUBLIC_API_BASE_URL ?? "http://localhost:8000",
     [],
   );
   const demoModeEnabled = process.env.NEXT_PUBLIC_DEMO_MODE === "true";
   const [step, setStep] = useState(0);
-  const [form, setForm] = useState<IntakeForm>(initialForm);
+  const [form, setForm] = useState<IntakeForm>(() => ({ ...initialForm, ...(prefill ?? {}) }));
   const [file, setFile] = useState<File | null>(null);
   const [fileError, setFileError] = useState<string | null>(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
