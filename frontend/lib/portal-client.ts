@@ -251,6 +251,27 @@ export async function getSubmissionDetail(
   );
 }
 
+export type DuplicateCheck = {
+  exists: boolean;
+  submission_id: string | null;
+  status: string | null;
+  submitted_at: string | null;
+  requirement_name: string | null;
+  period_label: string | null;
+  filename: string | null;
+};
+
+export async function checkDuplicateBySha256(
+  session: PortalSession,
+  sha256: string,
+): Promise<DuplicateCheck> {
+  return await fetchJson<DuplicateCheck>(
+    `/api/v1/portal/workspaces/${session.workspace_id}/duplicate-check?sha256=${encodeURIComponent(sha256)}`,
+    { method: "GET" },
+    session,
+  );
+}
+
 export const INSTITUTION_LABELS: Record<string, string> = {
   sat: "SAT",
   imss: "IMSS",

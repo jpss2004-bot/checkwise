@@ -331,3 +331,81 @@ def test_submission_detail_refuses_submission_from_other_workspace(
         headers={"X-Workspace-Token": access_b["access_token"]},
     )
     assert cross.status_code == 404
+
+
+# ---------------------------------------------------------------------------
+# Patch 4 — Guided upload UX: duplicate pre-check endpoint
+# ---------------------------------------------------------------------------
+
+
+def test_check_duplicate_returns_false_for_unseen_hash(api_client: TestClient) -> None:
+    access = api_client.post("/api/v1/portal/access", json=_access_payload()).json()
+    headers = {"X-Workspace-Token": access["access_token"]}
+    response = api_client.get(
+        f"/api/v1/portal/workspaces/{access['workspace_id']}/duplicate-check"
+        f"?sha256={'0' * 64}",
+        headers=headers,
+    )
+    assert response.status_code == 200, response.text
+    body = response.json()
+    assert body["exists"] is False
+    assert body["submission_id"] is None
+
+
+def test_check_duplicate_finds_existing_workspace_submission(api_client: TestClient) -> None:
+    access = api_client.post("/api/v1/portal/access", json=_access_payload()).json()
+    headers = {"X-Workspace-Token": access["access_token"]}
+    submitted = _submit_canonical(api_client, vendor_rfc=access["vendor_rfc"])
+
+    response = api_client.get(
+        f"/api/v1/portal/workspaces/{access['workspace_id']}/duplicate-check"
+        f"?sha256={submitted['sha256']}",
+        headers=headers,
+    )
+    assert response.status_code == 200, response.text
+    body = response.json()
+    assert body["exists"] is True
+    assert body["submission_id"] == submitted["submission_id"]
+    assert body["filename"] == "imss.pdf"
+
+
+def test_check_duplicate_does_not_leak_other_workspace_documents(
+    api_client: TestClient,
+) -> None:
+    """A duplicate uploaded by another vendor must NOT show as a duplicate
+    for this workspace's pre-check."""
+    access_a = api_client.post("/api/v1/portal/access", json=_access_payload()).json()
+    access_b = api_client.post(
+        "/api/v1/portal/access",
+        json=_access_payload(vendor_name="Otro Proveedor", vendor_rfc="EXT260512AB1"),
+    ).json()
+    submitted_a = _submit_canonical(api_client, vendor_rfc=access_a["vendor_rfc"])
+
+    response = api_client.get(
+        f"/api/v1/portal/workspaces/{access_b['workspace_id']}/duplicate-check"
+        f"?sha256={submitted_a['sha256']}",
+        headers={"X-Workspace-Token": access_b["access_token"]},
+    )
+    assert response.status_code == 200, response.text
+    assert response.json()["exists"] is False
+
+
+def test_check_duplicate_rejects_malformed_hash(api_client: TestClient) -> None:
+    access = api_client.post("/api/v1/portal/access", json=_access_payload()).json()
+    headers = {"X-Workspace-Token": access["access_token"]}
+    response = api_client.get(
+        f"/api/v1/portal/workspaces/{access['workspace_id']}/duplicate-check"
+        "?sha256=not-a-hash",
+        headers=headers,
+    )
+    assert response.status_code == 400
+
+
+def test_check_duplicate_requires_workspace_token(api_client: TestClient) -> None:
+    access = api_client.post("/api/v1/portal/access", json=_access_payload()).json()
+    response = api_client.get(
+        f"/api/v1/portal/workspaces/{access['workspace_id']}/duplicate-check"
+        f"?sha256={'0' * 64}",
+        headers={"X-Workspace-Token": "wrong-token"},
+    )
+    assert response.status_code == 401

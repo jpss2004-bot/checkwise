@@ -1,17 +1,23 @@
 "use client";
 
-import { FormEvent, useMemo, useState } from "react";
+import { FormEvent, useEffect, useMemo, useState } from "react";
+import Link from "next/link";
 import {
   AlertCircle,
+  AlertTriangle,
+  ArrowRight,
+  Calendar,
   CheckCircle2,
   ChevronLeft,
   ChevronRight,
+  Eye,
   FileText,
   Loader2,
   Lock,
   Pencil,
   ShieldCheck,
   UploadCloud,
+  UserCheck,
 } from "lucide-react";
 
 import { institutions, loadTypes, requirementGuides, requirements } from "@/lib/catalogs";
@@ -23,6 +29,8 @@ import { Label } from "@/components/ui/label";
 import { Select } from "@/components/ui/select";
 import { Textarea } from "@/components/ui/textarea";
 import { ValidationSignal, ValidationSummary } from "@/components/checkwise/validation-summary";
+import { checkDuplicateBySha256, type DuplicateCheck } from "@/lib/portal-client";
+import { readPortalSession } from "@/lib/portal-session";
 
 type SubmissionResponse = {
   submission_id: string;
@@ -145,6 +153,9 @@ export function IntakeWizard({
   const [result, setResult] = useState<SubmissionResponse | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [unlockedOverride, setUnlockedOverride] = useState(false);
+  const [filePreviewUrl, setFilePreviewUrl] = useState<string | null>(null);
+  const [duplicateCheck, setDuplicateCheck] = useState<DuplicateCheck | null>(null);
+  const [duplicateChecking, setDuplicateChecking] = useState(false);
 
   const lockedSet = useMemo(() => {
     if (unlockedOverride) return new Set<IntakeLockedField>();
@@ -166,6 +177,12 @@ export function IntakeWizard({
 
   function selectFile(nextFile: File | null) {
     setFileError(null);
+    setDuplicateCheck(null);
+    // Revoke the previous preview URL before replacing it.
+    if (filePreviewUrl) {
+      URL.revokeObjectURL(filePreviewUrl);
+      setFilePreviewUrl(null);
+    }
     if (!nextFile) {
       setFile(null);
       return;
@@ -187,7 +204,40 @@ export function IntakeWizard({
     }
     setFile(nextFile);
     setError(null);
+    // Generate an in-memory preview URL for the iframe.
+    try {
+      const url = URL.createObjectURL(nextFile);
+      setFilePreviewUrl(url);
+    } catch {
+      // Older browsers — preview unavailable but upload still works.
+      setFilePreviewUrl(null);
+    }
+    // Fire-and-forget duplicate pre-check against the workspace.
+    void runDuplicatePreCheck(nextFile);
   }
+
+  async function runDuplicatePreCheck(target: File) {
+    const session = readPortalSession();
+    if (!session) return;
+    setDuplicateChecking(true);
+    try {
+      const hash = await sha256OfFile(target);
+      const result = await checkDuplicateBySha256(session, hash);
+      setDuplicateCheck(result);
+    } catch {
+      // Pre-check is advisory; failures must not block the provider.
+      setDuplicateCheck(null);
+    } finally {
+      setDuplicateChecking(false);
+    }
+  }
+
+  // Clean up the preview blob URL on unmount or wizard reset.
+  useEffect(() => {
+    return () => {
+      if (filePreviewUrl) URL.revokeObjectURL(filePreviewUrl);
+    };
+  }, [filePreviewUrl]);
 
   async function useDemoFile() {
     setFileError(null);
@@ -348,10 +398,19 @@ export function IntakeWizard({
               onUseDemoFile={demoModeEnabled ? useDemoFile : undefined}
               comments={form.comments}
               onCommentsChange={(value) => updateField("comments", value)}
+              filePreviewUrl={filePreviewUrl}
+              duplicateCheck={duplicateCheck}
+              duplicateChecking={duplicateChecking}
+              requirement={selectedRequirement}
             />
           ) : null}
           {step === 3 ? (
-            <PrevalidationStep form={form} file={file} requirement={selectedRequirement} />
+            <PrevalidationStep
+              form={form}
+              file={file}
+              requirement={selectedRequirement}
+              duplicateCheck={duplicateCheck}
+            />
           ) : null}
           {step === 4 ? <ConfirmationStep result={result} error={error} /> : null}
 
@@ -639,6 +698,10 @@ function UploadStep({
   onUseDemoFile,
   comments,
   onCommentsChange,
+  filePreviewUrl,
+  duplicateCheck,
+  duplicateChecking,
+  requirement,
 }: {
   file: File | null;
   fileError: string | null;
@@ -646,63 +709,183 @@ function UploadStep({
   onUseDemoFile?: () => void;
   comments: string;
   onCommentsChange: (value: string) => void;
+  filePreviewUrl: string | null;
+  duplicateCheck: DuplicateCheck | null;
+  duplicateChecking: boolean;
+  requirement: (typeof requirementGuides)[number];
 }) {
   return (
     <section className="space-y-4">
-      <StepHeading title="Upload PDF" />
-      <label
-        htmlFor="native-file"
-        onDragOver={(event) => event.preventDefault()}
-        onDrop={(event) => {
-          event.preventDefault();
-          onFileSelected(event.dataTransfer.files?.[0] ?? null);
-        }}
-        className="flex min-h-[180px] cursor-pointer flex-col items-center justify-center rounded-md border border-dashed border-primary/40 bg-emerald-50/50 p-6 text-center transition-colors hover:bg-emerald-50"
-      >
-        <UploadCloud className="h-9 w-9 text-primary" aria-hidden="true" />
-        <p className="mt-3 text-sm font-semibold">Arrastra o selecciona el PDF</p>
-        <p className="mt-1 text-sm text-muted-foreground">
-          Solo PDF, máximo 15 MB. No subas archivos protegidos con contraseña.
-        </p>
-        <input
-          id="native-file"
-          type="file"
-          accept=".pdf,application/pdf"
-          className="sr-only"
-          onChange={(event) => onFileSelected(event.target.files?.[0] ?? null)}
-        />
-      </label>
-      {file ? (
-        <div className="rounded-md border border-border bg-white p-3 text-sm">
-          <div className="flex items-center gap-2 font-medium">
-            <FileText className="h-4 w-4 text-primary" aria-hidden="true" />
-            {file.name}
-          </div>
-          <p className="mt-1 text-muted-foreground">{Math.ceil(file.size / 1024)} KB</p>
+      <StepHeading title="Sube el documento" />
+      <div className="grid gap-4 lg:grid-cols-[minmax(0,1fr)_320px]">
+        <div className="space-y-4">
+          <label
+            htmlFor="native-file"
+            onDragOver={(event) => event.preventDefault()}
+            onDrop={(event) => {
+              event.preventDefault();
+              onFileSelected(event.dataTransfer.files?.[0] ?? null);
+            }}
+            className="flex min-h-[180px] cursor-pointer flex-col items-center justify-center rounded-md border border-dashed border-primary/40 bg-emerald-50/50 p-6 text-center transition-colors hover:bg-emerald-50"
+          >
+            <UploadCloud className="h-9 w-9 text-primary" aria-hidden="true" />
+            <p className="mt-3 text-sm font-semibold">
+              Arrastra o selecciona el PDF
+            </p>
+            <p className="mt-1 text-sm text-muted-foreground">
+              Solo PDF, máximo 15 MB. No subas archivos protegidos con contraseña.
+            </p>
+            <input
+              id="native-file"
+              type="file"
+              accept=".pdf,application/pdf"
+              className="sr-only"
+              onChange={(event) =>
+                onFileSelected(event.target.files?.[0] ?? null)
+              }
+            />
+          </label>
+
+          {file ? (
+            <div className="rounded-md border border-border bg-white p-3 text-sm">
+              <div className="flex items-center gap-2 font-medium">
+                <FileText className="h-4 w-4 text-primary" aria-hidden="true" />
+                {file.name}
+              </div>
+              <p className="mt-1 text-muted-foreground">
+                {Math.ceil(file.size / 1024)} KB
+              </p>
+            </div>
+          ) : null}
+
+          {duplicateChecking ? (
+            <div className="flex items-center gap-2 rounded-md border border-border bg-muted/40 p-3 text-xs text-muted-foreground">
+              <Loader2 className="h-3.5 w-3.5 animate-spin" aria-hidden="true" />
+              Verificando si ya habías subido este mismo archivo…
+            </div>
+          ) : null}
+
+          {duplicateCheck?.exists ? (
+            <div className="rounded-md border border-amber-300 bg-amber-50 p-3 text-sm text-amber-900">
+              <div className="flex items-start gap-2">
+                <AlertTriangle
+                  className="mt-0.5 h-4 w-4 shrink-0 text-amber-700"
+                  aria-hidden="true"
+                />
+                <div className="min-w-0">
+                  <p className="font-medium">Ya habías subido este archivo</p>
+                  <p className="mt-1 text-xs">
+                    Mismo SHA-256 que una carga anterior
+                    {duplicateCheck.filename ? ` (${duplicateCheck.filename})` : ""}
+                    {duplicateCheck.requirement_name
+                      ? ` para "${duplicateCheck.requirement_name}"`
+                      : ""}
+                    {duplicateCheck.status
+                      ? ` con estado "${duplicateCheck.status}"`
+                      : ""}
+                    . Puedes continuar si es a propósito; si no, revisa la carga
+                    anterior.
+                  </p>
+                  {duplicateCheck.submission_id ? (
+                    <Link
+                      href={`/portal/submissions/${duplicateCheck.submission_id}`}
+                      className="mt-2 inline-flex items-center gap-1 text-xs font-medium text-amber-900 underline"
+                    >
+                      Ver carga anterior
+                      <ArrowRight className="h-3 w-3" aria-hidden="true" />
+                    </Link>
+                  ) : null}
+                </div>
+              </div>
+            </div>
+          ) : null}
+
+          {filePreviewUrl ? (
+            <div className="overflow-hidden rounded-md border border-border bg-muted/30">
+              <div className="flex items-center gap-2 border-b border-border bg-white px-3 py-2 text-xs font-medium text-muted-foreground">
+                <Eye className="h-3.5 w-3.5" aria-hidden="true" />
+                Vista previa del PDF
+              </div>
+              <iframe
+                src={filePreviewUrl}
+                title="Vista previa del PDF seleccionado"
+                className="block h-[420px] w-full"
+              />
+            </div>
+          ) : null}
+
+          {fileError ? (
+            <p className="text-sm text-destructive">{fileError}</p>
+          ) : null}
+
+          {onUseDemoFile ? (
+            <Button
+              type="button"
+              variant="outline"
+              className="w-fit"
+              data-testid="use-demo-pdf"
+              onClick={onUseDemoFile}
+            >
+              <FileText className="h-4 w-4" aria-hidden="true" />
+              Usar PDF demo
+            </Button>
+          ) : null}
+
+          <Field label="Comentarios o aclaraciones" htmlFor="comments">
+            <Textarea
+              id="comments"
+              value={comments}
+              onChange={(event) => onCommentsChange(event.target.value)}
+              placeholder="Ej. El documento cubre el periodo de mayo 2026; el acuse fue emitido el día..."
+            />
+          </Field>
         </div>
-      ) : null}
-      {fileError ? <p className="text-sm text-destructive">{fileError}</p> : null}
-      {onUseDemoFile ? (
-        <Button
-          type="button"
-          variant="outline"
-          className="w-fit"
-          data-testid="use-demo-pdf"
-          onClick={onUseDemoFile}
-        >
-          <FileText className="h-4 w-4" aria-hidden="true" />
-          Usar PDF demo
-        </Button>
-      ) : null}
-      <Field label="Comentarios o aclaraciones" htmlFor="comments">
-        <Textarea
-          id="comments"
-          value={comments}
-          onChange={(event) => onCommentsChange(event.target.value)}
-          placeholder="Ej. El documento cubre el periodo de mayo 2026; el acuse fue emitido el día..."
-        />
-      </Field>
+
+        <aside className="space-y-3" aria-label="Guía del requisito">
+          <RequirementGuideCard requirement={requirement} />
+        </aside>
+      </div>
     </section>
+  );
+}
+
+function RequirementGuideCard({
+  requirement,
+}: {
+  requirement: (typeof requirementGuides)[number];
+}) {
+  return (
+    <div className="space-y-3 rounded-md border border-border bg-white p-4">
+      <div className="flex flex-wrap items-center gap-2">
+        <Badge variant="outline">{requirement.institution}</Badge>
+        <Badge variant="outline">{requirement.frequency}</Badge>
+      </div>
+      <div>
+        <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
+          Qué necesitamos
+        </p>
+        <h3 className="mt-1 text-sm font-semibold">{requirement.name}</h3>
+        <p className="mt-1 text-xs text-muted-foreground">{requirement.why}</p>
+      </div>
+      <div>
+        <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
+          Ejemplo válido
+        </p>
+        <p className="mt-1 text-xs text-muted-foreground">
+          {requirement.validExample}
+        </p>
+      </div>
+      <div>
+        <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
+          Causas comunes de rechazo
+        </p>
+        <ul className="mt-1 list-disc space-y-0.5 pl-4 text-xs text-muted-foreground">
+          {requirement.rejectionCauses.map((cause) => (
+            <li key={cause}>{cause}</li>
+          ))}
+        </ul>
+      </div>
+    </div>
   );
 }
 
@@ -710,25 +893,82 @@ function PrevalidationStep({
   form,
   file,
   requirement,
+  duplicateCheck,
 }: {
   form: IntakeForm;
   file: File | null;
   requirement: (typeof requirementGuides)[number];
+  duplicateCheck: DuplicateCheck | null;
 }) {
   return (
     <section className="space-y-4">
-      <StepHeading title="Confirmar envío" />
+      <StepHeading title="Revisa antes de enviar" />
       <div className="grid gap-4 md:grid-cols-2">
         <ReviewItem label="Cliente" value={form.client_name || "Pendiente"} />
-        <ReviewItem label="Proveedor / RFC" value={`${form.vendor_name || "Pendiente"} / ${form.vendor_rfc || "-"}`} />
+        <ReviewItem
+          label="Proveedor / RFC"
+          value={`${form.vendor_name || "Pendiente"} / ${form.vendor_rfc || "-"}`}
+        />
         <ReviewItem label="Periodo" value={form.period_code} />
         <ReviewItem label="Requisito" value={requirement.name} />
         <ReviewItem label="Archivo" value={file?.name ?? "Sin archivo"} />
         <ReviewItem label="Estado inicial" value="pendiente_revision" />
       </div>
-      <div className="rounded-md border border-border bg-muted/40 p-4 text-sm text-muted-foreground">
-        Al enviar, CheckWise calculará hash, inspeccionará estructura PDF, buscará texto legible y
-        registrará eventos de validación. La aprobación final seguirá siendo humana.
+
+      {duplicateCheck?.exists ? (
+        <div className="rounded-md border border-amber-300 bg-amber-50 p-4 text-sm text-amber-900">
+          <div className="flex items-start gap-2">
+            <AlertTriangle
+              className="mt-0.5 h-4 w-4 shrink-0 text-amber-700"
+              aria-hidden="true"
+            />
+            <div>
+              <p className="font-medium">Este archivo ya existe en tu expediente</p>
+              <p className="mt-1 text-xs">
+                Si es a propósito (re-envío para corregir) puedes continuar. Si no,
+                regresa y elige el archivo correcto.
+              </p>
+            </div>
+          </div>
+        </div>
+      ) : null}
+
+      <div className="rounded-md border border-primary/25 bg-primary/5 p-4">
+        <p className="text-xs font-medium uppercase tracking-wide text-primary">
+          Lo que sigue al enviar
+        </p>
+        <ol className="mt-2 space-y-2 text-sm">
+          <li className="flex items-start gap-2">
+            <ShieldCheck
+              className="mt-0.5 h-4 w-4 shrink-0 text-primary"
+              aria-hidden="true"
+            />
+            <span>
+              Calculamos hash SHA-256, inspeccionamos la estructura PDF y leemos
+              señales determinísticas. Nada se aprueba automáticamente.
+            </span>
+          </li>
+          <li className="flex items-start gap-2">
+            <UserCheck
+              className="mt-0.5 h-4 w-4 shrink-0 text-primary"
+              aria-hidden="true"
+            />
+            <span>
+              Pasa a revisión humana del equipo de cumplimiento. La aprobación
+              final siempre es humana.
+            </span>
+          </li>
+          <li className="flex items-start gap-2">
+            <Calendar
+              className="mt-0.5 h-4 w-4 shrink-0 text-primary"
+              aria-hidden="true"
+            />
+            <span>
+              Puedes consultar el estado en tu calendario o en el detalle del
+              documento cuando termine la revisión.
+            </span>
+          </li>
+        </ol>
       </div>
     </section>
   );
@@ -757,30 +997,122 @@ function ConfirmationStep({
     );
   }
 
+  const isMismatch = Boolean(result.document_signals?.mismatch_reason);
+  const isClarification = result.status === "requiere_aclaracion";
+  const isAttention = isMismatch || isClarification;
+  const heroTone = isAttention
+    ? "border-amber-300 bg-amber-50"
+    : "border-emerald-200 bg-emerald-50";
+  const heroIconBg = isAttention
+    ? "bg-amber-500 text-white"
+    : "bg-emerald-500 text-white";
+  const HeroIcon = isAttention ? AlertTriangle : CheckCircle2;
+  const heroHeadline = isMismatch
+    ? "Recibimos tu documento, pero detectamos una posible inconsistencia"
+    : isClarification
+      ? "Recibimos tu documento, pero necesitamos una aclaración"
+      : "Recibimos tu documento";
+  const heroSubcopy = isMismatch
+    ? "Tu archivo entró al sistema y queda como evidencia, pero el revisor humano lo verá con una alerta. Si subiste el documento equivocado, vuelve a cargar el correcto."
+    : isClarification
+      ? "El documento entró al sistema, pero el revisor humano necesita más información antes de aprobarlo."
+      : "Tu archivo entró al sistema y pasó las prevalidaciones automáticas iniciales. El revisor humano dará el dictamen final.";
+
   return (
     <section className="space-y-5">
-      <div className="rounded-md border border-primary/25 bg-emerald-50 p-5">
+      <div className={`rounded-md border p-5 ${heroTone}`}>
         <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
-          <div className="flex gap-2 text-sm font-medium text-primary">
-          <CheckCircle2 className="mt-0.5 h-4 w-4 shrink-0" aria-hidden="true" />
-          <span>{result.message}</span>
+          <div className="flex gap-3">
+            <div
+              className={`mt-0.5 flex h-10 w-10 shrink-0 items-center justify-center rounded-full ${heroIconBg}`}
+            >
+              <HeroIcon className="h-5 w-5" aria-hidden="true" />
+            </div>
+            <div className="min-w-0">
+              <p className="text-base font-semibold">{heroHeadline}</p>
+              <p className="mt-1 text-sm text-muted-foreground">{heroSubcopy}</p>
+            </div>
           </div>
           <Badge>{result.status}</Badge>
         </div>
-        <div className="mt-3 grid gap-2 text-xs text-muted-foreground md:grid-cols-2">
-          <span>Submission: {result.submission_id}</span>
-          <span>Documento: {result.document_id}</span>
-          <span>Eventos registrados: {result.validation_events?.length ?? 0}</span>
-          <span>Páginas PDF: {result.inspection?.page_count ?? "N/D"}</span>
-          <span className="md:col-span-2">SHA-256: {result.sha256}</span>
+      </div>
+
+      <div className="rounded-md border border-primary/25 bg-primary/5 p-5">
+        <p className="text-xs font-medium uppercase tracking-wide text-primary">
+          Lo que sigue
+        </p>
+        <ol className="mt-3 space-y-3 text-sm">
+          <li className="flex items-start gap-3">
+            <span className="mt-0.5 flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-primary text-xs font-semibold text-primary-foreground">
+              1
+            </span>
+            <div>
+              <p className="font-medium">Prevalidaciones automáticas</p>
+              <p className="text-xs text-muted-foreground">
+                Hash SHA-256, estructura PDF, texto legible, señales documentales.
+                Ya corrieron al recibir tu archivo.
+              </p>
+            </div>
+          </li>
+          <li className="flex items-start gap-3">
+            <span className="mt-0.5 flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-primary text-xs font-semibold text-primary-foreground">
+              2
+            </span>
+            <div>
+              <p className="font-medium">Revisión humana del equipo de cumplimiento</p>
+              <p className="text-xs text-muted-foreground">
+                Una persona autorizada decide aprobar, rechazar o pedir aclaración.
+                La automatización no aprueba.
+              </p>
+            </div>
+          </li>
+          <li className="flex items-start gap-3">
+            <span className="mt-0.5 flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-primary text-xs font-semibold text-primary-foreground">
+              3
+            </span>
+            <div>
+              <p className="font-medium">Verás el resultado en tu calendario</p>
+              <p className="text-xs text-muted-foreground">
+                Si te piden corregir algo, te llevaremos al detalle del documento
+                con la razón exacta.
+              </p>
+            </div>
+          </li>
+        </ol>
+        <div className="mt-5 flex flex-wrap gap-2">
+          <Button asChild>
+            <Link href="/portal/dashboard">
+              <Calendar className="h-4 w-4" aria-hidden="true" />
+              Ver mi calendario
+              <ArrowRight className="h-4 w-4" aria-hidden="true" />
+            </Link>
+          </Button>
+          <Button asChild variant="outline">
+            <Link href={`/portal/submissions/${result.submission_id}`}>
+              <FileText className="h-4 w-4" aria-hidden="true" />
+              Ver detalle del documento
+            </Link>
+          </Button>
         </div>
       </div>
-      {result.document_signals?.mismatch_reason ? (
-        <div className="rounded-md border border-amber-300 bg-amber-50 p-4 text-sm text-amber-900">
-          Detectamos que el documento cargado podría no coincidir con el requisito o periodo
-          esperado. Verifica el archivo antes de continuar o contacta soporte.
+
+      <details className="rounded-md border border-border bg-white p-4 text-sm">
+        <summary className="cursor-pointer text-xs font-medium uppercase tracking-wide text-muted-foreground">
+          Datos de trazabilidad
+        </summary>
+        <div className="mt-3 grid gap-2 text-xs text-muted-foreground md:grid-cols-2">
+          <span className="break-all">Submission: {result.submission_id}</span>
+          <span className="break-all">Documento: {result.document_id}</span>
+          <span>
+            Eventos registrados: {result.validation_events?.length ?? 0}
+          </span>
+          <span>Páginas PDF: {result.inspection?.page_count ?? "N/D"}</span>
+          <span className="break-all md:col-span-2">
+            SHA-256: {result.sha256}
+          </span>
         </div>
-      ) : null}
+      </details>
+
       <ValidationSummary validations={result.validations} />
     </section>
   );
@@ -819,6 +1151,14 @@ function ReviewItem({ label, value }: { label: string; value: string }) {
       <p className="mt-1 break-words text-sm font-medium">{value}</p>
     </div>
   );
+}
+
+async function sha256OfFile(file: File): Promise<string> {
+  const buf = await file.arrayBuffer();
+  const hash = await crypto.subtle.digest("SHA-256", buf);
+  return Array.from(new Uint8Array(hash))
+    .map((b) => b.toString(16).padStart(2, "0"))
+    .join("");
 }
 
 function formatApiError(payload: unknown): string {

@@ -682,3 +682,71 @@ def get_workspace_submission(
         previous_attempts=previous_attempts,
         suggested_action=_suggested_action(submission.status),  # type: ignore[arg-type]
     )
+
+
+# ---------------------------------------------------------------------------
+# Duplicate pre-check (Guided upload — Patch 4)
+# ---------------------------------------------------------------------------
+
+
+class DuplicateCheckResponse(BaseModel):
+    """Result of a client-side SHA-256 pre-check against this workspace."""
+
+    exists: bool
+    submission_id: str | None = None
+    status: str | None = None
+    submitted_at: str | None = None
+    requirement_name: str | None = None
+    period_label: str | None = None
+    filename: str | None = None
+
+
+@router.get(
+    "/workspaces/{workspace_id}/duplicate-check",
+    response_model=DuplicateCheckResponse,
+)
+def check_workspace_duplicate(
+    workspace_id: str,
+    sha256: str,
+    db: DbSession,
+    x_workspace_token: Annotated[str, Header(alias="X-Workspace-Token")] = "",
+) -> DuplicateCheckResponse:
+    """Return whether ``sha256`` already exists for this workspace's submissions.
+
+    Wizard-side pre-check: the browser computes the SHA-256 of the selected
+    file, sends it here, and we look for any prior submission by the same
+    provider with that same file hash. The goal is to *warn before submit*
+    rather than detecting duplicates after the upload pipeline runs.
+    """
+    workspace = _load_workspace(db, workspace_id, x_workspace_token)
+    if not sha256 or len(sha256) != 64:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="sha256 inválido (se esperan 64 caracteres hex).",
+        )
+
+    row = db.execute(
+        select(Submission, Document)
+        .join(Document, Document.submission_id == Submission.id)
+        .where(
+            Submission.client_id == workspace.client_id,
+            Submission.vendor_id == workspace.vendor_id,
+            Document.sha256 == sha256.lower(),
+        )
+        .order_by(Submission.created_at.desc())
+        .limit(1)
+    ).first()
+
+    if row is None:
+        return DuplicateCheckResponse(exists=False)
+
+    sub, doc = row
+    return DuplicateCheckResponse(
+        exists=True,
+        submission_id=sub.id,
+        status=sub.status,
+        submitted_at=sub.created_at.isoformat(),
+        requirement_name=sub.requirement.name if sub.requirement else None,
+        period_label=sub.period.code if sub.period else None,
+        filename=doc.original_filename,
+    )
