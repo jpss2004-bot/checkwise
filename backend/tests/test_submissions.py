@@ -44,6 +44,45 @@ def api_client(tmp_path) -> Generator[TestClient, None, None]:
         settings.LOCAL_STORAGE_PATH = previous_storage_path
 
 
+@pytest.fixture
+def seeded_api_client(tmp_path) -> Generator[tuple[TestClient, sessionmaker], None, None]:
+    """Same as ``api_client`` but pre-seeds the compliance catalog so /submissions
+    resolves canonical codes against existing DB rows."""
+    from app.db.seed import seed_catalog
+
+    engine = create_engine(
+        "sqlite+pysqlite:///:memory:",
+        connect_args={"check_same_thread": False},
+        poolclass=StaticPool,
+    )
+    testing_session = sessionmaker(autocommit=False, autoflush=False, bind=engine)
+    Base.metadata.create_all(bind=engine)
+
+    previous_storage_path = settings.LOCAL_STORAGE_PATH
+    settings.LOCAL_STORAGE_PATH = str(tmp_path / "storage")
+
+    bootstrap = testing_session()
+    try:
+        seed_catalog(bootstrap)
+        bootstrap.commit()
+    finally:
+        bootstrap.close()
+
+    def override_get_db() -> Generator[Session, None, None]:
+        db = testing_session()
+        try:
+            yield db
+        finally:
+            db.close()
+
+    app.dependency_overrides[get_db] = override_get_db
+    try:
+        yield TestClient(app), testing_session
+    finally:
+        app.dependency_overrides.clear()
+        settings.LOCAL_STORAGE_PATH = previous_storage_path
+
+
 def test_create_submission_records_document_and_validations(api_client: TestClient) -> None:
     response = api_client.post(
         "/api/v1/submissions",
@@ -219,6 +258,60 @@ def test_submission_without_canonical_codes_emits_deprecation_events(
     event_types = {event["event_type"] for event in response.json()["validation_events"]}
     assert "legacy_requirement_intake" in event_types
     assert "legacy_period_intake" in event_types
+
+
+def test_seeded_canonical_submission_does_not_create_new_requirement(
+    seeded_api_client,
+) -> None:
+    """Patch 2 (seeding): when the catalog is already in the DB, a canonical
+    submission must reuse the seeded ``Requirement`` row instead of letting
+    the on-the-fly fallback create another one."""
+    from sqlalchemy import select
+
+    from app.core.compliance_catalog import recurring_for_year
+    from app.models import Requirement
+
+    client, session_factory = seeded_api_client
+
+    # Count requirements after seed.
+    db = session_factory()
+    try:
+        before = len(db.scalars(select(Requirement.id)).all())
+    finally:
+        db.close()
+    assert before > 0  # seed produced rows
+
+    catalog_item = next(
+        item
+        for item in recurring_for_year(2026)
+        if item.institution == "imss" and item.due_month == 2
+    )
+    response = client.post(
+        "/api/v1/submissions",
+        data={
+            "client_name": "Cliente Piloto",
+            "vendor_name": "Proveedor REPSE SA de CV",
+            "vendor_rfc": "ABC010203AB1",
+            "period_code": "2026-01",
+            "period_key": catalog_item.period_key,
+            "load_type": "mensual",
+            "institution_code": "imss",
+            "requirement_name": catalog_item.name,
+            "requirement_code": catalog_item.code,
+            "initial_status": "pendiente_revision",
+        },
+        files={"file": ("imss.pdf", _pdf_bytes(), "application/pdf")},
+    )
+    assert response.status_code == 202, response.text
+
+    db = session_factory()
+    try:
+        after = len(db.scalars(select(Requirement.id)).all())
+    finally:
+        db.close()
+    # No NEW Requirement row created — the canonical code resolved to the
+    # seeded row.
+    assert after == before
 
 
 def test_submission_unknown_requirement_code_returns_422(api_client: TestClient) -> None:
