@@ -86,11 +86,6 @@ export function ExpedienteCard({ requirement, onAction }: ExpedienteCardProps) {
                   </span>
                 </>
               )}
-              {!requirement.required && (
-                <span className="ml-2 text-[color:var(--text-tertiary)]">
-                  · Opcional
-                </span>
-              )}
             </p>
             <h3
               id={`req-${requirement.id}-title`}
@@ -98,6 +93,18 @@ export function ExpedienteCard({ requirement, onAction }: ExpedienteCardProps) {
             >
               {requirement.name}
             </h3>
+            <p className="mt-1.5 inline-flex">
+              <span
+                className={cn(
+                  "rounded-full border px-2 py-0.5 font-mono text-[10px] uppercase tracking-wide",
+                  requirement.required
+                    ? "border-[color:var(--surface-brand-muted)] bg-[color:var(--surface-brand-muted)] text-[color:var(--text-brand)]"
+                    : "border-[color:var(--border-subtle)] bg-[color:var(--surface-sunken)] text-[color:var(--text-tertiary)]",
+                )}
+              >
+                {requirement.required ? "Obligatorio" : "Opcional"}
+              </span>
+            </p>
           </div>
         </div>
         <DocStateBadge state={requirement.state} />

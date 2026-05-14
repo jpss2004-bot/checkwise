@@ -22,6 +22,7 @@ import {
   countExpediente,
   type ExpedienteRequirement,
 } from "@/lib/mock/expediente";
+import { decidePostLoginRoute } from "@/lib/routing/post-login";
 import { withPortalSession } from "@/lib/session/with-portal-session";
 import type { PortalSession } from "@/lib/session/portal";
 
@@ -39,6 +40,7 @@ import type { PortalSession } from "@/lib/session/portal";
 function OnboardingInner({ session }: { session: PortalSession }) {
   const [requirements] = useState<ExpedienteRequirement[]>(MOCK_EXPEDIENTE);
   const counts = useMemo(() => countExpediente(requirements), [requirements]);
+  const decision = useMemo(() => decidePostLoginRoute(requirements), [requirements]);
 
   const needsAction = requirements.filter((r) =>
     ["pending", "empty", "rejected", "expired", "needs_review"].includes(r.state),
@@ -52,7 +54,7 @@ function OnboardingInner({ session }: { session: PortalSession }) {
     <>
       <ProviderContextBar session={session} />
       <main className="mx-auto max-w-6xl space-y-8 px-5 py-8">
-        <GateHero counts={counts} />
+        <GateHero counts={counts} banner={decision.banner} />
 
         {needsAction.length > 0 && (
           <ExpedienteSection
@@ -108,27 +110,62 @@ export default withPortalSession(OnboardingInner);
 
 // ─── Hero ────────────────────────────────────────────────────────
 
-function GateHero({ counts }: { counts: ReturnType<typeof countExpediente> }) {
+function GateHero({
+  counts,
+  banner,
+}: {
+  counts: ReturnType<typeof countExpediente>;
+  banner: "none" | "provisional_access" | "expediente_blocked";
+}) {
   if (counts.is_gate_satisfied) {
+    const isProvisional = banner === "provisional_access";
     return (
-      <section className="cw-fade-up rounded-xl border border-[color:var(--status-success-border)] bg-[color:var(--status-success-bg)] p-6 shadow-sm sm:p-8">
+      <section
+        className={`cw-fade-up rounded-xl border p-6 shadow-sm sm:p-8 ${
+          isProvisional
+            ? "border-[color:var(--status-info-border)] bg-[color:var(--status-info-bg)]"
+            : "border-[color:var(--status-success-border)] bg-[color:var(--status-success-bg)]"
+        }`}
+      >
         <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:gap-6">
           <span
-            className="flex h-12 w-12 shrink-0 items-center justify-center rounded-full bg-[color:var(--status-success-text)] text-white"
+            className={`flex h-12 w-12 shrink-0 items-center justify-center rounded-full text-white ${
+              isProvisional
+                ? "bg-[color:var(--status-info-text)]"
+                : "bg-[color:var(--status-success-text)]"
+            }`}
             aria-hidden="true"
           >
             <CheckCircle className="h-7 w-7" weight="fill" />
           </span>
           <div className="flex-1">
-            <p className="font-mono text-[11px] uppercase tracking-wide text-[color:var(--status-success-text)]">
-              Expediente inicial listo
+            <p
+              className={`font-mono text-[11px] uppercase tracking-wide ${
+                isProvisional
+                  ? "text-[color:var(--status-info-text)]"
+                  : "text-[color:var(--status-success-text)]"
+              }`}
+            >
+              {isProvisional ? "Acceso provisional habilitado" : "Expediente inicial listo"}
             </p>
             <h1 className="mt-1 text-xl font-semibold text-[color:var(--text-primary)]">
-              Ya puedes entrar al dashboard
+              {isProvisional
+                ? "Puedes entrar al dashboard mientras revisamos tus documentos"
+                : "Ya puedes entrar al dashboard"}
             </h1>
             <p className="mt-2 text-[13px] leading-5 text-[color:var(--text-secondary)]">
-              Cumpliste todos los documentos requeridos para tu alta. A partir de
-              aquí, sigue tu calendario REPSE recurrente.
+              {isProvisional ? (
+                <>
+                  Tus documentos obligatorios están en revisión humana. Mientras
+                  tanto tienes acceso provisional al dashboard — te avisaremos
+                  por correo cuando todo quede aprobado.
+                </>
+              ) : (
+                <>
+                  Cumpliste todos los documentos requeridos para tu alta. A
+                  partir de aquí, sigue tu calendario REPSE recurrente.
+                </>
+              )}
             </p>
             <div className="mt-4 flex flex-wrap gap-2">
               <Button asChild size="lg">
