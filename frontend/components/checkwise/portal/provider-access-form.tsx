@@ -3,7 +3,7 @@
 import { FormEvent, useMemo, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { ArrowRight, Key, ShieldCheck } from "@phosphor-icons/react";
+import { ArrowRight, Key } from "@phosphor-icons/react";
 
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
@@ -127,25 +127,8 @@ export function ProviderAccessForm() {
       data-testid="provider-access-form"
       noValidate
     >
-      <div className="flex items-center justify-between gap-3">
-        <div className="flex items-center gap-2">
-          <span className="flex h-9 w-9 items-center justify-center rounded-full bg-[color:var(--surface-brand-muted)]">
-            <ShieldCheck
-              className="h-5 w-5 text-[color:var(--text-brand)]"
-              weight="duotone"
-              aria-hidden="true"
-            />
-          </span>
-          <div>
-            <h2 className="text-base font-semibold leading-5 text-[color:var(--text-primary)]">
-              Entra a tu espacio
-            </h2>
-            <p className="text-xs text-[color:var(--text-secondary)]">
-              Captura tu cliente, filial y RFC para abrir tu portal.
-            </p>
-          </div>
-        </div>
-        <Badge variant="outline">Demo</Badge>
+      <div className="flex items-center justify-end">
+        <Badge variant="outline">Demo · sin auth de producción</Badge>
       </div>
 
       <div className="grid gap-4 sm:grid-cols-2">
