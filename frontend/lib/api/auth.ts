@@ -5,7 +5,7 @@
  * re-hydrate the current user from a stored JWT (e.g. after a refresh).
  */
 
-import type { AdminSession, AdminSessionUser } from "@/lib/admin-session";
+import type { AdminSession, AdminSessionUser } from "@/lib/session/admin";
 
 const API_BASE_URL =
   process.env.NEXT_PUBLIC_API_BASE_URL ?? "http://127.0.0.1:8000";

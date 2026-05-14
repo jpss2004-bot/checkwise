@@ -33,8 +33,9 @@ import {
   type SubmissionDetail,
   type SubmissionPreviousAttempt,
   type SubmissionSuggestedAction,
-} from "@/lib/portal-client";
-import { readPortalSession, type PortalSession } from "@/lib/portal-session";
+} from "@/lib/api/portal";
+import { DocumentStatus } from "@/lib/constants/statuses";
+import { readPortalSession, type PortalSession } from "@/lib/session/portal";
 
 type PageProps = {
   params: Promise<{ submission_id: string }>;
@@ -264,13 +265,17 @@ function StatusHero({ detail }: { detail: SubmissionDetail }) {
 
 function toneForStatus(status: RequirementStatus): "attention" | "approved" | "neutral" {
   if (
-    status === "rechazado" ||
-    status === "vencido" ||
-    status === "posible_mismatch" ||
-    status === "requiere_aclaracion"
+    status === DocumentStatus.RECHAZADO ||
+    status === DocumentStatus.VENCIDO ||
+    status === DocumentStatus.POSIBLE_MISMATCH ||
+    status === DocumentStatus.REQUIERE_ACLARACION
   )
     return "attention";
-  if (status === "aprobado" || status === "excepcion_legal" || status === "no_aplica")
+  if (
+    status === DocumentStatus.APROBADO ||
+    status === DocumentStatus.EXCEPCION_LEGAL ||
+    status === DocumentStatus.NO_APLICA
+  )
     return "approved";
   return "neutral";
 }

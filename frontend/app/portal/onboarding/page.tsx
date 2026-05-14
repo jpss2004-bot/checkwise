@@ -14,8 +14,8 @@ import {
 } from "@/components/checkwise/portal/state-surfaces";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { getOnboarding, type OnboardingSummary } from "@/lib/portal-client";
-import { readPortalSession, type PortalSession } from "@/lib/portal-session";
+import { getOnboarding, type OnboardingSummary } from "@/lib/api/portal";
+import { readPortalSession, type PortalSession } from "@/lib/session/portal";
 
 export default function OnboardingPage() {
   const router = useRouter();

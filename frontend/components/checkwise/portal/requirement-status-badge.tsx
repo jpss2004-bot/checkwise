@@ -1,5 +1,5 @@
 import { Badge } from "@/components/ui/badge";
-import type { RequirementStatus } from "@/lib/portal-client";
+import type { RequirementStatus } from "@/lib/api/portal";
 
 const STATUS_LABELS: Record<RequirementStatus, string> = {
   pendiente: "Pendiente",

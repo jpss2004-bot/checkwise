@@ -11,11 +11,11 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Select } from "@/components/ui/select";
 import { DEMO_CLIENTS } from "@/lib/demo-clients";
-import { createPortalAccess, PortalApiError } from "@/lib/portal-client";
+import { createPortalAccess, PortalApiError } from "@/lib/api/portal";
 import {
   writePortalSession,
   type PersonaType,
-} from "@/lib/portal-session";
+} from "@/lib/session/portal";
 
 type FormState = {
   client_name: string;

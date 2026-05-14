@@ -18,8 +18,8 @@ import {
   getOnboarding,
   type CalendarPayload,
   type OnboardingSummary,
-} from "@/lib/portal-client";
-import { readPortalSession, type PortalSession } from "@/lib/portal-session";
+} from "@/lib/api/portal";
+import { readPortalSession, type PortalSession } from "@/lib/session/portal";
 
 const DEFAULT_YEAR = 2026;
 

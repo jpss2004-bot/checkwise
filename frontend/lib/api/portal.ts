@@ -5,7 +5,7 @@
  * session's `access_token` is sent as the `X-Workspace-Token` header.
  */
 
-import type { PersonaType, PortalSession } from "@/lib/portal-session";
+import type { PersonaType, PortalSession } from "@/lib/session/portal";
 
 const API_BASE_URL =
   process.env.NEXT_PUBLIC_API_BASE_URL ?? "http://127.0.0.1:8000";

@@ -5,7 +5,7 @@
  * the ``reviewer`` or ``internal_admin`` role.
  */
 
-import type { RequirementStatus, SubmissionDetail } from "@/lib/portal-client";
+import type { RequirementStatus, SubmissionDetail } from "@/lib/api/portal";
 
 const API_BASE_URL =
   process.env.NEXT_PUBLIC_API_BASE_URL ?? "http://127.0.0.1:8000";

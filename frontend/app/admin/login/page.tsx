@@ -10,11 +10,11 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { AuthApiError, login } from "@/lib/admin-client";
+import { AuthApiError, login } from "@/lib/api/auth";
 import {
   readAdminSession,
   writeAdminSession,
-} from "@/lib/admin-session";
+} from "@/lib/session/admin";
 
 export default function AdminLoginPage() {
   const router = useRouter();

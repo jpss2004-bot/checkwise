@@ -19,7 +19,7 @@ import {
   UserCheck,
 } from "lucide-react";
 
-import { institutions, loadTypes, requirementGuides, requirements } from "@/lib/catalogs";
+import { institutions, loadTypes, requirementGuides, requirements } from "@/lib/api/catalogs";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -28,8 +28,9 @@ import { Label } from "@/components/ui/label";
 import { Select } from "@/components/ui/select";
 import { Textarea } from "@/components/ui/textarea";
 import { ValidationSignal, ValidationSummary } from "@/components/checkwise/validation-summary";
-import { checkDuplicateBySha256, type DuplicateCheck } from "@/lib/portal-client";
-import { readPortalSession } from "@/lib/portal-session";
+import { checkDuplicateBySha256, type DuplicateCheck } from "@/lib/api/portal";
+import { DocumentStatus } from "@/lib/constants/statuses";
+import { readPortalSession } from "@/lib/session/portal";
 
 type SubmissionResponse = {
   submission_id: string;
@@ -323,7 +324,7 @@ export function IntakeWizard({
       comments: form.comments.trim(),
     };
     Object.entries(normalizedForm).forEach(([key, value]) => body.set(key, value));
-    body.set("initial_status", "pendiente_revision");
+    body.set("initial_status", DocumentStatus.PENDIENTE_REVISION);
     body.set("file", file as File);
 
     try {
@@ -1042,7 +1043,7 @@ function ConfirmationStep({
   }
 
   const isMismatch = Boolean(result.document_signals?.mismatch_reason);
-  const isClarification = result.status === "requiere_aclaracion";
+  const isClarification = result.status === DocumentStatus.REQUIERE_ACLARACION;
   const isAttention = isMismatch || isClarification;
   const heroTone = isAttention
     ? "border-amber-300 bg-amber-50"

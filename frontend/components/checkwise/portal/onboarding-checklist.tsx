@@ -20,14 +20,15 @@ import {
   type OnboardingItem,
   type OnboardingSummary,
   type RequirementStatus,
-} from "@/lib/portal-client";
+} from "@/lib/api/portal";
+import { DocumentStatus } from "@/lib/constants/statuses";
 import { RequirementStatusBadge } from "./requirement-status-badge";
 
 const ATTENTION_STATUSES: RequirementStatus[] = [
-  "rechazado",
-  "vencido",
-  "posible_mismatch",
-  "requiere_aclaracion",
+  DocumentStatus.RECHAZADO,
+  DocumentStatus.VENCIDO,
+  DocumentStatus.POSIBLE_MISMATCH,
+  DocumentStatus.REQUIERE_ACLARACION,
 ];
 
 const NEXT_ACTION_LABEL: Partial<Record<RequirementStatus, string>> = {
@@ -248,19 +249,22 @@ function NextActionCallout({ item }: { item: OnboardingItem }) {
 }
 
 function ItemStatusIcon({ status }: { status: RequirementStatus }) {
-  if (status === "pendiente") {
+  if (status === DocumentStatus.PENDIENTE) {
     return <FileText className="mt-0.5 h-4 w-4 text-muted-foreground" aria-hidden="true" />;
   }
-  if (status === "rechazado" || status === "vencido") {
+  if (status === DocumentStatus.RECHAZADO || status === DocumentStatus.VENCIDO) {
     return <AlertCircle className="mt-0.5 h-4 w-4 text-red-600" aria-hidden="true" />;
   }
-  if (status === "posible_mismatch" || status === "requiere_aclaracion") {
+  if (
+    status === DocumentStatus.POSIBLE_MISMATCH ||
+    status === DocumentStatus.REQUIERE_ACLARACION
+  ) {
     return <AlertTriangle className="mt-0.5 h-4 w-4 text-amber-600" aria-hidden="true" />;
   }
-  if (status === "pendiente_revision" || status === "recibido") {
+  if (status === DocumentStatus.PENDIENTE_REVISION || status === DocumentStatus.RECIBIDO) {
     return <Clock3 className="mt-0.5 h-4 w-4 text-primary" aria-hidden="true" />;
   }
-  if (status === "no_aplica") {
+  if (status === DocumentStatus.NO_APLICA) {
     return <FileText className="mt-0.5 h-4 w-4 text-muted-foreground/60" aria-hidden="true" />;
   }
   return <CheckCircle2 className="mt-0.5 h-4 w-4 text-emerald-600" aria-hidden="true" />;

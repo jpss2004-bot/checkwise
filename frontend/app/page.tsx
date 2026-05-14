@@ -7,7 +7,7 @@ import { Activity, Database, FileCheck2, ShieldCheck } from "lucide-react";
 import { BrandLogo } from "@/components/checkwise/brand-logo";
 import { ProviderAccessForm } from "@/components/checkwise/portal/provider-access-form";
 import { Badge } from "@/components/ui/badge";
-import { readPortalSession } from "@/lib/portal-session";
+import { readPortalSession } from "@/lib/session/portal";
 
 const metrics = [
   { label: "Plataforma", value: "REPSE V1.2", icon: ShieldCheck },

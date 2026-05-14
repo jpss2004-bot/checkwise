@@ -21,15 +21,16 @@ import {
   type CalendarItem,
   type CalendarPayload,
   type RequirementStatus,
-} from "@/lib/portal-client";
+} from "@/lib/api/portal";
+import { DocumentStatus } from "@/lib/constants/statuses";
 import { EmptyState } from "./state-surfaces";
 import { RequirementStatusBadge } from "./requirement-status-badge";
 
 const ATTENTION_STATUSES: RequirementStatus[] = [
-  "rechazado",
-  "vencido",
-  "posible_mismatch",
-  "requiere_aclaracion",
+  DocumentStatus.RECHAZADO,
+  DocumentStatus.VENCIDO,
+  DocumentStatus.POSIBLE_MISMATCH,
+  DocumentStatus.REQUIERE_ACLARACION,
 ];
 
 type RecommendedAction = {

@@ -20,7 +20,7 @@ import {
   type AdminSession,
   clearAdminSession,
   readAdminSession,
-} from "@/lib/admin-session";
+} from "@/lib/session/admin";
 
 const REVIEWER_ROLES = ["reviewer", "internal_admin"] as const;
 

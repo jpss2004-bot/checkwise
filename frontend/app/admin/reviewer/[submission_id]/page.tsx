@@ -32,14 +32,15 @@ import {
   clearAdminSession,
   readAdminSession,
   type AdminSession,
-} from "@/lib/admin-session";
-import { INSTITUTION_LABELS, type SubmissionDetail } from "@/lib/portal-client";
+} from "@/lib/session/admin";
+import { INSTITUTION_LABELS, type SubmissionDetail } from "@/lib/api/portal";
 import {
   type DecisionAction,
   getReviewerSubmission,
   ReviewerApiError,
   submitDecision,
-} from "@/lib/reviewer-client";
+} from "@/lib/api/reviewer";
+import { DocumentStatus } from "@/lib/constants/statuses";
 
 type PageProps = {
   params: Promise<{ submission_id: string }>;
@@ -447,9 +448,9 @@ function DecisionCard({
 
   // Resolved states (already decided previously) — no further actions.
   if (
-    detail.status === "aprobado" ||
-    detail.status === "rechazado" ||
-    detail.status === "excepcion_legal"
+    detail.status === DocumentStatus.APROBADO ||
+    detail.status === DocumentStatus.RECHAZADO ||
+    detail.status === DocumentStatus.EXCEPCION_LEGAL
   ) {
     return (
       <Card>

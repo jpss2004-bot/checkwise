@@ -13,7 +13,7 @@ import {
 import { ProviderContextBar } from "@/components/checkwise/portal/provider-context-bar";
 import { UploadWizardSkeleton } from "@/components/checkwise/portal/state-surfaces";
 import { Button } from "@/components/ui/button";
-import { readPortalSession, type PortalSession } from "@/lib/portal-session";
+import { readPortalSession, type PortalSession } from "@/lib/session/portal";
 
 function PortalUploadInner() {
   const router = useRouter();

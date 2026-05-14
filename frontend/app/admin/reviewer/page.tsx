@@ -23,18 +23,18 @@ import {
   ErrorState,
   Skeleton,
 } from "@/components/checkwise/portal/state-surfaces";
-import { INSTITUTION_LABELS } from "@/lib/portal-client";
+import { INSTITUTION_LABELS } from "@/lib/api/portal";
 import {
   clearAdminSession,
   readAdminSession,
   type AdminSession,
-} from "@/lib/admin-session";
+} from "@/lib/session/admin";
 import {
   getReviewerQueue,
   ReviewerApiError,
   type QueueItem,
   type QueueResponse,
-} from "@/lib/reviewer-client";
+} from "@/lib/api/reviewer";
 
 const REVIEWER_ROLES = ["reviewer", "internal_admin"] as const;
 

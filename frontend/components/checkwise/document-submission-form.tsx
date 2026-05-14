@@ -3,7 +3,8 @@
 import { FormEvent, useMemo, useState } from "react";
 import { AlertCircle, CheckCircle2, Loader2, UploadCloud } from "lucide-react";
 
-import { institutions, loadTypes, requirements } from "@/lib/catalogs";
+import { institutions, loadTypes, requirements } from "@/lib/api/catalogs";
+import { DocumentStatus } from "@/lib/constants/statuses";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -47,7 +48,7 @@ export function DocumentSubmissionForm() {
     setError(null);
 
     const formData = new FormData(event.currentTarget);
-    formData.set("initial_status", "pendiente_revision");
+    formData.set("initial_status", DocumentStatus.PENDIENTE_REVISION);
 
     try {
       const response = await fetch(`${apiBaseUrl}/api/v1/submissions`, {
@@ -83,7 +84,11 @@ export function DocumentSubmissionForm() {
       </CardHeader>
       <CardContent>
         <form onSubmit={handleSubmit} className="space-y-6">
-          <input type="hidden" name="initial_status" value="pendiente_revision" />
+          <input
+            type="hidden"
+            name="initial_status"
+            value={DocumentStatus.PENDIENTE_REVISION}
+          />
 
           <fieldset className="space-y-4">
             <legend className="text-sm font-semibold text-primary">Relación cliente-proveedor</legend>

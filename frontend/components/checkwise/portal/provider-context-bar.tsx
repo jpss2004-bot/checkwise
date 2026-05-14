@@ -6,7 +6,7 @@ import { ClipboardCheck, LogOut } from "lucide-react";
 import { BrandLogo } from "@/components/checkwise/brand-logo";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { clearPortalSession, type PortalSession } from "@/lib/portal-session";
+import { clearPortalSession, type PortalSession } from "@/lib/session/portal";
 
 type Props = {
   session: PortalSession;
