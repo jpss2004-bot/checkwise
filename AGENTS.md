@@ -36,4 +36,6 @@ The current operation uses JotForm, Google Sheets, human/legal review, and Looke
 
 ## Current Phase Definition
 
-This repository is in V1 technical foundation mode. Build stable primitives first: model, intake, storage metadata, validation architecture, audit trail, documentation, and deployment readiness.
+V1.4 is operational: provider portal, reviewer queue + decision workflow, real auth + RBAC, brand application, and motion polish are all shipped. Next planned work is V1.5 — Client Overview (read-only client_admin view across a vendor portfolio).
+
+The structural-cleanup branch (`cleanup/structural-pass`) has reorganized routes, services, components, and sample fixtures. See `docs/ROADMAP.md` for the full phase log.

@@ -1,64 +1,116 @@
-# Roadmap V1
+# Roadmap
 
-## Fase Actual: V1.2 Provider Portal Foundation
+## Done
 
-- Página de acceso de proveedor (demo, sin auth de producción).
-- Catálogo regulatorio expuesto vía API derivado de
-  `C.Árbol Plataforma Proveedores REPSE VF`.
-- Expediente Corporativo gated antes del calendario recurrente.
-- Calendario REPSE año por mes por institución, con estado por requisito.
-- Workspaces de proveedor persistidos en PostgreSQL con `access_token` demo.
-- Wizard V1.1 reutilizado en `/portal/upload` con prefill desde el calendario.
-- Documentación dedicada en `docs/PROVIDER_PORTAL_FLOW.md`.
+### V1.0 — Foundation
 
-## Fase Previa: V1.1 Native Intake Foundation
+- Monorepo: frontend, backend, local DB, docs.
+- Versioned regulatory model.
+- Initial document-intake form.
+- Receive-document endpoint with hash + storage-key persistence.
+- Objective prevalidations.
+- Audit log.
 
-- Wizard nativo de carga documental.
-- PDF-only intake.
-- Inspección técnica PDF.
-- Señales documentales determinísticas.
-- Eventos de validación trazables.
-- Soporte contextual WhatsApp preparado por configuración.
-- Estrategia documentada de salida progresiva de JotForm.
+### V1.1 — Native Intake Foundation
 
-## Fase Anterior: Foundation
+- Native upload wizard.
+- PDF-only intake with technical inspection.
+- Deterministic document signals.
+- Traceable validation events.
+- Documented JotForm exit strategy.
 
-- Monorepo con frontend, backend, DB local y documentación.
-- Modelo regulatorio versionable.
-- Formulario inicial de carga documental.
-- Endpoint de recepción documental.
-- Prevalidaciones objetivas iniciales.
-- Auditabilidad base.
+### V1.2 — Provider Portal
 
-## Siguiente Fase Recomendada: V1.3 — Auth real + Seed regulatorio
+- `/` provider access page (demo, opaque workspace token).
+- `/portal/onboarding` — Expediente Corporativo gated by `persona_moral` / `persona_fisica`.
+- `/portal/dashboard` — REPSE 2026 calendar (monthly · bimonthly · four-monthly · annual).
+- `/portal/upload` — guided 5-step wizard with file preview, SHA-256 duplicate pre-check, and plain-language confirmation.
+- `/portal/submissions/[id]` — correction flow for `posible_mismatch` / `requiere_aclaracion`.
+- Compliance catalog API (`/api/v1/compliance/*`, `/api/v1/portal/*`).
+- `provider_workspaces` table + migration 0003.
 
-1. Autenticación real (Clerk / Auth0 / Supabase) reemplazando `access_token` demo.
-2. Roles: proveedor, cliente, revisor; ownership por workspace.
-3. Sembrar `requirements` y `requirement_versions` desde el catálogo
-   (`compliance_catalog.py`) hacia PostgreSQL.
-4. Persistir `onboarding_completed_at` desde la revisión humana, no del cliente.
-5. Reconciliar `period_code` con la taxonomía bimestral (B1–B6) y
-   cuatrimestral (Q1–Q3) del Árbol.
+### V1.2.1 — Canonical Keys + Catalog Seed
 
-## Fase Posterior: Importador Canónico + Vista del Cliente
+- `requirement_code` and `period_key` end-to-end across submissions, documents, and the wizard.
+- Idempotent compliance-catalog seed migration (0005).
+- Reconciled bimestral / cuatrimestral / anual periods (fixes a previous 422 on those frequencies).
 
-1. Auditar estructura actual de JotForm y Google Sheets.
-2. Crear diccionario de campos fuente.
-3. Mapear cada campo a entidades canónicas.
-4. Implementar importador idempotente hacia PostgreSQL.
-5. Reportar diferencias, duplicados y datos no mapeables.
-6. Sembrar `requirements` y `requirement_versions` desde la matriz REPSE 2026.
+### V1.2.2 — State & Polish Layer
 
-## Fases Posteriores
+- Skeleton, empty, error, and not-found surfaces across the portal.
 
-- Semilla completa de requisitos desde la matriz regulatoria.
-- Portal de proveedores con secciones por tipo de carga.
-- Cola de trabajos para OCR, hash, deduplicación y alertas.
-- Módulo de revisión humana/legal con motivos estandarizados.
-- Reporte mensual desde datos normalizados.
-- Integración con storage S3-compatible.
-- Autenticación, roles y permisos por cliente/proveedor/revisor.
+### V1.3 — Real Auth + RBAC
 
-## Criterio de No Sobreconstrucción
+- `User`, `Organization`, `Membership` tables + migration 0006.
+- bcrypt + JWT (HS256).
+- `require_role`, `require_org_role`, `require_any_role` dependencies.
+- Internal-admin / reviewer / (future) client-admin roles.
 
-Cada fase debe dejar una pieza operable y verificable. Las integraciones futuras deben colgar del modelo canónico, no duplicar lógica regulatoria en formularios o dashboards.
+### V1.4 — Reviewer Queue + Decision Workflow
+
+- `/admin/reviewer` queue ordered by attention.
+- `/admin/reviewer/[submission_id]` decision detail.
+- 4 decision actions: `approve`, `reject`, `request_clarification`, `mark_exception`.
+
+### V1.4.1 — Brand Application
+
+- Official IMPI palette (`#013557` · `#02558a` · `#09c1b0` · `#4b90a4`).
+- Open Sans typography.
+- `BrandLogo` component across every shipped surface.
+
+### V1.4.2 — Motion + Plain-Language Polish
+
+- CSS-only motion utilities (`cw-fade-up`, `cw-stagger`, `cw-pulse-soft`, `cw-hover-lift`, `cw-success-ring`, `cw-draw-check`), all guarded by `prefers-reduced-motion`.
+- `AnimatedCheck` in the success step of the wizard.
+- Plain-language status labels: `Esperando revisión` · `Posible inconsistencia` · `Necesita aclaración`.
+
+## In progress
+
+### Cleanup — Structural pass (this branch)
+
+- Removed dead artifacts and legacy run script.
+- Consolidated docs into a single README + focused per-topic docs in `docs/`.
+- Backend service extraction (`submission_service.py`, `requirement_service.py`).
+- Frontend wizard split into step-per-file structure.
+- Sample-doc sandbox built from the May-2026 Banco Docs Sample ZIP.
+- Added CI workflow + CONTRIBUTING.md.
+
+## Next
+
+### V1.5 — Client Overview ("Patch 8")
+
+Out-of-tenant read-only view for `client_admin`.
+
+Backend:
+- `/api/v1/clients/{org_id}/...` endpoints, guarded by `require_org_role("client_admin")`.
+- Per-vendor aggregation of `ReviewerDecision` + risk signals (overdue, pending, recently rejected).
+- Decide: `ClientWorkspace` join table vs. derive scope from `Membership`.
+
+Frontend:
+- `/admin/clients/[organization_id]` route.
+- Client dashboard tile under `/admin` (currently dimmed).
+- Surface correction-flow links per vendor.
+
+### V1.6 — Importers + Source-of-Truth Migration
+
+- Audit JotForm / Google Sheets schemas.
+- Build a field dictionary.
+- Map each field to canonical entities.
+- Idempotent importer into PostgreSQL.
+- Report unmappable rows, duplicates, divergences.
+
+### V1.7 — OCR + Structured Extraction
+
+- Background jobs (Redis + RQ or Celery) for OCR, hashing, dedup.
+- Field extraction per institution.
+- Confidence-scored validations attached to submissions.
+
+### V1.8 — Reports + Notifications
+
+- Monthly client-facing report from normalized data.
+- Vendor alerts (overdue, rejected, action-required).
+- Reviewer alerts (queue depth, SLA risk).
+
+## Guiding constraint
+
+Every phase must ship a piece that's operable and verifiable. Future integrations hang off the canonical model; regulation never lives in form-only logic.

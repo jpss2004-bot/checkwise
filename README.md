@@ -1,91 +1,122 @@
-# CheckWise V1.2
+# CheckWise
 
-Base técnica de CheckWise, una plataforma de cumplimiento documental REPSE para México. Esta fase mueve el producto de un wizard suelto a un portal de proveedor: acceso, expediente inicial, calendario REPSE recurrente y carga prellenada — todo trazable contra el catálogo regulatorio derivado de `C.Árbol Plataforma Proveedores REPSE VF`.
+REPSE-compliance SaaS for Mexico. Vendors upload monthly / bimonthly / four-monthly / annual evidence (SAT, IMSS, INFONAVIT, acuses, corporate file); LegalShelf reviewers approve, reject, or request clarifications; clients (companies being audited) read a portfolio-wide risk view.
 
-V1.2 agrega:
+## Status
 
-- `/` Acceso de proveedor (demo, sin autenticación de producción).
-- `/portal/onboarding` Expediente Corporativo gated por persona moral / física.
-- `/portal/dashboard` Calendario REPSE 2026 mensual / bimestral / cuatrimestral / anual.
-- `/portal/upload` Wizard V1.1 reutilizado, prellenado desde el calendario.
-- Endpoints `/api/v1/compliance/*` y `/api/v1/portal/*`.
-- Tabla `provider_workspaces` y migración `0003`.
+V1.2 is operational. Provider portal, reviewer queue + decision workflow, real auth + RBAC, official brand palette, and motion polish are all shipped. Client overview ("Patch 8") is next.
 
-## Estructura
+## Stack
 
-- `frontend/`: Next.js + TypeScript + Tailwind CSS + componentes estilo shadcn/ui.
-- `backend/`: FastAPI + SQLAlchemy + Alembic + OpenAPI.
-- `docs/`: arquitectura, setup, modelo de datos, modelo regulatorio y roadmap.
-- `docker-compose.yml`: PostgreSQL local.
-- `.env.example`: variables base para entorno local/deployment.
-- `AGENTS.md`: reglas para futuros agentes Codex.
+- **Backend** — FastAPI · SQLAlchemy · Alembic · Python 3.11
+- **Frontend** — Next.js 15 · React 19 · Tailwind 3 · shadcn-style components · lucide-react
+- **DB** — SQLite (local dev) · PostgreSQL (prod)
+- **Auth** — bcrypt + JWT (HS256). Provider portal uses opaque `X-Workspace-Token`.
+- **Storage** — local filesystem for dev, S3-compatible in prod (controlled by `STORAGE_BACKEND`).
 
-## Arranque rápido para demo local
+## Quick start
 
-Primera vez:
+**First time:**
 
 ```bash
-bash backend/scripts/dev_setup.sh   # crea .venv, instala deps, corre alembic
+bash backend/scripts/dev_setup.sh   # venv, deps, alembic migrate, seed demo
 cd frontend && npm install && cd ..
 ```
 
-Arrancar todo el stack (backend en :8000, frontend en :3000):
+**Every run (one command, both services):**
 
 ```bash
 bash dev.sh
 ```
 
-O en dos terminales:
+Or in two terminals:
 
 ```bash
-# Terminal 1
-bash backend/scripts/dev_start.sh
-
-# Terminal 2
-cd frontend && npm run dev
+bash backend/scripts/dev_start.sh        # http://localhost:8000
+cd frontend && npm run dev               # http://localhost:3000
 ```
 
-URLs de demo:
-
-- Frontend: `http://localhost:3000`
-- Backend: `http://localhost:8000`
-- FastAPI docs: `http://localhost:8000/docs`
-
-Reset de DB (borra SQLite local, re-corre migraciones, vuelve a seedear):
+Reset DB:
 
 ```bash
-bash backend/scripts/dev_reset.sh
+bash backend/scripts/dev_reset.sh        # drops SQLite, re-migrates, re-seeds
 ```
 
-## Verificación
+## Demo credentials
+
+Created by `backend/scripts/dev_seed.py`.
+
+| Surface | URL | Auth |
+| --- | --- | --- |
+| Reviewer / admin | `http://localhost:3000/admin/login` | `ada@legalshelf.mx` / `demo1234` |
+| Provider portal | `http://localhost:3000/` | Any client/vendor combo mints a fresh workspace |
+
+Pre-seeded provider workspace:
+
+- `workspace_id`: `ws-demo-0001`
+- `access_token`: `demo-token`
+- 4 demo submissions in states `pendiente_revision`, `posible_mismatch`, `aprobado`, `rechazado`
+
+## Repo layout
+
+```
+CheckWise/
+├── backend/                 FastAPI app, Alembic migrations, pytest suite
+│   ├── app/                 routers, services, models, schemas, db
+│   ├── alembic/             migrations 0001–0006
+│   ├── scripts/             dev_setup.sh, dev_start.sh, dev_reset.sh, dev_seed.py
+│   └── tests/               7 test modules, 82 passing
+├── frontend/                Next.js 15 app
+│   ├── app/                 routes (portal/, admin/)
+│   ├── components/          ui (shadcn), checkwise/ (brand, wizard, validation),
+│   │                        portal/ (calendar, checklist, badges, state surfaces)
+│   ├── lib/                 portal-client, admin-client, reviewer-client, sessions
+│   └── public/brand/        official logos (mirror of brand_assets/Logos CW/)
+├── docs/                    architecture, data model, roadmap, regulatory model,
+│                            portal flow, intake, validation, intelligence, JotForm exit
+├── demo_assets/             screenshots + demo guide PDF + fictitious SAT sample
+├── brand_assets/            source logo files
+├── scripts/reports/         one-off report + demo-asset generators (off the hot path)
+├── dev.sh                   one-shot launcher for the whole stack
+├── docker-compose.yml       optional Postgres for parity with prod
+├── AGENTS.md                rules for AI agents working on this repo
+└── .env.example             env-var template
+```
+
+Off-repo (lives in `../  _reference/`): exported Google Drive docs (FRD, Matriz Regulatoria, Tier deck, UAT), historical screenshots, sample-doc fixtures. See `_reference/README.md`.
+
+## Verification gauntlet
+
+Run before every commit / PR.
 
 ```bash
-cd backend && .venv/bin/ruff check . && .venv/bin/pytest -q
-cd frontend && npm run lint && npx tsc --noEmit && npm run build
+# Backend
+cd backend
+.venv/bin/ruff check .
+.venv/bin/pytest -q
+
+# Frontend
+cd frontend
+node_modules/.bin/tsc --noEmit
+node_modules/.bin/next lint --quiet
+node_modules/.bin/next build
 ```
 
-## Demo preparada
+## Conventions
 
-- Guía: `docs/DEMO_GUIDE.md`
-- Portal flow: `docs/PROVIDER_PORTAL_FLOW.md`
-- Screenshots reales: `demo_assets/screenshots/`
-- Regenerar assets de demo: `python3 scripts/reports/generate_demo_assets.py`
+- **Status vocabulary (Spanish, plain-language)** — `Esperando revisión` · `Posible inconsistencia` · `Necesita aclaración` · `Aprobado` · `Rechazado`. Canonical codes stay English in code (`pendiente_revision`, `posible_mismatch`, `requiere_aclaracion`, `aprobado`, `rechazado`).
+- **Brand colors only via HSL CSS variables** in `frontend/app/globals.css`. Semantic colors (success/attention/destructive) via Tailwind defaults (`emerald` / `amber` / `red`).
+- **One icon family** — `lucide-react`. No emoji in UI.
+- **Domain terms** — English in code identifiers, Spanish in user-facing copy.
+- **Migrations append-only** — never edit a merged migration; add a new one.
+- **Documents live outside the DB** — PostgreSQL holds metadata, hash, status, storage key, audit events.
 
-## Alcance V1 de esta fase
+## Where to go next
 
-Listo:
-
-- Modelo inicial para clientes, proveedores, contratos, periodos, instituciones, requisitos versionados, submissions, documentos, validaciones, historial de estados, reportes y auditoría.
-- Wizard inicial de carga documental con campos REPSE mínimos.
-- Endpoint backend para recibir carga documental, guardar archivo fuera de la DB, calcular hash y registrar prevalidaciones objetivas.
-- Validación PDF-only con inspección técnica y eventos trazables.
-- Catálogos base para estados, instituciones, tipos de carga y validaciones.
-- Documentación técnica para continuar con importadores JotForm/Sheets, validaciones avanzadas, dashboards y portal.
-
-Pendiente para siguientes fases:
-
-- Importador JotForm/Google Sheets hacia PostgreSQL.
-- Semilla completa de `requirements` desde la matriz regulatoria.
-- OCR, extracción estructurada y revisión legal asistida.
-- Portal multirol de proveedores/clientes/revisores.
-- Reportes ejecutivos generados desde datos normalizados.
+- Architecture overview → [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md)
+- Data model → [docs/DATA_MODEL.md](docs/DATA_MODEL.md)
+- Regulatory framework → [docs/REGULATORY_MODEL.md](docs/REGULATORY_MODEL.md)
+- Provider portal walkthrough → [docs/PROVIDER_PORTAL_FLOW.md](docs/PROVIDER_PORTAL_FLOW.md)
+- Roadmap → [docs/ROADMAP.md](docs/ROADMAP.md)
+- Demo guide → [docs/DEMO_GUIDE.md](docs/DEMO_GUIDE.md)
+- AI-agent rules → [AGENTS.md](AGENTS.md)

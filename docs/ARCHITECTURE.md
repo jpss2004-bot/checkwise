@@ -1,46 +1,55 @@
-# Arquitectura CheckWise V1
+# Architecture
 
-## Objetivo
+## Goal
 
-Crear una base técnica profesional para migrar gradualmente el flujo actual de JotForm + Google Sheets + revisión humana/legal + Looker Studio hacia una plataforma propia con PostgreSQL como fuente canónica.
+A self-owned platform that migrates the historical JotForm + Google Sheets + human/legal review + Looker Studio operation to a controlled stack with PostgreSQL as the canonical source.
 
-## Componentes
+## Components
 
 ```mermaid
 flowchart LR
-  Provider["Proveedor"] --> Frontend["Next.js Frontend"]
-  Frontend --> API["FastAPI API"]
-  API --> Postgres["PostgreSQL"]
-  API --> Storage["S3/R2/GCS compatible storage"]
-  API --> Workers["Workers futuros Redis + RQ/Celery"]
-  JotForm["JotForm"] --> Importer["Importador futuro"]
-  Sheets["Google Sheets"] --> Importer
-  Importer --> API
-  Postgres --> Reports["Reportes / dashboards futuros"]
+  Provider["Provider"] --> Frontend["Next.js Frontend"]
+  Reviewer["Reviewer (LegalShelf staff)"] --> Frontend
+  Frontend -->|JWT or workspace token| API["FastAPI"]
+  API -->|SQLAlchemy| Postgres["PostgreSQL (SQLite in dev)"]
+  API -->|local FS in dev, S3-compatible in prod| Storage["Object storage"]
+  API -.->|future| Workers["Redis + RQ/Celery (OCR, dedup, alerts)"]
+  JotForm["JotForm (legacy)"] -.->|future importer| API
+  Sheets["Google Sheets (legacy)"] -.->|future importer| API
+  Postgres --> Reports["Client-facing reports (future)"]
 ```
 
-## Principios
+## Principles
 
-- La regulación vive en `requirements` y `requirement_versions`.
-- La evidencia vive como `submissions` + `documents`.
-- Los archivos viven fuera de la base de datos.
-- La automatización inicial solo prevalida señales objetivas.
-- La aprobación crítica queda en revisión humana.
-- Todo cambio relevante se registra en `audit_log` o historial de estado.
+- Regulation lives in `requirements` and `requirement_versions`. Never in form-only logic.
+- Evidence lives as `submissions` + `documents`. Files stay out of the DB.
+- Automation prevalidates *objective* signals only (PDF integrity, hash, deterministic keyword matches). Approval is always human.
+- Every state transition records an `audit_log` event.
+- Storage is environment-driven via `STORAGE_BACKEND`: `local` in dev, S3-compatible (R2 / S3 / GCS) in prod.
 
-## Flujo inicial
+## Request flow — provider upload
 
-1. El proveedor o el operador captura una carga documental en el frontend.
-2. El backend recibe campos estructurados y archivo.
-3. El archivo se guarda en storage local de desarrollo, preparado para S3/R2/GCS.
-4. Se calcula hash SHA-256 y metadatos técnicos.
-5. Se registra `submission`, `document`, `validation` y `document_status_history`.
-6. El estado inicial queda como `pendiente_revision`.
+1. Provider authenticates via workspace token in the portal.
+2. Frontend wizard collects: vendor + period + institution + requirement code + the file itself.
+3. `POST /api/v1/submissions` receives the multipart upload.
+4. Backend writes the file to storage and computes SHA-256.
+5. `submission`, `document`, and seed `validations` rows are written.
+6. `services/pdf_validation` inspects the PDF (encryption, magic bytes, page count, text extraction).
+7. `services/document_intelligence` runs deterministic signal checks (RFC, date, keyword matches).
+8. Initial state lands as `pendiente_revision` or `posible_mismatch`.
 
-## Deployment previsto
+## Request flow — reviewer decision
 
-- Frontend: Vercel.
-- Backend: Render, Fly.io o Railway.
-- DB: Neon, Supabase o Railway Postgres.
-- Storage: Cloudflare R2, S3 o GCS.
-- Jobs: Redis + RQ/Celery para OCR, deduplicación y alertas.
+1. Reviewer logs in at `/admin/login` (JWT).
+2. `/api/v1/reviewer/queue` returns submissions ordered by attention.
+3. Reviewer opens detail at `/admin/reviewer/[submission_id]`.
+4. Decision is one of: `approve`, `reject`, `request_clarification`, `mark_exception`.
+5. `POST /api/v1/reviewer/{id}/decide` writes the new status + reviewer decision + audit event.
+
+## Deployment targets (planned)
+
+- Frontend → Vercel
+- Backend → Render / Fly.io / Railway
+- DB → Neon / Supabase / Railway Postgres
+- Storage → Cloudflare R2 / AWS S3 / GCS
+- Jobs → Redis + RQ or Celery (future, for OCR + dedup + alerts)
