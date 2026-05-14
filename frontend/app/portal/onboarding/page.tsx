@@ -1,12 +1,17 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { AlertCircle, ArrowRight, Loader2 } from "lucide-react";
+import { ArrowRight, FolderOpen } from "lucide-react";
 
 import { OnboardingChecklist } from "@/components/checkwise/portal/onboarding-checklist";
 import { ProviderContextBar } from "@/components/checkwise/portal/provider-context-bar";
+import {
+  EmptyState,
+  ErrorState,
+  OnboardingSkeleton,
+} from "@/components/checkwise/portal/state-surfaces";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { getOnboarding, type OnboardingSummary } from "@/lib/portal-client";
@@ -18,6 +23,7 @@ export default function OnboardingPage() {
   const [data, setData] = useState<OnboardingSummary | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
+  const [reloadKey, setReloadKey] = useState(0);
 
   useEffect(() => {
     const current = readPortalSession();
@@ -46,13 +52,16 @@ export default function OnboardingPage() {
     return () => {
       cancelled = true;
     };
-  }, [session]);
+  }, [session, reloadKey]);
+
+  const retry = useCallback(() => setReloadKey((k) => k + 1), []);
 
   if (!session) {
     return null;
   }
 
   const completed = data?.summary.completed ?? false;
+  const sectionCount = data?.sections.length ?? 0;
 
   return (
     <>
@@ -84,19 +93,22 @@ export default function OnboardingPage() {
         </Card>
 
         {loading ? (
-          <div className="flex items-center gap-2 rounded-md border border-border bg-white p-4 text-sm text-muted-foreground">
-            <Loader2 className="h-4 w-4 animate-spin" aria-hidden="true" />
-            Cargando expediente…
-          </div>
+          <OnboardingSkeleton />
         ) : error ? (
-          <div className="rounded-md border border-destructive/30 bg-red-50 p-3 text-sm text-destructive">
-            <div className="flex gap-2">
-              <AlertCircle className="mt-0.5 h-4 w-4 shrink-0" aria-hidden="true" />
-              <span>{error}</span>
-            </div>
-          </div>
-        ) : data ? (
+          <ErrorState
+            title="No pudimos cargar tu expediente"
+            description="Tu conexión pudo haberse interrumpido. No perdiste nada: tu sesión sigue activa y puedes reintentarlo."
+            onRetry={retry}
+          />
+        ) : data && sectionCount > 0 ? (
           <OnboardingChecklist data={data} />
+        ) : data ? (
+          <EmptyState
+            icon={FolderOpen}
+            title="Tu expediente aún no tiene secciones"
+            description="Estamos configurando los requisitos para tu workspace. Vuelve en unos minutos o avísanos si esto persiste."
+            variant="muted"
+          />
         ) : null}
       </main>
     </>

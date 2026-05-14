@@ -9,8 +9,10 @@ description = "CheckWise V1 FastAPI backend"
 requires-python = ">=3.11"
 dependencies = [
   "alembic>=1.13",
+  "bcrypt>=4.0",
   "fastapi>=0.111",
   "psycopg[binary]>=3.1",
+  "pyjwt>=2.8",
   "pypdf>=5.0",
   "pydantic-settings>=2.2",
   "python-multipart>=0.0.9",

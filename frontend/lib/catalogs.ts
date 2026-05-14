@@ -2,8 +2,11 @@ export const loadTypes = [
   { value: "alta_inicial", label: "Alta inicial" },
   { value: "contrato", label: "Contrato" },
   { value: "mensual", label: "Mensual" },
+  { value: "bimestral", label: "Bimestral" },
   { value: "cuatrimestral", label: "Cuatrimestral" },
+  { value: "anual", label: "Anual" },
   { value: "renovacion", label: "Renovación" },
+  { value: "evento", label: "Evento / excepción" },
 ];
 
 export const institutions = [

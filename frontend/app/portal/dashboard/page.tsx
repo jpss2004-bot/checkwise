@@ -1,12 +1,16 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { AlertCircle, ArrowLeft, Loader2 } from "lucide-react";
+import { ArrowLeft } from "lucide-react";
 
 import { ComplianceCalendar } from "@/components/checkwise/portal/compliance-calendar";
 import { ProviderContextBar } from "@/components/checkwise/portal/provider-context-bar";
+import {
+  DashboardSkeleton,
+  ErrorState,
+} from "@/components/checkwise/portal/state-surfaces";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import {
@@ -26,6 +30,7 @@ export default function DashboardPage() {
   const [calendar, setCalendar] = useState<CalendarPayload | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [reloadKey, setReloadKey] = useState(0);
 
   useEffect(() => {
     const current = readPortalSession();
@@ -56,7 +61,9 @@ export default function DashboardPage() {
     return () => {
       cancelled = true;
     };
-  }, [session]);
+  }, [session, reloadKey]);
+
+  const retry = useCallback(() => setReloadKey((k) => k + 1), []);
 
   if (!session) {
     return null;
@@ -66,9 +73,12 @@ export default function DashboardPage() {
 
   return (
     <>
-      <ProviderContextBar session={session} />
+      <ProviderContextBar
+        session={session}
+        onboardingPct={onboarding?.summary.completion_pct ?? null}
+      />
       <main className="mx-auto max-w-7xl space-y-5 px-5 py-6">
-        {!isComplete ? (
+        {!loading && !error && !isComplete ? (
           <Card>
             <CardHeader>
               <CardTitle>Expediente inicial pendiente</CardTitle>
@@ -91,17 +101,13 @@ export default function DashboardPage() {
         ) : null}
 
         {loading ? (
-          <div className="flex items-center gap-2 rounded-md border border-border bg-white p-4 text-sm text-muted-foreground">
-            <Loader2 className="h-4 w-4 animate-spin" aria-hidden="true" />
-            Cargando calendario…
-          </div>
+          <DashboardSkeleton />
         ) : error ? (
-          <div className="rounded-md border border-destructive/30 bg-red-50 p-3 text-sm text-destructive">
-            <div className="flex gap-2">
-              <AlertCircle className="mt-0.5 h-4 w-4 shrink-0" aria-hidden="true" />
-              <span>{error}</span>
-            </div>
-          </div>
+          <ErrorState
+            title="No pudimos cargar el calendario"
+            description="Tu conexión pudo haberse interrumpido o el servicio respondió tarde. Tu sesión sigue activa."
+            onRetry={retry}
+          />
         ) : calendar ? (
           <ComplianceCalendar data={calendar} />
         ) : null}

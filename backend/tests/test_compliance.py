@@ -65,3 +65,112 @@ def test_calendar_has_acuses_cuatrimestrales_and_annual_in_abril() -> None:
         for item in inst["items"]
     )
     assert has_annual
+
+
+def test_calendar_every_item_carries_canonical_period_key() -> None:
+    """Patch 3 (Reconciliation): every recurring item must expose ``period_key``."""
+    import re
+
+    client = TestClient(app)
+    payload = client.get("/api/v1/compliance/calendar?year=2026&persona_type=moral").json()
+    pattern = re.compile(r"^20\d{2}-(M(0[1-9]|1[0-2])|B[1-6]|Q[1-3]|A)$")
+    items = [
+        item
+        for month in payload["months"]
+        for inst in month["institutions"]
+        for item in inst["items"]
+    ]
+    assert items, "calendar must produce at least one recurring item"
+    for item in items:
+        assert "period_key" in item, item
+        assert item["period_key"], item
+        assert pattern.match(item["period_key"]), item["period_key"]
+
+
+def test_calendar_period_keys_match_known_anchors() -> None:
+    """Spot-check that key catalog anchors produce the expected canonical keys."""
+    client = TestClient(app)
+    payload = client.get("/api/v1/compliance/calendar?year=2026&persona_type=moral").json()
+    by_month = {month["month"]: month for month in payload["months"]}
+
+    # IMSS February covers January 2026 → 2026-M01.
+    feb_imss = next(
+        item
+        for inst in by_month[2]["institutions"]
+        if inst["institution"] == "imss"
+        for item in inst["items"]
+    )
+    assert feb_imss["period_key"] == "2026-M01"
+
+    # IMSS January covers December previous year → 2025-M12.
+    jan_imss = next(
+        item
+        for inst in by_month[1]["institutions"]
+        if inst["institution"] == "imss"
+        for item in inst["items"]
+    )
+    assert jan_imss["period_key"] == "2025-M12"
+
+    # INFONAVIT March covers B1 2026.
+    mar_infonavit = next(
+        item
+        for inst in by_month[3]["institutions"]
+        if inst["institution"] == "infonavit"
+        for item in inst["items"]
+    )
+    assert mar_infonavit["period_key"] == "2026-B1"
+
+    # INFONAVIT January covers B6 previous year.
+    jan_infonavit = next(
+        item
+        for inst in by_month[1]["institutions"]
+        if inst["institution"] == "infonavit"
+        for item in inst["items"]
+    )
+    assert jan_infonavit["period_key"] == "2025-B6"
+
+    # Acuses May covers Q1 2026.
+    may_acuses = next(
+        item
+        for inst in by_month[5]["institutions"]
+        if inst["institution"] == "stps_repse"
+        for item in inst["items"]
+    )
+    assert may_acuses["period_key"] == "2026-Q1"
+
+    # Acuses January covers Q3 previous year.
+    jan_acuses = next(
+        item
+        for inst in by_month[1]["institutions"]
+        if inst["institution"] == "stps_repse"
+        for item in inst["items"]
+    )
+    assert jan_acuses["period_key"] == "2025-Q3"
+
+    # Annual April covers previous fiscal year.
+    annual = next(
+        item
+        for inst in by_month[4]["institutions"]
+        if inst["institution"] == "sat"
+        for item in inst["items"]
+        if item["frequency"] == "anual"
+    )
+    assert annual["period_key"] == "2025-A"
+
+
+def test_catalog_lookup_recurring_by_code_returns_known_item() -> None:
+    """The catalog must expose a code-lookup helper used by /submissions."""
+    from app.core.compliance_catalog import lookup_recurring_by_code
+
+    sample = next(
+        item
+        for item in __import__(
+            "app.core.compliance_catalog", fromlist=["recurring_for_year"]
+        ).recurring_for_year(2026)
+    )
+    found = lookup_recurring_by_code(sample.code)
+    assert found is not None
+    assert found.code == sample.code
+
+    assert lookup_recurring_by_code("REC-NOT-A-REAL-CODE") is None
+    assert lookup_recurring_by_code("not even REC shaped") is None

@@ -79,6 +79,7 @@ def get_calendar(
                 "name": req.name,
                 "frequency": req.frequency,
                 "period_label": req.period_label,
+                "period_key": req.period_key,
             }
         )
     return {

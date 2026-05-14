@@ -24,6 +24,13 @@ class Settings(BaseSettings):
     SUPPORT_WHATSAPP_URL: str = ""
     SUPPORT_QR_PLACEHOLDER_URL: str = ""
 
+    # Auth + RBAC (Patch 6). The default secret is for local dev only;
+    # any non-local environment must override AUTH_JWT_SECRET via env.
+    AUTH_JWT_SECRET: str = "checkwise-local-dev-secret-change-me-please-min-32-chars"
+    AUTH_JWT_ALGORITHM: str = "HS256"
+    AUTH_JWT_EXPIRES_MINUTES: int = 60 * 24
+    AUTH_BCRYPT_ROUNDS: int = 12
+
     model_config = SettingsConfigDict(env_file=".env", env_file_encoding="utf-8", extra="ignore")
 
     @property

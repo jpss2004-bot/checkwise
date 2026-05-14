@@ -2,22 +2,52 @@
 @tailwind components;
 @tailwind utilities;
 
+/*
+ * CheckWise brand palette (per the official IMPI brand sheet).
+ *
+ *   --primary    deep navy   #013557   HSL(207, 98%, 17%)
+ *   --secondary  mid blue    #02558a   HSL(203, 97%, 27%)
+ *   --accent     teal        #09c1b0   HSL(174, 91%, 40%)
+ *   --muted-fg   slate       #4b90a4   HSL(193, 37%, 47%)
+ *
+ * Semantic system colors (emerald = success, amber = attention,
+ * red = error/destructive) are kept from Tailwind defaults so the
+ * brand layer never collides with the meaning layer.
+ */
+
 :root {
-  --background: 210 20% 98%;
-  --foreground: 222 28% 13%;
-  --border: 214 20% 86%;
-  --input: 214 20% 86%;
-  --ring: 174 72% 28%;
-  --primary: 174 72% 28%;
+  --background: 0 0% 100%;
+  --foreground: 207 98% 17%;
+
+  --border: 200 25% 88%;
+  --input: 200 25% 88%;
+  --ring: 207 98% 17%;
+
+  --primary: 207 98% 17%;
   --primary-foreground: 0 0% 100%;
-  --secondary: 42 80% 54%;
-  --secondary-foreground: 222 28% 13%;
-  --muted: 210 22% 93%;
-  --muted-foreground: 215 14% 42%;
-  --accent: 199 84% 44%;
-  --accent-foreground: 0 0% 100%;
+
+  --secondary: 203 97% 27%;
+  --secondary-foreground: 0 0% 100%;
+
+  --accent: 174 91% 40%;
+  --accent-foreground: 207 98% 17%;
+
+  --muted: 200 30% 96%;
+  --muted-foreground: 193 26% 38%;
+
   --destructive: 0 72% 45%;
   --destructive-foreground: 0 0% 100%;
+
+  /*
+   * Brand-named utilities. Available alongside the semantic tokens so
+   * components can opt into raw brand colors when the role of the
+   * surface is "this is the brand" (e.g. the logo wordmark, brand
+   * footer chip), not "this is a primary action".
+   */
+  --brand-navy: 207 98% 17%;
+  --brand-blue: 203 97% 27%;
+  --brand-teal: 174 91% 40%;
+  --brand-slate: 193 37% 47%;
 }
 
 * {
@@ -28,7 +58,9 @@ body {
   margin: 0;
   background: hsl(var(--background));
   color: hsl(var(--foreground));
-  font-family: Arial, Helvetica, sans-serif;
+  font-family: var(--font-sans), "Open Sans", -apple-system, BlinkMacSystemFont,
+    "Segoe UI", Roboto, Arial, sans-serif;
+  font-feature-settings: "ss01", "cv11";
   letter-spacing: 0;
 }
 
@@ -37,4 +69,140 @@ input,
 select,
 textarea {
   font: inherit;
+}
+
+/*
+ * Motion primitives.
+ *
+ * Calm, short, ease-out-only. Every animation here is purely visual
+ * (transform + opacity) and never animates layout properties. The
+ * @keyframes are global so they can be referenced by composed
+ * utilities. All effects collapse to no-op when the user has
+ * prefers-reduced-motion enabled.
+ */
+
+@keyframes cw-fade-up {
+  from {
+    opacity: 0;
+    transform: translateY(8px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@keyframes cw-fade-in {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+
+@keyframes cw-pulse-soft {
+  0%,
+  100% {
+    transform: scale(1);
+    box-shadow: 0 0 0 0 hsl(var(--brand-teal) / 0);
+  }
+  50% {
+    transform: scale(1.01);
+    box-shadow: 0 0 0 6px hsl(var(--brand-teal) / 0.06);
+  }
+}
+
+@keyframes cw-draw-check {
+  to {
+    stroke-dashoffset: 0;
+  }
+}
+
+@keyframes cw-success-ring {
+  0% {
+    transform: scale(0.7);
+    opacity: 0;
+  }
+  60% {
+    transform: scale(1.06);
+    opacity: 1;
+  }
+  100% {
+    transform: scale(1);
+    opacity: 1;
+  }
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  .cw-fade-up {
+    animation: cw-fade-up 320ms cubic-bezier(0.16, 1, 0.3, 1) both;
+  }
+  .cw-fade-in {
+    animation: cw-fade-in 240ms ease-out both;
+  }
+
+  /*
+   * Stagger children. Each direct child fades up; the delay derives
+   * from nth-child position (60ms step). Containers can override per
+   * child by setting style={{ ['--cw-index']: i }} when they need to
+   * control the sequence explicitly (e.g. mapped data with stable
+   * row indexes across re-renders).
+   */
+  .cw-stagger > * {
+    opacity: 0;
+    animation: cw-fade-up 360ms cubic-bezier(0.16, 1, 0.3, 1) both;
+  }
+  .cw-stagger > *:nth-child(1) { animation-delay: 0ms; }
+  .cw-stagger > *:nth-child(2) { animation-delay: 60ms; }
+  .cw-stagger > *:nth-child(3) { animation-delay: 120ms; }
+  .cw-stagger > *:nth-child(4) { animation-delay: 180ms; }
+  .cw-stagger > *:nth-child(5) { animation-delay: 240ms; }
+  .cw-stagger > *:nth-child(6) { animation-delay: 300ms; }
+  .cw-stagger > *:nth-child(7) { animation-delay: 360ms; }
+  .cw-stagger > *:nth-child(8) { animation-delay: 420ms; }
+  .cw-stagger > *:nth-child(n + 9) { animation-delay: 480ms; }
+  .cw-stagger > [style*="--cw-index"] {
+    animation-delay: calc(var(--cw-index) * 60ms);
+  }
+
+  .cw-pulse-soft {
+    animation: cw-pulse-soft 3.6s ease-in-out infinite;
+  }
+
+  .cw-hover-lift {
+    transition:
+      transform 220ms cubic-bezier(0.16, 1, 0.3, 1),
+      box-shadow 220ms cubic-bezier(0.16, 1, 0.3, 1),
+      border-color 200ms ease-out;
+  }
+  .cw-hover-lift:hover {
+    transform: translateY(-1px);
+    box-shadow: 0 6px 18px -10px hsl(var(--brand-navy) / 0.25);
+  }
+
+  .cw-success-ring {
+    animation: cw-success-ring 520ms cubic-bezier(0.16, 1, 0.3, 1) both;
+  }
+  .cw-draw-check path {
+    stroke-dasharray: 24;
+    stroke-dashoffset: 24;
+    animation: cw-draw-check 420ms cubic-bezier(0.65, 0, 0.35, 1) 240ms both;
+  }
+}
+
+/* Reduced-motion: leave transform/opacity at rest; no animation runs. */
+@media (prefers-reduced-motion: reduce) {
+  .cw-stagger > *,
+  .cw-fade-up,
+  .cw-fade-in,
+  .cw-pulse-soft,
+  .cw-hover-lift,
+  .cw-success-ring,
+  .cw-draw-check path {
+    animation: none !important;
+    transition: none !important;
+    opacity: 1 !important;
+    transform: none !important;
+  }
 }

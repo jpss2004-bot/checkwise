@@ -18,7 +18,9 @@ LOAD_TYPES = [
     {"code": "alta_inicial", "label": "Alta inicial"},
     {"code": "contrato", "label": "Contrato"},
     {"code": "mensual", "label": "Mensual"},
+    {"code": "bimestral", "label": "Bimestral"},
     {"code": "cuatrimestral", "label": "Cuatrimestral"},
+    {"code": "anual", "label": "Anual"},
     {"code": "renovacion", "label": "Renovación"},
     {"code": "evento", "label": "Evento / excepción"},
 ]

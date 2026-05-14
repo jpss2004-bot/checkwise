@@ -5,8 +5,13 @@ import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
 import { ArrowLeft } from "lucide-react";
 
-import { IntakeWizard } from "@/components/checkwise/intake-wizard";
+import {
+  IntakeWizard,
+  type IntakeLockedField,
+  type IntakeWizardPrefill,
+} from "@/components/checkwise/intake-wizard";
 import { ProviderContextBar } from "@/components/checkwise/portal/provider-context-bar";
+import { UploadWizardSkeleton } from "@/components/checkwise/portal/state-surfaces";
 import { Button } from "@/components/ui/button";
 import { readPortalSession, type PortalSession } from "@/lib/portal-session";
 
@@ -24,24 +29,51 @@ function PortalUploadInner() {
     setSession(current);
   }, [router]);
 
-  const prefill = useMemo(() => {
+  const requirementName = params.get("requirement") ?? undefined;
+  const requirementCode = params.get("requirement_code") ?? undefined;
+  const institutionCode = params.get("institution") ?? undefined;
+  const loadType = params.get("load_type") ?? undefined;
+  const periodLabel = params.get("period_label") ?? undefined;
+  const periodKey = params.get("period_key") ?? undefined;
+
+  const prefill = useMemo<IntakeWizardPrefill | undefined>(() => {
     if (!session) return undefined;
     return {
       client_name: session.client_name,
       vendor_name: session.vendor_name,
       vendor_rfc: session.vendor_rfc,
       contract_reference: session.contract_reference ?? "",
-      requirement_name: params.get("requirement") ?? undefined,
-      institution_code: params.get("institution") ?? undefined,
-      load_type: params.get("load_type") ?? undefined,
+      ...(requirementName ? { requirement_name: requirementName } : {}),
+      ...(requirementCode ? { requirement_code: requirementCode } : {}),
+      ...(institutionCode ? { institution_code: institutionCode } : {}),
+      ...(loadType ? { load_type: loadType } : {}),
+      ...(periodLabel ? { period_code: periodLabel } : {}),
+      ...(periodKey ? { period_key: periodKey } : {}),
     };
-  }, [session, params]);
+  }, [
+    session,
+    requirementName,
+    requirementCode,
+    institutionCode,
+    loadType,
+    periodLabel,
+    periodKey,
+  ]);
+
+  const lockedFields = useMemo<IntakeLockedField[]>(() => {
+    if (!session) return [];
+    const fields: IntakeLockedField[] = ["client_name", "vendor_name", "vendor_rfc"];
+    if (session.contract_reference) fields.push("contract_reference");
+    if (requirementName) fields.push("requirement_name");
+    if (institutionCode) fields.push("institution_code");
+    if (loadType) fields.push("load_type");
+    if (periodLabel) fields.push("period_code");
+    return fields;
+  }, [session, requirementName, institutionCode, loadType, periodLabel]);
 
   if (!session) {
     return null;
   }
-
-  const periodLabel = params.get("period_label");
 
   return (
     <>
@@ -71,7 +103,7 @@ function PortalUploadInner() {
             </Button>
           </div>
         </div>
-        <IntakeWizard prefill={prefill} />
+        <IntakeWizard prefill={prefill} lockedFields={lockedFields} />
       </main>
     </>
   );
@@ -79,7 +111,13 @@ function PortalUploadInner() {
 
 export default function PortalUploadPage() {
   return (
-    <Suspense fallback={null}>
+    <Suspense
+      fallback={
+        <main className="mx-auto max-w-7xl space-y-5 px-5 py-6">
+          <UploadWizardSkeleton />
+        </main>
+      }
+    >
       <PortalUploadInner />
     </Suspense>
   );
