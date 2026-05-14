@@ -1,11 +1,21 @@
 "use client";
 
-import { useRouter } from "next/navigation";
-import { ClipboardText, SignOut } from "@phosphor-icons/react";
+import Link from "next/link";
+import { usePathname, useRouter } from "next/navigation";
+import {
+  CalendarBlank,
+  ChartLineUp,
+  ClipboardText,
+  Files,
+  House,
+  SignOut,
+  type Icon,
+} from "@phosphor-icons/react";
 
 import { BrandLogo } from "@/components/checkwise/brand-logo";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import { cn } from "@/lib/utils";
 import { clearPortalSession, type PortalSession } from "@/lib/session/portal";
 
 type Props = {
@@ -13,8 +23,23 @@ type Props = {
   onboardingPct?: number | null;
 };
 
+interface NavLink {
+  href: string;
+  label: string;
+  icon: Icon;
+}
+
+const NAV_LINKS: NavLink[] = [
+  { href: "/portal/dashboard", label: "Dashboard", icon: House },
+  { href: "/portal/onboarding", label: "Expediente", icon: ClipboardText },
+  { href: "/portal/calendar", label: "Calendario", icon: CalendarBlank },
+  { href: "/portal/reports", label: "Reportes", icon: ChartLineUp },
+  { href: "/portal/upload", label: "Subir documento", icon: Files },
+];
+
 export function ProviderContextBar({ session, onboardingPct }: Props) {
   const router = useRouter();
+  const pathname = usePathname();
   const pct =
     typeof onboardingPct === "number" && Number.isFinite(onboardingPct)
       ? Math.min(100, Math.max(0, Math.round(onboardingPct)))
@@ -22,17 +47,21 @@ export function ProviderContextBar({ session, onboardingPct }: Props) {
   const isComplete = pct !== null && pct >= 100;
 
   return (
-    <header className="border-b border-border bg-white">
+    <header className="border-b border-[color:var(--border-subtle)] bg-[color:var(--surface-raised)]">
       <div className="mx-auto flex max-w-7xl flex-col gap-3 px-5 py-4 md:flex-row md:items-center md:justify-between">
         <div className="flex items-center gap-4">
-          <BrandLogo variant="compact" size="md" />
-          <div className="min-w-0 border-l border-border pl-4">
-            <p className="text-xs text-muted-foreground">Sesión proveedor</p>
-            <p className="truncate text-sm font-semibold">
+          <Link href="/portal/dashboard" aria-label="CheckWise dashboard">
+            <BrandLogo variant="compact" size="md" />
+          </Link>
+          <div className="min-w-0 border-l border-[color:var(--border-subtle)] pl-4">
+            <p className="text-xs text-[color:var(--text-tertiary)]">Sesión proveedor</p>
+            <p className="truncate text-sm font-semibold text-[color:var(--text-primary)]">
               {session.vendor_name}{" "}
-              <span className="text-muted-foreground">· {session.vendor_rfc}</span>
+              <span className="font-mono text-[color:var(--text-secondary)]">
+                · {session.vendor_rfc}
+              </span>
             </p>
-            <p className="truncate text-xs text-muted-foreground">
+            <p className="truncate text-xs text-[color:var(--text-secondary)]">
               Cliente: {session.client_name}
               {session.filial_name ? ` / ${session.filial_name}` : ""}
               {session.contract_reference ? ` · ${session.contract_reference}` : ""}
@@ -42,18 +71,14 @@ export function ProviderContextBar({ session, onboardingPct }: Props) {
         <div className="flex flex-wrap items-center gap-2">
           {pct !== null ? (
             <div
-              className={`flex items-center gap-2 rounded-full border px-3 py-1 text-xs ${
+              className={cn(
+                "flex items-center gap-2 rounded-full border px-3 py-1 text-xs",
                 isComplete
-                  ? "border-emerald-200 bg-emerald-50 text-emerald-900"
-                  : "border-primary/30 bg-primary/5 text-primary"
-              }`}
+                  ? "border-[color:var(--status-success-border)] bg-[color:var(--status-success-bg)] text-[color:var(--status-success-text)]"
+                  : "border-[color:var(--border-default)] bg-[color:var(--surface-brand-muted)] text-[color:var(--text-brand)]",
+              )}
               role="status"
               aria-label={`Expediente al ${pct} por ciento`}
-              title={
-                isComplete
-                  ? "Expediente corporativo completo"
-                  : `Llevas ${pct}% del expediente corporativo`
-              }
             >
               <ClipboardText className="h-3.5 w-3.5" aria-hidden="true" />
               <span className="font-medium">Expediente</span>
@@ -62,13 +87,16 @@ export function ProviderContextBar({ session, onboardingPct }: Props) {
                 className="h-1.5 w-12 overflow-hidden rounded-full bg-white/60"
               >
                 <span
-                  className={`block h-full rounded-full transition-[width] duration-500 ease-out ${
-                    isComplete ? "bg-emerald-500" : "bg-primary"
-                  }`}
+                  className={cn(
+                    "block h-full rounded-full transition-[width] duration-500 ease-out",
+                    isComplete
+                      ? "bg-[color:var(--status-success-text)]"
+                      : "bg-[color:var(--text-brand)]",
+                  )}
                   style={{ width: `${pct}%` }}
                 />
               </span>
-              <span className="tabular-nums font-semibold">{pct}%</span>
+              <span className="font-mono tabular-nums font-semibold">{pct}%</span>
             </div>
           ) : null}
           <Badge variant="outline">
@@ -88,6 +116,30 @@ export function ProviderContextBar({ session, onboardingPct }: Props) {
           </Button>
         </div>
       </div>
+
+      <nav
+        aria-label="Portal proveedor"
+        className="mx-auto flex max-w-7xl items-center gap-1 overflow-x-auto px-5 pb-3"
+      >
+        {NAV_LINKS.map(({ href, label, icon: IconComponent }) => {
+          const isActive = pathname === href || pathname?.startsWith(href + "/");
+          return (
+            <Link
+              key={href}
+              href={href}
+              className={cn(
+                "inline-flex shrink-0 items-center gap-1.5 rounded-full border px-3 py-1.5 text-[12px] font-medium transition-colors duration-fast",
+                isActive
+                  ? "border-[color:var(--border-brand)] bg-[color:var(--surface-brand)] text-[color:var(--text-inverse)]"
+                  : "border-[color:var(--border-subtle)] bg-[color:var(--surface-page)] text-[color:var(--text-secondary)] hover:border-[color:var(--border-strong)] hover:text-[color:var(--text-primary)]",
+              )}
+            >
+              <IconComponent className="h-3.5 w-3.5" weight="bold" aria-hidden="true" />
+              <span>{label}</span>
+            </Link>
+          );
+        })}
+      </nav>
     </header>
   );
 }
