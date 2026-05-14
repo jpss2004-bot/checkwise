@@ -1,8 +1,9 @@
 "use client";
 
 import { useRouter } from "next/navigation";
-import { Building2, ClipboardCheck, LogOut } from "lucide-react";
+import { ClipboardCheck, LogOut } from "lucide-react";
 
+import { BrandLogo } from "@/components/checkwise/brand-logo";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { clearPortalSession, type PortalSession } from "@/lib/portal-session";
@@ -23,12 +24,10 @@ export function ProviderContextBar({ session, onboardingPct }: Props) {
   return (
     <header className="border-b border-border bg-white">
       <div className="mx-auto flex max-w-7xl flex-col gap-3 px-5 py-4 md:flex-row md:items-center md:justify-between">
-        <div className="flex items-center gap-3">
-          <div className="flex h-10 w-10 items-center justify-center rounded-md bg-primary text-primary-foreground">
-            <Building2 className="h-5 w-5" aria-hidden="true" />
-          </div>
-          <div className="min-w-0">
-            <p className="text-xs text-muted-foreground">Sesión demo</p>
+        <div className="flex items-center gap-4">
+          <BrandLogo variant="compact" size="md" />
+          <div className="min-w-0 border-l border-border pl-4">
+            <p className="text-xs text-muted-foreground">Sesión proveedor</p>
             <p className="truncate text-sm font-semibold">
               {session.vendor_name}{" "}
               <span className="text-muted-foreground">· {session.vendor_rfc}</span>

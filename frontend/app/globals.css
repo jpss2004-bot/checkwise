@@ -2,22 +2,52 @@
 @tailwind components;
 @tailwind utilities;
 
+/*
+ * CheckWise brand palette (per the official IMPI brand sheet).
+ *
+ *   --primary    deep navy   #013557   HSL(207, 98%, 17%)
+ *   --secondary  mid blue    #02558a   HSL(203, 97%, 27%)
+ *   --accent     teal        #09c1b0   HSL(174, 91%, 40%)
+ *   --muted-fg   slate       #4b90a4   HSL(193, 37%, 47%)
+ *
+ * Semantic system colors (emerald = success, amber = attention,
+ * red = error/destructive) are kept from Tailwind defaults so the
+ * brand layer never collides with the meaning layer.
+ */
+
 :root {
-  --background: 210 20% 98%;
-  --foreground: 222 28% 13%;
-  --border: 214 20% 86%;
-  --input: 214 20% 86%;
-  --ring: 174 72% 28%;
-  --primary: 174 72% 28%;
+  --background: 0 0% 100%;
+  --foreground: 207 98% 17%;
+
+  --border: 200 25% 88%;
+  --input: 200 25% 88%;
+  --ring: 207 98% 17%;
+
+  --primary: 207 98% 17%;
   --primary-foreground: 0 0% 100%;
-  --secondary: 42 80% 54%;
-  --secondary-foreground: 222 28% 13%;
-  --muted: 210 22% 93%;
-  --muted-foreground: 215 14% 42%;
-  --accent: 199 84% 44%;
-  --accent-foreground: 0 0% 100%;
+
+  --secondary: 203 97% 27%;
+  --secondary-foreground: 0 0% 100%;
+
+  --accent: 174 91% 40%;
+  --accent-foreground: 207 98% 17%;
+
+  --muted: 200 30% 96%;
+  --muted-foreground: 193 26% 38%;
+
   --destructive: 0 72% 45%;
   --destructive-foreground: 0 0% 100%;
+
+  /*
+   * Brand-named utilities. Available alongside the semantic tokens so
+   * components can opt into raw brand colors when the role of the
+   * surface is "this is the brand" (e.g. the logo wordmark, brand
+   * footer chip), not "this is a primary action".
+   */
+  --brand-navy: 207 98% 17%;
+  --brand-blue: 203 97% 27%;
+  --brand-teal: 174 91% 40%;
+  --brand-slate: 193 37% 47%;
 }
 
 * {
@@ -28,7 +58,9 @@ body {
   margin: 0;
   background: hsl(var(--background));
   color: hsl(var(--foreground));
-  font-family: Arial, Helvetica, sans-serif;
+  font-family: var(--font-sans), "Open Sans", -apple-system, BlinkMacSystemFont,
+    "Segoe UI", Roboto, Arial, sans-serif;
+  font-feature-settings: "ss01", "cv11";
   letter-spacing: 0;
 }
 

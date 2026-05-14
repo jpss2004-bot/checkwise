@@ -4,6 +4,7 @@ import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import { Activity, Database, FileCheck2, ShieldCheck } from "lucide-react";
 
+import { BrandLogo } from "@/components/checkwise/brand-logo";
 import { ProviderAccessForm } from "@/components/checkwise/portal/provider-access-form";
 import { Badge } from "@/components/ui/badge";
 import { readPortalSession } from "@/lib/portal-session";
@@ -36,18 +37,21 @@ export default function HomePage() {
     <main className="min-h-screen bg-background">
       <header className="border-b border-border bg-white">
         <div className="mx-auto flex max-w-7xl flex-col gap-5 px-5 py-5 md:flex-row md:items-center md:justify-between">
-          <div className="flex items-center gap-3">
-            <div className="flex h-10 w-10 items-center justify-center rounded-md bg-primary text-primary-foreground">
-              <ShieldCheck className="h-5 w-5" aria-hidden="true" />
-            </div>
-            <div>
-              <p className="text-sm font-semibold text-primary">CheckWise</p>
-              <h1 className="text-2xl font-semibold text-foreground">
-                Plataforma de cumplimiento REPSE
-              </h1>
-            </div>
+          <div className="flex items-start gap-3">
+            <BrandLogo size="lg" poweredBy />
           </div>
-          <Badge variant="outline">V1.2 portal proveedor</Badge>
+          <div className="flex items-center gap-2">
+            <Badge variant="outline">Portal proveedor</Badge>
+          </div>
+        </div>
+        <div className="mx-auto max-w-7xl px-5 pb-5">
+          <h1 className="text-2xl font-semibold tracking-tight text-foreground">
+            Plataforma de cumplimiento REPSE
+          </h1>
+          <p className="mt-1 max-w-2xl text-sm text-muted-foreground">
+            Carga documental, prevalidación automática y revisión humana
+            trazable. Para proveedores, revisores y administradores.
+          </p>
         </div>
       </header>
 

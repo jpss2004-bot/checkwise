@@ -3,8 +3,9 @@
 import { type FormEvent, useEffect, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { AlertTriangle, Loader2, LogIn, ShieldCheck } from "lucide-react";
+import { AlertTriangle, Loader2, LogIn } from "lucide-react";
 
+import { BrandLogo } from "@/components/checkwise/brand-logo";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
@@ -51,9 +52,11 @@ export default function AdminLoginPage() {
 
   return (
     <main className="mx-auto flex min-h-screen max-w-md flex-col justify-center px-5 py-10">
-      <div className="mb-6 flex items-center gap-2 text-sm font-medium text-muted-foreground">
-        <ShieldCheck className="h-4 w-4 text-primary" aria-hidden />
-        CheckWise · Espacio interno
+      <div className="mb-6 flex flex-col gap-2">
+        <BrandLogo size="md" poweredBy />
+        <p className="text-xs uppercase tracking-wide text-muted-foreground">
+          Espacio interno
+        </p>
       </div>
       <Card>
         <CardHeader>
