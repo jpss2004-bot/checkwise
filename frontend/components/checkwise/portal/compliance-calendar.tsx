@@ -22,6 +22,7 @@ import {
   type CalendarPayload,
   type RequirementStatus,
 } from "@/lib/portal-client";
+import { EmptyState } from "./state-surfaces";
 import { RequirementStatusBadge } from "./requirement-status-badge";
 
 const ATTENTION_STATUSES: RequirementStatus[] = [
@@ -129,9 +130,12 @@ export function ComplianceCalendar({ data }: Props) {
           </div>
 
           {month.institutions.length === 0 ? (
-            <p className="rounded-md border border-border bg-muted/40 p-4 text-sm text-muted-foreground">
-              Sin obligaciones recurrentes para este mes.
-            </p>
+            <EmptyState
+              icon={CalendarDays}
+              title="Sin obligaciones para este mes"
+              description="Tu calendario no tiene cargas recurrentes programadas en este periodo. Selecciona otro mes para ver las próximas."
+              variant="muted"
+            />
           ) : (
             <div className="space-y-4">
               {month.institutions.map((inst) => (

@@ -3,7 +3,6 @@
 import { FormEvent, useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import {
-  AlertCircle,
   AlertTriangle,
   ArrowRight,
   Calendar,
@@ -415,10 +414,27 @@ export function IntakeWizard({
           {step === 4 ? <ConfirmationStep result={result} error={error} /> : null}
 
           {error && step !== 4 ? (
-            <div className="mt-5 rounded-md border border-destructive/30 bg-red-50 p-4 text-sm text-destructive">
-              <div className="flex gap-2">
-                <AlertCircle className="mt-0.5 h-4 w-4 shrink-0" aria-hidden="true" />
-                <span>{error}</span>
+            <div
+              role="alert"
+              className="mt-5 rounded-md border border-amber-300 bg-amber-50 p-4"
+            >
+              <div className="flex gap-3">
+                <div className="mt-0.5 flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-amber-500 text-white">
+                  <AlertTriangle className="h-4 w-4" aria-hidden="true" />
+                </div>
+                <div className="min-w-0">
+                  <p className="text-sm font-semibold text-amber-900">
+                    {step === 3
+                      ? "No pudimos enviar tu documento"
+                      : "Revisa este paso antes de continuar"}
+                  </p>
+                  <p className="mt-1 text-sm text-amber-900/80">{error}</p>
+                  {step === 3 ? (
+                    <p className="mt-1 text-xs text-amber-900/70">
+                      Tu archivo y los datos siguen aquí. Puedes volver a intentarlo.
+                    </p>
+                  ) : null}
+                </div>
               </div>
             </div>
           ) : null}
@@ -429,24 +445,35 @@ export function IntakeWizard({
               variant="outline"
               disabled={step === 0 || isSubmitting}
               onClick={() => setStep((current) => Math.max(0, current - 1))}
+              className="active:scale-[0.98]"
             >
               <ChevronLeft className="h-4 w-4" aria-hidden="true" />
               Atrás
             </Button>
 
             {step < 3 ? (
-              <Button type="button" data-testid="continue-step" onClick={handleContinue}>
+              <Button
+                type="button"
+                data-testid="continue-step"
+                onClick={handleContinue}
+                className="active:scale-[0.98]"
+              >
                 Continuar
                 <ChevronRight className="h-4 w-4" aria-hidden="true" />
               </Button>
             ) : step === 3 ? (
-              <Button type="submit" data-testid="submit-submission" disabled={isSubmitting}>
+              <Button
+                type="submit"
+                data-testid="submit-submission"
+                disabled={isSubmitting}
+                className="active:scale-[0.98]"
+              >
                 {isSubmitting ? (
                   <Loader2 className="h-4 w-4 animate-spin" aria-hidden="true" />
                 ) : (
                   <UploadCloud className="h-4 w-4" aria-hidden="true" />
                 )}
-                Enviar a revisión
+                {isSubmitting ? "Enviando…" : "Enviar a revisión"}
               </Button>
             ) : (
               <Button
@@ -457,6 +484,7 @@ export function IntakeWizard({
                   setFile(null);
                   setStep(0);
                 }}
+                className="active:scale-[0.98]"
               >
                 Nueva carga
               </Button>
@@ -983,8 +1011,24 @@ function ConfirmationStep({
 }) {
   if (error) {
     return (
-      <div className="rounded-md border border-destructive/30 bg-red-50 p-4 text-sm text-destructive">
-        {error}
+      <div
+        role="alert"
+        className="rounded-md border border-amber-300 bg-amber-50 p-5"
+      >
+        <div className="flex gap-3">
+          <div className="mt-0.5 flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-amber-500 text-white">
+            <AlertTriangle className="h-4 w-4" aria-hidden="true" />
+          </div>
+          <div className="min-w-0">
+            <p className="text-sm font-semibold text-amber-900">
+              No pudimos enviar tu documento
+            </p>
+            <p className="mt-1 text-sm text-amber-900/80">{error}</p>
+            <p className="mt-1 text-xs text-amber-900/70">
+              Tu archivo y los datos siguen aquí. Vuelve al paso anterior para reintentar.
+            </p>
+          </div>
+        </div>
       </div>
     );
   }
@@ -1080,14 +1124,14 @@ function ConfirmationStep({
           </li>
         </ol>
         <div className="mt-5 flex flex-wrap gap-2">
-          <Button asChild>
+          <Button asChild className="active:scale-[0.98]">
             <Link href="/portal/dashboard">
               <Calendar className="h-4 w-4" aria-hidden="true" />
               Ver mi calendario
               <ArrowRight className="h-4 w-4" aria-hidden="true" />
             </Link>
           </Button>
-          <Button asChild variant="outline">
+          <Button asChild variant="outline" className="active:scale-[0.98]">
             <Link href={`/portal/submissions/${result.submission_id}`}>
               <FileText className="h-4 w-4" aria-hidden="true" />
               Ver detalle del documento

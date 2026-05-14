@@ -1,6 +1,6 @@
 "use client";
 
-import { use, useEffect, useState } from "react";
+import { use, useCallback, useEffect, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import {
@@ -12,18 +12,23 @@ import {
   Clock3,
   FileText,
   History,
-  Loader2,
   ShieldCheck,
   UploadCloud,
 } from "lucide-react";
 
 import { ProviderContextBar } from "@/components/checkwise/portal/provider-context-bar";
 import { RequirementStatusBadge } from "@/components/checkwise/portal/requirement-status-badge";
+import {
+  ErrorState,
+  NotFoundState,
+  SubmissionDetailSkeleton,
+} from "@/components/checkwise/portal/state-surfaces";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import {
   getSubmissionDetail,
   INSTITUTION_LABELS,
+  PortalApiError,
   type RequirementStatus,
   type SubmissionDetail,
   type SubmissionPreviousAttempt,
@@ -35,13 +40,16 @@ type PageProps = {
   params: Promise<{ submission_id: string }>;
 };
 
+type ErrorKind = "not_found" | "network";
+
 export default function SubmissionDetailPage({ params }: PageProps) {
   const { submission_id } = use(params);
   const router = useRouter();
   const [session, setSession] = useState<PortalSession | null>(null);
   const [detail, setDetail] = useState<SubmissionDetail | null>(null);
   const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
+  const [errorKind, setErrorKind] = useState<ErrorKind | null>(null);
+  const [reloadKey, setReloadKey] = useState(0);
 
   useEffect(() => {
     const current = readPortalSession();
@@ -56,16 +64,18 @@ export default function SubmissionDetailPage({ params }: PageProps) {
     if (!session) return;
     let cancelled = false;
     setLoading(true);
-    setError(null);
+    setErrorKind(null);
     getSubmissionDetail(session, submission_id)
       .then((payload) => {
         if (!cancelled) setDetail(payload);
       })
-      .catch(() => {
-        if (!cancelled)
-          setError(
-            "No fue posible cargar este documento. Verifica el enlace o regresa al calendario.",
-          );
+      .catch((err: unknown) => {
+        if (cancelled) return;
+        if (err instanceof PortalApiError && err.status === 404) {
+          setErrorKind("not_found");
+        } else {
+          setErrorKind("network");
+        }
       })
       .finally(() => {
         if (!cancelled) setLoading(false);
@@ -73,7 +83,9 @@ export default function SubmissionDetailPage({ params }: PageProps) {
     return () => {
       cancelled = true;
     };
-  }, [session, submission_id]);
+  }, [session, submission_id, reloadKey]);
+
+  const retry = useCallback(() => setReloadKey((k) => k + 1), []);
 
   if (!session) return null;
 
@@ -107,20 +119,34 @@ export default function SubmissionDetailPage({ params }: PageProps) {
         </header>
 
         {loading ? (
-          <div className="flex items-center gap-2 rounded-md border border-border bg-white p-4 text-sm text-muted-foreground">
-            <Loader2 className="h-4 w-4 animate-spin" aria-hidden="true" />
-            Cargando documento…
-          </div>
-        ) : error ? (
-          <div className="rounded-md border border-destructive/30 bg-red-50 p-4 text-sm text-destructive">
-            <div className="flex gap-2">
-              <AlertCircle
-                className="mt-0.5 h-4 w-4 shrink-0"
-                aria-hidden="true"
-              />
-              <span>{error}</span>
-            </div>
-          </div>
+          <SubmissionDetailSkeleton />
+        ) : errorKind === "not_found" ? (
+          <NotFoundState
+            title="No encontramos este documento"
+            description="El enlace puede haber expirado, o el documento pertenece a otro workspace. Regresa al calendario para verlo desde ahí."
+            action={
+              <Button asChild>
+                <Link href="/portal/dashboard">
+                  <ArrowLeft className="h-4 w-4" aria-hidden="true" />
+                  Volver al calendario
+                </Link>
+              </Button>
+            }
+          />
+        ) : errorKind === "network" ? (
+          <ErrorState
+            title="No pudimos cargar este documento"
+            description="Tu conexión pudo haberse interrumpido. No perdiste nada: tu sesión sigue activa."
+            onRetry={retry}
+            secondary={
+              <Button asChild variant="outline" size="sm">
+                <Link href="/portal/dashboard">
+                  <ArrowLeft className="h-4 w-4" aria-hidden="true" />
+                  Calendario
+                </Link>
+              </Button>
+            }
+          />
         ) : detail ? (
           <div className="grid gap-5 lg:grid-cols-3">
             <div className="space-y-5 lg:col-span-2">

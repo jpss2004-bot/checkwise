@@ -11,6 +11,7 @@ import {
   type IntakeWizardPrefill,
 } from "@/components/checkwise/intake-wizard";
 import { ProviderContextBar } from "@/components/checkwise/portal/provider-context-bar";
+import { UploadWizardSkeleton } from "@/components/checkwise/portal/state-surfaces";
 import { Button } from "@/components/ui/button";
 import { readPortalSession, type PortalSession } from "@/lib/portal-session";
 
@@ -110,7 +111,13 @@ function PortalUploadInner() {
 
 export default function PortalUploadPage() {
   return (
-    <Suspense fallback={null}>
+    <Suspense
+      fallback={
+        <main className="mx-auto max-w-7xl space-y-5 px-5 py-6">
+          <UploadWizardSkeleton />
+        </main>
+      }
+    >
       <PortalUploadInner />
     </Suspense>
   );
