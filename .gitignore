@@ -44,6 +44,8 @@ uploads/
 
 # Local database
 postgres-data/
+backend/*.db
+backend/*.db-journal
 
 # Local session artifacts
 CodexConvo.txt
