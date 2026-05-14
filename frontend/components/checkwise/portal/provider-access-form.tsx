@@ -1,21 +1,19 @@
 "use client";
 
 import { FormEvent, useMemo, useState } from "react";
+import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { WarningCircle, ArrowRight, CircleNotch, ShieldCheck } from "@phosphor-icons/react";
+import { ArrowRight, Key, ShieldCheck } from "@phosphor-icons/react";
 
+import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Field } from "@/components/ui/field";
 import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
 import { Select } from "@/components/ui/select";
-import { DEMO_CLIENTS } from "@/lib/demo-clients";
 import { createPortalAccess, PortalApiError } from "@/lib/api/portal";
-import {
-  writePortalSession,
-  type PersonaType,
-} from "@/lib/session/portal";
+import { DEMO_CLIENTS } from "@/lib/demo-clients";
+import { writePortalSession, type PersonaType } from "@/lib/session/portal";
 
 type FormState = {
   client_name: string;
@@ -35,11 +33,17 @@ const initialState: FormState = {
   contract_reference: "",
 };
 
+interface FieldErrors {
+  vendor_name?: string;
+  vendor_rfc?: string;
+}
+
 export function ProviderAccessForm() {
   const router = useRouter();
   const [form, setForm] = useState<FormState>(initialState);
   const [submitting, setSubmitting] = useState(false);
-  const [error, setError] = useState<string | null>(null);
+  const [serverError, setServerError] = useState<string | null>(null);
+  const [fieldErrors, setFieldErrors] = useState<FieldErrors>({});
 
   const selectedClient = useMemo(
     () => DEMO_CLIENTS.find((c) => c.name === form.client_name) ?? DEMO_CLIENTS[0],
@@ -48,6 +52,9 @@ export function ProviderAccessForm() {
 
   function updateField<K extends keyof FormState>(field: K, value: FormState[K]) {
     setForm((current) => ({ ...current, [field]: value }));
+    if (field === "vendor_name" || field === "vendor_rfc") {
+      setFieldErrors((current) => ({ ...current, [field]: undefined }));
+    }
   }
 
   function handleClientChange(name: string) {
@@ -59,21 +66,25 @@ export function ProviderAccessForm() {
     }));
   }
 
-  function validate(): string | null {
-    if (form.vendor_name.trim().length < 2) return "Captura la razón social del proveedor.";
+  function validate(): FieldErrors {
+    const errors: FieldErrors = {};
+    if (form.vendor_name.trim().length < 2) {
+      errors.vendor_name = "Captura la razón social del proveedor.";
+    }
     const rfc = form.vendor_rfc.trim();
-    if (rfc.length < 12 || rfc.length > 13) return "El RFC debe tener 12 o 13 caracteres.";
-    return null;
+    if (rfc.length < 12 || rfc.length > 13) {
+      errors.vendor_rfc = "El RFC debe tener 12 o 13 caracteres.";
+    }
+    return errors;
   }
 
   async function handleSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
-    const validationError = validate();
-    if (validationError) {
-      setError(validationError);
-      return;
-    }
-    setError(null);
+    const errors = validate();
+    setFieldErrors(errors);
+    if (Object.keys(errors).length > 0) return;
+
+    setServerError(null);
     setSubmitting(true);
     try {
       const access = await createPortalAccess({
@@ -98,9 +109,11 @@ export function ProviderAccessForm() {
       router.push("/portal/onboarding");
     } catch (caught) {
       if (caught instanceof PortalApiError) {
-        setError(`No fue posible iniciar sesión demo (${caught.status}).`);
+        setServerError(
+          `No pudimos crear tu acceso (${caught.status}). Intenta de nuevo o contacta soporte.`,
+        );
       } else {
-        setError("No fue posible iniciar sesión demo.");
+        setServerError("No pudimos crear tu acceso. Revisa tu conexión e intenta de nuevo.");
       }
     } finally {
       setSubmitting(false);
@@ -108,123 +121,151 @@ export function ProviderAccessForm() {
   }
 
   return (
-    <Card className="mx-auto max-w-2xl">
-      <CardHeader>
-        <div className="flex items-center justify-between gap-2">
-          <div className="flex items-center gap-2">
-            <ShieldCheck className="h-5 w-5 text-primary" aria-hidden="true" />
-            <CardTitle>Acceso de proveedor</CardTitle>
+    <form
+      onSubmit={handleSubmit}
+      className="flex flex-col gap-5"
+      data-testid="provider-access-form"
+      noValidate
+    >
+      <div className="flex items-center justify-between gap-3">
+        <div className="flex items-center gap-2">
+          <span className="flex h-9 w-9 items-center justify-center rounded-full bg-[color:var(--surface-brand-muted)]">
+            <ShieldCheck
+              className="h-5 w-5 text-[color:var(--text-brand)]"
+              weight="duotone"
+              aria-hidden="true"
+            />
+          </span>
+          <div>
+            <h2 className="text-base font-semibold leading-5 text-[color:var(--text-primary)]">
+              Entra a tu espacio
+            </h2>
+            <p className="text-xs text-[color:var(--text-secondary)]">
+              Captura tu cliente, filial y RFC para abrir tu portal.
+            </p>
           </div>
-          <Badge variant="outline">Demo · sin autenticación de producción</Badge>
         </div>
-        <p className="mt-2 text-sm text-muted-foreground">
-          Captura el contexto de trabajo (cliente, filial, proveedor) para abrir tu espacio de
-          cumplimiento REPSE. En esta fase la sesión vive como demo segura en este dispositivo.
+        <Badge variant="outline">Demo</Badge>
+      </div>
+
+      <div className="grid gap-4 sm:grid-cols-2">
+        <Field label="Cliente" htmlFor="client_name">
+          <Select
+            id="client_name"
+            value={form.client_name}
+            onChange={(event) => handleClientChange(event.target.value)}
+          >
+            {DEMO_CLIENTS.map((client) => (
+              <option key={client.name} value={client.name}>
+                {client.name}
+              </option>
+            ))}
+          </Select>
+        </Field>
+
+        <Field label="Filial" htmlFor="filial_name">
+          <Select
+            id="filial_name"
+            value={form.filial_name}
+            onChange={(event) => updateField("filial_name", event.target.value)}
+          >
+            {selectedClient?.filiales.map((filial) => (
+              <option key={filial.name} value={filial.name}>
+                {filial.name}
+              </option>
+            ))}
+          </Select>
+        </Field>
+
+        <Field
+          label="Razón social del proveedor"
+          htmlFor="vendor_name"
+          required
+          error={fieldErrors.vendor_name}
+          className="sm:col-span-2"
+        >
+          <Input
+            id="vendor_name"
+            value={form.vendor_name}
+            onChange={(event) => updateField("vendor_name", event.target.value)}
+            placeholder="Servicios Especializados SA de CV"
+            autoComplete="organization"
+          />
+        </Field>
+
+        <Field
+          label="RFC del proveedor"
+          htmlFor="vendor_rfc"
+          required
+          error={fieldErrors.vendor_rfc}
+          helper="12 caracteres (persona moral) o 13 (persona física)."
+        >
+          <Input
+            id="vendor_rfc"
+            value={form.vendor_rfc}
+            onChange={(event) =>
+              updateField("vendor_rfc", event.target.value.toUpperCase())
+            }
+            placeholder="ABC010203AB1"
+            minLength={12}
+            maxLength={13}
+            className="font-mono uppercase tracking-wide"
+          />
+        </Field>
+
+        <Field label="Tipo de persona" htmlFor="persona_type">
+          <Select
+            id="persona_type"
+            value={form.persona_type}
+            onChange={(event) =>
+              updateField("persona_type", event.target.value as PersonaType)
+            }
+          >
+            <option value="moral">Persona moral</option>
+            <option value="fisica">Persona física</option>
+          </Select>
+        </Field>
+
+        <Field
+          label="Contrato"
+          htmlFor="contract_reference"
+          helper="Si tu cliente te dio un folio, captúralo. Opcional."
+          className="sm:col-span-2"
+        >
+          <Input
+            id="contract_reference"
+            value={form.contract_reference}
+            onChange={(event) => updateField("contract_reference", event.target.value)}
+            placeholder="CTR-2026-001"
+            className="font-mono"
+          />
+        </Field>
+      </div>
+
+      {serverError && (
+        <Alert variant="error">
+          <AlertTitle>No pudimos abrir tu espacio</AlertTitle>
+          <AlertDescription>{serverError}</AlertDescription>
+        </Alert>
+      )}
+
+      <Button type="submit" loading={submitting} className="w-full" size="lg">
+        <span>Entrar a mi portal</span>
+        {!submitting && <ArrowRight className="h-4 w-4" weight="bold" aria-hidden="true" />}
+      </Button>
+
+      <div className="flex flex-col gap-2 border-t border-[color:var(--border-subtle)] pt-4 text-xs">
+        <Link
+          href="/activate"
+          className="inline-flex items-center justify-center gap-2 text-[color:var(--text-link)] hover:underline"
+        >
+          <Key className="h-3.5 w-3.5" weight="bold" aria-hidden="true" />
+          <span>¿Tienes credenciales temporales? Activa tu cuenta aquí.</span>
+        </Link>
+        <p className="text-center text-[color:var(--text-tertiary)]">
+          CheckWise no firma documentos. Revisión humana obligatoria.
         </p>
-      </CardHeader>
-      <CardContent>
-        <form onSubmit={handleSubmit} className="space-y-5" data-testid="provider-access-form">
-          <div className="grid gap-4 md:grid-cols-2">
-            <div className="space-y-2">
-              <Label htmlFor="client_name">Cliente</Label>
-              <Select
-                id="client_name"
-                value={form.client_name}
-                onChange={(event) => handleClientChange(event.target.value)}
-              >
-                {DEMO_CLIENTS.map((client) => (
-                  <option key={client.name} value={client.name}>
-                    {client.name}
-                  </option>
-                ))}
-              </Select>
-            </div>
-            <div className="space-y-2">
-              <Label htmlFor="filial_name">Filial</Label>
-              <Select
-                id="filial_name"
-                value={form.filial_name}
-                onChange={(event) => updateField("filial_name", event.target.value)}
-              >
-                {selectedClient?.filiales.map((filial) => (
-                  <option key={filial.name} value={filial.name}>
-                    {filial.name}
-                  </option>
-                ))}
-              </Select>
-            </div>
-            <div className="space-y-2">
-              <Label htmlFor="vendor_name">Razón social del proveedor</Label>
-              <Input
-                id="vendor_name"
-                value={form.vendor_name}
-                onChange={(event) => updateField("vendor_name", event.target.value)}
-                placeholder="Servicios Especializados SA de CV"
-                required
-              />
-            </div>
-            <div className="space-y-2">
-              <Label htmlFor="vendor_rfc">RFC proveedor</Label>
-              <Input
-                id="vendor_rfc"
-                value={form.vendor_rfc}
-                onChange={(event) =>
-                  updateField("vendor_rfc", event.target.value.toUpperCase())
-                }
-                placeholder="ABC010203AB1"
-                minLength={12}
-                maxLength={13}
-                required
-              />
-            </div>
-            <div className="space-y-2">
-              <Label htmlFor="persona_type">Tipo de persona</Label>
-              <Select
-                id="persona_type"
-                value={form.persona_type}
-                onChange={(event) =>
-                  updateField("persona_type", event.target.value as PersonaType)
-                }
-              >
-                <option value="moral">Persona Moral</option>
-                <option value="fisica">Persona Física</option>
-              </Select>
-            </div>
-            <div className="space-y-2">
-              <Label htmlFor="contract_reference">Contrato (opcional)</Label>
-              <Input
-                id="contract_reference"
-                value={form.contract_reference}
-                onChange={(event) => updateField("contract_reference", event.target.value)}
-                placeholder="CTR-2026-001"
-              />
-            </div>
-          </div>
-
-          {error ? (
-            <div className="rounded-md border border-destructive/30 bg-red-50 p-3 text-sm text-destructive">
-              <div className="flex gap-2">
-                <WarningCircle className="mt-0.5 h-4 w-4 shrink-0" aria-hidden="true" />
-                <span>{error}</span>
-              </div>
-            </div>
-          ) : null}
-
-          <Button type="submit" disabled={submitting} className="w-full md:w-auto">
-            {submitting ? (
-              <CircleNotch className="h-4 w-4 animate-spin" aria-hidden="true" />
-            ) : (
-              <ArrowRight className="h-4 w-4" aria-hidden="true" />
-            )}
-            Entrar al espacio del proveedor
-          </Button>
-
-          <p className="text-xs text-muted-foreground">
-            CheckWise no firma legalmente documentos. La revisión humana sigue siendo obligatoria
-            para el cumplimiento REPSE.
-          </p>
-        </form>
-      </CardContent>
-    </Card>
+      </div>
+    </form>
   );
 }
