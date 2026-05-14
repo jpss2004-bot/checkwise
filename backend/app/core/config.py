@@ -31,6 +31,13 @@ class Settings(BaseSettings):
     AUTH_JWT_EXPIRES_MINUTES: int = 60 * 24
     AUTH_BCRYPT_ROUNDS: int = 12
 
+    # Portal session cookie (CheckWise 1.7). Provider portal moves off
+    # localStorage and onto an httpOnly signed cookie. Cookie is
+    # `Secure` automatically when CHECKWISE_ENV != "local" so dev still
+    # works over plain HTTP localhost.
+    PORTAL_SESSION_COOKIE_NAME: str = "checkwise_portal_session"
+    PORTAL_SESSION_EXPIRES_MINUTES: int = 60 * 24  # 24h, matches AUTH_JWT default
+
     model_config = SettingsConfigDict(env_file=".env", env_file_encoding="utf-8", extra="ignore")
 
     @property
@@ -42,6 +49,11 @@ class Settings(BaseSettings):
         return {
             ext.strip().lower() for ext in self.ALLOWED_FILE_EXTENSIONS.split(",") if ext.strip()
         }
+
+    @property
+    def cookie_secure(self) -> bool:
+        """Set `Secure` on cookies in any non-local environment."""
+        return self.CHECKWISE_ENV != "local"
 
 
 @lru_cache

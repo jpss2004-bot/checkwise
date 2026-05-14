@@ -1,14 +1,21 @@
-"""Provider portal endpoints (V1.2 demo).
+"""Provider portal endpoints.
 
-These endpoints support the provider-facing journey: a demo-grade access flow,
-an onboarding view that compares the regulatory Expediente Corporativo against
-existing submissions, and a yearly compliance calendar that overlays the
-recurring Árbol against actual submissions.
+These endpoints support the provider-facing journey: a credential
+access flow, an onboarding view that compares the regulatory
+Expediente Corporativo against existing submissions, and a yearly
+compliance calendar that overlays the recurring Árbol against
+actual submissions.
 
-⚠️  This is **not** authentication. Workspaces issue an opaque ``access_token``
-that the frontend stores in localStorage and sends on subsequent calls. Anyone
-with the token can read the workspace. V1.3 must replace this with real auth
-(roles, ownership, session expiry).
+CheckWise 1.7 — Session model
+-----------------------------
+``POST /portal/access`` issues an httpOnly signed-JWT cookie
+(``checkwise_portal_session``) carrying ``workspace_id`` and the
+workspace's ``access_token``. Every protected endpoint reads that
+cookie, verifies the signature, and confirms the cookie's
+``workspace_id`` matches the path's ``{workspace_id}`` (tenant guard).
+
+Legacy clients can still send ``X-Workspace-Token`` while we transition.
+Backend remains the source of truth for tenant ownership.
 """
 
 from __future__ import annotations
@@ -17,7 +24,7 @@ import secrets
 import unicodedata
 from typing import Annotated, Literal
 
-from fastapi import APIRouter, Depends, Header, HTTPException, status
+from fastapi import APIRouter, Depends, Header, HTTPException, Request, Response, status
 from pydantic import BaseModel, Field
 from sqlalchemy import select
 from sqlalchemy.orm import Session
@@ -28,6 +35,7 @@ from app.core.compliance_catalog import (
     expediente_for_persona,
     recurring_for_year,
 )
+from app.core.config import settings
 from app.db.session import get_db
 from app.models import (
     Document,
@@ -38,6 +46,11 @@ from app.models import (
     Validation,
     ValidationEvent,
 )
+from app.services.portal_session import (
+    PortalSessionError,
+    issue_portal_session_token,
+    verify_portal_session_token,
+)
 from app.services.submission_service import (
     get_or_create_client,
     get_or_create_contract,
@@ -46,6 +59,67 @@ from app.services.submission_service import (
 
 router = APIRouter(prefix="/portal", tags=["portal"])
 DbSession = Annotated[Session, Depends(get_db)]
+
+
+# ---------------------------------------------------------------------------
+# Cookie helpers
+# ---------------------------------------------------------------------------
+
+
+def _set_portal_session_cookie(
+    response: Response, *, workspace_id: str, access_token: str
+) -> None:
+    """Issue + attach the portal session cookie."""
+    token, expires_at = issue_portal_session_token(
+        workspace_id=workspace_id, access_token=access_token
+    )
+    response.set_cookie(
+        key=settings.PORTAL_SESSION_COOKIE_NAME,
+        value=token,
+        max_age=settings.PORTAL_SESSION_EXPIRES_MINUTES * 60,
+        httponly=True,
+        secure=settings.cookie_secure,
+        samesite="lax",
+        path="/",
+    )
+
+
+def _clear_portal_session_cookie(response: Response) -> None:
+    response.delete_cookie(
+        key=settings.PORTAL_SESSION_COOKIE_NAME,
+        path="/",
+        httponly=True,
+        secure=settings.cookie_secure,
+        samesite="lax",
+    )
+
+
+def _session_from_request(
+    request: Request,
+    *,
+    legacy_header: str = "",
+) -> tuple[str, str]:
+    """Resolve (workspace_id, access_token) from cookie or legacy header.
+
+    Cookie wins. Falls back to ``X-Workspace-Token`` for callers that
+    haven't migrated yet (e.g. integration tests, the legacy reviewer
+    queue UI which doesn't use this router but might share helpers).
+    Returns ("", "") when neither is present so the caller raises the
+    right 401 with workspace context.
+    """
+    cookie_token = request.cookies.get(settings.PORTAL_SESSION_COOKIE_NAME, "")
+    if cookie_token:
+        try:
+            claims = verify_portal_session_token(cookie_token)
+            return claims.workspace_id, claims.access_token
+        except PortalSessionError:
+            # fall through to legacy header below
+            pass
+    if legacy_header:
+        # Caller passed an X-Workspace-Token. We don't know the
+        # workspace_id from the header alone — the path must carry it.
+        return "", legacy_header
+    return "", ""
 
 
 # ---------------------------------------------------------------------------
@@ -155,6 +229,11 @@ def _match_submission(
 
 
 def _load_workspace(db: Session, workspace_id: str, access_token: str) -> ProviderWorkspace:
+    """Internal: load + verify by raw (workspace_id, access_token) pair.
+
+    Prefer ``current_portal_workspace`` from path-bound endpoints — this
+    raw helper is kept for /access resumption + tests.
+    """
     workspace = db.scalar(
         select(ProviderWorkspace).where(ProviderWorkspace.id == workspace_id).limit(1)
     )
@@ -167,6 +246,53 @@ def _load_workspace(db: Session, workspace_id: str, access_token: str) -> Provid
             status_code=status.HTTP_401_UNAUTHORIZED, detail="Access token inválido."
         )
     return workspace
+
+
+def current_portal_workspace(
+    request: Request,
+    db: DbSession,
+    workspace_id: str | None = None,
+    x_workspace_token: Annotated[str, Header(alias="X-Workspace-Token")] = "",
+) -> ProviderWorkspace:
+    """Resolve the workspace for the current request.
+
+    Reads the portal session cookie (preferred) or the legacy
+    ``X-Workspace-Token`` header. When ``workspace_id`` is supplied
+    (a path parameter), enforces that the session's workspace_id
+    matches it — this is the tenant guard.
+
+    Raises:
+        401 if no valid session is present.
+        403 if the cookie's workspace_id differs from the path's.
+        404 if the workspace_id doesn't exist.
+    """
+    cookie_ws, cookie_tok = _session_from_request(request, legacy_header=x_workspace_token)
+
+    # Determine effective workspace_id for the lookup.
+    if workspace_id is None:
+        target_ws = cookie_ws
+    else:
+        target_ws = workspace_id
+        # Tenant guard: if cookie has its own workspace_id, it must match.
+        if cookie_ws and cookie_ws != workspace_id:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="Esta sesión no tiene acceso a este workspace.",
+            )
+
+    if not target_ws or not cookie_tok:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Sesión de portal requerida.",
+        )
+
+    return _load_workspace(db, target_ws, cookie_tok)
+
+
+def _scope_from_path(workspace_id: str) -> str:
+    """Tiny helper that exists so each route declares its tenant scope
+    explicitly in code (auditable). The string is unused at runtime."""
+    return f"portal.workspaces.{workspace_id}"
 
 
 def _workspace_submissions(db: Session, workspace: ProviderWorkspace) -> list[Submission]:
@@ -187,8 +313,17 @@ def _workspace_submissions(db: Session, workspace: ProviderWorkspace) -> list[Su
 
 
 @router.post("/access", response_model=AccessResponse, status_code=status.HTTP_201_CREATED)
-def create_or_resume_access(payload: AccessRequest, db: DbSession) -> AccessResponse:
-    """Create (or resume) a demo provider workspace and return an access token."""
+def create_or_resume_access(
+    payload: AccessRequest,
+    db: DbSession,
+    response: Response,
+) -> AccessResponse:
+    """Create (or resume) a provider workspace, set the session cookie,
+    and return the workspace summary in the body.
+
+    The body still carries ``access_token`` during the V1.7 transition
+    so any pre-cookie client keeps working. New clients should ignore
+    it and rely on the cookie."""
 
     normalized_rfc = payload.vendor_rfc.strip().upper()
     client = get_or_create_client(db, payload.client_name.strip())
@@ -239,6 +374,13 @@ def create_or_resume_access(payload: AccessRequest, db: DbSession) -> AccessResp
     db.flush()
     db.commit()
 
+    # CheckWise 1.7: issue the httpOnly session cookie.
+    _set_portal_session_cookie(
+        response,
+        workspace_id=workspace.id,
+        access_token=workspace.access_token,
+    )
+
     return AccessResponse(
         workspace_id=workspace.id,
         access_token=workspace.access_token,
@@ -256,13 +398,65 @@ def create_or_resume_access(payload: AccessRequest, db: DbSession) -> AccessResp
     )
 
 
-@router.get("/workspaces/{workspace_id}", response_model=WorkspaceSummary)
-def get_workspace(
-    workspace_id: str,
+@router.post("/logout", status_code=status.HTTP_204_NO_CONTENT)
+def portal_logout(response: Response) -> None:
+    """Clear the portal session cookie."""
+    _clear_portal_session_cookie(response)
+
+
+@router.get("/me", response_model=WorkspaceSummary)
+def get_portal_me(
+    request: Request,
     db: DbSession,
     x_workspace_token: Annotated[str, Header(alias="X-Workspace-Token")] = "",
 ) -> WorkspaceSummary:
-    workspace = _load_workspace(db, workspace_id, x_workspace_token)
+    """Return the workspace summary for the current session.
+
+    Reads the portal session cookie. Falls back to ``X-Workspace-Token``
+    during the V1.7 transition. Returns 401 when no valid session is
+    present — the frontend interprets this as "send the user to /".
+    """
+    workspace_id, access_token = _session_from_request(
+        request, legacy_header=x_workspace_token
+    )
+    if not access_token:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Sesión de portal requerida.",
+        )
+    if not workspace_id:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail=(
+                "Sesión de portal requerida. La cabecera X-Workspace-Token "
+                "ya no es suficiente sin un workspace_id en la ruta — usa la cookie."
+            ),
+        )
+    workspace = _load_workspace(db, workspace_id, access_token)
+    return WorkspaceSummary(
+        workspace_id=workspace.id,
+        persona_type=workspace.persona_type,
+        client_name=workspace.client.name,
+        vendor_name=workspace.vendor.name,
+        vendor_rfc=workspace.vendor.rfc,
+        filial_name=workspace.filial_name,
+        contract_reference=(
+            workspace.contract.external_reference if workspace.contract else None
+        ),
+        onboarding_completed_at=(
+            workspace.onboarding_completed_at.isoformat()
+            if workspace.onboarding_completed_at
+            else None
+        ),
+    )
+
+
+@router.get("/workspaces/{workspace_id}", response_model=WorkspaceSummary)
+def get_workspace(
+    workspace_id: str,
+    workspace: Annotated[ProviderWorkspace, Depends(current_portal_workspace)],
+) -> WorkspaceSummary:
+    _ = workspace_id  # tenant guard already enforced by current_portal_workspace
     return WorkspaceSummary(
         workspace_id=workspace.id,
         persona_type=workspace.persona_type,
@@ -285,9 +479,9 @@ def get_workspace(
 def get_workspace_onboarding(
     workspace_id: str,
     db: DbSession,
-    x_workspace_token: Annotated[str, Header(alias="X-Workspace-Token")] = "",
+    workspace: Annotated[ProviderWorkspace, Depends(current_portal_workspace)],
 ) -> dict:
-    workspace = _load_workspace(db, workspace_id, x_workspace_token)
+    _ = workspace_id  # tenant guard already enforced by dependency
     subs = _workspace_submissions(db, workspace)
     expediente = expediente_for_persona(workspace.persona_type)  # type: ignore[arg-type]
 
@@ -350,10 +544,10 @@ def get_workspace_onboarding(
 def get_workspace_calendar(
     workspace_id: str,
     db: DbSession,
+    workspace: Annotated[ProviderWorkspace, Depends(current_portal_workspace)],
     year: int = 2026,
-    x_workspace_token: Annotated[str, Header(alias="X-Workspace-Token")] = "",
 ) -> dict:
-    workspace = _load_workspace(db, workspace_id, x_workspace_token)
+    _ = workspace_id  # tenant guard already enforced by dependency
     subs = _workspace_submissions(db, workspace)
     recurring = recurring_for_year(year, workspace.persona_type)  # type: ignore[arg-type]
 
@@ -526,9 +720,9 @@ def get_workspace_submission(
     workspace_id: str,
     submission_id: str,
     db: DbSession,
-    x_workspace_token: Annotated[str, Header(alias="X-Workspace-Token")] = "",
+    workspace: Annotated[ProviderWorkspace, Depends(current_portal_workspace)],
 ) -> SubmissionDetailResponse:
-    workspace = _load_workspace(db, workspace_id, x_workspace_token)
+    _ = workspace_id  # tenant guard already enforced by dependency
     submission = db.scalar(
         select(Submission).where(Submission.id == submission_id).limit(1)
     )
@@ -714,7 +908,7 @@ def check_workspace_duplicate(
     workspace_id: str,
     sha256: str,
     db: DbSession,
-    x_workspace_token: Annotated[str, Header(alias="X-Workspace-Token")] = "",
+    workspace: Annotated[ProviderWorkspace, Depends(current_portal_workspace)],
 ) -> DuplicateCheckResponse:
     """Return whether ``sha256`` already exists for this workspace's submissions.
 
@@ -723,7 +917,7 @@ def check_workspace_duplicate(
     provider with that same file hash. The goal is to *warn before submit*
     rather than detecting duplicates after the upload pipeline runs.
     """
-    workspace = _load_workspace(db, workspace_id, x_workspace_token)
+    _ = workspace_id  # tenant guard already enforced by dependency
     if not sha256 or len(sha256) != 64:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,

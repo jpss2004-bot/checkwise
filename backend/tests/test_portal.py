@@ -81,6 +81,11 @@ def test_portal_workspace_requires_correct_token(api_client: TestClient) -> None
     access = api_client.post("/api/v1/portal/access", json=_access_payload()).json()
     workspace_id = access["workspace_id"]
 
+    # CheckWise 1.7: /access now also sets an httpOnly session cookie.
+    # Negative case must simulate a foreign attacker (no cookie + a
+    # guessed header), so clear the cookie first.
+    api_client.cookies.clear()
+
     bad = api_client.get(
         f"/api/v1/portal/workspaces/{workspace_id}",
         headers={"X-Workspace-Token": "wrong-token"},
@@ -305,6 +310,8 @@ def test_submission_detail_lists_previous_attempts_for_same_slot(
 def test_submission_detail_requires_correct_token(api_client: TestClient) -> None:
     access = api_client.post("/api/v1/portal/access", json=_access_payload()).json()
     submitted = _submit_canonical(api_client, vendor_rfc=access["vendor_rfc"])
+    # CheckWise 1.7: simulate a foreign attacker — no valid cookie.
+    api_client.cookies.clear()
     bad = api_client.get(
         f"/api/v1/portal/workspaces/{access['workspace_id']}"
         f"/submissions/{submitted['submission_id']}",
@@ -403,9 +410,77 @@ def test_check_duplicate_rejects_malformed_hash(api_client: TestClient) -> None:
 
 def test_check_duplicate_requires_workspace_token(api_client: TestClient) -> None:
     access = api_client.post("/api/v1/portal/access", json=_access_payload()).json()
+    # CheckWise 1.7: simulate a foreign attacker — no valid cookie.
+    api_client.cookies.clear()
     response = api_client.get(
         f"/api/v1/portal/workspaces/{access['workspace_id']}/duplicate-check"
         f"?sha256={'0' * 64}",
         headers={"X-Workspace-Token": "wrong-token"},
     )
     assert response.status_code == 401
+
+
+# ---------------------------------------------------------------------------
+# CheckWise 1.7 — session cookie + tenant guard
+# ---------------------------------------------------------------------------
+
+
+COOKIE_NAME = "checkwise_portal_session"
+
+
+def test_access_sets_session_cookie(api_client: TestClient) -> None:
+    """/access must issue the httpOnly portal session cookie."""
+    response = api_client.post("/api/v1/portal/access", json=_access_payload())
+    assert response.status_code == 201
+    # cookie is delivered via Set-Cookie header
+    set_cookie = response.headers.get("set-cookie", "")
+    assert COOKIE_NAME in set_cookie
+    assert "HttpOnly" in set_cookie
+    assert "SameSite=lax" in set_cookie.lower() or "samesite=lax" in set_cookie.lower()
+
+
+def test_me_reads_session_from_cookie(api_client: TestClient) -> None:
+    """/me returns the workspace summary when only the cookie is present."""
+    access = api_client.post("/api/v1/portal/access", json=_access_payload()).json()
+    # Don't send the X-Workspace-Token header — cookie alone must work.
+    me = api_client.get("/api/v1/portal/me")
+    assert me.status_code == 200
+    body = me.json()
+    assert body["workspace_id"] == access["workspace_id"]
+    assert body["vendor_rfc"] == access["vendor_rfc"]
+
+
+def test_me_returns_401_without_session(api_client: TestClient) -> None:
+    api_client.cookies.clear()
+    response = api_client.get("/api/v1/portal/me")
+    assert response.status_code == 401
+
+
+def test_logout_clears_session_cookie(api_client: TestClient) -> None:
+    api_client.post("/api/v1/portal/access", json=_access_payload())
+    logout = api_client.post("/api/v1/portal/logout")
+    assert logout.status_code == 204
+    # After logout, /me must 401.
+    me = api_client.get("/api/v1/portal/me")
+    assert me.status_code == 401
+
+
+def test_tenant_guard_rejects_path_mismatch(api_client: TestClient) -> None:
+    """Cookie's workspace_id must match path's {workspace_id}.
+
+    Opens two workspaces in two clients; client_b holds the cookie for
+    workspace_b. Attempting to read workspace_a via the path must 403.
+    """
+    access_a = api_client.post("/api/v1/portal/access", json=_access_payload()).json()
+
+    fresh = TestClient(api_client.app)
+    fresh.post(
+        "/api/v1/portal/access",
+        json=_access_payload(
+            vendor_name="Otro Proveedor SA",
+            vendor_rfc="OTR260512AB1",
+        ),
+    )
+    # fresh now holds the cookie for the OTHER workspace.
+    cross = fresh.get(f"/api/v1/portal/workspaces/{access_a['workspace_id']}")
+    assert cross.status_code == 403
