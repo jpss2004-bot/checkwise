@@ -38,7 +38,7 @@ from app.services.document_intelligence import analyze_document_text
 from app.services.pdf_validation import inspect_pdf
 from app.services.prevalidation import build_initial_validations
 from app.services.requirement_service import resolve_period, resolve_requirement
-from app.services.storage import LocalStorageService
+from app.services.storage import get_storage_service
 from app.services.submission_service import (
     add_native_intake_events,
     assert_pdf_upload,
@@ -131,7 +131,7 @@ async def create_submission(
             status_code=status.HTTP_422_UNPROCESSABLE_CONTENT, detail="Institución inválida."
         )
 
-    storage = LocalStorageService()
+    storage = get_storage_service()
     try:
         stored_file = await storage.save_upload(file)
     except ValueError as exc:

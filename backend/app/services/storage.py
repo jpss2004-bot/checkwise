@@ -1,9 +1,30 @@
+"""Pluggable upload storage.
+
+Two backends ship today:
+
+``LocalStorageService``
+    Writes uploads under ``settings.LOCAL_STORAGE_PATH``. Used in dev and
+    in CI tests.
+
+``S3StorageService``
+    Uploads to any S3-compatible bucket (AWS S3, Cloudflare R2, MinIO).
+    The bytes still pass through a short-lived local temp file so PDF
+    inspection (which reads from ``StoredFile.path``) keeps working
+    without each caller having to know which backend is in use.
+
+Pick a backend with ``STORAGE_BACKEND={local,s3}``. Routes should call
+``get_storage_service()`` rather than instantiating a backend directly so
+config drives the choice end-to-end.
+"""
+
 from __future__ import annotations
 
 import hashlib
 import re
+import tempfile
 from dataclasses import dataclass
 from pathlib import Path
+from typing import Protocol
 
 from fastapi import UploadFile
 
@@ -21,34 +42,71 @@ class StoredFile:
     extension: str
 
 
+class StorageService(Protocol):
+    async def save_upload(self, upload: UploadFile) -> StoredFile: ...
+
+    def open_for_read(self, storage_key: str) -> Path:  # pragma: no cover - protocol stub
+        """Return a local path the caller can read for the duration of the request."""
+        ...
+
+    def presigned_download_url(
+        self, storage_key: str, *, ttl_seconds: int | None = None
+    ) -> str | None:  # pragma: no cover - protocol stub
+        """Return a time-limited download URL, or None when the backend serves files directly."""
+        ...
+
+
+def _safe_filename(filename: str) -> str:
+    cleaned = re.sub(r"[^A-Za-z0-9._-]+", "-", filename.strip()).strip("-")
+    return cleaned or "documento"
+
+
+async def _stream_to_temp(
+    upload: UploadFile, *, max_bytes: int
+) -> tuple[Path, str, int, str]:
+    """Stream the upload into a temp file while hashing.
+
+    Returns ``(temp_path, safe_filename, size_bytes, sha256_hex)``. The
+    caller owns the temp file and is responsible for moving or deleting
+    it. Enforces ``max_bytes`` so we never persist anything past the
+    limit, even on the S3 path.
+    """
+    if not upload.filename:
+        raise ValueError("El archivo no tiene nombre.")
+
+    safe_name = _safe_filename(upload.filename)
+    temp_dir = Path(tempfile.gettempdir()) / "checkwise-uploads"
+    temp_dir.mkdir(parents=True, exist_ok=True)
+    temp_path = temp_dir / f"{hashlib.sha1(safe_name.encode()).hexdigest()}-{safe_name}"
+
+    sha256 = hashlib.sha256()
+    size = 0
+
+    with temp_path.open("wb") as fh:
+        while chunk := await upload.read(1024 * 1024):
+            size += len(chunk)
+            if size > max_bytes:
+                temp_path.unlink(missing_ok=True)
+                raise ValueError("El archivo excede el tamaño máximo permitido.")
+            sha256.update(chunk)
+            fh.write(chunk)
+
+    return temp_path, safe_name, size, sha256.hexdigest()
+
+
+def _storage_key_for(sha256_hex: str, safe_name: str) -> str:
+    return f"documents/{sha256_hex[:2]}/{sha256_hex}/{safe_name}"
+
+
 class LocalStorageService:
     def __init__(self, base_path: str | Path | None = None) -> None:
         self.base_path = Path(base_path or settings.LOCAL_STORAGE_PATH)
 
     async def save_upload(self, upload: UploadFile) -> StoredFile:
-        if not upload.filename:
-            raise ValueError("El archivo no tiene nombre.")
-
-        safe_name = self._safe_filename(upload.filename)
-        extension = Path(safe_name).suffix.lower()
-        temp_dir = self.base_path / "tmp"
-        temp_dir.mkdir(parents=True, exist_ok=True)
-        temp_path = temp_dir / f"{hashlib.sha1(safe_name.encode()).hexdigest()}-{safe_name}"
-
-        sha256 = hashlib.sha256()
-        size = 0
-
-        with temp_path.open("wb") as fh:
-            while chunk := await upload.read(1024 * 1024):
-                size += len(chunk)
-                if size > settings.MAX_UPLOAD_SIZE_BYTES:
-                    temp_path.unlink(missing_ok=True)
-                    raise ValueError("El archivo excede el tamaño máximo permitido.")
-                sha256.update(chunk)
-                fh.write(chunk)
-
-        digest = sha256.hexdigest()
-        storage_key = f"documents/{digest[:2]}/{digest}/{safe_name}"
+        temp_path, safe_name, size, digest = await _stream_to_temp(
+            upload, max_bytes=settings.MAX_UPLOAD_SIZE_BYTES
+        )
+        storage_key = _storage_key_for(digest, safe_name)
         final_path = self.base_path / storage_key
         final_path.parent.mkdir(parents=True, exist_ok=True)
         temp_path.replace(final_path)
@@ -56,14 +114,152 @@ class LocalStorageService:
         return StoredFile(
             storage_key=storage_key,
             path=final_path,
-            original_filename=upload.filename,
+            original_filename=upload.filename or safe_name,
             mime_type=upload.content_type,
             size_bytes=size,
             sha256=digest,
-            extension=extension,
+            extension=Path(safe_name).suffix.lower(),
         )
 
-    @staticmethod
-    def _safe_filename(filename: str) -> str:
-        cleaned = re.sub(r"[^A-Za-z0-9._-]+", "-", filename.strip()).strip("-")
-        return cleaned or "documento"
+    def open_for_read(self, storage_key: str) -> Path:
+        return self.base_path / storage_key
+
+    def presigned_download_url(
+        self, storage_key: str, *, ttl_seconds: int | None = None
+    ) -> str | None:
+        # Local backend serves files via the application directly, not via signed URLs.
+        return None
+
+
+class S3StorageService:
+    """S3-compatible backend.
+
+    Uploads stream through a local temp file (so we hash + size-check the
+    bytes once and PDF inspection still has a real file to read), then
+    the temp file is uploaded to the bucket. The temp file is left in
+    place for the duration of the request so callers can read it via
+    ``StoredFile.path``; Render's ``/tmp`` is ephemeral so we don't need
+    a sweeper for short-lived processes.
+    """
+
+    def __init__(
+        self,
+        *,
+        bucket: str | None = None,
+        endpoint_url: str | None = None,
+        region: str | None = None,
+        access_key_id: str | None = None,
+        secret_access_key: str | None = None,
+        client=None,  # noqa: ANN001 - boto3 typing is loose; tests inject a moto client
+    ) -> None:
+        self.bucket = bucket or settings.STORAGE_BUCKET
+        if client is not None:
+            self._client = client
+        else:
+            self._client = _build_s3_client(
+                endpoint_url=endpoint_url or settings.AWS_S3_ENDPOINT or None,
+                region=region or settings.AWS_REGION or "auto",
+                access_key_id=access_key_id or settings.AWS_ACCESS_KEY_ID or None,
+                secret_access_key=secret_access_key or settings.AWS_SECRET_ACCESS_KEY or None,
+            )
+
+    async def save_upload(self, upload: UploadFile) -> StoredFile:
+        temp_path, safe_name, size, digest = await _stream_to_temp(
+            upload, max_bytes=settings.MAX_UPLOAD_SIZE_BYTES
+        )
+        storage_key = _storage_key_for(digest, safe_name)
+
+        extra_args: dict[str, str] = {}
+        if upload.content_type:
+            extra_args["ContentType"] = upload.content_type
+
+        with temp_path.open("rb") as fh:
+            self._client.upload_fileobj(
+                Fileobj=fh,
+                Bucket=self.bucket,
+                Key=storage_key,
+                ExtraArgs=extra_args or None,
+            )
+
+        return StoredFile(
+            storage_key=storage_key,
+            path=temp_path,
+            original_filename=upload.filename or safe_name,
+            mime_type=upload.content_type,
+            size_bytes=size,
+            sha256=digest,
+            extension=Path(safe_name).suffix.lower(),
+        )
+
+    def open_for_read(self, storage_key: str) -> Path:
+        """Materialize an object back to a local temp file and return its path.
+
+        Used by retroactive operations (e.g. re-inspecting an older
+        document). Single-shot — callers should not hold onto the path
+        across requests.
+        """
+        temp_dir = Path(tempfile.gettempdir()) / "checkwise-downloads"
+        temp_dir.mkdir(parents=True, exist_ok=True)
+        suffix = Path(storage_key).suffix or ".bin"
+        fd, name = tempfile.mkstemp(prefix="cw-", suffix=suffix, dir=temp_dir)
+        # Close the fd; boto3 will reopen by path.
+        import os
+
+        os.close(fd)
+        temp_path = Path(name)
+        self._client.download_file(Bucket=self.bucket, Key=storage_key, Filename=str(temp_path))
+        return temp_path
+
+    def presigned_download_url(
+        self, storage_key: str, *, ttl_seconds: int | None = None
+    ) -> str | None:
+        ttl = ttl_seconds if ttl_seconds is not None else settings.S3_PRESIGNED_URL_TTL_SECONDS
+        return self._client.generate_presigned_url(
+            ClientMethod="get_object",
+            Params={"Bucket": self.bucket, "Key": storage_key},
+            ExpiresIn=ttl,
+        )
+
+
+def _build_s3_client(
+    *,
+    endpoint_url: str | None,
+    region: str,
+    access_key_id: str | None,
+    secret_access_key: str | None,
+):  # noqa: ANN202 - boto3 client type is loose
+    """Build a boto3 S3 client tuned for non-AWS providers (Cloudflare R2)."""
+    import boto3
+    from botocore.config import Config
+
+    # R2 (and most non-AWS S3 providers) reject AWS's newer per-request
+    # integrity checksums. ``when_required`` keeps the checksum logic
+    # only for operations that mandate it (e.g. multipart finalize),
+    # which is what R2 expects.
+    config = Config(
+        signature_version="s3v4",
+        request_checksum_calculation="when_required",
+        response_checksum_validation="when_required",
+        retries={"max_attempts": 3, "mode": "standard"},
+    )
+    return boto3.client(
+        "s3",
+        endpoint_url=endpoint_url,
+        region_name=region,
+        aws_access_key_id=access_key_id,
+        aws_secret_access_key=secret_access_key,
+        config=config,
+    )
+
+
+def get_storage_service() -> StorageService:
+    """Return the storage backend selected by ``STORAGE_BACKEND``."""
+    backend = (settings.STORAGE_BACKEND or "local").strip().lower()
+    if backend == "s3":
+        return S3StorageService()
+    if backend == "local":
+        return LocalStorageService()
+    raise ValueError(
+        f"STORAGE_BACKEND={settings.STORAGE_BACKEND!r} is not supported. "
+        "Use 'local' or 's3'."
+    )

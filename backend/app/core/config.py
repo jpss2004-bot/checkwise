@@ -12,12 +12,26 @@ class Settings(BaseSettings):
     CHECKWISE_ENV: str = "local"
 
     DATABASE_URL: str = "postgresql+psycopg://checkwise:checkwise@localhost:5432/checkwise"
+    # Optional second URL used only by Alembic. Pooled connection providers
+    # (Neon's pgbouncer endpoint, RDS Proxy, etc.) don't support the advisory
+    # locks Alembic uses, so production deploys point DATABASE_URL at the
+    # pooled endpoint and DIRECT_DATABASE_URL at the direct endpoint.
+    DIRECT_DATABASE_URL: str = ""
     CORS_ORIGINS: str = "http://localhost:3000,http://127.0.0.1:3000"
 
     STORAGE_BACKEND: str = "local"
     STORAGE_BUCKET: str = "checkwise-local"
     STORAGE_PUBLIC_BASE_URL: str = ""
     LOCAL_STORAGE_PATH: str = "./storage"
+
+    # S3-compatible object storage (used when STORAGE_BACKEND == "s3").
+    # AWS_S3_ENDPOINT is the bucket endpoint URL — set it for Cloudflare R2,
+    # MinIO, or any non-AWS provider; leave blank for AWS S3 itself.
+    AWS_ACCESS_KEY_ID: str = ""
+    AWS_SECRET_ACCESS_KEY: str = ""
+    AWS_S3_ENDPOINT: str = ""
+    AWS_REGION: str = "auto"
+    S3_PRESIGNED_URL_TTL_SECONDS: int = 60 * 15
 
     MAX_UPLOAD_SIZE_BYTES: int = 15 * 1024 * 1024
     ALLOWED_FILE_EXTENSIONS: str = ".pdf"
@@ -54,6 +68,37 @@ class Settings(BaseSettings):
     def cookie_secure(self) -> bool:
         """Set `Secure` on cookies in any non-local environment."""
         return self.CHECKWISE_ENV != "local"
+
+    @property
+    def sqlalchemy_url(self) -> str:
+        """``DATABASE_URL`` normalized for SQLAlchemy + psycopg 3.
+
+        Managed providers (Neon, Supabase, Render) hand out plain
+        ``postgresql://`` URLs. SQLAlchemy with psycopg 3 needs the
+        explicit ``postgresql+psycopg://`` driver token, so paste-as-is
+        Just Works without you remembering to rewrite the URL.
+        """
+        return _normalize_pg_url(self.DATABASE_URL)
+
+    @property
+    def alembic_url(self) -> str:
+        """URL Alembic should use.
+
+        Prefers ``DIRECT_DATABASE_URL`` (pooled endpoints lack advisory
+        locks). Falls back to ``DATABASE_URL`` when no direct URL is set,
+        which matches single-endpoint dev setups.
+        """
+        return _normalize_pg_url(self.DIRECT_DATABASE_URL or self.DATABASE_URL)
+
+
+def _normalize_pg_url(url: str) -> str:
+    if not url:
+        return url
+    if url.startswith("postgres://"):
+        url = "postgresql://" + url[len("postgres://"):]
+    if url.startswith("postgresql://"):
+        return "postgresql+psycopg://" + url[len("postgresql://"):]
+    return url
 
 
 @lru_cache

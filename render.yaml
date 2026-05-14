@@ -1,0 +1,83 @@
+# Render Blueprint — CheckWise backend
+#
+# Provisioning:
+#   1. dashboard.render.com → New → Blueprint → pick this repo + branch.
+#   2. Render reads this file, shows the service shape, and prompts for
+#      the env vars with `sync: false` (the secret ones).
+#   3. Paste DATABASE_URL + DIRECT_DATABASE_URL from Neon, R2 credentials
+#      from Cloudflare, and a fresh AUTH_JWT_SECRET (openssl rand -hex 32).
+#   4. Apply. First deploy runs `pip install` then `alembic upgrade head`
+#      against DIRECT_DATABASE_URL, then starts uvicorn.
+#
+# Why this shape:
+#   * runtime: python — Render has native Python support, no Dockerfile
+#     needed. Uvicorn is a long-lived ASGI process, not a Lambda; that's
+#     why we host it here instead of Vercel.
+#   * rootDir: backend — the FastAPI app lives in /backend; the
+#     frontend deploys to Vercel separately.
+#   * preDeployCommand — runs migrations BEFORE traffic shifts to the
+#     new instance. If migration fails, the new instance never goes
+#     live and the old one keeps serving.
+#   * healthCheckPath: /health — Render polls this to gate rollouts.
+#
+# Plan choice — `starter` ($7/mo) keeps the instance warm. The `free`
+# tier spins down after 15 min idle and the first request after spin-up
+# takes ~30s, which is acceptable for an early beta but not for users.
+
+services:
+  - type: web
+    name: checkwise-api
+    runtime: python
+    plan: starter
+    rootDir: backend
+    branch: prod-ready/v1.7
+    autoDeploy: true
+    buildCommand: pip install -e .
+    preDeployCommand: alembic upgrade head
+    startCommand: uvicorn app.main:app --host 0.0.0.0 --port $PORT
+    healthCheckPath: /health
+    envVars:
+      # ---- Runtime ----
+      - key: CHECKWISE_ENV
+        value: production
+      - key: PYTHON_VERSION
+        value: "3.11"
+
+      # ---- Database (Neon) ----
+      # DATABASE_URL points at the POOLED Neon endpoint (used at runtime).
+      # DIRECT_DATABASE_URL points at the DIRECT endpoint (used by Alembic
+      # — pooled endpoints don't support advisory locks).
+      - key: DATABASE_URL
+        sync: false
+      - key: DIRECT_DATABASE_URL
+        sync: false
+
+      # ---- CORS ----
+      # Comma-separated. Add the Vercel preview + production origins after
+      # the frontend deploy lands. The local dev origins stay so devs can
+      # hit prod from their laptop in a pinch — remove for true prod.
+      - key: CORS_ORIGINS
+        value: "http://localhost:3000,http://127.0.0.1:3000"
+
+      # ---- Storage (Cloudflare R2) ----
+      - key: STORAGE_BACKEND
+        value: s3
+      - key: STORAGE_BUCKET
+        value: checkwise-prod
+      - key: AWS_S3_ENDPOINT
+        sync: false        # https://<account_id>.r2.cloudflarestorage.com
+      - key: AWS_ACCESS_KEY_ID
+        sync: false
+      - key: AWS_SECRET_ACCESS_KEY
+        sync: false
+      - key: AWS_REGION
+        value: auto
+
+      # ---- Auth ----
+      # 32+ char random secret. Generate with: openssl rand -hex 32
+      - key: AUTH_JWT_SECRET
+        sync: false
+
+      # ---- Support links (optional; populate when finalized) ----
+      - key: SUPPORT_WHATSAPP_URL
+        sync: false
