@@ -65,16 +65,27 @@ const Button = React.forwardRef<HTMLButtonElement, ButtonProps>(
     ref,
   ) => {
     const Comp = asChild ? Slot : "button";
+    // Slot requires a single child, so when asChild is true we pass
+    // `children` directly without injecting the loading spinner. The
+    // `loading` prop is only meaningful for native button usage.
+    const content =
+      asChild || !loading ? (
+        children
+      ) : (
+        <>
+          <Spinner className="text-current" label={null} />
+          {children}
+        </>
+      );
     return (
       <Comp
         className={cn(buttonVariants({ variant, size, className }))}
         ref={ref}
-        aria-busy={loading || undefined}
-        disabled={disabled || loading}
+        aria-busy={!asChild && loading ? true : undefined}
+        disabled={!asChild && (disabled || loading)}
         {...props}
       >
-        {loading && <Spinner className="text-current" label={null} />}
-        {children}
+        {content}
       </Comp>
     );
   },
