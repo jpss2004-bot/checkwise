@@ -5,7 +5,7 @@ import textwrap
 from pathlib import Path
 
 
-ROOT_DIR = Path(__file__).resolve().parents[1]
+ROOT_DIR = Path(__file__).resolve().parents[2]
 DEMO_ASSETS_DIR = ROOT_DIR / "demo_assets"
 SAMPLE_DOCUMENTS_DIR = DEMO_ASSETS_DIR / "sample_documents"
 SAMPLE_PDF_PATH = SAMPLE_DOCUMENTS_DIR / "checkwise_demo_opinion_sat.pdf"

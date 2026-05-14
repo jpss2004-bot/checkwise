@@ -11,7 +11,7 @@ Assets seguros para presentar CheckWise V1 sin usar datos reales sensibles.
 ## Regenerar PDF de muestra
 
 ```bash
-python3 tools/generate_demo_assets.py
+python3 scripts/reports/generate_demo_assets.py
 ```
 
 El PDF de muestra incluye texto visible para que las validaciones de lectura puedan detectarlo.

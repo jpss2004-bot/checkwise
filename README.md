@@ -22,57 +22,54 @@ V1.2 agrega:
 
 ## Arranque rápido para demo local
 
-Desde el repo:
+Primera vez:
 
 ```bash
-cd /Users/josepablosamano/Desktop/Personal/legalshelf/checkwise/CheckWise
-./scripts/checkwise_safe_v1.sh doctor
-./scripts/checkwise_safe_v1.sh backend-deps
-./scripts/checkwise_safe_v1.sh frontend-deps
+bash backend/scripts/dev_setup.sh   # crea .venv, instala deps, corre alembic
+cd frontend && npm install && cd ..
 ```
 
-Si Docker Desktop/PostgreSQL está disponible y se quiere correr la demo con persistencia real:
+Arrancar todo el stack (backend en :8000, frontend en :3000):
 
 ```bash
-./scripts/checkwise_safe_v1.sh postgres
-./scripts/checkwise_safe_v1.sh migrate
+bash dev.sh
 ```
 
-Docker es necesario para la demo completa con PostgreSQL local. Los tests de backend usan SQLite en memoria y pueden correr sin Docker.
-
-Terminal 1:
+O en dos terminales:
 
 ```bash
-./scripts/checkwise_safe_v1.sh backend
-```
+# Terminal 1
+bash backend/scripts/dev_start.sh
 
-Terminal 2:
-
-```bash
-./scripts/checkwise_safe_v1.sh frontend
+# Terminal 2
+cd frontend && npm run dev
 ```
 
 URLs de demo:
 
-- Frontend: `http://127.0.0.1:3000`
-- Backend: `http://127.0.0.1:8000`
-- FastAPI docs: `http://127.0.0.1:8000/docs`
+- Frontend: `http://localhost:3000`
+- Backend: `http://localhost:8000`
+- FastAPI docs: `http://localhost:8000/docs`
+
+Reset de DB (borra SQLite local, re-corre migraciones, vuelve a seedear):
+
+```bash
+bash backend/scripts/dev_reset.sh
+```
 
 ## Verificación
 
 ```bash
-./scripts/checkwise_safe_v1.sh verify
-cd backend && .venv/bin/ruff check . && .venv/bin/pytest
-cd frontend && npm run lint && npm run typecheck && npm run build
+cd backend && .venv/bin/ruff check . && .venv/bin/pytest -q
+cd frontend && npm run lint && npx tsc --noEmit && npm run build
 ```
 
 ## Demo preparada
 
 - Guía: `docs/DEMO_GUIDE.md`
 - Portal flow: `docs/PROVIDER_PORTAL_FLOW.md`
-- PDF ficticio: `demo_assets/sample_documents/checkwise_demo_opinion_sat.pdf`
 - Screenshots reales: `demo_assets/screenshots/`
-- Regenerar PDFs de demo: `python3 tools/generate_demo_assets.py`
+- Regenerar assets de demo: `python3 scripts/reports/generate_demo_assets.py`
 
 ## Alcance V1 de esta fase
 

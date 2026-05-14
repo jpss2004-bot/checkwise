@@ -47,6 +47,9 @@ postgres-data/
 backend/*.db
 backend/*.db-journal
 
+# Build / report artifacts
+outputs/
+
 # Local session artifacts
 CodexConvo.txt
 .claude/

@@ -23,7 +23,7 @@ from reportlab.platypus import (
 )
 
 
-ROOT = Path(__file__).resolve().parents[1]
+ROOT = Path(__file__).resolve().parents[2]
 SOURCE_JSON = ROOT / "outputs" / "checkwise_source_extract.json"
 OUT = ROOT / "outputs" / "CheckWise_Reporte_Profesional_Arquitectura_V1.pdf"
 

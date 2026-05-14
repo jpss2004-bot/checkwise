@@ -93,49 +93,36 @@ Los screenshots de esta guía se capturan desde el sistema local corriendo. No s
 
 ## Instrucciones locales
 
-Desde el repo:
+Primera vez:
 
 ```bash
-cd /Users/josepablosamano/Desktop/Personal/legalshelf/checkwise/CheckWise
-./scripts/checkwise_safe_v1.sh doctor
-./scripts/checkwise_safe_v1.sh backend-deps
-./scripts/checkwise_safe_v1.sh frontend-deps
+bash backend/scripts/dev_setup.sh
+cd frontend && npm install && cd ..
 ```
 
-Si se quiere correr con PostgreSQL local:
+Arrancar todo (backend + frontend en paralelo):
 
 ```bash
-./scripts/checkwise_safe_v1.sh postgres
-./scripts/checkwise_safe_v1.sh migrate
+bash dev.sh
 ```
 
-Docker/PostgreSQL es necesario para la demo completa con persistencia real. Los tests de backend usan SQLite en memoria, por lo que pueden correr aunque PostgreSQL no esté activo.
-
-Terminal 1:
+O en terminales separadas:
 
 ```bash
-./scripts/checkwise_safe_v1.sh backend
-```
+# Terminal 1
+bash backend/scripts/dev_start.sh
 
-Terminal 2:
-
-```bash
-./scripts/checkwise_safe_v1.sh frontend
-```
-
-Terminal 3:
-
-```bash
-./scripts/checkwise_safe_v1.sh verify
+# Terminal 2
+cd frontend && npm run dev
 ```
 
 URLs:
 
-- Frontend: `http://127.0.0.1:3000`
-- Backend: `http://127.0.0.1:8000`
-- FastAPI docs: `http://127.0.0.1:8000/docs`
-- Health: `http://127.0.0.1:8000/health`
-- Catalogs: `http://127.0.0.1:8000/api/v1/catalogs`
+- Frontend: `http://localhost:3000`
+- Backend: `http://localhost:8000`
+- FastAPI docs: `http://localhost:8000/docs`
+- Health: `http://localhost:8000/health`
+- Catalogs: `http://localhost:8000/api/v1/catalogs`
 
 ## Tests y verificación técnica
 
@@ -144,7 +131,7 @@ Backend:
 ```bash
 cd backend
 .venv/bin/ruff check .
-.venv/bin/pytest
+.venv/bin/pytest -q
 ```
 
 Frontend:
@@ -152,22 +139,22 @@ Frontend:
 ```bash
 cd frontend
 npm run lint
-npm run typecheck
+npx tsc --noEmit
 npm run build
 ```
 
 Verificación HTTP:
 
 ```bash
-curl http://127.0.0.1:8000/health
-curl http://127.0.0.1:8000/api/v1/catalogs
-curl http://127.0.0.1:8000/docs
+curl http://localhost:8000/health
+curl http://localhost:8000/api/v1/catalogs
+curl http://localhost:8000/docs
 ```
 
 ## Regenerar assets de demo
 
 ```bash
-python3 tools/generate_demo_assets.py
+python3 scripts/reports/generate_demo_assets.py
 ```
 
 Este comando genera:
@@ -182,7 +169,7 @@ Este comando genera:
 ```bash
 lsof -i :3000
 kill -9 $(lsof -ti :3000)
-./scripts/checkwise_safe_v1.sh frontend
+cd frontend && npm run dev
 ```
 
 ### Puerto 8000 ocupado
@@ -190,18 +177,14 @@ kill -9 $(lsof -ti :3000)
 ```bash
 lsof -i :8000
 kill -9 $(lsof -ti :8000)
-./scripts/checkwise_safe_v1.sh backend
+bash backend/scripts/dev_start.sh
 ```
 
 ### Backend no responde
 
-1. Confirmar que el backend está corriendo.
-2. Si se usa PostgreSQL, confirmar Docker Desktop y migraciones.
-3. Ejecutar:
-
-```bash
-./scripts/checkwise_safe_v1.sh verify
-```
+1. Confirmar que el backend está corriendo (`bash backend/scripts/dev_start.sh`).
+2. Si la DB local está corrupta, resetear: `bash backend/scripts/dev_reset.sh`.
+3. Confirmar `curl http://localhost:8000/health`.
 
 ### Frontend no compila
 
@@ -214,12 +197,7 @@ npm run build
 
 ### Docker/PostgreSQL no disponible
 
-Abrir Docker Desktop y esperar a que termine de iniciar. Luego:
-
-```bash
-./scripts/checkwise_safe_v1.sh postgres
-./scripts/checkwise_safe_v1.sh migrate
-```
+El stack de desarrollo usa SQLite local por defecto (`backend/checkwise.db`), por lo que Docker no es necesario para la demo. Solo se requiere para correr contra PostgreSQL en producción.
 
 ### El formulario no envía
 
