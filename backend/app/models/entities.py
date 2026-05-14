@@ -358,6 +358,81 @@ class ProviderWorkspace(TimestampMixin, Base):
     contract: Mapped[Contract | None] = relationship()
 
 
+class Organization(TimestampMixin, Base):
+    """Tenant container introduced by the auth + RBAC patch.
+
+    Orgs come in three kinds. ``internal`` is LegalShelf staff
+    (reviewers and admins). ``client`` represents a company whose
+    REPSE compliance we track on behalf of, and may be linked back
+    to the legacy ``clients`` row to bridge the existing data model.
+    ``vendor`` is reserved for the future where providers also get
+    accounts; in V1 they still authenticate via ``ProviderWorkspace``
+    access tokens.
+    """
+
+    __tablename__ = "organizations"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=new_id)
+    name: Mapped[str] = mapped_column(String(255), nullable=False)
+    kind: Mapped[str] = mapped_column(String(40), nullable=False)
+    client_id: Mapped[str | None] = mapped_column(ForeignKey("clients.id"))
+    vendor_id: Mapped[str | None] = mapped_column(ForeignKey("vendors.id"))
+    status: Mapped[str] = mapped_column(String(40), default="active", nullable=False)
+
+    memberships: Mapped[list[Membership]] = relationship(
+        back_populates="organization", cascade="all, delete-orphan"
+    )
+
+
+class User(TimestampMixin, Base):
+    """Real user account. Email + bcrypt password hash + status.
+
+    Independent of ``ProviderWorkspace``: provider portal users still
+    authenticate via opaque workspace tokens. ``User`` exists for
+    LegalShelf staff (and, later, client / reviewer / vendor staff).
+    """
+
+    __tablename__ = "users"
+    __table_args__ = (UniqueConstraint("email", name="uq_users_email"),)
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=new_id)
+    email: Mapped[str] = mapped_column(String(255), nullable=False)
+    password_hash: Mapped[str | None] = mapped_column(String(255))
+    full_name: Mapped[str] = mapped_column(String(255), nullable=False)
+    status: Mapped[str] = mapped_column(String(40), default="active", nullable=False)
+    last_login_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+
+    memberships: Mapped[list[Membership]] = relationship(
+        back_populates="user", cascade="all, delete-orphan"
+    )
+
+
+class Membership(TimestampMixin, Base):
+    """Join table between users and orgs, carrying a single role.
+
+    A user with two roles in the same org has two rows. A user with
+    access to two orgs has two rows. The role vocabulary starts at
+    ``internal_admin``; ``reviewer`` and ``client_admin`` will be
+    added by later patches when the surfaces that need them ship.
+    """
+
+    __tablename__ = "memberships"
+    __table_args__ = (
+        UniqueConstraint(
+            "user_id", "organization_id", "role", name="uq_memberships_user_org_role"
+        ),
+    )
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=new_id)
+    user_id: Mapped[str] = mapped_column(ForeignKey("users.id"), nullable=False)
+    organization_id: Mapped[str] = mapped_column(ForeignKey("organizations.id"), nullable=False)
+    role: Mapped[str] = mapped_column(String(40), nullable=False)
+    status: Mapped[str] = mapped_column(String(40), default="active", nullable=False)
+
+    user: Mapped[User] = relationship(back_populates="memberships")
+    organization: Mapped[Organization] = relationship(back_populates="memberships")
+
+
 class AuditLog(Base):
     __tablename__ = "audit_log"
 

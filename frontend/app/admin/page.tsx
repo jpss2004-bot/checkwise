@@ -1,0 +1,177 @@
+"use client";
+
+import { useEffect, useState } from "react";
+import { useRouter } from "next/navigation";
+import { CheckCircle2, ClipboardList, LogOut, ShieldCheck, Users } from "lucide-react";
+
+import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import {
+  type AdminSession,
+  clearAdminSession,
+  readAdminSession,
+} from "@/lib/admin-session";
+
+export default function AdminHomePage() {
+  const router = useRouter();
+  const [session, setSession] = useState<AdminSession | null>(null);
+
+  useEffect(() => {
+    const current = readAdminSession();
+    if (!current) {
+      router.replace("/admin/login");
+      return;
+    }
+    setSession(current);
+  }, [router]);
+
+  function onLogout() {
+    clearAdminSession();
+    router.replace("/admin/login");
+  }
+
+  if (!session) return null;
+
+  return (
+    <main className="mx-auto max-w-5xl space-y-6 px-5 py-8">
+      <header className="flex flex-wrap items-start justify-between gap-3">
+        <div className="min-w-0">
+          <p className="flex items-center gap-2 text-xs font-medium uppercase tracking-wide text-muted-foreground">
+            <ShieldCheck className="h-4 w-4 text-primary" aria-hidden />
+            Espacio interno
+          </p>
+          <h1 className="text-2xl font-semibold">Hola, {firstName(session.user.full_name)}</h1>
+          <p className="mt-1 text-sm text-muted-foreground">
+            Sesión iniciada como{" "}
+            <span className="font-medium text-foreground">{session.user.email}</span>.
+          </p>
+        </div>
+        <div className="flex flex-wrap items-center gap-2">
+          {session.roles.map((role) => (
+            <Badge key={role} variant="outline">
+              {role.replace(/_/g, " ")}
+            </Badge>
+          ))}
+          <Button
+            type="button"
+            variant="outline"
+            size="sm"
+            onClick={onLogout}
+            className="active:scale-[0.98]"
+          >
+            <LogOut className="h-4 w-4" aria-hidden />
+            Cerrar sesión
+          </Button>
+        </div>
+      </header>
+
+      <Card>
+        <CardHeader>
+          <CardTitle>Próximamente</CardTitle>
+          <p className="mt-1 text-sm text-muted-foreground">
+            Patch 6 establece la autenticación interna. Las superficies
+            siguientes se construyen sobre esta base:
+          </p>
+        </CardHeader>
+        <CardContent>
+          <ul className="grid gap-3 sm:grid-cols-2">
+            <li className="rounded-md border border-border bg-white p-4">
+              <div className="flex items-start gap-3">
+                <div className="mt-0.5 flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-primary/10 text-primary">
+                  <ClipboardList className="h-4 w-4" aria-hidden />
+                </div>
+                <div className="min-w-0">
+                  <p className="text-sm font-semibold">Bandeja de revisión</p>
+                  <p className="mt-0.5 text-xs text-muted-foreground">
+                    Patch 7 — cola de documentos pendientes con decisión humana
+                    y trazabilidad.
+                  </p>
+                </div>
+              </div>
+            </li>
+            <li className="rounded-md border border-border bg-white p-4">
+              <div className="flex items-start gap-3">
+                <div className="mt-0.5 flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-primary/10 text-primary">
+                  <Users className="h-4 w-4" aria-hidden />
+                </div>
+                <div className="min-w-0">
+                  <p className="text-sm font-semibold">Vista de cliente</p>
+                  <p className="mt-0.5 text-xs text-muted-foreground">
+                    Patch 8 — riesgo por proveedor para cada cliente bajo
+                    administración.
+                  </p>
+                </div>
+              </div>
+            </li>
+          </ul>
+        </CardContent>
+      </Card>
+
+      <Card>
+        <CardHeader>
+          <CardTitle>Estado de la sesión</CardTitle>
+        </CardHeader>
+        <CardContent className="grid gap-3 text-sm sm:grid-cols-2">
+          <Field
+            icon={<CheckCircle2 className="h-4 w-4 text-emerald-600" aria-hidden />}
+            label="Cuenta"
+            value={`${session.user.full_name} · ${session.user.status}`}
+          />
+          <Field
+            icon={<ShieldCheck className="h-4 w-4 text-primary" aria-hidden />}
+            label="Roles"
+            value={session.roles.length ? session.roles.join(", ") : "—"}
+          />
+          <Field
+            icon={<Users className="h-4 w-4 text-primary" aria-hidden />}
+            label="Organizaciones"
+            value={`${session.organization_ids.length}`}
+          />
+          <Field
+            icon={<CheckCircle2 className="h-4 w-4 text-emerald-600" aria-hidden />}
+            label="Sesión vigente hasta"
+            value={formatExpires(session.expires_at)}
+          />
+        </CardContent>
+      </Card>
+    </main>
+  );
+}
+
+function Field({
+  icon,
+  label,
+  value,
+}: {
+  icon: React.ReactNode;
+  label: string;
+  value: string;
+}) {
+  return (
+    <div className="rounded-md border border-border bg-white p-3">
+      <div className="flex items-center gap-2 text-xs font-medium uppercase tracking-wide text-muted-foreground">
+        {icon}
+        <span>{label}</span>
+      </div>
+      <p className="mt-1 break-words text-sm font-medium">{value}</p>
+    </div>
+  );
+}
+
+function firstName(fullName: string): string {
+  return fullName.split(" ")[0] ?? fullName;
+}
+
+function formatExpires(iso: string): string {
+  try {
+    return new Date(iso).toLocaleString("es-MX", {
+      day: "2-digit",
+      month: "short",
+      hour: "2-digit",
+      minute: "2-digit",
+    });
+  } catch {
+    return iso;
+  }
+}
