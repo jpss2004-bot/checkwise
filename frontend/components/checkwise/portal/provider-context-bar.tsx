@@ -8,6 +8,7 @@ import {
   ClipboardText,
   Files,
   House,
+  IdentificationCard,
   SignOut,
   type Icon,
 } from "@phosphor-icons/react";
@@ -35,6 +36,7 @@ const NAV_LINKS: NavLink[] = [
   { href: "/portal/calendar", label: "Calendario", icon: CalendarBlank },
   { href: "/portal/reports", label: "Reportes", icon: ChartLineUp },
   { href: "/portal/upload", label: "Subir documento", icon: Files },
+  { href: "/portal/entra-a-tu-espacio", label: "Mi espacio", icon: IdentificationCard },
 ];
 
 export function ProviderContextBar({ session, onboardingPct }: Props) {

@@ -92,6 +92,17 @@ function ReportsInner({ session }: { session: PortalSession }) {
           </AlertDescription>
         </Alert>
 
+        <div className="rounded-lg border border-[color:var(--border-subtle)] bg-[color:var(--surface-sunken)] px-4 py-3 text-xs text-[color:var(--text-secondary)]">
+          <p>
+            <span className="font-semibold text-[color:var(--text-brand)]">
+              Aislamiento por tenant.
+            </span>{" "}
+            Cada reporte sólo incluye datos del workspace autenticado. Nunca
+            seleccionamos clientes o proveedores por ID en el frontend — la
+            backend valida ownership antes de generar un PDF.
+          </p>
+        </div>
+
         <section aria-label="Listado de reportes" className="grid gap-5 lg:grid-cols-2">
           {MOCK_REPORTS.map((report) => (
             <ReportCard key={report.id} report={report} />

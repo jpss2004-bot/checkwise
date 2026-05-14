@@ -30,6 +30,8 @@ export type ReportStatus =
   | "ready"
   | "generating"
   | "needs_review"
+  | "blocked"
+  | "unavailable"
   | "not_available";
 
 export interface ReportMeta {
@@ -78,17 +80,21 @@ export const REPORT_STATUS_LABEL: Record<ReportStatus, string> = {
   ready: "Listo",
   generating: "Generando…",
   needs_review: "Necesita revisión",
+  blocked: "Bloqueado",
+  unavailable: "No disponible aún",
   not_available: "No disponible",
 };
 
 /** Variant lookup for the design system's status badges. */
 export const REPORT_STATUS_VARIANT: Record<
   ReportStatus,
-  "success" | "info" | "warning" | "outline"
+  "success" | "info" | "warning" | "destructive" | "outline"
 > = {
   ready: "success",
   generating: "info",
   needs_review: "warning",
+  blocked: "destructive",
+  unavailable: "outline",
   not_available: "outline",
 };
 
@@ -163,5 +169,26 @@ export const MOCK_REPORTS: ReportMeta[] = [
       { label: "3 documentos necesitan revisión", state: "needs_review" },
     ],
     status: "needs_review",
+  },
+  {
+    // Demonstrates the new "blocked" state — reports for a tenant
+    // with critical expediente gaps cannot be generated until the
+    // documentation is fixed (the report would otherwise carry
+    // misleading data).
+    id: "rep-tenant-blocked",
+    type: "provider_expediente",
+    title: "Expediente · Tenant con expediente incompleto",
+    blurb: "Bloqueado hasta que el expediente inicial obligatorio quede atendido.",
+    period: "2026",
+    scope: "Proveedor (otro tenant)",
+    generated_at_iso: null,
+    compliance_pct: null,
+    document_coverage_pct: null,
+    pending_actions: 4,
+    highlights: [
+      { label: "Documento mandatorio rechazado", state: "rejected" },
+      { label: "RFC en disputa", state: "needs_review" },
+    ],
+    status: "blocked",
   },
 ];

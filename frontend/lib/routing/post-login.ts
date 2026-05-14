@@ -34,12 +34,16 @@ import {
   type ExpedienteRequirement,
 } from "@/lib/mock/expediente";
 
-export type PostLoginRoute = "/portal/onboarding" | "/portal/dashboard";
+export type PostLoginRoute =
+  | "/portal/entra-a-tu-espacio"
+  | "/portal/onboarding"
+  | "/portal/dashboard";
 
 export type PostLoginBanner =
   | "none"
   | "provisional_access"
-  | "expediente_blocked";
+  | "expediente_blocked"
+  | "needs_workspace_confirmation";
 
 export interface PostLoginDecision {
   route: PostLoginRoute;
@@ -50,18 +54,58 @@ export interface PostLoginDecision {
   counts: ReturnType<typeof countExpediente>;
 }
 
+const STORAGE_KEY_CONFIRMED = "checkwise.workspace.confirmed.v1";
+
+/**
+ * Whether the user has previously pressed "Entrar a mi espacio" on
+ * /portal/entra-a-tu-espacio for this workspace_id. Reads localStorage
+ * so it survives reloads in the demo. The backend will replace this
+ * with a column on the workspace membership row.
+ *
+ * TODO[backend-integration]: derive from
+ *   `workspace_membership.workspace_confirmed_at IS NOT NULL`.
+ */
+export function isWorkspaceConfirmed(workspace_id: string): boolean {
+  if (typeof window === "undefined") return false;
+  try {
+    const raw = window.localStorage.getItem(STORAGE_KEY_CONFIRMED);
+    if (!raw) return false;
+    const map = JSON.parse(raw) as Record<string, string>;
+    return Boolean(map[workspace_id]);
+  } catch {
+    return false;
+  }
+}
+
 /**
  * Decide where to send a freshly-authenticated user.
  *
- * Pass the current expediente snapshot. Returns:
+ * Pass the current expediente snapshot. Optional `workspace_id` lets
+ * the helper add the new 1.6 short-circuit: if the user hasn't yet
+ * confirmed this workspace via /portal/entra-a-tu-espacio, that's the
+ * first destination, regardless of expediente state.
+ *
+ * Returns:
  *   - route: where to redirect
  *   - banner: which banner the destination should show
  *   - reason: short text for logs
  */
 export function decidePostLoginRoute(
   requirements: ExpedienteRequirement[],
+  workspace_id?: string,
 ): PostLoginDecision {
   const counts = countExpediente(requirements);
+
+  // CheckWise 1.6: every freshly-authed user goes through the
+  // workspace confirmation step first.
+  if (workspace_id && !isWorkspaceConfirmed(workspace_id)) {
+    return {
+      route: "/portal/entra-a-tu-espacio",
+      banner: "needs_workspace_confirmation",
+      reason: "workspace_not_yet_confirmed",
+      counts,
+    };
+  }
 
   // Has any mandatory item left to act on (empty / pending / rejected
   // / expired / needs_review)? → keep at the gate.

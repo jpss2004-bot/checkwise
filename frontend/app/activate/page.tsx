@@ -267,7 +267,8 @@ function ActivateClient() {
                   onboarding_completed_at: null,
                 });
                 setStepIndex(3);
-                setTimeout(() => router.push("/portal/onboarding"), 1800);
+                // CheckWise 1.6: confirm workspace before onboarding.
+                setTimeout(() => router.push("/portal/entra-a-tu-espacio"), 1800);
               }}
             />
           )}

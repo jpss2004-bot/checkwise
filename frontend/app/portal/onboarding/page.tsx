@@ -115,7 +115,11 @@ function GateHero({
   banner,
 }: {
   counts: ReturnType<typeof countExpediente>;
-  banner: "none" | "provisional_access" | "expediente_blocked";
+  banner:
+    | "none"
+    | "provisional_access"
+    | "expediente_blocked"
+    | "needs_workspace_confirmation";
 }) {
   if (counts.is_gate_satisfied) {
     const isProvisional = banner === "provisional_access";

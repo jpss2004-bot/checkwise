@@ -157,6 +157,21 @@ export function ExpedienteCard({ requirement, onAction }: ExpedienteCardProps) {
           </Button>
         )}
       </div>
+
+      {(requirement.state === "rejected" ||
+        requirement.state === "needs_review" ||
+        requirement.state === "expired") && (
+        <p className="text-[11px] text-[color:var(--text-tertiary)]">
+          ¿Crees que hay un cruce de empresa o una asignación incorrecta?{" "}
+          <a
+            href="/portal/entra-a-tu-espacio#correccion"
+            className="text-[color:var(--text-link)] hover:underline"
+          >
+            Reportar inconsistencia
+          </a>
+          .
+        </p>
+      )}
     </article>
   );
 }

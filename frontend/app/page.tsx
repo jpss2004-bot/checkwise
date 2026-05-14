@@ -142,7 +142,9 @@ export default function PublicHome() {
   // If a session already exists, send the user straight to the portal.
   // Public marketing page is for unauthenticated visitors.
   useEffect(() => {
-    if (hasSession) router.replace("/portal/onboarding");
+    // CheckWise 1.6: route returning sessions through the workspace
+    // confirmation step. Once confirmed it redirects onward.
+    if (hasSession) router.replace("/portal/entra-a-tu-espacio");
   }, [hasSession, router]);
 
   return (

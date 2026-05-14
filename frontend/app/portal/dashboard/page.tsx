@@ -16,6 +16,7 @@ import { DocStateBadge } from "@/components/checkwise/doc-state-badge";
 import { ProviderContextBar } from "@/components/checkwise/portal/provider-context-bar";
 import { SemaphoreCard } from "@/components/checkwise/portal/semaphore-card";
 import { SuggestedActions } from "@/components/checkwise/portal/suggested-actions";
+import { WorkspaceIdentityCard } from "@/components/checkwise/workspace/workspace-identity-card";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -28,10 +29,12 @@ import {
   type AttentionRow,
 } from "@/lib/mock/dashboard";
 import { MOCK_EXPEDIENTE, countExpediente } from "@/lib/mock/expediente";
+import { verifyToken } from "@/lib/mock/invitations";
 import { decidePostLoginRoute } from "@/lib/routing/post-login";
 import { withPortalSession } from "@/lib/session/with-portal-session";
 import type { PortalSession } from "@/lib/session/portal";
 import type { DocumentStateCode } from "@/lib/types";
+import { buildWorkspaceContext } from "@/lib/workspace/resolver";
 
 /**
  * Provider dashboard.
@@ -58,6 +61,13 @@ function DashboardInner({ session }: { session: PortalSession }) {
   const gateBlocked = decision.banner === "expediente_blocked";
   const provisional = decision.banner === "provisional_access";
 
+  // Build the workspace identity snapshot — same source as
+  // /portal/entra-a-tu-espacio so users see consistent values.
+  const workspace = useMemo(() => {
+    const inv = verifyToken("demo").ok ? verifyToken("demo").invitation ?? null : null;
+    return buildWorkspaceContext(session, inv);
+  }, [session]);
+
   return (
     <>
       <ProviderContextBar
@@ -67,6 +77,8 @@ function DashboardInner({ session }: { session: PortalSession }) {
       <main className="mx-auto max-w-7xl space-y-8 px-5 py-8">
         {gateBlocked ? <LockedDashboardHero counts={expedienteCounts} /> : null}
         {provisional ? <ProvisionalAccessBanner /> : null}
+
+        <WorkspaceIdentityCard workspace={workspace} />
 
         <SemaphoreCard data={MOCK_SEMAPHORE} />
 

@@ -76,7 +76,9 @@ export default function LoginPage() {
   useEffect(() => {
     const existing = readPortalSession();
     if (existing) {
-      router.replace("/portal/onboarding");
+      // CheckWise 1.6: returning sessions enter the workspace
+      // confirmation step first.
+      router.replace("/portal/entra-a-tu-espacio");
       return;
     }
     setChecked(true);

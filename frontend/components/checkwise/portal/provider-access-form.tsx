@@ -106,7 +106,9 @@ export function ProviderAccessForm() {
         contract_reference: access.contract_reference,
         onboarding_completed_at: access.onboarding_completed_at,
       });
-      router.push("/portal/onboarding");
+      // CheckWise 1.6: send every freshly-authed user through the
+      // workspace confirmation step before onboarding/dashboard.
+      router.push("/portal/entra-a-tu-espacio");
     } catch (caught) {
       if (caught instanceof PortalApiError) {
         setServerError(
