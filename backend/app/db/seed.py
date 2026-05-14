@@ -9,7 +9,7 @@ Called from two places:
   comes up with the canonical catalog already present in PostgreSQL.
 - Test fixtures that need to exercise canonical-path behavior without
   relying on the on-the-fly fallback in
-  ``endpoints._get_requirement_for_catalog_item``.
+  ``services.requirement_service._get_requirement_for_catalog_item``.
 
 Idempotent on purpose: every insertion is gated by a presence check against
 the canonical ``code``. Re-running the seed (across deploys or test setUps)
@@ -28,6 +28,7 @@ from dataclasses import dataclass
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
+from app.constants.statuses import DocumentStatus
 from app.core.catalogs import INSTITUTIONS
 from app.core.compliance_catalog import (
     CATALOG_SOURCE,
@@ -180,7 +181,7 @@ def _seed_onboarding_requirement(
                 minimum_validation=_minimum_validation_text(),
                 automatic_signals=_automatic_signals_text(),
                 human_review_required=True,
-                missing_state="pendiente_revision",
+                missing_state=DocumentStatus.PENDIENTE_REVISION.value,
                 implementation_notes=_implementation_notes_text(),
                 required=item.required,
             )
@@ -236,7 +237,7 @@ def _seed_recurring_requirement(
                 minimum_validation=_minimum_validation_text(),
                 automatic_signals=_automatic_signals_text(),
                 human_review_required=True,
-                missing_state="pendiente_revision",
+                missing_state=DocumentStatus.PENDIENTE_REVISION.value,
                 implementation_notes=_implementation_notes_text(),
                 required=True,
                 temporal_rule=item.period_label,

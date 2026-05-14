@@ -24,6 +24,12 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.api.v1.auth import CurrentUser, require_any_role
+from app.constants.roles import MembershipRole
+from app.constants.statuses import (
+    REVIEWER_DECISION_STATUS,
+    DocumentStatus,
+    ReviewerAction,
+)
 from app.db.session import get_db
 from app.models import (
     Client,
@@ -41,22 +47,29 @@ from app.services.validation_events import add_validation_event
 
 router = APIRouter(prefix="/reviewer", tags=["reviewer"])
 DbSession = Annotated[Session, Depends(get_db)]
-ReviewerDep = Annotated[CurrentUser, Depends(require_any_role("reviewer", "internal_admin"))]
+ReviewerDep = Annotated[
+    CurrentUser,
+    Depends(require_any_role(MembershipRole.REVIEWER, MembershipRole.INTERNAL_ADMIN)),
+]
 
 
 # Statuses that need a reviewer decision. ``requiere_aclaracion`` is
 # already a decision (the ball is back in the provider's court) so it
 # is intentionally not in the default queue.
 QUEUE_STATUSES: tuple[str, ...] = (
-    "recibido",
-    "pendiente_revision",
-    "prevalidado",
-    "posible_mismatch",
+    DocumentStatus.RECIBIDO.value,
+    DocumentStatus.PENDIENTE_REVISION.value,
+    DocumentStatus.PREVALIDADO.value,
+    DocumentStatus.POSIBLE_MISMATCH.value,
 )
 
 # Statuses that count as a "resolved" decision (terminal until a new
 # submission arrives for the same slot).
-RESOLVED_STATUSES: tuple[str, ...] = ("aprobado", "rechazado", "excepcion_legal")
+RESOLVED_STATUSES: tuple[str, ...] = (
+    DocumentStatus.APROBADO.value,
+    DocumentStatus.RECHAZADO.value,
+    DocumentStatus.EXCEPCION_LEGAL.value,
+)
 
 
 # ---------------------------------------------------------------------------
@@ -99,26 +112,18 @@ class QueueResponse(BaseModel):
     next_cursor: str | None = None
 
 
-DECISION_ACTIONS: tuple[str, ...] = (
-    "approve",
-    "reject",
-    "request_clarification",
-    "mark_exception",
-)
+DECISION_ACTIONS: tuple[str, ...] = tuple(action.value for action in ReviewerAction)
 
 
 _ACTION_TO_STATUS: dict[str, str] = {
-    "approve": "aprobado",
-    "reject": "rechazado",
-    "request_clarification": "requiere_aclaracion",
-    "mark_exception": "excepcion_legal",
+    action.value: status.value for action, status in REVIEWER_DECISION_STATUS.items()
 }
 
 
 _ACTION_REQUIRES_REASON: set[str] = {
-    "reject",
-    "request_clarification",
-    "mark_exception",
+    ReviewerAction.REJECT.value,
+    ReviewerAction.REQUEST_CLARIFICATION.value,
+    ReviewerAction.MARK_EXCEPTION.value,
 }
 
 

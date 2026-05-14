@@ -22,11 +22,7 @@ from pydantic import BaseModel, Field
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from app.api.v1.endpoints import (
-    _get_or_create_client,
-    _get_or_create_contract,
-    _get_or_create_vendor,
-)
+from app.constants.statuses import DocumentStatus
 from app.core.compliance_catalog import (
     catalog_metadata,
     expediente_for_persona,
@@ -41,6 +37,11 @@ from app.models import (
     Submission,
     Validation,
     ValidationEvent,
+)
+from app.services.submission_service import (
+    get_or_create_client,
+    get_or_create_contract,
+    get_or_create_vendor,
 )
 
 router = APIRouter(prefix="/portal", tags=["portal"])
@@ -190,14 +191,14 @@ def create_or_resume_access(payload: AccessRequest, db: DbSession) -> AccessResp
     """Create (or resume) a demo provider workspace and return an access token."""
 
     normalized_rfc = payload.vendor_rfc.strip().upper()
-    client = _get_or_create_client(db, payload.client_name.strip())
-    vendor = _get_or_create_vendor(
+    client = get_or_create_client(db, payload.client_name.strip())
+    vendor = get_or_create_vendor(
         db, client_id=client.id, name=payload.vendor_name.strip(), rfc=normalized_rfc
     )
     if vendor.persona_type != payload.persona_type:
         vendor.persona_type = payload.persona_type
 
-    contract = _get_or_create_contract(
+    contract = get_or_create_contract(
         db,
         client_id=client.id,
         vendor_id=vendor.id,
@@ -494,17 +495,21 @@ class SubmissionDetailResponse(BaseModel):
 
 # Statuses that mean "you, the provider, must act now."
 _ACTIONABLE_STATUSES: set[str] = {
-    "rechazado",
-    "vencido",
-    "posible_mismatch",
-    "requiere_aclaracion",
+    DocumentStatus.RECHAZADO.value,
+    DocumentStatus.VENCIDO.value,
+    DocumentStatus.POSIBLE_MISMATCH.value,
+    DocumentStatus.REQUIERE_ACLARACION.value,
 }
 # Statuses that resolve the slot.
-_RESOLVED_STATUSES: set[str] = {"aprobado", "excepcion_legal", "no_aplica"}
+_RESOLVED_STATUSES: set[str] = {
+    DocumentStatus.APROBADO.value,
+    DocumentStatus.EXCEPCION_LEGAL.value,
+    DocumentStatus.NO_APLICA.value,
+}
 
 
 def _suggested_action(status: str) -> str:
-    if status == "posible_mismatch":
+    if status == DocumentStatus.POSIBLE_MISMATCH:
         return "verify_and_reupload"
     if status in _ACTIONABLE_STATUSES:
         return "reupload"

@@ -17,6 +17,7 @@ from sqlalchemy import (
 )
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
+from app.constants.statuses import DocumentStatus
 from app.db.base import Base
 
 
@@ -189,7 +190,9 @@ class Submission(TimestampMixin, Base):
     )
     load_type: Mapped[str] = mapped_column(String(40), nullable=False)
     source: Mapped[str] = mapped_column(String(60), default="portal", nullable=False)
-    status: Mapped[str] = mapped_column(String(40), default="pendiente_revision", nullable=False)
+    status: Mapped[str] = mapped_column(
+        String(40), default=DocumentStatus.PENDIENTE_REVISION.value, nullable=False
+    )
     # Canonical denormalized keys, populated from the catalog at intake. Kept
     # alongside the requirement_id/requirement_version_id FKs so a submission
     # remains attributable even if requirements are renamed or migrated. Both
@@ -223,7 +226,9 @@ class Document(TimestampMixin, Base):
     mime_type: Mapped[str | None] = mapped_column(String(120))
     size_bytes: Mapped[int] = mapped_column(Integer, nullable=False)
     sha256: Mapped[str] = mapped_column(String(64), index=True, nullable=False)
-    status: Mapped[str] = mapped_column(String(40), default="pendiente_revision", nullable=False)
+    status: Mapped[str] = mapped_column(
+        String(40), default=DocumentStatus.PENDIENTE_REVISION.value, nullable=False
+    )
     ocr_status: Mapped[str] = mapped_column(String(40), default="not_started", nullable=False)
 
     submission: Mapped[Submission] = relationship(back_populates="documents")

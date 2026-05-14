@@ -1,17 +1,18 @@
+"""Public-API catalogs exposed at /api/v1/catalogs.
+
+The code lists are derived from the typed StrEnums in ``app.constants`` so
+there is exactly one place that defines a canonical code. Labels and
+extra metadata stay here because they are presentation concerns.
+"""
+
 from __future__ import annotations
 
+from app.constants.institutions import INSTITUTION_LABELS, Institution
+from app.constants.statuses import STATUS_LABELS_ES, DocumentStatus
+
 DOCUMENT_STATUSES = [
-    {"code": "pendiente", "label": "Pendiente"},
-    {"code": "recibido", "label": "Recibido"},
-    {"code": "pendiente_revision", "label": "Pendiente de revisión"},
-    {"code": "prevalidado", "label": "Prevalidado"},
-    {"code": "posible_mismatch", "label": "Posible mismatch"},
-    {"code": "aprobado", "label": "Aprobado"},
-    {"code": "rechazado", "label": "Rechazado"},
-    {"code": "vencido", "label": "Vencido"},
-    {"code": "no_aplica", "label": "No aplica"},
-    {"code": "requiere_aclaracion", "label": "Requiere aclaración"},
-    {"code": "excepcion_legal", "label": "Excepción legal"},
+    {"code": status.value, "label": STATUS_LABELS_ES[status]}
+    for status in DocumentStatus
 ]
 
 LOAD_TYPES = [
@@ -26,11 +27,8 @@ LOAD_TYPES = [
 ]
 
 INSTITUTIONS = [
-    {"code": "stps_repse", "label": "STPS / REPSE"},
-    {"code": "sat", "label": "SAT"},
-    {"code": "imss", "label": "IMSS"},
-    {"code": "infonavit", "label": "INFONAVIT"},
-    {"code": "interno_cliente", "label": "Interno / Cliente"},
+    {"code": institution.value, "label": INSTITUTION_LABELS[institution]}
+    for institution in Institution
 ]
 
 VALIDATION_RULES = [
@@ -54,7 +52,7 @@ REQUIREMENT_EXAMPLES = [
     {
         "code": "REQ-ONB-001",
         "name": "Constancia de Situación Fiscal / RFC del proveedor",
-        "institution": "sat",
+        "institution": Institution.SAT.value,
         "load_type": "alta_inicial",
         "risk_level": "alto",
         "human_review_required": True,
@@ -62,7 +60,7 @@ REQUIREMENT_EXAMPLES = [
     {
         "code": "REQ-ONB-002",
         "name": "Constancia REPSE vigente",
-        "institution": "stps_repse",
+        "institution": Institution.STPS_REPSE.value,
         "load_type": "alta_inicial",
         "risk_level": "critico",
         "human_review_required": True,
@@ -70,7 +68,7 @@ REQUIREMENT_EXAMPLES = [
     {
         "code": "REQ-CON-001",
         "name": "Contrato firmado",
-        "institution": "interno_cliente",
+        "institution": Institution.INTERNO_CLIENTE.value,
         "load_type": "contrato",
         "risk_level": "critico",
         "human_review_required": True,
@@ -78,7 +76,7 @@ REQUIREMENT_EXAMPLES = [
     {
         "code": "REQ-MON-001",
         "name": "CFDI/XML de factura de servicio",
-        "institution": "sat",
+        "institution": Institution.SAT.value,
         "load_type": "mensual",
         "risk_level": "alto",
         "human_review_required": True,
@@ -86,7 +84,7 @@ REQUIREMENT_EXAMPLES = [
     {
         "code": "REQ-QUAD-001",
         "name": "ICSOE IMSS",
-        "institution": "imss",
+        "institution": Institution.IMSS.value,
         "load_type": "cuatrimestral",
         "risk_level": "critico",
         "human_review_required": True,
@@ -94,7 +92,7 @@ REQUIREMENT_EXAMPLES = [
     {
         "code": "REQ-REN-001",
         "name": "Renovación REPSE",
-        "institution": "stps_repse",
+        "institution": Institution.STPS_REPSE.value,
         "load_type": "renovacion",
         "risk_level": "critico",
         "human_review_required": True,
