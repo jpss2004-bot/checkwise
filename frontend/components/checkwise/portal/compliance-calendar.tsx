@@ -137,7 +137,7 @@ export function ComplianceCalendar({ data }: Props) {
               variant="muted"
             />
           ) : (
-            <div className="space-y-4">
+            <div className="cw-stagger space-y-4">
               {month.institutions.map((inst) => (
                 <section
                   key={inst.institution}
@@ -158,7 +158,7 @@ export function ComplianceCalendar({ data }: Props) {
                       return (
                         <li
                           key={item.code}
-                          className="flex flex-col gap-2 rounded-md border border-border/70 px-3 py-2 sm:flex-row sm:items-center sm:justify-between"
+                          className="cw-hover-lift flex flex-col gap-2 rounded-md border border-border/70 bg-white px-3 py-2 sm:flex-row sm:items-center sm:justify-between"
                         >
                           <div className="min-w-0">
                             <p className="text-sm font-medium">{item.name}</p>
@@ -193,7 +193,7 @@ function CalendarOverview({ overview }: { overview: CalendarOverviewData }) {
 
   return (
     <section
-      className="grid grid-cols-1 gap-3 sm:grid-cols-3"
+      className="cw-stagger grid grid-cols-1 gap-3 sm:grid-cols-3"
       aria-label="Resumen del calendario"
     >
       <OverviewTile
@@ -324,7 +324,7 @@ function RecommendedActionsCard({ actions }: { actions: RecommendedAction[] }) {
         </p>
       </CardHeader>
       <CardContent>
-        <ul className="space-y-2">
+        <ul className="cw-stagger space-y-2">
           {actions.map((entry) => {
             const needsAttention = ATTENTION_STATUSES.includes(entry.item.status);
             const href = buildCalendarUploadHref(entry.institution, entry.item);
@@ -332,7 +332,7 @@ function RecommendedActionsCard({ actions }: { actions: RecommendedAction[] }) {
             return (
               <li
                 key={entry.key}
-                className={`flex flex-col gap-2 rounded-md border p-3 sm:flex-row sm:items-center sm:justify-between ${
+                className={`cw-hover-lift flex flex-col gap-2 rounded-md border p-3 sm:flex-row sm:items-center sm:justify-between ${
                   needsAttention
                     ? "border-amber-300 bg-amber-50"
                     : "border-border bg-white"

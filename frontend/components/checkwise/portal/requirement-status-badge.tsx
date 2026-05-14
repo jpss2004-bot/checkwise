@@ -4,14 +4,14 @@ import type { RequirementStatus } from "@/lib/portal-client";
 const STATUS_LABELS: Record<RequirementStatus, string> = {
   pendiente: "Pendiente",
   recibido: "Recibido",
-  pendiente_revision: "Pendiente de revisión",
+  pendiente_revision: "Esperando revisión",
   prevalidado: "Prevalidado",
-  posible_mismatch: "Posible mismatch",
+  posible_mismatch: "Posible inconsistencia",
   aprobado: "Aprobado",
   rechazado: "Rechazado",
   vencido: "Vencido",
   no_aplica: "No aplica",
-  requiere_aclaracion: "Requiere aclaración",
+  requiere_aclaracion: "Necesita aclaración",
   excepcion_legal: "Excepción legal",
 };
 

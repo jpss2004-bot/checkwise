@@ -94,12 +94,17 @@ export function OnboardingChecklist({ data }: Props) {
 
       <CardContent className="space-y-5">
         {summary.completed ? (
-          <CompletedBanner total={summary.total_required} />
+          <div className="cw-fade-up">
+            <CompletedBanner total={summary.total_required} />
+          </div>
         ) : nextAction ? (
-          <NextActionCallout item={nextAction} />
+          <div className="cw-fade-up">
+            <NextActionCallout item={nextAction} />
+          </div>
         ) : null}
 
-        {data.sections.map((section) => {
+        <div className="cw-stagger space-y-5">
+          {data.sections.map((section, sectionIndex) => {
           const sectionPct =
             section.required === 0
               ? 100
@@ -111,6 +116,7 @@ export function OnboardingChecklist({ data }: Props) {
               key={section.section}
               className="rounded-md border border-border bg-white p-4"
               data-section={section.section}
+              style={{ ["--cw-index" as string]: sectionIndex }}
             >
               <header className="flex flex-wrap items-center justify-between gap-2">
                 <div className="flex items-center gap-2">
@@ -150,7 +156,7 @@ export function OnboardingChecklist({ data }: Props) {
                   return (
                     <li
                       key={item.code}
-                      className="flex flex-col gap-2 rounded-md border border-border/70 px-3 py-2 sm:flex-row sm:items-center sm:justify-between"
+                      className="cw-hover-lift flex flex-col gap-2 rounded-md border border-border/70 bg-white px-3 py-2 sm:flex-row sm:items-center sm:justify-between"
                     >
                       <div className="flex items-start gap-2">
                         <ItemStatusIcon status={item.status} />
@@ -183,6 +189,7 @@ export function OnboardingChecklist({ data }: Props) {
             </section>
           );
         })}
+        </div>
       </CardContent>
     </Card>
   );
@@ -195,7 +202,7 @@ function NextActionCallout({ item }: { item: OnboardingItem }) {
   const cta = NEXT_ACTION_CTA[item.status] ?? "Cargar ahora";
 
   const containerClass = needsAttention
-    ? "rounded-md border border-amber-300 bg-amber-50 p-4 sm:p-5"
+    ? "rounded-md border border-amber-300 bg-amber-50 p-4 sm:p-5 cw-pulse-soft"
     : "rounded-md border border-primary/30 bg-primary/5 p-4 sm:p-5";
   const iconWrapperClass = needsAttention
     ? "mt-0.5 flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-amber-500 text-white"

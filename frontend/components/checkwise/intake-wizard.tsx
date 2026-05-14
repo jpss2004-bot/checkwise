@@ -1064,13 +1064,18 @@ function ConfirmationStep({
 
   return (
     <section className="space-y-5">
-      <div className={`rounded-md border p-5 ${heroTone}`}>
+      <div className={`cw-fade-up rounded-md border p-5 ${heroTone}`}>
         <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
           <div className="flex gap-3">
             <div
-              className={`mt-0.5 flex h-10 w-10 shrink-0 items-center justify-center rounded-full ${heroIconBg}`}
+              className={`cw-success-ring mt-0.5 flex h-10 w-10 shrink-0 items-center justify-center rounded-full ${heroIconBg}`}
+              aria-hidden="true"
             >
-              <HeroIcon className="h-5 w-5" aria-hidden="true" />
+              {isAttention ? (
+                <HeroIcon className="h-5 w-5" aria-hidden="true" />
+              ) : (
+                <AnimatedCheck />
+              )}
             </div>
             <div className="min-w-0">
               <p className="text-base font-semibold">{heroHeadline}</p>
@@ -1081,11 +1086,11 @@ function ConfirmationStep({
         </div>
       </div>
 
-      <div className="rounded-md border border-primary/25 bg-primary/5 p-5">
+      <div className="cw-fade-up rounded-md border border-primary/25 bg-primary/5 p-5">
         <p className="text-xs font-medium uppercase tracking-wide text-primary">
           Lo que sigue
         </p>
-        <ol className="mt-3 space-y-3 text-sm">
+        <ol className="cw-stagger mt-3 space-y-3 text-sm">
           <li className="flex items-start gap-3">
             <span className="mt-0.5 flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-primary text-xs font-semibold text-primary-foreground">
               1
@@ -1237,4 +1242,27 @@ function formatApiError(payload: unknown): string {
   }
 
   return "No fue posible registrar la carga.";
+}
+
+// Confirmation hero check mark. The path stroke draws in (via the
+// .cw-draw-check selector in globals.css) right after the success ring
+// pops, giving the moment a real "done" beat without animating layout.
+function AnimatedCheck() {
+  return (
+    <svg
+      className="cw-draw-check h-5 w-5"
+      viewBox="0 0 24 24"
+      fill="none"
+      xmlns="http://www.w3.org/2000/svg"
+      aria-hidden="true"
+    >
+      <path
+        d="M5 12.5 L10 17.5 L19 7.5"
+        stroke="currentColor"
+        strokeWidth="2.5"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
+    </svg>
+  );
 }
