@@ -1,4 +1,4 @@
-import { AlertTriangle, CheckCircle2, CircleDashed } from "lucide-react";
+import { Warning, CheckCircle, CircleDashed } from "@phosphor-icons/react";
 
 import { Badge } from "@/components/ui/badge";
 
@@ -18,10 +18,10 @@ export function ValidationSummary({ validations }: { validations: ValidationSign
       {validations.map((validation) => {
         const Icon =
           validation.severity === "error"
-            ? AlertTriangle
+            ? Warning
             : validation.severity === "warning"
               ? CircleDashed
-              : CheckCircle2;
+              : CheckCircle;
         return (
           <div key={validation.rule_code} className="rounded-md border border-border bg-white p-3">
             <div className="flex flex-wrap items-center gap-2">

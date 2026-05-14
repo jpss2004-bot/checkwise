@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
-import { Activity, Database, FileCheck2, ShieldCheck } from "lucide-react";
+import { ChartLineUp, Database, FileText, ShieldCheck } from "@phosphor-icons/react";
 
 import { BrandLogo } from "@/components/checkwise/brand-logo";
 import { ProviderAccessForm } from "@/components/checkwise/portal/provider-access-form";
@@ -11,9 +11,9 @@ import { readPortalSession } from "@/lib/session/portal";
 
 const metrics = [
   { label: "Plataforma", value: "REPSE V1.2", icon: ShieldCheck },
-  { label: "Trazabilidad", value: "Cliente → Periodo", icon: FileCheck2 },
+  { label: "Trazabilidad", value: "Cliente → Periodo", icon: FileText },
   { label: "Fuente futura", value: "PostgreSQL", icon: Database },
-  { label: "Validación", value: "Humana + señales", icon: Activity },
+  { label: "Validación", value: "Humana + señales", icon: ChartLineUp },
 ];
 
 export default function HomePage() {

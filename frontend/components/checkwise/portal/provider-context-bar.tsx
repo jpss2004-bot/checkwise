@@ -1,7 +1,7 @@
 "use client";
 
 import { useRouter } from "next/navigation";
-import { ClipboardCheck, LogOut } from "lucide-react";
+import { ClipboardText, SignOut } from "@phosphor-icons/react";
 
 import { BrandLogo } from "@/components/checkwise/brand-logo";
 import { Badge } from "@/components/ui/badge";
@@ -55,7 +55,7 @@ export function ProviderContextBar({ session, onboardingPct }: Props) {
                   : `Llevas ${pct}% del expediente corporativo`
               }
             >
-              <ClipboardCheck className="h-3.5 w-3.5" aria-hidden="true" />
+              <ClipboardText className="h-3.5 w-3.5" aria-hidden="true" />
               <span className="font-medium">Expediente</span>
               <span
                 aria-hidden="true"
@@ -83,7 +83,7 @@ export function ProviderContextBar({ session, onboardingPct }: Props) {
               router.push("/");
             }}
           >
-            <LogOut className="h-4 w-4" aria-hidden="true" />
+            <SignOut className="h-4 w-4" aria-hidden="true" />
             Cerrar sesión demo
           </Button>
         </div>

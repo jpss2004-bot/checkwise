@@ -5,12 +5,12 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import {
   ArrowRight,
-  CheckCircle2,
-  ClipboardList,
-  LogOut,
+  CheckCircle,
+  ClipboardText,
+  SignOut,
   ShieldCheck,
   Users,
-} from "lucide-react";
+} from "@phosphor-icons/react";
 
 import { BrandLogo } from "@/components/checkwise/brand-logo";
 import { Badge } from "@/components/ui/badge";
@@ -80,7 +80,7 @@ export default function AdminHomePage() {
             onClick={onLogout}
             className="active:scale-[0.98]"
           >
-            <LogOut className="h-4 w-4" aria-hidden />
+            <SignOut className="h-4 w-4" aria-hidden />
             Cerrar sesión
           </Button>
         </div>
@@ -103,7 +103,7 @@ export default function AdminHomePage() {
                 >
                   <div className="flex items-start gap-3">
                     <div className="mt-0.5 flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-primary text-primary-foreground">
-                      <ClipboardList className="h-4 w-4" aria-hidden />
+                      <ClipboardText className="h-4 w-4" aria-hidden />
                     </div>
                     <div className="min-w-0 flex-1">
                       <p className="flex items-center justify-between gap-2 text-sm font-semibold">
@@ -123,7 +123,7 @@ export default function AdminHomePage() {
               <li className="rounded-md border border-border bg-white p-4 opacity-70">
                 <div className="flex items-start gap-3">
                   <div className="mt-0.5 flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-muted text-muted-foreground">
-                    <ClipboardList className="h-4 w-4" aria-hidden />
+                    <ClipboardText className="h-4 w-4" aria-hidden />
                   </div>
                   <div className="min-w-0">
                     <p className="text-sm font-semibold">Bandeja de revisión</p>
@@ -159,7 +159,7 @@ export default function AdminHomePage() {
         </CardHeader>
         <CardContent className="grid gap-3 text-sm sm:grid-cols-2">
           <Field
-            icon={<CheckCircle2 className="h-4 w-4 text-emerald-600" aria-hidden />}
+            icon={<CheckCircle className="h-4 w-4 text-emerald-600" aria-hidden />}
             label="Cuenta"
             value={`${session.user.full_name} · ${session.user.status}`}
           />
@@ -174,7 +174,7 @@ export default function AdminHomePage() {
             value={`${session.organization_ids.length}`}
           />
           <Field
-            icon={<CheckCircle2 className="h-4 w-4 text-emerald-600" aria-hidden />}
+            icon={<CheckCircle className="h-4 w-4 text-emerald-600" aria-hidden />}
             label="Sesión vigente hasta"
             value={formatExpires(session.expires_at)}
           />

@@ -4,17 +4,17 @@ import { use, useCallback, useEffect, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import {
-  AlertCircle,
-  AlertTriangle,
+  WarningCircle,
+  Warning,
   ArrowLeft,
   ArrowRight,
-  CheckCircle2,
-  Clock3,
+  CheckCircle,
+  Clock,
   FileText,
-  History,
+  ClockCounterClockwise,
   ShieldCheck,
-  UploadCloud,
-} from "lucide-react";
+  CloudArrowUp,
+} from "@phosphor-icons/react";
 
 import { ProviderContextBar } from "@/components/checkwise/portal/provider-context-bar";
 import { RequirementStatusBadge } from "@/components/checkwise/portal/requirement-status-badge";
@@ -211,10 +211,10 @@ function StatusHero({ detail }: { detail: SubmissionDetail }) {
         : "bg-primary text-primary-foreground";
   const Icon =
     tone === "attention"
-      ? AlertTriangle
+      ? Warning
       : tone === "approved"
-        ? CheckCircle2
-        : Clock3;
+        ? CheckCircle
+        : Clock;
   const ctaHref = buildReuploadHref(detail);
   const showPrimaryCta =
     detail.suggested_action === "reupload" ||
@@ -356,7 +356,7 @@ function ReasonRow({
   humanReview?: boolean;
 }) {
   const Icon =
-    severity === "error" ? AlertCircle : severity === "warning" ? AlertTriangle : ShieldCheck;
+    severity === "error" ? WarningCircle : severity === "warning" ? Warning : ShieldCheck;
   const iconColor =
     severity === "error"
       ? "text-red-600"
@@ -438,7 +438,7 @@ function TimelineCard({ detail }: { detail: SubmissionDetail }) {
     <Card>
       <CardHeader>
         <div className="flex items-center gap-2">
-          <History className="h-4 w-4 text-primary" aria-hidden="true" />
+          <ClockCounterClockwise className="h-4 w-4 text-primary" aria-hidden="true" />
           <CardTitle>Línea de tiempo</CardTitle>
         </div>
         <p className="mt-1 text-sm text-muted-foreground">
@@ -545,7 +545,7 @@ function TraceabilityCard({ detail }: { detail: SubmissionDetail }) {
     <Card>
       <CardHeader>
         <div className="flex items-center gap-2">
-          <UploadCloud className="h-4 w-4 text-muted-foreground" aria-hidden="true" />
+          <CloudArrowUp className="h-4 w-4 text-muted-foreground" aria-hidden="true" />
           <CardTitle>Datos de trazabilidad</CardTitle>
         </div>
         <p className="mt-1 text-sm text-muted-foreground">

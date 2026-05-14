@@ -2,13 +2,13 @@
 
 import { type ComponentType, type ReactNode } from "react";
 import {
-  AlertTriangle,
+  Warning,
   ArrowRight,
-  FileSearch,
-  Inbox,
-  RefreshCcw,
-  WifiOff,
-} from "lucide-react";
+  FileMagnifyingGlass,
+  Tray,
+  ArrowsClockwise,
+  WifiSlash,
+} from "@phosphor-icons/react";
 
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
@@ -92,7 +92,7 @@ type EmptyStateProps = {
 };
 
 export function EmptyState({
-  icon: Icon = Inbox,
+  icon: Icon = Tray,
   title,
   description,
   action,
@@ -152,7 +152,7 @@ export function ErrorState({
   className,
   variant = "default",
 }: ErrorStateProps) {
-  const Icon = variant === "network" ? WifiOff : AlertTriangle;
+  const Icon = variant === "network" ? WifiSlash : Warning;
   return (
     <div
       role="alert"
@@ -182,7 +182,7 @@ export function ErrorState({
                 onClick={onRetry}
                 className="active:scale-[0.98]"
               >
-                <RefreshCcw className="h-4 w-4" aria-hidden />
+                <ArrowsClockwise className="h-4 w-4" aria-hidden />
                 {retryLabel}
               </Button>
             ) : null}
@@ -214,7 +214,7 @@ export function NotFoundState({
 }: NotFoundStateProps) {
   return (
     <EmptyState
-      icon={FileSearch}
+      icon={FileMagnifyingGlass}
       title={title}
       description={description}
       action={action}
@@ -409,7 +409,7 @@ export function InlineRetry({ message, onRetry, className }: InlineRetryProps) {
       )}
     >
       <div className="flex items-center gap-2 text-amber-900">
-        <AlertTriangle className="h-4 w-4" aria-hidden />
+        <Warning className="h-4 w-4" aria-hidden />
         <span>{message}</span>
       </div>
       <button

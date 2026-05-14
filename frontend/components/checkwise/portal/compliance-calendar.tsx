@@ -3,14 +3,14 @@
 import { useMemo, useState, type ReactNode } from "react";
 import Link from "next/link";
 import {
-  AlertTriangle,
-  CalendarDays,
-  CheckCircle2,
-  ChevronLeft,
-  ChevronRight,
+  Warning,
+  CalendarBlank,
+  CheckCircle,
+  CaretLeft,
+  CaretRight,
   ShieldCheck,
-  UploadCloud,
-} from "lucide-react";
+  CloudArrowUp,
+} from "@phosphor-icons/react";
 
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -114,7 +114,7 @@ export function ComplianceCalendar({ data }: Props) {
               onClick={() => setSelected((s) => Math.max(1, s - 1))}
               disabled={selected === 1}
             >
-              <ChevronLeft className="h-4 w-4" aria-hidden="true" /> Mes anterior
+              <CaretLeft className="h-4 w-4" aria-hidden="true" /> Mes anterior
             </Button>
             <h3 className="text-lg font-semibold">
               {MONTH_LABELS_ES[month.month]} {data.year}
@@ -126,13 +126,13 @@ export function ComplianceCalendar({ data }: Props) {
               onClick={() => setSelected((s) => Math.min(12, s + 1))}
               disabled={selected === 12}
             >
-              Siguiente mes <ChevronRight className="h-4 w-4" aria-hidden="true" />
+              Siguiente mes <CaretRight className="h-4 w-4" aria-hidden="true" />
             </Button>
           </div>
 
           {month.institutions.length === 0 ? (
             <EmptyState
-              icon={CalendarDays}
+              icon={CalendarBlank}
               title="Sin obligaciones para este mes"
               description="Tu calendario no tiene cargas recurrentes programadas en este periodo. Selecciona otro mes para ver las próximas."
               variant="muted"
@@ -169,7 +169,7 @@ export function ComplianceCalendar({ data }: Props) {
                             <RequirementStatusBadge status={item.status} />
                             <Button asChild size="sm" variant="outline">
                               <Link href={uploadHref}>
-                                <UploadCloud className="h-4 w-4" aria-hidden="true" />
+                                <CloudArrowUp className="h-4 w-4" aria-hidden="true" />
                                 {item.status === "pendiente" ? "Cargar" : "Recargar"}
                               </Link>
                             </Button>
@@ -205,9 +205,9 @@ function CalendarOverview({ overview }: { overview: CalendarOverviewData }) {
         }
         icon={
           attentionActive ? (
-            <AlertTriangle className="h-4 w-4 text-amber-700" aria-hidden="true" />
+            <Warning className="h-4 w-4 text-amber-700" aria-hidden="true" />
           ) : (
-            <CheckCircle2 className="h-4 w-4 text-emerald-600" aria-hidden="true" />
+            <CheckCircle className="h-4 w-4 text-emerald-600" aria-hidden="true" />
           )
         }
         label="Atención requerida"
@@ -223,7 +223,7 @@ function CalendarOverview({ overview }: { overview: CalendarOverviewData }) {
       />
       <OverviewTile
         tone={dueActive ? "border-primary/30 bg-primary/5" : "border-border bg-white"}
-        icon={<CalendarDays className="h-4 w-4 text-primary" aria-hidden="true" />}
+        icon={<CalendarBlank className="h-4 w-4 text-primary" aria-hidden="true" />}
         label="Vence este mes"
         labelTone={dueActive ? "text-primary" : "text-muted-foreground"}
         value={overview.dueThisMonth === null ? "—" : `${overview.dueThisMonth}`}
@@ -348,9 +348,9 @@ function RecommendedActionsCard({ actions }: { actions: RecommendedAction[] }) {
                     }`}
                   >
                     {needsAttention ? (
-                      <AlertTriangle className="h-4 w-4" aria-hidden="true" />
+                      <Warning className="h-4 w-4" aria-hidden="true" />
                     ) : (
-                      <UploadCloud className="h-4 w-4" aria-hidden="true" />
+                      <CloudArrowUp className="h-4 w-4" aria-hidden="true" />
                     )}
                   </div>
                   <div className="min-w-0">
@@ -368,7 +368,7 @@ function RecommendedActionsCard({ actions }: { actions: RecommendedAction[] }) {
                   <RequirementStatusBadge status={entry.item.status} />
                   <Button asChild size="sm">
                     <Link href={href} aria-label={`${ctaLabel} ${entry.item.name}`}>
-                      <UploadCloud className="h-4 w-4" aria-hidden="true" />
+                      <CloudArrowUp className="h-4 w-4" aria-hidden="true" />
                       {ctaLabel}
                     </Link>
                   </Button>

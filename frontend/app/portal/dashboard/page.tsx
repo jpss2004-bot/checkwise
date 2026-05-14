@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { ArrowLeft } from "lucide-react";
+import { ArrowLeft } from "@phosphor-icons/react";
 
 import { ComplianceCalendar } from "@/components/checkwise/portal/compliance-calendar";
 import { ProviderContextBar } from "@/components/checkwise/portal/provider-context-bar";

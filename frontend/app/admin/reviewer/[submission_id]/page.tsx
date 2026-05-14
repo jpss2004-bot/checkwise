@@ -4,19 +4,19 @@ import { use, useCallback, useEffect, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import {
-  AlertCircle,
-  AlertTriangle,
+  WarningCircle,
+  Warning,
   ArrowLeft,
-  CheckCircle2,
-  ClipboardList,
+  CheckCircle,
+  ClipboardText,
   FileText,
   Gavel,
-  History,
-  Loader2,
-  MessageCircleQuestion,
+  ClockCounterClockwise,
+  CircleNotch,
+  Question,
   ShieldCheck,
   XCircle,
-} from "lucide-react";
+} from "@phosphor-icons/react";
 
 import { BrandLogo } from "@/components/checkwise/brand-logo";
 import { RequirementStatusBadge } from "@/components/checkwise/portal/requirement-status-badge";
@@ -156,7 +156,7 @@ export default function ReviewerSubmissionPage({ params }: PageProps) {
             <BrandLogo variant="compact" size="md" />
             <span className="hidden h-5 w-px bg-border sm:block" />
             <p className="flex items-center gap-2 text-xs font-medium uppercase tracking-wide text-muted-foreground">
-              <ClipboardList className="h-4 w-4 text-primary" aria-hidden />
+              <ClipboardText className="h-4 w-4 text-primary" aria-hidden />
               Bandeja de revisión
             </p>
           </div>
@@ -298,7 +298,7 @@ function SignalRow({
   message: string;
 }) {
   const Icon =
-    severity === "error" ? AlertCircle : severity === "warning" ? AlertTriangle : ShieldCheck;
+    severity === "error" ? WarningCircle : severity === "warning" ? Warning : ShieldCheck;
   const iconColor =
     severity === "error"
       ? "text-red-600"
@@ -349,7 +349,7 @@ function TimelineCard({ detail }: { detail: SubmissionDetail }) {
     <Card>
       <CardHeader>
         <div className="flex items-center gap-2">
-          <History className="h-4 w-4 text-primary" aria-hidden />
+          <ClockCounterClockwise className="h-4 w-4 text-primary" aria-hidden />
           <CardTitle>Línea de tiempo</CardTitle>
         </div>
       </CardHeader>
@@ -392,12 +392,12 @@ const ACTIONS: {
   icon: typeof Gavel;
   variant: "approve" | "reject" | "clarify" | "exception";
 }[] = [
-  { action: "approve", label: "Aprobar", icon: CheckCircle2, variant: "approve" },
+  { action: "approve", label: "Aprobar", icon: CheckCircle, variant: "approve" },
   { action: "reject", label: "Rechazar", icon: XCircle, variant: "reject" },
   {
     action: "request_clarification",
     label: "Pedir aclaración",
-    icon: MessageCircleQuestion,
+    icon: Question,
     variant: "clarify",
   },
   { action: "mark_exception", label: "Excepción legal", icon: Gavel, variant: "exception" },
@@ -425,7 +425,7 @@ function DecisionCard({
       <Card>
         <CardHeader>
           <div className="flex items-center gap-2">
-            <CheckCircle2 className="h-4 w-4 text-emerald-600" aria-hidden />
+            <CheckCircle className="h-4 w-4 text-emerald-600" aria-hidden />
             <CardTitle>Decisión registrada</CardTitle>
           </div>
         </CardHeader>
@@ -534,7 +534,7 @@ function DecisionCard({
             className="rounded-md border border-amber-300 bg-amber-50 p-3 text-sm text-amber-900"
           >
             <div className="flex items-start gap-2">
-              <AlertTriangle
+              <Warning
                 className="mt-0.5 h-4 w-4 shrink-0 text-amber-600"
                 aria-hidden
               />
@@ -551,7 +551,7 @@ function DecisionCard({
           data-testid="submit-decision"
         >
           {submitting ? (
-            <Loader2 className="h-4 w-4 animate-spin" aria-hidden />
+            <CircleNotch className="h-4 w-4 animate-spin" aria-hidden />
           ) : (
             <Gavel className="h-4 w-4" aria-hidden />
           )}

@@ -4,14 +4,14 @@ import { useCallback, useEffect, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import {
-  AlertTriangle,
+  Warning,
   ArrowLeft,
   ArrowRight,
-  ClipboardList,
-  Clock3,
-  Inbox,
-  LogOut,
-} from "lucide-react";
+  ClipboardText,
+  Clock,
+  Tray,
+  SignOut,
+} from "@phosphor-icons/react";
 
 import { BrandLogo } from "@/components/checkwise/brand-logo";
 import { Badge } from "@/components/ui/badge";
@@ -104,7 +104,7 @@ export default function ReviewerQueuePage() {
             <BrandLogo variant="compact" size="md" />
             <span className="hidden h-5 w-px bg-border sm:block" />
             <p className="flex items-center gap-2 text-xs font-medium uppercase tracking-wide text-muted-foreground">
-              <ClipboardList className="h-4 w-4 text-primary" aria-hidden />
+              <ClipboardText className="h-4 w-4 text-primary" aria-hidden />
               Bandeja de revisión
             </p>
           </div>
@@ -130,7 +130,7 @@ export default function ReviewerQueuePage() {
             onClick={onLogout}
             className="active:scale-[0.98]"
           >
-            <LogOut className="h-4 w-4" aria-hidden />
+            <SignOut className="h-4 w-4" aria-hidden />
             Cerrar sesión
           </Button>
         </div>
@@ -146,7 +146,7 @@ export default function ReviewerQueuePage() {
         />
       ) : items.length === 0 ? (
         <EmptyState
-          icon={Inbox}
+          icon={Tray}
           title="No hay documentos por revisar"
           description="Cuando un proveedor cargue documentación nueva, aparecerá aquí en orden de llegada."
           variant="muted"
@@ -192,7 +192,7 @@ function QueueRow({ item }: { item: QueueItem }) {
             <RequirementStatusBadge status={item.status} />
             {item.has_mismatch ? (
               <span className="inline-flex items-center gap-1 rounded-md border border-amber-300 bg-amber-50 px-2 py-0.5 text-xs text-amber-800">
-                <AlertTriangle className="h-3 w-3" aria-hidden />
+                <Warning className="h-3 w-3" aria-hidden />
                 Posible mismatch
               </span>
             ) : null}
@@ -217,7 +217,7 @@ function QueueRow({ item }: { item: QueueItem }) {
         </div>
         <div className="flex shrink-0 flex-col items-start gap-2 sm:items-end">
           <span className="inline-flex items-center gap-1 text-xs text-muted-foreground">
-            <Clock3 className="h-3 w-3" aria-hidden />
+            <Clock className="h-3 w-3" aria-hidden />
             {ageText}
           </span>
           <span className="inline-flex items-center gap-1 text-xs font-medium text-primary">

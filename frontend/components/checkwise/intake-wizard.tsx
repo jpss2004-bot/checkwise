@@ -3,21 +3,21 @@
 import { FormEvent, useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import {
-  AlertTriangle,
+  Warning,
   ArrowRight,
   Calendar,
-  CheckCircle2,
-  ChevronLeft,
-  ChevronRight,
+  CheckCircle,
+  CaretLeft,
+  CaretRight,
   Eye,
   FileText,
-  Loader2,
+  CircleNotch,
   Lock,
-  Pencil,
+  PencilSimple,
   ShieldCheck,
-  UploadCloud,
+  CloudArrowUp,
   UserCheck,
-} from "lucide-react";
+} from "@phosphor-icons/react";
 
 import { institutions, loadTypes, requirementGuides, requirements } from "@/lib/api/catalogs";
 import { Badge } from "@/components/ui/badge";
@@ -421,7 +421,7 @@ export function IntakeWizard({
             >
               <div className="flex gap-3">
                 <div className="mt-0.5 flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-amber-500 text-white">
-                  <AlertTriangle className="h-4 w-4" aria-hidden="true" />
+                  <Warning className="h-4 w-4" aria-hidden="true" />
                 </div>
                 <div className="min-w-0">
                   <p className="text-sm font-semibold text-amber-900">
@@ -448,7 +448,7 @@ export function IntakeWizard({
               onClick={() => setStep((current) => Math.max(0, current - 1))}
               className="active:scale-[0.98]"
             >
-              <ChevronLeft className="h-4 w-4" aria-hidden="true" />
+              <CaretLeft className="h-4 w-4" aria-hidden="true" />
               Atrás
             </Button>
 
@@ -460,7 +460,7 @@ export function IntakeWizard({
                 className="active:scale-[0.98]"
               >
                 Continuar
-                <ChevronRight className="h-4 w-4" aria-hidden="true" />
+                <CaretRight className="h-4 w-4" aria-hidden="true" />
               </Button>
             ) : step === 3 ? (
               <Button
@@ -470,9 +470,9 @@ export function IntakeWizard({
                 className="active:scale-[0.98]"
               >
                 {isSubmitting ? (
-                  <Loader2 className="h-4 w-4 animate-spin" aria-hidden="true" />
+                  <CircleNotch className="h-4 w-4 animate-spin" aria-hidden="true" />
                 ) : (
-                  <UploadCloud className="h-4 w-4" aria-hidden="true" />
+                  <CloudArrowUp className="h-4 w-4" aria-hidden="true" />
                 )}
                 {isSubmitting ? "Enviando…" : "Enviar a revisión"}
               </Button>
@@ -577,7 +577,7 @@ function ContextStep({
           onClick={onToggleUnlock}
           className="inline-flex items-center gap-1.5 text-xs font-medium text-primary underline-offset-4 hover:underline"
         >
-          <Pencil className="h-3 w-3" aria-hidden="true" />
+          <PencilSimple className="h-3 w-3" aria-hidden="true" />
           {unlocked ? "Volver a bloquear el contexto" : "Necesito cambiar algo del contexto"}
         </button>
       ) : null}
@@ -757,7 +757,7 @@ function UploadStep({
             }}
             className="flex min-h-[180px] cursor-pointer flex-col items-center justify-center rounded-md border border-dashed border-primary/40 bg-emerald-50/50 p-6 text-center transition-colors hover:bg-emerald-50"
           >
-            <UploadCloud className="h-9 w-9 text-primary" aria-hidden="true" />
+            <CloudArrowUp className="h-9 w-9 text-primary" aria-hidden="true" />
             <p className="mt-3 text-sm font-semibold">
               Arrastra o selecciona el PDF
             </p>
@@ -789,7 +789,7 @@ function UploadStep({
 
           {duplicateChecking ? (
             <div className="flex items-center gap-2 rounded-md border border-border bg-muted/40 p-3 text-xs text-muted-foreground">
-              <Loader2 className="h-3.5 w-3.5 animate-spin" aria-hidden="true" />
+              <CircleNotch className="h-3.5 w-3.5 animate-spin" aria-hidden="true" />
               Verificando si ya habías subido este mismo archivo…
             </div>
           ) : null}
@@ -797,7 +797,7 @@ function UploadStep({
           {duplicateCheck?.exists ? (
             <div className="rounded-md border border-amber-300 bg-amber-50 p-3 text-sm text-amber-900">
               <div className="flex items-start gap-2">
-                <AlertTriangle
+                <Warning
                   className="mt-0.5 h-4 w-4 shrink-0 text-amber-700"
                   aria-hidden="true"
                 />
@@ -947,7 +947,7 @@ function PrevalidationStep({
       {duplicateCheck?.exists ? (
         <div className="rounded-md border border-amber-300 bg-amber-50 p-4 text-sm text-amber-900">
           <div className="flex items-start gap-2">
-            <AlertTriangle
+            <Warning
               className="mt-0.5 h-4 w-4 shrink-0 text-amber-700"
               aria-hidden="true"
             />
@@ -1018,7 +1018,7 @@ function ConfirmationStep({
       >
         <div className="flex gap-3">
           <div className="mt-0.5 flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-amber-500 text-white">
-            <AlertTriangle className="h-4 w-4" aria-hidden="true" />
+            <Warning className="h-4 w-4" aria-hidden="true" />
           </div>
           <div className="min-w-0">
             <p className="text-sm font-semibold text-amber-900">
@@ -1051,7 +1051,7 @@ function ConfirmationStep({
   const heroIconBg = isAttention
     ? "bg-amber-500 text-white"
     : "bg-emerald-500 text-white";
-  const HeroIcon = isAttention ? AlertTriangle : CheckCircle2;
+  const HeroIcon = isAttention ? Warning : CheckCircle;
   const heroHeadline = isMismatch
     ? "Recibimos tu documento, pero detectamos una posible inconsistencia"
     : isClarification

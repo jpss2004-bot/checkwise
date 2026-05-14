@@ -2,15 +2,15 @@
 
 import Link from "next/link";
 import {
-  AlertCircle,
-  AlertTriangle,
+  WarningCircle,
+  Warning,
   ArrowRight,
-  CheckCircle2,
-  Clock3,
+  CheckCircle,
+  Clock,
   FileText,
   ShieldCheck,
-  UploadCloud,
-} from "lucide-react";
+  CloudArrowUp,
+} from "@phosphor-icons/react";
 
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -122,7 +122,7 @@ export function OnboardingChecklist({ data }: Props) {
               <header className="flex flex-wrap items-center justify-between gap-2">
                 <div className="flex items-center gap-2">
                   {sectionComplete ? (
-                    <CheckCircle2 className="h-4 w-4 text-emerald-600" aria-hidden="true" />
+                    <CheckCircle className="h-4 w-4 text-emerald-600" aria-hidden="true" />
                   ) : (
                     <FileText className="h-4 w-4 text-muted-foreground" aria-hidden="true" />
                   )}
@@ -178,7 +178,7 @@ export function OnboardingChecklist({ data }: Props) {
                         <RequirementStatusBadge status={item.status} />
                         <Button asChild size="sm" variant="outline">
                           <Link href={uploadHref}>
-                            <UploadCloud className="h-4 w-4" aria-hidden="true" />
+                            <CloudArrowUp className="h-4 w-4" aria-hidden="true" />
                             {item.status === "pendiente" ? "Cargar" : "Recargar"}
                           </Link>
                         </Button>
@@ -218,7 +218,7 @@ function NextActionCallout({ item }: { item: OnboardingItem }) {
         <div className="flex items-start gap-3">
           <div className={iconWrapperClass}>
             {needsAttention ? (
-              <AlertTriangle className="h-4 w-4" aria-hidden="true" />
+              <Warning className="h-4 w-4" aria-hidden="true" />
             ) : (
               <ShieldCheck className="h-4 w-4" aria-hidden="true" />
             )}
@@ -253,21 +253,21 @@ function ItemStatusIcon({ status }: { status: RequirementStatus }) {
     return <FileText className="mt-0.5 h-4 w-4 text-muted-foreground" aria-hidden="true" />;
   }
   if (status === DocumentStatus.RECHAZADO || status === DocumentStatus.VENCIDO) {
-    return <AlertCircle className="mt-0.5 h-4 w-4 text-red-600" aria-hidden="true" />;
+    return <WarningCircle className="mt-0.5 h-4 w-4 text-red-600" aria-hidden="true" />;
   }
   if (
     status === DocumentStatus.POSIBLE_MISMATCH ||
     status === DocumentStatus.REQUIERE_ACLARACION
   ) {
-    return <AlertTriangle className="mt-0.5 h-4 w-4 text-amber-600" aria-hidden="true" />;
+    return <Warning className="mt-0.5 h-4 w-4 text-amber-600" aria-hidden="true" />;
   }
   if (status === DocumentStatus.PENDIENTE_REVISION || status === DocumentStatus.RECIBIDO) {
-    return <Clock3 className="mt-0.5 h-4 w-4 text-primary" aria-hidden="true" />;
+    return <Clock className="mt-0.5 h-4 w-4 text-primary" aria-hidden="true" />;
   }
   if (status === DocumentStatus.NO_APLICA) {
     return <FileText className="mt-0.5 h-4 w-4 text-muted-foreground/60" aria-hidden="true" />;
   }
-  return <CheckCircle2 className="mt-0.5 h-4 w-4 text-emerald-600" aria-hidden="true" />;
+  return <CheckCircle className="mt-0.5 h-4 w-4 text-emerald-600" aria-hidden="true" />;
 }
 
 function CompletedBanner({ total }: { total: number }) {
@@ -275,7 +275,7 @@ function CompletedBanner({ total }: { total: number }) {
     <div className="rounded-md border border-emerald-200 bg-emerald-50 p-4 sm:p-5">
       <div className="flex items-start gap-3">
         <div className="mt-0.5 flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-emerald-500 text-white">
-          <CheckCircle2 className="h-4 w-4" aria-hidden="true" />
+          <CheckCircle className="h-4 w-4" aria-hidden="true" />
         </div>
         <div className="min-w-0">
           <p className="text-sm font-semibold text-emerald-900">

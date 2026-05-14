@@ -3,7 +3,7 @@
 import { type FormEvent, useEffect, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { AlertTriangle, Loader2, LogIn } from "lucide-react";
+import { Warning, CircleNotch, SignIn } from "@phosphor-icons/react";
 
 import { BrandLogo } from "@/components/checkwise/brand-logo";
 import { Button } from "@/components/ui/button";
@@ -98,7 +98,7 @@ export default function AdminLoginPage() {
                 className="rounded-md border border-amber-300 bg-amber-50 p-3"
               >
                 <div className="flex items-start gap-2">
-                  <AlertTriangle
+                  <Warning
                     className="mt-0.5 h-4 w-4 shrink-0 text-amber-600"
                     aria-hidden
                   />
@@ -113,9 +113,9 @@ export default function AdminLoginPage() {
               disabled={submitting}
             >
               {submitting ? (
-                <Loader2 className="h-4 w-4 animate-spin" aria-hidden />
+                <CircleNotch className="h-4 w-4 animate-spin" aria-hidden />
               ) : (
-                <LogIn className="h-4 w-4" aria-hidden />
+                <SignIn className="h-4 w-4" aria-hidden />
               )}
               {submitting ? "Verificando…" : "Entrar"}
             </Button>

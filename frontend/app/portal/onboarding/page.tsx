@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { ArrowRight, FolderOpen } from "lucide-react";
+import { ArrowRight, FolderOpen } from "@phosphor-icons/react";
 
 import { OnboardingChecklist } from "@/components/checkwise/portal/onboarding-checklist";
 import { ProviderContextBar } from "@/components/checkwise/portal/provider-context-bar";

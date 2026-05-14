@@ -1,7 +1,7 @@
 "use client";
 
 import { FormEvent, useMemo, useState } from "react";
-import { AlertCircle, CheckCircle2, Loader2, UploadCloud } from "lucide-react";
+import { WarningCircle, CheckCircle, CircleNotch, CloudArrowUp } from "@phosphor-icons/react";
 
 import { institutions, loadTypes, requirements } from "@/lib/api/catalogs";
 import { DocumentStatus } from "@/lib/constants/statuses";
@@ -179,9 +179,9 @@ export function DocumentSubmissionForm() {
             </p>
             <Button type="submit" disabled={isSubmitting}>
               {isSubmitting ? (
-                <Loader2 className="h-4 w-4 animate-spin" aria-hidden="true" />
+                <CircleNotch className="h-4 w-4 animate-spin" aria-hidden="true" />
               ) : (
-                <UploadCloud className="h-4 w-4" aria-hidden="true" />
+                <CloudArrowUp className="h-4 w-4" aria-hidden="true" />
               )}
               Registrar carga
             </Button>
@@ -191,7 +191,7 @@ export function DocumentSubmissionForm() {
         {error ? (
           <div className="mt-5 rounded-md border border-destructive/30 bg-red-50 p-4 text-sm text-destructive">
             <div className="flex gap-2">
-              <AlertCircle className="mt-0.5 h-4 w-4 shrink-0" aria-hidden="true" />
+              <WarningCircle className="mt-0.5 h-4 w-4 shrink-0" aria-hidden="true" />
               <span>{error}</span>
             </div>
           </div>
@@ -200,7 +200,7 @@ export function DocumentSubmissionForm() {
         {result ? (
           <div className="mt-5 rounded-md border border-primary/25 bg-emerald-50 p-4">
             <div className="flex gap-2 text-sm font-medium text-primary">
-              <CheckCircle2 className="mt-0.5 h-4 w-4 shrink-0" aria-hidden="true" />
+              <CheckCircle className="mt-0.5 h-4 w-4 shrink-0" aria-hidden="true" />
               <span>{result.message}</span>
             </div>
             <div className="mt-3 grid gap-2 text-xs text-muted-foreground md:grid-cols-2">

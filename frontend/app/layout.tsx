@@ -1,13 +1,8 @@
 import type { Metadata } from "next";
-import { Open_Sans } from "next/font/google";
-import "./globals.css";
+import { GeistMono } from "geist/font/mono";
+import { GeistSans } from "geist/font/sans";
 
-const openSans = Open_Sans({
-  subsets: ["latin"],
-  weight: ["400", "500", "600", "700"],
-  display: "swap",
-  variable: "--font-sans",
-});
+import "./globals.css";
 
 export const metadata: Metadata = {
   title: "CheckWise · Plataforma de cumplimiento REPSE",
@@ -22,7 +17,7 @@ export default function RootLayout({
   children: React.ReactNode;
 }>) {
   return (
-    <html lang="es" className={openSans.variable}>
+    <html lang="es" className={`${GeistSans.variable} ${GeistMono.variable}`}>
       <body className="antialiased">{children}</body>
     </html>
   );

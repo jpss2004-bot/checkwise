@@ -1,4 +1,4 @@
-import { MessageCircle, QrCode } from "lucide-react";
+import { ChatCircle, QrCode } from "@phosphor-icons/react";
 
 import { Button } from "@/components/ui/button";
 
@@ -10,7 +10,7 @@ export function SupportCard() {
     <section className="rounded-md border border-border bg-white p-5 shadow-soft">
       <div className="flex items-start gap-3">
         <div className="flex h-9 w-9 items-center justify-center rounded-md bg-muted text-primary">
-          <MessageCircle className="h-5 w-5" aria-hidden="true" />
+          <ChatCircle className="h-5 w-5" aria-hidden="true" />
         </div>
         <div>
           <h2 className="text-base font-semibold">Soporte documental</h2>
