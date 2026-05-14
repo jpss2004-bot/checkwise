@@ -1,17 +1,38 @@
 /**
- * Demo-only provider session helpers backed by localStorage.
+ * Portal session — CheckWise 1.7
  *
- * V1.2 does not implement real authentication. The portal issues an opaque
- * access_token at /api/v1/portal/access; we cache it here so subsequent calls
- * can present `X-Workspace-Token`. V1.3 must replace this with real auth.
+ * Source of truth is now the httpOnly cookie issued by the backend at
+ * POST /api/v1/portal/access and validated by GET /api/v1/portal/me.
+ * The browser cannot read or write that cookie.
+ *
+ * What this module exposes:
+ *   * Types (PortalSession, PersonaType) — unchanged shape
+ *   * `fetchCurrentSession()` (async) — hits /me, caches in-memory
+ *   * `readPortalSession()` (sync) — returns the in-memory cache or null
+ *   * `clearPortalSession()` — async: posts /logout + clears cache
+ *   * `writePortalSession()` — transition shim used only by the
+ *     mocked /activate flow until P1-1 wires real activation to
+ *     /portal/access. It populates the in-memory cache but does NOT
+ *     persist anywhere; a reload bounces the user back to /.
+ *
+ * Note: localStorage is no longer touched. Any stale entry under
+ * `checkwise.portal.session.v1` is cleared on first `fetchCurrentSession`.
  */
 
-const STORAGE_KEY = "checkwise.portal.session.v1";
+import {
+  fetchPortalMe,
+  postPortalLogout,
+  type WorkspaceSummary,
+} from "@/lib/api/portal-session";
+
+const LEGACY_LOCAL_STORAGE_KEY = "checkwise.portal.session.v1";
 
 export type PersonaType = "moral" | "fisica";
 
 export type PortalSession = {
   workspace_id: string;
+  /** Kept on the type for backward compatibility with existing code paths.
+   *  Browser never sees the real access token in 1.7+. */
   access_token: string;
   persona_type: PersonaType;
   client_name: string;
@@ -22,35 +43,85 @@ export type PortalSession = {
   onboarding_completed_at: string | null;
 };
 
-export function readPortalSession(): PortalSession | null {
-  if (typeof window === "undefined") {
-    return null;
-  }
+let cached: PortalSession | null = null;
+
+function clearLegacyLocalStorage(): void {
+  if (typeof window === "undefined") return;
   try {
-    const raw = window.localStorage.getItem(STORAGE_KEY);
-    if (!raw) {
-      return null;
-    }
-    const parsed = JSON.parse(raw) as PortalSession;
-    if (!parsed.workspace_id || !parsed.access_token) {
-      return null;
-    }
-    return parsed;
+    window.localStorage.removeItem(LEGACY_LOCAL_STORAGE_KEY);
   } catch {
+    /* ignore */
+  }
+}
+
+function summaryToSession(summary: WorkspaceSummary): PortalSession {
+  return {
+    workspace_id: summary.workspace_id,
+    // Browser no longer holds the real access_token. We carry a
+    // placeholder so existing TypeScript consumers continue to compile
+    // — the cookie is what actually authenticates the request.
+    access_token: "cookie-managed",
+    persona_type: summary.persona_type as PersonaType,
+    client_name: summary.client_name,
+    vendor_name: summary.vendor_name,
+    vendor_rfc: summary.vendor_rfc,
+    filial_name: summary.filial_name,
+    contract_reference: summary.contract_reference,
+    onboarding_completed_at: summary.onboarding_completed_at,
+  };
+}
+
+/**
+ * Read the in-memory session cache. Synchronous — returns null until
+ * `fetchCurrentSession()` has populated the cache for the current
+ * page lifetime. Most callers should prefer the async fetch.
+ */
+export function readPortalSession(): PortalSession | null {
+  return cached;
+}
+
+/**
+ * Bootstrap the session from the backend.
+ *
+ * Calls GET /api/v1/portal/me with credentials=include so the
+ * httpOnly cookie is sent. Caches the response in memory. Returns
+ * null on 401 (no valid cookie) or any network failure.
+ */
+export async function fetchCurrentSession(): Promise<PortalSession | null> {
+  clearLegacyLocalStorage();
+  const summary = await fetchPortalMe();
+  if (!summary) {
+    cached = null;
     return null;
   }
+  cached = summaryToSession(summary);
+  return cached;
 }
 
+/**
+ * Clear the cookie + cache. Async because logout hits the backend.
+ */
+export async function clearPortalSession(): Promise<void> {
+  cached = null;
+  await postPortalLogout();
+}
+
+/**
+ * Transition shim. Used only by the mocked /activate flow to
+ * populate the in-memory cache when activation succeeds without
+ * actually minting a backend session. Logs a deprecation hint and
+ * does NOT persist anywhere — a reload bounces the user to /.
+ *
+ * TODO[backend-integration]: when P1-1 wires activation to a real
+ * /api/v1/activation/* endpoint that returns a cookie, remove this
+ * shim entirely.
+ */
 export function writePortalSession(session: PortalSession): void {
-  if (typeof window === "undefined") {
-    return;
+  if (typeof console !== "undefined") {
+    // eslint-disable-next-line no-console
+    console.warn(
+      "[checkwise] writePortalSession is a transition shim; real session must come from /portal/access (cookie) or P1-1 activation API.",
+    );
   }
-  window.localStorage.setItem(STORAGE_KEY, JSON.stringify(session));
-}
-
-export function clearPortalSession(): void {
-  if (typeof window === "undefined") {
-    return;
-  }
-  window.localStorage.removeItem(STORAGE_KEY);
+  cached = session;
 }

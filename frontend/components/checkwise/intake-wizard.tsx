@@ -30,7 +30,7 @@ import { Textarea } from "@/components/ui/textarea";
 import { ValidationSignal, ValidationSummary } from "@/components/checkwise/validation-summary";
 import { checkDuplicateBySha256, type DuplicateCheck } from "@/lib/api/portal";
 import { DocumentStatus } from "@/lib/constants/statuses";
-import { readPortalSession } from "@/lib/session/portal";
+import { fetchCurrentSession, readPortalSession } from "@/lib/session/portal";
 
 type SubmissionResponse = {
   submission_id: string;
@@ -217,7 +217,9 @@ export function IntakeWizard({
   }
 
   async function runDuplicatePreCheck(target: File) {
-    const session = readPortalSession();
+    // Cache-first; fall back to a backend round-trip so the wizard
+    // works on a deep-linked refresh where the cache is empty.
+    const session = readPortalSession() ?? (await fetchCurrentSession());
     if (!session) return;
     setDuplicateChecking(true);
     try {

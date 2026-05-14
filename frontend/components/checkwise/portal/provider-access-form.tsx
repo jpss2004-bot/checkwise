@@ -13,7 +13,10 @@ import { Input } from "@/components/ui/input";
 import { Select } from "@/components/ui/select";
 import { createPortalAccess, PortalApiError } from "@/lib/api/portal";
 import { DEMO_CLIENTS } from "@/lib/demo-clients";
-import { writePortalSession, type PersonaType } from "@/lib/session/portal";
+import {
+  fetchCurrentSession,
+  type PersonaType,
+} from "@/lib/session/portal";
 
 type FormState = {
   client_name: string;
@@ -87,7 +90,7 @@ export function ProviderAccessForm() {
     setServerError(null);
     setSubmitting(true);
     try {
-      const access = await createPortalAccess({
+      await createPortalAccess({
         client_name: form.client_name.trim(),
         filial_name: form.filial_name.trim() || null,
         vendor_name: form.vendor_name.trim(),
@@ -95,19 +98,12 @@ export function ProviderAccessForm() {
         persona_type: form.persona_type,
         contract_reference: form.contract_reference.trim() || null,
       });
-      writePortalSession({
-        workspace_id: access.workspace_id,
-        access_token: access.access_token,
-        persona_type: access.persona_type as PersonaType,
-        client_name: access.client_name,
-        vendor_name: access.vendor_name,
-        vendor_rfc: access.vendor_rfc,
-        filial_name: access.filial_name,
-        contract_reference: access.contract_reference,
-        onboarding_completed_at: access.onboarding_completed_at,
-      });
-      // CheckWise 1.6: send every freshly-authed user through the
-      // workspace confirmation step before onboarding/dashboard.
+      // CheckWise 1.7: cookie is now set server-side by /portal/access.
+      // Warm the in-memory cache via /me so the workspace-confirmation
+      // page renders without an extra round-trip.
+      await fetchCurrentSession();
+      // Send every freshly-authed user through the workspace
+      // confirmation step before onboarding/dashboard.
       router.push("/portal/entra-a-tu-espacio");
     } catch (caught) {
       if (caught instanceof PortalApiError) {

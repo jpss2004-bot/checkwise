@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import {
   ArrowRight,
@@ -17,12 +17,13 @@ import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Progress } from "@/components/ui/progress";
+import { Skeleton } from "@/components/ui/skeleton";
+import { getOnboarding } from "@/lib/api/portal";
 import {
-  MOCK_EXPEDIENTE,
-  countExpediente,
-  type ExpedienteRequirement,
-} from "@/lib/mock/expediente";
-import { decidePostLoginRoute } from "@/lib/routing/post-login";
+  adaptOnboardingToRequirements,
+  countRealExpediente,
+} from "@/lib/api/portal-adapters";
+import { MOCK_EXPEDIENTE, type ExpedienteRequirement } from "@/lib/mock/expediente";
 import { withPortalSession } from "@/lib/session/with-portal-session";
 import type { PortalSession } from "@/lib/session/portal";
 
@@ -38,9 +39,67 @@ import type { PortalSession } from "@/lib/session/portal";
  * shape (currently it only returns the bare requirement names).
  */
 function OnboardingInner({ session }: { session: PortalSession }) {
-  const [requirements] = useState<ExpedienteRequirement[]>(MOCK_EXPEDIENTE);
-  const counts = useMemo(() => countExpediente(requirements), [requirements]);
-  const decision = useMemo(() => decidePostLoginRoute(requirements), [requirements]);
+  // CheckWise 1.7: real /portal/workspaces/{id}/onboarding. The
+  // adapter enriches each item with UX copy (why/format/next_action)
+  // that the backend doesn't yet ship — that enrichment will move
+  // server-side in P1-1.
+  const [requirements, setRequirements] = useState<ExpedienteRequirement[] | null>(
+    null,
+  );
+  const [loadError, setLoadError] = useState(false);
+
+  useEffect(() => {
+    let cancelled = false;
+    getOnboarding(session)
+      .then((payload) => {
+        if (cancelled) return;
+        const adapted = adaptOnboardingToRequirements(payload);
+        // Backend may legitimately return zero items during early
+        // setup; the UI shouldn't render an empty gate. Fall back to
+        // the mock so demos still work end-to-end.
+        setRequirements(adapted.length > 0 ? adapted : MOCK_EXPEDIENTE);
+      })
+      .catch(() => {
+        if (cancelled) return;
+        setLoadError(true);
+        setRequirements(MOCK_EXPEDIENTE);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [session]);
+
+  const counts = useMemo(
+    () => countRealExpediente(requirements ?? []),
+    [requirements],
+  );
+
+  // Local banner decision — replaces the mock-only routing helper for
+  // this page's hero. Same semantics, derived from the real counts.
+  const banner: "expediente_blocked" | "provisional_access" | "none" = (() => {
+    if (!requirements) return "none";
+    const blocking = requirements
+      .filter((r) => r.required)
+      .some((r) =>
+        ["empty", "pending", "rejected", "expired", "needs_review"].includes(r.state),
+      );
+    if (blocking) return "expediente_blocked";
+    if (counts.in_review > 0) return "provisional_access";
+    return "none";
+  })();
+
+  if (!requirements) {
+    return (
+      <>
+        <ProviderContextBar session={session} />
+        <main className="mx-auto max-w-6xl space-y-6 px-5 py-8">
+          <Skeleton className="h-40 w-full rounded-xl" />
+          <Skeleton className="h-48 w-full rounded-xl" />
+          <Skeleton className="h-48 w-full rounded-xl" />
+        </main>
+      </>
+    );
+  }
 
   const needsAction = requirements.filter((r) =>
     ["pending", "empty", "rejected", "expired", "needs_review"].includes(r.state),
@@ -54,7 +113,16 @@ function OnboardingInner({ session }: { session: PortalSession }) {
     <>
       <ProviderContextBar session={session} />
       <main className="mx-auto max-w-6xl space-y-8 px-5 py-8">
-        <GateHero counts={counts} banner={decision.banner} />
+        {loadError && (
+          <Alert variant="warning">
+            <AlertTitle>Mostramos datos de respaldo</AlertTitle>
+            <AlertDescription>
+              No pudimos consultar tu expediente al instante. La vista usa
+              datos de respaldo mientras se restablece la conexión.
+            </AlertDescription>
+          </Alert>
+        )}
+        <GateHero counts={counts} banner={banner} />
 
         {needsAction.length > 0 && (
           <ExpedienteSection
@@ -114,7 +182,7 @@ function GateHero({
   counts,
   banner,
 }: {
-  counts: ReturnType<typeof countExpediente>;
+  counts: ReturnType<typeof countRealExpediente>;
   banner:
     | "none"
     | "provisional_access"
@@ -251,7 +319,7 @@ function CountsSummary({
   counts,
   stacked = false,
 }: {
-  counts: ReturnType<typeof countExpediente>;
+  counts: ReturnType<typeof countRealExpediente>;
   stacked?: boolean;
 }) {
   return (

@@ -35,7 +35,7 @@ import {
   type SubmissionSuggestedAction,
 } from "@/lib/api/portal";
 import { DocumentStatus } from "@/lib/constants/statuses";
-import { readPortalSession, type PortalSession } from "@/lib/session/portal";
+import { fetchCurrentSession, type PortalSession } from "@/lib/session/portal";
 
 type PageProps = {
   params: Promise<{ submission_id: string }>;
@@ -53,12 +53,18 @@ export default function SubmissionDetailPage({ params }: PageProps) {
   const [reloadKey, setReloadKey] = useState(0);
 
   useEffect(() => {
-    const current = readPortalSession();
-    if (!current) {
-      router.replace("/");
-      return;
-    }
-    setSession(current);
+    let cancelled = false;
+    fetchCurrentSession().then((current) => {
+      if (cancelled) return;
+      if (!current) {
+        router.replace("/");
+        return;
+      }
+      setSession(current);
+    });
+    return () => {
+      cancelled = true;
+    };
   }, [router]);
 
   useEffect(() => {

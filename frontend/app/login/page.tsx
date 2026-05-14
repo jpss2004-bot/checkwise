@@ -21,7 +21,7 @@ import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
 import { cn } from "@/lib/utils";
-import { readPortalSession } from "@/lib/session/portal";
+import { fetchCurrentSession } from "@/lib/session/portal";
 
 /**
  * Login / access entry.
@@ -74,14 +74,20 @@ export default function LoginPage() {
   const [role, setRole] = useState<RoleKey>("provider");
 
   useEffect(() => {
-    const existing = readPortalSession();
-    if (existing) {
-      // CheckWise 1.6: returning sessions enter the workspace
-      // confirmation step first.
-      router.replace("/portal/entra-a-tu-espacio");
-      return;
-    }
-    setChecked(true);
+    let cancelled = false;
+    // CheckWise 1.7: ask the backend; no localStorage trust.
+    fetchCurrentSession().then((existing) => {
+      if (cancelled) return;
+      if (existing) {
+        // Returning sessions enter the workspace confirmation step first.
+        router.replace("/portal/entra-a-tu-espacio");
+        return;
+      }
+      setChecked(true);
+    });
+    return () => {
+      cancelled = true;
+    };
   }, [router]);
 
   if (!checked) return <LoginSkeleton />;

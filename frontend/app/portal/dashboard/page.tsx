@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo } from "react";
+import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import {
   ArrowRight,
@@ -21,6 +21,12 @@ import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Progress } from "@/components/ui/progress";
+import { getOnboarding } from "@/lib/api/portal";
+import {
+  adaptOnboardingToRequirements,
+  countRealExpediente,
+  type ExpedienteCounts,
+} from "@/lib/api/portal-adapters";
 import {
   MOCK_ATTENTION_TODAY,
   MOCK_DOC_STATE_COUNTS,
@@ -30,7 +36,6 @@ import {
 } from "@/lib/mock/dashboard";
 import { MOCK_EXPEDIENTE, countExpediente } from "@/lib/mock/expediente";
 import { verifyToken } from "@/lib/mock/invitations";
-import { decidePostLoginRoute } from "@/lib/routing/post-login";
 import { withPortalSession } from "@/lib/session/with-portal-session";
 import type { PortalSession } from "@/lib/session/portal";
 import type { DocumentStateCode } from "@/lib/types";
@@ -49,17 +54,34 @@ import { buildWorkspaceContext } from "@/lib/workspace/resolver";
  * with /api/v1/portal/dashboard once it exposes the equivalents.
  */
 function DashboardInner({ session }: { session: PortalSession }) {
-  // Reuse the same mock expediente to compute the gate.
-  const expedienteCounts = useMemo(
-    () => countExpediente(MOCK_EXPEDIENTE),
-    [],
+  // CheckWise 1.7: real expediente counts now come from
+  // /portal/workspaces/{id}/onboarding. Semaphore + suggested actions
+  // + attention rows + state overview stay mocked until P1-3 ships a
+  // dashboard aggregator endpoint.
+  const [expedienteCounts, setExpedienteCounts] = useState<ExpedienteCounts>(() =>
+    countExpediente(MOCK_EXPEDIENTE),
   );
-  const decision = useMemo(
-    () => decidePostLoginRoute(MOCK_EXPEDIENTE),
-    [],
-  );
-  const gateBlocked = decision.banner === "expediente_blocked";
-  const provisional = decision.banner === "provisional_access";
+
+  useEffect(() => {
+    let cancelled = false;
+    getOnboarding(session)
+      .then((payload) => {
+        if (cancelled) return;
+        const adapted = adaptOnboardingToRequirements(payload);
+        const source = adapted.length > 0 ? adapted : MOCK_EXPEDIENTE;
+        setExpedienteCounts(countRealExpediente(source));
+      })
+      .catch(() => {
+        /* fall back to the mock-derived counts initialised in useState */
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [session]);
+
+  const gateBlocked = expedienteCounts.needs_action > 0;
+  const provisional =
+    !gateBlocked && expedienteCounts.in_review > 0;
 
   // Build the workspace identity snapshot — same source as
   // /portal/entra-a-tu-espacio so users see consistent values.

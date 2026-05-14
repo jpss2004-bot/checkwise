@@ -3,19 +3,15 @@
 import { useEffect, useState, type ComponentType } from "react";
 import { useRouter } from "next/navigation";
 
-import { readPortalSession, type PortalSession } from "./portal";
+import { fetchCurrentSession, readPortalSession, type PortalSession } from "./portal";
 
 /**
  * HOC that fronts a portal page with the standard session-check.
  *
- * Replaces the 4x-duplicated pattern from V1.2:
- *   const [session, setSession] = useState<PortalSession | null>(null);
- *   useEffect(() => {
- *     const s = readPortalSession();
- *     if (!s) { router.replace("/"); return; }
- *     setSession(s);
- *   }, [router]);
- *   if (!session) return null;
+ * CheckWise 1.7: session lives in an httpOnly cookie. The HOC tries
+ * the in-memory cache first (populated by a prior fetch in the same
+ * SPA navigation), then falls back to `GET /api/v1/portal/me`. A
+ * 401 / network failure redirects to `/`.
  *
  * Usage:
  *   function DashboardInner({ session }: { session: PortalSession }) { ... }
@@ -31,12 +27,23 @@ export function withPortalSession<P extends { session: PortalSession }>(
     const [session, setSession] = useState<PortalSession | null>(null);
 
     useEffect(() => {
-      const s = readPortalSession();
-      if (!s) {
-        router.replace("/");
+      let cancelled = false;
+      const cached = readPortalSession();
+      if (cached) {
+        setSession(cached);
         return;
       }
-      setSession(s);
+      fetchCurrentSession().then((s) => {
+        if (cancelled) return;
+        if (!s) {
+          router.replace("/");
+          return;
+        }
+        setSession(s);
+      });
+      return () => {
+        cancelled = true;
+      };
     }, [router]);
 
     if (!session) return null;

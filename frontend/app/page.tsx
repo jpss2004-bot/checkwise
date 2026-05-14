@@ -28,7 +28,7 @@ import { ContactForm } from "@/components/marketing/contact-form";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Progress } from "@/components/ui/progress";
-import { readPortalSession } from "@/lib/session/portal";
+import { fetchCurrentSession } from "@/lib/session/portal";
 
 interface FeatureItem {
   icon: Icon;
@@ -136,7 +136,15 @@ export default function PublicHome() {
   const [hasSession, setHasSession] = useState(false);
 
   useEffect(() => {
-    setHasSession(!!readPortalSession());
+    let cancelled = false;
+    // CheckWise 1.7: ask the backend whether a portal session cookie
+    // is valid. No localStorage trust.
+    fetchCurrentSession().then((session) => {
+      if (!cancelled) setHasSession(!!session);
+    });
+    return () => {
+      cancelled = true;
+    };
   }, []);
 
   // If a session already exists, send the user straight to the portal.

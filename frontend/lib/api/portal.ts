@@ -103,14 +103,24 @@ async function fetchJson<T>(
   init: RequestInit = {},
   session?: PortalSession,
 ): Promise<T> {
+  // CheckWise 1.7: portal session is an httpOnly cookie. Pass
+  // `credentials: "include"` on every call so the browser sends it.
+  // The legacy `session` parameter is kept for backward-compat with
+  // existing call sites; if a caller still passes one we add the
+  // X-Workspace-Token header as a fallback, but the cookie is the
+  // canonical path.
   const headers = new Headers(init.headers ?? {});
   if (!headers.has("Content-Type") && init.body) {
     headers.set("Content-Type", "application/json");
   }
-  if (session) {
+  if (session && session.access_token && session.access_token !== "cookie-managed") {
     headers.set("X-Workspace-Token", session.access_token);
   }
-  const response = await fetch(`${API_BASE_URL}${path}`, { ...init, headers });
+  const response = await fetch(`${API_BASE_URL}${path}`, {
+    ...init,
+    headers,
+    credentials: "include",
+  });
   if (!response.ok) {
     const detail = await response.text().catch(() => "");
     throw new PortalApiError(response.status, detail || response.statusText);

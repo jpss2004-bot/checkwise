@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import {
   ArrowLeft,
@@ -20,6 +20,9 @@ import { DocStateBadge, DOC_STATE_LABELS } from "@/components/checkwise/doc-stat
 import { ProviderContextBar } from "@/components/checkwise/portal/provider-context-bar";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import { Skeleton } from "@/components/ui/skeleton";
+import { getCalendar } from "@/lib/api/portal";
+import { adaptCalendarToEvents } from "@/lib/api/portal-adapters";
 import {
   INSTITUTION_LABELS,
   MOCK_CALENDAR_2026,
@@ -59,10 +62,35 @@ function CalendarInner({ session }: { session: PortalSession }) {
   const [filterInstitution, setFilterInstitution] =
     useState<CalendarInstitution | "all">("all");
 
+  // CheckWise 1.7: real /portal/workspaces/{id}/calendar payload,
+  // flattened by adaptCalendarToEvents into the existing CalendarEvent
+  // shape so the UI below stays as-is.
+  const [events, setEvents] = useState<CalendarEvent[] | null>(null);
+  const [loadError, setLoadError] = useState(false);
+
+  useEffect(() => {
+    let cancelled = false;
+    getCalendar(session, year)
+      .then((payload) => {
+        if (cancelled) return;
+        const adapted = adaptCalendarToEvents(payload);
+        setEvents(adapted.length > 0 ? adapted : MOCK_CALENDAR_2026);
+      })
+      .catch(() => {
+        if (cancelled) return;
+        setLoadError(true);
+        setEvents(MOCK_CALENDAR_2026);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [session, year]);
+
   const filteredEvents = useMemo(() => {
-    if (filterInstitution === "all") return MOCK_CALENDAR_2026;
-    return MOCK_CALENDAR_2026.filter((e) => e.institution === filterInstitution);
-  }, [filterInstitution]);
+    if (!events) return [];
+    if (filterInstitution === "all") return events;
+    return events.filter((e) => e.institution === filterInstitution);
+  }, [filterInstitution, events]);
 
   // Index events by (institution, month) for fast lookup.
   const eventsByCell = useMemo(() => {
@@ -77,9 +105,21 @@ function CalendarInner({ session }: { session: PortalSession }) {
   }, [filteredEvents]);
 
   const selected = useMemo(
-    () => MOCK_CALENDAR_2026.find((e) => e.id === selectedId) ?? null,
-    [selectedId],
+    () => (events ?? []).find((e) => e.id === selectedId) ?? null,
+    [selectedId, events],
   );
+
+  if (!events) {
+    return (
+      <>
+        <ProviderContextBar session={session} />
+        <main className="mx-auto max-w-7xl space-y-6 px-5 py-8">
+          <Skeleton className="h-24 w-1/2 rounded-xl" />
+          <Skeleton className="h-[420px] w-full rounded-xl" />
+        </main>
+      </>
+    );
+  }
 
   return (
     <>
@@ -110,15 +150,20 @@ function CalendarInner({ session }: { session: PortalSession }) {
           value={filterInstitution}
           onChange={setFilterInstitution}
           counts={{
-            all: MOCK_CALENDAR_2026.length,
-            sat: MOCK_CALENDAR_2026.filter((e) => e.institution === "sat").length,
-            imss: MOCK_CALENDAR_2026.filter((e) => e.institution === "imss").length,
-            infonavit: MOCK_CALENDAR_2026.filter((e) => e.institution === "infonavit")
-              .length,
-            stps_repse: MOCK_CALENDAR_2026.filter((e) => e.institution === "stps_repse")
-              .length,
+            all: events.length,
+            sat: events.filter((e) => e.institution === "sat").length,
+            imss: events.filter((e) => e.institution === "imss").length,
+            infonavit: events.filter((e) => e.institution === "infonavit").length,
+            stps_repse: events.filter((e) => e.institution === "stps_repse").length,
           }}
         />
+
+        {loadError && (
+          <p className="text-xs text-[color:var(--text-secondary)]">
+            No pudimos cargar tu calendario en este momento. Mostramos datos de
+            respaldo mientras se restablece la conexión.
+          </p>
+        )}
 
         <section
           className="cw-fade-up overflow-x-auto rounded-lg border border-[color:var(--border-default)] bg-[color:var(--surface-raised)] shadow-xs"

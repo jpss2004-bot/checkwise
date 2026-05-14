@@ -108,13 +108,14 @@ export function ProviderContextBar({ session, onboardingPct }: Props) {
             type="button"
             variant="outline"
             size="sm"
-            onClick={() => {
-              clearPortalSession();
+            onClick={async () => {
+              // CheckWise 1.7: server-side cookie clear, then route home.
+              await clearPortalSession();
               router.push("/");
             }}
           >
             <SignOut className="h-4 w-4" aria-hidden="true" />
-            Cerrar sesión demo
+            Cerrar sesión
           </Button>
         </div>
       </div>
