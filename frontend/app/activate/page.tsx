@@ -1,19 +1,30 @@
 "use client";
 
-import { useCallback, useMemo, useState, type FormEvent } from "react";
+import {
+  Suspense,
+  useCallback,
+  useEffect,
+  useMemo,
+  useState,
+  type FormEvent,
+} from "react";
 import Link from "next/link";
-import { useRouter } from "next/navigation";
+import { useRouter, useSearchParams } from "next/navigation";
 import {
   ArrowLeft,
   ArrowRight,
+  Buildings,
   Check,
   CheckCircle,
   Eye,
   EyeSlash,
   Key,
   ShieldCheck,
+  Truck,
   UserCircle,
   Warning,
+  WarningCircle,
+  type Icon,
 } from "@phosphor-icons/react";
 
 import { BrandLogo } from "@/components/checkwise/brand-logo";
@@ -21,12 +32,14 @@ import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
 import { Field } from "@/components/ui/field";
 import { Input } from "@/components/ui/input";
+import { Skeleton } from "@/components/ui/skeleton";
 import { Stepper, type StepperStep } from "@/components/ui/stepper";
 import {
   evaluatePassword,
   inferFromEmail,
   type EmailInference,
 } from "@/lib/email-inference";
+import type { InvitationRole } from "@/lib/email/welcome";
 import {
   MOCK_TEMP_CODE,
   setPassword,
@@ -35,6 +48,12 @@ import {
   type ActivationError,
   type ActivationSession,
 } from "@/lib/mock/activation";
+import {
+  consumeInvitation,
+  verifyToken,
+  type Invitation,
+} from "@/lib/mock/invitations";
+import { cn } from "@/lib/utils";
 import { writePortalSession } from "@/lib/session/portal";
 
 const STEPS: StepperStep[] = [
@@ -65,11 +84,50 @@ const ERROR_COPY: Record<ActivationError, { title: string; body: string }> = {
 };
 
 export default function ActivatePage() {
+  return (
+    <Suspense fallback={<ActivateSkeleton />}>
+      <ActivateClient />
+    </Suspense>
+  );
+}
+
+function ActivateClient() {
   const router = useRouter();
+  const params = useSearchParams();
+  const token = params.get("token");
+
+  const [tokenChecked, setTokenChecked] = useState(false);
+  const [invitation, setInvitation] = useState<Invitation | null>(null);
+  const [tokenError, setTokenError] = useState<"unknown" | "expired" | null>(null);
+
   const [stepIndex, setStepIndex] = useState<StepIndex>(0);
   const [session, setSession] = useState<ActivationSession | null>(null);
   const [error, setError] = useState<ActivationError | null>(null);
   const [submitting, setSubmitting] = useState(false);
+
+  // ── Token verification on mount ────────────────────────────────
+  useEffect(() => {
+    if (!token) {
+      setTokenChecked(true);
+      return;
+    }
+    const result = verifyToken(token);
+    if (!result.ok || !result.invitation) {
+      setTokenError(result.error ?? "unknown");
+      setTokenChecked(true);
+      return;
+    }
+    setInvitation(result.invitation);
+    // Skip the manual credentials step — token-based entry pre-fills
+    // the activation session with the invited email.
+    setSession({
+      activation_token: `tok-${result.invitation.token}`,
+      email: result.invitation.email,
+      company_hint: result.invitation.company_hint,
+    });
+    setStepIndex(1);
+    setTokenChecked(true);
+  }, [token]);
 
   const inference: EmailInference | null = useMemo(
     () => (session ? inferFromEmail(session.email) : null),
@@ -78,14 +136,23 @@ export default function ActivatePage() {
 
   const goBack = useCallback(() => {
     setError(null);
-    setStepIndex((i) => (i > 0 ? ((i - 1) as StepIndex) : i));
-  }, []);
+    // From the password step, only allow going back to credentials
+    // when there's no token-based session pinning the email.
+    setStepIndex((i) => {
+      if (i === 1 && invitation) return i;
+      return i > 0 ? ((i - 1) as StepIndex) : i;
+    });
+  }, [invitation]);
+
+  if (!tokenChecked) return <ActivateSkeleton />;
 
   return (
     <main className="min-h-[100dvh] bg-[color:var(--surface-page)]">
       <div className="mx-auto flex min-h-[100dvh] max-w-3xl flex-col gap-8 px-5 py-10 lg:py-14">
         <header className="flex items-center justify-between">
-          <BrandLogo size="md" />
+          <Link href="/" aria-label="Volver al inicio">
+            <BrandLogo size="md" />
+          </Link>
           <Link
             href="/"
             className="inline-flex items-center gap-1.5 text-xs font-medium text-[color:var(--text-link)] hover:underline"
@@ -94,6 +161,23 @@ export default function ActivatePage() {
             Volver al inicio
           </Link>
         </header>
+
+        {invitation && stepIndex < 3 && <InvitationBanner invitation={invitation} />}
+
+        {tokenError && (
+          <Alert variant="error">
+            <AlertTitle>
+              {tokenError === "expired"
+                ? "Tu invitación expiró"
+                : "No reconocimos este enlace"}
+            </AlertTitle>
+            <AlertDescription>
+              {tokenError === "expired"
+                ? "Pide a quien te invitó que genere una nueva invitación."
+                : "El enlace puede haberse roto o nunca llegó a emitirse. Puedes activar tu cuenta capturando tus credenciales temporales aquí mismo."}
+            </AlertDescription>
+          </Alert>
+        )}
 
         {stepIndex < 3 && (
           <Stepper steps={STEPS} currentIndex={stepIndex as 0 | 1 | 2} />
@@ -127,6 +211,7 @@ export default function ActivatePage() {
               email={session.email}
               error={error}
               submitting={submitting}
+              canGoBack={!invitation}
               onBack={goBack}
               onSubmit={async (password) => {
                 setError(null);
@@ -146,24 +231,35 @@ export default function ActivatePage() {
             <IdentityStep
               email={session.email}
               inference={inference}
+              presetCompany={invitation?.company_hint ?? null}
+              presetRole={invitation?.role ?? "provider"}
               error={error}
               submitting={submitting}
               onBack={goBack}
               onSubmit={async (payload) => {
                 setError(null);
                 setSubmitting(true);
-                const result = await submitIdentity(session.activation_token, payload);
+                const result = await submitIdentity(session.activation_token, {
+                  first_name: payload.first_name,
+                  last_name: payload.last_name,
+                  email: payload.email,
+                  company: payload.company,
+                });
                 setSubmitting(false);
                 if (!result.ok) {
                   setError(result.error);
                   return;
                 }
-                // Drop a portal session and route to onboarding.
+                // Mark the invitation consumed so the same token can't
+                // be reused (matters when we go to real auth).
+                if (invitation) consumeInvitation(invitation.token);
+
                 writePortalSession({
                   workspace_id: result.data.workspace_id,
                   access_token: result.data.access_token,
                   persona_type: "moral",
-                  client_name: "Cliente por confirmar",
+                  client_name:
+                    payload.role === "client" ? payload.company : "Cliente por confirmar",
                   vendor_name: payload.company,
                   vendor_rfc: "PENDIENTE",
                   filial_name: null,
@@ -179,13 +275,62 @@ export default function ActivatePage() {
           {stepIndex === 3 && <SuccessStep />}
         </section>
 
-        <p className="text-center text-xs text-[color:var(--text-tertiary)]">
-          Para esta demo, el código temporal es{" "}
-          <span className="font-mono font-semibold text-[color:var(--text-brand)]">
-            {MOCK_TEMP_CODE}
-          </span>
-          .
+        {!invitation && stepIndex === 0 && (
+          <p className="text-center text-xs text-[color:var(--text-tertiary)]">
+            Para esta demo, el código temporal es{" "}
+            <span className="font-mono font-semibold text-[color:var(--text-brand)]">
+              {MOCK_TEMP_CODE}
+            </span>
+            .
+          </p>
+        )}
+      </div>
+    </main>
+  );
+}
+
+// ─── Invitation banner ──────────────────────────────────────────
+
+function InvitationBanner({ invitation }: { invitation: Invitation }) {
+  const RoleIcon: Icon = invitation.role === "client" ? Buildings : Truck;
+  return (
+    <div className="cw-fade-up flex items-center gap-3 rounded-lg border border-[color:var(--surface-teal-muted)] bg-[color:var(--surface-teal-muted)]/40 p-4">
+      <span
+        className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-[color:var(--surface-raised)] text-[color:var(--text-teal)]"
+        aria-hidden="true"
+      >
+        <RoleIcon className="h-5 w-5" weight="duotone" />
+      </span>
+      <div className="min-w-0">
+        <p className="font-mono text-[10px] uppercase tracking-wide text-[color:var(--text-teal)]">
+          Invitación verificada · {invitation.role === "client" ? "Cliente" : "Proveedor"}
         </p>
+        <p className="mt-0.5 text-[13px] leading-5 text-[color:var(--text-primary)]">
+          <span className="font-medium">{invitation.inviter}</span>
+          {" te invitó como "}
+          <strong>{invitation.role === "client" ? "cliente" : "proveedor"}</strong>
+          {invitation.company_hint && (
+            <>
+              {" de "}
+              <strong>{invitation.company_hint}</strong>
+            </>
+          )}
+          . Sigue los pasos para activar tu cuenta.
+        </p>
+      </div>
+    </div>
+  );
+}
+
+// ─── Loading skeleton ───────────────────────────────────────────
+
+function ActivateSkeleton() {
+  return (
+    <main className="min-h-[100dvh] bg-[color:var(--surface-page)]">
+      <div className="mx-auto flex min-h-[100dvh] max-w-3xl flex-col gap-6 px-5 py-10 lg:py-14">
+        <Skeleton className="h-8 w-32" />
+        <Skeleton className="h-10 w-full rounded-lg" />
+        <Skeleton className="h-[480px] w-full rounded-xl" />
       </div>
     </main>
   );
@@ -284,11 +429,19 @@ interface PasswordStepProps {
   email: string;
   error: ActivationError | null;
   submitting: boolean;
+  canGoBack: boolean;
   onSubmit: (password: string) => Promise<void>;
   onBack: () => void;
 }
 
-function PasswordStep({ email, error, submitting, onSubmit, onBack }: PasswordStepProps) {
+function PasswordStep({
+  email,
+  error,
+  submitting,
+  canGoBack,
+  onSubmit,
+  onBack,
+}: PasswordStepProps) {
   const [password, setPasswordValue] = useState("");
   const [confirm, setConfirm] = useState("");
   const [show, setShow] = useState(false);
@@ -403,10 +556,16 @@ function PasswordStep({ email, error, submitting, onSubmit, onBack }: PasswordSt
       </Field>
 
       <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
-        <Button type="button" variant="ghost" size="sm" onClick={onBack}>
-          <ArrowLeft className="h-4 w-4" weight="bold" aria-hidden="true" />
-          Atrás
-        </Button>
+        {canGoBack ? (
+          <Button type="button" variant="ghost" size="sm" onClick={onBack}>
+            <ArrowLeft className="h-4 w-4" weight="bold" aria-hidden="true" />
+            Atrás
+          </Button>
+        ) : (
+          <span className="text-xs text-[color:var(--text-tertiary)]">
+            Tu invitación quedó verificada — continúa con tu contraseña.
+          </span>
+        )}
         <Button
           type="submit"
           loading={submitting}
@@ -427,6 +586,8 @@ function PasswordStep({ email, error, submitting, onSubmit, onBack }: PasswordSt
 interface IdentityStepProps {
   email: string;
   inference: EmailInference;
+  presetCompany: string | null;
+  presetRole: InvitationRole;
   error: ActivationError | null;
   submitting: boolean;
   onSubmit: (payload: {
@@ -434,6 +595,7 @@ interface IdentityStepProps {
     last_name: string;
     email: string;
     company: string;
+    role: InvitationRole;
   }) => Promise<void>;
   onBack: () => void;
 }
@@ -441,6 +603,8 @@ interface IdentityStepProps {
 function IdentityStep({
   email,
   inference,
+  presetCompany,
+  presetRole,
   error,
   submitting,
   onSubmit,
@@ -448,7 +612,8 @@ function IdentityStep({
 }: IdentityStepProps) {
   const [firstName, setFirstName] = useState(inference.first_name);
   const [lastName, setLastName] = useState(inference.last_name);
-  const [company, setCompany] = useState(inference.company);
+  const [company, setCompany] = useState(presetCompany ?? inference.company);
+  const [role, setRole] = useState<InvitationRole>(presetRole);
   const [companyTouched, setCompanyTouched] = useState(false);
   const [errors, setErrors] = useState<{
     first_name?: string;
@@ -456,7 +621,9 @@ function IdentityStep({
     company?: string;
   }>({});
 
-  const companyAutoSuggested = !inference.is_generic_domain && inference.company !== "";
+  const companyAutoSuggested =
+    presetCompany !== null ||
+    (!inference.is_generic_domain && inference.company !== "");
 
   function handleSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -472,6 +639,7 @@ function IdentityStep({
       last_name: lastName.trim(),
       email,
       company: company.trim(),
+      role,
     });
   }
 
@@ -501,6 +669,62 @@ function IdentityStep({
           <AlertDescription>{ERROR_COPY[error].body}</AlertDescription>
         </Alert>
       )}
+
+      <fieldset>
+        <legend className="mb-2 text-[13px] font-medium text-[color:var(--text-primary)]">
+          Confirma tu rol
+        </legend>
+        <div role="radiogroup" className="grid gap-2 sm:grid-cols-2">
+          {(["provider", "client"] as const).map((value) => {
+            const IconComponent: Icon = value === "client" ? Buildings : Truck;
+            const isSelected = role === value;
+            return (
+              <button
+                key={value}
+                type="button"
+                role="radio"
+                aria-checked={isSelected}
+                onClick={() => setRole(value)}
+                className={cn(
+                  "flex items-start gap-3 rounded-lg border px-3 py-3 text-left transition-colors duration-fast",
+                  isSelected
+                    ? "border-[color:var(--border-brand)] bg-[color:var(--surface-brand-muted)]"
+                    : "border-[color:var(--border-default)] bg-[color:var(--surface-raised)] hover:border-[color:var(--border-strong)]",
+                )}
+              >
+                <span
+                  className={cn(
+                    "flex h-7 w-7 shrink-0 items-center justify-center rounded-full",
+                    isSelected
+                      ? "bg-[color:var(--surface-brand)] text-[color:var(--text-inverse)]"
+                      : "bg-[color:var(--surface-teal-muted)] text-[color:var(--text-teal)]",
+                  )}
+                  aria-hidden="true"
+                >
+                  <IconComponent className="h-4 w-4" weight="duotone" />
+                </span>
+                <div>
+                  <p
+                    className={cn(
+                      "text-[13px] font-semibold",
+                      isSelected
+                        ? "text-[color:var(--text-brand)]"
+                        : "text-[color:var(--text-primary)]",
+                    )}
+                  >
+                    {value === "client" ? "Cliente" : "Proveedor"}
+                  </p>
+                  <p className="text-[11px] leading-4 text-[color:var(--text-secondary)]">
+                    {value === "client"
+                      ? "Reviso a mis proveedores REPSE."
+                      : "Cargo mi expediente y obligaciones."}
+                  </p>
+                </div>
+              </button>
+            );
+          })}
+        </div>
+      </fieldset>
 
       <div className="grid gap-4 sm:grid-cols-2">
         <Field
@@ -561,9 +785,11 @@ function IdentityStep({
                   weight="fill"
                   aria-hidden="true"
                 />
-                Detectamos esta empresa por tu correo. Confírmala o corrígela.
+                {presetCompany
+                  ? "Tu cliente registró esta empresa en la invitación. Confírmala o corrígela."
+                  : "Detectamos esta empresa por tu correo. Confírmala o corrígela."}
               </span>
-            ) : inference.is_generic_domain ? (
+            ) : inference.is_generic_domain && !presetCompany ? (
               "Captura el nombre legal completo de la empresa que representas."
             ) : undefined
           }
