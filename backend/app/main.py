@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import RedirectResponse
 
 from app.api.v1.router import api_router
 from app.core.config import settings
@@ -24,6 +25,10 @@ def create_app() -> FastAPI:
         allow_methods=["*"],
         allow_headers=["*"],
     )
+
+    @app.get("/", include_in_schema=False)
+    def root() -> RedirectResponse:
+        return RedirectResponse(url="/docs")
 
     @app.get("/health", tags=["system"])
     def health() -> dict[str, str]:

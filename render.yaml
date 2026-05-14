@@ -53,11 +53,12 @@ services:
         sync: false
 
       # ---- CORS ----
-      # Comma-separated. Add the Vercel preview + production origins after
-      # the frontend deploy lands. The local dev origins stay so devs can
-      # hit prod from their laptop in a pinch — remove for true prod.
+      # Comma-separated list of allowed origins.
+      # IMPORTANT: add your Vercel frontend URL(s) here before the frontend
+      # goes live, e.g. https://checkwise.vercel.app,https://app.checkwise.mx
+      # You can also override this key directly in the Render dashboard.
       - key: CORS_ORIGINS
-        value: "http://localhost:3000,http://127.0.0.1:3000"
+        sync: false
 
       # ---- Storage (Cloudflare R2) ----
       - key: STORAGE_BACKEND
