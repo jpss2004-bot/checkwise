@@ -119,4 +119,5 @@ node_modules/.bin/next build
 - Provider portal walkthrough → [docs/PROVIDER_PORTAL_FLOW.md](docs/PROVIDER_PORTAL_FLOW.md)
 - Roadmap → [docs/ROADMAP.md](docs/ROADMAP.md)
 - Demo guide → [docs/DEMO_GUIDE.md](docs/DEMO_GUIDE.md)
+- Contributing (conventions, commit style, PR process) → [CONTRIBUTING.md](CONTRIBUTING.md)
 - AI-agent rules → [AGENTS.md](AGENTS.md)
