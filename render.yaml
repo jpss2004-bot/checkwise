@@ -30,7 +30,7 @@ services:
     runtime: python
     plan: starter
     rootDir: backend
-    branch: prod-ready/v1.7
+    branch: main
     autoDeploy: true
     buildCommand: pip install -e .
     preDeployCommand: alembic upgrade head
