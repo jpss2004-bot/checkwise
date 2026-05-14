@@ -3,65 +3,256 @@
 @tailwind utilities;
 
 /*
- * CheckWise brand palette (per the official IMPI brand sheet).
+ * CheckWise Design System — 3-layer token architecture.
  *
- *   --primary    deep navy   #013557   HSL(207, 98%, 17%)
- *   --secondary  mid blue    #02558a   HSL(203, 97%, 27%)
- *   --accent     teal        #09c1b0   HSL(174, 91%, 40%)
- *   --muted-fg   slate       #4b90a4   HSL(193, 37%, 47%)
+ *   Primitive  →  raw scales (navy, teal, gray, status)
+ *   Semantic   →  meaning-based (surface, text, border, interactive)
+ *   Component  →  shadcn-compatible aliases (primary, accent, ...)
  *
- * Semantic system colors (emerald = success, amber = attention,
- * red = error/destructive) are kept from Tailwind defaults so the
- * brand layer never collides with the meaning layer.
+ * Brand: navy #013557 primary, teal #09c1b0 accent.
+ * Full spec: docs/DESIGN_SYSTEM.md
  */
 
+/* ── 1. Primitive tokens ──────────────────────────────────────── */
 :root {
-  --background: 0 0% 100%;
-  --foreground: 207 98% 17%;
+  /* Navy scale — derived from brand primary #013557 */
+  --navy-50:   204 100% 97%;
+  --navy-100:  204  90% 92%;
+  --navy-200:  204  85% 82%;
+  --navy-300:  204  80% 68%;
+  --navy-400:  204  78% 52%;
+  --navy-500:  204  93% 38%;
+  --navy-600:  204  96% 28%;
+  --navy-700:  204  97% 21%;
+  --navy-800:  204  98% 17%;   /* #013557 — brand primary */
+  --navy-900:  204  99% 12%;
+  --navy-950:  204 100%  8%;
 
-  --border: 200 25% 88%;
-  --input: 200 25% 88%;
-  --ring: 207 98% 17%;
+  /* Teal scale — derived from brand accent #09c1b0 */
+  --teal-50:   175  90% 96%;
+  --teal-100:  175  88% 88%;
+  --teal-200:  175  86% 74%;
+  --teal-300:  175  88% 60%;
+  --teal-400:  175  89% 50%;
+  --teal-500:  175  91% 40%;   /* #09c1b0 — brand teal */
+  --teal-600:  175  91% 34%;
+  --teal-700:  175  92% 27%;
+  --teal-800:  175  92% 20%;
+  --teal-900:  175  93% 14%;
 
-  --primary: 207 98% 17%;
-  --primary-foreground: 0 0% 100%;
+  /* Neutral / gray scale */
+  --gray-25:   210  20% 99%;
+  --gray-50:   210  20% 98%;
+  --gray-100:  210  18% 94%;
+  --gray-200:  214  18% 88%;
+  --gray-300:  214  16% 76%;
+  --gray-400:  215  14% 60%;
+  --gray-500:  215  14% 42%;
+  --gray-600:  215  16% 34%;
+  --gray-700:  215  18% 26%;
+  --gray-800:  220  20% 20%;
+  --gray-900:  222  24% 16%;
+  --gray-950:  222  28% 13%;
 
-  --secondary: 203 97% 27%;
-  --secondary-foreground: 0 0% 100%;
+  /* Status — success */
+  --green-50:  142  76% 95%;
+  --green-100: 142  70% 85%;
+  --green-500: 142  76% 36%;
+  --green-700: 142  80% 26%;
 
-  --accent: 174 91% 40%;
-  --accent-foreground: 207 98% 17%;
+  /* Status — warning / attention */
+  --amber-50:   38  90% 95%;
+  --amber-100:  38  85% 85%;
+  --amber-500:  38  92% 50%;
+  --amber-700:  38  90% 36%;
 
-  --muted: 200 30% 96%;
-  --muted-foreground: 193 26% 38%;
+  /* Status — error / destructive */
+  --red-50:    0  90% 96%;
+  --red-100:   0  80% 88%;
+  --red-500:   0  72% 45%;
+  --red-700:   0  76% 34%;
 
-  --destructive: 0 72% 45%;
+  /* Status — info */
+  --blue-50:   214  80% 96%;
+  --blue-100:  214  70% 88%;
+  --blue-500:  214  89% 52%;
+  --blue-700:  214  89% 38%;
+
+  /* Status — expired (warm orange, distinct from amber) */
+  --orange-50:  30  80% 96%;
+  --orange-100: 30  70% 85%;
+  --orange-500: 30  90% 50%;
+  --orange-700: 30  80% 38%;
+}
+
+/* ── 2. Semantic tokens ───────────────────────────────────────── */
+:root {
+  /* Surfaces */
+  --surface-page:         hsl(var(--gray-50));
+  --surface-raised:       hsl(0 0% 100%);
+  --surface-overlay:      hsl(0 0% 100%);
+  --surface-sunken:       hsl(var(--gray-100));
+  --surface-hover:        hsl(var(--gray-50));
+  --surface-selected:     hsl(var(--navy-50));
+  --surface-brand:        hsl(var(--navy-800));
+  --surface-brand-muted:  hsl(var(--navy-50));
+  --surface-teal-muted:   hsl(var(--teal-50));
+
+  /* Text */
+  --text-primary:         hsl(var(--gray-950));
+  --text-secondary:       hsl(var(--gray-500));
+  --text-tertiary:        hsl(var(--gray-400));
+  --text-disabled:        hsl(var(--gray-300));
+  --text-inverse:         hsl(0 0% 100%);
+  --text-link:            hsl(var(--navy-700));
+  --text-brand:           hsl(var(--navy-800));
+  --text-teal:            hsl(var(--teal-600));
+
+  /* Borders */
+  --border-subtle:        hsl(var(--gray-100));
+  --border-default:       hsl(var(--gray-200));
+  --border-strong:        hsl(var(--gray-300));
+  --border-focus:         hsl(var(--navy-500));
+  --border-brand:         hsl(var(--navy-800));
+  --border-error:         hsl(var(--red-500));
+  --border-success:       hsl(var(--green-500));
+
+  /* Interactive */
+  --interactive-primary:        hsl(var(--navy-800));
+  --interactive-primary-hover:  hsl(var(--navy-700));
+  --interactive-primary-active: hsl(var(--navy-900));
+  --interactive-secondary:      hsl(var(--teal-500));
+  --interactive-secondary-hover:hsl(var(--teal-600));
+  --interactive-ghost-hover:    hsl(var(--gray-100));
+  --interactive-destructive:    hsl(var(--red-500));
+
+  /* Status surfaces */
+  --status-success-text:   hsl(var(--green-700));
+  --status-success-bg:     hsl(var(--green-50));
+  --status-success-border: hsl(var(--green-100));
+
+  --status-warning-text:   hsl(var(--amber-700));
+  --status-warning-bg:     hsl(var(--amber-50));
+  --status-warning-border: hsl(var(--amber-100));
+
+  --status-error-text:     hsl(var(--red-700));
+  --status-error-bg:       hsl(var(--red-50));
+  --status-error-border:   hsl(var(--red-100));
+
+  --status-info-text:      hsl(var(--blue-700));
+  --status-info-bg:        hsl(var(--blue-50));
+  --status-info-border:    hsl(var(--blue-100));
+
+  /* REPSE document states */
+  --doc-empty-text:        hsl(var(--gray-400));
+  --doc-empty-bg:          hsl(var(--gray-50));
+  --doc-empty-border:      hsl(var(--gray-200));
+
+  --doc-pending-text:      hsl(var(--amber-700));
+  --doc-pending-bg:        hsl(var(--amber-50));
+  --doc-pending-border:    hsl(var(--amber-100));
+
+  --doc-uploaded-text:     hsl(var(--blue-700));
+  --doc-uploaded-bg:       hsl(var(--blue-50));
+  --doc-uploaded-border:   hsl(var(--blue-100));
+
+  --doc-in-review-text:    hsl(var(--navy-700));
+  --doc-in-review-bg:      hsl(var(--navy-50));
+  --doc-in-review-border:  hsl(var(--navy-100));
+
+  --doc-approved-text:     hsl(var(--green-700));
+  --doc-approved-bg:       hsl(var(--green-50));
+  --doc-approved-border:   hsl(var(--green-100));
+
+  --doc-rejected-text:     hsl(var(--red-700));
+  --doc-rejected-bg:       hsl(var(--red-50));
+  --doc-rejected-border:   hsl(var(--red-100));
+
+  --doc-expired-text:      hsl(var(--orange-700));
+  --doc-expired-bg:        hsl(var(--orange-50));
+  --doc-expired-border:    hsl(var(--orange-100));
+
+  --doc-needs-review-text: hsl(var(--amber-700));
+  --doc-needs-review-bg:   hsl(var(--amber-50));
+  --doc-needs-review-border:hsl(var(--amber-100));
+
+  /* AI/OCR confidence states */
+  --confidence-high-text:    hsl(var(--green-700));
+  --confidence-high-bg:      hsl(var(--green-50));
+  --confidence-high-border:  hsl(var(--green-100));
+
+  --confidence-medium-text:  hsl(var(--amber-700));
+  --confidence-medium-bg:    hsl(var(--amber-50));
+  --confidence-medium-border:hsl(var(--amber-100));
+
+  --confidence-low-text:     hsl(var(--orange-700));
+  --confidence-low-bg:       hsl(var(--orange-50));
+  --confidence-low-border:   hsl(var(--orange-100));
+
+  --confidence-none-text:    hsl(var(--gray-500));
+  --confidence-none-bg:      hsl(var(--gray-100));
+  --confidence-none-border:  hsl(var(--gray-200));
+
+  /* Motion */
+  --ease-enter:    cubic-bezier(0.16, 1, 0.3, 1);
+  --ease-exit:     cubic-bezier(0.4, 0, 1, 1);
+  --ease-standard: cubic-bezier(0.4, 0, 0.2, 1);
+  --ease-bounce:   cubic-bezier(0.34, 1.56, 0.64, 1);
+
+  --duration-instant:  80ms;
+  --duration-fast:    150ms;
+  --duration-standard:250ms;
+  --duration-slow:    350ms;
+  --duration-enter:   400ms;
+}
+
+/* ── 3. Component tokens (shadcn-compatible aliases) ──────────── */
+:root {
+  --background:             210 20% 98%;
+  --foreground:             222 28% 13%;
+
+  --border:                 214 18% 88%;
+  --input:                  210 18% 94%;
+  --ring:                   204 93% 38%;
+
+  --primary:                204 98% 17%;
+  --primary-foreground:     0 0% 100%;
+
+  --secondary:              175 91% 40%;
+  --secondary-foreground:   0 0% 100%;
+
+  --muted:                  210 18% 94%;
+  --muted-foreground:       215 14% 42%;
+
+  --accent:                 204 100% 97%;
+  --accent-foreground:      204 98% 17%;
+
+  --destructive:            0 72% 45%;
   --destructive-foreground: 0 0% 100%;
 
-  /*
-   * Brand-named utilities. Available alongside the semantic tokens so
-   * components can opt into raw brand colors when the role of the
-   * surface is "this is the brand" (e.g. the logo wordmark, brand
-   * footer chip), not "this is a primary action".
-   */
-  --brand-navy: 207 98% 17%;
-  --brand-blue: 203 97% 27%;
-  --brand-teal: 174 91% 40%;
+  /* Brand-named utilities — kept for legacy refs in motion primitives */
+  --brand-navy:  204 98% 17%;
+  --brand-blue:  204 96% 28%;
+  --brand-teal:  175 91% 40%;
   --brand-slate: 193 37% 47%;
 }
 
+/* ── Reset ────────────────────────────────────────────────────── */
 * {
   box-sizing: border-box;
 }
 
 body {
   margin: 0;
-  background: hsl(var(--background));
-  color: hsl(var(--foreground));
-  font-family: var(--font-sans), "Open Sans", -apple-system, BlinkMacSystemFont,
+  background: var(--surface-page);
+  color: var(--text-primary);
+  font-family: var(--font-geist-sans), "Geist", -apple-system, BlinkMacSystemFont,
     "Segoe UI", Roboto, Arial, sans-serif;
-  font-feature-settings: "ss01", "cv11";
+  font-size: 14px;
+  line-height: 1.6;
   letter-spacing: 0;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
 }
 
 button,
@@ -71,15 +262,21 @@ textarea {
   font: inherit;
 }
 
-/*
- * Motion primitives.
- *
- * Calm, short, ease-out-only. Every animation here is purely visual
- * (transform + opacity) and never animates layout properties. The
- * @keyframes are global so they can be referenced by composed
- * utilities. All effects collapse to no-op when the user has
- * prefers-reduced-motion enabled.
- */
+/* Geist Mono for technical metadata (RFC, hash, IDs) */
+.font-mono,
+code,
+pre {
+  font-family: var(--font-geist-mono), "Geist Mono", "Courier New", monospace;
+  font-feature-settings: "ss01";
+}
+
+/* ── Keyframes ────────────────────────────────────────────────── */
+
+/* Shimmer for skeleton loaders */
+@keyframes shimmer {
+  0%   { transform: translateX(-100%); }
+  100% { transform: translateX(100%); }
+}
 
 @keyframes cw-fade-up {
   from {
@@ -136,22 +333,15 @@ textarea {
 
 @media (prefers-reduced-motion: no-preference) {
   .cw-fade-up {
-    animation: cw-fade-up 320ms cubic-bezier(0.16, 1, 0.3, 1) both;
+    animation: cw-fade-up 320ms var(--ease-enter) both;
   }
   .cw-fade-in {
     animation: cw-fade-in 240ms ease-out both;
   }
 
-  /*
-   * Stagger children. Each direct child fades up; the delay derives
-   * from nth-child position (60ms step). Containers can override per
-   * child by setting style={{ ['--cw-index']: i }} when they need to
-   * control the sequence explicitly (e.g. mapped data with stable
-   * row indexes across re-renders).
-   */
   .cw-stagger > * {
     opacity: 0;
-    animation: cw-fade-up 360ms cubic-bezier(0.16, 1, 0.3, 1) both;
+    animation: cw-fade-up 360ms var(--ease-enter) both;
   }
   .cw-stagger > *:nth-child(1) { animation-delay: 0ms; }
   .cw-stagger > *:nth-child(2) { animation-delay: 60ms; }
@@ -172,8 +362,8 @@ textarea {
 
   .cw-hover-lift {
     transition:
-      transform 220ms cubic-bezier(0.16, 1, 0.3, 1),
-      box-shadow 220ms cubic-bezier(0.16, 1, 0.3, 1),
+      transform 220ms var(--ease-enter),
+      box-shadow 220ms var(--ease-enter),
       border-color 200ms ease-out;
   }
   .cw-hover-lift:hover {
@@ -182,7 +372,7 @@ textarea {
   }
 
   .cw-success-ring {
-    animation: cw-success-ring 520ms cubic-bezier(0.16, 1, 0.3, 1) both;
+    animation: cw-success-ring 520ms var(--ease-enter) both;
   }
   .cw-draw-check path {
     stroke-dasharray: 24;
@@ -191,7 +381,6 @@ textarea {
   }
 }
 
-/* Reduced-motion: leave transform/opacity at rest; no animation runs. */
 @media (prefers-reduced-motion: reduce) {
   .cw-stagger > *,
   .cw-fade-up,
