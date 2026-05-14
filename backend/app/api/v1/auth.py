@@ -168,6 +168,29 @@ def require_role(role: str) -> Callable[..., CurrentUser]:
     return _dep
 
 
+def require_any_role(*roles: str) -> Callable[..., CurrentUser]:
+    """Dependency factory: 403 unless the user carries **any** of ``roles``.
+
+    Used when an endpoint should accept several roles (e.g. the
+    reviewer queue is fine with either ``reviewer`` or ``internal_admin``
+    — both should be able to read it).
+    """
+
+    accepted = tuple(roles)
+
+    def _dep(
+        current: Annotated[CurrentUser, Depends(get_current_user)],
+    ) -> CurrentUser:
+        if not any(role in current.roles for role in accepted):
+            raise HTTPException(
+                status.HTTP_403_FORBIDDEN,
+                detail=f"One of roles {list(accepted)} required",
+            )
+        return current
+
+    return _dep
+
+
 def require_org_role(role: str) -> Callable[..., CurrentUser]:
     """The role must be held within the path's ``organization_id``.
 

@@ -1,8 +1,16 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { CheckCircle2, ClipboardList, LogOut, ShieldCheck, Users } from "lucide-react";
+import {
+  ArrowRight,
+  CheckCircle2,
+  ClipboardList,
+  LogOut,
+  ShieldCheck,
+  Users,
+} from "lucide-react";
 
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -12,6 +20,8 @@ import {
   clearAdminSession,
   readAdminSession,
 } from "@/lib/admin-session";
+
+const REVIEWER_ROLES = ["reviewer", "internal_admin"] as const;
 
 export default function AdminHomePage() {
   const router = useRouter();
@@ -32,6 +42,10 @@ export default function AdminHomePage() {
   }
 
   if (!session) return null;
+
+  const canReview = session.roles.some((r) =>
+    (REVIEWER_ROLES as readonly string[]).includes(r),
+  );
 
   return (
     <main className="mx-auto max-w-5xl space-y-6 px-5 py-8">
@@ -68,31 +82,56 @@ export default function AdminHomePage() {
 
       <Card>
         <CardHeader>
-          <CardTitle>Próximamente</CardTitle>
+          <CardTitle>Superficies disponibles</CardTitle>
           <p className="mt-1 text-sm text-muted-foreground">
-            Patch 6 establece la autenticación interna. Las superficies
-            siguientes se construyen sobre esta base:
+            Las herramientas que ya tienes acceso de acuerdo a tu rol.
           </p>
         </CardHeader>
         <CardContent>
           <ul className="grid gap-3 sm:grid-cols-2">
-            <li className="rounded-md border border-border bg-white p-4">
-              <div className="flex items-start gap-3">
-                <div className="mt-0.5 flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-primary/10 text-primary">
-                  <ClipboardList className="h-4 w-4" aria-hidden />
+            {canReview ? (
+              <li>
+                <Link
+                  href="/admin/reviewer"
+                  className="block rounded-md border border-primary/30 bg-primary/5 p-4 transition-colors hover:bg-primary/10 active:scale-[0.99]"
+                >
+                  <div className="flex items-start gap-3">
+                    <div className="mt-0.5 flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-primary text-primary-foreground">
+                      <ClipboardList className="h-4 w-4" aria-hidden />
+                    </div>
+                    <div className="min-w-0 flex-1">
+                      <p className="flex items-center justify-between gap-2 text-sm font-semibold">
+                        Bandeja de revisión
+                        <ArrowRight className="h-4 w-4 text-primary" aria-hidden />
+                      </p>
+                      <p className="mt-0.5 text-xs text-muted-foreground">
+                        Cola de documentos esperando una decisión humana —
+                        aprobar, rechazar, pedir aclaración o marcar excepción
+                        legal.
+                      </p>
+                    </div>
+                  </div>
+                </Link>
+              </li>
+            ) : (
+              <li className="rounded-md border border-border bg-white p-4 opacity-70">
+                <div className="flex items-start gap-3">
+                  <div className="mt-0.5 flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-muted text-muted-foreground">
+                    <ClipboardList className="h-4 w-4" aria-hidden />
+                  </div>
+                  <div className="min-w-0">
+                    <p className="text-sm font-semibold">Bandeja de revisión</p>
+                    <p className="mt-0.5 text-xs text-muted-foreground">
+                      Requiere rol <code>reviewer</code> o{" "}
+                      <code>internal_admin</code>.
+                    </p>
+                  </div>
                 </div>
-                <div className="min-w-0">
-                  <p className="text-sm font-semibold">Bandeja de revisión</p>
-                  <p className="mt-0.5 text-xs text-muted-foreground">
-                    Patch 7 — cola de documentos pendientes con decisión humana
-                    y trazabilidad.
-                  </p>
-                </div>
-              </div>
-            </li>
-            <li className="rounded-md border border-border bg-white p-4">
+              </li>
+            )}
+            <li className="rounded-md border border-border bg-white p-4 opacity-70">
               <div className="flex items-start gap-3">
-                <div className="mt-0.5 flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-primary/10 text-primary">
+                <div className="mt-0.5 flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-muted text-muted-foreground">
                   <Users className="h-4 w-4" aria-hidden />
                 </div>
                 <div className="min-w-0">
