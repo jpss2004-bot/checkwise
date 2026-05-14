@@ -4,22 +4,36 @@ REPSE-compliance SaaS for Mexico. Vendors upload monthly / bimonthly / four-mont
 
 ## Status
 
-V1.2 is operational. Provider portal, reviewer queue + decision workflow, real auth + RBAC, official brand palette, and motion polish are all shipped. Client overview ("Patch 8") is next.
+V1.6 is operational locally. Shipped surfaces:
+
+- Public marketing page (`/`) with dual CTAs and contact form
+- Role-aware login (`/login`) for provider · cliente · administrador
+- Welcome-email activation flow (`/activate?token=…`) with 3-step wizard + role confirmation
+- Workspace confirmation gate (`/portal/entra-a-tu-espacio`) with tenant-locked field display + correction-request form
+- Initial expediente gate (`/portal/onboarding`) with mandatory/optional pills, provisional-access banner
+- Provider dashboard (`/portal/dashboard`) with workspace identity, semaphore, suggested actions, attention rows, calendar teaser
+- REPSE calendar (`/portal/calendar`) with institution × month grid + detail drawer
+- Reports center scaffold (`/portal/reports`) with 5 report types and `ready`/`generating`/`needs_review`/`blocked`/`unavailable` states
+- Reviewer queue + decision workflow (`/admin/reviewer/*`) with real JWT auth and tenant-scoped detail
+- Real backend auth (`/api/v1/auth/login`), RBAC (`require_role` / `require_org_role`), audit log
+
+**Important.** The 1.5 + 1.6 frontend pages currently consume `lib/mock/*` data. The backend already has many of the equivalent endpoints — wiring them up is the next major task (see [docs/CHECKWISE_1_6.md](docs/CHECKWISE_1_6.md) §Backend integration TODOs).
 
 ## Stack
 
-- **Backend** — FastAPI · SQLAlchemy · Alembic · Python 3.11
-- **Frontend** — Next.js 15 · React 19 · Tailwind 3 · shadcn-style components · lucide-react
-- **DB** — SQLite (local dev) · PostgreSQL (prod)
-- **Auth** — bcrypt + JWT (HS256). Provider portal uses opaque `X-Workspace-Token`.
-- **Storage** — local filesystem for dev, S3-compatible in prod (controlled by `STORAGE_BACKEND`).
+- **Backend** — FastAPI · SQLAlchemy · Alembic · Python 3.11 · bcrypt · PyJWT (HS256)
+- **Frontend** — Next.js 15 · React 19 · Tailwind 3 · Geist + Geist Mono · Phosphor icons · shadcn-style primitives
+- **Database** — PostgreSQL 16 (local dev via docker-compose; prod-bound on Neon or equivalent managed Postgres)
+- **Auth** — bcrypt + JWT for staff users; provider portal still uses the V1.2 opaque `X-Workspace-Token` (replacement is a roadmap item)
+- **Storage** — local filesystem in dev (`STORAGE_BACKEND=local`); S3-compatible target in prod (not yet implemented)
 
 ## Quick start
 
 **First time:**
 
 ```bash
-bash backend/scripts/dev_setup.sh   # venv, deps, alembic migrate, seed demo
+docker compose up -d postgres                       # local Postgres on :5432
+bash backend/scripts/dev_setup.sh                   # venv, deps, alembic migrate, seed demo
 cd frontend && npm install && cd ..
 ```
 
@@ -32,14 +46,14 @@ bash dev.sh
 Or in two terminals:
 
 ```bash
-bash backend/scripts/dev_start.sh        # http://localhost:8000
-cd frontend && npm run dev               # http://localhost:3000
+bash backend/scripts/dev_start.sh                   # http://localhost:8000
+cd frontend && npm run dev                          # http://localhost:3000
 ```
 
 Reset DB:
 
 ```bash
-bash backend/scripts/dev_reset.sh        # drops SQLite, re-migrates, re-seeds
+bash backend/scripts/dev_reset.sh                   # drops + re-migrates + re-seeds
 ```
 
 ## Demo credentials
@@ -48,8 +62,10 @@ Created by `backend/scripts/dev_seed.py`.
 
 | Surface | URL | Auth |
 | --- | --- | --- |
+| Public marketing | `http://localhost:3000/` | none |
+| Login (provider / cliente) | `http://localhost:3000/login` | seeded demo client + free-form RFC |
+| Activation demo | `http://localhost:3000/activate?token=demo` | resolves to a seeded provider invitation |
 | Reviewer / admin | `http://localhost:3000/admin/login` | `ada@legalshelf.mx` / `demo1234` |
-| Provider portal | `http://localhost:3000/` | Any client/vendor combo mints a fresh workspace |
 
 Pre-seeded provider workspace:
 
@@ -57,37 +73,68 @@ Pre-seeded provider workspace:
 - `access_token`: `demo-token`
 - 4 demo submissions in states `pendiente_revision`, `posible_mismatch`, `aprobado`, `rechazado`
 
-## Repo layout
+## Repo layout (tracked)
 
 ```
 CheckWise/
-├── backend/                 FastAPI app, Alembic migrations, pytest suite
-│   ├── app/                 routers, services, models, schemas, db
-│   ├── alembic/             migrations 0001–0006
-│   ├── scripts/             dev_setup.sh, dev_start.sh, dev_reset.sh, dev_seed.py
-│   └── tests/               7 test modules, 82 passing
-├── frontend/                Next.js 15 app
-│   ├── app/                 routes (portal/, admin/)
-│   ├── components/          ui (shadcn), checkwise/ (brand, wizard, validation),
-│   │                        portal/ (calendar, checklist, badges, state surfaces)
-│   ├── lib/                 portal-client, admin-client, reviewer-client, sessions
-│   └── public/brand/        official logos (mirror of brand_assets/Logos CW/)
-├── docs/                    architecture, data model, roadmap, regulatory model,
-│                            portal flow, intake, validation, intelligence, JotForm exit
-├── demo_assets/             screenshots + demo guide PDF + fictitious SAT sample
-├── brand_assets/            source logo files
-├── scripts/reports/         one-off report + demo-asset generators (off the hot path)
-├── dev.sh                   one-shot launcher for the whole stack
-├── docker-compose.yml       optional Postgres for parity with prod
-├── AGENTS.md                rules for AI agents working on this repo
-└── .env.example             env-var template
+├── backend/                          FastAPI app, Alembic migrations, pytest suite
+│   ├── app/
+│   │   ├── api/v1/                   auth · portal · reviewer · compliance · endpoints
+│   │   ├── services/                 auth · audit_log · storage · pdf_validation ·
+│   │   │                             document_intelligence · prevalidation ·
+│   │   │                             submission_service · requirement_service
+│   │   ├── models/                   SQLAlchemy entities (20 tables)
+│   │   ├── schemas/                  Pydantic request/response schemas
+│   │   ├── constants/                statuses · institutions · roles (StrEnums)
+│   │   ├── core/                     config · catalogs · compliance_catalog
+│   │   └── db/                       session · base · seed
+│   ├── alembic/versions/             6 migrations (initial → auth/RBAC)
+│   ├── scripts/                      dev_setup · dev_start · dev_reset · dev_seed
+│   └── tests/                        7 pytest modules, 82 tests
+├── frontend/                         Next.js 15 app
+│   ├── app/
+│   │   ├── (marketing)               page.tsx · login · activate
+│   │   ├── portal/                   entra-a-tu-espacio · onboarding · dashboard ·
+│   │   │                             calendar · reports · upload · submissions/[id]
+│   │   └── admin/                    login · reviewer · reviewer/[id]
+│   ├── components/
+│   │   ├── ui/                       Button · Field · Input · Alert · Progress ·
+│   │   │                             Skeleton · Spinner · Stepper · Badge · …
+│   │   ├── checkwise/                BrandLogo · IntakeWizard · DocStateBadge ·
+│   │   │                             ConfidenceBadge
+│   │   ├── checkwise/portal/         ProviderContextBar · SemaphoreCard ·
+│   │   │                             SuggestedActions · ExpedienteCard ·
+│   │   │                             ComplianceCalendar · OnboardingChecklist · …
+│   │   ├── checkwise/workspace/      WorkspaceIdentityCard · ProtectedFieldNotice ·
+│   │   │                             CorrectionRequestForm · AccessDecisionBanner
+│   │   └── marketing/                ContactForm
+│   └── lib/
+│       ├── api/                      auth · portal · reviewer · catalogs
+│       ├── constants/                statuses (mirror of backend)
+│       ├── email/                    welcome (HTML + plaintext templates)
+│       ├── mock/                     activation · calendar · contact-requests ·
+│       │                             corrections · dashboard · expediente ·
+│       │                             invitations · reports
+│       ├── routing/                  post-login (decision helper)
+│       ├── session/                  admin · portal · with-portal-session HOC
+│       └── workspace/                resolver · types
+├── docs/                             14 docs incl. DESIGN_SYSTEM, CHECKWISE_1_5,
+│                                     CHECKWISE_1_6, ONBOARDING_V1, ARCHITECTURE,
+│                                     DATA_MODEL, ROADMAP, PROVIDER_PORTAL_FLOW, …
+├── scripts/reports/                  one-off report + demo-asset generators
+├── brand_assets/                     source logo files
+├── demo_assets/                      screenshots + demo guide PDF
+├── .github/workflows/ci.yml          backend (ruff + pytest) + frontend (tsc + lint + build)
+├── dev.sh                            one-shot launcher for the whole stack
+├── docker-compose.yml                local Postgres
+├── .env.example                      env-var template
+├── CONTRIBUTING.md                   conventions, commit style, PR process
+└── AGENTS.md                         rules for AI agents working on this repo
 ```
-
-Off-repo (lives in `../  _reference/`): exported Google Drive docs (FRD, Matriz Regulatoria, Tier deck, UAT), historical screenshots, sample-doc fixtures. See `_reference/README.md`.
 
 ## Verification gauntlet
 
-Run before every commit / PR.
+Run before every commit / PR. CI runs the same.
 
 ```bash
 # Backend
@@ -104,12 +151,26 @@ node_modules/.bin/next build
 
 ## Conventions
 
-- **Status vocabulary (Spanish, plain-language)** — `Esperando revisión` · `Posible inconsistencia` · `Necesita aclaración` · `Aprobado` · `Rechazado`. Canonical codes stay English in code (`pendiente_revision`, `posible_mismatch`, `requiere_aclaracion`, `aprobado`, `rechazado`).
-- **Brand colors only via HSL CSS variables** in `frontend/app/globals.css`. Semantic colors (success/attention/destructive) via Tailwind defaults (`emerald` / `amber` / `red`).
-- **One icon family** — `lucide-react`. No emoji in UI.
+- **Status vocabulary (Spanish, plain-language UI)** — `Esperando revisión` · `Posible inconsistencia` · `Necesita aclaración` · `Aprobado` · `Rechazado`. Canonical codes stay English in code (`pendiente_revision`, `posible_mismatch`, `requiere_aclaracion`, `aprobado`, `rechazado`).
+- **REPSE document states (8)** — `pending`, `uploaded`, `in_review`, `approved`, `rejected`, `expired`, `needs_review`, `empty`. Single source of truth in `frontend/lib/constants/statuses.ts` and `backend/app/constants/statuses.py`.
+- **Brand colors only via HSL CSS variables** in `frontend/app/globals.css`. Primary navy `#013557`, accent teal `#09c1b0`. Semantic colors (success/attention/destructive) via Tailwind defaults (`emerald` / `amber` / `red`).
+- **One icon family** — `@phosphor-icons/react`. No emoji in product UI.
+- **Fonts** — `Geist` for UI, `Geist Mono` for RFCs, hashes, IDs, technical metadata.
 - **Domain terms** — English in code identifiers, Spanish in user-facing copy.
 - **Migrations append-only** — never edit a merged migration; add a new one.
 - **Documents live outside the DB** — PostgreSQL holds metadata, hash, status, storage key, audit events.
+- **Tenant isolation** — Backend is the source of truth for every protected field (workspace_id, role, RFC, company). `localStorage` and token-prefilled UI values are display hints only.
+
+## Deployment architecture (notes, not yet production)
+
+The frontend (Next.js) and backend (FastAPI) have different runtime needs:
+
+- **Frontend → Vercel** is the natural target (Next.js native, edge-rendered routes, ISR).
+- **Backend → not Vercel.** FastAPI is a long-lived Python server. Vercel can run Python via serverless functions, but the stack here uses SQLAlchemy + Alembic + pg connection pooling that maps poorly to that runtime. Better targets: **Render**, **Railway**, **Fly.io**, **Cloud Run**, or self-hosted via Docker.
+- **Database → Neon** (or any managed Postgres) using the existing SQLAlchemy/Alembic setup. The `DATABASE_URL` env var feeds `backend/app/core/config.py`.
+- **Storage → S3-compatible** (R2 / S3 / GCS) — currently `LocalStorageService` writes to `./storage`. Vercel's filesystem is read-only outside `/tmp`, so this **must** be migrated before any production-style deploy.
+
+Production blockers and the full integration plan live in [docs/CHECKWISE_1_6.md](docs/CHECKWISE_1_6.md). A 1.7 production-readiness audit is tracked in this branch's session notes.
 
 ## Where to go next
 
@@ -119,5 +180,8 @@ node_modules/.bin/next build
 - Provider portal walkthrough → [docs/PROVIDER_PORTAL_FLOW.md](docs/PROVIDER_PORTAL_FLOW.md)
 - Roadmap → [docs/ROADMAP.md](docs/ROADMAP.md)
 - Demo guide → [docs/DEMO_GUIDE.md](docs/DEMO_GUIDE.md)
+- CheckWise 1.5 implementation → [docs/CHECKWISE_1_5.md](docs/CHECKWISE_1_5.md)
+- CheckWise 1.6 implementation → [docs/CHECKWISE_1_6.md](docs/CHECKWISE_1_6.md)
+- Design system → [docs/DESIGN_SYSTEM.md](docs/DESIGN_SYSTEM.md)
 - Contributing (conventions, commit style, PR process) → [CONTRIBUTING.md](CONTRIBUTING.md)
 - AI-agent rules → [AGENTS.md](AGENTS.md)

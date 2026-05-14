@@ -1,11 +1,24 @@
 # OS
 .DS_Store
+.Spotlight-V100
+.Trashes
+.AppleDouble
 
-# Env
+# Env (never commit populated env files)
 .env
 .env.*
 !.env.example
 !frontend/.env.local.example
+
+# Secrets and certificates — defense in depth on top of .env
+*.pem
+*.key
+*.p12
+*.pfx
+*.crt
+service-account*.json
+*credentials*.json
+*-secret.json
 
 # Python
 __pycache__/
@@ -32,6 +45,9 @@ frontend/out/
 frontend/.turbo/
 *.tsbuildinfo
 
+# Vercel local
+.vercel/
+
 # Logs
 *.log
 npm-debug.log*
@@ -42,15 +58,20 @@ tmp/
 uploads/
 *.tmp
 
+# Editor swap / backup files
+*.swp
+*.swo
+*~
+*.bak
+
 # Local database
 postgres-data/
 backend/*.db
 backend/*.db-journal
 
-# Build / report artifacts
+# Build / report artifacts (generated PDFs etc.)
 outputs/
 
-# Local session artifacts
+# Local session artifacts and AI tooling
 CodexConvo.txt
 .claude/
-.claude/settings.local.json
