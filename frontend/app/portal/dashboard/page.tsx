@@ -5,8 +5,11 @@ import Link from "next/link";
 import {
   ArrowRight,
   CalendarBlank,
+  ClipboardText,
   ClockCounterClockwise,
+  HourglassHigh,
   LockKey,
+  PencilSimple,
 } from "@phosphor-icons/react";
 
 import { DocStateBadge } from "@/components/checkwise/doc-state-badge";
@@ -16,6 +19,7 @@ import { SuggestedActions } from "@/components/checkwise/portal/suggested-action
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import { Progress } from "@/components/ui/progress";
 import {
   MOCK_ATTENTION_TODAY,
   MOCK_DOC_STATE_COUNTS,
@@ -24,6 +28,7 @@ import {
   type AttentionRow,
 } from "@/lib/mock/dashboard";
 import { MOCK_EXPEDIENTE, countExpediente } from "@/lib/mock/expediente";
+import { decidePostLoginRoute } from "@/lib/routing/post-login";
 import { withPortalSession } from "@/lib/session/with-portal-session";
 import type { PortalSession } from "@/lib/session/portal";
 import type { DocumentStateCode } from "@/lib/types";
@@ -46,7 +51,12 @@ function DashboardInner({ session }: { session: PortalSession }) {
     () => countExpediente(MOCK_EXPEDIENTE),
     [],
   );
-  const gateSatisfied = expedienteCounts.is_gate_satisfied;
+  const decision = useMemo(
+    () => decidePostLoginRoute(MOCK_EXPEDIENTE),
+    [],
+  );
+  const gateBlocked = decision.banner === "expediente_blocked";
+  const provisional = decision.banner === "provisional_access";
 
   return (
     <>
@@ -55,9 +65,12 @@ function DashboardInner({ session }: { session: PortalSession }) {
         onboardingPct={expedienteCounts.completion_pct}
       />
       <main className="mx-auto max-w-7xl space-y-8 px-5 py-8">
-        {!gateSatisfied ? <LockedDashboardHero counts={expedienteCounts} /> : null}
+        {gateBlocked ? <LockedDashboardHero counts={expedienteCounts} /> : null}
+        {provisional ? <ProvisionalAccessBanner /> : null}
 
         <SemaphoreCard data={MOCK_SEMAPHORE} />
+
+        <ExpedienteSummaryCard counts={expedienteCounts} />
 
         <div className="grid gap-6 lg:grid-cols-3">
           <div className="space-y-6 lg:col-span-2">
@@ -76,6 +89,109 @@ function DashboardInner({ session }: { session: PortalSession }) {
 }
 
 export default withPortalSession(DashboardInner);
+
+// ─── Provisional access banner ───────────────────────────────────
+
+function ProvisionalAccessBanner() {
+  return (
+    <Alert variant="info">
+      <AlertTitle className="flex items-center gap-2">
+        <HourglassHigh className="h-4 w-4" weight="bold" aria-hidden="true" />
+        Tu expediente está en revisión
+      </AlertTitle>
+      <AlertDescription className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+        <span>
+          Subiste todos los documentos obligatorios — tienes acceso provisional
+          al dashboard mientras nuestro equipo legal los revisa. Te avisaremos
+          por correo cuando todo quede aprobado.
+        </span>
+        <Button asChild size="sm" variant="outline" className="shrink-0">
+          <Link href="/portal/onboarding">
+            <span>Ver expediente</span>
+            <ArrowRight className="h-3.5 w-3.5" weight="bold" aria-hidden="true" />
+          </Link>
+        </Button>
+      </AlertDescription>
+    </Alert>
+  );
+}
+
+// ─── Expediente summary card ────────────────────────────────────
+
+function ExpedienteSummaryCard({
+  counts,
+}: {
+  counts: ReturnType<typeof countExpediente>;
+}) {
+  return (
+    <section className="cw-fade-up rounded-lg border border-[color:var(--border-default)] bg-[color:var(--surface-raised)] p-5 shadow-xs">
+      <header className="mb-4 flex flex-wrap items-center justify-between gap-3">
+        <div className="flex items-center gap-2">
+          <ClipboardText
+            className="h-5 w-5 text-[color:var(--text-brand)]"
+            weight="duotone"
+            aria-hidden="true"
+          />
+          <h2 className="text-[15px] font-semibold text-[color:var(--text-primary)]">
+            Tu expediente inicial
+          </h2>
+          <Badge variant="brand">{counts.completion_pct}%</Badge>
+        </div>
+        <Button asChild variant="outline" size="sm">
+          <Link href="/portal/onboarding">
+            <PencilSimple className="h-3.5 w-3.5" weight="bold" aria-hidden="true" />
+            <span>Revisar o actualizar</span>
+            <ArrowRight className="h-3.5 w-3.5" weight="bold" aria-hidden="true" />
+          </Link>
+        </Button>
+      </header>
+
+      <Progress
+        value={counts.completion_pct}
+        label={`${counts.completed + counts.in_review} de ${counts.total_required} documentos obligatorios avanzados`}
+        showValue
+        tone={counts.needs_action === 0 ? "success" : "brand"}
+        className="max-w-3xl"
+      />
+
+      <dl className="mt-4 grid grid-cols-2 gap-3 sm:grid-cols-4">
+        <SummaryStat label="Aprobados" value={counts.completed} tone="success" />
+        <SummaryStat label="En revisión" value={counts.in_review} tone="info" />
+        <SummaryStat label="Por atender" value={counts.needs_action} tone="warning" />
+        <SummaryStat label="Opcionales pendientes" value={counts.optional_pending} tone="neutral" />
+      </dl>
+    </section>
+  );
+}
+
+function SummaryStat({
+  label,
+  value,
+  tone,
+}: {
+  label: string;
+  value: number;
+  tone: "success" | "info" | "warning" | "neutral";
+}) {
+  const accent =
+    tone === "success"
+      ? "text-[color:var(--status-success-text)]"
+      : tone === "info"
+        ? "text-[color:var(--status-info-text)]"
+        : tone === "warning"
+          ? "text-[color:var(--status-warning-text)]"
+          : "text-[color:var(--text-primary)]";
+  return (
+    <div className="rounded-sm border border-[color:var(--border-subtle)] bg-[color:var(--surface-page)] px-3 py-2.5">
+      <dt className="font-mono text-[10px] uppercase tracking-wide text-[color:var(--text-tertiary)]">
+        {label}
+      </dt>
+      <dd className={`font-mono text-xl font-semibold tabular-nums ${accent}`}>
+        {value}
+      </dd>
+    </div>
+  );
+}
 
 // ─── Locked-state hero ───────────────────────────────────────────
 
