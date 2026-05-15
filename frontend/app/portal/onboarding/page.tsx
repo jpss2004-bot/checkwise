@@ -139,10 +139,32 @@ function OnboardingInner({ session }: { session: PortalSession }) {
   const needsAction = requirements.filter((r) =>
     ["pending", "empty", "rejected", "expired", "needs_review"].includes(r.state),
   );
+  // Mandatory items unlock the dashboard. Optional items can be done
+  // later from the dashboard's settings area. Splitting them into two
+  // visually distinct sections is the difference between "10 things to
+  // do" (overwhelming) and "5 to unlock + 5 you can defer" (clear).
+  const needsActionMandatory = needsAction.filter((r) => r.required);
+  const needsActionOptional = needsAction.filter((r) => !r.required);
   const inProgress = requirements.filter((r) =>
     ["uploaded", "in_review"].includes(r.state),
   );
   const completed = requirements.filter((r) => r.state === "approved");
+
+  /**
+   * Open the upload wizard pre-filled for a specific expediente
+   * requirement. The wizard reads ?requirement=…&institution=… from
+   * the URL and locks those fields so the user just picks the file
+   * and hits submit. ``load_type=alta_inicial`` because every card on
+   * this page belongs to the initial expediente.
+   */
+  function openUploadFor(req: ExpedienteRequirement) {
+    const params = new URLSearchParams();
+    params.set("requirement", req.name);
+    if (req.requirement_code) params.set("requirement_code", req.requirement_code);
+    params.set("institution", req.institution);
+    params.set("load_type", "alta_inicial");
+    router.push(`/portal/upload?${params.toString()}`);
+  }
 
   return (
     <>
@@ -164,16 +186,40 @@ function OnboardingInner({ session }: { session: PortalSession }) {
           activating={activating}
         />
 
-        {needsAction.length > 0 && (
+        {needsActionMandatory.length > 0 && (
           <ExpedienteSection
-            title="Necesitan tu atención"
-            description="Estos documentos te están bloqueando. Atiéndelos primero."
+            title="Obligatorios — desbloquean tu dashboard"
+            description="Estos documentos te bloquean el dashboard. Atiéndelos primero."
             tone="attention"
-            count={needsAction.length}
+            count={needsActionMandatory.length}
           >
             <div className="grid gap-4 lg:grid-cols-2">
-              {needsAction.map((req) => (
-                <ExpedienteCard key={req.id} requirement={req} />
+              {needsActionMandatory.map((req) => (
+                <ExpedienteCard
+                  key={req.id}
+                  requirement={req}
+                  onAction={openUploadFor}
+                />
+              ))}
+            </div>
+          </ExpedienteSection>
+        )}
+
+        {needsActionOptional.length > 0 && (
+          <ExpedienteSection
+            title="Opcionales — puedes hacerlos después"
+            description="No bloquean tu dashboard. Súbelos cuando aplique a tu caso."
+            tone="info"
+            count={needsActionOptional.length}
+            collapsible
+          >
+            <div className="grid gap-4 lg:grid-cols-2">
+              {needsActionOptional.map((req) => (
+                <ExpedienteCard
+                  key={req.id}
+                  requirement={req}
+                  onAction={openUploadFor}
+                />
               ))}
             </div>
           </ExpedienteSection>
@@ -188,7 +234,11 @@ function OnboardingInner({ session }: { session: PortalSession }) {
           >
             <div className="grid gap-4 lg:grid-cols-2">
               {inProgress.map((req) => (
-                <ExpedienteCard key={req.id} requirement={req} />
+                <ExpedienteCard
+                  key={req.id}
+                  requirement={req}
+                  onAction={openUploadFor}
+                />
               ))}
             </div>
           </ExpedienteSection>
@@ -204,7 +254,11 @@ function OnboardingInner({ session }: { session: PortalSession }) {
           >
             <div className="grid gap-4 lg:grid-cols-2">
               {completed.map((req) => (
-                <ExpedienteCard key={req.id} requirement={req} />
+                <ExpedienteCard
+                  key={req.id}
+                  requirement={req}
+                  onAction={openUploadFor}
+                />
               ))}
             </div>
           </ExpedienteSection>
@@ -418,10 +472,11 @@ function GateHero({
             </div>
           </div>
           <p className="max-w-prose text-[13px] leading-5 text-[color:var(--text-secondary)]">
-            Te pedimos {counts.total_required} documentos obligatorios. Una vez
-            que los hayas enviado, tu cliente puede contratar tus servicios
-            especializados y empezamos a darle seguimiento mensual a tus
-            obligaciones REPSE.
+            Solo los <strong>{counts.total_required} documentos obligatorios</strong>{" "}
+            desbloquean tu dashboard. Los opcionales puedes subirlos cuando
+            apliquen a tu caso. Una vez que envíes los obligatorios, tu cliente
+            puede contratar tus servicios especializados y empezamos a darle
+            seguimiento mensual a tus obligaciones REPSE.
           </p>
 
           <Progress

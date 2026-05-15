@@ -96,13 +96,20 @@ export function ExpedienteCard({ requirement, onAction }: ExpedienteCardProps) {
             <p className="mt-1.5 inline-flex">
               <span
                 className={cn(
-                  "rounded-full border px-2 py-0.5 font-mono text-[10px] uppercase tracking-wide",
+                  "rounded-full border px-2 py-0.5 font-mono text-[10px] uppercase tracking-wide font-semibold",
                   requirement.required
-                    ? "border-[color:var(--surface-brand-muted)] bg-[color:var(--surface-brand-muted)] text-[color:var(--text-brand)]"
+                    ? "border-[color:var(--status-warning-border)] bg-[color:var(--status-warning-bg)] text-[color:var(--status-warning-text)]"
                     : "border-[color:var(--border-subtle)] bg-[color:var(--surface-sunken)] text-[color:var(--text-tertiary)]",
                 )}
+                title={
+                  requirement.required
+                    ? "Obligatorio para activar el dashboard"
+                    : "Opcional — puedes subirlo después"
+                }
               >
-                {requirement.required ? "Obligatorio" : "Opcional"}
+                {requirement.required
+                  ? "Obligatorio · activa dashboard"
+                  : "Opcional"}
               </span>
             </p>
           </div>
