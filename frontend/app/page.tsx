@@ -7,9 +7,11 @@ import {
   CalendarBlank,
   ChartLineUp,
   CheckCircle,
+  Circle,
   ClipboardText,
   Files,
   Gavel,
+  Hourglass,
   Lightbulb,
   Lock,
   PaperPlaneTilt,
@@ -20,12 +22,13 @@ import {
   type Icon,
 } from "@phosphor-icons/react";
 
+import type { DocumentStateCode } from "@/lib/types";
+
 import { BrandLogo } from "@/components/checkwise/brand-logo";
 import { DocStateBadge } from "@/components/checkwise/doc-state-badge";
 import { ContactForm } from "@/components/marketing/contact-form";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { Progress } from "@/components/ui/progress";
 
 interface FeatureItem {
   icon: Icon;
@@ -196,17 +199,32 @@ function MarketingNav() {
 }
 
 // ─── Hero ────────────────────────────────────────────────────────
+//
+// CheckWise 2.0 launch hero. Editorial split with an asymmetric
+// compliance cockpit on the right: a single dominant cockpit object
+// that reveals the product DNA (workspace + requirement + period →
+// obligation state) through a 6-slot evidence lattice, a 4-step
+// submission timeline, and a deadline-pressure pill — instead of a
+// generic SaaS preview card.
+//
+// Motion is staggered on mount via the cw-fade-up cascade; the only
+// perpetual motion is a teal "live" pulse on the in-review timeline
+// node and a slow scanline at the foot of the lattice. All gated by
+// prefers-reduced-motion in globals.css.
 
 function Hero() {
   return (
-    <section className="relative overflow-hidden">
+    <section className="relative isolate overflow-hidden">
       <BackgroundOrnaments />
-      <div className="relative mx-auto max-w-6xl px-5 pb-12 pt-16 sm:pt-20 lg:pb-20 lg:pt-28">
-        <div className="grid grid-cols-1 items-center gap-12 lg:grid-cols-[1.05fr_1fr] lg:gap-16">
-          {/* ── Left column: type + CTAs ─────────────────────── */}
-          <div className="cw-fade-up min-w-0 space-y-7">
+      <div className="relative mx-auto max-w-[1320px] px-5 pb-16 pt-16 sm:pt-20 lg:pb-24 lg:pt-28">
+        <div className="grid grid-cols-1 items-start gap-14 lg:grid-cols-2 lg:gap-12 xl:gap-16">
+          {/* ── Left rail: editorial type column ────────────── */}
+          <div className="min-w-0">
             {/* Eyebrow */}
-            <div className="flex items-center gap-3">
+            <div
+              className="cw-fade-up flex items-center gap-3"
+              style={{ animationDelay: "0ms" }}
+            >
               <Badge variant="teal" className="rounded-full px-3 py-1">
                 <Sparkle className="h-3 w-3" weight="fill" aria-hidden="true" />
                 Plataforma de cumplimiento REPSE
@@ -222,8 +240,12 @@ function Hero() {
 
             {/* Display H1 */}
             <h1
-              className="break-words font-semibold tracking-[-0.022em] text-[color:var(--text-primary)]"
-              style={{ fontSize: "clamp(2.25rem, 5.2vw, 4.4rem)", lineHeight: "1.05" }}
+              className="cw-fade-up mt-7 break-words font-semibold tracking-[-0.024em] text-[color:var(--text-primary)] [text-wrap:balance]"
+              style={{
+                animationDelay: "60ms",
+                fontSize: "clamp(2.25rem, 4.2vw, 3.6rem)",
+                lineHeight: "1.05",
+              }}
             >
               Cumplimiento documental REPSE{" "}
               <span className="text-[color:var(--text-teal)]">
@@ -231,15 +253,35 @@ function Hero() {
               </span>
             </h1>
 
-            {/* Subhead — 19 words, contains REPSE + proveedor + cliente */}
-            <p className="max-w-[44ch] text-[15px] leading-[1.65] text-[color:var(--text-secondary)] sm:text-[17px]">
+            {/* Subhead — 19 words, REPSE + proveedor + cliente, no em dashes */}
+            <p
+              className="cw-fade-up mt-7 max-w-[46ch] text-[15px] leading-[1.65] text-[color:var(--text-secondary)] sm:text-[17px]"
+              style={{ animationDelay: "120ms" }}
+            >
               Centraliza el expediente REPSE de cada proveedor: cargas guiadas,
-              calendario recurrente y reportes ejecutivos para tu cliente — sin
+              calendario recurrente y reportes ejecutivos para tu cliente. Sin
               spreadsheets.
             </p>
 
+            {/* Product DNA caption — the hero says what CheckWise is */}
+            <div
+              className="cw-fade-up mt-6 flex flex-wrap items-center gap-2 font-mono text-[10px] uppercase tracking-[0.22em] text-[color:var(--text-tertiary)]"
+              style={{ animationDelay: "180ms" }}
+            >
+              <span>Obligación</span>
+              <span aria-hidden="true" className="text-[color:var(--text-teal)]">×</span>
+              <span>Evidencia</span>
+              <span aria-hidden="true" className="text-[color:var(--text-teal)]">×</span>
+              <span>Período</span>
+              <span aria-hidden="true" className="text-[color:var(--border-default)]">→</span>
+              <span className="text-[color:var(--text-secondary)]">Estado actual</span>
+            </div>
+
             {/* CTAs */}
-            <div className="flex flex-wrap items-center gap-3 pt-1">
+            <div
+              className="cw-fade-up mt-8 flex flex-wrap items-center gap-3"
+              style={{ animationDelay: "240ms" }}
+            >
               <Button
                 asChild
                 size="lg"
@@ -269,15 +311,21 @@ function Hero() {
             </div>
 
             {/* Fine print */}
-            <p className="max-w-[44ch] text-xs leading-5 text-[color:var(--text-tertiary)]">
+            <p
+              className="cw-fade-up mt-7 max-w-[46ch] text-xs leading-5 text-[color:var(--text-tertiary)]"
+              style={{ animationDelay: "300ms" }}
+            >
               CheckWise no firma documentos. La revisión humana sigue siendo
               obligatoria para el cumplimiento REPSE.
             </p>
           </div>
 
-          {/* ── Right column: layered preview composition ────── */}
-          <div className="cw-fade-up" style={{ animationDelay: "120ms" }}>
-            <HeroPreviewCard />
+          {/* ── Right canvas: compliance cockpit ────────────── */}
+          <div
+            className="cw-fade-up min-w-0"
+            style={{ animationDelay: "240ms" }}
+          >
+            <HeroCockpit />
           </div>
         </div>
 
@@ -291,12 +339,15 @@ function Hero() {
 
 function BackgroundOrnaments() {
   return (
-    <div aria-hidden="true" className="pointer-events-none absolute inset-0 overflow-hidden">
+    <div
+      aria-hidden="true"
+      className="pointer-events-none absolute inset-0 -z-10 overflow-hidden"
+    >
       {/* Subtle navy grid texture, masked toward center-top */}
       <div className="cw-grid-pattern absolute inset-0" />
       {/* Navy soft blob */}
       <div
-        className="absolute -top-32 left-[18%] h-[560px] w-[560px] rounded-full opacity-[0.16] blur-3xl"
+        className="absolute -top-32 left-[14%] h-[580px] w-[580px] rounded-full opacity-[0.16] blur-3xl"
         style={{
           background:
             "radial-gradient(circle, hsl(var(--brand-navy)/0.55) 0%, transparent 70%)",
@@ -304,7 +355,7 @@ function BackgroundOrnaments() {
       />
       {/* Teal soft blob */}
       <div
-        className="absolute -bottom-44 -right-24 h-[600px] w-[600px] rounded-full opacity-[0.14] blur-3xl"
+        className="absolute -bottom-44 -right-24 h-[620px] w-[620px] rounded-full opacity-[0.14] blur-3xl"
         style={{
           background:
             "radial-gradient(circle, hsl(var(--brand-teal)/0.6) 0%, transparent 70%)",
@@ -314,98 +365,275 @@ function BackgroundOrnaments() {
   );
 }
 
-function HeroPreviewCard() {
+// ─── Hero cockpit composition ────────────────────────────────────
+
+type SlotSeed = {
+  code: string;
+  name: string;
+  institution: string;
+  period: string;
+  state: DocumentStateCode;
+};
+
+const COCKPIT_SLOTS: readonly SlotSeed[] = [
+  {
+    code: "csf",
+    name: "Constancia de Situación Fiscal",
+    institution: "SAT",
+    period: "2026",
+    state: "approved",
+  },
+  {
+    code: "repse",
+    name: "Registro REPSE",
+    institution: "STPS",
+    period: "2026",
+    state: "in_review",
+  },
+  {
+    code: "imss-opinion",
+    name: "Opinión de cumplimiento",
+    institution: "IMSS",
+    period: "Mar 2026",
+    state: "needs_review",
+  },
+  {
+    code: "infonavit",
+    name: "Certificado sin adeudo",
+    institution: "INFONAVIT",
+    period: "Bim 2 / 2026",
+    state: "uploaded",
+  },
+  {
+    code: "sisub",
+    name: "Acuse SISUB cuatrimestral",
+    institution: "STPS",
+    period: "Cua 1 / 2026",
+    state: "pending",
+  },
+  {
+    code: "isr",
+    name: "Declaración ISR mensual",
+    institution: "SAT",
+    period: "Abr 2026",
+    state: "empty",
+  },
+] as const;
+
+type TimelineNode = {
+  label: string;
+  date: string;
+  state: "done" | "active" | "upcoming";
+};
+
+const COCKPIT_TIMELINE: readonly TimelineNode[] = [
+  { label: "Recibido", date: "16 Mayo · 09:42", state: "done" },
+  { label: "Prevalidado", date: "16 Mayo · 09:43", state: "done" },
+  { label: "En revisión humana", date: "17 Mayo · 11:08", state: "active" },
+  { label: "Aprobado", date: "Pendiente", state: "upcoming" },
+] as const;
+
+function HeroCockpit() {
   return (
     <div className="relative">
-      {/* Back peek card — z-axis depth */}
+      {/* Back peek card — z-axis depth implies "more workspaces" */}
       <div
         aria-hidden="true"
-        className="absolute -right-3 -top-5 hidden h-full w-full origin-top-right -rotate-[3.2deg] scale-[0.94] rounded-[1.75rem] border border-[color:var(--border-subtle)] bg-[color:var(--surface-raised)]/85 shadow-[0_18px_40px_-24px_hsl(var(--brand-navy)/0.18)] sm:block"
+        className="absolute -right-4 -top-6 hidden h-full w-[97%] origin-top-right -rotate-[3deg] scale-[0.96] rounded-[2rem] border border-[color:var(--border-subtle)] bg-[color:var(--surface-raised)]/80 shadow-[0_22px_50px_-28px_hsl(var(--brand-navy)/0.20)] sm:block"
       />
 
-      {/* Outer bezel — premium machined-aluminum tray */}
+      {/* Floating deadline-pressure pill — implies the calendar without
+          a whole second card. Clipped to the cockpit's right shoulder. */}
       <div
-        className="cw-hover-lift relative rounded-[1.75rem] border border-[color:var(--border-default)]/80 bg-gradient-to-br from-white to-[color:var(--surface-raised)] p-1.5 shadow-[0_30px_80px_-30px_hsl(var(--brand-navy)/0.30),0_8px_24px_-12px_hsl(var(--brand-navy)/0.10)]"
+        aria-hidden="true"
+        className="cw-fade-up absolute -top-4 right-4 z-10 hidden items-center gap-2 rounded-full border border-[color:var(--border-default)] bg-[color:var(--surface-raised)] px-3 py-1.5 shadow-[0_12px_28px_-16px_hsl(var(--brand-navy)/0.30)] sm:inline-flex"
+        style={{ animationDelay: "320ms" }}
       >
+        <Hourglass
+          className="h-3.5 w-3.5 text-[color:var(--status-warning-text)]"
+          weight="fill"
+        />
+        <span className="font-mono text-[10px] uppercase tracking-[0.16em] text-[color:var(--text-secondary)]">
+          IMSS Mayo · vence en
+        </span>
+        <span className="font-mono text-[11px] font-semibold tabular-nums text-[color:var(--text-primary)]">
+          1d 04h
+        </span>
+      </div>
+
+      {/* Outer bezel — single materialized cockpit tray */}
+      <div className="cw-hover-lift relative rounded-[2rem] border border-[color:var(--border-default)]/80 bg-gradient-to-br from-white to-[color:var(--surface-raised)] p-1.5 shadow-[0_36px_90px_-36px_hsl(var(--brand-navy)/0.32),0_10px_28px_-14px_hsl(var(--brand-navy)/0.10)]">
         {/* Inner core */}
-        <div className="rounded-[1.375rem] bg-[color:var(--surface-raised)] p-5 shadow-[inset_0_1px_0_hsl(0_0%_100%/0.9)] sm:p-6">
-          {/* Header */}
-          <div className="flex items-start justify-between gap-3">
-            <div className="min-w-0">
-              <p className="font-mono text-[10px] uppercase tracking-[0.18em] text-[color:var(--text-teal)]">
-                Expediente del proveedor
-              </p>
-              <h3 className="mt-1.5 truncate text-lg font-semibold tracking-tight text-[color:var(--text-primary)]">
-                Distribuidora Nogal · S.A. de C.V.
-              </h3>
-              <p className="mt-1 font-mono text-[11px] uppercase tracking-[0.12em] text-[color:var(--text-tertiary)]">
-                DNG890101AB1 · Persona moral
-              </p>
-              <p className="mt-1.5 flex items-center gap-1.5 font-mono text-[11px] uppercase tracking-[0.12em] text-[color:var(--text-tertiary)]">
-                <span
-                  aria-hidden="true"
-                  className="cw-pulse-soft inline-block h-1.5 w-1.5 rounded-full bg-[color:var(--text-teal)]"
-                />
-                <span>Sincronizado hace 2 min</span>
-              </p>
-            </div>
-            <Badge variant="warning" className="shrink-0">
-              Atención
-            </Badge>
-          </div>
-
-          {/* Progress band with trailing scanline */}
-          <div className="relative mt-5 overflow-hidden rounded-xl border border-[color:var(--border-subtle)] bg-[color:var(--surface-page)]/80 p-4">
-            <div className="flex items-center justify-between gap-3">
-              <p className="text-[13px] font-medium text-[color:var(--text-primary)]">
-                Expediente inicial REPSE
-              </p>
-              <span className="font-mono text-[11px] tabular-nums text-[color:var(--text-secondary)]">
-                11 / 14 documentos
-              </span>
-            </div>
-            <Progress
-              value={78}
-              tone="warning"
-              label="78% completo · 3 documentos por subir"
-              className="mt-3"
-            />
-            <span aria-hidden="true" className="cw-scan absolute inset-x-0 bottom-0 h-px" />
-          </div>
-
-          {/* Document rows */}
-          <ul className="mt-4 space-y-2.5">
-            <PreviewRow
-              label="Constancia de Situación Fiscal"
-              state="approved"
-              mono="SAT · vigente"
-            />
-            <PreviewRow
-              label="Registro REPSE · folio actualizado"
-              state="in_review"
-              mono="Revisor humano asignado"
-            />
-            <PreviewRow
-              label="Opinión de cumplimiento IMSS"
-              state="needs_review"
-              mono="Pide aclaración"
-            />
-          </ul>
-
-          {/* Next-action footer */}
-          <div className="mt-4 flex items-start gap-2 rounded-xl border border-[color:var(--status-warning-border)] bg-[color:var(--status-warning-bg)] p-3.5">
-            <Lightbulb
-              className="mt-0.5 h-4 w-4 shrink-0 text-[color:var(--status-warning-text)]"
-              weight="fill"
-              aria-hidden="true"
-            />
-            <p className="text-xs leading-5 text-[color:var(--status-warning-text)]">
-              <span className="font-semibold">Próxima acción:</span> sube la
-              opinión IMSS antes del 18 de mayo para mantener el cumplimiento.
-            </p>
-          </div>
+        <div className="rounded-[1.625rem] bg-[color:var(--surface-raised)] shadow-[inset_0_1px_0_hsl(0_0%_100%/0.9)]">
+          <CockpitHeader />
+          <div className="border-t border-[color:var(--border-subtle)]" />
+          <CockpitLatticeBand />
+          <div className="border-t border-[color:var(--border-subtle)]" />
+          <CockpitTimelineBand />
+          <div className="border-t border-[color:var(--border-subtle)]" />
+          <CockpitNextActionFooter />
         </div>
       </div>
+    </div>
+  );
+}
+
+function CockpitHeader() {
+  return (
+    <div className="flex items-start justify-between gap-3 px-5 pb-4 pt-5 sm:px-6 sm:pt-6">
+      <div className="min-w-0">
+        <p className="font-mono text-[10px] uppercase tracking-[0.18em] text-[color:var(--text-teal)]">
+          Centro de cumplimiento
+        </p>
+        <h3 className="mt-1.5 truncate text-lg font-semibold tracking-tight text-[color:var(--text-primary)]">
+          Distribuidora Nogal · S.A. de C.V.
+        </h3>
+        <p className="mt-1 font-mono text-[11px] uppercase tracking-[0.12em] text-[color:var(--text-tertiary)]">
+          DNG890101AB1 · Persona moral
+        </p>
+        <p className="mt-1.5 flex items-center gap-1.5 font-mono text-[11px] uppercase tracking-[0.12em] text-[color:var(--text-tertiary)]">
+          <span
+            aria-hidden="true"
+            className="cw-pulse-soft inline-block h-1.5 w-1.5 rounded-full bg-[color:var(--text-teal)]"
+          />
+          <span>Sincronizado hace 2 min</span>
+        </p>
+      </div>
+      <div className="flex shrink-0 flex-col items-end gap-2">
+        <Badge variant="brand" className="gap-1.5">
+          <CalendarBlank className="h-3 w-3" weight="bold" aria-hidden="true" />
+          Mayo 2026
+        </Badge>
+        <Badge variant="warning">3 acciones pendientes</Badge>
+      </div>
+    </div>
+  );
+}
+
+function CockpitLatticeBand() {
+  return (
+    <div className="relative overflow-hidden px-5 pb-5 pt-4 sm:px-6 sm:pb-6">
+      <div className="mb-3 flex items-baseline justify-between gap-3">
+        <p className="font-mono text-[10px] uppercase tracking-[0.18em] text-[color:var(--text-tertiary)]">
+          Lattice de evidencia
+        </p>
+        <span className="font-mono text-[11px] tabular-nums text-[color:var(--text-secondary)]">
+          11 / 14 ranuras resueltas
+        </span>
+      </div>
+      <ul className="cw-stagger grid grid-cols-2 gap-2.5 sm:grid-cols-3">
+        {COCKPIT_SLOTS.map((slot, idx) => (
+          <li
+            key={slot.code}
+            style={{ ["--cw-index" as string]: idx }}
+            className="cw-hover-lift group relative flex flex-col gap-2 rounded-xl border border-[color:var(--border-subtle)] bg-[color:var(--surface-page)]/70 p-3 transition-colors hover:border-[color:var(--border-default)]"
+          >
+            <div className="flex items-center justify-between gap-2">
+              <span className="font-mono text-[9px] uppercase tracking-[0.18em] text-[color:var(--text-tertiary)]">
+                {slot.institution}
+              </span>
+              <DocStateBadge state={slot.state} withIcon={false} />
+            </div>
+            <p className="text-[12.5px] font-medium leading-snug text-[color:var(--text-primary)]">
+              {slot.name}
+            </p>
+            <p className="font-mono text-[10px] uppercase tracking-[0.12em] text-[color:var(--text-tertiary)]">
+              {slot.period}
+            </p>
+          </li>
+        ))}
+      </ul>
+      {/* Slow horizontal scanline along the bottom — reads as live, not static */}
+      <span
+        aria-hidden="true"
+        className="cw-scan absolute inset-x-5 bottom-0 h-px sm:inset-x-6"
+      />
+    </div>
+  );
+}
+
+function CockpitTimelineBand() {
+  return (
+    <div className="px-5 py-5 sm:px-6">
+      <div className="mb-4 flex items-baseline justify-between gap-3">
+        <p className="font-mono text-[10px] uppercase tracking-[0.18em] text-[color:var(--text-tertiary)]">
+          Línea de revisión · Opinión IMSS
+        </p>
+        <span className="font-mono text-[10px] uppercase tracking-[0.16em] text-[color:var(--text-secondary)]">
+          submission · S-2826
+        </span>
+      </div>
+      <ol className="grid grid-cols-4 gap-2">
+        {COCKPIT_TIMELINE.map((node, idx) => (
+          <li key={node.label} className="relative flex flex-col gap-1.5">
+            {/* connector line to the next node */}
+            {idx < COCKPIT_TIMELINE.length - 1 ? (
+              <span
+                aria-hidden="true"
+                className={`absolute left-[14px] right-0 top-[7px] h-px ${
+                  node.state === "done"
+                    ? "bg-[color:var(--text-teal)]/60"
+                    : node.state === "active"
+                      ? "bg-gradient-to-r from-[color:var(--text-teal)]/60 to-[color:var(--border-default)]"
+                      : "bg-[color:var(--border-subtle)]"
+                }`}
+              />
+            ) : null}
+            <span
+              aria-hidden="true"
+              className={`relative z-10 flex h-3.5 w-3.5 items-center justify-center rounded-full border ${
+                node.state === "done"
+                  ? "border-[color:var(--text-teal)] bg-[color:var(--text-teal)]"
+                  : node.state === "active"
+                    ? "cw-pulse-soft border-[color:var(--text-teal)] bg-[color:var(--surface-raised)]"
+                    : "border-[color:var(--border-default)] bg-[color:var(--surface-raised)]"
+              }`}
+            >
+              {node.state === "done" ? (
+                <CheckCircle
+                  className="h-3 w-3 text-white"
+                  weight="fill"
+                />
+              ) : node.state === "active" ? (
+                <span className="h-1.5 w-1.5 rounded-full bg-[color:var(--text-teal)]" />
+              ) : (
+                <Circle
+                  className="h-2 w-2 text-[color:var(--text-tertiary)]"
+                  weight="bold"
+                />
+              )}
+            </span>
+            <p
+              className={`text-[12px] font-medium leading-tight ${
+                node.state === "upcoming"
+                  ? "text-[color:var(--text-tertiary)]"
+                  : "text-[color:var(--text-primary)]"
+              }`}
+            >
+              {node.label}
+            </p>
+            <p className="font-mono text-[10px] uppercase tracking-[0.1em] text-[color:var(--text-tertiary)]">
+              {node.date}
+            </p>
+          </li>
+        ))}
+      </ol>
+    </div>
+  );
+}
+
+function CockpitNextActionFooter() {
+  return (
+    <div className="flex items-start gap-2.5 rounded-b-[1.625rem] bg-[color:var(--status-warning-bg)] px-5 py-4 sm:px-6">
+      <Lightbulb
+        className="mt-0.5 h-4 w-4 shrink-0 text-[color:var(--status-warning-text)]"
+        weight="fill"
+        aria-hidden="true"
+      />
+      <p className="text-[12.5px] leading-5 text-[color:var(--status-warning-text)]">
+        <span className="font-semibold">Próxima acción:</span> sube la opinión
+        IMSS antes del 18 de mayo para mantener el cumplimiento.
+      </p>
     </div>
   );
 }
@@ -425,7 +653,7 @@ function HeroTrustStrip() {
     {
       icon: Files,
       label: "Trazabilidad",
-      value: "Hash · revisor · periodo",
+      value: "Hash · revisor · período",
     },
     {
       icon: ChartLineUp,
@@ -434,7 +662,10 @@ function HeroTrustStrip() {
     },
   ];
   return (
-    <div className="cw-fade-up mt-14 lg:mt-20" style={{ animationDelay: "240ms" }}>
+    <div
+      className="cw-fade-up mt-16 lg:mt-24"
+      style={{ animationDelay: "420ms" }}
+    >
       <div className="grid grid-cols-2 gap-x-6 gap-y-6 rounded-2xl border border-[color:var(--border-subtle)] bg-[color:var(--surface-raised)]/70 px-5 py-5 backdrop-blur-sm sm:grid-cols-4 sm:px-7 sm:py-6">
         {items.map(({ icon: IconComponent, label, value }) => (
           <div key={label} className="flex items-start gap-3">
@@ -459,30 +690,6 @@ function HeroTrustStrip() {
         ))}
       </div>
     </div>
-  );
-}
-
-function PreviewRow({
-  label,
-  state,
-  mono,
-}: {
-  label: string;
-  state: "approved" | "uploaded" | "pending" | "in_review" | "needs_review";
-  mono: string;
-}) {
-  return (
-    <li className="flex items-center justify-between gap-3">
-      <div className="min-w-0">
-        <p className="truncate text-sm font-medium text-[color:var(--text-primary)]">
-          {label}
-        </p>
-        <p className="font-mono text-[10px] uppercase tracking-wide text-[color:var(--text-tertiary)]">
-          {mono}
-        </p>
-      </div>
-      <DocStateBadge state={state} withIcon />
-    </li>
   );
 }
 
