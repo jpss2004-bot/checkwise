@@ -24,6 +24,7 @@ import { WorkspaceIdentityCard } from "@/components/checkwise/workspace/workspac
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import { PageHeader } from "@/components/ui/page-header";
 import { Progress } from "@/components/ui/progress";
 import type { EvidenceSlotCardProps } from "@/components/checkwise/portal/evidence-slot-card";
 import {
@@ -127,6 +128,12 @@ function DashboardInner({ session }: { session: PortalSession }) {
         onboardingPct={onboarding.completion_pct}
       />
       <main className="mx-auto max-w-7xl space-y-8 px-5 py-8">
+        <PageHeader
+          eyebrow="Compliance command center"
+          title={`Hola, ${session.vendor_name.split(" ")[0] ?? "operación REPSE"}`}
+          description="Tu vista operativa: lo que falta, lo que está en revisión y la próxima acción concreta para mantener tu cumplimiento al día."
+        />
+
         {gateBlocked ? <LockedDashboardHero summary={onboarding} /> : null}
         {provisional ? <ProvisionalAccessBanner /> : null}
 

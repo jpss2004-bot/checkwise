@@ -101,8 +101,8 @@ export function EmptyState({
 }: EmptyStateProps) {
   const tone =
     variant === "muted"
-      ? "border-border bg-muted/30"
-      : "border-border bg-white";
+      ? "border-[color:var(--border-subtle)] bg-[color:var(--surface-sunken)]/40"
+      : "border-[color:var(--border-default)] bg-[color:var(--surface-raised)]";
   return (
     <div
       className={cn(
@@ -111,13 +111,17 @@ export function EmptyState({
         className,
       )}
     >
-      <div className="flex h-10 w-10 items-center justify-center rounded-full bg-muted text-muted-foreground">
+      <div className="flex h-10 w-10 items-center justify-center rounded-full bg-[color:var(--surface-sunken)] text-[color:var(--text-tertiary)]">
         <Icon className="h-5 w-5" aria-hidden />
       </div>
       <div className="max-w-md space-y-1">
-        <p className="text-sm font-semibold">{title}</p>
+        <p className="text-sm font-semibold text-[color:var(--text-primary)]">
+          {title}
+        </p>
         {description ? (
-          <p className="text-sm text-muted-foreground">{description}</p>
+          <p className="text-sm text-[color:var(--text-secondary)]">
+            {description}
+          </p>
         ) : null}
       </div>
       {action ? <div className="mt-1">{action}</div> : null}
@@ -157,18 +161,22 @@ export function ErrorState({
     <div
       role="alert"
       className={cn(
-        "rounded-md border border-amber-300 bg-amber-50 p-5",
+        "rounded-md border border-[color:var(--status-warning-border)] bg-[color:var(--status-warning-bg)] p-5",
         className,
       )}
     >
       <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
         <div className="flex items-start gap-3">
-          <div className="mt-0.5 flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-amber-500 text-white">
-            <Icon className="h-4 w-4" aria-hidden />
+          <div className="mt-0.5 flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-[color:var(--status-warning-text)] text-[color:var(--text-inverse)]">
+            <Icon className="h-4 w-4" weight="fill" aria-hidden />
           </div>
           <div className="min-w-0 space-y-1">
-            <p className="text-sm font-semibold text-amber-900">{title}</p>
-            <p className="text-sm text-amber-900/80">{description}</p>
+            <p className="text-sm font-semibold text-[color:var(--status-warning-text)]">
+              {title}
+            </p>
+            <p className="text-sm text-[color:var(--status-warning-text)]/80">
+              {description}
+            </p>
           </div>
         </div>
         {onRetry || secondary ? (
@@ -180,9 +188,8 @@ export function ErrorState({
                 size="sm"
                 variant="outline"
                 onClick={onRetry}
-                className="active:scale-[0.98]"
               >
-                <ArrowsClockwise className="h-4 w-4" aria-hidden />
+                <ArrowsClockwise className="h-4 w-4" weight="bold" aria-hidden />
                 {retryLabel}
               </Button>
             ) : null}
@@ -404,21 +411,21 @@ export function InlineRetry({ message, onRetry, className }: InlineRetryProps) {
     <div
       role="alert"
       className={cn(
-        "flex flex-wrap items-center justify-between gap-3 rounded-md border border-amber-300 bg-amber-50 px-3 py-2 text-sm",
+        "flex flex-wrap items-center justify-between gap-3 rounded-md border border-[color:var(--status-warning-border)] bg-[color:var(--status-warning-bg)] px-3 py-2 text-sm",
         className,
       )}
     >
-      <div className="flex items-center gap-2 text-amber-900">
-        <Warning className="h-4 w-4" aria-hidden />
+      <div className="flex items-center gap-2 text-[color:var(--status-warning-text)]">
+        <Warning className="h-4 w-4" weight="fill" aria-hidden />
         <span>{message}</span>
       </div>
       <button
         type="button"
         onClick={onRetry}
-        className="inline-flex items-center gap-1 rounded-md border border-amber-300 bg-white px-2 py-1 text-xs font-medium text-amber-900 transition-transform hover:bg-amber-100 active:scale-[0.98]"
+        className="inline-flex items-center gap-1 rounded-md border border-[color:var(--status-warning-border)] bg-[color:var(--surface-raised)] px-2 py-1 text-xs font-medium text-[color:var(--status-warning-text)] transition-colors duration-fast hover:bg-[color:var(--status-warning-bg)]"
       >
         Reintentar
-        <ArrowRight className="h-3.5 w-3.5" aria-hidden />
+        <ArrowRight className="h-3.5 w-3.5" weight="bold" aria-hidden />
       </button>
     </div>
   );

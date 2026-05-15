@@ -8,26 +8,24 @@ import {
   Warning,
   ArrowLeft,
   CheckCircle,
-  ClipboardText,
   FileText,
-  Gavel,
-  ClockCounterClockwise,
-  CircleNotch,
-  Question,
   ShieldCheck,
-  XCircle,
 } from "@phosphor-icons/react";
 
-import { BrandLogo } from "@/components/checkwise/brand-logo";
+import {
+  ReviewDecisionPanel,
+  type ReviewerAction,
+} from "@/components/checkwise/admin/review-decision-panel";
 import { RequirementStatusBadge } from "@/components/checkwise/portal/requirement-status-badge";
 import {
   ErrorState,
   NotFoundState,
   SubmissionDetailSkeleton,
 } from "@/components/checkwise/portal/state-surfaces";
+import { SubmissionTimeline } from "@/components/checkwise/portal/submission-timeline";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { Textarea } from "@/components/ui/textarea";
+import { PageHeader } from "@/components/ui/page-header";
 import {
   clearAdminSession,
   readAdminSession,
@@ -35,7 +33,6 @@ import {
 } from "@/lib/session/admin";
 import { INSTITUTION_LABELS, type SubmissionDetail } from "@/lib/api/portal";
 import {
-  type DecisionAction,
   getReviewerSubmission,
   ReviewerApiError,
   submitDecision,
@@ -48,11 +45,6 @@ type PageProps = {
 
 const REVIEWER_ROLES = ["reviewer", "internal_admin"] as const;
 
-type DecisionState = {
-  action: DecisionAction;
-  reason: string;
-};
-
 export default function ReviewerSubmissionPage({ params }: PageProps) {
   const { submission_id } = use(params);
   const router = useRouter();
@@ -62,10 +54,7 @@ export default function ReviewerSubmissionPage({ params }: PageProps) {
   const [errorKind, setErrorKind] = useState<"not_found" | "network" | null>(null);
   const [reloadKey, setReloadKey] = useState(0);
 
-  const [decision, setDecision] = useState<DecisionState | null>(null);
-  const [submitting, setSubmitting] = useState(false);
-  const [decisionError, setDecisionError] = useState<string | null>(null);
-  const [decided, setDecided] = useState<{ new_status: string; action: DecisionAction } | null>(
+  const [decided, setDecided] = useState<{ new_status: string; action: ReviewerAction } | null>(
     null,
   );
 
@@ -114,63 +103,55 @@ export default function ReviewerSubmissionPage({ params }: PageProps) {
 
   const retry = useCallback(() => setReloadKey((k) => k + 1), []);
 
-  async function onSubmitDecision() {
-    if (!session || !decision || !detail) return;
-    setDecisionError(null);
-    const requiresReason = decision.action !== "approve";
-    const reason = decision.reason.trim();
-    if (requiresReason && !reason) {
-      setDecisionError("Esta decisión necesita una razón.");
-      return;
-    }
-    setSubmitting(true);
-    try {
-      const result = await submitDecision(
-        session.access_token,
-        detail.submission_id,
-        decision.action,
-        reason || null,
-      );
-      setDecided({ new_status: result.new_status, action: result.action });
-      setDecision(null);
-    } catch (err) {
-      if (err instanceof ReviewerApiError && err.status === 409) {
-        setDecisionError("Este documento ya tiene una decisión registrada.");
-      } else if (err instanceof ReviewerApiError && err.status === 422) {
-        setDecisionError("La razón es obligatoria para esta decisión.");
-      } else {
-        setDecisionError("No pudimos registrar la decisión. Intenta de nuevo.");
+  const handleDecision = useCallback(
+    async (action: ReviewerAction, reason: string | null) => {
+      if (!session || !detail) return;
+      try {
+        const result = await submitDecision(
+          session.access_token,
+          detail.submission_id,
+          action,
+          reason,
+        );
+        setDecided({ new_status: result.new_status, action: result.action as ReviewerAction });
+      } catch (err) {
+        if (err instanceof ReviewerApiError && err.status === 409) {
+          throw new Error("Este documento ya tiene una decisión registrada.");
+        }
+        if (err instanceof ReviewerApiError && err.status === 422) {
+          throw new Error("La razón es obligatoria para esta decisión.");
+        }
+        throw new Error("No pudimos registrar la decisión. Intenta de nuevo.");
       }
-    } finally {
-      setSubmitting(false);
-    }
-  }
+    },
+    [session, detail],
+  );
 
   if (!session) return null;
 
+  const terminalStatuses: string[] = [
+    DocumentStatus.APROBADO,
+    DocumentStatus.RECHAZADO,
+    DocumentStatus.EXCEPCION_LEGAL,
+  ];
+  const isTerminal = !!detail && terminalStatuses.includes(detail.status);
+  const panelDisabled = isTerminal || !!decided;
+
   return (
     <main className="mx-auto max-w-6xl space-y-5 px-5 py-8">
-      <header className="flex flex-wrap items-center justify-between gap-3">
-        <div className="min-w-0 space-y-2">
-          <div className="flex items-center gap-3">
-            <BrandLogo variant="compact" size="md" />
-            <span className="hidden h-5 w-px bg-border sm:block" />
-            <p className="flex items-center gap-2 text-xs font-medium uppercase tracking-wide text-muted-foreground">
-              <ClipboardText className="h-4 w-4 text-primary" aria-hidden />
-              Bandeja de revisión
-            </p>
-          </div>
-          <h1 className="text-2xl font-semibold tracking-tight">
-            {detail?.requirement.name ?? "Documento por revisar"}
-          </h1>
-        </div>
-        <Button asChild variant="outline" size="sm">
-          <Link href="/admin/reviewer">
-            <ArrowLeft className="h-4 w-4" aria-hidden />
-            Bandeja
-          </Link>
-        </Button>
-      </header>
+      <PageHeader
+        eyebrow="Reviewer workbench"
+        title={detail?.requirement.name ?? "Documento por revisar"}
+        description="Revisa señales automáticas, contexto del proveedor y la línea de tiempo. Tu decisión queda en el audit log."
+        actions={
+          <Button asChild variant="outline" size="sm">
+            <Link href="/admin/reviewer">
+              <ArrowLeft className="h-4 w-4" aria-hidden />
+              Bandeja
+            </Link>
+          </Button>
+        }
+      />
 
       {loading ? (
         <SubmissionDetailSkeleton />
@@ -197,20 +178,51 @@ export default function ReviewerSubmissionPage({ params }: PageProps) {
         <div className="grid gap-5 lg:grid-cols-3">
           <div className="space-y-5 lg:col-span-2">
             <StatusHeader detail={detail} decidedHint={decided?.new_status ?? null} />
+            <LineageStrip detail={detail} />
             <ReasonsCard detail={detail} />
             <ProviderCard detail={detail} />
-            <TimelineCard detail={detail} />
+            <SubmissionTimeline detail={detail} />
           </div>
           <div className="space-y-5">
-            <DecisionCard
-              detail={detail}
-              decision={decision}
-              setDecision={setDecision}
-              onSubmit={onSubmitDecision}
-              submitting={submitting}
-              decisionError={decisionError}
-              decided={decided}
-            />
+            {decided ? (
+              <Card>
+                <CardHeader>
+                  <div className="flex items-center gap-2">
+                    <CheckCircle
+                      className="h-4 w-4 text-[color:var(--status-success-text)]"
+                      weight="fill"
+                      aria-hidden
+                    />
+                    <CardTitle>Decisión registrada</CardTitle>
+                  </div>
+                </CardHeader>
+                <CardContent>
+                  <p className="text-sm text-[color:var(--text-secondary)]">
+                    Este documento ahora está en{" "}
+                    <span className="font-medium text-[color:var(--text-primary)]">
+                      {decided.new_status}
+                    </span>
+                    . La línea de tiempo refleja tu decisión.
+                  </p>
+                  <Button asChild className="mt-4">
+                    <Link href="/admin/reviewer">
+                      <ArrowLeft className="h-4 w-4" aria-hidden />
+                      Volver a la bandeja
+                    </Link>
+                  </Button>
+                </CardContent>
+              </Card>
+            ) : (
+              <ReviewDecisionPanel
+                disabled={panelDisabled}
+                disabledReason={
+                  isTerminal
+                    ? `Este documento ya está en ${detail.status}. Solo una nueva carga del proveedor puede reabrirlo.`
+                    : undefined
+                }
+                onSubmit={handleDecision}
+              />
+            )}
             <TraceabilityCard detail={detail} />
           </div>
         </div>
@@ -222,6 +234,55 @@ export default function ReviewerSubmissionPage({ params }: PageProps) {
 // ---------------------------------------------------------------------------
 // Components
 // ---------------------------------------------------------------------------
+
+/**
+ * Phase 9 — surfaces the Phase 4 replacement-lineage pointers that
+ * already arrive on the reviewer detail payload. Mirrors the provider
+ * portal's lineage strip so both surfaces render the same affordance
+ * when a submission is part of a replacement chain.
+ *
+ * Backend source: ``GET /api/v1/reviewer/submissions/{id}`` →
+ * ``supersedes_submission_id`` / ``superseded_by_submission_id``.
+ * Returns null when the submission stands alone.
+ */
+function LineageStrip({ detail }: { detail: SubmissionDetail }) {
+  if (!detail.supersedes_submission_id && !detail.superseded_by_submission_id) {
+    return null;
+  }
+  return (
+    <section
+      aria-label="Replacement lineage"
+      className="rounded-md border border-[color:var(--border-default)] bg-[color:var(--surface-sunken)] p-4 text-sm"
+    >
+      {detail.supersedes_submission_id ? (
+        <p>
+          <span className="font-medium text-[color:var(--text-primary)]">
+            Reemplaza intento anterior:
+          </span>{" "}
+          <Link
+            href={`/admin/reviewer/${detail.supersedes_submission_id}`}
+            className="font-mono text-xs text-[color:var(--text-brand)] underline-offset-2 hover:underline"
+          >
+            {detail.supersedes_submission_id}
+          </Link>
+        </p>
+      ) : null}
+      {detail.superseded_by_submission_id ? (
+        <p className={detail.supersedes_submission_id ? "mt-2" : ""}>
+          <span className="font-medium text-[color:var(--text-primary)]">
+            Reemplazado por intento más reciente:
+          </span>{" "}
+          <Link
+            href={`/admin/reviewer/${detail.superseded_by_submission_id}`}
+            className="font-mono text-xs text-[color:var(--text-brand)] underline-offset-2 hover:underline"
+          >
+            {detail.superseded_by_submission_id}
+          </Link>
+        </p>
+      ) : null}
+    </section>
+  );
+}
 
 function StatusHeader({
   detail,
@@ -235,20 +296,20 @@ function StatusHeader({
       detail.requirement.institution
     : "—";
   return (
-    <section className="rounded-md border border-border bg-white p-5">
+    <section className="rounded-lg border border-[color:var(--border-default)] bg-[color:var(--surface-raised)] p-5 shadow-xs">
       <div className="flex flex-wrap items-start justify-between gap-3">
         <div className="min-w-0 space-y-2">
           <RequirementStatusBadge status={detail.status} />
-          <p className="text-base font-semibold">
+          <p className="text-base font-semibold text-[color:var(--text-primary)]">
             {detail.requirement.name ?? "Documento por revisar"}
           </p>
-          <p className="text-sm text-muted-foreground">
+          <p className="text-sm text-[color:var(--text-secondary)]">
             {institutionLabel}
             {detail.period.period_key ? ` · ${detail.period.period_key}` : ""}
           </p>
         </div>
         {decidedHint ? (
-          <div className="rounded-md border border-emerald-200 bg-emerald-50 px-3 py-2 text-xs font-medium text-emerald-900">
+          <div className="rounded-md border border-[color:var(--status-success-border)] bg-[color:var(--status-success-bg)] px-3 py-2 text-xs font-medium text-[color:var(--status-success-text)]">
             Decisión registrada · ahora {decidedHint}
           </div>
         ) : null}
@@ -301,16 +362,20 @@ function SignalRow({
     severity === "error" ? WarningCircle : severity === "warning" ? Warning : ShieldCheck;
   const iconColor =
     severity === "error"
-      ? "text-red-600"
+      ? "text-[color:var(--status-error-text)]"
       : severity === "warning"
-        ? "text-amber-600"
-        : "text-primary";
+        ? "text-[color:var(--status-warning-text)]"
+        : "text-[color:var(--text-brand)]";
   return (
-    <div className="flex items-start gap-3 rounded-md border border-border bg-white p-3">
-      <Icon className={`mt-0.5 h-4 w-4 shrink-0 ${iconColor}`} aria-hidden />
+    <div className="flex items-start gap-3 rounded-md border border-[color:var(--border-default)] bg-[color:var(--surface-raised)] p-3">
+      <Icon
+        className={`mt-0.5 h-4 w-4 shrink-0 ${iconColor}`}
+        weight="fill"
+        aria-hidden
+      />
       <div className="min-w-0">
-        <p className="text-sm font-medium">{title}</p>
-        <p className="mt-0.5 text-sm text-muted-foreground">{message}</p>
+        <p className="text-sm font-medium text-[color:var(--text-primary)]">{title}</p>
+        <p className="mt-0.5 text-sm text-[color:var(--text-secondary)]">{message}</p>
       </div>
     </div>
   );
@@ -344,236 +409,9 @@ function ProviderCard({ detail }: { detail: SubmissionDetail }) {
   );
 }
 
-function TimelineCard({ detail }: { detail: SubmissionDetail }) {
-  return (
-    <Card>
-      <CardHeader>
-        <div className="flex items-center gap-2">
-          <ClockCounterClockwise className="h-4 w-4 text-primary" aria-hidden />
-          <CardTitle>Línea de tiempo</CardTitle>
-        </div>
-      </CardHeader>
-      <CardContent>
-        {detail.history.length === 0 ? (
-          <p className="rounded-md border border-border bg-muted/40 p-3 text-sm text-muted-foreground">
-            Aún no hay cambios de estado registrados.
-          </p>
-        ) : (
-          <ol className="space-y-3">
-            {detail.history.map((h, i) => (
-              <li key={`${h.occurred_at}-${i}`} className="flex items-start gap-3">
-                <span
-                  aria-hidden
-                  className="mt-1.5 flex h-2.5 w-2.5 shrink-0 rounded-full bg-primary"
-                />
-                <div className="min-w-0">
-                  <p className="text-sm font-medium">
-                    {h.from_status ? `${h.from_status} → ${h.to_status}` : h.to_status}
-                  </p>
-                  <p className="text-xs text-muted-foreground">
-                    {formatDate(h.occurred_at)} · {h.actor}
-                  </p>
-                  {h.reason ? (
-                    <p className="mt-1 text-sm text-muted-foreground">{h.reason}</p>
-                  ) : null}
-                </div>
-              </li>
-            ))}
-          </ol>
-        )}
-      </CardContent>
-    </Card>
-  );
-}
-
-const ACTIONS: {
-  action: DecisionAction;
-  label: string;
-  icon: typeof Gavel;
-  variant: "approve" | "reject" | "clarify" | "exception";
-}[] = [
-  { action: "approve", label: "Aprobar", icon: CheckCircle, variant: "approve" },
-  { action: "reject", label: "Rechazar", icon: XCircle, variant: "reject" },
-  {
-    action: "request_clarification",
-    label: "Pedir aclaración",
-    icon: Question,
-    variant: "clarify",
-  },
-  { action: "mark_exception", label: "Excepción legal", icon: Gavel, variant: "exception" },
-];
-
-function DecisionCard({
-  detail,
-  decision,
-  setDecision,
-  onSubmit,
-  submitting,
-  decisionError,
-  decided,
-}: {
-  detail: SubmissionDetail;
-  decision: { action: DecisionAction; reason: string } | null;
-  setDecision: (next: { action: DecisionAction; reason: string } | null) => void;
-  onSubmit: () => void;
-  submitting: boolean;
-  decisionError: string | null;
-  decided: { new_status: string; action: DecisionAction } | null;
-}) {
-  if (decided) {
-    return (
-      <Card>
-        <CardHeader>
-          <div className="flex items-center gap-2">
-            <CheckCircle className="h-4 w-4 text-emerald-600" aria-hidden />
-            <CardTitle>Decisión registrada</CardTitle>
-          </div>
-        </CardHeader>
-        <CardContent>
-          <p className="text-sm">
-            Este documento ahora está en{" "}
-            <span className="font-medium">{decided.new_status}</span>. La línea
-            de tiempo y el detalle del proveedor reflejan tu decisión.
-          </p>
-          <Button asChild className="mt-4 active:scale-[0.98]">
-            <Link href="/admin/reviewer">
-              <ArrowLeft className="h-4 w-4" aria-hidden />
-              Volver a la bandeja
-            </Link>
-          </Button>
-        </CardContent>
-      </Card>
-    );
-  }
-
-  // Resolved states (already decided previously) — no further actions.
-  if (
-    detail.status === DocumentStatus.APROBADO ||
-    detail.status === DocumentStatus.RECHAZADO ||
-    detail.status === DocumentStatus.EXCEPCION_LEGAL
-  ) {
-    return (
-      <Card>
-        <CardHeader>
-          <CardTitle>Documento resuelto</CardTitle>
-        </CardHeader>
-        <CardContent className="space-y-2 text-sm text-muted-foreground">
-          <p>
-            Este documento ya tiene una decisión registrada como{" "}
-            <span className="font-medium text-foreground">{detail.status}</span>.
-            Solo una nueva carga del proveedor puede reabrirlo.
-          </p>
-        </CardContent>
-      </Card>
-    );
-  }
-
-  const requiresReason = decision?.action && decision.action !== "approve";
-  return (
-    <Card>
-      <CardHeader>
-        <CardTitle>Tu decisión</CardTitle>
-        <p className="mt-1 text-sm text-muted-foreground">
-          Elige una acción. Las que devuelven el documento al proveedor
-          requieren una razón.
-        </p>
-      </CardHeader>
-      <CardContent className="space-y-3">
-        <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
-          {ACTIONS.map((opt) => {
-            const Icon = opt.icon;
-            const isActive = decision?.action === opt.action;
-            return (
-              <button
-                key={opt.action}
-                type="button"
-                onClick={() =>
-                  setDecision({ action: opt.action, reason: decision?.reason ?? "" })
-                }
-                className={`flex items-center gap-2 rounded-md border px-3 py-2 text-sm transition-colors active:scale-[0.98] ${
-                  isActive
-                    ? actionActiveClass(opt.variant)
-                    : "border-border bg-white hover:bg-muted"
-                }`}
-                aria-pressed={isActive}
-                data-action={opt.action}
-              >
-                <Icon className="h-4 w-4" aria-hidden />
-                {opt.label}
-              </button>
-            );
-          })}
-        </div>
-        {decision ? (
-          <div className="space-y-2">
-            <label
-              htmlFor="decision-reason"
-              className="block text-sm font-medium"
-            >
-              {requiresReason ? "Razón (obligatoria)" : "Nota (opcional)"}
-            </label>
-            <Textarea
-              id="decision-reason"
-              rows={3}
-              value={decision.reason}
-              onChange={(e) =>
-                setDecision({ ...decision, reason: e.target.value })
-              }
-              placeholder={
-                requiresReason
-                  ? "Describe en una frase clara qué necesita corregir el proveedor."
-                  : "Nota opcional para el registro."
-              }
-            />
-          </div>
-        ) : null}
-
-        {decisionError ? (
-          <div
-            role="alert"
-            className="rounded-md border border-amber-300 bg-amber-50 p-3 text-sm text-amber-900"
-          >
-            <div className="flex items-start gap-2">
-              <Warning
-                className="mt-0.5 h-4 w-4 shrink-0 text-amber-600"
-                aria-hidden
-              />
-              <p>{decisionError}</p>
-            </div>
-          </div>
-        ) : null}
-
-        <Button
-          type="button"
-          disabled={!decision || submitting}
-          onClick={onSubmit}
-          className="w-full active:scale-[0.98]"
-          data-testid="submit-decision"
-        >
-          {submitting ? (
-            <CircleNotch className="h-4 w-4 animate-spin" aria-hidden />
-          ) : (
-            <Gavel className="h-4 w-4" aria-hidden />
-          )}
-          {submitting ? "Registrando decisión…" : "Registrar decisión"}
-        </Button>
-      </CardContent>
-    </Card>
-  );
-}
-
-function actionActiveClass(variant: "approve" | "reject" | "clarify" | "exception"): string {
-  switch (variant) {
-    case "approve":
-      return "border-emerald-300 bg-emerald-50 text-emerald-900";
-    case "reject":
-      return "border-red-300 bg-red-50 text-red-900";
-    case "clarify":
-      return "border-amber-300 bg-amber-50 text-amber-900";
-    case "exception":
-      return "border-primary/40 bg-primary/5 text-primary";
-  }
-}
+// Timeline + decision UI now live in shared compositions:
+// - <SubmissionTimeline/> in components/checkwise/portal/submission-timeline.tsx
+// - <ReviewDecisionPanel/> in components/checkwise/admin/review-decision-panel.tsx
 
 function TraceabilityCard({ detail }: { detail: SubmissionDetail }) {
   return (
@@ -614,11 +452,13 @@ function TraceabilityCard({ detail }: { detail: SubmissionDetail }) {
 
 function Field({ label, value }: { label: string; value: string }) {
   return (
-    <div className="rounded-md border border-border/70 bg-white p-3">
-      <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
+    <div className="rounded-md border border-[color:var(--border-subtle)] bg-[color:var(--surface-page)] p-3">
+      <p className="text-xs font-medium uppercase tracking-wide text-[color:var(--text-tertiary)]">
         {label}
       </p>
-      <p className="mt-1 break-words text-sm font-medium">{value}</p>
+      <p className="mt-1 break-words text-sm font-medium text-[color:var(--text-primary)]">
+        {value}
+      </p>
     </div>
   );
 }

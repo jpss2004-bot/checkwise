@@ -7,16 +7,15 @@ import {
   Warning,
   ArrowLeft,
   ArrowRight,
-  ClipboardText,
   Clock,
   Tray,
   SignOut,
 } from "@phosphor-icons/react";
 
-import { BrandLogo } from "@/components/checkwise/brand-logo";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { PageHeader } from "@/components/ui/page-header";
 import { RequirementStatusBadge } from "@/components/checkwise/portal/requirement-status-badge";
 import {
   EmptyState,
@@ -98,43 +97,30 @@ export default function ReviewerQueuePage() {
 
   return (
     <main className="mx-auto max-w-6xl space-y-6 px-5 py-8">
-      <header className="flex flex-wrap items-start justify-between gap-3">
-        <div className="min-w-0 space-y-2">
-          <div className="flex items-center gap-3">
-            <BrandLogo variant="compact" size="md" />
-            <span className="hidden h-5 w-px bg-border sm:block" />
-            <p className="flex items-center gap-2 text-xs font-medium uppercase tracking-wide text-muted-foreground">
-              <ClipboardText className="h-4 w-4 text-primary" aria-hidden />
-              Bandeja de revisión
-            </p>
-          </div>
-          <h1 className="text-2xl font-semibold tracking-tight">
-            Documentos por revisar
-          </h1>
-          <p className="text-sm text-muted-foreground">
-            Empieza por lo más viejo. Cada documento espera tu decisión
-            humana — la automatización no aprueba ni rechaza nada.
-          </p>
-        </div>
-        <div className="flex flex-wrap items-center gap-2">
-          <Button asChild variant="outline" size="sm">
-            <Link href="/admin">
-              <ArrowLeft className="h-4 w-4" aria-hidden />
-              Inicio
-            </Link>
-          </Button>
-          <Button
-            type="button"
-            variant="outline"
-            size="sm"
-            onClick={onLogout}
-            className="active:scale-[0.98]"
-          >
-            <SignOut className="h-4 w-4" aria-hidden />
-            Cerrar sesión
-          </Button>
-        </div>
-      </header>
+      <PageHeader
+        eyebrow="Reviewer workbench"
+        title="Documentos por revisar"
+        description="Empieza por lo más viejo. Cada documento espera tu decisión humana — la automatización no aprueba ni rechaza nada."
+        actions={
+          <>
+            <Button asChild variant="outline" size="sm">
+              <Link href="/admin">
+                <ArrowLeft className="h-4 w-4" aria-hidden />
+                Inicio
+              </Link>
+            </Button>
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              onClick={onLogout}
+            >
+              <SignOut className="h-4 w-4" aria-hidden />
+              Cerrar sesión
+            </Button>
+          </>
+        }
+      />
 
       {loading ? (
         <QueueSkeleton />
@@ -184,15 +170,15 @@ function QueueRow({ item }: { item: QueueItem }) {
   return (
     <Link
       href={`/admin/reviewer/${item.submission_id}`}
-      className="block rounded-md border border-border bg-white p-4 transition-colors hover:bg-muted/40 active:scale-[0.995]"
+      className="cw-hover-lift block rounded-md border border-[color:var(--border-default)] bg-[color:var(--surface-raised)] p-4 transition-colors hover:bg-[color:var(--surface-hover)]"
     >
       <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
         <div className="min-w-0 space-y-1">
           <div className="flex flex-wrap items-center gap-2">
             <RequirementStatusBadge status={item.status} />
             {item.has_mismatch ? (
-              <span className="inline-flex items-center gap-1 rounded-md border border-amber-300 bg-amber-50 px-2 py-0.5 text-xs text-amber-800">
-                <Warning className="h-3 w-3" aria-hidden />
+              <span className="inline-flex items-center gap-1 rounded-md border border-[color:var(--status-warning-border)] bg-[color:var(--status-warning-bg)] px-2 py-0.5 text-xs text-[color:var(--status-warning-text)]">
+                <Warning className="h-3 w-3" weight="fill" aria-hidden />
                 Posible mismatch
               </span>
             ) : null}
@@ -203,26 +189,26 @@ function QueueRow({ item }: { item: QueueItem }) {
               </span>
             ) : null}
           </div>
-          <p className="truncate text-sm font-semibold">
+          <p className="truncate text-sm font-semibold text-[color:var(--text-primary)]">
             {item.requirement.name ?? "Documento sin requisito canónico"}
           </p>
-          <p className="text-xs text-muted-foreground">
+          <p className="text-xs text-[color:var(--text-secondary)]">
             {institutionLabel}
             {item.period.period_key ? ` · ${item.period.period_key}` : ""}
           </p>
-          <p className="truncate text-xs text-muted-foreground">
+          <p className="truncate text-xs text-[color:var(--text-secondary)]">
             {item.provider.client_name} · {item.provider.vendor_name}
             {item.provider.vendor_rfc ? ` (${item.provider.vendor_rfc})` : ""}
           </p>
         </div>
         <div className="flex shrink-0 flex-col items-start gap-2 sm:items-end">
-          <span className="inline-flex items-center gap-1 text-xs text-muted-foreground">
-            <Clock className="h-3 w-3" aria-hidden />
+          <span className="inline-flex items-center gap-1 text-xs text-[color:var(--text-tertiary)]">
+            <Clock className="h-3 w-3" weight="bold" aria-hidden />
             {ageText}
           </span>
-          <span className="inline-flex items-center gap-1 text-xs font-medium text-primary">
+          <span className="inline-flex items-center gap-1 text-xs font-medium text-[color:var(--text-brand)]">
             Revisar
-            <ArrowRight className="h-3.5 w-3.5" aria-hidden />
+            <ArrowRight className="h-3.5 w-3.5" weight="bold" aria-hidden />
           </span>
         </div>
       </div>

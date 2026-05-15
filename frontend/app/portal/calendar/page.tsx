@@ -20,23 +20,35 @@ import { DocStateBadge, DOC_STATE_LABELS } from "@/components/checkwise/doc-stat
 import { ProviderContextBar } from "@/components/checkwise/portal/provider-context-bar";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import { PageHeader } from "@/components/ui/page-header";
 import { Skeleton } from "@/components/ui/skeleton";
-import { getCalendar } from "@/lib/api/portal";
-import { adaptCalendarToEvents } from "@/lib/api/portal-adapters";
 import {
+  getCalendar,
   INSTITUTION_LABELS,
-  MOCK_CALENDAR_2026,
-  MONTH_LABELS,
-  MONTH_LABELS_SHORT,
-  type CalendarEvent,
-  type CalendarInstitution,
-} from "@/lib/mock/calendar";
+  MONTH_LABELS_ES,
+  MONTH_LABELS_SHORT_ES,
+  statusToDocumentStateCode,
+  type CalendarItem,
+  type CalendarPayload,
+} from "@/lib/api/portal";
+import type { DocumentStateCode } from "@/lib/types";
 import { withOnboardingGate } from "@/lib/session/with-onboarding-gate";
 import type { PortalSession } from "@/lib/session/portal";
 
-const INSTITUTIONS: CalendarInstitution[] = ["sat", "imss", "infonavit", "stps_repse"];
+/**
+ * Calendar surface (Phase 5 — canonical backend reads).
+ *
+ * Consumes ``GET /api/v1/portal/workspaces/{id}/calendar`` directly.
+ * No adapter, no MOCK_CALENDAR_2026. The backend response now ships
+ * the four enrichment fields the drawer needs (``required_document``,
+ * ``deadline_iso``, ``suggested_action``, ``href``) per item.
+ */
 
-const INSTITUTION_ICON: Record<CalendarInstitution, Icon> = {
+type CalendarInstitutionCode = "sat" | "imss" | "infonavit" | "stps_repse";
+
+const INSTITUTIONS: CalendarInstitutionCode[] = ["sat", "imss", "infonavit", "stps_repse"];
+
+const INSTITUTION_ICON: Record<CalendarInstitutionCode, Icon> = {
   sat: Scales,
   imss: Buildings,
   infonavit: Buildings,
@@ -44,28 +56,62 @@ const INSTITUTION_ICON: Record<CalendarInstitution, Icon> = {
 };
 
 /**
- * Yearly REPSE calendar — institution × month grid.
- *
- * Click any cell to open a detail drawer with obligation name,
- * institution, required document, deadline, state, and CTA.
- *
- * Mock-data only for the moment. The existing
- * /api/v1/portal/calendar response already covers most of this; we'll
- * swap when the suggested_action + required_document fields land.
- *
- * TODO[backend-integration]: replace MOCK_CALENDAR_2026 with a fetch
- * from /api/v1/portal/calendar?year=2026 + augment the response shape.
+ * Flat, drawer-ready view of one calendar slot. Phase 5 — built
+ * inline from the backend payload (no adapter, no mock fallback).
  */
+type CalendarEntry = {
+  id: string;
+  year: number;
+  month: number;
+  institution: CalendarInstitutionCode;
+  obligation: string;
+  required_document: string;
+  deadline_iso: string;
+  state: DocumentStateCode;
+  suggested_action: string;
+  frequency: CalendarItem["frequency"];
+  /** Canonical upload URL provided by the backend. */
+  href: string;
+  /** Current submission id, when one exists. */
+  submission_id: string | null;
+};
+
+function flattenCalendarPayload(payload: CalendarPayload): CalendarEntry[] {
+  const entries: CalendarEntry[] = [];
+  for (const month of payload.months) {
+    for (const inst of month.institutions) {
+      if (!INSTITUTIONS.includes(inst.institution as CalendarInstitutionCode)) {
+        continue;
+      }
+      const institution = inst.institution as CalendarInstitutionCode;
+      for (const item of inst.items) {
+        entries.push({
+          id: `${institution}-${payload.year}-${month.month}-${item.code}`,
+          year: payload.year,
+          month: month.month,
+          institution,
+          obligation: item.name,
+          required_document: item.required_document,
+          deadline_iso: item.deadline_iso,
+          state: statusToDocumentStateCode(item.status),
+          suggested_action: item.suggested_action,
+          frequency: item.frequency,
+          href: item.href,
+          submission_id: item.submission_id,
+        });
+      }
+    }
+  }
+  return entries;
+}
+
 function CalendarInner({ session }: { session: PortalSession }) {
-  const [year] = useState(2026);
+  const [year] = useState(new Date().getFullYear() || 2026);
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [filterInstitution, setFilterInstitution] =
-    useState<CalendarInstitution | "all">("all");
+    useState<CalendarInstitutionCode | "all">("all");
 
-  // CheckWise 1.7: real /portal/workspaces/{id}/calendar payload,
-  // flattened by adaptCalendarToEvents into the existing CalendarEvent
-  // shape so the UI below stays as-is.
-  const [events, setEvents] = useState<CalendarEvent[] | null>(null);
+  const [events, setEvents] = useState<CalendarEntry[] | null>(null);
   const [loadError, setLoadError] = useState(false);
 
   useEffect(() => {
@@ -73,13 +119,13 @@ function CalendarInner({ session }: { session: PortalSession }) {
     getCalendar(session, year)
       .then((payload) => {
         if (cancelled) return;
-        const adapted = adaptCalendarToEvents(payload);
-        setEvents(adapted.length > 0 ? adapted : MOCK_CALENDAR_2026);
+        setEvents(flattenCalendarPayload(payload));
+        setLoadError(false);
       })
       .catch(() => {
         if (cancelled) return;
         setLoadError(true);
-        setEvents(MOCK_CALENDAR_2026);
+        setEvents([]);
       });
     return () => {
       cancelled = true;
@@ -94,7 +140,7 @@ function CalendarInner({ session }: { session: PortalSession }) {
 
   // Index events by (institution, month) for fast lookup.
   const eventsByCell = useMemo(() => {
-    const map = new Map<string, CalendarEvent[]>();
+    const map = new Map<string, CalendarEntry[]>();
     for (const e of filteredEvents) {
       const key = `${e.institution}-${e.month}`;
       const list = map.get(key) ?? [];
@@ -125,26 +171,19 @@ function CalendarInner({ session }: { session: PortalSession }) {
     <>
       <ProviderContextBar session={session} />
       <main className="mx-auto max-w-7xl space-y-6 px-5 py-8">
-        <header className="flex flex-wrap items-end justify-between gap-3">
-          <div className="space-y-1">
-            <p className="font-mono text-[10px] uppercase tracking-wide text-[color:var(--text-teal)]">
-              Calendario REPSE · {year}
-            </p>
-            <h1 className="text-2xl font-semibold tracking-tight text-[color:var(--text-primary)]">
-              Tu año de cumplimiento de un vistazo
-            </h1>
-            <p className="max-w-prose text-[13px] text-[color:var(--text-secondary)]">
-              Cada celda representa una obligación. Toca cualquier mes para ver
-              detalle, requisito y siguiente acción.
-            </p>
-          </div>
-          <Button asChild variant="outline" size="sm">
-            <Link href="/portal/dashboard">
-              <ArrowLeft className="h-4 w-4" weight="bold" aria-hidden="true" />
-              Dashboard
-            </Link>
-          </Button>
-        </header>
+        <PageHeader
+          eyebrow={`Calendario REPSE · ${year}`}
+          title="Tu año de cumplimiento de un vistazo"
+          description="Cada celda representa una obligación. Toca cualquier mes para ver detalle, requisito y siguiente acción."
+          actions={
+            <Button asChild variant="outline" size="sm">
+              <Link href="/portal/dashboard">
+                <ArrowLeft className="h-4 w-4" weight="bold" aria-hidden="true" />
+                Dashboard
+              </Link>
+            </Button>
+          }
+        />
 
         <FilterChips
           value={filterInstitution}
@@ -160,8 +199,8 @@ function CalendarInner({ session }: { session: PortalSession }) {
 
         {loadError && (
           <p className="text-xs text-[color:var(--text-secondary)]">
-            No pudimos cargar tu calendario en este momento. Mostramos datos de
-            respaldo mientras se restablece la conexión.
+            No pudimos cargar tu calendario en este momento. Recarga la página
+            para intentar de nuevo; tu sesión sigue activa.
           </p>
         )}
 
@@ -178,7 +217,7 @@ function CalendarInner({ session }: { session: PortalSession }) {
                 >
                   Institución
                 </th>
-                {MONTH_LABELS_SHORT.map((m, idx) => (
+                {MONTH_LABELS_SHORT_ES.map((m, idx) => (
                   <th
                     key={m}
                     scope="col"
@@ -260,11 +299,11 @@ function FilterChips({
   onChange,
   counts,
 }: {
-  value: CalendarInstitution | "all";
-  onChange: (v: CalendarInstitution | "all") => void;
-  counts: Record<CalendarInstitution | "all", number>;
+  value: CalendarInstitutionCode | "all";
+  onChange: (v: CalendarInstitutionCode | "all") => void;
+  counts: Record<CalendarInstitutionCode | "all", number>;
 }) {
-  const options: { value: CalendarInstitution | "all"; label: string }[] = [
+  const options: { value: CalendarInstitutionCode | "all"; label: string }[] = [
     { value: "all", label: "Todas" },
     { value: "sat", label: "SAT" },
     { value: "imss", label: "IMSS" },
@@ -323,7 +362,7 @@ function MonthCell({
   isCurrent,
   onSelect,
 }: {
-  events: CalendarEvent[];
+  events: CalendarEntry[];
   isCurrent: boolean;
   onSelect: (id: string) => void;
 }) {
@@ -351,7 +390,7 @@ function MonthCell({
         tone +
         (isCurrent ? " ring-2 ring-[color:var(--border-focus)]/40" : "")
       }
-      aria-label={`${event.obligation} en ${MONTH_LABELS[event.month - 1]}: ${DOC_STATE_LABELS[event.state]}`}
+      aria-label={`${event.obligation} en ${MONTH_LABELS_ES[event.month]}: ${DOC_STATE_LABELS[event.state]}`}
     >
       <StateDot state={event.state} />
       {events.length > 1 && (
@@ -363,7 +402,7 @@ function MonthCell({
   );
 }
 
-function StateDot({ state }: { state: CalendarEvent["state"] }) {
+function StateDot({ state }: { state: CalendarEntry["state"] }) {
   const symbol =
     state === "approved"
       ? "✓"
@@ -387,7 +426,7 @@ function EventDrawer({
   event,
   onClose,
 }: {
-  event: CalendarEvent;
+  event: CalendarEntry;
   onClose: () => void;
 }) {
   return (
@@ -411,7 +450,7 @@ function EventDrawer({
           <div className="min-w-0">
             <p className="font-mono text-[10px] uppercase tracking-wide text-[color:var(--text-tertiary)]">
               {INSTITUTION_LABELS[event.institution]} ·{" "}
-              {MONTH_LABELS[event.month - 1]} {event.year}
+              {MONTH_LABELS_ES[event.month]} {event.year}
             </p>
             <h2
               id="drawer-title"
@@ -465,7 +504,7 @@ function EventDrawer({
           {event.state !== "approved" && (
             <Button asChild className="w-full" size="lg">
               <Link
-                href={`/portal/upload?period_key=${event.year}-M${String(event.month).padStart(2, "0")}`}
+                href={event.href}
               >
                 <CloudArrowUp className="h-4 w-4" weight="bold" aria-hidden="true" />
                 <span>Subir documento</span>
@@ -507,15 +546,15 @@ function DetailRow({
   );
 }
 
-function frequencyLabel(freq: CalendarEvent["frequency"]): string {
+function frequencyLabel(freq: CalendarEntry["frequency"]): string {
   switch (freq) {
-    case "monthly":
+    case "mensual":
       return "Mensual";
-    case "bimonthly":
+    case "bimestral":
       return "Bimestral";
-    case "four_monthly":
+    case "cuatrimestral":
       return "Cuatrimestral";
-    case "annual":
+    case "anual":
       return "Anual";
   }
 }
@@ -535,7 +574,7 @@ function formatLongDate(iso: string): string {
 
 // ─── Legend ─────────────────────────────────────────────────────
 
-const LEGEND_STATES: CalendarEvent["state"][] = [
+const LEGEND_STATES: CalendarEntry["state"][] = [
   "approved",
   "in_review",
   "uploaded",

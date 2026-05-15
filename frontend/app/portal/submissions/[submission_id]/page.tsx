@@ -11,7 +11,6 @@ import {
   CheckCircle,
   Clock,
   FileText,
-  ClockCounterClockwise,
   ShieldCheck,
   CloudArrowUp,
 } from "@phosphor-icons/react";
@@ -23,8 +22,10 @@ import {
   NotFoundState,
   SubmissionDetailSkeleton,
 } from "@/components/checkwise/portal/state-surfaces";
+import { SubmissionTimeline } from "@/components/checkwise/portal/submission-timeline";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { PageHeader } from "@/components/ui/page-header";
 import {
   getSubmissionDetail,
   INSTITUTION_LABELS,
@@ -100,30 +101,27 @@ export default function SubmissionDetailPage({ params }: PageProps) {
     <>
       <ProviderContextBar session={session} />
       <main className="mx-auto max-w-7xl space-y-5 px-5 py-6">
-        <header className="flex flex-wrap items-center justify-between gap-3">
-          <div className="min-w-0">
-            <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
-              Resultado de carga
-            </p>
-            <h1 className="text-2xl font-semibold">
-              {detail?.requirement.name ?? "Detalle de documento"}
-            </h1>
-          </div>
-          <div className="flex flex-wrap gap-2">
-            <Button asChild variant="outline" size="sm">
-              <Link href="/portal/dashboard">
-                <ArrowLeft className="h-4 w-4" aria-hidden="true" />
-                Calendario
-              </Link>
-            </Button>
-            <Button asChild variant="outline" size="sm">
-              <Link href="/portal/onboarding">
-                <ArrowLeft className="h-4 w-4" aria-hidden="true" />
-                Expediente
-              </Link>
-            </Button>
-          </div>
-        </header>
+        <PageHeader
+          eyebrow="Resultado de carga"
+          title={detail?.requirement.name ?? "Detalle de documento"}
+          description="Estado actual, razones, contexto regulatorio y línea de tiempo auditable de este documento."
+          actions={
+            <>
+              <Button asChild variant="outline" size="sm">
+                <Link href="/portal/dashboard">
+                  <ArrowLeft className="h-4 w-4" aria-hidden="true" />
+                  Calendario
+                </Link>
+              </Button>
+              <Button asChild variant="outline" size="sm">
+                <Link href="/portal/onboarding">
+                  <ArrowLeft className="h-4 w-4" aria-hidden="true" />
+                  Expediente
+                </Link>
+              </Button>
+            </>
+          }
+        />
 
         {loading ? (
           <SubmissionDetailSkeleton />
@@ -158,11 +156,12 @@ export default function SubmissionDetailPage({ params }: PageProps) {
           <div className="grid gap-5 lg:grid-cols-3">
             <div className="space-y-5 lg:col-span-2">
               <StatusHero detail={detail} />
+              <LineageStrip detail={detail} />
               <ReasonsCard detail={detail} />
               <ContextCard detail={detail} />
             </div>
             <div className="space-y-5">
-              <TimelineCard detail={detail} />
+              <SubmissionTimeline detail={detail} />
               <PreviousAttemptsCard previous={detail.previous_attempts} />
               <TraceabilityCard detail={detail} />
             </div>
@@ -205,16 +204,16 @@ function StatusHero({ detail }: { detail: SubmissionDetail }) {
 
   const containerClass =
     tone === "attention"
-      ? "rounded-md border border-amber-300 bg-amber-50 p-5"
+      ? "rounded-lg border border-[color:var(--status-warning-border)] bg-[color:var(--status-warning-bg)] p-5"
       : tone === "approved"
-        ? "rounded-md border border-emerald-200 bg-emerald-50 p-5"
-        : "rounded-md border border-primary/30 bg-primary/5 p-5";
+        ? "rounded-lg border border-[color:var(--status-success-border)] bg-[color:var(--status-success-bg)] p-5"
+        : "rounded-lg border border-[color:var(--surface-brand-muted)] bg-[color:var(--surface-brand-muted)] p-5";
   const iconClass =
     tone === "attention"
-      ? "bg-amber-500 text-white"
+      ? "bg-[color:var(--status-warning-text)] text-[color:var(--text-inverse)]"
       : tone === "approved"
-        ? "bg-emerald-500 text-white"
-        : "bg-primary text-primary-foreground";
+        ? "bg-[color:var(--status-success-text)] text-[color:var(--text-inverse)]"
+        : "bg-[color:var(--interactive-primary)] text-[color:var(--text-inverse)]";
   const Icon =
     tone === "attention"
       ? Warning
@@ -237,8 +236,10 @@ function StatusHero({ detail }: { detail: SubmissionDetail }) {
           </div>
           <div className="min-w-0">
             <RequirementStatusBadge status={detail.status} />
-            <p className="mt-2 text-base font-semibold">{headline}</p>
-            <p className="mt-1 text-sm text-muted-foreground">
+            <p className="mt-2 text-base font-semibold text-[color:var(--text-primary)]">
+              {headline}
+            </p>
+            <p className="mt-1 text-sm text-[color:var(--text-secondary)]">
               {INSTITUTION_LABELS[detail.requirement.institution ?? ""] ??
                 detail.requirement.institution ??
                 ""}
@@ -296,6 +297,16 @@ function buildReuploadHref(detail: SubmissionDetail): string {
   if (detail.load_type) params.set("load_type", detail.load_type);
   if (detail.period.code) params.set("period_label", detail.period.code);
   if (detail.period.period_key) params.set("period_key", detail.period.period_key);
+  // Phase 3 — when the suggested action is to reupload (i.e. this
+  // submission is in a replacement-eligible state), thread its id
+  // through so the wizard POSTs ``supersedes_submission_id`` and the
+  // backend can link the new attempt to this one.
+  if (
+    detail.suggested_action === "reupload" ||
+    detail.suggested_action === "verify_and_reupload"
+  ) {
+    params.set("replaces", detail.submission_id);
+  }
   return `/portal/upload?${params.toString()}`;
 }
 
@@ -365,18 +376,22 @@ function ReasonRow({
     severity === "error" ? WarningCircle : severity === "warning" ? Warning : ShieldCheck;
   const iconColor =
     severity === "error"
-      ? "text-red-600"
+      ? "text-[color:var(--status-error-text)]"
       : severity === "warning"
-        ? "text-amber-600"
-        : "text-primary";
+        ? "text-[color:var(--status-warning-text)]"
+        : "text-[color:var(--text-brand)]";
   return (
-    <div className="flex items-start gap-3 rounded-md border border-border bg-white p-3">
-      <Icon className={`mt-0.5 h-4 w-4 shrink-0 ${iconColor}`} aria-hidden="true" />
+    <div className="flex items-start gap-3 rounded-md border border-[color:var(--border-default)] bg-[color:var(--surface-raised)] p-3">
+      <Icon
+        className={`mt-0.5 h-4 w-4 shrink-0 ${iconColor}`}
+        weight="fill"
+        aria-hidden="true"
+      />
       <div className="min-w-0">
-        <p className="text-sm font-medium">{title}</p>
-        <p className="mt-0.5 text-sm text-muted-foreground">{message}</p>
+        <p className="text-sm font-medium text-[color:var(--text-primary)]">{title}</p>
+        <p className="mt-0.5 text-sm text-[color:var(--text-secondary)]">{message}</p>
         {humanReview ? (
-          <p className="mt-1 text-xs font-medium uppercase tracking-wide text-muted-foreground">
+          <p className="mt-1 text-xs font-medium uppercase tracking-wide text-[color:var(--text-tertiary)]">
             Requiere revisión humana
           </p>
         ) : null}
@@ -435,61 +450,8 @@ function Field({ label, value }: { label: string; value: string }) {
   );
 }
 
-// ---------------------------------------------------------------------------
-// Timeline
-// ---------------------------------------------------------------------------
-
-function TimelineCard({ detail }: { detail: SubmissionDetail }) {
-  return (
-    <Card>
-      <CardHeader>
-        <div className="flex items-center gap-2">
-          <ClockCounterClockwise className="h-4 w-4 text-primary" aria-hidden="true" />
-          <CardTitle>Línea de tiempo</CardTitle>
-        </div>
-        <p className="mt-1 text-sm text-muted-foreground">
-          Qué cambió en este documento desde que lo cargaste.
-        </p>
-      </CardHeader>
-      <CardContent>
-        {detail.history.length === 0 ? (
-          <p className="rounded-md border border-border bg-muted/40 p-3 text-sm text-muted-foreground">
-            Aún no hay cambios de estado registrados.
-          </p>
-        ) : (
-          <ol className="space-y-3">
-            {detail.history.map((entry, index) => (
-              <li
-                key={`${entry.occurred_at}-${index}`}
-                className="flex items-start gap-3"
-              >
-                <span
-                  aria-hidden="true"
-                  className="mt-1.5 flex h-2.5 w-2.5 shrink-0 rounded-full bg-primary"
-                />
-                <div className="min-w-0">
-                  <p className="text-sm font-medium">
-                    {entry.from_status
-                      ? `${entry.from_status} → ${entry.to_status}`
-                      : entry.to_status}
-                  </p>
-                  <p className="text-xs text-muted-foreground">
-                    {formatDate(entry.occurred_at)} · {entry.actor}
-                  </p>
-                  {entry.reason ? (
-                    <p className="mt-1 text-sm text-muted-foreground">
-                      {entry.reason}
-                    </p>
-                  ) : null}
-                </div>
-              </li>
-            ))}
-          </ol>
-        )}
-      </CardContent>
-    </Card>
-  );
-}
+// Timeline now lives in <SubmissionTimeline/> — merges history + events
+// (see frontend/components/checkwise/portal/submission-timeline.tsx).
 
 // ---------------------------------------------------------------------------
 // Previous attempts
@@ -593,6 +555,49 @@ function TraceabilityCard({ detail }: { detail: SubmissionDetail }) {
         ) : null}
       </CardContent>
     </Card>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Replacement lineage strip (Phase 4)
+// ---------------------------------------------------------------------------
+
+function LineageStrip({ detail }: { detail: SubmissionDetail }) {
+  if (!detail.supersedes_submission_id && !detail.superseded_by_submission_id) {
+    return null;
+  }
+  return (
+    <section
+      aria-label="Lineage de reemplazos"
+      className="rounded-md border border-[color:var(--border-default)] bg-[color:var(--surface-sunken)] p-4 text-sm"
+    >
+      {detail.supersedes_submission_id ? (
+        <p>
+          <span className="font-medium text-[color:var(--text-primary)]">
+            Reemplaza intento anterior:
+          </span>{" "}
+          <Link
+            href={`/portal/submissions/${detail.supersedes_submission_id}`}
+            className="font-mono text-xs text-[color:var(--text-brand)] underline-offset-2 hover:underline"
+          >
+            {detail.supersedes_submission_id}
+          </Link>
+        </p>
+      ) : null}
+      {detail.superseded_by_submission_id ? (
+        <p className={detail.supersedes_submission_id ? "mt-2" : ""}>
+          <span className="font-medium text-[color:var(--text-primary)]">
+            Reemplazado por intento más reciente:
+          </span>{" "}
+          <Link
+            href={`/portal/submissions/${detail.superseded_by_submission_id}`}
+            className="font-mono text-xs text-[color:var(--text-brand)] underline-offset-2 hover:underline"
+          >
+            {detail.superseded_by_submission_id}
+          </Link>
+        </p>
+      ) : null}
+    </section>
   );
 }
 

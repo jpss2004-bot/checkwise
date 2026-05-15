@@ -13,6 +13,7 @@ import {
 import { ProviderContextBar } from "@/components/checkwise/portal/provider-context-bar";
 import { UploadWizardSkeleton } from "@/components/checkwise/portal/state-surfaces";
 import { Button } from "@/components/ui/button";
+import { PageHeader } from "@/components/ui/page-header";
 import { fetchCurrentSession, type PortalSession } from "@/lib/session/portal";
 
 function PortalUploadInner() {
@@ -41,6 +42,12 @@ function PortalUploadInner() {
   const loadType = params.get("load_type") ?? undefined;
   const periodLabel = params.get("period_label") ?? undefined;
   const periodKey = params.get("period_key") ?? undefined;
+  // Phase 3 — replacement lineage. The submission-detail page sets
+  // ``replaces=<prior_submission_id>`` when the user clicks the
+  // "corregir / volver a cargar" CTA. Thread it through to the wizard
+  // so the new upload POSTs ``supersedes_submission_id`` and the
+  // backend can link the new attempt to the prior one.
+  const supersedesSubmissionId = params.get("replaces") ?? undefined;
   // When the user opened the wizard from /portal/onboarding, the
   // success state should send them back there instead of dumping them
   // into the dashboard, so they can continue with the next mandatory
@@ -98,34 +105,36 @@ function PortalUploadInner() {
     <>
       <ProviderContextBar session={session} />
       <main className="mx-auto max-w-7xl space-y-5 px-5 py-6">
-        <div className="flex flex-wrap items-center justify-between gap-2">
-          <div>
-            <h1 className="text-2xl font-semibold">Carga documental</h1>
-            <p className="text-sm text-muted-foreground">
-              {periodLabel
-                ? `Cargando ${periodLabel}`
-                : "Carga el documento que falta para tu expediente o calendario REPSE."}
-            </p>
-          </div>
-          <div className="flex gap-2">
-            <Button asChild variant="outline" size="sm">
-              <Link href="/portal/onboarding">
-                <ArrowLeft className="h-4 w-4" aria-hidden="true" />
-                Expediente
-              </Link>
-            </Button>
-            <Button asChild variant="outline" size="sm">
-              <Link href="/portal/dashboard">
-                <ArrowLeft className="h-4 w-4" aria-hidden="true" />
-                Calendario
-              </Link>
-            </Button>
-          </div>
-        </div>
+        <PageHeader
+          eyebrow="Guided upload resolver"
+          title="Carga documental"
+          description={
+            periodLabel
+              ? `Estás resolviendo la obligación del periodo ${periodLabel}. Confirmamos contexto, validamos el archivo y te avisamos qué pasa después.`
+              : "Resuelve una obligación específica: confirmamos contexto, validamos el archivo y te decimos qué pasa después de subir."
+          }
+          actions={
+            <>
+              <Button asChild variant="outline" size="sm">
+                <Link href="/portal/onboarding">
+                  <ArrowLeft className="h-4 w-4" aria-hidden="true" />
+                  Expediente
+                </Link>
+              </Button>
+              <Button asChild variant="outline" size="sm">
+                <Link href="/portal/dashboard">
+                  <ArrowLeft className="h-4 w-4" aria-hidden="true" />
+                  Calendario
+                </Link>
+              </Button>
+            </>
+          }
+        />
         <IntakeWizard
           prefill={prefill}
           lockedFields={lockedFields}
           successContinue={successContinue}
+          supersedesSubmissionId={supersedesSubmissionId}
         />
       </main>
     </>
