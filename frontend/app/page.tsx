@@ -175,11 +175,14 @@ export default function PublicHome() {
 function MarketingNav() {
   return (
     <header className="sticky top-0 z-20 border-b border-[color:var(--border-subtle)] bg-[color:var(--surface-page)]/85 backdrop-blur">
-      <div className="mx-auto flex max-w-6xl items-center justify-between px-5 py-3">
+      <div className="mx-auto flex max-w-6xl items-center justify-between gap-3 px-5 py-3">
         <Link href="/" aria-label="CheckWise inicio">
           <BrandLogo size="md" />
         </Link>
-        <nav className="hidden items-center gap-6 text-[13px] sm:flex">
+        <nav
+          aria-label="Navegación principal"
+          className="hidden items-center gap-6 text-[13px] md:flex"
+        >
           <a
             href="#producto"
             className="text-[color:var(--text-secondary)] hover:text-[color:var(--text-primary)]"
@@ -201,11 +204,15 @@ function MarketingNav() {
         </nav>
         <div className="flex items-center gap-2">
           <Button asChild variant="ghost" size="sm">
-            <Link href="/login">Iniciar sesión</Link>
+            <Link href="/login">
+              <span className="sm:hidden">Entrar</span>
+              <span className="hidden sm:inline">Iniciar sesión</span>
+            </Link>
           </Button>
           <Button asChild size="sm">
             <Link href="#contacto">
-              <span>Solicitar información</span>
+              <span className="sm:hidden">Demo</span>
+              <span className="hidden sm:inline">Solicitar información</span>
               <ArrowRight className="h-3.5 w-3.5" weight="bold" aria-hidden="true" />
             </Link>
           </Button>
@@ -236,10 +243,10 @@ function Hero() {
               </span>
             </h1>
             <p className="max-w-[52ch] text-[15px] leading-relaxed text-[color:var(--text-secondary)] sm:text-base">
-              CheckWise ayuda a empresas y proveedores a gestionar documentos
-              recurrentes, vencimientos, evidencia, estados de revisión y
-              reportes ejecutivos en un solo lugar — sin spreadsheets, sin
-              correos perdidos.
+              Centraliza el expediente REPSE de tus proveedores: cargas
+              guiadas, calendario recurrente, estados de revisión y
+              reportes para tu cliente — sin spreadsheets ni correos
+              perdidos.
             </p>
             <div className="flex flex-wrap gap-3">
               <Button asChild size="lg">
@@ -292,39 +299,70 @@ function BackgroundOrnaments() {
 
 function HeroPreviewCard() {
   return (
-    <div className="relative rounded-2xl border border-[color:var(--border-default)] bg-[color:var(--surface-raised)] p-5 shadow-lg">
-      <div className="flex items-center justify-between">
-        <p className="font-mono text-[10px] uppercase tracking-wide text-[color:var(--text-tertiary)]">
-          Estado actual · Mayo 2026
-        </p>
-        <Badge variant="warning">Atención</Badge>
+    <div className="relative rounded-2xl border border-[color:var(--border-default)] bg-[color:var(--surface-raised)] p-5 shadow-lg sm:p-6">
+      <div className="flex items-start justify-between gap-3">
+        <div className="min-w-0">
+          <p className="font-mono text-[10px] uppercase tracking-wide text-[color:var(--text-teal)]">
+            Expediente del proveedor
+          </p>
+          <h3 className="mt-1 truncate text-lg font-semibold text-[color:var(--text-primary)]">
+            Distribuidora Nogal · S.A. de C.V.
+          </h3>
+          <p className="mt-0.5 font-mono text-[11px] uppercase tracking-wide text-[color:var(--text-tertiary)]">
+            DNG890101AB1 · Persona moral
+          </p>
+        </div>
+        <Badge variant="warning" className="shrink-0">
+          Atención
+        </Badge>
       </div>
-      <h3 className="mt-2 text-lg font-semibold text-[color:var(--text-primary)]">
-        Distribuidora Nogal SA
-      </h3>
-      <p className="mt-1 text-[13px] text-[color:var(--text-secondary)]">
-        Cumplimiento estable · 2 puntos por atender
-      </p>
-      <Progress
-        value={78}
-        showValue
-        tone="warning"
-        label="11 de 14 obligaciones al día"
-        className="mt-4"
-      />
-      <ul className="mt-4 space-y-2 border-t border-[color:var(--border-subtle)] pt-4">
+
+      <div className="mt-5 rounded-lg border border-[color:var(--border-subtle)] bg-[color:var(--surface-page)] p-4">
+        <div className="flex items-center justify-between gap-3">
+          <p className="text-[13px] font-medium text-[color:var(--text-primary)]">
+            Expediente inicial REPSE
+          </p>
+          <span className="font-mono text-[11px] tabular-nums text-[color:var(--text-secondary)]">
+            11 / 14 documentos
+          </span>
+        </div>
+        <Progress
+          value={78}
+          tone="warning"
+          label="78% completo · 3 documentos por subir"
+          className="mt-3"
+        />
+      </div>
+
+      <ul className="mt-4 space-y-2.5">
         <PreviewRow
-          label="Opinión SAT · mayo"
-          state="pending"
-          mono="Vence 18 may"
+          label="Constancia de Situación Fiscal"
+          state="approved"
+          mono="SAT · vigente"
         />
         <PreviewRow
-          label="Acuse ICSOE · Q2"
-          state="uploaded"
-          mono="En revisión humana"
+          label="Registro REPSE · folio actualizado"
+          state="in_review"
+          mono="Revisor humano asignado"
         />
-        <PreviewRow label="Resumen IMSS · marzo" state="approved" mono="Aprobado" />
+        <PreviewRow
+          label="Opinión de cumplimiento IMSS"
+          state="needs_review"
+          mono="Pide aclaración"
+        />
       </ul>
+
+      <div className="mt-4 flex items-start gap-2 rounded-md border border-[color:var(--status-warning-border)] bg-[color:var(--status-warning-bg)] p-3">
+        <Lightbulb
+          className="mt-0.5 h-4 w-4 shrink-0 text-[color:var(--status-warning-text)]"
+          weight="fill"
+          aria-hidden="true"
+        />
+        <p className="text-xs leading-5 text-[color:var(--status-warning-text)]">
+          <span className="font-semibold">Próxima acción:</span> sube la
+          opinión IMSS antes del 18 de mayo para mantener el cumplimiento.
+        </p>
+      </div>
     </div>
   );
 }
@@ -335,7 +373,7 @@ function PreviewRow({
   mono,
 }: {
   label: string;
-  state: "approved" | "uploaded" | "pending";
+  state: "approved" | "uploaded" | "pending" | "in_review" | "needs_review";
   mono: string;
 }) {
   return (
@@ -356,23 +394,50 @@ function PreviewRow({
 // ─── Trust strip ─────────────────────────────────────────────────
 
 function Trust() {
-  const items = [
-    { label: "Trazabilidad", value: "100%" },
-    { label: "Estados REPSE", value: "8" },
-    { label: "Validación", value: "Humana + IA" },
-    { label: "Reportes", value: "PDF · ejecutivos" },
+  const items: { icon: Icon; label: string; value: string }[] = [
+    {
+      icon: ClipboardText,
+      label: "Cargas guiadas",
+      value: "Por documento y por proveedor",
+    },
+    {
+      icon: CalendarBlank,
+      label: "Calendario REPSE",
+      value: "SAT · IMSS · INFONAVIT · STPS",
+    },
+    {
+      icon: Files,
+      label: "Trazabilidad",
+      value: "Hash · revisor · periodo",
+    },
+    {
+      icon: ChartLineUp,
+      label: "Reportes ejecutivos",
+      value: "PDF mensual al cliente",
+    },
   ];
   return (
     <section className="border-y border-[color:var(--border-subtle)] bg-[color:var(--surface-raised)]">
-      <div className="mx-auto grid max-w-6xl grid-cols-2 gap-3 px-5 py-5 sm:grid-cols-4">
-        {items.map((item) => (
-          <div key={item.label} className="flex flex-col">
-            <p className="font-mono text-[10px] uppercase tracking-wide text-[color:var(--text-tertiary)]">
-              {item.label}
-            </p>
-            <p className="text-[15px] font-semibold text-[color:var(--text-primary)]">
-              {item.value}
-            </p>
+      <div className="mx-auto grid max-w-6xl grid-cols-2 gap-x-6 gap-y-5 px-5 py-6 sm:grid-cols-4">
+        {items.map(({ icon: IconComponent, label, value }) => (
+          <div key={label} className="flex items-start gap-3">
+            <span
+              className="mt-0.5 flex h-8 w-8 shrink-0 items-center justify-center rounded-md bg-[color:var(--surface-teal-muted)]"
+              aria-hidden="true"
+            >
+              <IconComponent
+                className="h-4 w-4 text-[color:var(--text-teal)]"
+                weight="duotone"
+              />
+            </span>
+            <div className="min-w-0">
+              <p className="font-mono text-[10px] uppercase tracking-wide text-[color:var(--text-tertiary)]">
+                {label}
+              </p>
+              <p className="mt-0.5 text-[13px] font-medium leading-5 text-[color:var(--text-primary)]">
+                {value}
+              </p>
+            </div>
           </div>
         ))}
       </div>
@@ -714,7 +779,7 @@ function MarketingFooter() {
           <a href="#contacto" className="hover:text-[color:var(--text-primary)]">
             Contacto
           </a>
-          <span className="font-mono uppercase tracking-wide">v1.5 demo</span>
+          <span className="font-mono uppercase tracking-wide">v1.7.1</span>
         </div>
       </div>
     </footer>
