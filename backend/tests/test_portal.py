@@ -144,7 +144,6 @@ def _setup_workspace_session(
         ws_id = workspace.id
         user_id = user.id
         user_email = user.email
-        vendor_rfc = vendor.rfc
     finally:
         db.close()
 

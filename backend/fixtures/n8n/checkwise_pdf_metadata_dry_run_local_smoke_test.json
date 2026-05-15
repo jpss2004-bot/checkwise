@@ -1,0 +1,128 @@
+{
+  "name": "CheckWise PDF metadata dry run - local smoke test",
+  "nodes": [
+    {
+      "parameters": {},
+      "id": "ManualTrigger_1",
+      "name": "When clicking 'Execute workflow'",
+      "type": "n8n-nodes-base.manualTrigger",
+      "typeVersion": 1,
+      "position": [
+        0,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "fileSelector": "/Users/josepablosamano/.n8n-files/checkwise-test-pdfs/human-med-acuse-sisub-septiembre.pdf",
+        "dataPropertyName": "file"
+      },
+      "id": "ReadPdf_2",
+      "name": "Read sample PDF",
+      "type": "n8n-nodes-base.readBinaryFiles",
+      "typeVersion": 1,
+      "position": [
+        300,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "http://127.0.0.1:8000/api/v1/metadata-dry-run/pdf",
+        "sendBody": true,
+        "contentType": "multipart-form-data",
+        "bodyParameters": {
+          "parameters": [
+            {
+              "parameterType": "formBinaryData",
+              "name": "file",
+              "inputDataFieldName": "file"
+            },
+            {
+              "parameterType": "formData",
+              "name": "document_type_code",
+              "value": "acuse_sisub"
+            },
+            {
+              "parameterType": "formData",
+              "name": "context_json",
+              "value": "{\"client_legal_name\":\"CLIENTE DEMO, S.A. DE C.V.\",\"provider_nomenclature\":\"HUMAN MED\",\"upload_form_month\":\"Septiembre\"}"
+            }
+          ]
+        },
+        "options": {
+          "response": {
+            "response": {
+              "responseFormat": "json"
+            }
+          }
+        }
+      },
+      "id": "PostPdf_3",
+      "name": "POST PDF to CheckWise backend",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.4,
+      "position": [
+        620,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "mode": "runOnceForEachItem",
+        "language": "javaScript",
+        "jsCode": "const payload = $json;\nconst safety = payload.safety || {};\nconst failures = [];\n\nif (payload.payload_type !== 'checkwise_local_pdf_metadata_dry_run') failures.push('unexpected payload_type');\nif (!payload.metadata_rules_version) failures.push('missing metadata_rules_version');\nif (payload.document_type_code !== 'acuse_sisub') failures.push('unexpected document_type_code');\nif (payload.validation_result?.status !== 'passed') failures.push('validation did not pass');\nif (safety.legal_approval_allowed !== false) failures.push('legal approval must be disabled');\nif (safety.ocr_used !== false) failures.push('OCR must be disabled');\nif (safety.ai_used !== false) failures.push('AI must be disabled');\nif (safety.google_sheets_used !== false) failures.push('Google Sheets must be disabled');\nif (safety.external_services_used !== false) failures.push('external services must be disabled');\nif (safety.human_review_required !== true) failures.push('human review must be required');\n\nif (failures.length) {\n  throw new Error(`Safety validation failed: ${failures.join(', ')}`);\n}\n\nreturn {\n  json: {\n    status: 'passed',\n    checked_at: new Date().toISOString(),\n    document_type_code: payload.document_type_code,\n    metadata_rules_version: payload.metadata_rules_version,\n    original_filename: payload.deterministic_file_metadata?.original_filename,\n    sha256: payload.deterministic_file_metadata?.sha256,\n    page_count: payload.deterministic_file_metadata?.page_count,\n    review_item_count: payload.review_item_count,\n    prefilled_review_fields: payload.review_items\n      .filter((item) => item.status !== 'pending')\n      .map((item) => item.field_key),\n    pending_review_fields: payload.review_items\n      .filter((item) => item.status === 'pending')\n      .map((item) => item.field_key),\n    safety,\n    review_payload: payload\n  }\n};\n"
+      },
+      "id": "ValidateBackendPayload_4",
+      "name": "Validate safety gates",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        940,
+        0
+      ]
+    }
+  ],
+  "connections": {
+    "When clicking 'Execute workflow'": {
+      "main": [
+        [
+          {
+            "node": "Read sample PDF",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Read sample PDF": {
+      "main": [
+        [
+          {
+            "node": "POST PDF to CheckWise backend",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "POST PDF to CheckWise backend": {
+      "main": [
+        [
+          {
+            "node": "Validate safety gates",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1",
+    "saveManualExecutions": true,
+    "omitInternalNodeConnections": true
+  },
+  "tags": []
+}

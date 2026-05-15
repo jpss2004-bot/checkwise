@@ -1,0 +1,453 @@
+{
+  "name": "CheckWise PDF metadata dry run - visual OCR AI Sheets",
+  "nodes": [
+    {
+      "parameters": {
+        "content": "## 1. Upload intake\nPDF + document type + user context. This is the only human input at the start.",
+        "height": 160,
+        "width": 320,
+        "color": 4
+      },
+      "id": "Note_Intake",
+      "name": "Segment 1 - Intake",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        -140,
+        -430
+      ]
+    },
+    {
+      "parameters": {
+        "content": "## 2. CheckWise backend\nCalls your local backend through this public tunnel: https://kitty-produces-dow-sense.trycloudflare.com",
+        "height": 160,
+        "width": 380,
+        "color": 5
+      },
+      "id": "Note_Backend",
+      "name": "Segment 2 - Backend rulebook + OCR",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        280,
+        -430
+      ]
+    },
+    {
+      "parameters": {
+        "content": "## 3. Safety gate\nLegal approval stays false. Human review stays required. AI and Sheets do not run in the backend.",
+        "height": 160,
+        "width": 360,
+        "color": 3
+      },
+      "id": "Note_Safety",
+      "name": "Segment 3 - Safety gate",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        720,
+        -430
+      ]
+    },
+    {
+      "parameters": {
+        "content": "## 4. AI suggestions\nCreate an n8n OpenAI credential named `OpenAI CheckWise Metadata`, then select it in the OpenAI node.",
+        "height": 180,
+        "width": 520,
+        "color": 6
+      },
+      "id": "Note_AI",
+      "name": "Segment 4 - AI suggestions",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        1500,
+        -520
+      ]
+    },
+    {
+      "parameters": {
+        "content": "## 5. Google Sheets audit row\nCreate an n8n Google Sheets OAuth credential named `Google Sheets CheckWise Metadata`, then set the Spreadsheet ID.",
+        "height": 180,
+        "width": 520,
+        "color": 7
+      },
+      "id": "Note_Sheets",
+      "name": "Segment 5 - Sheets audit log",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        1500,
+        420
+      ]
+    },
+    {
+      "parameters": {
+        "authentication": "none",
+        "formTitle": "CheckWise PDF Metadata Dry Run",
+        "formDescription": "Upload one PDF and choose the expected document type. The backend will use the real CheckWise metadata rulebook, run local OCR, and return a human-review payload.",
+        "formFields": {
+          "values": [
+            {
+              "fieldLabel": "PDF file",
+              "fieldName": "file",
+              "fieldType": "file",
+              "multipleFiles": false,
+              "acceptFileTypes": ".pdf",
+              "requiredField": true
+            },
+            {
+              "fieldLabel": "Document type",
+              "fieldName": "document_type_code",
+              "fieldType": "dropdown",
+              "fieldOptions": {
+                "values": [
+                  {
+                    "option": "acuse_sisub"
+                  },
+                  {
+                    "option": "acuse_icsoe"
+                  },
+                  {
+                    "option": "contrato_prestacion_servicios"
+                  }
+                ]
+              },
+              "requiredField": true
+            },
+            {
+              "fieldLabel": "Client legal name",
+              "fieldName": "client_legal_name",
+              "fieldType": "text",
+              "defaultValue": "CLIENTE DEMO, S.A. DE C.V.",
+              "requiredField": true
+            },
+            {
+              "fieldLabel": "Provider nomenclature",
+              "fieldName": "provider_nomenclature",
+              "fieldType": "text",
+              "defaultValue": "HUMAN MED",
+              "requiredField": true
+            },
+            {
+              "fieldLabel": "Upload form month",
+              "fieldName": "upload_form_month",
+              "fieldType": "text",
+              "defaultValue": "Septiembre",
+              "requiredField": false
+            },
+            {
+              "fieldLabel": "Reported period",
+              "fieldName": "reported_period",
+              "fieldType": "text",
+              "placeholder": "Example: Cuatrimestre inmediato anterior",
+              "requiredField": false
+            }
+          ]
+        },
+        "responseMode": "lastNode",
+        "options": {
+          "buttonLabel": "Run metadata dry run",
+          "respondWithOptions": {
+            "values": {
+              "respondWith": "text",
+              "formSubmittedText": "CheckWise metadata dry run completed. Return to n8n to inspect the review payload, OCR result, AI suggestion, and Sheets append."
+            }
+          },
+          "appendAttribution": false
+        }
+      },
+      "id": "FormTrigger_1",
+      "name": "Upload PDF form",
+      "type": "n8n-nodes-base.formTrigger",
+      "typeVersion": 2.5,
+      "position": [
+        0,
+        0
+      ],
+      "webhookId": "checkwise-pdf-metadata-dry-run-visual"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://kitty-produces-dow-sense.trycloudflare.com/api/v1/metadata-dry-run/pdf",
+        "sendBody": true,
+        "contentType": "multipart-form-data",
+        "bodyParameters": {
+          "parameters": [
+            {
+              "parameterType": "formBinaryData",
+              "name": "file",
+              "inputDataFieldName": "file"
+            },
+            {
+              "parameterType": "formData",
+              "name": "document_type_code",
+              "value": "={{ $json.document_type_code }}"
+            },
+            {
+              "parameterType": "formData",
+              "name": "context_json",
+              "value": "={{ JSON.stringify({ client_legal_name: $json.client_legal_name, provider_nomenclature: $json.provider_nomenclature, upload_form_month: $json.upload_form_month, reported_period: $json.reported_period }) }}"
+            },
+            {
+              "parameterType": "formData",
+              "name": "include_intelligence",
+              "value": "true"
+            },
+            {
+              "parameterType": "formData",
+              "name": "enable_ocr",
+              "value": "true"
+            }
+          ]
+        },
+        "options": {
+          "response": {
+            "response": {
+              "responseFormat": "json"
+            }
+          }
+        }
+      },
+      "id": "PostPdf_2",
+      "name": "POST PDF to CheckWise backend with OCR",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.4,
+      "position": [
+        420,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "mode": "runOnceForEachItem",
+        "language": "javaScript",
+        "jsCode": "const payload = $json;\nconst safety = payload.safety || {};\nconst intelligence = payload.intelligence || {};\nconst ocr = intelligence.ocr || {};\nconst failures = [];\n\nif (payload.payload_type !== 'checkwise_local_pdf_metadata_dry_run') failures.push('unexpected payload_type');\nif (!payload.metadata_rules_version) failures.push('missing metadata_rules_version');\nif (!payload.document_type_code) failures.push('missing document_type_code');\nif (payload.validation_result?.status !== 'passed') failures.push('validation did not pass');\nif (safety.legal_approval_allowed !== false) failures.push('legal approval must be disabled');\nif (safety.ai_used !== false) failures.push('AI must not run inside the backend dry-run');\nif (safety.google_sheets_used !== false) failures.push('Google Sheets must not be written by the backend');\nif (safety.external_services_used !== false) failures.push('external services must be disabled by the backend');\nif (safety.human_review_required !== true) failures.push('human review must be required');\nif (!intelligence.pdf_text_extraction) failures.push('missing pdf text extraction package');\nif (!intelligence.ocr) failures.push('missing OCR status package');\nif (!intelligence.ai_extraction_request) failures.push('missing AI extraction request package');\nif (!intelligence.google_sheets?.row) failures.push('missing Google Sheets row package');\nif (safety.ocr_used === true && !['completed', 'completed_no_text'].includes(ocr.status)) {\n  failures.push('OCR safety flag is true but OCR did not complete');\n}\n\nif (failures.length) {\n  throw new Error('Safety validation failed: ' + failures.join(', '));\n}\n\nreturn {\n  json: {\n    status: 'passed',\n    checked_at: new Date().toISOString(),\n    document_type_code: payload.document_type_code,\n    metadata_rules_version: payload.metadata_rules_version,\n    original_filename: payload.deterministic_file_metadata?.original_filename,\n    sha256: payload.deterministic_file_metadata?.sha256,\n    page_count: payload.deterministic_file_metadata?.page_count,\n    review_item_count: payload.review_item_count,\n    prefilled_review_fields: payload.review_items\n      .filter((item) => item.status !== 'pending')\n      .map((item) => item.field_key),\n    pending_review_fields: payload.review_items\n      .filter((item) => item.status === 'pending')\n      .map((item) => item.field_key),\n    pdf_text_extraction: intelligence.pdf_text_extraction,\n    ocr_status: intelligence.ocr,\n    ai_extraction_request: intelligence.ai_extraction_request,\n    google_sheets_row: intelligence.google_sheets.row,\n    safety,\n    review_payload: payload\n  }\n};"
+      },
+      "id": "ValidatePayload_3",
+      "name": "Validate safety gates",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        840,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "mode": "runOnceForEachItem",
+        "language": "javaScript",
+        "jsCode": "const ocr = $json.ocr_status || {};\nreturn {\n  json: {\n    ...$json,\n    workflow_stage: 'backend_payload_validated_ocr_ready',\n    ocr_summary: {\n      used: ocr.ocr_used === true,\n      status: ocr.status || 'missing',\n      engine: ocr.engine || null,\n      language: ocr.language || null,\n      text_char_count: ocr.text_char_count || 0,\n      sample: ocr.text_sample || null,\n    },\n  },\n};"
+      },
+      "id": "SummarizeOcr_4",
+      "name": "Summarize OCR and review package",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1200,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "mode": "runOnceForEachItem",
+        "language": "javaScript",
+        "jsCode": "const request = $json.ai_extraction_request;\nif (!request) {\n  throw new Error('Missing ai_extraction_request from CheckWise backend payload.');\n}\n\nreturn {\n  json: {\n    ...$json,\n    openai_request: {\n      system_prompt: request.system_prompt,\n      user_prompt: JSON.stringify(request.user_payload, null, 2),\n      status: 'ready_for_openai_node',\n    },\n  },\n};"
+      },
+      "id": "PrepareAi_5",
+      "name": "Prepare ai_extraction_request",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1560,
+        -220
+      ]
+    },
+    {
+      "parameters": {
+        "resource": "chat",
+        "operation": "complete",
+        "chatModel": "={{ $env.CHECKWISE_OPENAI_MODEL || 'gpt-4o-mini' }}",
+        "prompt": {
+          "messages": [
+            {
+              "role": "system",
+              "content": "={{ $json.openai_request.system_prompt }}"
+            },
+            {
+              "role": "user",
+              "content": "={{ $json.openai_request.user_prompt }}"
+            }
+          ]
+        },
+        "simplifyOutput": true,
+        "options": {
+          "temperature": 0,
+          "maxTokens": 1200
+        }
+      },
+      "id": "OpenAi_6",
+      "name": "OpenAI - suggest metadata only",
+      "type": "n8n-nodes-base.openAi",
+      "typeVersion": 1.1,
+      "position": [
+        1900,
+        -220
+      ],
+      "credentials": {
+        "openAiApi": {
+          "id": "__SET_IN_N8N__",
+          "name": "OpenAI CheckWise Metadata"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "mode": "runOnceForEachItem",
+        "language": "javaScript",
+        "jsCode": "const content = $json.message?.content\n  || $json.choices?.[0]?.message?.content\n  || $json.data?.[0]?.message?.content\n  || $json.text\n  || '';\n\nlet parsed = null;\nlet parseStatus = 'empty';\nlet parseError = null;\n\nif (content) {\n  try {\n    parsed = JSON.parse(content);\n    parseStatus = 'parsed_json';\n  } catch (error) {\n    parseStatus = 'raw_text_needs_review';\n    parseError = error.message;\n  }\n}\n\nreturn {\n  json: {\n    ai_used: true,\n    ai_parse_status: parseStatus,\n    ai_parse_error: parseError,\n    ai_raw_response: content,\n    ai_suggestions: parsed,\n    human_review_required: true,\n    legal_approval_allowed: false,\n  },\n};"
+      },
+      "id": "ParseAi_7",
+      "name": "Parse AI suggestions for human review",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        2240,
+        -220
+      ]
+    },
+    {
+      "parameters": {
+        "mode": "runOnceForEachItem",
+        "language": "javaScript",
+        "jsCode": "const row = $json.google_sheets_row || {};\nconst ocr = $json.ocr_status || {};\n\nreturn {\n  json: {\n    ...row,\n    ocr_status: ocr.status || null,\n    ocr_engine: ocr.engine || null,\n    ocr_language: ocr.language || null,\n    ocr_text_char_count: ocr.text_char_count || 0,\n    ocr_completed: ocr.ocr_used === true,\n    review_payload_json: JSON.stringify($json.review_payload),\n  },\n};"
+      },
+      "id": "PrepareSheets_8",
+      "name": "Prepare google_sheets_row",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1560,
+        260
+      ]
+    },
+    {
+      "parameters": {
+        "authentication": "oAuth2",
+        "resource": "sheet",
+        "operation": "append",
+        "sheetId": "={{ $env.CHECKWISE_GOOGLE_SHEET_ID || 'PASTE_SPREADSHEET_ID_HERE' }}",
+        "range": "Metadata Dry Run!A:AZ",
+        "options": {
+          "valueInputMode": "RAW",
+          "usePathForKeyRow": false
+        }
+      },
+      "id": "GoogleSheets_9",
+      "name": "Google Sheets - append google_sheets_row",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 1,
+      "position": [
+        1900,
+        260
+      ],
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "__SET_IN_N8N__",
+          "name": "Google Sheets CheckWise Metadata"
+        }
+      }
+    }
+  ],
+  "connections": {
+    "Upload PDF form": {
+      "main": [
+        [
+          {
+            "node": "POST PDF to CheckWise backend with OCR",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "POST PDF to CheckWise backend with OCR": {
+      "main": [
+        [
+          {
+            "node": "Validate safety gates",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Validate safety gates": {
+      "main": [
+        [
+          {
+            "node": "Summarize OCR and review package",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Summarize OCR and review package": {
+      "main": [
+        [
+          {
+            "node": "Prepare ai_extraction_request",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Prepare google_sheets_row",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Prepare ai_extraction_request": {
+      "main": [
+        [
+          {
+            "node": "OpenAI - suggest metadata only",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "OpenAI - suggest metadata only": {
+      "main": [
+        [
+          {
+            "node": "Parse AI suggestions for human review",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Prepare google_sheets_row": {
+      "main": [
+        [
+          {
+            "node": "Google Sheets - append google_sheets_row",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1",
+    "saveManualExecutions": true,
+    "omitInternalNodeConnections": true
+  },
+  "tags": []
+}

@@ -1,0 +1,51 @@
+{
+  "name": "CheckWise local fixture runner (metadata payload builder)",
+  "nodes": [
+    {
+      "parameters": {},
+      "id": "ManualTrigger_1",
+      "name": "When clicking 'Execute workflow'",
+      "type": "n8n-nodes-base.manualTrigger",
+      "typeVersion": 1,
+      "position": [0, 0]
+    },
+    {
+      "parameters": {
+        "mode": "runOnceForAllItems",
+        "language": "javascript",
+        "jsCode": "const fixtures = [\n  {\n    json: {\n      fixtureKey: 'acuse_sisub',\n      context: {\n        submission_id: 'sample_sub_acuse',\n        expected_document_type: 'acuse_sisub',\n        upload_context_version: 1,\n        metadata_rules_version: 'v1'\n      }\n    }\n  },\n  {\n    json: {\n      fixtureKey: 'contrato_prestacion_servicios',\n      context: {\n        submission_id: 'sample_sub_contrato',\n        expected_document_type: 'contrato_prestacion_servicios',\n        upload_context_version: 1,\n        metadata_rules_version: 'v1'\n      }\n    }\n  }\n];\nreturn fixtures;\n"
+      },
+      "id": "LoadFixtures_2",
+      "name": "Load fixtures",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 1,
+      "position": [240, 0]
+    },
+    {
+      "parameters": {
+        "mode": "runOnceForEachItem",
+        "language": "javascript",
+        "jsCode": "const templates = {\n  acuse_sisub: {\n    documentType: 'acuse_sisub',\n    metadataRulesVersion: 'v1',\n    requiredFields: [\n      'document_name',\n      'area_interna',\n      'document_category',\n      'document_subtype',\n      'document_date',\n      'participants',\n      'tags'\n    ]\n  },\n  contrato_prestacion_servicios: {\n    documentType: 'contrato_prestacion_servicios',\n    metadataRulesVersion: 'v1',\n    requiredFields: [\n      'document_name',\n      'document_date',\n      'start_date',\n      'expiration_date',\n      'participants',\n      'tags'\n    ]\n  }\n};\n\nreturn $input.all().map((item) => {\n  const fk = item.json.fixtureKey;\n  const template = templates[fk] || { documentType: fk, metadataRulesVersion: 'v1', requiredFields: [] };\n\n  item.json.template = template;\n  item.json.review_items = template.requiredFields.map((k) => ({\n    field_key: k,\n    value: null,\n    status: 'pending'\n  }));\n\n  item.json.review_payload = {\n    fixture_key: fk,\n    context: item.json.context,\n    template,\n    review_items: item.json.review_items,\n    safety: {\n      legal_approval_allowed: false,\n      ocr_used: false,\n      ai_used: false,\n      google_sheets_used: false\n    }\n  };\n\n  return item;\n});\n"
+      },
+      "id": "BuildPayload_3",
+      "name": "Build review payload",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 1,
+      "position": [520, 0]
+    }
+  ],
+  "connections": {
+    "When clicking 'Execute workflow'": {
+      "main": [[{ "node": "Load fixtures", "type": "main", "index": 0 }]]
+    },
+    "Load fixtures": {
+      "main": [[{ "node": "Build review payload", "type": "main", "index": 0 }]]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1",
+    "saveManualExecutions": true,
+    "omitInternalNodeConnections": true
+  },
+  "tags": []
+}

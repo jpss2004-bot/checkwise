@@ -71,6 +71,7 @@ backend/*.db-journal
 
 # Build / report artifacts (generated PDFs etc.)
 outputs/
+*.zip
 
 # Local session artifacts and AI tooling
 CodexConvo.txt
