@@ -65,7 +65,19 @@ export function withPortalSession<P extends { session: PortalSession }>(
 
         if (cancelled) return;
         if (!resolved) {
-          router.replace("/login");
+          // /enter succeeded but the cookie did not stick — almost
+          // always a cross-origin SameSite/Secure mismatch. Don't loop:
+          // surface the problem and force the user back to /login with
+          // a flag so the login page can warn instead of bouncing.
+          try {
+            window.sessionStorage.setItem(
+              "checkwise.portal.bootstrap_failed",
+              "1",
+            );
+          } catch {
+            /* ignore */
+          }
+          router.replace("/login?reason=portal_session_unavailable");
           return;
         }
         setSession(resolved);

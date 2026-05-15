@@ -70,6 +70,18 @@ class Settings(BaseSettings):
         return self.CHECKWISE_ENV != "local"
 
     @property
+    def cookie_samesite(self) -> str:
+        """``SameSite`` value for the portal session cookie.
+
+        In production the frontend (Vercel) and the API (Render) live on
+        different eTLD+1 origins, so the browser will only send the
+        portal cookie cross-site when ``SameSite=None`` AND ``Secure``
+        are both set. In local dev everything is on ``localhost``, so
+        ``Lax`` is the safer default.
+        """
+        return "none" if self.cookie_secure else "lax"
+
+    @property
     def sqlalchemy_url(self) -> str:
         """``DATABASE_URL`` normalized for SQLAlchemy + psycopg 3.
 

@@ -83,7 +83,7 @@ def _set_portal_session_cookie(
         max_age=settings.PORTAL_SESSION_EXPIRES_MINUTES * 60,
         httponly=True,
         secure=settings.cookie_secure,
-        samesite="lax",
+        samesite=settings.cookie_samesite,  # type: ignore[arg-type]
         path="/",
     )
 
@@ -94,7 +94,7 @@ def _clear_portal_session_cookie(response: Response) -> None:
         path="/",
         httponly=True,
         secure=settings.cookie_secure,
-        samesite="lax",
+        samesite=settings.cookie_samesite,  # type: ignore[arg-type]
     )
 
 
