@@ -26,6 +26,7 @@ import { SubmissionTimeline } from "@/components/checkwise/portal/submission-tim
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { PageHeader } from "@/components/ui/page-header";
+import { toast } from "@/components/ui/toast";
 import {
   clearAdminSession,
   readAdminSession,
@@ -114,6 +115,9 @@ export default function ReviewerSubmissionPage({ params }: PageProps) {
           reason,
         );
         setDecided({ new_status: result.new_status, action: result.action as ReviewerAction });
+        toast.success("Decisión registrada", {
+          description: `Este documento ahora está en ${result.new_status}.`,
+        });
       } catch (err) {
         if (err instanceof ReviewerApiError && err.status === 409) {
           throw new Error("Este documento ya tiene una decisión registrada.");

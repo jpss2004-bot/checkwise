@@ -139,19 +139,20 @@ function DashboardInner({ session }: { session: PortalSession }) {
 
         <WorkspaceIdentityCard workspace={workspace} />
 
+        <NextActionRail
+          actions={toNextActionItems(dashboard.suggested_actions)}
+          emptyState={{
+            title: "Estás al día",
+            description: "No hay acciones urgentes para tu workspace en este momento.",
+          }}
+        />
+
         <SemaphoreCard data={adaptSemaphore(dashboard.semaphore)} />
 
         <ExpedienteSummaryCard summary={onboarding} />
 
         <div className="cw-stagger grid gap-6 lg:grid-cols-3">
           <div className="space-y-6 lg:col-span-2">
-            <NextActionRail
-              actions={toNextActionItems(dashboard.suggested_actions)}
-              emptyState={{
-                title: "Estás al día",
-                description: "No hay acciones urgentes para tu workspace en este momento.",
-              }}
-            />
             <EvidenceSlotGrid
               title="Necesita tu atención"
               items={toSlotItems(dashboard.attention_today)}

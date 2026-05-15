@@ -10,9 +10,10 @@ import type { DocumentStateCode } from "@/lib/types";
  * EvidenceSlotCard — atomic unit of the evidence-slot lattice.
  *
  * Renders one obligation (workspace × requirement × period) as a
- * compact, scannable card. The dominant visual is the *state*: the
- * left edge carries a 3px state-colored bar driven by --doc-* tokens
- * so a wall of cards reads as a state map at a glance.
+ * compact, scannable card. State is communicated via the state badge
+ * in the bottom row plus the deadline chip; the card surface stays
+ * neutral so a wall of cards reads as calm operational space rather
+ * than as a chromatic strip-stack.
  *
  * Backed by canonical reads — never renders invented status. Lineage
  * indicator surfaces the supersession relationship when present.
@@ -43,17 +44,6 @@ export interface EvidenceSlotCardProps {
   index?: number;
   className?: string;
 }
-
-const STATE_BAR_CLASS: Record<DocumentStateCode, string> = {
-  empty: "bg-[color:var(--doc-empty-border)]",
-  pending: "bg-[color:var(--doc-pending-border)]",
-  uploaded: "bg-[color:var(--doc-uploaded-border)]",
-  in_review: "bg-[color:var(--doc-in-review-border)]",
-  approved: "bg-[color:var(--doc-approved-text)]",
-  rejected: "bg-[color:var(--doc-rejected-text)]",
-  expired: "bg-[color:var(--doc-expired-text)]",
-  needs_review: "bg-[color:var(--doc-needs-review-text)]",
-};
 
 const STATE_LABEL_FALLBACK: Record<DocumentStateCode, string> = {
   empty: "Sin estado",
@@ -106,7 +96,7 @@ export function EvidenceSlotCard({
     <Link
       href={href}
       className={cn(
-        "cw-fade-up cw-hover-lift group relative flex h-full min-w-0 overflow-hidden rounded-md",
+        "cw-fade-up cw-hover-lift group flex h-full min-w-0 flex-col gap-2 overflow-hidden rounded-md p-4",
         "border border-[color:var(--border-default)] bg-[color:var(--surface-raised)]",
         "shadow-xs focus:outline-none focus-visible:ring-2 focus-visible:ring-[color:var(--border-focus)]/40 focus-visible:ring-offset-2 focus-visible:ring-offset-[color:var(--surface-page)]",
         className,
@@ -114,8 +104,7 @@ export function EvidenceSlotCard({
       style={index != null ? ({ "--cw-index": index } as React.CSSProperties) : undefined}
       aria-label={`${title} · ${institution} · ${resolvedStateLabel}`}
     >
-      <span aria-hidden="true" className={cn("w-1 shrink-0", STATE_BAR_CLASS[state])} />
-      <div className="flex min-w-0 flex-1 flex-col gap-2 p-4">
+      <div className="flex min-w-0 flex-1 flex-col gap-2">
         <div className="flex items-center gap-2">
           <span className="font-mono text-[10px] uppercase tracking-wide text-[color:var(--text-tertiary)]">
             {institution}
@@ -168,6 +157,7 @@ export function EvidenceSlotCard({
     </Link>
   );
 }
+
 
 function renderDueChip(days: number | null | undefined) {
   if (days === null || days === undefined) return null;

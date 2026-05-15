@@ -150,7 +150,7 @@ export default function ReviewerQueuePage() {
       <PageHeader
         eyebrow="Reviewer workbench"
         title="Documentos por revisar"
-        description="Empieza por lo más viejo. Cada documento espera tu decisión humana — la automatización no aprueba ni rechaza nada."
+        description="Empieza por lo más viejo. Cada documento espera tu decisión humana. La automatización no aprueba ni rechaza nada."
         actions={
           <>
             <Button asChild variant="outline" size="sm">

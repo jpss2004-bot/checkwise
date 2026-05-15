@@ -47,14 +47,6 @@ const PRIORITY_LABEL: Record<NextActionPriority, string> = {
   low: "Prioridad baja",
 };
 
-const PRIORITY_RING: Record<NextActionPriority, string> = {
-  // A subtle left-edge accent that mirrors the EvidenceSlotCard state bar
-  // so action and slot surfaces share a visual grammar.
-  high: "before:bg-[color:var(--status-error-text)]",
-  medium: "before:bg-[color:var(--status-warning-text)]",
-  low: "before:bg-[color:var(--status-info-text)]",
-};
-
 export function NextActionRail({ actions, emptyState, className }: NextActionRailProps) {
   if (actions.length === 0) {
     if (!emptyState) return null;
@@ -121,10 +113,8 @@ export function NextActionRail({ actions, emptyState, className }: NextActionRai
           >
             <article
               className={cn(
-                "cw-fade-up cw-hover-lift relative flex min-w-[260px] flex-1 snap-start flex-col gap-3 overflow-hidden rounded-md p-4",
+                "cw-fade-up cw-hover-lift flex min-w-[260px] flex-1 snap-start flex-col gap-3 rounded-md p-4",
                 "border border-[color:var(--border-default)] bg-[color:var(--surface-page)]",
-                "before:absolute before:left-0 before:top-0 before:h-full before:w-1",
-                PRIORITY_RING[action.priority],
               )}
               style={{ "--cw-index": idx } as React.CSSProperties}
             >
