@@ -1,10 +1,16 @@
 /**
  * Typed wrapper over the V1.2 portal + compliance endpoints.
  *
- * All calls require a PortalSession (returned by `createPortalAccess`). The
- * session's `access_token` is sent as the `X-Workspace-Token` header.
+ * Auth resolution (CheckWise 1.8):
+ *   1. ``Authorization: Bearer <jwt>`` from the admin/user session in
+ *      localStorage — primary, cross-origin safe.
+ *   2. ``credentials: "include"`` so the portal session cookie still
+ *      gets sent when the browser allows it.
+ *   3. Legacy ``X-Workspace-Token`` header when the caller passes a
+ *      PortalSession with a real token (kept for backward compat).
  */
 
+import { readAdminSession } from "@/lib/session/admin";
 import type { PersonaType, PortalSession } from "@/lib/session/portal";
 
 const API_BASE_URL =
@@ -103,19 +109,24 @@ async function fetchJson<T>(
   init: RequestInit = {},
   session?: PortalSession,
 ): Promise<T> {
-  // CheckWise 1.7: portal session is an httpOnly cookie. Pass
-  // `credentials: "include"` on every call so the browser sends it.
-  // The legacy `session` parameter is kept for backward-compat with
-  // existing call sites; if a caller still passes one we add the
-  // X-Workspace-Token header as a fallback, but the cookie is the
-  // canonical path.
   const headers = new Headers(init.headers ?? {});
   if (!headers.has("Content-Type") && init.body) {
     headers.set("Content-Type", "application/json");
   }
-  if (session && session.access_token && session.access_token !== "cookie-managed") {
+  // 1. Bearer JWT — the cross-origin-safe primary path.
+  const adminSession = readAdminSession();
+  if (adminSession?.access_token && !headers.has("Authorization")) {
+    headers.set("Authorization", `Bearer ${adminSession.access_token}`);
+  }
+  // 2. Legacy X-Workspace-Token still supported when a caller passes one.
+  if (
+    session &&
+    session.access_token &&
+    session.access_token !== "cookie-managed"
+  ) {
     headers.set("X-Workspace-Token", session.access_token);
   }
+  // 3. credentials: "include" so the cookie tags along when the browser allows.
   const response = await fetch(`${API_BASE_URL}${path}`, {
     ...init,
     headers,

@@ -37,7 +37,7 @@ from pydantic import BaseModel, Field
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from app.api.v1.auth import CurrentUser, get_current_user
+from app.api.v1.auth import CurrentUser, _claims_from_header, get_current_user
 from app.constants.statuses import DocumentStatus
 from app.core.compliance_catalog import (
     catalog_metadata,
@@ -52,6 +52,7 @@ from app.models import (
     DocumentStatusHistory,
     ProviderWorkspace,
     Submission,
+    User,
     Validation,
     ValidationEvent,
 )
@@ -253,24 +254,93 @@ def _load_workspace(db: Session, workspace_id: str, access_token: str) -> Provid
     return workspace
 
 
+def _resolve_workspace_via_jwt(
+    db: Session, authorization: str | None, *, workspace_id: str | None
+) -> ProviderWorkspace | None:
+    """Resolve the caller's owned workspace via Authorization: Bearer.
+
+    Returns ``None`` if there is no Authorization header or the JWT
+    does not map to a valid user. Raises 403 if the JWT's user does
+    not own the path's ``workspace_id``.
+
+    This path exists because the portal session cookie is a
+    third-party cookie in production (Vercel ↔ Render are different
+    eTLD+1 origins) and modern browsers (Safari ITP, Chrome Privacy
+    Sandbox) frequently refuse to store or send it. The bearer JWT
+    sidesteps that entirely.
+    """
+    if not authorization:
+        return None
+    try:
+        claims = _claims_from_header(authorization)
+    except HTTPException:
+        return None
+    user = db.get(User, claims.user_id)
+    if user is None or user.status != "active":
+        return None
+
+    if workspace_id is not None:
+        workspace = db.scalar(
+            select(ProviderWorkspace)
+            .where(ProviderWorkspace.id == workspace_id)
+            .limit(1)
+        )
+        if workspace is None:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="Workspace no encontrado.",
+            )
+        if workspace.owner_user_id != user.id:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="Esta sesión no tiene acceso a este workspace.",
+            )
+        return workspace
+
+    owned = list(
+        db.scalars(
+            select(ProviderWorkspace).where(
+                ProviderWorkspace.owner_user_id == user.id
+            )
+        )
+    )
+    if len(owned) == 1:
+        return owned[0]
+    if len(owned) > 1:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="Tienes varios espacios disponibles. Indica workspace_id.",
+        )
+    return None
+
+
 def current_portal_workspace(
     request: Request,
     db: DbSession,
     workspace_id: str | None = None,
     x_workspace_token: Annotated[str, Header(alias="X-Workspace-Token")] = "",
+    authorization: Annotated[str | None, Header()] = None,
 ) -> ProviderWorkspace:
     """Resolve the workspace for the current request.
 
-    Reads the portal session cookie (preferred) or the legacy
-    ``X-Workspace-Token`` header. When ``workspace_id`` is supplied
-    (a path parameter), enforces that the session's workspace_id
-    matches it — this is the tenant guard.
+    Resolution order:
+      1. ``Authorization: Bearer <jwt>`` — the cross-origin-safe path.
+         Decodes the JWT, looks up the user's owned workspace, and
+         enforces the path's ``workspace_id`` if any.
+      2. ``checkwise_portal_session`` cookie — preferred when the
+         browser allows third-party cookies.
+      3. Legacy ``X-Workspace-Token`` header — kept for tests and
+         integration scripts.
 
     Raises:
         401 if no valid session is present.
-        403 if the cookie's workspace_id differs from the path's.
-        404 if the workspace_id doesn't exist.
+        403 if the JWT user (or cookie) does not own the path's workspace.
+        404 if the workspace_id does not exist.
     """
+    via_jwt = _resolve_workspace_via_jwt(db, authorization, workspace_id=workspace_id)
+    if via_jwt is not None:
+        return via_jwt
+
     cookie_ws, cookie_tok = _session_from_request(request, legacy_header=x_workspace_token)
 
     # Determine effective workspace_id for the lookup.
@@ -426,30 +496,27 @@ def get_portal_me(
     request: Request,
     db: DbSession,
     x_workspace_token: Annotated[str, Header(alias="X-Workspace-Token")] = "",
+    authorization: Annotated[str | None, Header()] = None,
 ) -> WorkspaceSummary:
     """Return the workspace summary for the current session.
 
-    Reads the portal session cookie. Falls back to ``X-Workspace-Token``
-    during the V1.7 transition. Returns 401 when no valid session is
-    present — the frontend interprets this as "send the user to /".
+    Resolution order matches ``current_portal_workspace``:
+      1. ``Authorization: Bearer`` JWT (cross-origin safe).
+      2. ``checkwise_portal_session`` cookie.
+      3. Legacy ``X-Workspace-Token`` header.
     """
-    workspace_id, access_token = _session_from_request(
-        request, legacy_header=x_workspace_token
-    )
-    if not access_token:
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Sesión de portal requerida.",
+    workspace = _resolve_workspace_via_jwt(db, authorization, workspace_id=None)
+    if workspace is None:
+        workspace_id, access_token = _session_from_request(
+            request, legacy_header=x_workspace_token
         )
-    if not workspace_id:
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail=(
-                "Sesión de portal requerida. La cabecera X-Workspace-Token "
-                "ya no es suficiente sin un workspace_id en la ruta — usa la cookie."
-            ),
-        )
-    workspace = _load_workspace(db, workspace_id, access_token)
+        if not access_token or not workspace_id:
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail="Sesión de portal requerida.",
+            )
+        workspace = _load_workspace(db, workspace_id, access_token)
+
     return WorkspaceSummary(
         workspace_id=workspace.id,
         persona_type=workspace.persona_type,
