@@ -254,7 +254,7 @@ export function IntakeWizard({
     }
     if (nextFile.size > maxUploadSizeBytes) {
       setFile(null);
-      setFileError("El PDF excede el máximo de 15 MB para esta demo.");
+      setFileError("El PDF excede el máximo de 15 MB.");
       return;
     }
     setFile(nextFile);
@@ -300,13 +300,15 @@ export function IntakeWizard({
     setFileError(null);
     setError(null);
     try {
-      const response = await fetch("/demo/checkwise_demo_opinion_sat.pdf");
+      const response = await fetch("/samples/checkwise-demo-document.pdf");
       if (!response.ok) {
-        throw new Error("No encontré el PDF demo en el frontend.");
+        throw new Error(
+          "No pudimos cargar el PDF de muestra. Sube tu propio archivo o intenta de nuevo.",
+        );
       }
       const blob = await response.blob();
       selectFile(
-        new File([blob], "checkwise_demo_opinion_sat.pdf", {
+        new File([blob], "checkwise-demo-document.pdf", {
           type: "application/pdf",
         }),
       );
@@ -315,7 +317,7 @@ export function IntakeWizard({
       setFileError(
         demoFileError instanceof Error
           ? demoFileError.message
-          : "No fue posible cargar el PDF demo.",
+          : "No pudimos cargar el PDF de muestra.",
       );
     }
   }
@@ -911,16 +913,22 @@ function UploadStep({
           ) : null}
 
           {onUseDemoFile ? (
-            <Button
-              type="button"
-              variant="outline"
-              className="w-fit"
-              data-testid="use-demo-pdf"
-              onClick={onUseDemoFile}
-            >
-              <FileText className="h-4 w-4" aria-hidden="true" />
-              Usar PDF demo
-            </Button>
+            <div className="flex flex-col gap-1.5">
+              <Button
+                type="button"
+                variant="outline"
+                className="w-fit"
+                data-testid="use-demo-pdf"
+                onClick={onUseDemoFile}
+              >
+                <FileText className="h-4 w-4" aria-hidden="true" />
+                Usar PDF de muestra
+              </Button>
+              <p className="text-xs text-muted-foreground">
+                Adjunta un PDF de prueba etiquetado como demostración para
+                recorrer el flujo sin tu archivo real.
+              </p>
+            </div>
           ) : null}
 
           <Field label="Comentarios o aclaraciones" htmlFor="comments">

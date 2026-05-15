@@ -65,6 +65,23 @@ DEMO_CONTRACT_REF = "C-DEMO-001"
 DEMO_WORKSPACE_TOKEN = "demo-token"
 DEMO_WORKSPACE_ID = "ws-demo-0001"
 
+# ── Boss demo account (CheckWise 1.7.1) ────────────────────────────
+# Account B in the demo guide: a returning provider whose initial
+# expediente is already complete, so login lands directly on the
+# dashboard. Independent client + vendor + workspace from the
+# first-login provider above so the two scenarios never collide.
+BOSS_DEMO_EMAIL = "boss.demo@checkwise.mx"
+BOSS_DEMO_PASSWORD = "BossDemo!2026"
+BOSS_DEMO_FULLNAME = "Servicios Especializados Aurora"
+
+BOSS_DEMO_CLIENT_NAME = "Constructora Aurora · Demo"
+BOSS_DEMO_CLIENT_RFC = "AUR010101CD2"
+BOSS_DEMO_VENDOR_NAME = "Servicios Especializados Aurora · Demo"
+BOSS_DEMO_VENDOR_RFC = "SEA050101EF3"
+
+BOSS_DEMO_WORKSPACE_ID = "ws-demo-0002"
+BOSS_DEMO_WORKSPACE_TOKEN = "boss-demo-token"
+
 
 def _utc(year: int, month: int, day: int = 1) -> datetime:
     return datetime(year, month, day, 12, 0, 0, tzinfo=UTC)
@@ -73,10 +90,12 @@ def _utc(year: int, month: int, day: int = 1) -> datetime:
 def _wipe_demo(db) -> None:
     """Remove anything tagged with the demo identifiers so the seed
     is idempotent. Order matters because of FKs."""
-    workspace = db.scalar(
-        select(ProviderWorkspace).where(ProviderWorkspace.id == DEMO_WORKSPACE_ID)
-    )
-    if workspace is not None:
+    for ws_id in (DEMO_WORKSPACE_ID, BOSS_DEMO_WORKSPACE_ID):
+        workspace = db.scalar(
+            select(ProviderWorkspace).where(ProviderWorkspace.id == ws_id)
+        )
+        if workspace is None:
+            continue
         vendor_id = workspace.vendor_id
         client_id = workspace.client_id
 
@@ -100,7 +119,7 @@ def _wipe_demo(db) -> None:
         db.query(Client).filter(Client.id == client_id).delete(synchronize_session=False)
         db.flush()
 
-    for demo_email in (DEMO_USER_EMAIL, DEMO_PROVIDER_EMAIL):
+    for demo_email in (DEMO_USER_EMAIL, DEMO_PROVIDER_EMAIL, BOSS_DEMO_EMAIL):
         user = db.scalar(select(User).where(User.email == demo_email))
         if user is not None:
             db.query(Membership).filter(Membership.user_id == user.id).delete(
@@ -159,6 +178,63 @@ def _seed_provider_user(db) -> str:
     db.add(user)
     db.flush()
     return user.id
+
+
+def _seed_boss_demo_user(db) -> str:
+    """Create the boss-demo user and return its id.
+
+    Marked ``must_change_password=False`` so login lands directly on
+    the workspace entry, then on the dashboard once the user clicks
+    "Entrar a mi espacio".
+    """
+    user = User(
+        email=BOSS_DEMO_EMAIL,
+        password_hash=hash_password(BOSS_DEMO_PASSWORD),
+        full_name=BOSS_DEMO_FULLNAME,
+        status="active",
+        must_change_password=False,
+    )
+    db.add(user)
+    db.flush()
+    return user.id
+
+
+def _seed_boss_demo_workspace(db, *, owner_user_id: str) -> tuple[str, str, str]:
+    """Boss demo workspace: provider whose initial expediente is
+    already complete, so the dashboard is unlocked from first login.
+    """
+    client = Client(name=BOSS_DEMO_CLIENT_NAME, rfc=BOSS_DEMO_CLIENT_RFC)
+    db.add(client)
+    db.flush()
+
+    vendor = Vendor(
+        client_id=client.id,
+        name=BOSS_DEMO_VENDOR_NAME,
+        rfc=BOSS_DEMO_VENDOR_RFC,
+        persona_type="moral",
+    )
+    db.add(vendor)
+    db.flush()
+
+    workspace = ProviderWorkspace(
+        id=BOSS_DEMO_WORKSPACE_ID,
+        client_id=client.id,
+        vendor_id=vendor.id,
+        contract_id=None,
+        owner_user_id=owner_user_id,
+        filial_name="Filial Centro",
+        persona_type="moral",
+        display_name=BOSS_DEMO_VENDOR_NAME,
+        access_token=BOSS_DEMO_WORKSPACE_TOKEN,
+        # Already-completed expediente. This is the field the
+        # withOnboardingGate HOC reads to allow /portal/dashboard.
+        onboarding_completed_at=datetime.now(UTC) - timedelta(days=14),
+        status="active",
+    )
+    db.add(workspace)
+    db.flush()
+
+    return client.id, vendor.id, workspace.id
 
 
 def _seed_workspace(db, *, owner_user_id: str) -> tuple[str, str, str]:
@@ -346,11 +422,18 @@ def main() -> None:
             db, owner_user_id=provider_user_id
         )
         submissions = _seed_submissions(db, client_id=client_id, vendor_id=vendor_id)
+        boss_user_id = _seed_boss_demo_user(db)
+        boss_client_id, boss_vendor_id, boss_workspace_id = _seed_boss_demo_workspace(
+            db, owner_user_id=boss_user_id
+        )
+        boss_submissions = _seed_submissions(
+            db, client_id=boss_client_id, vendor_id=boss_vendor_id
+        )
         db.commit()
     finally:
         db.close()
 
-    print("Demo data ready.")
+    print("CheckWise 1.7.1 demo data ready.")
     print()
     print("  Reviewer / admin login:")
     print("    URL       http://localhost:3000/login")
@@ -358,19 +441,21 @@ def main() -> None:
     print(f"    Password  {DEMO_USER_PASSWORD}")
     print("    Roles     internal_admin, reviewer")
     print()
-    print("  Provider login (FIRST-LOGIN flow):")
+    print("  Account A — first-login provider (incomplete expediente):")
     print("    URL       http://localhost:3000/login")
     print(f"    Email     {DEMO_PROVIDER_EMAIL}")
     print(f"    Password  {DEMO_PROVIDER_TEMP_PASSWORD}  (temporary)")
-    print("    Note      must_change_password=True; after login the user is")
-    print("              forced through /activate to set a permanent password,")
-    print("              then enters workspace via /portal/enter.")
+    print("    Flow      forced /activate → /portal/onboarding (gate active)")
+    print(f"    workspace {workspace_id}  ({DEMO_VENDOR_NAME})")
+    print(f"    seeded    {submissions} sample submission(s)")
     print()
-    print("  Pre-seeded provider workspace (assigned to the provider user):")
-    print(f"    workspace_id    {workspace_id}")
-    print(f"    owner_user_id   {provider_user_id}")
-    print(f"    client / vendor {DEMO_CLIENT_NAME} / {DEMO_VENDOR_NAME}")
-    print(f"    {submissions} demo submission(s) in queue states.")
+    print("  Account B — boss demo (completed expediente, dashboard unlocked):")
+    print("    URL       http://localhost:3000/login")
+    print(f"    Email     {BOSS_DEMO_EMAIL}")
+    print(f"    Password  {BOSS_DEMO_PASSWORD}")
+    print("    Flow      login → /portal/entra-a-tu-espacio → /portal/dashboard")
+    print(f"    workspace {boss_workspace_id}  ({BOSS_DEMO_VENDOR_NAME})")
+    print(f"    seeded    {boss_submissions} sample submission(s)")
 
 
 if __name__ == "__main__":
