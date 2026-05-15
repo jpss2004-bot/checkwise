@@ -75,6 +75,7 @@
   /* Status — info */
   --blue-50:   214  80% 96%;
   --blue-100:  214  70% 88%;
+  --blue-200:  214  75% 80%;
   --blue-500:  214  89% 52%;
   --blue-700:  214  89% 38%;
 
@@ -97,6 +98,7 @@
   --surface-brand:        hsl(var(--navy-800));
   --surface-brand-muted:  hsl(var(--navy-50));
   --surface-teal-muted:   hsl(var(--teal-50));
+  --surface-ai-muted:     hsl(var(--teal-50));
 
   /* Text */
   --text-primary:         hsl(var(--gray-950));
@@ -107,6 +109,7 @@
   --text-link:            hsl(var(--navy-700));
   --text-brand:           hsl(var(--navy-800));
   --text-teal:            hsl(var(--teal-600));
+  --text-ai:              hsl(var(--teal-700));
 
   /* Borders */
   --border-subtle:        hsl(var(--gray-100));
@@ -116,6 +119,7 @@
   --border-brand:         hsl(var(--navy-800));
   --border-error:         hsl(var(--red-500));
   --border-success:       hsl(var(--green-500));
+  --border-ai:            hsl(var(--teal-500));
 
   /* Interactive */
   --interactive-primary:        hsl(var(--navy-800));
@@ -125,6 +129,8 @@
   --interactive-secondary-hover:hsl(var(--teal-600));
   --interactive-ghost-hover:    hsl(var(--gray-100));
   --interactive-destructive:    hsl(var(--red-500));
+  --interactive-ai:             hsl(var(--teal-500));
+  --interactive-ai-hover:       hsl(var(--teal-600));
 
   /* Status surfaces */
   --status-success-text:   hsl(var(--green-700));
@@ -142,6 +148,10 @@
   --status-info-text:      hsl(var(--blue-700));
   --status-info-bg:        hsl(var(--blue-50));
   --status-info-border:    hsl(var(--blue-100));
+
+  --status-ai-text:        hsl(var(--teal-700));
+  --status-ai-bg:          hsl(var(--teal-50));
+  --status-ai-border:      hsl(var(--teal-100));
 
   /* REPSE document states */
   --doc-empty-text:        hsl(var(--gray-400));
@@ -215,6 +225,49 @@
   --duration-standard:250ms;
   --duration-slow:    350ms;
   --duration-enter:   400ms;
+  --duration-deliberate: 560ms;
+
+  /* Elevation */
+  --shadow-xs: 0 1px 2px rgba(1, 53, 87, 0.06);
+  --shadow-sm: 0 2px 8px rgba(1, 53, 87, 0.08), 0 1px 2px rgba(1, 53, 87, 0.04);
+  --shadow-md: 0 4px 16px rgba(1, 53, 87, 0.10), 0 2px 4px rgba(1, 53, 87, 0.06);
+  --shadow-lg: 0 12px 40px rgba(1, 53, 87, 0.12), 0 4px 12px rgba(1, 53, 87, 0.08);
+  --shadow-xl: 0 24px 64px rgba(1, 53, 87, 0.14), 0 8px 20px rgba(1, 53, 87, 0.08);
+  --shadow-focus: 0 0 0 3px hsl(var(--navy-500) / 0.28);
+  --shadow-focus-ai: 0 0 0 3px hsl(var(--teal-500) / 0.28);
+  --shadow-focus-error: 0 0 0 3px hsl(var(--red-500) / 0.24);
+
+  /* Radius */
+  --radius-sharp: 4px;
+  --radius-sm: 6px;
+  --radius: 8px;
+  --radius-md: 10px;
+  --radius-lg: 12px;
+  --radius-xl: 16px;
+  --radius-2xl: 20px;
+  --radius-pill: 9999px;
+}
+
+/* ── Density tokens ───────────────────────────────────────────── */
+:root,
+[data-density="comfortable"] {
+  --density-base-font: 15px;
+  --density-row-padding-y: 14px;
+  --density-row-padding-x: 16px;
+  --density-control-height: 40px;
+  --density-section-gap: 32px;
+  --density-card-padding: 24px;
+  --density-row-gap: 14px;
+}
+
+[data-density="compact"] {
+  --density-base-font: 13px;
+  --density-row-padding-y: 8px;
+  --density-row-padding-x: 12px;
+  --density-control-height: 32px;
+  --density-section-gap: 24px;
+  --density-card-padding: 16px;
+  --density-row-gap: 10px;
 }
 
 /* ── 3. Component tokens (shadcn-compatible aliases) ──────────── */

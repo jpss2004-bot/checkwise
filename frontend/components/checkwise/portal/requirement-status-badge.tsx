@@ -1,4 +1,4 @@
-import { Badge } from "@/components/ui/badge";
+import { Badge, type BadgeProps } from "@/components/ui/badge";
 import type { RequirementStatus } from "@/lib/api/portal";
 
 const STATUS_LABELS: Record<RequirementStatus, string> = {
@@ -15,21 +15,23 @@ const STATUS_LABELS: Record<RequirementStatus, string> = {
   excepcion_legal: "Excepción legal",
 };
 
-const STATUS_VARIANT: Record<
-  RequirementStatus,
-  "default" | "secondary" | "outline" | "warning" | "destructive"
-> = {
-  pendiente: "outline",
-  recibido: "secondary",
-  pendiente_revision: "default",
-  prevalidado: "default",
-  posible_mismatch: "warning",
-  aprobado: "default",
-  rechazado: "destructive",
-  vencido: "destructive",
+// Maps each canonical workflow status to a Badge doc-state variant so the
+// rendered color comes from --doc-* / --status-* tokens (one source of truth)
+// rather than collapsing 11 statuses into 5 generic buckets. Mapping mirrors
+// the SlotState taxonomy in docs/EVIDENCE_SLOTS.md so all status surfaces
+// (calendar, checklist, queue, detail) read consistently.
+const STATUS_VARIANT: Record<RequirementStatus, NonNullable<BadgeProps["variant"]>> = {
+  pendiente: "doc-empty",
+  recibido: "doc-uploaded",
+  pendiente_revision: "doc-in-review",
+  prevalidado: "doc-in-review",
+  posible_mismatch: "doc-needs-review",
+  aprobado: "doc-approved",
+  rechazado: "doc-rejected",
+  vencido: "doc-expired",
   no_aplica: "outline",
-  requiere_aclaracion: "warning",
-  excepcion_legal: "warning",
+  requiere_aclaracion: "doc-needs-review",
+  excepcion_legal: "info",
 };
 
 const STATUS_DESCRIPTIONS: Record<RequirementStatus, string> = {
