@@ -38,6 +38,8 @@ export type OnboardingItem = {
   status: RequirementStatus;
   submission_id: string | null;
   submitted_at: string | null;
+  /** Original PDF filename of the attached document, when one exists. */
+  filename: string | null;
 };
 
 export type OnboardingSection = {

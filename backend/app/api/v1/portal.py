@@ -657,6 +657,27 @@ def get_workspace_onboarding(
     sections: dict[str, dict] = {}
     received_required = 0
     total_required = 0
+    # Pre-fetch document filenames for the matched submissions in one
+    # query so we can show the real PDF name on each card instead of
+    # the generic "PDF · documento oficial vigente" placeholder.
+    matched_submission_ids: list[str] = []
+    for req in expediente:
+        m = _match_submission(req.name, req.institution, subs, requirement_code=req.code)
+        if m is not None:
+            matched_submission_ids.append(m.id)
+    filename_by_submission: dict[str, str] = {}
+    if matched_submission_ids:
+        rows = db.execute(
+            select(Document.submission_id, Document.original_filename).where(
+                Document.submission_id.in_(matched_submission_ids)
+            )
+        ).all()
+        # If a submission has multiple documents the latest insertion wins
+        # — correct enough for the card label, since the provider sees
+        # whichever file is currently attached.
+        for sub_id, fname in rows:
+            filename_by_submission[sub_id] = fname
+
     for req in expediente:
         match = _match_submission(
             req.name,
@@ -678,6 +699,9 @@ def get_workspace_onboarding(
             "status": item_status,
             "submission_id": match.id if match else None,
             "submitted_at": match.created_at.isoformat() if match else None,
+            "filename": (
+                filename_by_submission.get(match.id) if match is not None else None
+            ),
         }
         section["items"].append(item)
         if req.required:

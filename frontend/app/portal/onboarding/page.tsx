@@ -163,6 +163,11 @@ function OnboardingInner({ session }: { session: PortalSession }) {
     if (req.requirement_code) params.set("requirement_code", req.requirement_code);
     params.set("institution", req.institution);
     params.set("load_type", "alta_inicial");
+    // Tells the upload page "user came from expediente". The wizard's
+    // success state will then offer "continuar con el siguiente
+    // documento" pointing back here, instead of the default
+    // "ver mi calendario" CTA which would dump them into the dashboard.
+    params.set("from", "onboarding");
     router.push(`/portal/upload?${params.toString()}`);
   }
 

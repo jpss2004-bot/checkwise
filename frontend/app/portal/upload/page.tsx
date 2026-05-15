@@ -41,6 +41,19 @@ function PortalUploadInner() {
   const loadType = params.get("load_type") ?? undefined;
   const periodLabel = params.get("period_label") ?? undefined;
   const periodKey = params.get("period_key") ?? undefined;
+  // When the user opened the wizard from /portal/onboarding, the
+  // success state should send them back there instead of dumping them
+  // into the dashboard, so they can continue with the next mandatory
+  // document. We thread a successContinue prop into the wizard.
+  const cameFromOnboarding = params.get("from") === "onboarding";
+  const successContinue = cameFromOnboarding
+    ? {
+        href: "/portal/onboarding",
+        label: "Continuar con tu expediente",
+        helper:
+          "Vuelve al expediente inicial y sigue con el siguiente documento obligatorio.",
+      }
+    : undefined;
 
   const prefill = useMemo<IntakeWizardPrefill | undefined>(() => {
     if (!session) return undefined;
@@ -109,7 +122,11 @@ function PortalUploadInner() {
             </Button>
           </div>
         </div>
-        <IntakeWizard prefill={prefill} lockedFields={lockedFields} />
+        <IntakeWizard
+          prefill={prefill}
+          lockedFields={lockedFields}
+          successContinue={successContinue}
+        />
       </main>
     </>
   );

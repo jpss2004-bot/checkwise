@@ -3,7 +3,9 @@
 import {
   ArrowRight,
   Buildings,
+  CheckCircle,
   CloudArrowUp,
+  FilePdf,
   Files,
   Scales,
   ShieldCheck,
@@ -121,16 +123,37 @@ export function ExpedienteCard({ requirement, onAction }: ExpedienteCardProps) {
         {requirement.why}
       </p>
 
-      <div className="flex items-start gap-2 rounded-sm bg-[color:var(--surface-sunken)] p-3">
-        <Files
-          className="mt-0.5 h-3.5 w-3.5 shrink-0 text-[color:var(--text-tertiary)]"
-          weight="bold"
-          aria-hidden="true"
-        />
-        <p className="text-xs leading-5 text-[color:var(--text-secondary)]">
-          {requirement.format}
-        </p>
-      </div>
+      {requirement.filename ? (
+        <div className="flex items-center gap-2 rounded-sm border border-[color:var(--doc-uploaded-border)] bg-[color:var(--doc-uploaded-bg)] p-3">
+          <FilePdf
+            className="h-4 w-4 shrink-0 text-[color:var(--doc-uploaded-text)]"
+            weight="duotone"
+            aria-hidden="true"
+          />
+          <span
+            className="min-w-0 flex-1 truncate font-mono text-xs text-[color:var(--doc-uploaded-text)]"
+            title={requirement.filename}
+          >
+            {requirement.filename}
+          </span>
+          <CheckCircle
+            className="h-4 w-4 shrink-0 text-[color:var(--doc-uploaded-text)]"
+            weight="fill"
+            aria-hidden="true"
+          />
+        </div>
+      ) : (
+        <div className="flex items-start gap-2 rounded-sm bg-[color:var(--surface-sunken)] p-3">
+          <Files
+            className="mt-0.5 h-3.5 w-3.5 shrink-0 text-[color:var(--text-tertiary)]"
+            weight="bold"
+            aria-hidden="true"
+          />
+          <p className="text-xs leading-5 text-[color:var(--text-secondary)]">
+            {requirement.format}
+          </p>
+        </div>
+      )}
 
       {requirement.reviewer_note && (
         <div className="rounded-sm border border-[color:var(--status-warning-border)] bg-[color:var(--status-warning-bg)] p-3 text-xs text-[color:var(--status-warning-text)]">

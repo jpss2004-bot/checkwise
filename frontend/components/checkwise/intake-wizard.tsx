@@ -107,6 +107,15 @@ export type IntakeWizardPrefill = Partial<IntakeForm>;
 
 export type IntakeLockedField = keyof IntakeForm;
 
+/** Replaces the default "Ver mi calendario" success CTA. Used when the
+ *  user opened the wizard from a flow that should continue elsewhere
+ *  (currently: from /portal/onboarding → "Continuar con tu expediente"). */
+export interface IntakeSuccessContinue {
+  href: string;
+  label: string;
+  helper?: string;
+}
+
 const LOCKED_FIELD_LABELS: Record<IntakeLockedField, string> = {
   client_name: "Cliente",
   vendor_name: "Proveedor",
@@ -136,9 +145,11 @@ const LOCKED_FIELD_SOURCE: Partial<Record<IntakeLockedField, string>> = {
 export function IntakeWizard({
   prefill,
   lockedFields,
+  successContinue,
 }: {
   prefill?: IntakeWizardPrefill;
   lockedFields?: IntakeLockedField[];
+  successContinue?: IntakeSuccessContinue;
 } = {}) {
   const apiBaseUrl = useMemo(
     () => process.env.NEXT_PUBLIC_API_BASE_URL ?? "http://localhost:8000",
@@ -414,7 +425,13 @@ export function IntakeWizard({
               duplicateCheck={duplicateCheck}
             />
           ) : null}
-          {step === 4 ? <ConfirmationStep result={result} error={error} /> : null}
+          {step === 4 ? (
+            <ConfirmationStep
+              result={result}
+              error={error}
+              successContinue={successContinue}
+            />
+          ) : null}
 
           {error && step !== 4 ? (
             <div
@@ -1008,9 +1025,11 @@ function PrevalidationStep({
 function ConfirmationStep({
   result,
   error,
+  successContinue,
 }: {
   result: SubmissionResponse | null;
   error: string | null;
+  successContinue?: IntakeSuccessContinue;
 }) {
   if (error) {
     return (
@@ -1132,13 +1151,22 @@ function ConfirmationStep({
           </li>
         </ol>
         <div className="mt-5 flex flex-wrap gap-2">
-          <Button asChild className="active:scale-[0.98]">
-            <Link href="/portal/dashboard">
-              <Calendar className="h-4 w-4" aria-hidden="true" />
-              Ver mi calendario
-              <ArrowRight className="h-4 w-4" aria-hidden="true" />
-            </Link>
-          </Button>
+          {successContinue ? (
+            <Button asChild className="active:scale-[0.98]">
+              <Link href={successContinue.href}>
+                <ArrowRight className="h-4 w-4" aria-hidden="true" />
+                {successContinue.label}
+              </Link>
+            </Button>
+          ) : (
+            <Button asChild className="active:scale-[0.98]">
+              <Link href="/portal/dashboard">
+                <Calendar className="h-4 w-4" aria-hidden="true" />
+                Ver mi calendario
+                <ArrowRight className="h-4 w-4" aria-hidden="true" />
+              </Link>
+            </Button>
+          )}
           <Button asChild variant="outline" className="active:scale-[0.98]">
             <Link href={`/portal/submissions/${result.submission_id}`}>
               <FileText className="h-4 w-4" aria-hidden="true" />
@@ -1146,6 +1174,11 @@ function ConfirmationStep({
             </Link>
           </Button>
         </div>
+        {successContinue?.helper && (
+          <p className="mt-3 text-xs text-muted-foreground">
+            {successContinue.helper}
+          </p>
+        )}
       </div>
 
       <details className="rounded-md border border-border bg-white p-4 text-sm">

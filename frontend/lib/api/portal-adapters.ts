@@ -146,6 +146,7 @@ function adaptOnboardingItem(
     next_action: item.note ?? enrichment.next_action,
     reviewer_note: enrichment.reviewer_note,
     required: item.required,
+    filename: item.filename ?? null,
   };
 }
 

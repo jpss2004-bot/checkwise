@@ -148,17 +148,28 @@
   --doc-empty-bg:          hsl(var(--gray-50));
   --doc-empty-border:      hsl(var(--gray-200));
 
-  --doc-pending-text:      hsl(var(--amber-700));
-  --doc-pending-bg:        hsl(var(--amber-50));
-  --doc-pending-border:    hsl(var(--amber-100));
+  /* "Pending" = nothing happened yet, you need to upload.
+     Neutral/gray reads as "inactive, not yet started" so it visually
+     contrasts with the warm amber of needs_review (action needed
+     because reviewer flagged something) and the cool navy/blue of
+     in_review (work is happening on our side). */
+  --doc-pending-text:      hsl(var(--gray-500));
+  --doc-pending-bg:        hsl(var(--gray-50));
+  --doc-pending-border:    hsl(var(--gray-200));
 
+  /* "Uploaded" = freshly arrived in our intake pipeline. Bright sky
+     blue separates it from the deeper navy of in_review (later in
+     the pipeline) so the two stages look adjacent but distinct. */
   --doc-uploaded-text:     hsl(var(--blue-700));
   --doc-uploaded-bg:       hsl(var(--blue-50));
-  --doc-uploaded-border:   hsl(var(--blue-100));
+  --doc-uploaded-border:   hsl(var(--blue-200));
 
+  /* "In review" = a reviewer is actively looking at it. Stronger
+     navy + thicker border so it pops against the lighter "uploaded"
+     blue. */
   --doc-in-review-text:    hsl(var(--navy-700));
   --doc-in-review-bg:      hsl(var(--navy-50));
-  --doc-in-review-border:  hsl(var(--navy-100));
+  --doc-in-review-border:  hsl(var(--navy-200));
 
   --doc-approved-text:     hsl(var(--green-700));
   --doc-approved-bg:       hsl(var(--green-50));

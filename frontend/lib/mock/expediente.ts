@@ -35,6 +35,10 @@ export interface ExpedienteRequirement {
   reviewer_note?: string;
   /** Whether the requirement is hard-blocking (true) or optional (false). */
   required: boolean;
+  /** Original PDF filename of the attached document, when one exists.
+   *  Card shows this in the file box once uploaded; null = nothing
+   *  attached yet, card shows the format hint instead. */
+  filename?: string | null;
 }
 
 /**
