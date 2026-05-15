@@ -15,10 +15,30 @@ from sqlalchemy.orm import Session
 
 from app.constants.institutions import INSTITUTION_LABELS, Institution
 from app.constants.statuses import DocumentStatus
-from app.models import Client, Contract, Vendor
+from app.core.config import settings
+from app.models import (
+    Client,
+    Contract,
+    Document,
+    DocumentInspection,
+    DocumentStatusHistory,
+    Submission,
+    Validation,
+    Vendor,
+)
 from app.models import Institution as InstitutionModel
-from app.services.document_intelligence import DocumentSignals
-from app.services.pdf_validation import PdfInspectionResult
+from app.schemas.submissions import (
+    DocumentInspectionSummary,
+    DocumentSignalsSummary,
+    SubmissionResponse,
+    SupportInfo,
+    ValidationEventSummary,
+)
+from app.services.audit_log import add_audit_event
+from app.services.document_intelligence import DocumentSignals, analyze_document_text
+from app.services.pdf_validation import PdfInspectionResult, inspect_pdf
+from app.services.prevalidation import build_initial_validations
+from app.services.requirement_service import ResolvedPeriod, ResolvedRequirement
 from app.services.storage import StoredFile
 from app.services.validation_events import add_validation_event
 
@@ -319,3 +339,344 @@ def add_native_intake_events(
         )
 
     return events
+
+
+# ---------------------------------------------------------------------------
+# Shared intake orchestration
+# ---------------------------------------------------------------------------
+
+
+# Audit-metadata values for the ``intake_source`` key. Distinguishes the
+# two paths so an auditor can tell whether a submission came in through
+# the legacy free-text endpoint (browser-posted tenant identity) or the
+# tenant-safe workspace-scoped portal endpoint (workspace-derived
+# identity). Kept in code rather than in the catalog so the labels can't
+# drift between writer (here) and any reader.
+INTAKE_SOURCE_LEGACY_NATIVE = "legacy_native_intake"
+INTAKE_SOURCE_WORKSPACE_PORTAL = "workspace_portal_intake"
+
+_INTAKE_HISTORY_REASON = {
+    INTAKE_SOURCE_LEGACY_NATIVE: "Carga inicial desde portal nativo CheckWise.",
+    INTAKE_SOURCE_WORKSPACE_PORTAL: (
+        "Carga inicial desde portal del proveedor (workspace autenticado)."
+    ),
+}
+
+
+def finalize_intake_submission(
+    db: Session,
+    *,
+    stored_file: StoredFile,
+    client: Client,
+    vendor: Vendor,
+    contract: Contract | None,
+    institution: InstitutionModel,
+    resolved_requirement: ResolvedRequirement,
+    resolved_period: ResolvedPeriod,
+    load_type: str,
+    period_code: str,
+    comments: str | None,
+    submitted_by: str,
+    intake_source: str,
+    extra_audit_metadata: dict | None = None,
+    supersedes_submission: Submission | None = None,
+) -> SubmissionResponse:
+    """Run the shared back-half of a documentary intake.
+
+    Both ``POST /api/v1/submissions`` (legacy native intake, kept for the
+    importer + dev paths) and ``POST /api/v1/portal/workspaces/{id}/submissions``
+    (tenant-safe workspace-scoped intake) call this helper. The two
+    endpoints differ only in how they resolve tenant identity
+    (``client`` / ``vendor`` / ``contract``):
+
+    * Legacy: get-or-create from browser-posted form fields.
+      Tenant identity is NOT authoritative — kept for the importer
+      and historic test paths.
+    * Workspace: pre-loaded from the authenticated
+      :class:`ProviderWorkspace`. Tenant identity is authoritative.
+
+    Once tenant identity + requirement/period are resolved, the rest of
+    the pipeline (PDF inspection, duplicate detection, validation
+    signals, status derivation, audit log, response shaping) is
+    identical, so it lives here. Adding a new intake surface in the
+    future means resolving identity in the router and calling this same
+    function — never duplicating the orchestration.
+
+    ``intake_source`` MUST be one of ``INTAKE_SOURCE_LEGACY_NATIVE`` /
+    ``INTAKE_SOURCE_WORKSPACE_PORTAL``. It is written to the audit-log
+    metadata so an auditor can tell which path produced the row.
+    """
+    duplicate = db.scalar(
+        select(Document).where(Document.sha256 == stored_file.sha256).limit(1)
+    )
+
+    pdf_inspection = inspect_pdf(stored_file.path)
+    document_signals = analyze_document_text(
+        pdf_inspection.text_sample,
+        expected_requirement=resolved_requirement.canonical_name,
+        expected_institution=institution.code,
+        expected_period=period_code,
+    )
+    final_status = status_from_inspection(pdf_inspection, document_signals)
+
+    submission = Submission(
+        client_id=client.id,
+        vendor_id=vendor.id,
+        contract_id=contract.id if contract else None,
+        period_id=resolved_period.period.id,
+        institution_id=institution.id,
+        requirement_id=resolved_requirement.requirement.id,
+        requirement_version_id=resolved_requirement.requirement_version.id,
+        requirement_code=resolved_requirement.canonical_code,
+        period_key=resolved_period.canonical_period_key,
+        load_type=load_type,
+        source="portal",
+        status=final_status.value,
+        comments=comments,
+        submitted_by=submitted_by,
+        # Replacement lineage (Phase 3). Caller must have already
+        # validated that the prior submission belongs to the same
+        # tenant + slot and is in an eligible state before passing it
+        # in; this layer trusts that decision and just persists the
+        # FK + emits the lineage audit trail.
+        supersedes_submission_id=(
+            supersedes_submission.id if supersedes_submission is not None else None
+        ),
+    )
+    db.add(submission)
+    db.flush()
+
+    document = Document(
+        submission_id=submission.id,
+        storage_key=stored_file.storage_key,
+        original_filename=stored_file.original_filename,
+        mime_type=stored_file.mime_type,
+        size_bytes=stored_file.size_bytes,
+        sha256=stored_file.sha256,
+        status=final_status.value,
+    )
+    db.add(document)
+    db.flush()
+
+    inspection = DocumentInspection(
+        document_id=document.id,
+        is_pdf=pdf_inspection.is_pdf,
+        is_corrupt=pdf_inspection.is_corrupt,
+        is_encrypted=pdf_inspection.is_encrypted,
+        page_count=pdf_inspection.page_count,
+        text_char_count=pdf_inspection.text_char_count,
+        has_text=pdf_inspection.has_text,
+        is_probably_scanned=pdf_inspection.is_probably_scanned,
+        detected_institution=document_signals.detected_institution,
+        detected_document_type=document_signals.detected_document_type,
+        detected_rfcs=document_signals.detected_rfcs,
+        detected_dates=document_signals.detected_dates,
+        period_mentions=document_signals.period_mentions,
+        requirement_match_confidence=document_signals.requirement_match_confidence,
+        mismatch_reason=document_signals.mismatch_reason,
+        inspection_error=pdf_inspection.error,
+        raw_metadata=pdf_inspection.metadata,
+    )
+    db.add(inspection)
+
+    signals = build_initial_validations(
+        stored_file,
+        duplicate_found=duplicate is not None,
+        pdf_inspection=pdf_inspection,
+        document_signals=document_signals,
+        human_review_required=resolved_requirement.requirement_version.human_review_required,
+    )
+    for signal in signals:
+        db.add(
+            Validation(
+                submission_id=submission.id,
+                document_id=document.id,
+                rule_code=signal.rule_code,
+                rule_type=signal.rule_type,
+                result=signal.result,
+                severity=signal.severity,
+                message=signal.message,
+                requires_human_review=signal.requires_human_review,
+            )
+        )
+
+    history_reason = _INTAKE_HISTORY_REASON.get(
+        intake_source, "Carga inicial desde flujo no clasificado."
+    )
+    db.add(
+        DocumentStatusHistory(
+            document_id=document.id,
+            submission_id=submission.id,
+            from_status=None,
+            to_status=final_status.value,
+            reason=history_reason,
+            actor="system",
+        )
+    )
+
+    validation_events = add_native_intake_events(
+        db,
+        submission_id=submission.id,
+        document_id=document.id,
+        stored_file=stored_file,
+        duplicate_found=duplicate is not None,
+        pdf_inspection=pdf_inspection,
+        document_signals=document_signals,
+        human_review_required=resolved_requirement.requirement_version.human_review_required,
+        requirement_used_legacy=resolved_requirement.used_legacy,
+        period_used_legacy=resolved_period.used_legacy,
+    )
+
+    # Phase 3 — replacement lineage. Two ValidationEvents (one per
+    # affected submission) make the link visible in both timelines,
+    # then a dedicated AuditLog row gives auditors a single query
+    # ("show me everything that was a replacement").
+    if supersedes_submission is not None:
+        replacement_event = add_validation_event(
+            db,
+            submission_id=submission.id,
+            document_id=document.id,
+            event_type="submission_replacement_linked",
+            rule_code="submission_replacement",
+            result="pass",
+            severity="info",
+            message=(
+                "Esta carga reemplaza una entrega anterior del mismo requisito "
+                "para este proveedor y periodo."
+            ),
+            payload={
+                "previous_submission_id": supersedes_submission.id,
+                "previous_status": supersedes_submission.status,
+            },
+            actor_type="supplier",
+        )
+        validation_events.append(replacement_event)
+        add_validation_event(
+            db,
+            submission_id=supersedes_submission.id,
+            # The prior submission's own primary document, not the new
+            # one — keeps the event correctly attributed in the prior
+            # submission's timeline.
+            document_id=None,
+            event_type="submission_replaced",
+            rule_code="submission_replacement",
+            result="superseded",
+            severity="info",
+            message=(
+                "Esta entrega fue reemplazada por una nueva carga del mismo "
+                "requisito y periodo."
+            ),
+            payload={
+                "new_submission_id": submission.id,
+                "previous_status": supersedes_submission.status,
+            },
+            actor_type="system",
+        )
+
+    audit_metadata: dict = {
+        # Kept for backward compatibility with existing audit consumers.
+        "source": "native_intake",
+        # Distinguishes the two intake surfaces. New in Phase 1.
+        "intake_source": intake_source,
+        "storage_key": stored_file.storage_key,
+        "sha256": stored_file.sha256,
+        "requirement_intake": (
+            "legacy_free_text" if resolved_requirement.used_legacy else "canonical_code"
+        ),
+        "period_intake": (
+            "legacy_period_code" if resolved_period.used_legacy else "canonical_period_key"
+        ),
+        "validation_events": [event.event_type for event in validation_events],
+    }
+    if supersedes_submission is not None:
+        audit_metadata["supersedes_submission_id"] = supersedes_submission.id
+    if extra_audit_metadata:
+        audit_metadata.update(extra_audit_metadata)
+
+    add_audit_event(
+        db,
+        action="submission.created",
+        entity_type="submission",
+        entity_id=submission.id,
+        after={
+            "client_id": client.id,
+            "vendor_id": vendor.id,
+            "period_id": resolved_period.period.id,
+            "requirement_id": resolved_requirement.requirement.id,
+            "requirement_code": resolved_requirement.canonical_code,
+            "period_key": resolved_period.canonical_period_key,
+            "status": final_status.value,
+            "supersedes_submission_id": (
+                supersedes_submission.id if supersedes_submission is not None else None
+            ),
+        },
+        metadata=audit_metadata,
+    )
+
+    # Dedicated lineage audit-log row (Phase 3). Lets compliance reports
+    # filter on ``action='submission.replacement_linked'`` directly
+    # instead of mining the intake row's ``after.supersedes_*`` field.
+    if supersedes_submission is not None:
+        add_audit_event(
+            db,
+            action="submission.replacement_linked",
+            entity_type="submission",
+            entity_id=submission.id,
+            metadata={
+                "previous_submission_id": supersedes_submission.id,
+                "new_submission_id": submission.id,
+                "requirement_code": resolved_requirement.canonical_code,
+                "period_key": resolved_period.canonical_period_key,
+                # ``workspace_id`` is supplied by the workspace endpoint via
+                # ``extra_audit_metadata``; the lookup tolerates its absence
+                # (legacy endpoint never sets a workspace).
+                "workspace_id": (extra_audit_metadata or {}).get("workspace_id"),
+                "previous_status": supersedes_submission.status,
+            },
+        )
+
+    db.commit()
+
+    return SubmissionResponse(
+        submission_id=submission.id,
+        document_id=document.id,
+        status=final_status.value,
+        sha256=stored_file.sha256,
+        storage_key=stored_file.storage_key,
+        validations=signals,
+        validation_events=[
+            ValidationEventSummary(
+                event_type=event.event_type,
+                result=event.result,
+                severity=event.severity,
+                message=event.message,
+                confidence=event.confidence,
+            )
+            for event in validation_events
+        ],
+        inspection=DocumentInspectionSummary(
+            is_pdf=pdf_inspection.is_pdf,
+            is_corrupt=pdf_inspection.is_corrupt,
+            is_encrypted=pdf_inspection.is_encrypted,
+            page_count=pdf_inspection.page_count,
+            text_char_count=pdf_inspection.text_char_count,
+            has_text=pdf_inspection.has_text,
+            is_probably_scanned=pdf_inspection.is_probably_scanned,
+        ),
+        document_signals=DocumentSignalsSummary(
+            detected_institution=document_signals.detected_institution,
+            detected_document_type=document_signals.detected_document_type,
+            detected_rfcs=document_signals.detected_rfcs,
+            detected_dates=document_signals.detected_dates,
+            period_mentions=document_signals.period_mentions,
+            requirement_match_confidence=document_signals.requirement_match_confidence,
+            mismatch_reason=document_signals.mismatch_reason,
+            anomaly_codes=document_signals.anomaly_codes,
+        ),
+        support=SupportInfo(
+            whatsapp_url=settings.SUPPORT_WHATSAPP_URL or None,
+            qr_placeholder_url=settings.SUPPORT_QR_PLACEHOLDER_URL or None,
+            message="Contacta soporte si no sabes qué documento subir o detectas una alerta.",
+        ),
+        message=submission_message(final_status),
+    )

@@ -78,27 +78,14 @@ export interface WorkspaceContext {
 }
 
 /**
- * Outcome of `decideWorkspaceAccess`. Lives next to PostLoginDecision
- * but is more granular — it carries the *reason* the user is being
- * routed somewhere so the destination page can render the right
- * banner.
+ * Phase 6 — ``WorkspaceAccessOutcome`` and the matching
+ * ``decideWorkspaceAccess`` helper were deleted. Real routing now reads
+ * ``session.expediente_status`` straight from the backend at every
+ * post-auth surface (``/login``, ``/portal/entra-a-tu-espacio``,
+ * ``withOnboardingGate``), so the granular access-decision type was
+ * dead code. If future flows need a structured outcome again, restore
+ * the type alongside its first real consumer.
  */
-export type WorkspaceAccessOutcome =
-  | { decision: "allow"; route: "/portal/dashboard" }
-  | { decision: "allow_provisional"; route: "/portal/dashboard"; reason: "in_review" }
-  | { decision: "redirect_onboarding"; route: "/portal/onboarding"; reason: "mandatory_blocking" }
-  | { decision: "needs_confirmation"; route: "/portal/entra-a-tu-espacio"; reason: "first_entry" }
-  | {
-      decision: "blocked";
-      reason:
-        | "invitation_expired"
-        | "invitation_revoked"
-        | "invitation_used"
-        | "company_mismatch"
-        | "domain_mismatch"
-        | "role_dispute"
-        | "unknown_workspace";
-    };
 
 /**
  * Body of a profile / workspace correction request. Anything beyond

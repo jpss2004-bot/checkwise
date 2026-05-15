@@ -299,10 +299,21 @@ def test_portal_workspace_requires_correct_token(api_client: TestClient) -> None
 
 
 def test_portal_onboarding_reflects_existing_submission(api_client: TestClient) -> None:
+    """Onboarding lights up the matching slot via the canonical
+    ``requirement_code`` lookup.
+
+    Phase 4 dropped the legacy fuzzy-name fallback in
+    ``_match_submission``. The onboarding endpoint now goes through
+    ``build_workspace_onboarding_slots``, which matches strictly on
+    ``requirement_code``. So the test posts the canonical
+    ``ONB-REPSE-001`` code instead of relying on name normalisation.
+    """
     access = _setup_workspace_session(api_client)
     headers = {"X-Workspace-Token": access["access_token"]}
 
-    # Upload a REPSE-original-flavoured submission.
+    # Upload a REPSE-original-flavoured submission using the canonical
+    # catalog code for the slot — this is how the workspace upload
+    # endpoint feeds submissions today.
     sub = api_client.post(
         "/api/v1/submissions",
         data={
@@ -313,6 +324,7 @@ def test_portal_onboarding_reflects_existing_submission(api_client: TestClient) 
             "load_type": "alta_inicial",
             "institution_code": "stps_repse",
             "requirement_name": "Registro REPSE original",
+            "requirement_code": "ONB-REPSE-001",
             "initial_status": "pendiente_revision",
         },
         files={"file": ("repse.pdf", _pdf_bytes(), "application/pdf")},

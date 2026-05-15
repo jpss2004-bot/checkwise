@@ -202,6 +202,15 @@ class Submission(TimestampMixin, Base):
     period_key: Mapped[str | None] = mapped_column(String(20), index=True)
     comments: Mapped[str | None] = mapped_column(Text)
     submitted_by: Mapped[str | None] = mapped_column(String(255))
+    # Replacement lineage (Phase 3). Points to the prior submission this
+    # row replaces when a provider re-uploads after a rejection /
+    # clarification / mismatch / expiry. ``evidence_slots`` walks the
+    # lineage chain to decide which submission is "current" for an
+    # obligation slot, so historical attempts can be kept verbatim for
+    # the audit trail without dominating the slot view.
+    supersedes_submission_id: Mapped[str | None] = mapped_column(
+        ForeignKey("submissions.id"), index=True
+    )
 
     client: Mapped[Client] = relationship(back_populates="submissions")
     vendor: Mapped[Vendor] = relationship(back_populates="submissions")

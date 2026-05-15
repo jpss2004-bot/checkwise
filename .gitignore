@@ -56,6 +56,8 @@ yarn-error.log*
 pnpm-debug.log*
 tmp/
 uploads/
+!docs/design-system/claude-design-v0.1/uploads/
+!docs/design-system/claude-design-v0.1/uploads/**
 *.tmp
 
 # Editor swap / backup files
@@ -75,4 +77,14 @@ outputs/
 
 # Local session artifacts and AI tooling
 CodexConvo.txt
-.claude/
+.claude/*
+!.claude/skills/
+!.claude/skills/**
+# Skill installer output (reproducible from skills-lock.json + install script)
+.agents/
+# Symlinks created by scripts/register-design-skills.sh into .agents/
+.claude/skills/design-taste-frontend
+.claude/skills/gpt-taste
+.claude/skills/high-end-visual-design
+.claude/skills/impeccable
+.claude/skills/redesign-existing-projects

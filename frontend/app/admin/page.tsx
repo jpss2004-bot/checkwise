@@ -153,6 +153,47 @@ export default function AdminHomePage() {
         </CardContent>
       </Card>
 
+      {session.roles.includes("internal_admin") ? (
+        <Card>
+          <CardHeader>
+            <CardTitle>Operaciones admin</CardTitle>
+            <p className="mt-1 text-sm text-muted-foreground">
+              Control plane interno. Cada cambio queda en el audit log.
+            </p>
+          </CardHeader>
+          <CardContent>
+            <ul className="grid gap-3 sm:grid-cols-2">
+              {[
+                { href: "/admin/dashboard", label: "Resumen", desc: "Conteos operativos." },
+                { href: "/admin/clients", label: "Clientes", desc: "Alta, edición y status." },
+                { href: "/admin/vendors", label: "Proveedores", desc: "Alta, edición y status." },
+                { href: "/admin/requirements", label: "Requisitos", desc: "Catálogo regulatorio." },
+                { href: "/admin/calendar", label: "Calendario", desc: "Periodos y obligaciones." },
+                { href: "/admin/audit-log", label: "Audit log", desc: "Explorador de eventos." },
+                {
+                  href: "/client/dashboard",
+                  label: "Portal del cliente (preview)",
+                  desc: "Vista cliente: semáforo + proveedores + actividad.",
+                },
+              ].map((item) => (
+                <li key={item.href}>
+                  <Link
+                    href={item.href}
+                    className="block rounded-md border border-primary/30 bg-primary/5 p-4 transition-colors hover:bg-primary/10"
+                  >
+                    <p className="flex items-center justify-between gap-2 text-sm font-semibold">
+                      {item.label}
+                      <ArrowRight className="h-4 w-4 text-primary" aria-hidden />
+                    </p>
+                    <p className="mt-0.5 text-xs text-muted-foreground">{item.desc}</p>
+                  </Link>
+                </li>
+              ))}
+            </ul>
+          </CardContent>
+        </Card>
+      ) : null}
+
       <Card>
         <CardHeader>
           <CardTitle>Estado de la sesión</CardTitle>

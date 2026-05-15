@@ -1,0 +1,958 @@
+"""Phase 7 — Admin Operations Core.
+
+LegalShelf internal control plane. Every endpoint is gated on the
+``internal_admin`` role (the ``reviewer`` role alone is **not**
+sufficient — reviewers read the queue, admins operate the platform).
+
+Surfaces:
+
+* ``GET /admin/overview`` — single operational summary.
+* ``/admin/clients`` — list / get / create / patch (no delete).
+* ``/admin/vendors`` — list / get / create / patch (no delete).
+  Enforces vendor.client_id refers to an existing client and the
+  unique (client_id, rfc) constraint.
+* ``/admin/workspaces`` — read + minimal patch (status, owner,
+  display_name, filial_name). ``access_token`` is NEVER returned.
+* ``/admin/requirements`` — list / get / create / patch. On create,
+  an initial ``RequirementVersion`` is spawned when caller supplies
+  any version-shaped fields.
+* ``GET /admin/periods`` and ``GET /admin/calendar?year=`` —
+  read-only operational visibility into period rows + recurring
+  catalog summary.
+* ``GET /admin/audit-log`` — filtered audit-log explorer.
+
+Every mutation writes an ``AuditLog`` row with
+``action="admin.<entity>.<verb>"`` and
+``metadata={"source": "admin_operations", ...}`` so the audit-log
+explorer itself answers "what did this admin do."
+"""
+
+from __future__ import annotations
+
+from datetime import datetime
+from typing import Annotated, Literal
+
+from fastapi import APIRouter, Depends, HTTPException, Query, status
+from pydantic import BaseModel, Field
+from sqlalchemy import and_, func, select
+from sqlalchemy.exc import IntegrityError
+from sqlalchemy.orm import Session
+
+from app.api.v1.auth import CurrentUser, require_role
+from app.constants.roles import MembershipRole
+from app.constants.statuses import DocumentStatus
+from app.core.compliance_catalog import (
+    catalog_metadata,
+    recurring_for_year,
+)
+from app.db.session import get_db
+from app.models import (
+    AuditLog,
+    Client,
+    Institution,
+    Period,
+    ProviderWorkspace,
+    Requirement,
+    RequirementVersion,
+    Submission,
+    Vendor,
+)
+from app.services.audit_log import add_audit_event
+
+router = APIRouter(prefix="/admin", tags=["admin"])
+DbSession = Annotated[Session, Depends(get_db)]
+AdminUser = Annotated[
+    CurrentUser, Depends(require_role(MembershipRole.INTERNAL_ADMIN))
+]
+
+
+# ---------------------------------------------------------------------------
+# Shared helpers
+# ---------------------------------------------------------------------------
+
+
+def _audit_admin(
+    db: Session,
+    *,
+    actor: CurrentUser,
+    action: str,
+    entity_type: str,
+    entity_id: str,
+    before: dict | None,
+    after: dict | None,
+    extra_metadata: dict | None = None,
+) -> None:
+    """Write the standard admin-operations audit row.
+
+    Every admin mutation goes through here so the audit-log explorer
+    can filter on ``actor_type='internal_admin'`` or
+    ``metadata.source='admin_operations'`` and surface every action a
+    LegalShelf operator took. Don't bypass this helper.
+    """
+    metadata = {"source": "admin_operations"}
+    if extra_metadata:
+        metadata.update(extra_metadata)
+    add_audit_event(
+        db,
+        action=action,
+        entity_type=entity_type,
+        entity_id=entity_id,
+        actor_type="internal_admin",
+        actor_id=actor.user.id,
+        before=before,
+        after=after,
+        metadata=metadata,
+    )
+
+
+def _client_to_dict(row: Client) -> dict:
+    return {
+        "id": row.id,
+        "name": row.name,
+        "rfc": row.rfc,
+        "responsible_name": row.responsible_name,
+        "status": row.status,
+        "created_at": row.created_at.isoformat() if row.created_at else None,
+        "updated_at": row.updated_at.isoformat() if row.updated_at else None,
+    }
+
+
+def _vendor_to_dict(row: Vendor) -> dict:
+    return {
+        "id": row.id,
+        "client_id": row.client_id,
+        "name": row.name,
+        "rfc": row.rfc,
+        "contact_name": row.contact_name,
+        "contact_email": row.contact_email,
+        "repse_id": row.repse_id,
+        "persona_type": row.persona_type,
+        "status": row.status,
+        "created_at": row.created_at.isoformat() if row.created_at else None,
+        "updated_at": row.updated_at.isoformat() if row.updated_at else None,
+    }
+
+
+def _workspace_to_dict(row: ProviderWorkspace) -> dict:
+    """Workspace serializer — NEVER includes the access_token.
+
+    Phase 7 contract: the admin surfaces operate the tenant model but
+    must not leak the workspace session token. The token is the
+    provider's session credential; exposing it would defeat the
+    tenant-safe upload guard.
+    """
+    return {
+        "id": row.id,
+        "client_id": row.client_id,
+        "vendor_id": row.vendor_id,
+        "contract_id": row.contract_id,
+        "owner_user_id": row.owner_user_id,
+        "persona_type": row.persona_type,
+        "display_name": row.display_name,
+        "filial_name": row.filial_name,
+        "onboarding_completed_at": (
+            row.onboarding_completed_at.isoformat()
+            if row.onboarding_completed_at
+            else None
+        ),
+        "status": row.status,
+        "created_at": row.created_at.isoformat() if row.created_at else None,
+        "updated_at": row.updated_at.isoformat() if row.updated_at else None,
+    }
+
+
+def _requirement_to_dict(row: Requirement, *, version: RequirementVersion | None) -> dict:
+    return {
+        "id": row.id,
+        "code": row.code,
+        "name": row.name,
+        "institution_id": row.institution_id,
+        "load_type": row.load_type,
+        "frequency": row.frequency,
+        "risk_level": row.risk_level,
+        "is_active": row.is_active,
+        "current_version": row.current_version,
+        "version": (
+            {
+                "id": version.id,
+                "version": version.version,
+                "legal_basis": version.legal_basis,
+                "applicability_rule": version.applicability_rule,
+                "minimum_validation": version.minimum_validation,
+                "automatic_signals": version.automatic_signals,
+                "human_review_required": version.human_review_required,
+                "missing_state": version.missing_state,
+                "temporal_rule": version.temporal_rule,
+                "source_url": version.source_url,
+                "implementation_notes": version.implementation_notes,
+                "required": version.required,
+                "effective_from": (
+                    version.effective_from.isoformat() if version.effective_from else None
+                ),
+                "effective_to": (
+                    version.effective_to.isoformat() if version.effective_to else None
+                ),
+            }
+            if version is not None
+            else None
+        ),
+        "created_at": row.created_at.isoformat() if row.created_at else None,
+        "updated_at": row.updated_at.isoformat() if row.updated_at else None,
+    }
+
+
+def _period_to_dict(row: Period) -> dict:
+    return {
+        "id": row.id,
+        "code": row.code,
+        "period_key": row.period_key,
+        "year": row.year,
+        "month": row.month,
+        "period_type": row.period_type,
+        "starts_on": row.starts_on.isoformat() if row.starts_on else None,
+        "ends_on": row.ends_on.isoformat() if row.ends_on else None,
+        "due_on": row.due_on.isoformat() if row.due_on else None,
+    }
+
+
+def _load_current_version(db: Session, requirement: Requirement) -> RequirementVersion | None:
+    return db.scalar(
+        select(RequirementVersion)
+        .where(
+            RequirementVersion.requirement_id == requirement.id,
+            RequirementVersion.version == requirement.current_version,
+        )
+        .limit(1)
+    )
+
+
+# ---------------------------------------------------------------------------
+# Overview
+# ---------------------------------------------------------------------------
+
+
+_QUEUE_STATUSES = (
+    DocumentStatus.RECIBIDO.value,
+    DocumentStatus.PENDIENTE_REVISION.value,
+    DocumentStatus.PREVALIDADO.value,
+    DocumentStatus.POSIBLE_MISMATCH.value,
+)
+_REJECTED_OR_CORRECTION_STATUSES = (
+    DocumentStatus.RECHAZADO.value,
+    DocumentStatus.REQUIERE_ACLARACION.value,
+    DocumentStatus.POSIBLE_MISMATCH.value,
+)
+
+
+class AdminOverview(BaseModel):
+    clients_total: int
+    vendors_total: int
+    active_workspaces_total: int
+    pending_reviews_total: int
+    rejected_or_correction_total: int
+    recent_submissions_total: int
+    recent_audit_events_total: int
+
+
+@router.get("/overview", response_model=AdminOverview)
+def get_overview(db: DbSession, current: AdminUser) -> AdminOverview:
+    """Operational counters for the admin home page.
+
+    ``recent_*`` fields count the last 100 rows in the respective
+    tables — enough to spot a sudden spike without expensive date math
+    on day-one of the surface. Replace with a time-bounded query when
+    a real ops dashboard surface lands.
+    """
+    _ = current
+    clients_total = int(db.scalar(select(func.count(Client.id))) or 0)
+    vendors_total = int(db.scalar(select(func.count(Vendor.id))) or 0)
+    active_workspaces_total = int(
+        db.scalar(
+            select(func.count(ProviderWorkspace.id)).where(
+                ProviderWorkspace.status == "active"
+            )
+        )
+        or 0
+    )
+    pending_reviews_total = int(
+        db.scalar(
+            select(func.count(Submission.id)).where(
+                Submission.status.in_(_QUEUE_STATUSES)
+            )
+        )
+        or 0
+    )
+    rejected_or_correction_total = int(
+        db.scalar(
+            select(func.count(Submission.id)).where(
+                Submission.status.in_(_REJECTED_OR_CORRECTION_STATUSES)
+            )
+        )
+        or 0
+    )
+    submissions_total = int(db.scalar(select(func.count(Submission.id))) or 0)
+    audit_total = int(db.scalar(select(func.count(AuditLog.id))) or 0)
+    return AdminOverview(
+        clients_total=clients_total,
+        vendors_total=vendors_total,
+        active_workspaces_total=active_workspaces_total,
+        pending_reviews_total=pending_reviews_total,
+        rejected_or_correction_total=rejected_or_correction_total,
+        recent_submissions_total=min(submissions_total, 100),
+        recent_audit_events_total=min(audit_total, 100),
+    )
+
+
+# ---------------------------------------------------------------------------
+# Clients
+# ---------------------------------------------------------------------------
+
+
+class ClientCreate(BaseModel):
+    name: str = Field(min_length=2, max_length=255)
+    rfc: str | None = Field(default=None, max_length=13)
+    responsible_name: str | None = Field(default=None, max_length=255)
+    status: str = "active"
+
+
+class ClientUpdate(BaseModel):
+    name: str | None = Field(default=None, min_length=2, max_length=255)
+    rfc: str | None = Field(default=None, max_length=13)
+    responsible_name: str | None = Field(default=None, max_length=255)
+    status: str | None = None
+
+
+@router.get("/clients")
+def list_clients(db: DbSession, current: AdminUser) -> dict:
+    _ = current
+    rows = list(db.scalars(select(Client).order_by(Client.created_at.desc())))
+    return {"items": [_client_to_dict(r) for r in rows], "total": len(rows)}
+
+
+@router.get("/clients/{client_id}")
+def get_client(client_id: str, db: DbSession, current: AdminUser) -> dict:
+    _ = current
+    row = db.get(Client, client_id)
+    if row is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, detail="Cliente no encontrado.")
+    return _client_to_dict(row)
+
+
+@router.post("/clients", status_code=status.HTTP_201_CREATED)
+def create_client(payload: ClientCreate, db: DbSession, current: AdminUser) -> dict:
+    row = Client(
+        name=payload.name.strip(),
+        rfc=(payload.rfc or "").strip().upper() or None,
+        responsible_name=(payload.responsible_name or "").strip() or None,
+        status=payload.status or "active",
+    )
+    db.add(row)
+    try:
+        db.flush()
+    except IntegrityError as exc:
+        db.rollback()
+        raise HTTPException(
+            status.HTTP_409_CONFLICT, detail="RFC ya está en uso."
+        ) from exc
+    _audit_admin(
+        db,
+        actor=current,
+        action="admin.client.created",
+        entity_type="client",
+        entity_id=row.id,
+        before=None,
+        after=_client_to_dict(row),
+    )
+    db.commit()
+    db.refresh(row)
+    return _client_to_dict(row)
+
+
+@router.patch("/clients/{client_id}")
+def update_client(
+    client_id: str, payload: ClientUpdate, db: DbSession, current: AdminUser
+) -> dict:
+    row = db.get(Client, client_id)
+    if row is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, detail="Cliente no encontrado.")
+    before = _client_to_dict(row)
+    data = payload.model_dump(exclude_unset=True)
+    if "name" in data and data["name"] is not None:
+        row.name = data["name"].strip()
+    if "rfc" in data:
+        row.rfc = (data["rfc"] or "").strip().upper() or None
+    if "responsible_name" in data:
+        row.responsible_name = (data["responsible_name"] or "").strip() or None
+    if "status" in data and data["status"] is not None:
+        row.status = data["status"]
+    try:
+        db.flush()
+    except IntegrityError as exc:
+        db.rollback()
+        raise HTTPException(
+            status.HTTP_409_CONFLICT, detail="RFC ya está en uso."
+        ) from exc
+    after = _client_to_dict(row)
+    _audit_admin(
+        db,
+        actor=current,
+        action="admin.client.updated",
+        entity_type="client",
+        entity_id=row.id,
+        before=before,
+        after=after,
+    )
+    db.commit()
+    db.refresh(row)
+    return _client_to_dict(row)
+
+
+# ---------------------------------------------------------------------------
+# Vendors
+# ---------------------------------------------------------------------------
+
+
+class VendorCreate(BaseModel):
+    client_id: str
+    name: str = Field(min_length=2, max_length=255)
+    rfc: str = Field(min_length=12, max_length=13)
+    contact_name: str | None = None
+    contact_email: str | None = None
+    repse_id: str | None = None
+    persona_type: Literal["moral", "fisica"] | None = None
+    status: str = "active"
+
+
+class VendorUpdate(BaseModel):
+    name: str | None = Field(default=None, min_length=2, max_length=255)
+    contact_name: str | None = None
+    contact_email: str | None = None
+    repse_id: str | None = None
+    persona_type: Literal["moral", "fisica"] | None = None
+    status: str | None = None
+
+
+@router.get("/vendors")
+def list_vendors(
+    db: DbSession,
+    current: AdminUser,
+    client_id: str | None = None,
+) -> dict:
+    _ = current
+    stmt = select(Vendor).order_by(Vendor.created_at.desc())
+    if client_id:
+        stmt = stmt.where(Vendor.client_id == client_id)
+    rows = list(db.scalars(stmt))
+    return {"items": [_vendor_to_dict(r) for r in rows], "total": len(rows)}
+
+
+@router.get("/vendors/{vendor_id}")
+def get_vendor(vendor_id: str, db: DbSession, current: AdminUser) -> dict:
+    _ = current
+    row = db.get(Vendor, vendor_id)
+    if row is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, detail="Proveedor no encontrado.")
+    return _vendor_to_dict(row)
+
+
+@router.post("/vendors", status_code=status.HTTP_201_CREATED)
+def create_vendor(payload: VendorCreate, db: DbSession, current: AdminUser) -> dict:
+    client = db.get(Client, payload.client_id)
+    if client is None:
+        raise HTTPException(
+            status.HTTP_404_NOT_FOUND,
+            detail="Cliente no encontrado; crea el cliente antes del proveedor.",
+        )
+    row = Vendor(
+        client_id=payload.client_id,
+        name=payload.name.strip(),
+        rfc=payload.rfc.strip().upper(),
+        contact_name=(payload.contact_name or "").strip() or None,
+        contact_email=(payload.contact_email or "").strip() or None,
+        repse_id=(payload.repse_id or "").strip() or None,
+        persona_type=payload.persona_type,
+        status=payload.status or "active",
+    )
+    db.add(row)
+    try:
+        db.flush()
+    except IntegrityError as exc:
+        db.rollback()
+        raise HTTPException(
+            status.HTTP_409_CONFLICT,
+            detail="Ya existe un proveedor con ese RFC para este cliente.",
+        ) from exc
+    _audit_admin(
+        db,
+        actor=current,
+        action="admin.vendor.created",
+        entity_type="vendor",
+        entity_id=row.id,
+        before=None,
+        after=_vendor_to_dict(row),
+    )
+    db.commit()
+    db.refresh(row)
+    return _vendor_to_dict(row)
+
+
+@router.patch("/vendors/{vendor_id}")
+def update_vendor(
+    vendor_id: str, payload: VendorUpdate, db: DbSession, current: AdminUser
+) -> dict:
+    row = db.get(Vendor, vendor_id)
+    if row is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, detail="Proveedor no encontrado.")
+    before = _vendor_to_dict(row)
+    data = payload.model_dump(exclude_unset=True)
+    if "name" in data and data["name"] is not None:
+        row.name = data["name"].strip()
+    if "contact_name" in data:
+        row.contact_name = (data["contact_name"] or "").strip() or None
+    if "contact_email" in data:
+        row.contact_email = (data["contact_email"] or "").strip() or None
+    if "repse_id" in data:
+        row.repse_id = (data["repse_id"] or "").strip() or None
+    if "persona_type" in data:
+        row.persona_type = data["persona_type"]
+    if "status" in data and data["status"] is not None:
+        row.status = data["status"]
+    db.flush()
+    after = _vendor_to_dict(row)
+    _audit_admin(
+        db,
+        actor=current,
+        action="admin.vendor.updated",
+        entity_type="vendor",
+        entity_id=row.id,
+        before=before,
+        after=after,
+    )
+    db.commit()
+    db.refresh(row)
+    return _vendor_to_dict(row)
+
+
+# ---------------------------------------------------------------------------
+# Provider workspaces
+# ---------------------------------------------------------------------------
+
+
+class WorkspaceUpdate(BaseModel):
+    status: str | None = None
+    owner_user_id: str | None = None
+    display_name: str | None = None
+    filial_name: str | None = None
+
+
+@router.get("/workspaces")
+def list_workspaces(
+    db: DbSession,
+    current: AdminUser,
+    client_id: str | None = None,
+    vendor_id: str | None = None,
+) -> dict:
+    _ = current
+    stmt = select(ProviderWorkspace).order_by(ProviderWorkspace.created_at.desc())
+    if client_id:
+        stmt = stmt.where(ProviderWorkspace.client_id == client_id)
+    if vendor_id:
+        stmt = stmt.where(ProviderWorkspace.vendor_id == vendor_id)
+    rows = list(db.scalars(stmt))
+    return {"items": [_workspace_to_dict(r) for r in rows], "total": len(rows)}
+
+
+@router.get("/workspaces/{workspace_id}")
+def get_workspace_admin(
+    workspace_id: str, db: DbSession, current: AdminUser
+) -> dict:
+    _ = current
+    row = db.get(ProviderWorkspace, workspace_id)
+    if row is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, detail="Workspace no encontrado.")
+    return _workspace_to_dict(row)
+
+
+@router.patch("/workspaces/{workspace_id}")
+def update_workspace_admin(
+    workspace_id: str,
+    payload: WorkspaceUpdate,
+    db: DbSession,
+    current: AdminUser,
+) -> dict:
+    row = db.get(ProviderWorkspace, workspace_id)
+    if row is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, detail="Workspace no encontrado.")
+    before = _workspace_to_dict(row)
+    data = payload.model_dump(exclude_unset=True)
+    if "status" in data and data["status"] is not None:
+        row.status = data["status"]
+    if "owner_user_id" in data:
+        row.owner_user_id = data["owner_user_id"] or None
+    if "display_name" in data:
+        row.display_name = (data["display_name"] or "").strip() or None
+    if "filial_name" in data:
+        row.filial_name = (data["filial_name"] or "").strip() or None
+    db.flush()
+    after = _workspace_to_dict(row)
+    _audit_admin(
+        db,
+        actor=current,
+        action="admin.workspace.updated",
+        entity_type="provider_workspace",
+        entity_id=row.id,
+        before=before,
+        after=after,
+    )
+    db.commit()
+    db.refresh(row)
+    return _workspace_to_dict(row)
+
+
+# ---------------------------------------------------------------------------
+# Requirements
+# ---------------------------------------------------------------------------
+
+
+class RequirementCreate(BaseModel):
+    code: str = Field(min_length=2, max_length=80)
+    name: str = Field(min_length=2, max_length=255)
+    institution_id: str
+    load_type: str
+    frequency: str
+    risk_level: str = "medium"
+    is_active: bool = True
+    # Optional initial RequirementVersion fields. When any of these are
+    # supplied, an initial version=1 row is created alongside the
+    # Requirement.
+    legal_basis: str | None = None
+    applicability_rule: str | None = None
+    minimum_validation: str | None = None
+    automatic_signals: str | None = None
+    human_review_required: bool | None = None
+    missing_state: str | None = None
+    temporal_rule: str | None = None
+    source_url: str | None = None
+    implementation_notes: str | None = None
+    required: bool | None = None
+
+
+class RequirementUpdate(BaseModel):
+    name: str | None = Field(default=None, min_length=2, max_length=255)
+    institution_id: str | None = None
+    load_type: str | None = None
+    frequency: str | None = None
+    risk_level: str | None = None
+    is_active: bool | None = None
+
+
+@router.get("/requirements")
+def list_requirements(
+    db: DbSession,
+    current: AdminUser,
+    institution_id: str | None = None,
+    is_active: bool | None = None,
+) -> dict:
+    _ = current
+    stmt = select(Requirement).order_by(Requirement.code.asc())
+    if institution_id:
+        stmt = stmt.where(Requirement.institution_id == institution_id)
+    if is_active is not None:
+        stmt = stmt.where(Requirement.is_active == is_active)
+    rows = list(db.scalars(stmt))
+    items = []
+    for r in rows:
+        v = _load_current_version(db, r)
+        items.append(_requirement_to_dict(r, version=v))
+    return {"items": items, "total": len(items)}
+
+
+@router.get("/requirements/{requirement_id}")
+def get_requirement(
+    requirement_id: str, db: DbSession, current: AdminUser
+) -> dict:
+    _ = current
+    row = db.get(Requirement, requirement_id)
+    if row is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, detail="Requisito no encontrado.")
+    return _requirement_to_dict(row, version=_load_current_version(db, row))
+
+
+@router.post("/requirements", status_code=status.HTTP_201_CREATED)
+def create_requirement(
+    payload: RequirementCreate, db: DbSession, current: AdminUser
+) -> dict:
+    institution = db.get(Institution, payload.institution_id)
+    if institution is None:
+        raise HTTPException(
+            status.HTTP_404_NOT_FOUND,
+            detail="Institución no encontrada.",
+        )
+    requirement = Requirement(
+        code=payload.code.strip(),
+        name=payload.name.strip(),
+        institution_id=payload.institution_id,
+        load_type=payload.load_type,
+        frequency=payload.frequency,
+        risk_level=payload.risk_level,
+        is_active=payload.is_active,
+        current_version=1,
+    )
+    db.add(requirement)
+    try:
+        db.flush()
+    except IntegrityError as exc:
+        db.rollback()
+        raise HTTPException(
+            status.HTTP_409_CONFLICT,
+            detail="Ya existe un requisito con ese código.",
+        ) from exc
+
+    version: RequirementVersion | None = None
+    version_fields = {
+        "legal_basis": payload.legal_basis,
+        "applicability_rule": payload.applicability_rule,
+        "minimum_validation": payload.minimum_validation,
+        "automatic_signals": payload.automatic_signals,
+        "human_review_required": payload.human_review_required,
+        "missing_state": payload.missing_state,
+        "temporal_rule": payload.temporal_rule,
+        "source_url": payload.source_url,
+        "implementation_notes": payload.implementation_notes,
+        "required": payload.required,
+    }
+    if any(v is not None for v in version_fields.values()):
+        version = RequirementVersion(
+            requirement_id=requirement.id,
+            version=1,
+            legal_basis=payload.legal_basis,
+            applicability_rule=payload.applicability_rule,
+            minimum_validation=payload.minimum_validation,
+            automatic_signals=payload.automatic_signals,
+            human_review_required=(
+                payload.human_review_required
+                if payload.human_review_required is not None
+                else True
+            ),
+            missing_state=payload.missing_state,
+            temporal_rule=payload.temporal_rule,
+            source_url=payload.source_url,
+            implementation_notes=payload.implementation_notes,
+            required=(payload.required if payload.required is not None else True),
+        )
+        db.add(version)
+        db.flush()
+
+    _audit_admin(
+        db,
+        actor=current,
+        action="admin.requirement.created",
+        entity_type="requirement",
+        entity_id=requirement.id,
+        before=None,
+        after=_requirement_to_dict(requirement, version=version),
+        extra_metadata={"created_version": version.id if version else None},
+    )
+    db.commit()
+    db.refresh(requirement)
+    return _requirement_to_dict(requirement, version=_load_current_version(db, requirement))
+
+
+@router.patch("/requirements/{requirement_id}")
+def update_requirement(
+    requirement_id: str,
+    payload: RequirementUpdate,
+    db: DbSession,
+    current: AdminUser,
+) -> dict:
+    row = db.get(Requirement, requirement_id)
+    if row is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, detail="Requisito no encontrado.")
+    before = _requirement_to_dict(row, version=_load_current_version(db, row))
+    data = payload.model_dump(exclude_unset=True)
+    if "name" in data and data["name"] is not None:
+        row.name = data["name"].strip()
+    if "institution_id" in data and data["institution_id"] is not None:
+        institution = db.get(Institution, data["institution_id"])
+        if institution is None:
+            raise HTTPException(
+                status.HTTP_404_NOT_FOUND, detail="Institución no encontrada."
+            )
+        row.institution_id = data["institution_id"]
+    if "load_type" in data and data["load_type"] is not None:
+        row.load_type = data["load_type"]
+    if "frequency" in data and data["frequency"] is not None:
+        row.frequency = data["frequency"]
+    if "risk_level" in data and data["risk_level"] is not None:
+        row.risk_level = data["risk_level"]
+    if "is_active" in data and data["is_active"] is not None:
+        row.is_active = data["is_active"]
+    db.flush()
+    after = _requirement_to_dict(row, version=_load_current_version(db, row))
+    _audit_admin(
+        db,
+        actor=current,
+        action="admin.requirement.updated",
+        entity_type="requirement",
+        entity_id=row.id,
+        before=before,
+        after=after,
+    )
+    db.commit()
+    db.refresh(row)
+    return _requirement_to_dict(row, version=_load_current_version(db, row))
+
+
+# ---------------------------------------------------------------------------
+# Periods + calendar oversight (read-only)
+# ---------------------------------------------------------------------------
+
+
+@router.get("/periods")
+def list_periods(
+    db: DbSession,
+    current: AdminUser,
+    year: int | None = None,
+    period_type: str | None = None,
+    limit: Annotated[int, Query(ge=1, le=500)] = 100,
+) -> dict:
+    """Read-only Period roster. Phase 7 keeps it list-only."""
+    _ = current
+    stmt = select(Period).order_by(
+        Period.year.desc().nulls_last(),
+        Period.month.desc().nulls_last(),
+    )
+    if year is not None:
+        stmt = stmt.where(Period.year == year)
+    if period_type:
+        stmt = stmt.where(Period.period_type == period_type)
+    stmt = stmt.limit(limit)
+    rows = list(db.scalars(stmt))
+    return {"items": [_period_to_dict(r) for r in rows], "total": len(rows)}
+
+
+@router.get("/calendar")
+def get_admin_calendar(
+    db: DbSession,
+    current: AdminUser,
+    year: int = 2026,
+    persona_type: Literal["moral", "fisica"] = "moral",
+) -> dict:
+    """Aggregated recurring catalog snapshot for the requested year.
+
+    Read-only — same canonical catalog that powers the provider
+    calendar, summarised by institution × month. The admin surface
+    can use this to confirm a year is correctly seeded without
+    drilling into per-provider workspaces.
+    """
+    _ = current
+    catalog = recurring_for_year(year, persona_type)
+    months: dict[int, dict] = {
+        m: {"month": m, "institutions": {}, "expected_total": 0} for m in range(1, 13)
+    }
+    for req in catalog:
+        bucket = months[req.due_month]["institutions"]
+        inst = bucket.setdefault(
+            req.institution, {"institution": req.institution, "expected": 0}
+        )
+        inst["expected"] += 1
+        months[req.due_month]["expected_total"] += 1
+    return {
+        "metadata": catalog_metadata(),
+        "year": year,
+        "persona_type": persona_type,
+        "months": [
+            {
+                "month": m["month"],
+                "expected_total": m["expected_total"],
+                "institutions": list(m["institutions"].values()),
+            }
+            for m in months.values()
+        ],
+    }
+
+
+# ---------------------------------------------------------------------------
+# Audit log explorer
+# ---------------------------------------------------------------------------
+
+
+class AuditLogItem(BaseModel):
+    id: str
+    actor_id: str | None
+    actor_type: str
+    action: str
+    entity_type: str
+    entity_id: str
+    before: dict | None
+    after: dict | None
+    metadata: dict | None = Field(default=None, alias="event_metadata")
+    created_at: datetime
+
+    model_config = {"populate_by_name": True}
+
+
+class AuditLogResponse(BaseModel):
+    items: list[AuditLogItem]
+    total: int
+    limit: int
+
+
+@router.get("/audit-log", response_model=AuditLogResponse)
+def list_audit_log(
+    db: DbSession,
+    current: AdminUser,
+    actor_id: str | None = None,
+    actor_type: str | None = None,
+    action: str | None = None,
+    entity_type: str | None = None,
+    entity_id: str | None = None,
+    date_from: datetime | None = None,
+    date_to: datetime | None = None,
+    limit: Annotated[int, Query(ge=1, le=200)] = 50,
+) -> AuditLogResponse:
+    """Filtered audit-log explorer.
+
+    Newest first. Filters compose as AND. Default limit 50, hard cap
+    200. Returns at most ``limit`` rows; the total count is the
+    matching row count (or capped at ``limit`` if the DB doesn't make
+    the full count cheap — Phase 7 returns the rendered length to keep
+    the surface simple).
+    """
+    _ = current
+    filters = []
+    if actor_id:
+        filters.append(AuditLog.actor_id == actor_id)
+    if actor_type:
+        filters.append(AuditLog.actor_type == actor_type)
+    if action:
+        filters.append(AuditLog.action == action)
+    if entity_type:
+        filters.append(AuditLog.entity_type == entity_type)
+    if entity_id:
+        filters.append(AuditLog.entity_id == entity_id)
+    if date_from:
+        filters.append(AuditLog.created_at >= date_from)
+    if date_to:
+        filters.append(AuditLog.created_at <= date_to)
+    stmt = select(AuditLog)
+    if filters:
+        stmt = stmt.where(and_(*filters))
+    stmt = stmt.order_by(AuditLog.created_at.desc()).limit(limit)
+    rows = list(db.scalars(stmt))
+    items = [
+        AuditLogItem(
+            id=row.id,
+            actor_id=row.actor_id,
+            actor_type=row.actor_type,
+            action=row.action,
+            entity_type=row.entity_type,
+            entity_id=row.entity_id,
+            before=row.before,
+            after=row.after,
+            event_metadata=row.event_metadata,
+            created_at=row.created_at,
+        )
+        for row in rows
+    ]
+    return AuditLogResponse(items=items, total=len(items), limit=limit)

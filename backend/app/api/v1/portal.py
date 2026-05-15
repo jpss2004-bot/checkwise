@@ -29,20 +29,36 @@ a new session — the cookie can only be issued by ``/portal/enter``.
 from __future__ import annotations
 
 import secrets
-import unicodedata
+from datetime import date
 from typing import Annotated, Literal
 
-from fastapi import APIRouter, Depends, Header, HTTPException, Request, Response, status
+from fastapi import (
+    APIRouter,
+    Depends,
+    File,
+    Form,
+    Header,
+    HTTPException,
+    Request,
+    Response,
+    UploadFile,
+    status,
+)
 from pydantic import BaseModel, Field
 from sqlalchemy import select
+from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import Session
 
 from app.api.v1.auth import CurrentUser, _claims_from_header, get_current_user
 from app.constants.statuses import DocumentStatus
+from app.core.catalogs import DOCUMENT_STATUSES, INSTITUTIONS, LOAD_TYPES
 from app.core.compliance_catalog import (
     catalog_metadata,
     expediente_for_persona,
+    onboarding_format,
+    onboarding_why,
     recurring_for_year,
+    recurring_required_document,
 )
 from app.core.config import settings
 from app.db.session import get_db
@@ -57,10 +73,25 @@ from app.models import (
     ValidationEvent,
 )
 from app.models.entities import utc_now
+from app.schemas.submissions import SubmissionResponse
+from app.services.evidence_slots import (
+    SlotState,
+    SlotView,
+    build_workspace_calendar_slots,
+    build_workspace_onboarding_slots,
+)
 from app.services.portal_session import (
     PortalSessionError,
     issue_portal_session_token,
     verify_portal_session_token,
+)
+from app.services.requirement_service import resolve_period, resolve_requirement
+from app.services.storage import get_storage_service
+from app.services.submission_service import (
+    INTAKE_SOURCE_WORKSPACE_PORTAL,
+    assert_pdf_upload,
+    finalize_intake_submission,
+    get_or_create_institution,
 )
 
 router = APIRouter(prefix="/portal", tags=["portal"])
@@ -191,64 +222,147 @@ class CompleteOnboardingResponse(BaseModel):
 # ---------------------------------------------------------------------------
 
 
-def _normalize(value: str | None) -> str:
-    if not value:
-        return ""
-    n = unicodedata.normalize("NFKD", value).encode("ascii", "ignore").decode().lower()
-    return " ".join(n.split())
+# ---------------------------------------------------------------------------
+# Phase 5 — UX enrichment helpers (state-driven)
+# ---------------------------------------------------------------------------
+#
+# The "next_action" and "suggested_action" strings are functions of the
+# slot's current state, not the catalog row. They used to live in
+# frontend mocks; centralising them server-side means every consumer
+# (provider portal, future client portal, future reports) sees the same
+# copy without re-implementing the state machine.
 
 
-def _match_submission(
-    expected_name: str,
-    expected_institution: str,
-    submissions: list[Submission],
-    *,
-    period_label: str | None = None,
-    requirement_code: str | None = None,
-    period_key: str | None = None,
-) -> Submission | None:
-    """Return the best matching submission for an expected requirement.
+def _onboarding_next_action(status: str | None, required: bool) -> str:
+    """Plain-language next step for an onboarding card, by current status."""
+    if status is None or status in {DocumentStatus.PENDIENTE.value}:
+        return (
+            "Sube este documento para destrabar tu expediente inicial."
+            if required
+            else "Si tu actividad lo requiere, sube el documento. "
+            "Si no aplica, déjalo así."
+        )
+    if status == DocumentStatus.RECIBIDO.value:
+        return "Recibimos tu documento. Va a la cola de revisión."
+    if status in {
+        DocumentStatus.PENDIENTE_REVISION.value,
+        DocumentStatus.PREVALIDADO.value,
+    }:
+        return (
+            "Tu documento está en revisión humana. Te avisaremos por correo "
+            "en menos de 24 horas hábiles."
+        )
+    if status == DocumentStatus.APROBADO.value:
+        return "Listo. Lo revisaremos por vigencia el próximo periodo."
+    if status == DocumentStatus.RECHAZADO.value:
+        return (
+            "Tu documento fue rechazado. Revisa la nota del revisor y sube una "
+            "versión corregida."
+        )
+    if status == DocumentStatus.REQUIERE_ACLARACION.value:
+        return (
+            "El revisor pidió una aclaración. Responde la observación o sube "
+            "una versión corregida."
+        )
+    if status == DocumentStatus.POSIBLE_MISMATCH.value:
+        return (
+            "Detectamos una posible inconsistencia con el requisito. Verifica "
+            "el archivo y vuelve a subir si fue equivocado."
+        )
+    if status == DocumentStatus.VENCIDO.value:
+        return "El documento venció. Sube la versión vigente."
+    if status == DocumentStatus.EXCEPCION_LEGAL.value:
+        return "Aprobado bajo excepción legal. Sin acción adicional."
+    if status == DocumentStatus.NO_APLICA.value:
+        return "Este requisito no aplica para tu caso. Sin acción."
+    return "Sube este documento desde el wizard."
 
-    Preferred path: exact match on ``(institution, requirement_code, period_key)``
-    when both canonical keys are provided and the stored submission carries
-    them. Falls back to the legacy name + year heuristic so historic
-    submissions written before canonical keys still light up the dashboard.
+
+def _calendar_suggested_action(status: str | None) -> str:
+    """Plain-language next step for a calendar item, by current status."""
+    if status is None or status == DocumentStatus.PENDIENTE.value:
+        return "Sube este documento cuando esté disponible."
+    if status == DocumentStatus.RECIBIDO.value:
+        return "Recibimos tu documento. Está en cola de revisión."
+    if status in {
+        DocumentStatus.PENDIENTE_REVISION.value,
+        DocumentStatus.PREVALIDADO.value,
+    }:
+        return "Tu documento está en revisión humana."
+    if status == DocumentStatus.APROBADO.value:
+        return "Aprobado. Sin acción inmediata."
+    if status == DocumentStatus.RECHAZADO.value:
+        return "El revisor pidió que vuelvas a subir el documento corregido."
+    if status == DocumentStatus.REQUIERE_ACLARACION.value:
+        return "Responde la observación o sube una versión corregida."
+    if status == DocumentStatus.POSIBLE_MISMATCH.value:
+        return "Verifica el archivo. Si fue equivocado, vuelve a subir."
+    if status == DocumentStatus.VENCIDO.value:
+        return "Documento vencido. Sube la versión vigente."
+    if status == DocumentStatus.EXCEPCION_LEGAL.value:
+        return "Aprobado bajo excepción legal."
+    if status == DocumentStatus.NO_APLICA.value:
+        return "No aplica para este periodo."
+    return "Sube este documento desde el wizard."
+
+
+def _latest_reviewer_note(db: Session, submission_id: str | None) -> str | None:
+    """Return the message of the most recent ``reviewer_decision`` event.
+
+    The reviewer's reason was already persisted by the workflow service
+    (`apply_reviewer_decision`) as a ``ValidationEvent`` with
+    ``event_type='reviewer_decision'`` and ``actor_type='reviewer'``.
+    Looking it up here gives the provider portal a stable "reviewer's
+    note" string without inventing a new column. Returns None when no
+    reviewer decision exists yet (typical for fresh uploads).
     """
-    expected_norm = _normalize(expected_name)
-    period_year = ""
-    if period_label:
-        digits = "".join(c for c in period_label if c.isdigit() or c in "-/ ")
-        period_year = digits.strip()
-    candidates: list[tuple[int, Submission]] = []
-    for sub in submissions:
-        inst_code = sub.institution.code if sub.institution else ""
-        if inst_code != expected_institution:
-            continue
+    if not submission_id:
+        return None
+    event = db.scalar(
+        select(ValidationEvent)
+        .where(
+            ValidationEvent.submission_id == submission_id,
+            ValidationEvent.event_type == "reviewer_decision",
+        )
+        .order_by(ValidationEvent.created_at.desc())
+        .limit(1)
+    )
+    if event is None:
+        return None
+    msg = (event.message or "").strip()
+    return msg or None
 
-        # Canonical-code fast path. When both the catalog row and the stored
-        # submission carry canonical keys, that pair is the truth.
-        if requirement_code and getattr(sub, "requirement_code", None) == requirement_code:
-            if period_key is None or getattr(sub, "period_key", None) == period_key:
-                candidates.append((200, sub))
-                continue
 
-        req_name = sub.requirement.name if sub.requirement else ""
-        name_score = 0
-        if _normalize(req_name) == expected_norm:
-            name_score = 100
-        elif expected_norm in _normalize(req_name) or _normalize(req_name) in expected_norm:
-            name_score = 60
-        if name_score == 0:
-            continue
-        period_score = 0
-        if period_key and getattr(sub, "period_key", None) == period_key:
-            period_score = 50
-        elif period_year and sub.period and sub.period.code:
-            if period_year[:4] and period_year[:4] in sub.period.code:
-                period_score = 10
-        candidates.append((name_score + period_score, sub))
-    candidates.sort(key=lambda x: x[0], reverse=True)
-    return candidates[0][1] if candidates else None
+def _calendar_deadline_iso(year: int, due_month: int, due_day: int) -> str:
+    """Compute the conventional REPSE deadline as an ISO date string.
+
+    Conventional day-17 cutoff for monthly / bimestral / cuatrimestral
+    slots (mirrors the legacy frontend adapter). The SAT annual slot
+    carries an explicit ``due_day=30`` in the catalog.
+    """
+    return f"{year:04d}-{due_month:02d}-{due_day:02d}"
+
+
+def _calendar_upload_href(*, year: int, code: str, period_key: str) -> str:
+    """Build the canonical upload URL for a calendar item.
+
+    Keeps the frontend stable: every calendar entry can offer a
+    "Subir" link without inventing a URL convention per surface.
+    """
+    return (
+        f"/portal/upload?requirement_code={code}"
+        f"&period_key={period_key}"
+        f"&period_label={year}-{period_key.split('-', 1)[-1] if '-' in period_key else period_key}"
+    )
+
+
+# Phase 4 — the legacy ``_match_submission`` fuzzy matcher was removed
+# after onboarding and calendar adopted ``evidence_slots``. Canonical
+# ``(requirement_code, period_key)`` matching now happens inside the
+# slot service, which is also lineage-aware (a superseded prior never
+# wins over its replacement). If a future surface needs a fuzzy fallback
+# again, prefer extending ``evidence_slots`` over re-introducing
+# name-based heuristics.
 
 
 def _load_workspace(db: Session, workspace_id: str, access_token: str) -> ProviderWorkspace:
@@ -650,46 +764,53 @@ def get_workspace_onboarding(
     db: DbSession,
     workspace: Annotated[ProviderWorkspace, Depends(current_portal_workspace)],
 ) -> dict:
-    _ = workspace_id  # tenant guard already enforced by dependency
-    subs = _workspace_submissions(db, workspace)
-    expediente = expediente_for_persona(workspace.persona_type)  # type: ignore[arg-type]
+    """Workspace onboarding view (Phase 4 — consumes evidence_slots).
 
-    sections: dict[str, dict] = {}
-    received_required = 0
-    total_required = 0
-    # Pre-fetch document filenames for the matched submissions in one
-    # query so we can show the real PDF name on each card instead of
-    # the generic "PDF · documento oficial vigente" placeholder.
-    matched_submission_ids: list[str] = []
-    for req in expediente:
-        m = _match_submission(req.name, req.institution, subs, requirement_code=req.code)
-        if m is not None:
-            matched_submission_ids.append(m.id)
+    Tenant guard runs in ``current_portal_workspace``. Per-slot
+    "current submission" comes from ``build_workspace_onboarding_slots``,
+    which walks the replacement-lineage chain so a superseded rejection
+    never dominates a slot once the provider has uploaded a replacement.
+    Response shape is preserved exactly so the frontend's existing
+    onboarding page keeps working without changes.
+    """
+    _ = workspace_id  # tenant guard already enforced by dependency
+
+    slots = build_workspace_onboarding_slots(db, workspace)
+    slot_by_code: dict[str, SlotView] = {
+        view.slot_key.requirement_code: view
+        for view in slots
+        if view.slot_key.requirement_code is not None
+    }
+
+    # Pre-fetch document filenames for the "current" submissions only
+    # (one row per slot — superseded attempts are intentionally omitted).
+    current_ids = [
+        view.current_submission_id for view in slots if view.current_submission_id
+    ]
     filename_by_submission: dict[str, str] = {}
-    if matched_submission_ids:
+    if current_ids:
         rows = db.execute(
             select(Document.submission_id, Document.original_filename).where(
-                Document.submission_id.in_(matched_submission_ids)
+                Document.submission_id.in_(current_ids)
             )
         ).all()
-        # If a submission has multiple documents the latest insertion wins
-        # — correct enough for the card label, since the provider sees
-        # whichever file is currently attached.
+        # If a submission has multiple documents the latest insertion
+        # wins — correct enough for the card label.
         for sub_id, fname in rows:
             filename_by_submission[sub_id] = fname
 
+    expediente = expediente_for_persona(workspace.persona_type)  # type: ignore[arg-type]
+    sections: dict[str, dict] = {}
+    received_required = 0
+    total_required = 0
     for req in expediente:
-        match = _match_submission(
-            req.name,
-            req.institution,
-            subs,
-            requirement_code=req.code,
-        )
+        view = slot_by_code.get(req.code)
         section = sections.setdefault(
             req.section,
             {"section": req.section, "items": [], "received": 0, "required": 0},
         )
-        item_status = match.status if match else "pendiente"
+        item_status = view.current_status if (view and view.current_status) else "pendiente"
+        current_submission_id = view.current_submission_id if view else None
         item = {
             "code": req.code,
             "name": req.name,
@@ -697,17 +818,28 @@ def get_workspace_onboarding(
             "required": req.required,
             "note": req.note,
             "status": item_status,
-            "submission_id": match.id if match else None,
-            "submitted_at": match.created_at.isoformat() if match else None,
+            "submission_id": current_submission_id,
+            "submitted_at": view.submitted_at_iso if view else None,
             "filename": (
-                filename_by_submission.get(match.id) if match is not None else None
+                filename_by_submission.get(current_submission_id)
+                if current_submission_id
+                else None
             ),
+            # Phase 5 — UX enrichment that used to live in the frontend
+            # mock. The why/format strings are static catalog data; the
+            # next_action + reviewer_note vary with slot state so they
+            # are computed against the current submission (lineage-aware
+            # by way of the slot view).
+            "why": onboarding_why(req),
+            "format": onboarding_format(req),
+            "next_action": _onboarding_next_action(item_status, req.required),
+            "reviewer_note": _latest_reviewer_note(db, current_submission_id),
         }
         section["items"].append(item)
         if req.required:
             section["required"] += 1
             total_required += 1
-            if match is not None:
+            if current_submission_id is not None:
                 section["received"] += 1
                 received_required += 1
 
@@ -740,28 +872,38 @@ def get_workspace_calendar(
     workspace: Annotated[ProviderWorkspace, Depends(current_portal_workspace)],
     year: int = 2026,
 ) -> dict:
-    _ = workspace_id  # tenant guard already enforced by dependency
-    subs = _workspace_submissions(db, workspace)
-    recurring = recurring_for_year(year, workspace.persona_type)  # type: ignore[arg-type]
+    """Workspace calendar view (Phase 4 — consumes evidence_slots).
 
+    Same tenant guard + same response shape as before. The leaf-of-the-
+    lineage-chain selection now lives in
+    ``build_workspace_calendar_slots`` so a rejected/clarification
+    submission that has been replaced no longer counts as the current
+    submission for its slot.
+    """
+    _ = workspace_id  # tenant guard already enforced by dependency
+
+    slots = build_workspace_calendar_slots(db, workspace, year)
+    slot_by_key: dict[tuple[str | None, str | None], SlotView] = {
+        (view.slot_key.requirement_code, view.slot_key.period_key): view
+        for view in slots
+    }
+
+    recurring = recurring_for_year(year, workspace.persona_type)  # type: ignore[arg-type]
     months: dict[int, dict] = {
-        m: {"month": m, "institutions": {}, "received": 0, "expected": 0} for m in range(1, 13)
+        m: {"month": m, "institutions": {}, "received": 0, "expected": 0}
+        for m in range(1, 13)
     }
     for req in recurring:
-        match = _match_submission(
-            req.name,
-            req.institution,
-            subs,
-            period_label=req.period_label,
-            requirement_code=req.code,
-            period_key=req.period_key,
-        )
+        view = slot_by_key.get((req.code, req.period_key))
         bucket = months[req.due_month]["institutions"]
         inst = bucket.setdefault(
             req.institution,
             {"institution": req.institution, "items": [], "received": 0, "expected": 0},
         )
-        item_status = match.status if match else "pendiente"
+        item_status = view.current_status if (view and view.current_status) else "pendiente"
+        # Phase 5 — UX enrichment that used to live in the calendar mock.
+        deadline_iso = _calendar_deadline_iso(year, req.due_month, req.due_day)
+        href = _calendar_upload_href(year=year, code=req.code, period_key=req.period_key)
         inst["items"].append(
             {
                 "code": req.code,
@@ -770,12 +912,17 @@ def get_workspace_calendar(
                 "period_label": req.period_label,
                 "period_key": req.period_key,
                 "status": item_status,
-                "submission_id": match.id if match else None,
+                "submission_id": view.current_submission_id if view else None,
+                "required_document": recurring_required_document(req),
+                "due_month": req.due_month,
+                "deadline_iso": deadline_iso,
+                "suggested_action": _calendar_suggested_action(item_status),
+                "href": href,
             }
         )
         inst["expected"] += 1
         months[req.due_month]["expected"] += 1
-        if match is not None:
+        if view and view.current_submission_id is not None:
             inst["received"] += 1
             months[req.due_month]["received"] += 1
 
@@ -878,6 +1025,15 @@ class SubmissionDetailResponse(BaseModel):
     suggested_action: Literal[
         "reupload", "wait_for_review", "no_action", "verify_and_reupload"
     ]
+    # Phase 4 — replacement lineage pointers. Provider UI uses these to
+    # link "Reemplaza intento anterior" / "Reemplazado por intento más
+    # reciente" affordances. Both may be ``None``.
+    #   * ``supersedes_submission_id`` — set when this submission was
+    #     filed as an explicit replacement for a prior submission.
+    #   * ``superseded_by_submission_id`` — set when a later submission
+    #     declared this one as the prior it replaces.
+    supersedes_submission_id: str | None = None
+    superseded_by_submission_id: str | None = None
 
 
 # Statuses that mean "you, the provider, must act now."
@@ -1021,6 +1177,20 @@ def get_workspace_submission(
                 )
             )
 
+    # Phase 4 — reverse-lineage lookup. The forward pointer
+    # (``supersedes_submission_id``) is on the row itself. The reverse
+    # ("what replaced me?") is a single targeted query.
+    superseded_by_id: str | None = None
+    if submission.status is not None:
+        replacement = db.scalar(
+            select(Submission.id).where(
+                Submission.supersedes_submission_id == submission.id,
+                Submission.client_id == workspace.client_id,
+                Submission.vendor_id == workspace.vendor_id,
+            )
+        )
+        superseded_by_id = replacement
+
     return SubmissionDetailResponse(
         submission_id=submission.id,
         workspace_id=workspace.id,
@@ -1028,6 +1198,8 @@ def get_workspace_submission(
         load_type=submission.load_type,
         submitted_at=submission.created_at.isoformat(),
         comments=submission.comments,
+        supersedes_submission_id=submission.supersedes_submission_id,
+        superseded_by_submission_id=superseded_by_id,
         requirement=SubmissionRequirementSummary(
             code=submission.requirement.code if submission.requirement else None,
             name=submission.requirement.name if submission.requirement else None,
@@ -1141,4 +1313,789 @@ def check_workspace_duplicate(
         requirement_name=sub.requirement.name if sub.requirement else None,
         period_label=sub.period.code if sub.period else None,
         filename=doc.original_filename,
+    )
+
+
+# ---------------------------------------------------------------------------
+# Workspace-scoped provider upload (Phase 1 — tenant-safe intake)
+# ---------------------------------------------------------------------------
+
+
+_VALID_DOCUMENT_STATUSES = frozenset(item["code"] for item in DOCUMENT_STATUSES)
+_VALID_LOAD_TYPES = frozenset(item["code"] for item in LOAD_TYPES)
+_VALID_INSTITUTION_CODES = frozenset(item["code"] for item in INSTITUTIONS)
+
+
+# Statuses a prior submission must be in for a provider to replace it.
+# Anything else is either still in flight (``recibido`` / ``pendiente_revision``
+# / ``prevalidado``), already approved (``aprobado``), or otherwise
+# closed (``excepcion_legal`` / ``no_aplica``). The provider does not get
+# to bypass those by uploading a "replacement."
+_REPLACEMENT_ELIGIBLE_STATUSES: frozenset[str] = frozenset(
+    {
+        DocumentStatus.RECHAZADO.value,
+        DocumentStatus.REQUIERE_ACLARACION.value,
+        DocumentStatus.POSIBLE_MISMATCH.value,
+        DocumentStatus.VENCIDO.value,
+    }
+)
+
+
+def _resolve_supersedes_submission(
+    db: Session,
+    *,
+    workspace: ProviderWorkspace,
+    prior_id: str | None,
+    new_requirement_code: str | None,
+    new_period_key: str | None,
+) -> Submission | None:
+    """Validate a caller-supplied ``supersedes_submission_id`` (or return None).
+
+    Phase 3 contract:
+
+    * ``404`` if the prior id does not exist, or exists but belongs to a
+      different client/vendor (workspace tenant guard — never confirm
+      cross-tenant existence).
+    * ``409`` if the prior is not in a replacement-eligible status
+      (``rechazado`` / ``requiere_aclaracion`` / ``posible_mismatch`` /
+      ``vencido``).
+    * ``409`` if both submissions carry canonical slot keys
+      (``requirement_code`` / ``period_key``) and any of them mismatch.
+      Legacy rows without canonical keys skip the slot check rather than
+      blocking the upload — they are tracked through their existing
+      requirement/period FKs.
+
+    No auto-linking: when ``prior_id`` is empty / None this function
+    returns None and the new submission stands alone.
+    """
+    if not prior_id:
+        return None
+
+    prior = db.get(Submission, prior_id)
+    if prior is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Submission previa no encontrada para este workspace.",
+        )
+    if prior.client_id != workspace.client_id or prior.vendor_id != workspace.vendor_id:
+        # Never reveal that the row exists in another tenant.
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Submission previa no encontrada para este workspace.",
+        )
+
+    if prior.status not in _REPLACEMENT_ELIGIBLE_STATUSES:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail=(
+                f"La submission previa no puede reemplazarse desde el estado "
+                f"'{prior.status}'."
+            ),
+        )
+
+    # Canonical slot check. When both sides carry both keys, they MUST
+    # match — otherwise the provider would be using a rejection from one
+    # obligation to absolve a different one. When the prior is a legacy
+    # row without canonical keys we skip the check (no way to compare
+    # safely) and trust the explicit referencing.
+    if (
+        new_requirement_code
+        and prior.requirement_code
+        and new_requirement_code != prior.requirement_code
+    ):
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail=(
+                "El nuevo documento corresponde a un requirement_code distinto "
+                "del que se intenta reemplazar."
+            ),
+        )
+    if (
+        new_period_key
+        and prior.period_key
+        and new_period_key != prior.period_key
+    ):
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail=(
+                "El nuevo documento corresponde a un period_key distinto del "
+                "que se intenta reemplazar."
+            ),
+        )
+
+    return prior
+
+
+@router.post(
+    "/workspaces/{workspace_id}/submissions",
+    response_model=SubmissionResponse,
+    status_code=status.HTTP_202_ACCEPTED,
+    tags=["submissions"],
+    summary="Workspace-scoped provider upload",
+    description=(
+        "Tenant-safe replacement for the legacy `POST /api/v1/submissions`. "
+        "Identity (client, vendor, contract) is derived from the authenticated "
+        "`ProviderWorkspace`. Browser-posted client / vendor / RFC / contract "
+        "fields are NOT accepted and have no effect — a spoofed form cannot "
+        "redirect the submission to another tenant."
+    ),
+)
+async def create_workspace_submission(
+    workspace_id: str,
+    file: Annotated[UploadFile, File()],
+    period_code: Annotated[str, Form(min_length=4)],
+    load_type: Annotated[str, Form()],
+    institution_code: Annotated[str, Form()],
+    requirement_name: Annotated[str, Form(min_length=2)],
+    db: DbSession,
+    workspace: Annotated[ProviderWorkspace, Depends(current_portal_workspace)],
+    comments: Annotated[str | None, Form()] = None,
+    initial_status: Annotated[str, Form()] = DocumentStatus.PENDIENTE_REVISION.value,
+    requirement_code: Annotated[str | None, Form()] = None,
+    period_key: Annotated[str | None, Form()] = None,
+    supersedes_submission_id: Annotated[str | None, Form()] = None,
+) -> SubmissionResponse:
+    """Create a submission scoped to the authenticated provider workspace.
+
+    Tenant guard runs in ``current_portal_workspace``:
+      * Authorization: Bearer JWT (primary, cross-origin-safe path).
+      * Portal session cookie.
+      * Legacy ``X-Workspace-Token`` header (transition aid).
+
+    Returns 401 when no valid session is presented, 403 when the
+    session does not own the path's ``workspace_id``, 404 when the
+    workspace does not exist.
+
+    Tenant identity (client / vendor / contract) is read from the
+    workspace row — NOT from form fields. The endpoint deliberately
+    does not declare `client_name`, `vendor_name`, `vendor_rfc`, or
+    `contract_reference` so a spoofed form body has no effect: FastAPI
+    drops undeclared fields silently and the submission still binds to
+    `workspace.client_id` / `workspace.vendor_id`.
+    """
+    _ = workspace_id  # tenant guard already enforced by dependency
+
+    assert_pdf_upload(file)
+
+    if initial_status != DocumentStatus.PENDIENTE_REVISION:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+            detail="La carga inicial debe comenzar en pendiente_revision.",
+        )
+    if initial_status not in _VALID_DOCUMENT_STATUSES:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+            detail="Estado inválido.",
+        )
+    if load_type not in _VALID_LOAD_TYPES:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+            detail="Tipo de carga inválido.",
+        )
+    if institution_code not in _VALID_INSTITUTION_CODES:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+            detail="Institución inválida.",
+        )
+
+    # Phase 3 — replacement lineage. Resolve + validate the prior
+    # submission BEFORE persisting any of the new upload's side
+    # effects (storage write, DB rows). A bogus reference must reject
+    # the request without leaving an orphaned PDF on disk.
+    supersedes_submission = _resolve_supersedes_submission(
+        db,
+        workspace=workspace,
+        prior_id=(supersedes_submission_id or "").strip() or None,
+        new_requirement_code=(requirement_code or "").strip() or None,
+        new_period_key=(period_key or "").strip() or None,
+    )
+
+    storage = get_storage_service()
+    try:
+        stored_file = await storage.save_upload(file)
+    except ValueError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)
+        ) from exc
+
+    try:
+        # Tenant identity is authoritative here — derived from the
+        # ProviderWorkspace tied to the authenticated session. Browser
+        # cannot influence these values.
+        client = workspace.client
+        vendor = workspace.vendor
+        contract = workspace.contract
+
+        institution = get_or_create_institution(db, institution_code)
+        resolved_requirement = resolve_requirement(
+            db,
+            requirement_code=(requirement_code or "").strip() or None,
+            requirement_name=requirement_name.strip(),
+            institution_id=institution.id,
+            institution_code=institution.code,
+            load_type=load_type,
+        )
+        resolved_period = resolve_period(
+            db,
+            period_key=(period_key or "").strip() or None,
+            period_code=period_code.strip(),
+            load_type=load_type,
+        )
+
+        return finalize_intake_submission(
+            db,
+            stored_file=stored_file,
+            client=client,
+            vendor=vendor,
+            contract=contract,
+            institution=institution,
+            resolved_requirement=resolved_requirement,
+            resolved_period=resolved_period,
+            load_type=load_type,
+            period_code=period_code.strip(),
+            comments=comments,
+            submitted_by=f"workspace:{workspace.id}",
+            intake_source=INTAKE_SOURCE_WORKSPACE_PORTAL,
+            extra_audit_metadata={"workspace_id": workspace.id},
+            supersedes_submission=supersedes_submission,
+        )
+    except SQLAlchemyError as exc:
+        db.rollback()
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="No fue posible registrar la carga documental.",
+        ) from exc
+
+
+# ---------------------------------------------------------------------------
+# Provider dashboard (Phase 4 — backend-owned read model)
+# ---------------------------------------------------------------------------
+
+
+class DashboardOnboardingSummary(BaseModel):
+    total_required: int
+    completed: int
+    in_review: int
+    needs_action: int
+    optional_pending: int
+    completion_pct: int
+    is_gate_satisfied: bool
+
+
+class DashboardDocumentStateCounts(BaseModel):
+    approved: int
+    in_review: int
+    uploaded: int
+    pending: int
+    needs_review: int
+    rejected: int
+    expired: int
+    exception: int
+
+
+class DashboardSemaphore(BaseModel):
+    level: Literal["green", "yellow", "red"]
+    label: str
+    reason: str
+    compliance_pct: int
+    total_tracked: int
+    on_track: int
+
+
+class DashboardSuggestedAction(BaseModel):
+    id: str
+    type: Literal["complete_onboarding", "reupload", "verify_mismatch", "clarify", "upcoming"]
+    title: str
+    body: str
+    priority: Literal["low", "medium", "high"]
+    href: str
+    requirement_code: str | None = None
+    period_key: str | None = None
+
+
+class DashboardAttentionItem(BaseModel):
+    id: str
+    title: str
+    institution: str
+    state: str
+    due_in_days: int | None = None
+    href: str
+
+
+class DashboardUpcomingDeadline(BaseModel):
+    id: str
+    title: str
+    institution: str
+    period_key: str | None
+    due_month: int
+    state: str
+    href: str
+
+
+class DashboardResponse(BaseModel):
+    workspace_id: str
+    persona_type: str
+    onboarding_summary: DashboardOnboardingSummary
+    document_state_counts: DashboardDocumentStateCounts
+    semaphore: DashboardSemaphore
+    suggested_actions: list[DashboardSuggestedAction]
+    attention_today: list[DashboardAttentionItem]
+    upcoming_deadlines: list[DashboardUpcomingDeadline]
+
+
+# ``SlotState`` values that mean "the provider must act now."
+_ACTIONABLE_SLOT_STATES: frozenset[SlotState] = frozenset(
+    {SlotState.REJECTED, SlotState.NEEDS_CORRECTION, SlotState.POSSIBLE_MISMATCH}
+)
+
+# ``SlotState`` values that count as "resolved / no action needed."
+_RESOLVED_SLOT_STATES: frozenset[SlotState] = frozenset(
+    {SlotState.APPROVED, SlotState.EXCEPTION, SlotState.NOT_APPLICABLE}
+)
+
+
+def _empty_document_counts() -> DashboardDocumentStateCounts:
+    return DashboardDocumentStateCounts(
+        approved=0,
+        in_review=0,
+        uploaded=0,
+        pending=0,
+        needs_review=0,
+        rejected=0,
+        expired=0,
+        exception=0,
+    )
+
+
+def _bucket_document_state(
+    counts: DashboardDocumentStateCounts, state: SlotState
+) -> None:
+    """Bump the count bucket for a slot's coarse state.
+
+    ``MISSING`` → pending. ``NEEDS_CORRECTION`` and ``POSSIBLE_MISMATCH``
+    → needs_review (matches the UI bucket the frontend already uses).
+    ``NOT_APPLICABLE`` is intentionally not counted as a document
+    (the slot has no document at all).
+    """
+    if state is SlotState.APPROVED:
+        counts.approved += 1
+    elif state is SlotState.IN_REVIEW:
+        counts.in_review += 1
+    elif state is SlotState.UPLOADED:
+        counts.uploaded += 1
+    elif state is SlotState.MISSING:
+        counts.pending += 1
+    elif state in (SlotState.NEEDS_CORRECTION, SlotState.POSSIBLE_MISMATCH):
+        counts.needs_review += 1
+    elif state is SlotState.REJECTED:
+        counts.rejected += 1
+    elif state is SlotState.EXPIRED:
+        counts.expired += 1
+    elif state is SlotState.EXCEPTION:
+        counts.exception += 1
+    # NOT_APPLICABLE: skip — no document is expected.
+
+
+def _compute_onboarding_summary(
+    slots: list[SlotView], workspace: ProviderWorkspace
+) -> DashboardOnboardingSummary:
+    required_views = [view for view in slots if view.required]
+    total_required = len(required_views)
+    completed = sum(
+        1 for view in required_views if view.state in _RESOLVED_SLOT_STATES
+    )
+    in_review = sum(
+        1 for view in required_views if view.state in (SlotState.IN_REVIEW, SlotState.UPLOADED)
+    )
+    _NEEDS_ACTION_STATES = _ACTIONABLE_SLOT_STATES | {SlotState.MISSING, SlotState.EXPIRED}
+    needs_action = sum(
+        1 for view in required_views if view.state in _NEEDS_ACTION_STATES
+    )
+    optional_pending = sum(
+        1
+        for view in slots
+        if not view.required and view.state is not SlotState.APPROVED
+    )
+    completion_pct = (
+        100
+        if total_required == 0
+        else round(((completed + in_review) / total_required) * 100)
+    )
+    # The onboarding gate flips once the provider has either explicitly
+    # completed onboarding (workspace.onboarding_completed_at set) or
+    # left zero required slots needing action. Mirrors the frontend's
+    # gate logic.
+    is_gate_satisfied = (
+        workspace.onboarding_completed_at is not None or needs_action == 0
+    )
+    return DashboardOnboardingSummary(
+        total_required=total_required,
+        completed=completed,
+        in_review=in_review,
+        needs_action=needs_action,
+        optional_pending=optional_pending,
+        completion_pct=completion_pct,
+        is_gate_satisfied=is_gate_satisfied,
+    )
+
+
+def _compute_semaphore(
+    onboarding_slots: list[SlotView], calendar_slots: list[SlotView]
+) -> DashboardSemaphore:
+    required = [s for s in onboarding_slots if s.required] + [
+        s for s in calendar_slots if s.required
+    ]
+    total_tracked = len(required)
+    on_track = sum(1 for s in required if s.state in _RESOLVED_SLOT_STATES)
+    compliance_pct = (
+        100 if total_tracked == 0 else round(on_track / total_tracked * 100)
+    )
+    has_blocking = any(s.state in _ACTIONABLE_SLOT_STATES for s in required)
+    has_pending = any(
+        s.state in (SlotState.MISSING, SlotState.IN_REVIEW, SlotState.UPLOADED, SlotState.EXPIRED)
+        for s in required
+    )
+    if has_blocking:
+        level: Literal["green", "yellow", "red"] = "red"
+        label = "Rojo · obligaciones críticas"
+        reason = (
+            "Hay documentos rechazados o con observaciones que necesitas atender "
+            "antes de seguir avanzando."
+        )
+    elif has_pending:
+        level = "yellow"
+        label = "Amarillo · puntos por atender"
+        reason = (
+            "Tu expediente está en marcha, pero todavía quedan documentos por "
+            "subir o por revisar."
+        )
+    else:
+        level = "green"
+        label = "Verde · al día"
+        reason = "Todas tus obligaciones obligatorias están aprobadas."
+    return DashboardSemaphore(
+        level=level,
+        label=label,
+        reason=reason,
+        compliance_pct=compliance_pct,
+        total_tracked=total_tracked,
+        on_track=on_track,
+    )
+
+
+def _onboarding_reupload_href(view: SlotView) -> str:
+    parts = [f"requirement_code={view.requirement_code}"]
+    if view.current_submission_id and view.state in _ACTIONABLE_SLOT_STATES:
+        parts.append(f"replaces={view.current_submission_id}")
+    parts.append("from=onboarding")
+    return "/portal/upload?" + "&".join(parts)
+
+
+def _calendar_reupload_href(view: SlotView) -> str:
+    parts: list[str] = []
+    if view.requirement_code:
+        parts.append(f"requirement_code={view.requirement_code}")
+    if view.period_key:
+        parts.append(f"period_key={view.period_key}")
+        parts.append(f"period_label={view.period_key}")
+    if view.current_submission_id and view.state in _ACTIONABLE_SLOT_STATES:
+        parts.append(f"replaces={view.current_submission_id}")
+    qs = "&".join(parts)
+    return f"/portal/upload?{qs}" if qs else "/portal/upload"
+
+
+def _compute_suggested_actions(
+    onboarding_slots: list[SlotView],
+    calendar_slots: list[SlotView],
+    today: date,
+) -> list[DashboardSuggestedAction]:
+    actions: list[DashboardSuggestedAction] = []
+    # 1. Rejected / clarification / mismatch — high priority.
+    for view in onboarding_slots + calendar_slots:
+        if not view.required:
+            continue
+        if view.state not in _ACTIONABLE_SLOT_STATES:
+            continue
+        is_onboarding = view.slot_key.period_key is None
+        actions.append(
+            DashboardSuggestedAction(
+                id=f"act-{view.requirement_code}-{view.period_key or 'onb'}",
+                type=(
+                    "verify_mismatch"
+                    if view.state is SlotState.POSSIBLE_MISMATCH
+                    else "clarify"
+                    if view.state is SlotState.NEEDS_CORRECTION
+                    else "reupload"
+                ),
+                title=_action_title_for_state(view),
+                body=_action_body_for_state(view),
+                priority="high",
+                href=(
+                    _onboarding_reupload_href(view)
+                    if is_onboarding
+                    else _calendar_reupload_href(view)
+                ),
+                requirement_code=view.requirement_code,
+                period_key=view.period_key,
+            )
+        )
+    # 2. Missing required onboarding slots — medium priority.
+    for view in onboarding_slots:
+        if not view.required or view.state is not SlotState.MISSING:
+            continue
+        actions.append(
+            DashboardSuggestedAction(
+                id=f"act-{view.requirement_code}-missing",
+                type="complete_onboarding",
+                title=f"Sube tu documento: {view.requirement_name}",
+                body=(
+                    "Este documento es obligatorio para terminar tu expediente "
+                    "inicial."
+                ),
+                priority="medium",
+                href=_onboarding_reupload_href(view),
+                requirement_code=view.requirement_code,
+                period_key=None,
+            )
+        )
+    # 3. Calendar slots due within 14 days — low/medium depending on urgency.
+    for view in calendar_slots:
+        if not view.required or view.state is not SlotState.MISSING:
+            continue
+        due_in = _due_in_days_for_period(view.period_key, today)
+        if due_in is None or due_in < 0 or due_in > 14:
+            continue
+        actions.append(
+            DashboardSuggestedAction(
+                id=f"act-{view.requirement_code}-{view.period_key}-upcoming",
+                type="upcoming",
+                title=f"Próximo vencimiento: {view.requirement_name}",
+                body=(
+                    f"Tienes {due_in} día(s) para subir este documento del "
+                    f"periodo {view.period_key}."
+                ),
+                priority="medium" if due_in <= 5 else "low",
+                href=_calendar_reupload_href(view),
+                requirement_code=view.requirement_code,
+                period_key=view.period_key,
+            )
+        )
+    return actions[:5]
+
+
+def _action_title_for_state(view: SlotView) -> str:
+    if view.state is SlotState.REJECTED:
+        return f"Corrige el documento rechazado: {view.requirement_name}"
+    if view.state is SlotState.NEEDS_CORRECTION:
+        return f"Aclara el documento: {view.requirement_name}"
+    if view.state is SlotState.POSSIBLE_MISMATCH:
+        return f"Verifica el documento: {view.requirement_name}"
+    return view.requirement_name or "Acción requerida"
+
+
+def _action_body_for_state(view: SlotView) -> str:
+    if view.state is SlotState.REJECTED:
+        return (
+            "El revisor rechazó esta entrega. Vuelve a cargar una versión "
+            "corregida; CheckWise enlazará la nueva carga con la anterior."
+        )
+    if view.state is SlotState.NEEDS_CORRECTION:
+        return (
+            "El revisor pidió una aclaración. Sube una nueva versión o "
+            "responde la observación."
+        )
+    if view.state is SlotState.POSSIBLE_MISMATCH:
+        return (
+            "Las señales automáticas detectaron una posible inconsistencia. "
+            "Verifica el archivo y vuelve a cargar si fue equivocado."
+        )
+    return ""
+
+
+def _due_in_days_for_period(period_key: str | None, today: date) -> int | None:
+    """Estimate days-to-deadline from a canonical period_key.
+
+    The catalog encodes deadlines as "due in month X of year Y" with a
+    conventional 17th-of-month cutoff (mirroring the legacy frontend
+    adapter). We can't recover the exact `due_month` from the slot
+    view, so we use the period_key's own month/year as a conservative
+    proxy: the document is due in the same period it covers, give or
+    take a few weeks. Returns None if the key isn't parseable.
+    """
+    if not period_key:
+        return None
+    try:
+        year = int(period_key[:4])
+    except ValueError:
+        return None
+    month: int | None = None
+    if "-M" in period_key:
+        try:
+            month = int(period_key.split("-M", 1)[1])
+        except ValueError:
+            month = None
+    elif "-B" in period_key:
+        try:
+            bm = int(period_key.split("-B", 1)[1])
+        except ValueError:
+            bm = None
+        if bm is not None:
+            month = bm * 2
+    elif "-Q" in period_key:
+        try:
+            q = int(period_key.split("-Q", 1)[1])
+        except ValueError:
+            q = None
+        if q is not None:
+            month = q * 4
+    elif period_key.endswith("-A"):
+        month = 12
+    if month is None or not 1 <= month <= 12:
+        return None
+    try:
+        deadline = date(year, month, 17)
+    except ValueError:
+        return None
+    return (deadline - today).days
+
+
+def _compute_attention_today(
+    onboarding_slots: list[SlotView],
+    calendar_slots: list[SlotView],
+    today: date,
+) -> list[DashboardAttentionItem]:
+    items: list[DashboardAttentionItem] = []
+    # Required slots needing action — always surface, regardless of date.
+    for view in onboarding_slots + calendar_slots:
+        if not view.required:
+            continue
+        if view.state not in _ACTIONABLE_SLOT_STATES and view.state is not SlotState.EXPIRED:
+            continue
+        is_onboarding = view.slot_key.period_key is None
+        href = (
+            _onboarding_reupload_href(view)
+            if is_onboarding
+            else _calendar_reupload_href(view)
+        )
+        items.append(
+            DashboardAttentionItem(
+                id=f"att-{view.requirement_code}-{view.period_key or 'onb'}",
+                title=view.requirement_name or view.requirement_code or "Obligación",
+                institution=view.institution or "—",
+                state=view.state.value,
+                due_in_days=_due_in_days_for_period(view.period_key, today),
+                href=href,
+            )
+        )
+    # Calendar slots due within 14 days that are still MISSING/in-review.
+    for view in calendar_slots:
+        if not view.required:
+            continue
+        if view.state in _ACTIONABLE_SLOT_STATES or view.state is SlotState.EXPIRED:
+            continue  # already added above
+        if view.state in (SlotState.APPROVED, SlotState.EXCEPTION, SlotState.NOT_APPLICABLE):
+            continue
+        due_in = _due_in_days_for_period(view.period_key, today)
+        if due_in is None or due_in < 0 or due_in > 14:
+            continue
+        items.append(
+            DashboardAttentionItem(
+                id=f"att-{view.requirement_code}-{view.period_key}",
+                title=view.requirement_name or view.requirement_code or "Obligación",
+                institution=view.institution or "—",
+                state=view.state.value,
+                due_in_days=due_in,
+                href=_calendar_reupload_href(view),
+            )
+        )
+    # Sort overdue first, then ascending by due_in_days, missing days at the end.
+    items.sort(
+        key=lambda i: (
+            i.due_in_days is None,
+            i.due_in_days if i.due_in_days is not None else 0,
+        )
+    )
+    return items[:10]
+
+
+def _compute_upcoming_deadlines(
+    calendar_slots: list[SlotView], today: date
+) -> list[DashboardUpcomingDeadline]:
+    rows: list[tuple[int, DashboardUpcomingDeadline]] = []
+    for view in calendar_slots:
+        if not view.required:
+            continue
+        if view.state in _RESOLVED_SLOT_STATES:
+            continue
+        due_in = _due_in_days_for_period(view.period_key, today)
+        if due_in is None or due_in < 0:
+            continue
+        # Parse the deadline's month for the response.
+        deadline_month = today.month
+        if view.period_key and "-M" in view.period_key:
+            try:
+                deadline_month = int(view.period_key.split("-M", 1)[1])
+            except ValueError:
+                deadline_month = today.month
+        rows.append(
+            (
+                due_in,
+                DashboardUpcomingDeadline(
+                    id=f"due-{view.requirement_code}-{view.period_key}",
+                    title=view.requirement_name or view.requirement_code or "Obligación",
+                    institution=view.institution or "—",
+                    period_key=view.period_key,
+                    due_month=deadline_month,
+                    state=view.state.value,
+                    href=_calendar_reupload_href(view),
+                ),
+            )
+        )
+    rows.sort(key=lambda r: r[0])
+    return [r[1] for r in rows[:5]]
+
+
+@router.get(
+    "/workspaces/{workspace_id}/dashboard",
+    response_model=DashboardResponse,
+    summary="Provider dashboard read model",
+    description=(
+        "Backend-owned dashboard aggregate. Composes evidence-slot state "
+        "(replacement-lineage aware) into the semaphore, document counts, "
+        "suggested actions, attention items, and upcoming deadlines. "
+        "Computed read-only — no persisted suggested_actions yet."
+    ),
+)
+def get_workspace_dashboard(
+    workspace_id: str,
+    db: DbSession,
+    workspace: Annotated[ProviderWorkspace, Depends(current_portal_workspace)],
+    year: int | None = None,
+) -> DashboardResponse:
+    """Provider dashboard composed from the canonical evidence-slot service."""
+    _ = workspace_id  # tenant guard already enforced by dependency
+    today = date.today()
+    target_year = year or today.year
+
+    onboarding_slots = build_workspace_onboarding_slots(db, workspace)
+    calendar_slots = build_workspace_calendar_slots(db, workspace, target_year)
+
+    # Document counts span every tracked slot (onboarding + calendar).
+    counts = _empty_document_counts()
+    for view in onboarding_slots + calendar_slots:
+        _bucket_document_state(counts, view.state)
+
+    return DashboardResponse(
+        workspace_id=workspace.id,
+        persona_type=workspace.persona_type,
+        onboarding_summary=_compute_onboarding_summary(onboarding_slots, workspace),
+        document_state_counts=counts,
+        semaphore=_compute_semaphore(onboarding_slots, calendar_slots),
+        suggested_actions=_compute_suggested_actions(
+            onboarding_slots, calendar_slots, today
+        ),
+        attention_today=_compute_attention_today(
+            onboarding_slots, calendar_slots, today
+        ),
+        upcoming_deadlines=_compute_upcoming_deadlines(calendar_slots, today),
     )

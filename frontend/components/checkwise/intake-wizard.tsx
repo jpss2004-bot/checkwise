@@ -30,7 +30,12 @@ import { Textarea } from "@/components/ui/textarea";
 import { ValidationSignal, ValidationSummary } from "@/components/checkwise/validation-summary";
 import { checkDuplicateBySha256, type DuplicateCheck } from "@/lib/api/portal";
 import { DocumentStatus } from "@/lib/constants/statuses";
-import { fetchCurrentSession, readPortalSession } from "@/lib/session/portal";
+import { readAdminSession } from "@/lib/session/admin";
+import {
+  fetchCurrentSession,
+  readPortalSession,
+  type PortalSession,
+} from "@/lib/session/portal";
 
 type SubmissionResponse = {
   submission_id: string;
@@ -146,10 +151,18 @@ export function IntakeWizard({
   prefill,
   lockedFields,
   successContinue,
+  supersedesSubmissionId,
 }: {
   prefill?: IntakeWizardPrefill;
   lockedFields?: IntakeLockedField[];
   successContinue?: IntakeSuccessContinue;
+  /** Phase 3 — when the wizard was opened via the "reupload" CTA on a
+   *  rejected / clarification / mismatch / expired submission, this
+   *  carries the id of the prior submission so the workspace POST can
+   *  include ``supersedes_submission_id``. Backend validates eligibility
+   *  + tenancy and writes the replacement audit trail. Ignored on the
+   *  legacy /api/v1/submissions path. */
+  supersedesSubmissionId?: string;
 } = {}) {
   const apiBaseUrl = useMemo(
     () => process.env.NEXT_PUBLIC_API_BASE_URL ?? "http://localhost:8000",
@@ -372,7 +385,6 @@ export function IntakeWizard({
     setResult(null);
     setError(null);
 
-    const body = new FormData();
     const normalizedForm: IntakeForm = {
       ...form,
       client_name: form.client_name.trim(),
@@ -382,14 +394,59 @@ export function IntakeWizard({
       period_code: form.period_code.trim(),
       comments: form.comments.trim(),
     };
-    Object.entries(normalizedForm).forEach(([key, value]) => body.set(key, value));
-    body.set("initial_status", DocumentStatus.PENDIENTE_REVISION);
-    body.set("file", file as File);
+
+    // Phase 1 — Tenant-safe upload. When the provider has an authenticated
+    // portal session we route through the workspace-scoped endpoint, which
+    // derives client/vendor/contract from the backend session and ignores
+    // any browser-posted identity. The legacy /api/v1/submissions path is
+    // kept for callers without a session (importer, dev workflows, demos
+    // that don't log in).
+    const session: PortalSession | null =
+      readPortalSession() ?? (await fetchCurrentSession());
+
+    const body = new FormData();
+    let endpoint: string;
+    if (session) {
+      endpoint = `${apiBaseUrl}/api/v1/portal/workspaces/${session.workspace_id}/submissions`;
+      body.set("period_code", normalizedForm.period_code);
+      body.set("period_key", normalizedForm.period_key);
+      body.set("load_type", normalizedForm.load_type);
+      body.set("institution_code", normalizedForm.institution_code);
+      body.set("requirement_name", normalizedForm.requirement_name);
+      body.set("requirement_code", normalizedForm.requirement_code);
+      body.set("comments", normalizedForm.comments);
+      body.set("initial_status", DocumentStatus.PENDIENTE_REVISION);
+      body.set("file", file as File);
+      // Phase 3 — replacement lineage. Only the workspace endpoint
+      // accepts this; the legacy /api/v1/submissions path silently
+      // ignores extra fields.
+      if (supersedesSubmissionId) {
+        body.set("supersedes_submission_id", supersedesSubmissionId);
+      }
+    } else {
+      endpoint = `${apiBaseUrl}/api/v1/submissions`;
+      Object.entries(normalizedForm).forEach(([key, value]) => body.set(key, value));
+      body.set("initial_status", DocumentStatus.PENDIENTE_REVISION);
+      body.set("file", file as File);
+    }
+
+    const headers = new Headers();
+    if (session) {
+      const adminSession = readAdminSession();
+      if (adminSession?.access_token) {
+        headers.set("Authorization", `Bearer ${adminSession.access_token}`);
+      }
+      if (session.access_token && session.access_token !== "cookie-managed") {
+        headers.set("X-Workspace-Token", session.access_token);
+      }
+    }
 
     try {
-      const response = await fetch(`${apiBaseUrl}/api/v1/submissions`, {
+      const response = await fetch(endpoint, {
         method: "POST",
         body,
+        headers,
+        credentials: session ? "include" : "same-origin",
       });
 
       if (!response.ok) {

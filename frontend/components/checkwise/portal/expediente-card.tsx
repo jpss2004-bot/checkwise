@@ -16,10 +16,34 @@ import {
 import { DocStateBadge } from "@/components/checkwise/doc-state-badge";
 import { Button } from "@/components/ui/button";
 import { Spinner } from "@/components/ui/spinner";
+import { statusToDocumentStateCode, type OnboardingItem } from "@/lib/api/portal";
+import type { DocumentStateCode } from "@/lib/types";
 import { cn } from "@/lib/utils";
-import type { ExpedienteRequirement } from "@/lib/mock/expediente";
 
-const INSTITUTION_ICON: Record<ExpedienteRequirement["institution"], Icon> = {
+/**
+ * The shape the card renders against. Phase 5 — fed directly by the
+ * backend's enriched ``OnboardingItem`` (no adapter, no frontend mock).
+ * Kept as an intermediate type so the page can plug in either a real
+ * backend item or, in the future, a reviewer-side variant without
+ * forking the component.
+ */
+export interface ExpedienteCardItem {
+  /** Stable id for React keys + upload routing. Derived from the
+   *  canonical requirement_code (lowercased) by the page. */
+  id: string;
+  requirement_code: string;
+  name: string;
+  institution: string;
+  why: string;
+  format: string;
+  state: DocumentStateCode;
+  next_action: string;
+  reviewer_note: string | null;
+  required: boolean;
+  filename: string | null;
+}
+
+const INSTITUTION_ICON: Record<string, Icon> = {
   sat: Scales,
   stps_repse: ShieldCheck,
   imss: Buildings,
@@ -27,7 +51,7 @@ const INSTITUTION_ICON: Record<ExpedienteRequirement["institution"], Icon> = {
   interno_cliente: Stamp,
 };
 
-const INSTITUTION_LABEL: Record<ExpedienteRequirement["institution"], string> = {
+const INSTITUTION_LABEL: Record<string, string> = {
   sat: "SAT",
   stps_repse: "STPS / REPSE",
   imss: "IMSS",
@@ -35,10 +59,33 @@ const INSTITUTION_LABEL: Record<ExpedienteRequirement["institution"], string> = 
   interno_cliente: "Interno / Cliente",
 };
 
+/**
+ * Build a card-ready view of a backend ``OnboardingItem``. Pure
+ * mapping — drives no fetches, no fallbacks. Page-level state lives
+ * in the page; this just normalises the field shape and id.
+ */
+export function expedienteCardItemFromOnboarding(
+  item: OnboardingItem,
+): ExpedienteCardItem {
+  return {
+    id: item.code.toLowerCase(),
+    requirement_code: item.code,
+    name: item.name,
+    institution: item.institution,
+    why: item.why,
+    format: item.format,
+    state: statusToDocumentStateCode(item.status),
+    next_action: item.next_action,
+    reviewer_note: item.reviewer_note,
+    required: item.required,
+    filename: item.filename,
+  };
+}
+
 interface ExpedienteCardProps {
-  requirement: ExpedienteRequirement;
-  /** Called when the user clicks the primary CTA. Receives the requirement id. */
-  onAction?: (req: ExpedienteRequirement) => void;
+  requirement: ExpedienteCardItem;
+  /** Called when the user clicks the primary CTA. Receives the card item. */
+  onAction?: (req: ExpedienteCardItem) => void;
 }
 
 /**
@@ -207,7 +254,7 @@ export function ExpedienteCard({ requirement, onAction }: ExpedienteCardProps) {
 }
 
 function toneForState(
-  state: ExpedienteRequirement["state"],
+  state: DocumentStateCode,
 ): "attention" | "rejected" | "approved" | "neutral" {
   if (state === "approved") return "approved";
   if (state === "rejected" || state === "expired") return "rejected";
@@ -215,7 +262,7 @@ function toneForState(
   return "neutral";
 }
 
-function ctaLabelForState(state: ExpedienteRequirement["state"]): string {
+function ctaLabelForState(state: DocumentStateCode): string {
   if (state === "rejected") return "Corregir y volver a subir";
   if (state === "expired") return "Subir versión vigente";
   if (state === "needs_review") return "Revisar y confirmar";

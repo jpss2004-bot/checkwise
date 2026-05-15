@@ -1,0 +1,398 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* ============================================================
+   CHECKWISE · DESIGN SYSTEM v0.2 · GLOBAL TOKENS
+   ============================================================
+
+   Architecture:
+     1) Primitive tokens   — raw HSL triplets, NEVER consumed by components
+     2) Semantic tokens    — meaning ("--text-primary", "--surface-raised")
+     3) Component tokens   — local, only created when a primitive needs them
+
+   Color rules (these are not suggestions):
+
+     ── NAVY ───────────────────────────────────────────────────
+     The brand primary. Structural use only:
+       · Primary buttons, primary links, focus rings
+       · Active nav items, brand wordmark "Check"
+       · Borders and text that need brand emphasis
+     Do not use navy for decorative accents.
+
+     ── TEAL ───────────────────────────────────────────────────
+     RESERVED for AI / intelligence states and the "Wise" half
+     of the wordmark. The presence of teal in the UI means:
+       "an AI did this" / "this is a confidence signal".
+
+     Banned uses of teal:
+       · Generic icons (calendar, clock, document)
+       · Hover tints
+       · Card or button accents that have nothing to do with AI
+       · Dividers, separators, chrome
+       · "Active" state coloring on anything that isn't AI-produced
+
+     If teal feels too quiet, the answer is navy. Not more teal.
+
+     ── INK / GRAY ─────────────────────────────────────────────
+     ~90% of the interface. Text, borders, surfaces, chrome.
+
+     ── STATUS (green/amber/red/blue) ──────────────────────────
+     Only inside Badge / Alert / status pill components — never
+     painted on chrome or surfaces directly.
+   ============================================================ */
+
+
+/* ┌─────────────────────────────────────────────────────────┐
+   │ 1. PRIMITIVE TOKENS                                     │
+   └─────────────────────────────────────────────────────────┘ */
+:root {
+  /* ─ Navy (brand structure) ───────────────────────────── */
+  --navy-50:   204 100%  97%;
+  --navy-100:  204  90%  92%;
+  --navy-200:  204  85%  82%;
+  --navy-300:  204  80%  68%;
+  --navy-400:  204  78%  52%;
+  --navy-500:  204  93%  38%;
+  --navy-600:  204  96%  28%;
+  --navy-700:  204  97%  21%;
+  --navy-800:  204  98%  17%;   /* #013557 — brand primary */
+  --navy-900:  204  99%  12%;
+  --navy-950:  204 100%   8%;
+
+  /* ─ Teal (AI / intelligence only) ────────────────────── */
+  --teal-50:   175  90%  96%;
+  --teal-100:  175  88%  88%;
+  --teal-200:  175  86%  74%;
+  --teal-300:  175  88%  60%;
+  --teal-400:  175  89%  50%;
+  --teal-500:  175  91%  40%;   /* #09c1b0 — brand teal */
+  --teal-600:  175  91%  34%;
+  --teal-700:  175  92%  27%;
+  --teal-800:  175  92%  20%;
+  --teal-900:  175  93%  14%;
+
+  /* ─ Gray (neutral chrome) ────────────────────────────── */
+  --gray-25:   210  20%  99%;
+  --gray-50:   210  20%  98%;
+  --gray-100:  210  18%  94%;
+  --gray-200:  214  18%  88%;
+  --gray-300:  214  16%  76%;
+  --gray-400:  215  14%  60%;
+  --gray-500:  215  14%  42%;
+  --gray-600:  215  16%  34%;
+  --gray-700:  215  18%  26%;
+  --gray-800:  220  20%  20%;
+  --gray-900:  222  24%  16%;
+  --gray-950:  222  28%  13%;
+
+  /* ─ Status primitives ────────────────────────────────── */
+  --green-50:  142  76%  95%;
+  --green-100: 142  70%  85%;
+  --green-500: 142  76%  36%;
+  --green-700: 142  80%  26%;
+
+  --amber-50:   38  90%  95%;
+  --amber-100:  38  85%  85%;
+  --amber-500:  38  92%  50%;
+  --amber-700:  38  90%  36%;
+
+  --red-50:     0  90%  96%;
+  --red-100:    0  80%  88%;
+  --red-500:    0  72%  45%;
+  --red-700:    0  76%  34%;
+
+  --blue-50:   214  80%  96%;
+  --blue-100:  214  70%  88%;
+  --blue-500:  214  89%  52%;
+  --blue-700:  214  89%  38%;
+
+  /* ─ Orange (document expired, confidence low) ────────── */
+  --orange-50:  30  80%  96%;
+  --orange-100: 30  70%  85%;
+  --orange-500: 24  91%  48%;
+  --orange-700: 24  91%  38%;
+}
+
+
+/* ┌─────────────────────────────────────────────────────────┐
+   │ 2. SEMANTIC TOKENS                                      │
+   │ These are what components reference.                    │
+   └─────────────────────────────────────────────────────────┘ */
+:root {
+  /* ─ Surfaces ─────────────────────────────────────────── */
+  --surface-page:         hsl(var(--gray-50));
+  --surface-raised:       hsl(0 0% 100%);
+  --surface-sunken:       hsl(var(--gray-100));
+  --surface-hover:        hsl(var(--gray-50));
+  --surface-selected:     hsl(var(--navy-50));
+  --surface-brand:        hsl(var(--navy-800));
+  --surface-brand-muted:  hsl(var(--navy-50));
+  --surface-ai-muted:     hsl(var(--teal-50));    /* AI-only — see rule above */
+  --surface-overlay:      hsl(0 0% 100%);
+
+  /* ─ Text ─────────────────────────────────────────────── */
+  --text-primary:         hsl(var(--gray-950));
+  --text-secondary:       hsl(var(--gray-500));
+  --text-tertiary:        hsl(var(--gray-400));
+  --text-disabled:        hsl(var(--gray-300));
+  --text-inverse:         hsl(0 0% 100%);
+  --text-link:            hsl(var(--navy-700));
+  --text-brand:           hsl(var(--navy-800));
+  --text-ai:              hsl(var(--teal-700));   /* AI-only */
+
+  /* ─ Borders ──────────────────────────────────────────── */
+  --border-subtle:        hsl(var(--gray-100));
+  --border-default:       hsl(var(--gray-200));
+  --border-strong:        hsl(var(--gray-300));
+  --border-focus:         hsl(var(--navy-500));
+  --border-brand:         hsl(var(--navy-800));
+  --border-error:         hsl(var(--red-500));
+  --border-success:       hsl(var(--green-500));
+  --border-ai:            hsl(var(--teal-500));   /* AI-only */
+
+  /* ─ Interactive ──────────────────────────────────────── */
+  --interactive-primary:        hsl(var(--navy-800));
+  --interactive-primary-hover:  hsl(var(--navy-700));
+  --interactive-primary-active: hsl(var(--navy-900));
+  --interactive-secondary:      hsl(0 0% 100%);
+  --interactive-secondary-hover:hsl(var(--gray-50));
+  --interactive-ghost-hover:    hsl(var(--gray-100));
+  --interactive-destructive:    hsl(var(--red-500));
+  --interactive-ai:             hsl(var(--teal-500));   /* AI-only */
+  --interactive-ai-hover:       hsl(var(--teal-600));
+
+  /* ─ shadcn/Tailwind bridge (back-compat names) ───────── */
+  --background:               var(--gray-50);
+  --foreground:               var(--gray-950);
+  --primary:                  var(--navy-800);
+  --primary-foreground:       0 0% 100%;
+  --secondary:                var(--gray-100);     /* secondary = surface, NOT teal */
+  --secondary-foreground:     var(--gray-950);
+  --muted:                    var(--gray-100);
+  --muted-foreground:         var(--gray-500);
+  --accent:                   var(--navy-50);
+  --accent-foreground:        var(--navy-800);
+  --destructive:              var(--red-500);
+  --destructive-foreground:   0 0% 100%;
+  --border:                   var(--gray-200);
+  --input:                    var(--gray-100);
+  --ring:                     var(--navy-500);
+  --card:                     0 0% 100%;
+  --card-foreground:          var(--gray-950);
+  --popover:                  0 0% 100%;
+  --popover-foreground:       var(--gray-950);
+
+  /* ─ Status (only inside Badge/Alert components) ──────── */
+  --status-success-text:   hsl(var(--green-700));
+  --status-success-bg:     hsl(var(--green-50));
+  --status-success-border: hsl(var(--green-100));
+  --status-warning-text:   hsl(var(--amber-700));
+  --status-warning-bg:     hsl(var(--amber-50));
+  --status-warning-border: hsl(var(--amber-100));
+  --status-error-text:     hsl(var(--red-700));
+  --status-error-bg:       hsl(var(--red-50));
+  --status-error-border:   hsl(var(--red-100));
+  --status-info-text:      hsl(var(--blue-700));
+  --status-info-bg:        hsl(var(--blue-50));
+  --status-info-border:    hsl(var(--blue-100));
+  --status-ai-text:        hsl(var(--teal-700));
+  --status-ai-bg:          hsl(var(--teal-50));
+  --status-ai-border:      hsl(var(--teal-100));
+
+  /* ─ Document states (REPSE-specific) ─────────────────── */
+  --doc-pending-text:      hsl(var(--amber-700));
+  --doc-pending-bg:        hsl(var(--amber-50));
+  --doc-pending-border:    hsl(var(--amber-100));
+  --doc-uploaded-text:     hsl(var(--blue-700));
+  --doc-uploaded-bg:       hsl(var(--blue-50));
+  --doc-uploaded-border:   hsl(var(--blue-100));
+  --doc-in-review-text:    hsl(var(--navy-700));
+  --doc-in-review-bg:      hsl(var(--navy-50));
+  --doc-in-review-border:  hsl(var(--navy-100));
+  --doc-approved-text:     hsl(var(--green-700));
+  --doc-approved-bg:       hsl(var(--green-50));
+  --doc-approved-border:   hsl(var(--green-100));
+  --doc-rejected-text:     hsl(var(--red-700));
+  --doc-rejected-bg:       hsl(var(--red-50));
+  --doc-rejected-border:   hsl(var(--red-100));
+  --doc-expired-text:      hsl(var(--orange-700));
+  --doc-expired-bg:        hsl(var(--orange-50));
+  --doc-expired-border:    hsl(var(--orange-100));
+  --doc-needs-review-text: hsl(var(--amber-700));
+  --doc-needs-review-bg:   hsl(var(--amber-50));
+  --doc-needs-review-border:hsl(var(--amber-100));
+
+  /* ─ AI / OCR confidence (4 tiers) ────────────────────── */
+  --confidence-high-text:    hsl(var(--green-700));   /* ≥ 95% — auto-accept */
+  --confidence-high-bg:      hsl(var(--green-50));
+  --confidence-high-border:  hsl(var(--green-100));
+
+  --confidence-medium-text:  hsl(var(--amber-700));   /* 70–94% — inline confirm */
+  --confidence-medium-bg:    hsl(var(--amber-50));
+  --confidence-medium-border:hsl(var(--amber-100));
+
+  --confidence-low-text:     hsl(var(--orange-700));  /* 50–69% — block until human */
+  --confidence-low-bg:       hsl(var(--orange-50));
+  --confidence-low-border:   hsl(var(--orange-100));
+
+  --confidence-none-text:    hsl(var(--gray-500));    /* < 50% / no extraction */
+  --confidence-none-bg:      hsl(var(--gray-100));
+  --confidence-none-border:  hsl(var(--gray-200));
+
+  /* ─ Motion ───────────────────────────────────────────── */
+  --duration-instant:    80ms;
+  --duration-fast:      150ms;   /* hovers, icon swaps */
+  --duration-standard:  250ms;   /* most component transitions */
+  --duration-slow:      350ms;   /* panels, drawers */
+  --duration-deliberate:560ms;   /* AI reveals — reads as "thought happening" */
+
+  --ease-enter:    cubic-bezier(0.16, 1, 0.3, 1);
+  --ease-exit:     cubic-bezier(0.4, 0, 1, 1);
+  --ease-standard: cubic-bezier(0.4, 0, 0.2, 1);
+  --ease-bounce:   cubic-bezier(0.34, 1.56, 0.64, 1);
+
+  /* ─ Elevation (tinted toward navy) ───────────────────── */
+  --shadow-xs: 0 1px 2px rgba(1, 53, 87, 0.06);
+  --shadow-sm: 0 2px 8px rgba(1, 53, 87, 0.08), 0 1px 2px rgba(1, 53, 87, 0.04);
+  --shadow-md: 0 4px 16px rgba(1, 53, 87, 0.10), 0 2px 4px rgba(1, 53, 87, 0.06);
+  --shadow-lg: 0 12px 40px rgba(1, 53, 87, 0.12), 0 4px 12px rgba(1, 53, 87, 0.08);
+  --shadow-xl: 0 24px 64px rgba(1, 53, 87, 0.14), 0 8px 20px rgba(1, 53, 87, 0.08);
+  --shadow-focus: 0 0 0 3px hsl(var(--navy-500) / 0.28);
+  --shadow-focus-ai: 0 0 0 3px hsl(var(--teal-500) / 0.28);
+  --shadow-focus-error: 0 0 0 3px hsl(var(--red-500) / 0.24);
+
+  /* ─ Radius ───────────────────────────────────────────── */
+  --radius-sharp:   4px;
+  --radius-sm:      6px;
+  --radius:         8px;
+  --radius-md:     10px;
+  --radius-lg:     12px;
+  --radius-xl:     16px;
+  --radius-2xl:    20px;
+  --radius-pill:  9999px;
+}
+
+
+/* ┌─────────────────────────────────────────────────────────┐
+   │ 3. DENSITY TOKENS (net-new in v0.2)                     │
+   │                                                         │
+   │ Surfaces opt into a density via the [data-density]      │
+   │ attribute. Default density is comfortable.              │
+   │                                                         │
+   │ Use compact on:                                         │
+   │   /portal/dashboard, /portal/calendar, /portal/reports, │
+   │   tables, queue rows, AI/OCR review panels.             │
+   │ Use comfortable on:                                     │
+   │   /, /login, /activate, /portal/onboarding,             │
+   │   /portal/entra-a-tu-espacio, settings.                 │
+   └─────────────────────────────────────────────────────────┘ */
+:root,
+[data-density="comfortable"] {
+  --density-base-font:        15px;
+  --density-row-padding-y:    14px;
+  --density-row-padding-x:    16px;
+  --density-control-height:   40px;
+  --density-section-gap:      32px;
+  --density-card-padding:     24px;
+  --density-row-gap:          14px;
+}
+
+[data-density="compact"] {
+  --density-base-font:        13px;
+  --density-row-padding-y:    8px;
+  --density-row-padding-x:    12px;
+  --density-control-height:   32px;
+  --density-section-gap:      24px;
+  --density-card-padding:     16px;
+  --density-row-gap:          10px;
+}
+
+
+/* ┌─────────────────────────────────────────────────────────┐
+   │ 4. KEYFRAMES                                            │
+   └─────────────────────────────────────────────────────────┘ */
+@keyframes shimmer {
+  0%   { transform: translateX(-100%); }
+  100% { transform: translateX(100%);  }
+}
+
+@keyframes fade-in {
+  from { opacity: 0; transform: translateY(4px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+
+@keyframes spin {
+  to { transform: rotate(360deg); }
+}
+
+
+/* ┌─────────────────────────────────────────────────────────┐
+   │ 5. GLOBAL RESET / BASE                                  │
+   └─────────────────────────────────────────────────────────┘ */
+@layer base {
+  * {
+    border-color: var(--border-default);
+    box-sizing: border-box;
+  }
+
+  html, body {
+    margin: 0;
+    padding: 0;
+  }
+
+  body {
+    background: var(--surface-page);
+    color: var(--text-primary);
+    font-family: var(--font-geist-sans), 'Arial', sans-serif;
+    font-size: 14px;
+    line-height: 1.6;
+    letter-spacing: 0;
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+    text-rendering: optimizeLegibility;
+  }
+
+  /* Mono — used for RFC codes, document IDs, submission IDs, hashes */
+  code, kbd, samp, pre, .font-mono {
+    font-family: var(--font-geist-mono), 'SF Mono', Menlo, monospace;
+  }
+
+  ::selection {
+    background: hsl(var(--teal-100));
+    color: hsl(var(--navy-900));
+  }
+
+  :focus-visible {
+    outline: none;
+    box-shadow: var(--shadow-focus);
+    border-radius: var(--radius-sm);
+  }
+}
+
+
+/* ┌─────────────────────────────────────────────────────────┐
+   │ 6. UTILITY CLASSES                                      │
+   └─────────────────────────────────────────────────────────┘ */
+@layer utilities {
+  .shimmer {
+    position: relative;
+    overflow: hidden;
+  }
+  .shimmer::after {
+    content: '';
+    position: absolute;
+    inset: 0;
+    background: linear-gradient(
+      90deg,
+      transparent,
+      rgba(255, 255, 255, 0.4),
+      transparent
+    );
+    animation: shimmer 1.5s var(--ease-standard) infinite;
+  }
+
+  .animate-fade-in {
+    animation: fade-in var(--duration-standard) var(--ease-enter) both;
+  }
+}

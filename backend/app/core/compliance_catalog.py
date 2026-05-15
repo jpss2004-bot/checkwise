@@ -53,6 +53,12 @@ class OnboardingRequirement:
     persona_types: tuple[PersonaType, ...]
     required: bool = True
     note: str | None = None
+    # Phase 5 — UX enrichment that used to live in frontend mocks.
+    # Both default to empty; the portal endpoint falls back to an
+    # institution-based default copy when blank, so the catalog can be
+    # enriched per-item later without breaking the API shape.
+    why: str = ""
+    format: str = ""
 
 
 @dataclass(frozen=True)
@@ -75,6 +81,12 @@ class RecurringRequirement:
     period_key: str
     # Persona types this applies to (both by default).
     persona_types: tuple[PersonaType, ...] = ("moral", "fisica")
+    # Phase 5 — UX enrichment surfaced by the calendar endpoint.
+    # ``required_document`` defaults to the requirement name; the
+    # ``due_day`` is the conventional 17th-of-month REPSE deadline (SAT
+    # annual override is set at build time below).
+    required_document: str = ""
+    due_day: int = 17
 
 
 # ---------------------------------------------------------------------------
@@ -372,6 +384,11 @@ def recurring_for_year(
                     period_label=f"SAT Anual {year - 1}",
                     period_key=_annual_period_key(year=year),
                     persona_types=("moral", "fisica"),
+                    # SAT's anual deadline is the 30th of April. We
+                    # encode the conservative 30 instead of the strict
+                    # legal 30/31 ambiguity, and keep day=17 for every
+                    # other recurring item.
+                    due_day=30,
                 )
             )
 
@@ -428,7 +445,85 @@ def _slug(value: str) -> str:
     return normalized[:60] or "doc"
 
 
+# ---------------------------------------------------------------------------
+# Phase 5 — UX enrichment helpers
+# ---------------------------------------------------------------------------
+#
+# These helpers used to live as inline copy inside frontend mocks
+# (``frontend/lib/mock/expediente.ts`` and ``frontend/lib/mock/calendar.ts``).
+# Moving them server-side means:
+#
+# 1. The provider portal's onboarding + calendar pages can drop the
+#    adapter layer entirely and render backend data verbatim.
+# 2. Any future surface — a client dashboard, a reviewer brief, the
+#    sample-PDF generator — sees the same copy without re-inventing it.
+# 3. Admin-managed requirement copy (a future phase) can replace this
+#    static dict without changing the API shape.
+
+
+# Default copy per institution. Used when an OnboardingRequirement does
+# not carry an explicit ``why`` / ``format`` value. Sticking to per-
+# institution defaults (rather than per-code) keeps the diff small while
+# the copy remains useful — each institution's documents share enough
+# common framing that one paragraph reads cleanly across them.
+_ONBOARDING_DEFAULT_WHY: dict[InstitutionCode, str] = {
+    "sat": (
+        "Este documento valida tu situación fiscal ante el SAT y permite "
+        "facturar servicios especializados sin observaciones del cliente."
+    ),
+    "stps_repse": (
+        "Sin un Registro REPSE vigente tu cliente no puede contratarte "
+        "para servicios especializados — es el documento ancla del "
+        "expediente."
+    ),
+    "imss": (
+        "Comprueba que tu relación patronal está activa ante el IMSS y "
+        "que tus trabajadores están dados de alta."
+    ),
+    "infonavit": (
+        "Acredita que tus trabajadores acceden a las prestaciones de "
+        "vivienda que exige la ley."
+    ),
+    "interno_cliente": (
+        "Forma parte de tu expediente regulatorio interno con el cliente; "
+        "lo necesitamos para soportar la trazabilidad legal del servicio."
+    ),
+}
+
+
+_ONBOARDING_DEFAULT_FORMAT: dict[InstitutionCode, str] = {
+    "sat": "PDF · descarga oficial desde el portal del SAT.",
+    "stps_repse": "PDF · acuse emitido por la STPS.",
+    "imss": "PDF · constancia o resumen emitido por el IMSS.",
+    "infonavit": "PDF · resumen o liquidación emitida por INFONAVIT.",
+    "interno_cliente": "PDF · escaneo legible del documento original.",
+}
+
+
+def onboarding_why(req: OnboardingRequirement) -> str:
+    """Return per-item ``why`` copy with an institution-based fallback."""
+    return req.why or _ONBOARDING_DEFAULT_WHY.get(req.institution, "")
+
+
+def onboarding_format(req: OnboardingRequirement) -> str:
+    """Return per-item ``format`` copy with an institution-based fallback."""
+    return req.format or _ONBOARDING_DEFAULT_FORMAT.get(req.institution, "PDF.")
+
+
+def recurring_required_document(req: RecurringRequirement) -> str:
+    """Return the document the provider is expected to upload.
+
+    Falls back to the requirement name when the catalog row does not
+    carry an explicit ``required_document`` value (the requirement name
+    is itself the document name for most recurring slots).
+    """
+    return req.required_document or req.name
+
+
 __all__ = [
+    "onboarding_why",
+    "onboarding_format",
+    "recurring_required_document",
     "CATALOG_SOURCE",
     "CATALOG_VERSION",
     "lookup_onboarding_by_code",

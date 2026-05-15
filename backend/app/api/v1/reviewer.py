@@ -25,11 +25,7 @@ from sqlalchemy.orm import Session
 
 from app.api.v1.auth import CurrentUser, require_any_role
 from app.constants.roles import MembershipRole
-from app.constants.statuses import (
-    REVIEWER_DECISION_STATUS,
-    DocumentStatus,
-    ReviewerAction,
-)
+from app.constants.statuses import DocumentStatus, ReviewerAction
 from app.db.session import get_db
 from app.models import (
     Client,
@@ -43,7 +39,7 @@ from app.models import (
     Vendor,
 )
 from app.models.entities import utc_now
-from app.services.validation_events import add_validation_event
+from app.services.submission_workflow import apply_reviewer_decision
 
 router = APIRouter(prefix="/reviewer", tags=["reviewer"])
 DbSession = Annotated[Session, Depends(get_db)]
@@ -63,13 +59,8 @@ QUEUE_STATUSES: tuple[str, ...] = (
     DocumentStatus.POSIBLE_MISMATCH.value,
 )
 
-# Statuses that count as a "resolved" decision (terminal until a new
-# submission arrives for the same slot).
-RESOLVED_STATUSES: tuple[str, ...] = (
-    DocumentStatus.APROBADO.value,
-    DocumentStatus.RECHAZADO.value,
-    DocumentStatus.EXCEPCION_LEGAL.value,
-)
+# Terminal-status gating now lives in ``submission_workflow.is_terminal_status``;
+# the local tuple this module used to export has been removed.
 
 
 # ---------------------------------------------------------------------------
@@ -113,18 +104,6 @@ class QueueResponse(BaseModel):
 
 
 DECISION_ACTIONS: tuple[str, ...] = tuple(action.value for action in ReviewerAction)
-
-
-_ACTION_TO_STATUS: dict[str, str] = {
-    action.value: status.value for action, status in REVIEWER_DECISION_STATUS.items()
-}
-
-
-_ACTION_REQUIRES_REASON: set[str] = {
-    ReviewerAction.REJECT.value,
-    ReviewerAction.REQUEST_CLARIFICATION.value,
-    ReviewerAction.MARK_EXCEPTION.value,
-}
 
 
 class DecisionRequest(BaseModel):
@@ -379,6 +358,17 @@ def get_submission(
                 )
             )
 
+    # Phase 4 — replacement lineage pointers. Same shape as the
+    # provider-side detail endpoint so the reviewer UI can render the
+    # same "replaces" / "replaced by" affordances.
+    superseded_by_id = db.scalar(
+        select(Submission.id).where(
+            Submission.supersedes_submission_id == submission.id,
+            Submission.client_id == submission.client_id,
+            Submission.vendor_id == submission.vendor_id,
+        )
+    )
+
     return {
         "submission_id": submission.id,
         "workspace_id": "",  # not workspace-scoped here
@@ -429,6 +419,8 @@ def get_submission(
         "events": [e.model_dump() for e in events],
         "history": [h.model_dump() for h in history],
         "previous_attempts": [a.model_dump() for a in previous_attempts],
+        "supersedes_submission_id": submission.supersedes_submission_id,
+        "superseded_by_submission_id": superseded_by_id,
         "suggested_action": _suggested_action(submission.status),
     }
 
@@ -448,80 +440,38 @@ def submit_decision(
     db: DbSession,
     current: ReviewerDep,
 ) -> DecisionResponse:
-    """Record a reviewer decision.
+    """Record a reviewer decision via the workflow state machine.
 
-    Writes:
-    - ``Submission.status`` -> the new status mapped from ``action``.
-    - ``DocumentStatusHistory`` row (``from`` -> ``to`` with the reason
-      and ``actor="reviewer:<user_id>"``).
-    - ``ValidationEvent`` (``event_type="reviewer_decision"``,
-      ``result=action``, ``message=reason``, ``actor_type="reviewer"``).
+    Thin wrapper over :func:`app.services.submission_workflow.apply_reviewer_decision`.
+    Validation, status mutation, ``DocumentStatusHistory``,
+    ``ValidationEvent`` and ``AuditLog`` writes all live in the workflow
+    service so the same transition logic runs for every caller. Errors
+    bubble up from the service:
 
-    Rejects:
     - Unknown submission -> 404.
-    - Already-resolved submission (``aprobado`` / ``rechazado`` /
-      ``excepcion_legal``) -> 409. Re-deciding requires the provider
-      to submit a new attempt; this avoids accidental double-clicks
-      mutating a settled audit record.
+    - Submission already in a terminal status -> 409.
+    - Decision attempted from an unsupported source status -> 409.
     - ``reject`` / ``request_clarification`` / ``mark_exception``
       without a ``reason`` -> 422.
     """
-
-    reason = (payload.reason or "").strip() or None
-    if payload.action in _ACTION_REQUIRES_REASON and not reason:
-        raise HTTPException(
-            status.HTTP_422_UNPROCESSABLE_CONTENT,
-            detail=f"'{payload.action}' requires a 'reason'.",
-        )
-
     submission = db.get(Submission, submission_id)
     if submission is None:
         raise HTTPException(status.HTTP_404_NOT_FOUND, detail="Submission not found")
-    if submission.status in RESOLVED_STATUSES:
-        raise HTTPException(
-            status.HTTP_409_CONFLICT,
-            detail=f"Submission already resolved as '{submission.status}'.",
-        )
 
-    previous_status = submission.status
-    new_status = _ACTION_TO_STATUS[payload.action]
-    submission.status = new_status
-    submission.updated_at = utc_now()
-
-    document = db.scalar(
-        select(Document).where(Document.submission_id == submission.id).limit(1)
-    )
-
-    history_row = DocumentStatusHistory(
-        submission_id=submission.id,
-        document_id=document.id if document else None,
-        from_status=previous_status,
-        to_status=new_status,
-        reason=reason,
-        actor=f"reviewer:{current.user.id}",
-    )
-    db.add(history_row)
-
-    add_validation_event(
+    result = apply_reviewer_decision(
         db,
-        submission_id=submission.id,
-        document_id=document.id if document else None,
-        event_type="reviewer_decision",
-        result=payload.action,
-        severity="info" if payload.action == "approve" else "warning",
-        message=reason,
-        actor_type="reviewer",
+        submission=submission,
+        action=payload.action,
+        reason=payload.reason,
+        reviewer_user_id=current.user.id,
     )
-
-    db.commit()
-    db.refresh(submission)
 
     return DecisionResponse(
-        submission_id=submission.id,
-        previous_status=previous_status,
-        new_status=new_status,
-        action=payload.action,
-        reason=reason,
-        decided_at=submission.updated_at,
-        reviewer_user_id=current.user.id,
+        submission_id=result.submission_id,
+        previous_status=result.previous_status,
+        new_status=result.new_status,
+        action=result.action,
+        reason=result.reason,
+        decided_at=result.decided_at,
+        reviewer_user_id=result.reviewer_user_id,
     )

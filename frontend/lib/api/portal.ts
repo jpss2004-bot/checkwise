@@ -40,6 +40,13 @@ export type OnboardingItem = {
   submitted_at: string | null;
   /** Original PDF filename of the attached document, when one exists. */
   filename: string | null;
+  /** Phase 5 — backend-owned UX enrichment. ``why`` and ``format`` are
+   *  static catalog copy; ``next_action`` and ``reviewer_note`` are
+   *  computed against the slot's current submission (lineage-aware). */
+  why: string;
+  format: string;
+  next_action: string;
+  reviewer_note: string | null;
 };
 
 export type OnboardingSection = {
@@ -71,6 +78,15 @@ export type CalendarItem = {
   period_key: string;
   status: RequirementStatus;
   submission_id: string | null;
+  /** Phase 5 — backend-owned UX enrichment. */
+  required_document: string;
+  due_month: number;
+  /** ISO date (``YYYY-MM-DD``). Conventional day-17 cutoff for monthly /
+   *  bimestral / cuatrimestral slots; the SAT annual slot uses day 30. */
+  deadline_iso: string;
+  suggested_action: string;
+  /** Canonical upload URL ready to use as ``<Link href>``. */
+  href: string;
 };
 
 export type CalendarInstitution = {
@@ -261,6 +277,10 @@ export type SubmissionDetail = {
   history: SubmissionHistoryEntry[];
   previous_attempts: SubmissionPreviousAttempt[];
   suggested_action: SubmissionSuggestedAction;
+  /** Phase 4 — id of the prior submission this one replaces, or null. */
+  supersedes_submission_id: string | null;
+  /** Phase 4 — id of the newer submission that replaced this one, or null. */
+  superseded_by_submission_id: string | null;
 };
 
 export async function getSubmissionDetail(
@@ -297,6 +317,101 @@ export async function completeOnboarding(
     session,
   );
 }
+
+// ---------------------------------------------------------------------------
+// Provider dashboard read model (Phase 4)
+// ---------------------------------------------------------------------------
+
+export type DashboardSemaphoreLevel = "green" | "yellow" | "red";
+export type DashboardActionPriority = "low" | "medium" | "high";
+export type DashboardActionType =
+  | "complete_onboarding"
+  | "reupload"
+  | "verify_mismatch"
+  | "clarify"
+  | "upcoming";
+
+export type DashboardOnboardingSummary = {
+  total_required: number;
+  completed: number;
+  in_review: number;
+  needs_action: number;
+  optional_pending: number;
+  completion_pct: number;
+  is_gate_satisfied: boolean;
+};
+
+export type DashboardDocumentStateCounts = {
+  approved: number;
+  in_review: number;
+  uploaded: number;
+  pending: number;
+  needs_review: number;
+  rejected: number;
+  expired: number;
+  exception: number;
+};
+
+export type DashboardSemaphore = {
+  level: DashboardSemaphoreLevel;
+  label: string;
+  reason: string;
+  compliance_pct: number;
+  total_tracked: number;
+  on_track: number;
+};
+
+export type DashboardSuggestedAction = {
+  id: string;
+  type: DashboardActionType;
+  title: string;
+  body: string;
+  priority: DashboardActionPriority;
+  href: string;
+  requirement_code: string | null;
+  period_key: string | null;
+};
+
+export type DashboardAttentionItem = {
+  id: string;
+  title: string;
+  institution: string;
+  state: string;
+  due_in_days: number | null;
+  href: string;
+};
+
+export type DashboardUpcomingDeadline = {
+  id: string;
+  title: string;
+  institution: string;
+  period_key: string | null;
+  due_month: number;
+  state: string;
+  href: string;
+};
+
+export type DashboardPayload = {
+  workspace_id: string;
+  persona_type: string;
+  onboarding_summary: DashboardOnboardingSummary;
+  document_state_counts: DashboardDocumentStateCounts;
+  semaphore: DashboardSemaphore;
+  suggested_actions: DashboardSuggestedAction[];
+  attention_today: DashboardAttentionItem[];
+  upcoming_deadlines: DashboardUpcomingDeadline[];
+};
+
+export async function getDashboard(
+  session: PortalSession,
+): Promise<DashboardPayload> {
+  return await fetchJson<DashboardPayload>(
+    `/api/v1/portal/workspaces/${session.workspace_id}/dashboard`,
+    { method: "GET" },
+    session,
+  );
+}
+
 
 export type DuplicateCheck = {
   exists: boolean;
@@ -341,3 +456,52 @@ export const MONTH_LABELS_ES: Record<number, string> = {
   11: "Noviembre",
   12: "Diciembre",
 };
+
+export const MONTH_LABELS_SHORT_ES: readonly string[] = [
+  "Ene",
+  "Feb",
+  "Mar",
+  "Abr",
+  "May",
+  "Jun",
+  "Jul",
+  "Ago",
+  "Sep",
+  "Oct",
+  "Nov",
+  "Dic",
+];
+
+/**
+ * Map the canonical Spanish ``RequirementStatus`` to the UI's
+ * ``DocumentStateCode``. Centralised here (Phase 5) so the onboarding
+ * + calendar pages can render backend data without re-deriving the
+ * mapping per surface. Exhaustive over the backend's status set.
+ */
+export function statusToDocumentStateCode(
+  status: RequirementStatus,
+): import("@/lib/types").DocumentStateCode {
+  switch (status) {
+    case "pendiente":
+      return "pending";
+    case "recibido":
+      return "uploaded";
+    case "pendiente_revision":
+    case "prevalidado":
+      return "in_review";
+    case "aprobado":
+      return "approved";
+    case "rechazado":
+      return "rejected";
+    case "vencido":
+      return "expired";
+    case "posible_mismatch":
+    case "requiere_aclaracion":
+      return "needs_review";
+    case "no_aplica":
+    case "excepcion_legal":
+      return "approved";
+    default:
+      return "empty";
+  }
+}

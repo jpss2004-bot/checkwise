@@ -11,7 +11,11 @@ import {
   ShieldCheck,
 } from "@phosphor-icons/react";
 
-import { ExpedienteCard } from "@/components/checkwise/portal/expediente-card";
+import {
+  ExpedienteCard,
+  expedienteCardItemFromOnboarding,
+  type ExpedienteCardItem,
+} from "@/components/checkwise/portal/expediente-card";
 import { ProviderContextBar } from "@/components/checkwise/portal/provider-context-bar";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
@@ -19,33 +23,21 @@ import { Button } from "@/components/ui/button";
 import { Progress } from "@/components/ui/progress";
 import { Skeleton } from "@/components/ui/skeleton";
 import { completeOnboarding, getOnboarding } from "@/lib/api/portal";
-import {
-  adaptOnboardingToRequirements,
-  countRealExpediente,
-} from "@/lib/api/portal-adapters";
-import { MOCK_EXPEDIENTE, type ExpedienteRequirement } from "@/lib/mock/expediente";
 import { withPortalSession } from "@/lib/session/with-portal-session";
 import { fetchCurrentSession } from "@/lib/session/portal";
 import type { PortalSession } from "@/lib/session/portal";
 
 /**
- * Initial expediente gate.
+ * Initial expediente gate (Phase 5 — canonical backend reads).
  *
- * Mock data lives in lib/mock/expediente.ts. Once the backend grows
- * a richer onboarding contract (per-requirement why/format/next_action)
- * we can drop the mock and consume the real API.
- *
- * TODO[backend-integration]: Replace MOCK_EXPEDIENTE with a fetch
- * from /api/v1/portal/onboarding once the API returns the enriched
- * shape (currently it only returns the bare requirement names).
+ * Consumes ``GET /api/v1/portal/workspaces/{id}/onboarding`` directly.
+ * No adapter, no MOCK_EXPEDIENTE. The backend response now carries
+ * the enriched fields (``why`` / ``format`` / ``next_action`` /
+ * ``reviewer_note``) the cards need.
  */
 function OnboardingInner({ session }: { session: PortalSession }) {
-  // CheckWise 1.7: real /portal/workspaces/{id}/onboarding. The
-  // adapter enriches each item with UX copy (why/format/next_action)
-  // that the backend doesn't yet ship — that enrichment will move
-  // server-side in P1-1.
   const router = useRouter();
-  const [requirements, setRequirements] = useState<ExpedienteRequirement[] | null>(
+  const [requirements, setRequirements] = useState<ExpedienteCardItem[] | null>(
     null,
   );
   const [loadError, setLoadError] = useState(false);
@@ -88,16 +80,21 @@ function OnboardingInner({ session }: { session: PortalSession }) {
     getOnboarding(session)
       .then((payload) => {
         if (cancelled) return;
-        const adapted = adaptOnboardingToRequirements(payload);
-        // Backend may legitimately return zero items during early
-        // setup; the UI shouldn't render an empty gate. Fall back to
-        // the mock so demos still work end-to-end.
-        setRequirements(adapted.length > 0 ? adapted : MOCK_EXPEDIENTE);
+        // Phase 5 — flatten backend sections into the card-ready item
+        // shape. No frontend fallback: an empty backend response shows
+        // the empty state below.
+        const flat: ExpedienteCardItem[] = [];
+        for (const section of payload.sections) {
+          for (const item of section.items) {
+            flat.push(expedienteCardItemFromOnboarding(item));
+          }
+        }
+        setRequirements(flat);
       })
       .catch(() => {
         if (cancelled) return;
         setLoadError(true);
-        setRequirements(MOCK_EXPEDIENTE);
+        setRequirements([]);
       });
     return () => {
       cancelled = true;
@@ -105,7 +102,7 @@ function OnboardingInner({ session }: { session: PortalSession }) {
   }, [session]);
 
   const counts = useMemo(
-    () => countRealExpediente(requirements ?? []),
+    () => countOnboardingCards(requirements ?? []),
     [requirements],
   );
 
@@ -157,7 +154,7 @@ function OnboardingInner({ session }: { session: PortalSession }) {
    * and hits submit. ``load_type=alta_inicial`` because every card on
    * this page belongs to the initial expediente.
    */
-  function openUploadFor(req: ExpedienteRequirement) {
+  function openUploadFor(req: ExpedienteCardItem) {
     const params = new URLSearchParams();
     params.set("requirement", req.name);
     if (req.requirement_code) params.set("requirement_code", req.requirement_code);
@@ -177,10 +174,19 @@ function OnboardingInner({ session }: { session: PortalSession }) {
       <main className="mx-auto max-w-6xl space-y-8 px-5 py-8">
         {loadError && (
           <Alert variant="warning">
-            <AlertTitle>Mostramos datos de respaldo</AlertTitle>
+            <AlertTitle>No pudimos cargar tu expediente</AlertTitle>
             <AlertDescription>
-              No pudimos consultar tu expediente al instante. La vista usa
-              datos de respaldo mientras se restablece la conexión.
+              Algo falló al consultar tu expediente. Recarga la página para
+              intentar de nuevo; tu sesión sigue activa.
+            </AlertDescription>
+          </Alert>
+        )}
+        {!loadError && requirements.length === 0 && (
+          <Alert>
+            <AlertTitle>Tu expediente está vacío</AlertTitle>
+            <AlertDescription>
+              No tenemos requisitos cargados para tu workspace. Si crees que es
+              un error, contacta a tu administrador de cumplimiento.
             </AlertDescription>
           </Alert>
         )}
@@ -302,7 +308,7 @@ function ActivateDashboardCard({
   onActivate,
 }: {
   status: PortalSession["expediente_status"];
-  counts: ReturnType<typeof countRealExpediente>;
+  counts: ReturnType<typeof countOnboardingCards>;
   activating: boolean;
   error: string | null;
   onActivate: () => void;
@@ -381,7 +387,7 @@ function GateHero({
   onActivate,
   activating,
 }: {
-  counts: ReturnType<typeof countRealExpediente>;
+  counts: ReturnType<typeof countOnboardingCards>;
   banner:
     | "none"
     | "provisional_access"
@@ -521,7 +527,7 @@ function CountsSummary({
   counts,
   stacked = false,
 }: {
-  counts: ReturnType<typeof countRealExpediente>;
+  counts: ReturnType<typeof countOnboardingCards>;
   stacked?: boolean;
 }) {
   return (
@@ -634,4 +640,49 @@ function ExpedienteSection({
       {open && children}
     </section>
   );
+}
+
+// ─── Counts ─────────────────────────────────────────────────────────
+//
+// Phase 5 — replaces the `countRealExpediente` helper that used to
+// live in `lib/api/portal-adapters.ts`. Same arithmetic, but the
+// input is the backend-derived ``ExpedienteCardItem`` directly so
+// the page doesn't need an adapter module.
+
+interface OnboardingCounts {
+  total_required: number;
+  completed: number;
+  in_review: number;
+  needs_action: number;
+  optional_pending: number;
+  completion_pct: number;
+  is_gate_satisfied: boolean;
+}
+
+function countOnboardingCards(items: ExpedienteCardItem[]): OnboardingCounts {
+  const required = items.filter((r) => r.required);
+  const total_required = required.length;
+  const completed = required.filter((r) => r.state === "approved").length;
+  const in_review = required.filter((r) =>
+    ["uploaded", "in_review"].includes(r.state),
+  ).length;
+  const needs_action = required.filter((r) =>
+    ["pending", "empty", "rejected", "expired", "needs_review"].includes(r.state),
+  ).length;
+  const optional_pending = items.filter(
+    (r) => !r.required && r.state !== "approved",
+  ).length;
+  const completion_pct =
+    total_required === 0
+      ? 100
+      : Math.round(((completed + in_review) / total_required) * 100);
+  return {
+    total_required,
+    completed,
+    in_review,
+    needs_action,
+    optional_pending,
+    completion_pct,
+    is_gate_satisfied: needs_action === 0,
+  };
 }
