@@ -6,82 +6,80 @@ import {
   ArrowRight,
   CalendarBlank,
   ClipboardText,
-  ClockCounterClockwise,
   HourglassHigh,
   LockKey,
   PencilSimple,
 } from "@phosphor-icons/react";
 
 import { DocStateBadge } from "@/components/checkwise/doc-state-badge";
+import { EvidenceSlotGrid } from "@/components/checkwise/portal/evidence-slot-grid";
+import {
+  NextActionRail,
+  type NextActionItem,
+  type NextActionPriority,
+} from "@/components/checkwise/portal/next-action-rail";
 import { ProviderContextBar } from "@/components/checkwise/portal/provider-context-bar";
 import { SemaphoreCard } from "@/components/checkwise/portal/semaphore-card";
-import { SuggestedActions } from "@/components/checkwise/portal/suggested-actions";
 import { WorkspaceIdentityCard } from "@/components/checkwise/workspace/workspace-identity-card";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Progress } from "@/components/ui/progress";
-import { getOnboarding } from "@/lib/api/portal";
+import type { EvidenceSlotCardProps } from "@/components/checkwise/portal/evidence-slot-card";
 import {
-  adaptOnboardingToRequirements,
-  countRealExpediente,
-  type ExpedienteCounts,
-} from "@/lib/api/portal-adapters";
-import {
-  MOCK_ATTENTION_TODAY,
-  MOCK_DOC_STATE_COUNTS,
-  MOCK_SEMAPHORE,
-  MOCK_SUGGESTED_ACTIONS,
-  type AttentionRow,
-} from "@/lib/mock/dashboard";
-import { MOCK_EXPEDIENTE, countExpediente } from "@/lib/mock/expediente";
+  getDashboard,
+  type DashboardAttentionItem,
+  type DashboardOnboardingSummary,
+  type DashboardPayload,
+  type DashboardSemaphore,
+  type DashboardSuggestedAction,
+  type DashboardUpcomingDeadline,
+  type DashboardDocumentStateCounts,
+  type DashboardSemaphoreLevel,
+} from "@/lib/api/portal";
 import { verifyToken } from "@/lib/mock/invitations";
 import { withOnboardingGate } from "@/lib/session/with-onboarding-gate";
 import type { PortalSession } from "@/lib/session/portal";
 import type { DocumentStateCode } from "@/lib/types";
 import { buildWorkspaceContext } from "@/lib/workspace/resolver";
+import type {
+  DashboardSemaphore as ComponentSemaphore,
+  SemaphoreTone,
+} from "@/lib/mock/dashboard";
 
 /**
- * Provider dashboard.
+ * Provider dashboard (Phase 4 — backend-owned read model).
  *
  * Locked state shows a hero pointing back to /portal/onboarding when
  * the expediente gate isn't satisfied. Otherwise the full dashboard
  * renders with semaphore + suggested actions + attention rows +
  * calendar entry + document-state overview.
  *
- * TODO[backend-integration]: replace MOCK_SEMAPHORE,
- * MOCK_SUGGESTED_ACTIONS, MOCK_ATTENTION_TODAY, MOCK_DOC_STATE_COUNTS
- * with /api/v1/portal/dashboard once it exposes the equivalents.
+ * Data source: GET /api/v1/portal/workspaces/{id}/dashboard. The
+ * backend composes onboarding + calendar slot views (replacement-
+ * lineage aware) into the semaphore + counts + computed suggested
+ * actions. Mocks are no longer consumed at runtime.
  */
 function DashboardInner({ session }: { session: PortalSession }) {
-  // CheckWise 1.7: real expediente counts now come from
-  // /portal/workspaces/{id}/onboarding. Semaphore + suggested actions
-  // + attention rows + state overview stay mocked until P1-3 ships a
-  // dashboard aggregator endpoint.
-  const [expedienteCounts, setExpedienteCounts] = useState<ExpedienteCounts>(() =>
-    countExpediente(MOCK_EXPEDIENTE),
-  );
+  const [dashboard, setDashboard] = useState<DashboardPayload | null>(null);
+  const [loadError, setLoadError] = useState(false);
 
   useEffect(() => {
     let cancelled = false;
-    getOnboarding(session)
+    getDashboard(session)
       .then((payload) => {
         if (cancelled) return;
-        const adapted = adaptOnboardingToRequirements(payload);
-        const source = adapted.length > 0 ? adapted : MOCK_EXPEDIENTE;
-        setExpedienteCounts(countRealExpediente(source));
+        setDashboard(payload);
+        setLoadError(false);
       })
       .catch(() => {
-        /* fall back to the mock-derived counts initialised in useState */
+        if (cancelled) return;
+        setLoadError(true);
       });
     return () => {
       cancelled = true;
     };
   }, [session]);
-
-  const gateBlocked = expedienteCounts.needs_action > 0;
-  const provisional =
-    !gateBlocked && expedienteCounts.in_review > 0;
 
   // Build the workspace identity snapshot — same source as
   // /portal/entra-a-tu-espacio so users see consistent values.
@@ -90,31 +88,77 @@ function DashboardInner({ session }: { session: PortalSession }) {
     return buildWorkspaceContext(session, inv);
   }, [session]);
 
+  if (loadError && !dashboard) {
+    return (
+      <>
+        <ProviderContextBar session={session} />
+        <main className="mx-auto max-w-7xl space-y-6 px-5 py-8">
+          <Alert variant="warning">
+            <AlertTitle>No pudimos cargar tu dashboard</AlertTitle>
+            <AlertDescription>
+              Algo falló al consultar el resumen de tus obligaciones. Tu sesión
+              sigue activa; vuelve a intentarlo en unos segundos.
+            </AlertDescription>
+          </Alert>
+        </main>
+      </>
+    );
+  }
+
+  if (!dashboard) {
+    return (
+      <>
+        <ProviderContextBar session={session} />
+        <main className="mx-auto max-w-7xl space-y-6 px-5 py-8">
+          <DashboardSkeleton />
+        </main>
+      </>
+    );
+  }
+
+  const onboarding = dashboard.onboarding_summary;
+  const gateBlocked = onboarding.needs_action > 0;
+  const provisional = !gateBlocked && onboarding.in_review > 0;
+
   return (
     <>
       <ProviderContextBar
         session={session}
-        onboardingPct={expedienteCounts.completion_pct}
+        onboardingPct={onboarding.completion_pct}
       />
       <main className="mx-auto max-w-7xl space-y-8 px-5 py-8">
-        {gateBlocked ? <LockedDashboardHero counts={expedienteCounts} /> : null}
+        {gateBlocked ? <LockedDashboardHero summary={onboarding} /> : null}
         {provisional ? <ProvisionalAccessBanner /> : null}
 
         <WorkspaceIdentityCard workspace={workspace} />
 
-        <SemaphoreCard data={MOCK_SEMAPHORE} />
+        <SemaphoreCard data={adaptSemaphore(dashboard.semaphore)} />
 
-        <ExpedienteSummaryCard counts={expedienteCounts} />
+        <ExpedienteSummaryCard summary={onboarding} />
 
         <div className="grid gap-6 lg:grid-cols-3">
           <div className="space-y-6 lg:col-span-2">
-            <SuggestedActions actions={MOCK_SUGGESTED_ACTIONS} />
-            <AttentionToday rows={MOCK_ATTENTION_TODAY} />
-            <DocumentStateOverview counts={MOCK_DOC_STATE_COUNTS} />
+            <NextActionRail
+              actions={toNextActionItems(dashboard.suggested_actions)}
+              emptyState={{
+                title: "Estás al día",
+                description: "No hay acciones urgentes para tu workspace en este momento.",
+              }}
+            />
+            <EvidenceSlotGrid
+              title="Necesita tu atención"
+              items={toSlotItems(dashboard.attention_today)}
+              emptyState={{
+                title: "Nada por atender hoy",
+                description:
+                  "Todas tus obligaciones activas están en revisión o aprobadas.",
+              }}
+            />
+            <DocumentStateOverview counts={dashboard.document_state_counts} />
           </div>
           <div className="space-y-6">
             <CalendarTeaser />
-            <UpcomingCard rows={MOCK_ATTENTION_TODAY.slice(0, 3)} />
+            <UpcomingCard rows={dashboard.upcoming_deadlines} />
           </div>
         </div>
       </main>
@@ -123,6 +167,97 @@ function DashboardInner({ session }: { session: PortalSession }) {
 }
 
 export default withOnboardingGate(DashboardInner);
+
+// ─── Skeleton ─────────────────────────────────────────────────────
+
+function DashboardSkeleton() {
+  return (
+    <div className="space-y-6">
+      <div className="h-24 animate-pulse rounded-lg border border-[color:var(--border-default)] bg-[color:var(--surface-raised)]" />
+      <div className="h-40 animate-pulse rounded-lg border border-[color:var(--border-default)] bg-[color:var(--surface-raised)]" />
+      <div className="grid gap-6 lg:grid-cols-3">
+        <div className="space-y-6 lg:col-span-2">
+          <div className="h-48 animate-pulse rounded-lg border border-[color:var(--border-default)] bg-[color:var(--surface-raised)]" />
+          <div className="h-48 animate-pulse rounded-lg border border-[color:var(--border-default)] bg-[color:var(--surface-raised)]" />
+        </div>
+        <div className="space-y-6">
+          <div className="h-40 animate-pulse rounded-lg border border-[color:var(--border-default)] bg-[color:var(--surface-raised)]" />
+          <div className="h-40 animate-pulse rounded-lg border border-[color:var(--border-default)] bg-[color:var(--surface-raised)]" />
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ─── Adapters: backend payload → component prop shape ─────────────
+
+const LEVEL_TO_TONE: Record<DashboardSemaphoreLevel, SemaphoreTone> = {
+  green: "green",
+  yellow: "yellow",
+  red: "red",
+};
+
+function adaptSemaphore(s: DashboardSemaphore): ComponentSemaphore {
+  return {
+    tone: LEVEL_TO_TONE[s.level],
+    headline: s.label,
+    description: s.reason,
+    compliance_pct: s.compliance_pct,
+    total_tracked: s.total_tracked,
+    on_track: s.on_track,
+  };
+}
+
+// Backend slot states (10) → frontend DocumentStateCode (8).
+const SLOT_STATE_TO_DOC_CODE: Record<string, DocumentStateCode> = {
+  missing: "pending",
+  uploaded: "uploaded",
+  in_review: "in_review",
+  approved: "approved",
+  rejected: "rejected",
+  needs_correction: "needs_review",
+  possible_mismatch: "needs_review",
+  exception: "approved",
+  expired: "expired",
+  not_applicable: "approved",
+};
+
+const ACTION_CTA_LABEL: Record<DashboardSuggestedAction["type"], string> = {
+  reupload: "Corregir",
+  clarify: "Responder",
+  verify_mismatch: "Verificar",
+  complete_onboarding: "Subir documento",
+  upcoming: "Subir documento",
+};
+
+const ACTION_PRIORITY_MAP: Record<DashboardSuggestedAction["priority"], NextActionPriority> = {
+  low: "low",
+  medium: "medium",
+  high: "high",
+};
+
+function toNextActionItems(actions: DashboardSuggestedAction[]): NextActionItem[] {
+  return actions.map((action) => ({
+    id: action.id,
+    title: action.title,
+    body: action.body,
+    priority: ACTION_PRIORITY_MAP[action.priority],
+    ctaLabel: ACTION_CTA_LABEL[action.type] ?? "Abrir",
+    ctaHref: action.href,
+    meta: action.requirement_code ?? action.period_key ?? undefined,
+  }));
+}
+
+function toSlotItems(rows: DashboardAttentionItem[]): EvidenceSlotCardProps[] {
+  return rows.map((row) => ({
+    id: row.id,
+    title: row.title,
+    institution: INSTITUTION_LABEL[row.institution] ?? row.institution.toUpperCase(),
+    state: SLOT_STATE_TO_DOC_CODE[row.state] ?? "pending",
+    dueInDays: row.due_in_days,
+    href: row.href,
+  }));
+}
 
 // ─── Provisional access banner ───────────────────────────────────
 
@@ -153,9 +288,9 @@ function ProvisionalAccessBanner() {
 // ─── Expediente summary card ────────────────────────────────────
 
 function ExpedienteSummaryCard({
-  counts,
+  summary,
 }: {
-  counts: ReturnType<typeof countExpediente>;
+  summary: DashboardOnboardingSummary;
 }) {
   return (
     <section className="cw-fade-up rounded-lg border border-[color:var(--border-default)] bg-[color:var(--surface-raised)] p-5 shadow-xs">
@@ -169,7 +304,7 @@ function ExpedienteSummaryCard({
           <h2 className="text-[15px] font-semibold text-[color:var(--text-primary)]">
             Tu expediente inicial
           </h2>
-          <Badge variant="brand">{counts.completion_pct}%</Badge>
+          <Badge variant="brand">{summary.completion_pct}%</Badge>
         </div>
         <Button asChild variant="outline" size="sm">
           <Link href="/portal/onboarding">
@@ -181,18 +316,22 @@ function ExpedienteSummaryCard({
       </header>
 
       <Progress
-        value={counts.completion_pct}
-        label={`${counts.completed + counts.in_review} de ${counts.total_required} documentos obligatorios avanzados`}
+        value={summary.completion_pct}
+        label={`${summary.completed + summary.in_review} de ${summary.total_required} documentos obligatorios avanzados`}
         showValue
-        tone={counts.needs_action === 0 ? "success" : "brand"}
+        tone={summary.needs_action === 0 ? "success" : "brand"}
         className="max-w-3xl"
       />
 
       <dl className="mt-4 grid grid-cols-2 gap-3 sm:grid-cols-4">
-        <SummaryStat label="Aprobados" value={counts.completed} tone="success" />
-        <SummaryStat label="En revisión" value={counts.in_review} tone="info" />
-        <SummaryStat label="Por atender" value={counts.needs_action} tone="warning" />
-        <SummaryStat label="Opcionales pendientes" value={counts.optional_pending} tone="neutral" />
+        <SummaryStat label="Aprobados" value={summary.completed} tone="success" />
+        <SummaryStat label="En revisión" value={summary.in_review} tone="info" />
+        <SummaryStat label="Por atender" value={summary.needs_action} tone="warning" />
+        <SummaryStat
+          label="Opcionales pendientes"
+          value={summary.optional_pending}
+          tone="neutral"
+        />
       </dl>
     </section>
   );
@@ -230,9 +369,9 @@ function SummaryStat({
 // ─── Locked-state hero ───────────────────────────────────────────
 
 function LockedDashboardHero({
-  counts,
+  summary,
 }: {
-  counts: ReturnType<typeof countExpediente>;
+  summary: DashboardOnboardingSummary;
 }) {
   return (
     <Alert variant="warning">
@@ -242,9 +381,10 @@ function LockedDashboardHero({
       </AlertTitle>
       <AlertDescription className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
         <span>
-          Tienes {counts.needs_action} documento{counts.needs_action === 1 ? "" : "s"}{" "}
-          del expediente inicial por atender. Mientras tanto, puedes ver el
-          dashboard pero no recibirás recordatorios mensuales.
+          Tienes {summary.needs_action} documento
+          {summary.needs_action === 1 ? "" : "s"} del expediente inicial por
+          atender. Mientras tanto, puedes ver el dashboard pero no recibirás
+          recordatorios mensuales.
         </span>
         <Button asChild size="sm" variant="default" className="shrink-0">
           <Link href="/portal/onboarding">
@@ -257,75 +397,22 @@ function LockedDashboardHero({
   );
 }
 
-// ─── Attention today ─────────────────────────────────────────────
+// ─── Institution labels (used by UpcomingCard side rail) ────────
 
-function AttentionToday({ rows }: { rows: AttentionRow[] }) {
-  if (rows.length === 0) return null;
-  return (
-    <section className="rounded-lg border border-[color:var(--border-default)] bg-[color:var(--surface-raised)] shadow-xs">
-      <header className="flex items-center gap-2 border-b border-[color:var(--border-subtle)] px-5 py-3">
-        <ClockCounterClockwise
-          className="h-4 w-4 text-[color:var(--text-brand)]"
-          weight="duotone"
-          aria-hidden="true"
-        />
-        <h2 className="text-[13px] font-semibold uppercase tracking-wide text-[color:var(--text-primary)]">
-          Necesita tu atención hoy
-        </h2>
-      </header>
-      <ul className="divide-y divide-[color:var(--border-subtle)]">
-        {rows.map((row) => (
-          <li
-            key={row.id}
-            className="flex flex-wrap items-center justify-between gap-3 px-5 py-3 transition-colors hover:bg-[color:var(--surface-hover)]"
-          >
-            <div className="min-w-0 flex-1">
-              <p className="text-sm font-medium text-[color:var(--text-primary)]">
-                {row.title}
-              </p>
-              <p className="mt-0.5 font-mono text-[10px] uppercase tracking-wide text-[color:var(--text-tertiary)]">
-                {row.institution}
-              </p>
-            </div>
-            <div className="flex items-center gap-3">
-              <DueChip days={row.due_in_days} />
-              <DocStateBadge state={row.state} withIcon={false} />
-            </div>
-          </li>
-        ))}
-      </ul>
-    </section>
-  );
-}
-
-function DueChip({ days }: { days: number }) {
-  const overdue = days < 0;
-  const urgent = days >= 0 && days <= 5;
-  const className = overdue
-    ? "bg-[color:var(--status-error-bg)] text-[color:var(--status-error-text)] border-[color:var(--status-error-border)]"
-    : urgent
-      ? "bg-[color:var(--status-warning-bg)] text-[color:var(--status-warning-text)] border-[color:var(--status-warning-border)]"
-      : "bg-[color:var(--surface-sunken)] text-[color:var(--text-secondary)] border-[color:var(--border-default)]";
-  const label = overdue
-    ? `Vencido hace ${Math.abs(days)}d`
-    : days === 0
-      ? "Vence hoy"
-      : `En ${days}d`;
-  return (
-    <span
-      className={`rounded-full border px-2.5 py-0.5 font-mono text-[10px] font-medium ${className}`}
-    >
-      {label}
-    </span>
-  );
-}
+const INSTITUTION_LABEL: Record<string, string> = {
+  sat: "SAT",
+  imss: "IMSS",
+  infonavit: "INFONAVIT",
+  stps_repse: "STPS / REPSE",
+  interno_cliente: "Interno / Cliente",
+};
 
 // ─── Document state overview ─────────────────────────────────────
 
 function DocumentStateOverview({
   counts,
 }: {
-  counts: typeof MOCK_DOC_STATE_COUNTS;
+  counts: DashboardDocumentStateCounts;
 }) {
   const entries: { state: DocumentStateCode; count: number }[] = [
     { state: "approved", count: counts.approved },
@@ -361,8 +448,8 @@ function DocumentStateOverview({
 // ─── Calendar teaser ─────────────────────────────────────────────
 
 function CalendarTeaser() {
-  // 12 month dots — colored by mock status; clicking goes to the
-  // calendar route. Real palette comes from the dashboard aggregate.
+  // 12 month dots — colored statically. Real coloring is provided by
+  // /portal/calendar which the user can open from this teaser.
   const MONTHS = [
     "Ene",
     "Feb",
@@ -377,8 +464,7 @@ function CalendarTeaser() {
     "Nov",
     "Dic",
   ];
-  // 0..4 → past, 5 → current month (May), 6..11 → upcoming
-  const CURRENT = 4;
+  const CURRENT = new Date().getMonth();
   return (
     <section className="rounded-lg border border-[color:var(--border-default)] bg-[color:var(--surface-raised)] p-5 shadow-xs">
       <div className="mb-3 flex items-center justify-between gap-2">
@@ -390,16 +476,14 @@ function CalendarTeaser() {
           />
           Calendario REPSE
         </h2>
-        <Badge variant="brand">2026</Badge>
+        <Badge variant="brand">{new Date().getFullYear()}</Badge>
       </div>
       <div className="grid grid-cols-6 gap-2">
         {MONTHS.map((month, idx) => {
           const isCurrent = idx === CURRENT;
           const isPast = idx < CURRENT;
           const tone = isPast
-            ? idx === 2
-              ? "bg-[color:var(--status-warning-bg)] text-[color:var(--status-warning-text)] border-[color:var(--status-warning-border)]"
-              : "bg-[color:var(--status-success-bg)] text-[color:var(--status-success-text)] border-[color:var(--status-success-border)]"
+            ? "bg-[color:var(--surface-sunken)] text-[color:var(--text-tertiary)] border-[color:var(--border-subtle)]"
             : isCurrent
               ? "border-[color:var(--border-focus)] bg-[color:var(--surface-brand-muted)] text-[color:var(--text-brand)] ring-2 ring-[color:var(--border-focus)]/40"
               : "border-[color:var(--border-subtle)] bg-[color:var(--surface-page)] text-[color:var(--text-tertiary)]";
@@ -414,7 +498,7 @@ function CalendarTeaser() {
         })}
       </div>
       <p className="mt-3 text-xs text-[color:var(--text-secondary)]">
-        Mayo es el periodo en curso. Tienes 2 obligaciones por completar.
+        Abre el calendario para ver cada obligación con su estado real.
       </p>
       <Button asChild variant="outline" size="sm" className="mt-3 w-full">
         <Link href="/portal/calendar">
@@ -428,7 +512,7 @@ function CalendarTeaser() {
 
 // ─── Upcoming side card ──────────────────────────────────────────
 
-function UpcomingCard({ rows }: { rows: AttentionRow[] }) {
+function UpcomingCard({ rows }: { rows: DashboardUpcomingDeadline[] }) {
   if (rows.length === 0) return null;
   return (
     <section className="rounded-lg border border-[color:var(--border-default)] bg-[color:var(--surface-raised)] p-5 shadow-xs">
@@ -436,22 +520,33 @@ function UpcomingCard({ rows }: { rows: AttentionRow[] }) {
         Próximos vencimientos
       </h2>
       <ul className="space-y-3">
-        {rows.map((row) => (
-          <li
-            key={row.id}
-            className="flex items-start justify-between gap-3 border-b border-[color:var(--border-subtle)] pb-3 last:border-0 last:pb-0"
-          >
-            <div className="min-w-0">
-              <p className="font-mono text-[10px] uppercase tracking-wide text-[color:var(--text-tertiary)]">
-                {row.institution}
-              </p>
-              <p className="mt-0.5 text-[13px] font-medium leading-5 text-[color:var(--text-primary)]">
-                {row.title}
-              </p>
-            </div>
-            <DueChip days={row.due_in_days} />
-          </li>
-        ))}
+        {rows.map((row) => {
+          const institutionLabel =
+            INSTITUTION_LABEL[row.institution] ?? row.institution;
+          return (
+            <li
+              key={row.id}
+              className="flex items-start justify-between gap-3 border-b border-[color:var(--border-subtle)] pb-3 last:border-0 last:pb-0"
+            >
+              <div className="min-w-0">
+                <p className="font-mono text-[10px] uppercase tracking-wide text-[color:var(--text-tertiary)]">
+                  {institutionLabel}
+                </p>
+                <Link
+                  href={row.href}
+                  className="mt-0.5 block text-[13px] font-medium leading-5 text-[color:var(--text-primary)] hover:underline"
+                >
+                  {row.title}
+                </Link>
+                {row.period_key ? (
+                  <p className="mt-0.5 font-mono text-[10px] text-[color:var(--text-tertiary)]">
+                    {row.period_key}
+                  </p>
+                ) : null}
+              </div>
+            </li>
+          );
+        })}
       </ul>
     </section>
   );
