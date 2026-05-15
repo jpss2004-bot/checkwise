@@ -452,10 +452,39 @@ pre {
   .cw-pulse-soft,
   .cw-hover-lift,
   .cw-success-ring,
-  .cw-draw-check path {
+  .cw-draw-check path,
+  .cw-scan {
     animation: none !important;
     transition: none !important;
     opacity: 1 !important;
     transform: none !important;
+  }
+}
+
+/* ── Hero ornaments ───────────────────────────────────────────────
+   Subtle navy 56px grid masked toward the center-top, giving the
+   hero a tactile texture without introducing a third color.
+*/
+.cw-grid-pattern {
+  background-image:
+    linear-gradient(to right, hsl(var(--brand-navy) / 0.045) 1px, transparent 1px),
+    linear-gradient(to bottom, hsl(var(--brand-navy) / 0.045) 1px, transparent 1px);
+  background-size: 56px 56px;
+  -webkit-mask-image: radial-gradient(ellipse 70% 60% at 50% 30%, #000 35%, transparent 78%);
+  mask-image: radial-gradient(ellipse 70% 60% at 50% 30%, #000 35%, transparent 78%);
+}
+
+/* Slow horizontal scanline used at the foot of the hero preview's
+   progress band — reads as "live data, not a screenshot". */
+@media (prefers-reduced-motion: no-preference) {
+  .cw-scan {
+    background: linear-gradient(
+      90deg,
+      transparent 0%,
+      hsl(var(--brand-teal) / 0.55) 50%,
+      transparent 100%
+    );
+    transform: translateX(-100%);
+    animation: shimmer 3.6s var(--ease-standard) infinite;
   }
 }

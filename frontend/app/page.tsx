@@ -133,7 +133,6 @@ export default function PublicHome() {
     <main className="min-h-[100dvh] bg-[color:var(--surface-page)]">
       <MarketingNav />
       <Hero />
-      <Trust />
       <ProductPreview />
       <Features />
       <HowItWorks />
@@ -202,49 +201,89 @@ function Hero() {
   return (
     <section className="relative overflow-hidden">
       <BackgroundOrnaments />
-      <div className="relative mx-auto max-w-6xl px-5 py-16 lg:py-24">
-        <div className="grid items-center gap-12 lg:grid-cols-[1.1fr_1fr]">
-          <div className="cw-fade-up space-y-6">
-            <Badge variant="teal" className="rounded-full px-3 py-1">
-              <Sparkle className="h-3 w-3" weight="fill" aria-hidden="true" />
-              Plataforma de cumplimiento REPSE
-            </Badge>
-            <h1 className="text-[2.4rem] font-semibold leading-[1.05] tracking-tight text-[color:var(--text-primary)] sm:text-[2.9rem] lg:text-[3.2rem]">
-              Cumplimiento documental REPSE
-              <br />
+      <div className="relative mx-auto max-w-6xl px-5 pb-12 pt-16 sm:pt-20 lg:pb-20 lg:pt-28">
+        <div className="grid grid-cols-1 items-center gap-12 lg:grid-cols-[1.05fr_1fr] lg:gap-16">
+          {/* ── Left column: type + CTAs ─────────────────────── */}
+          <div className="cw-fade-up min-w-0 space-y-7">
+            {/* Eyebrow */}
+            <div className="flex items-center gap-3">
+              <Badge variant="teal" className="rounded-full px-3 py-1">
+                <Sparkle className="h-3 w-3" weight="fill" aria-hidden="true" />
+                Plataforma de cumplimiento REPSE
+              </Badge>
+              <span
+                aria-hidden="true"
+                className="hidden h-px w-8 bg-[color:var(--border-default)] sm:block"
+              />
+              <span className="hidden font-mono text-[10px] uppercase tracking-[0.2em] text-[color:var(--text-tertiary)] sm:inline">
+                México · 2026
+              </span>
+            </div>
+
+            {/* Display H1 */}
+            <h1
+              className="break-words font-semibold tracking-[-0.022em] text-[color:var(--text-primary)]"
+              style={{ fontSize: "clamp(2.25rem, 5.2vw, 4.4rem)", lineHeight: "1.05" }}
+            >
+              Cumplimiento documental REPSE{" "}
               <span className="text-[color:var(--text-teal)]">
                 guiado, trazable y accionable.
               </span>
             </h1>
-            <p className="max-w-[52ch] text-[15px] leading-relaxed text-[color:var(--text-secondary)] sm:text-base">
-              Centraliza el expediente REPSE de tus proveedores: cargas
-              guiadas, calendario recurrente, estados de revisión y
-              reportes para tu cliente — sin spreadsheets ni correos
-              perdidos.
+
+            {/* Subhead — 19 words, contains REPSE + proveedor + cliente */}
+            <p className="max-w-[44ch] text-[15px] leading-[1.65] text-[color:var(--text-secondary)] sm:text-[17px]">
+              Centraliza el expediente REPSE de cada proveedor: cargas guiadas,
+              calendario recurrente y reportes ejecutivos para tu cliente — sin
+              spreadsheets.
             </p>
-            <div className="flex flex-wrap gap-3">
-              <Button asChild size="lg">
+
+            {/* CTAs */}
+            <div className="flex flex-wrap items-center gap-3 pt-1">
+              <Button
+                asChild
+                size="lg"
+                className="group cw-hover-lift gap-2 rounded-full pl-6 pr-2 shadow-[0_10px_30px_-12px_hsl(var(--brand-navy)/0.45)]"
+              >
                 <Link href="#contacto">
                   <span>Solicitar información</span>
-                  <ArrowRight className="h-4 w-4" weight="bold" aria-hidden="true" />
+                  <span
+                    aria-hidden="true"
+                    className="ml-1 inline-flex h-8 w-8 items-center justify-center rounded-full bg-white/15 transition-transform duration-300 ease-[cubic-bezier(0.32,0.72,0,1)] group-hover:translate-x-0.5"
+                  >
+                    <ArrowRight className="h-3.5 w-3.5" weight="bold" />
+                  </span>
                 </Link>
               </Button>
-              <Button asChild variant="outline" size="lg">
+              <Button
+                asChild
+                variant="outline"
+                size="lg"
+                className="cw-hover-lift gap-2 rounded-full px-5"
+              >
                 <Link href="/login">
                   <Lock className="h-4 w-4" weight="bold" aria-hidden="true" />
                   <span>Iniciar sesión</span>
                 </Link>
               </Button>
             </div>
-            <p className="text-xs text-[color:var(--text-tertiary)]">
+
+            {/* Fine print */}
+            <p className="max-w-[44ch] text-xs leading-5 text-[color:var(--text-tertiary)]">
               CheckWise no firma documentos. La revisión humana sigue siendo
               obligatoria para el cumplimiento REPSE.
             </p>
           </div>
+
+          {/* ── Right column: layered preview composition ────── */}
           <div className="cw-fade-up" style={{ animationDelay: "120ms" }}>
             <HeroPreviewCard />
           </div>
         </div>
+
+        {/* Hero-native trust strip — folds the proof tiles into the
+            first viewport so the hero reads as one composed surface. */}
+        <HeroTrustStrip />
       </div>
     </section>
   );
@@ -253,15 +292,19 @@ function Hero() {
 function BackgroundOrnaments() {
   return (
     <div aria-hidden="true" className="pointer-events-none absolute inset-0 overflow-hidden">
+      {/* Subtle navy grid texture, masked toward center-top */}
+      <div className="cw-grid-pattern absolute inset-0" />
+      {/* Navy soft blob */}
       <div
-        className="absolute -top-32 left-1/4 h-[520px] w-[520px] rounded-full opacity-[0.16] blur-3xl"
+        className="absolute -top-32 left-[18%] h-[560px] w-[560px] rounded-full opacity-[0.16] blur-3xl"
         style={{
           background:
             "radial-gradient(circle, hsl(var(--brand-navy)/0.55) 0%, transparent 70%)",
         }}
       />
+      {/* Teal soft blob */}
       <div
-        className="absolute -bottom-40 -right-24 h-[560px] w-[560px] rounded-full opacity-[0.13] blur-3xl"
+        className="absolute -bottom-44 -right-24 h-[600px] w-[600px] rounded-full opacity-[0.14] blur-3xl"
         style={{
           background:
             "radial-gradient(circle, hsl(var(--brand-teal)/0.6) 0%, transparent 70%)",
@@ -273,69 +316,147 @@ function BackgroundOrnaments() {
 
 function HeroPreviewCard() {
   return (
-    <div className="relative rounded-2xl border border-[color:var(--border-default)] bg-[color:var(--surface-raised)] p-5 shadow-lg sm:p-6">
-      <div className="flex items-start justify-between gap-3">
-        <div className="min-w-0">
-          <p className="font-mono text-[10px] uppercase tracking-wide text-[color:var(--text-teal)]">
-            Expediente del proveedor
-          </p>
-          <h3 className="mt-1 truncate text-lg font-semibold text-[color:var(--text-primary)]">
-            Distribuidora Nogal · S.A. de C.V.
-          </h3>
-          <p className="mt-0.5 font-mono text-[11px] uppercase tracking-wide text-[color:var(--text-tertiary)]">
-            DNG890101AB1 · Persona moral
-          </p>
+    <div className="relative">
+      {/* Back peek card — z-axis depth */}
+      <div
+        aria-hidden="true"
+        className="absolute -right-3 -top-5 hidden h-full w-full origin-top-right -rotate-[3.2deg] scale-[0.94] rounded-[1.75rem] border border-[color:var(--border-subtle)] bg-[color:var(--surface-raised)]/85 shadow-[0_18px_40px_-24px_hsl(var(--brand-navy)/0.18)] sm:block"
+      />
+
+      {/* Outer bezel — premium machined-aluminum tray */}
+      <div
+        className="cw-hover-lift relative rounded-[1.75rem] border border-[color:var(--border-default)]/80 bg-gradient-to-br from-white to-[color:var(--surface-raised)] p-1.5 shadow-[0_30px_80px_-30px_hsl(var(--brand-navy)/0.30),0_8px_24px_-12px_hsl(var(--brand-navy)/0.10)]"
+      >
+        {/* Inner core */}
+        <div className="rounded-[1.375rem] bg-[color:var(--surface-raised)] p-5 shadow-[inset_0_1px_0_hsl(0_0%_100%/0.9)] sm:p-6">
+          {/* Header */}
+          <div className="flex items-start justify-between gap-3">
+            <div className="min-w-0">
+              <p className="font-mono text-[10px] uppercase tracking-[0.18em] text-[color:var(--text-teal)]">
+                Expediente del proveedor
+              </p>
+              <h3 className="mt-1.5 truncate text-lg font-semibold tracking-tight text-[color:var(--text-primary)]">
+                Distribuidora Nogal · S.A. de C.V.
+              </h3>
+              <p className="mt-1 font-mono text-[11px] uppercase tracking-[0.12em] text-[color:var(--text-tertiary)]">
+                DNG890101AB1 · Persona moral
+              </p>
+              <p className="mt-1.5 flex items-center gap-1.5 font-mono text-[11px] uppercase tracking-[0.12em] text-[color:var(--text-tertiary)]">
+                <span
+                  aria-hidden="true"
+                  className="cw-pulse-soft inline-block h-1.5 w-1.5 rounded-full bg-[color:var(--text-teal)]"
+                />
+                <span>Sincronizado hace 2 min</span>
+              </p>
+            </div>
+            <Badge variant="warning" className="shrink-0">
+              Atención
+            </Badge>
+          </div>
+
+          {/* Progress band with trailing scanline */}
+          <div className="relative mt-5 overflow-hidden rounded-xl border border-[color:var(--border-subtle)] bg-[color:var(--surface-page)]/80 p-4">
+            <div className="flex items-center justify-between gap-3">
+              <p className="text-[13px] font-medium text-[color:var(--text-primary)]">
+                Expediente inicial REPSE
+              </p>
+              <span className="font-mono text-[11px] tabular-nums text-[color:var(--text-secondary)]">
+                11 / 14 documentos
+              </span>
+            </div>
+            <Progress
+              value={78}
+              tone="warning"
+              label="78% completo · 3 documentos por subir"
+              className="mt-3"
+            />
+            <span aria-hidden="true" className="cw-scan absolute inset-x-0 bottom-0 h-px" />
+          </div>
+
+          {/* Document rows */}
+          <ul className="mt-4 space-y-2.5">
+            <PreviewRow
+              label="Constancia de Situación Fiscal"
+              state="approved"
+              mono="SAT · vigente"
+            />
+            <PreviewRow
+              label="Registro REPSE · folio actualizado"
+              state="in_review"
+              mono="Revisor humano asignado"
+            />
+            <PreviewRow
+              label="Opinión de cumplimiento IMSS"
+              state="needs_review"
+              mono="Pide aclaración"
+            />
+          </ul>
+
+          {/* Next-action footer */}
+          <div className="mt-4 flex items-start gap-2 rounded-xl border border-[color:var(--status-warning-border)] bg-[color:var(--status-warning-bg)] p-3.5">
+            <Lightbulb
+              className="mt-0.5 h-4 w-4 shrink-0 text-[color:var(--status-warning-text)]"
+              weight="fill"
+              aria-hidden="true"
+            />
+            <p className="text-xs leading-5 text-[color:var(--status-warning-text)]">
+              <span className="font-semibold">Próxima acción:</span> sube la
+              opinión IMSS antes del 18 de mayo para mantener el cumplimiento.
+            </p>
+          </div>
         </div>
-        <Badge variant="warning" className="shrink-0">
-          Atención
-        </Badge>
       </div>
+    </div>
+  );
+}
 
-      <div className="mt-5 rounded-lg border border-[color:var(--border-subtle)] bg-[color:var(--surface-page)] p-4">
-        <div className="flex items-center justify-between gap-3">
-          <p className="text-[13px] font-medium text-[color:var(--text-primary)]">
-            Expediente inicial REPSE
-          </p>
-          <span className="font-mono text-[11px] tabular-nums text-[color:var(--text-secondary)]">
-            11 / 14 documentos
-          </span>
-        </div>
-        <Progress
-          value={78}
-          tone="warning"
-          label="78% completo · 3 documentos por subir"
-          className="mt-3"
-        />
-      </div>
-
-      <ul className="mt-4 space-y-2.5">
-        <PreviewRow
-          label="Constancia de Situación Fiscal"
-          state="approved"
-          mono="SAT · vigente"
-        />
-        <PreviewRow
-          label="Registro REPSE · folio actualizado"
-          state="in_review"
-          mono="Revisor humano asignado"
-        />
-        <PreviewRow
-          label="Opinión de cumplimiento IMSS"
-          state="needs_review"
-          mono="Pide aclaración"
-        />
-      </ul>
-
-      <div className="mt-4 flex items-start gap-2 rounded-md border border-[color:var(--status-warning-border)] bg-[color:var(--status-warning-bg)] p-3">
-        <Lightbulb
-          className="mt-0.5 h-4 w-4 shrink-0 text-[color:var(--status-warning-text)]"
-          weight="fill"
-          aria-hidden="true"
-        />
-        <p className="text-xs leading-5 text-[color:var(--status-warning-text)]">
-          <span className="font-semibold">Próxima acción:</span> sube la
-          opinión IMSS antes del 18 de mayo para mantener el cumplimiento.
-        </p>
+function HeroTrustStrip() {
+  const items: { icon: Icon; label: string; value: string }[] = [
+    {
+      icon: ClipboardText,
+      label: "Cargas guiadas",
+      value: "Por documento y por proveedor",
+    },
+    {
+      icon: CalendarBlank,
+      label: "Calendario REPSE",
+      value: "SAT · IMSS · INFONAVIT · STPS",
+    },
+    {
+      icon: Files,
+      label: "Trazabilidad",
+      value: "Hash · revisor · periodo",
+    },
+    {
+      icon: ChartLineUp,
+      label: "Reportes ejecutivos",
+      value: "PDF mensual al cliente",
+    },
+  ];
+  return (
+    <div className="cw-fade-up mt-14 lg:mt-20" style={{ animationDelay: "240ms" }}>
+      <div className="grid grid-cols-2 gap-x-6 gap-y-6 rounded-2xl border border-[color:var(--border-subtle)] bg-[color:var(--surface-raised)]/70 px-5 py-5 backdrop-blur-sm sm:grid-cols-4 sm:px-7 sm:py-6">
+        {items.map(({ icon: IconComponent, label, value }) => (
+          <div key={label} className="flex items-start gap-3">
+            <span
+              className="mt-0.5 flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-[color:var(--surface-teal-muted)]"
+              aria-hidden="true"
+            >
+              <IconComponent
+                className="h-4 w-4 text-[color:var(--text-teal)]"
+                weight="duotone"
+              />
+            </span>
+            <div className="min-w-0">
+              <p className="font-mono text-[10px] uppercase tracking-[0.16em] text-[color:var(--text-tertiary)]">
+                {label}
+              </p>
+              <p className="mt-1 text-[13px] font-medium leading-5 text-[color:var(--text-primary)]">
+                {value}
+              </p>
+            </div>
+          </div>
+        ))}
       </div>
     </div>
   );
@@ -362,60 +483,6 @@ function PreviewRow({
       </div>
       <DocStateBadge state={state} withIcon />
     </li>
-  );
-}
-
-// ─── Trust strip ─────────────────────────────────────────────────
-
-function Trust() {
-  const items: { icon: Icon; label: string; value: string }[] = [
-    {
-      icon: ClipboardText,
-      label: "Cargas guiadas",
-      value: "Por documento y por proveedor",
-    },
-    {
-      icon: CalendarBlank,
-      label: "Calendario REPSE",
-      value: "SAT · IMSS · INFONAVIT · STPS",
-    },
-    {
-      icon: Files,
-      label: "Trazabilidad",
-      value: "Hash · revisor · periodo",
-    },
-    {
-      icon: ChartLineUp,
-      label: "Reportes ejecutivos",
-      value: "PDF mensual al cliente",
-    },
-  ];
-  return (
-    <section className="border-y border-[color:var(--border-subtle)] bg-[color:var(--surface-raised)]">
-      <div className="mx-auto grid max-w-6xl grid-cols-2 gap-x-6 gap-y-5 px-5 py-6 sm:grid-cols-4">
-        {items.map(({ icon: IconComponent, label, value }) => (
-          <div key={label} className="flex items-start gap-3">
-            <span
-              className="mt-0.5 flex h-8 w-8 shrink-0 items-center justify-center rounded-md bg-[color:var(--surface-teal-muted)]"
-              aria-hidden="true"
-            >
-              <IconComponent
-                className="h-4 w-4 text-[color:var(--text-teal)]"
-                weight="duotone"
-              />
-            </span>
-            <div className="min-w-0">
-              <p className="font-mono text-[10px] uppercase tracking-wide text-[color:var(--text-tertiary)]">
-                {label}
-              </p>
-              <p className="mt-0.5 text-[13px] font-medium leading-5 text-[color:var(--text-primary)]">
-                {value}
-              </p>
-            </div>
-          </div>
-        ))}
-      </div>
-    </section>
   );
 }
 
