@@ -178,7 +178,7 @@ export function SubmissionTimeline({
         </div>
       ) : (
         <ol
-          className="relative space-y-0 px-5 py-4"
+          className="cw-stagger relative space-y-0 px-5 py-4"
           aria-label="Cronología de cambios"
         >
           {items.map((item, idx) => (
@@ -186,6 +186,7 @@ export function SubmissionTimeline({
               key={`${item.kind}-${item.occurredAt}-${idx}`}
               item={item}
               isLast={idx === items.length - 1}
+              index={idx}
             />
           ))}
         </ol>
@@ -194,11 +195,20 @@ export function SubmissionTimeline({
   );
 }
 
-function TimelineRow({ item, isLast }: { item: Item; isLast: boolean }) {
+function TimelineRow({
+  item,
+  isLast,
+  index,
+}: {
+  item: Item;
+  isLast: boolean;
+  index: number;
+}) {
+  const staggerStyle = { "--cw-index": index } as React.CSSProperties;
   if (item.kind === "status") {
     const ActorIcon = actorIcon(item.actor.split(":")[0] ?? item.actor);
     return (
-      <li className="relative flex gap-3 pb-4 last:pb-0">
+      <li className="relative flex gap-3 pb-4 last:pb-0" style={staggerStyle}>
         {!isLast ? (
           <span
             aria-hidden="true"
@@ -242,7 +252,7 @@ function TimelineRow({ item, isLast }: { item: Item; isLast: boolean }) {
   const EventIcon = eventIcon(item.eventType, item.severity);
   const tone = SEVERITY_TONE[item.severity] ?? "text-[color:var(--text-tertiary)]";
   return (
-    <li className="relative flex gap-3 pb-4 last:pb-0">
+    <li className="relative flex gap-3 pb-4 last:pb-0" style={staggerStyle}>
       {!isLast ? (
         <span
           aria-hidden="true"

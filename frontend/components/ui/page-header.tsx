@@ -51,7 +51,7 @@ export function PageHeader({
           </p>
         ) : null}
         <div className="flex flex-wrap items-center gap-2.5">
-          <h1 className="text-2xl font-semibold tracking-tight text-[color:var(--text-primary)] sm:text-[26px]">
+          <h1 className="text-3xl font-semibold leading-[1.1] tracking-[-0.015em] text-balance text-[color:var(--text-primary)] sm:text-4xl">
             {title}
           </h1>
           {trailing}

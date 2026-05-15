@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import {
@@ -14,15 +14,23 @@ import {
 
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { PageHeader } from "@/components/ui/page-header";
+import {
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+} from "@/components/ui/table";
+import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { RequirementStatusBadge } from "@/components/checkwise/portal/requirement-status-badge";
 import {
   EmptyState,
   ErrorState,
   Skeleton,
 } from "@/components/checkwise/portal/state-surfaces";
-import { INSTITUTION_LABELS } from "@/lib/api/portal";
+import { INSTITUTION_LABELS, type RequirementStatus } from "@/lib/api/portal";
 import {
   clearAdminSession,
   readAdminSession,
@@ -37,6 +45,28 @@ import {
 
 const REVIEWER_ROLES = ["reviewer", "internal_admin"] as const;
 
+type FilterKey = "all" | "in_review" | "mismatch" | "clarify";
+
+const FILTER_LABEL: Record<FilterKey, string> = {
+  all: "Todos",
+  in_review: "Por revisar",
+  mismatch: "Posible mismatch",
+  clarify: "Aclaración",
+};
+
+const FILTER_STATUSES: Record<Exclude<FilterKey, "all" | "mismatch">, RequirementStatus[]> = {
+  in_review: ["pendiente_revision", "prevalidado", "recibido"],
+  clarify: ["requiere_aclaracion"],
+};
+
+function matchesFilter(item: QueueItem, filter: FilterKey): boolean {
+  if (filter === "all") return true;
+  if (filter === "mismatch") {
+    return item.has_mismatch || item.status === "posible_mismatch";
+  }
+  return FILTER_STATUSES[filter].includes(item.status);
+}
+
 export default function ReviewerQueuePage() {
   const router = useRouter();
   const [session, setSession] = useState<AdminSession | null>(null);
@@ -44,6 +74,7 @@ export default function ReviewerQueuePage() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [reloadKey, setReloadKey] = useState(0);
+  const [filter, setFilter] = useState<FilterKey>("all");
 
   useEffect(() => {
     const current = readAdminSession();
@@ -91,9 +122,28 @@ export default function ReviewerQueuePage() {
     router.replace("/admin/login");
   }
 
-  if (!session) return null;
+  const items = useMemo(() => queue?.items ?? [], [queue]);
+  const filteredItems = useMemo(
+    () => items.filter((item) => matchesFilter(item, filter)),
+    [items, filter],
+  );
 
-  const items = queue?.items ?? [];
+  const counts = useMemo<Record<FilterKey, number>>(() => {
+    const acc: Record<FilterKey, number> = {
+      all: items.length,
+      in_review: 0,
+      mismatch: 0,
+      clarify: 0,
+    };
+    for (const item of items) {
+      if (matchesFilter(item, "in_review")) acc.in_review += 1;
+      if (matchesFilter(item, "mismatch")) acc.mismatch += 1;
+      if (matchesFilter(item, "clarify")) acc.clarify += 1;
+    }
+    return acc;
+  }, [items]);
+
+  if (!session) return null;
 
   return (
     <main className="mx-auto max-w-6xl space-y-6 px-5 py-8">
@@ -109,12 +159,7 @@ export default function ReviewerQueuePage() {
                 Inicio
               </Link>
             </Button>
-            <Button
-              type="button"
-              variant="outline"
-              size="sm"
-              onClick={onLogout}
-            >
+            <Button type="button" variant="outline" size="sm" onClick={onLogout}>
               <SignOut className="h-4 w-4" aria-hidden />
               Cerrar sesión
             </Button>
@@ -123,7 +168,7 @@ export default function ReviewerQueuePage() {
       />
 
       {loading ? (
-        <QueueSkeleton />
+        <QueueTableSkeleton />
       ) : error ? (
         <ErrorState
           title="No pudimos cargar la bandeja"
@@ -138,107 +183,186 @@ export default function ReviewerQueuePage() {
           variant="muted"
         />
       ) : (
-        <Card>
-          <CardHeader>
-            <div className="flex flex-wrap items-center justify-between gap-3">
-              <CardTitle>{items.length} en cola</CardTitle>
-              <Badge variant="outline" className="whitespace-nowrap">
-                Orden FIFO · más viejos primero
-              </Badge>
+        <section
+          aria-label="Cola de documentos por revisar"
+          className="cw-fade-up rounded-lg border border-[color:var(--border-default)] bg-[color:var(--surface-raised)] shadow-xs"
+        >
+          <header className="flex flex-wrap items-center justify-between gap-3 border-b border-[color:var(--border-subtle)] px-5 py-3">
+            <Tabs value={filter} onValueChange={(v) => setFilter(v as FilterKey)}>
+              <TabsList>
+                {(["all", "in_review", "mismatch", "clarify"] as FilterKey[]).map(
+                  (key) => (
+                    <TabsTrigger key={key} value={key}>
+                      <span>{FILTER_LABEL[key]}</span>
+                      <span className="ml-1.5 font-mono text-[10px] tabular-nums opacity-70">
+                        {counts[key]}
+                      </span>
+                    </TabsTrigger>
+                  ),
+                )}
+              </TabsList>
+            </Tabs>
+            <Badge variant="outline" className="whitespace-nowrap">
+              FIFO · más viejos primero
+            </Badge>
+          </header>
+
+          {filteredItems.length === 0 ? (
+            <div className="px-5 py-10">
+              <EmptyState
+                icon={Tray}
+                title={`Sin resultados en "${FILTER_LABEL[filter]}"`}
+                description="Cambia el filtro para ver otros documentos en la cola."
+                variant="muted"
+              />
             </div>
-          </CardHeader>
-          <CardContent>
-            <ul className="space-y-3">
-              {items.map((item) => (
-                <li key={item.submission_id}>
-                  <QueueRow item={item} />
-                </li>
-              ))}
-            </ul>
-          </CardContent>
-        </Card>
+          ) : (
+            <Table>
+              <TableHeader>
+                <TableRow>
+                  <TableHead className="w-[160px]">Estado</TableHead>
+                  <TableHead>Documento</TableHead>
+                  <TableHead>Institución · periodo</TableHead>
+                  <TableHead>Proveedor</TableHead>
+                  <TableHead className="w-[120px]">Edad</TableHead>
+                  <TableHead className="w-[40px]" aria-label="Acción" />
+                </TableRow>
+              </TableHeader>
+              <TableBody>
+                {filteredItems.map((item) => (
+                  <QueueTableRow
+                    key={item.submission_id}
+                    item={item}
+                    onOpen={() => router.push(`/admin/reviewer/${item.submission_id}`)}
+                  />
+                ))}
+              </TableBody>
+            </Table>
+          )}
+        </section>
       )}
     </main>
   );
 }
 
-function QueueRow({ item }: { item: QueueItem }) {
+function QueueTableRow({
+  item,
+  onOpen,
+}: {
+  item: QueueItem;
+  onOpen: () => void;
+}) {
   const ageText = formatAge(item.age_hours);
   const institutionLabel = item.requirement.institution
     ? INSTITUTION_LABELS[item.requirement.institution] ?? item.requirement.institution
     : "—";
+
   return (
-    <Link
-      href={`/admin/reviewer/${item.submission_id}`}
-      className="cw-hover-lift block rounded-md border border-[color:var(--border-default)] bg-[color:var(--surface-raised)] p-4 transition-colors hover:bg-[color:var(--surface-hover)]"
+    <TableRow
+      onClick={onOpen}
+      onKeyDown={(e) => {
+        if (e.key === "Enter" || e.key === " ") {
+          e.preventDefault();
+          onOpen();
+        }
+      }}
+      tabIndex={0}
+      role="link"
+      aria-label={`Abrir ${item.requirement.name ?? "documento"} de ${item.provider.vendor_name}`}
+      className="cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-[color:var(--border-focus)]/40"
     >
-      <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
-        <div className="min-w-0 space-y-1">
-          <div className="flex flex-wrap items-center gap-2">
-            <RequirementStatusBadge status={item.status} />
-            {item.has_mismatch ? (
-              <span className="inline-flex items-center gap-1 rounded-md border border-[color:var(--status-warning-border)] bg-[color:var(--status-warning-bg)] px-2 py-0.5 text-xs text-[color:var(--status-warning-text)]">
-                <Warning className="h-3 w-3" weight="fill" aria-hidden />
-                Posible mismatch
-              </span>
-            ) : null}
-            {item.signal_count > 0 ? (
-              <span className="text-xs text-muted-foreground">
-                {item.signal_count} señal{item.signal_count === 1 ? "" : "es"} automátic
-                {item.signal_count === 1 ? "a" : "as"}
-              </span>
-            ) : null}
-          </div>
-          <p className="truncate text-sm font-semibold text-[color:var(--text-primary)]">
-            {item.requirement.name ?? "Documento sin requisito canónico"}
-          </p>
-          <p className="text-xs text-[color:var(--text-secondary)]">
-            {institutionLabel}
-            {item.period.period_key ? ` · ${item.period.period_key}` : ""}
-          </p>
-          <p className="truncate text-xs text-[color:var(--text-secondary)]">
-            {item.provider.client_name} · {item.provider.vendor_name}
-            {item.provider.vendor_rfc ? ` (${item.provider.vendor_rfc})` : ""}
-          </p>
+      <TableCell>
+        <div className="flex flex-col gap-1.5">
+          <RequirementStatusBadge status={item.status} />
+          {item.has_mismatch ? (
+            <span className="inline-flex w-max items-center gap-1 rounded-sm border border-[color:var(--status-warning-border)] bg-[color:var(--status-warning-bg)] px-1.5 py-0.5 text-[10px] font-medium text-[color:var(--status-warning-text)]">
+              <Warning className="h-3 w-3" weight="fill" aria-hidden />
+              Mismatch
+            </span>
+          ) : null}
         </div>
-        <div className="flex shrink-0 flex-col items-start gap-2 sm:items-end">
-          <span className="inline-flex items-center gap-1 text-xs text-[color:var(--text-tertiary)]">
-            <Clock className="h-3 w-3" weight="bold" aria-hidden />
-            {ageText}
-          </span>
-          <span className="inline-flex items-center gap-1 text-xs font-medium text-[color:var(--text-brand)]">
-            Revisar
-            <ArrowRight className="h-3.5 w-3.5" weight="bold" aria-hidden />
-          </span>
-        </div>
-      </div>
-    </Link>
+      </TableCell>
+
+      <TableCell>
+        <p className="font-medium leading-tight text-[color:var(--text-primary)]">
+          {item.requirement.name ?? "Documento sin requisito canónico"}
+        </p>
+        {item.signal_count > 0 ? (
+          <p className="mt-1 text-[11px] text-[color:var(--text-tertiary)]">
+            {item.signal_count} señal{item.signal_count === 1 ? "" : "es"} automátic
+            {item.signal_count === 1 ? "a" : "as"}
+          </p>
+        ) : null}
+      </TableCell>
+
+      <TableCell>
+        <p className="text-[color:var(--text-primary)]">{institutionLabel}</p>
+        {item.period.period_key ? (
+          <p className="font-mono text-[11px] tabular-nums text-[color:var(--text-tertiary)]">
+            {item.period.period_key}
+          </p>
+        ) : null}
+      </TableCell>
+
+      <TableCell>
+        <p className="font-medium text-[color:var(--text-primary)]">
+          {item.provider.vendor_name}
+        </p>
+        <p className="text-[11px] text-[color:var(--text-tertiary)]">
+          {item.provider.client_name}
+          {item.provider.vendor_rfc ? (
+            <span className="ml-1 font-mono">· {item.provider.vendor_rfc}</span>
+          ) : null}
+        </p>
+      </TableCell>
+
+      <TableCell>
+        <span className="inline-flex items-center gap-1 font-mono text-[11px] tabular-nums text-[color:var(--text-secondary)]">
+          <Clock className="h-3 w-3" weight="bold" aria-hidden />
+          {ageText}
+        </span>
+      </TableCell>
+
+      <TableCell className="text-right">
+        <ArrowRight
+          className="ml-auto h-4 w-4 text-[color:var(--text-tertiary)] transition-transform duration-fast group-hover:translate-x-0.5"
+          weight="bold"
+          aria-hidden
+        />
+      </TableCell>
+    </TableRow>
   );
 }
 
-function QueueSkeleton() {
+function QueueTableSkeleton() {
   return (
-    <Card>
-      <CardHeader>
-        <Skeleton className="h-4 w-3/12" />
-      </CardHeader>
-      <CardContent className="space-y-3">
+    <section
+      aria-busy="true"
+      className="rounded-lg border border-[color:var(--border-default)] bg-[color:var(--surface-raised)] shadow-xs"
+    >
+      <header className="flex flex-wrap items-center gap-2 border-b border-[color:var(--border-subtle)] px-5 py-3">
         {Array.from({ length: 4 }).map((_, i) => (
-          <div key={i} className="rounded-md border border-border bg-white p-4">
-            <Skeleton className="h-3 w-2/12" />
-            <Skeleton className="mt-3 h-4 w-7/12" />
-            <Skeleton className="mt-2 h-3 w-5/12" />
-            <Skeleton className="mt-2 h-3 w-8/12" />
+          <Skeleton key={i} className="h-7 w-24 rounded-md" />
+        ))}
+      </header>
+      <div className="divide-y divide-[color:var(--border-subtle)]">
+        {Array.from({ length: 5 }).map((_, i) => (
+          <div key={i} className="grid grid-cols-12 items-center gap-3 px-5 py-3">
+            <Skeleton className="col-span-2 h-5 w-24" />
+            <Skeleton className="col-span-3 h-4 w-full" />
+            <Skeleton className="col-span-3 h-4 w-3/4" />
+            <Skeleton className="col-span-3 h-4 w-2/3" />
+            <Skeleton className="col-span-1 h-4 w-12" />
           </div>
         ))}
-      </CardContent>
-    </Card>
+      </div>
+    </section>
   );
 }
 
 function formatAge(hours: number): string {
-  if (hours < 1) return "menos de 1 hora";
-  if (hours < 24) return hours === 1 ? "hace 1 hora" : `hace ${hours} horas`;
+  if (hours < 1) return "<1h";
+  if (hours < 24) return `${hours}h`;
   const days = Math.floor(hours / 24);
-  return days === 1 ? "hace 1 día" : `hace ${days} días`;
+  return `${days}d`;
 }

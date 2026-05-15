@@ -143,7 +143,7 @@ function DashboardInner({ session }: { session: PortalSession }) {
 
         <ExpedienteSummaryCard summary={onboarding} />
 
-        <div className="grid gap-6 lg:grid-cols-3">
+        <div className="cw-stagger grid gap-6 lg:grid-cols-3">
           <div className="space-y-6 lg:col-span-2">
             <NextActionRail
               actions={toNextActionItems(dashboard.suggested_actions)}

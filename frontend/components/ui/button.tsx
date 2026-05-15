@@ -8,9 +8,10 @@ import { Spinner } from "./spinner";
 const buttonVariants = cva(
   [
     "inline-flex items-center justify-center gap-2 rounded font-medium",
-    "transition-[background-color,box-shadow,transform] duration-fast",
+    "transition-[background-color,box-shadow,transform] duration-fast ease-enter",
     "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[color:var(--border-focus)]/40 focus-visible:ring-offset-2 focus-visible:ring-offset-[color:var(--surface-page)]",
     "disabled:pointer-events-none disabled:opacity-50",
+    "active:scale-[0.985] active:transition-none motion-reduce:active:scale-100",
   ].join(" "),
   {
     variants: {
