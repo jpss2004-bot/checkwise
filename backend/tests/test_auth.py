@@ -367,31 +367,118 @@ def test_require_org_role_denies_when_membership_revoked(db_factory) -> None:
 
 
 # ---------------------------------------------------------------------------
-# Portal X-Workspace-Token path is untouched
+# must_change_password gate + /auth/set-password (CheckWise 1.8)
 # ---------------------------------------------------------------------------
 
 
-def test_portal_access_unaffected_by_auth_router(api_client: TestClient) -> None:
-    """Smoke check: creating a provider workspace + accessing it via
-    ``X-Workspace-Token`` continues to work after the auth router was
-    added. Patch 6 promised not to change the portal flow."""
-    response = api_client.post(
-        "/api/v1/portal/access",
-        json={
-            "client_name": "Cliente Auth Patch",
-            "vendor_name": "Proveedor Auth Patch",
-            "vendor_rfc": "PAP260512AB1",
-            "persona_type": "moral",
-        },
-    )
-    assert response.status_code == 201
-    payload = response.json()
-    workspace_id = payload["workspace_id"]
-    token = payload["access_token"]
+def test_login_response_includes_must_change_password_flag(
+    api_client: TestClient, db_factory
+) -> None:
+    """When a user is seeded with must_change_password=True, the login
+    response must surface that flag so the frontend can route to /activate."""
+    db = db_factory()
+    try:
+        org = Organization(name="Demo Provider Org", kind="vendor")
+        db.add(org)
+        db.flush()
+        user = User(
+            email="prov-flag@checkwise.test",
+            password_hash=hash_password("CheckWiseTest!2026"),
+            full_name="Provider Flag",
+            status="active",
+            must_change_password=True,
+        )
+        db.add(user)
+        db.flush()
+        db.add(
+            Membership(
+                user_id=user.id, organization_id=org.id, role="provider", status="active"
+            )
+        )
+        db.commit()
+    finally:
+        db.close()
 
-    # /onboarding requires X-Workspace-Token, not a JWT.
-    response = api_client.get(
-        f"/api/v1/portal/workspaces/{workspace_id}/onboarding",
-        headers={"X-Workspace-Token": token},
+    response = api_client.post(
+        "/api/v1/auth/login",
+        json={"email": "prov-flag@checkwise.test", "password": "CheckWiseTest!2026"},
     )
-    assert response.status_code == 200
+    assert response.status_code == 200, response.text
+    payload = response.json()
+    assert payload["must_change_password"] is True
+    assert payload["user"]["must_change_password"] is True
+
+
+def test_set_password_clears_must_change_flag_and_lets_user_log_in_again(
+    api_client: TestClient, db_factory
+) -> None:
+    """After /auth/set-password, must_change_password is False and the
+    new password authenticates."""
+    db = db_factory()
+    try:
+        org = Organization(name="Demo Provider Org 2", kind="vendor")
+        db.add(org)
+        db.flush()
+        user = User(
+            email="prov-set@checkwise.test",
+            password_hash=hash_password("temp-pass-12chars!"),
+            full_name="Provider Set",
+            status="active",
+            must_change_password=True,
+        )
+        db.add(user)
+        db.flush()
+        db.add(
+            Membership(
+                user_id=user.id, organization_id=org.id, role="provider", status="active"
+            )
+        )
+        db.commit()
+    finally:
+        db.close()
+
+    token = _login(api_client, "prov-set@checkwise.test", "temp-pass-12chars!")
+    new_password = "NewLongerPassword!2026"
+    set_resp = api_client.post(
+        "/api/v1/auth/set-password",
+        json={"new_password": new_password},
+        headers={"Authorization": f"Bearer {token}"},
+    )
+    assert set_resp.status_code == 200, set_resp.text
+    assert set_resp.json()["must_change_password"] is False
+
+    # Old password no longer works.
+    bad = api_client.post(
+        "/api/v1/auth/login",
+        json={"email": "prov-set@checkwise.test", "password": "temp-pass-12chars!"},
+    )
+    assert bad.status_code == 401
+
+    # New password works and the flag stays clear.
+    fresh = api_client.post(
+        "/api/v1/auth/login",
+        json={"email": "prov-set@checkwise.test", "password": new_password},
+    )
+    assert fresh.status_code == 200, fresh.text
+    assert fresh.json()["must_change_password"] is False
+
+
+def test_set_password_requires_authentication(api_client: TestClient) -> None:
+    response = api_client.post(
+        "/api/v1/auth/set-password",
+        json={"new_password": "AnyLongerPassword!2026"},
+    )
+    assert response.status_code == 401
+
+
+def test_set_password_rejects_short_password(
+    api_client: TestClient, db_factory
+) -> None:
+    _, _, password = _seed_user(db_factory)
+    token = _login(api_client, "ada@legalshelf.mx", password)
+    response = api_client.post(
+        "/api/v1/auth/set-password",
+        json={"new_password": "tooshort"},
+        headers={"Authorization": f"Bearer {token}"},
+    )
+    assert response.status_code == 422

@@ -118,9 +118,8 @@ export async function clearPortalSession(): Promise<void> {
  */
 export function writePortalSession(session: PortalSession): void {
   if (typeof console !== "undefined") {
-    // eslint-disable-next-line no-console
     console.warn(
-      "[checkwise] writePortalSession is a transition shim; real session must come from /portal/access (cookie) or P1-1 activation API.",
+      "[checkwise] writePortalSession is a transition shim; the real session is the httpOnly cookie minted by POST /api/v1/portal/enter.",
     );
   }
   cached = session;

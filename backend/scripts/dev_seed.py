@@ -52,6 +52,10 @@ DEMO_USER_PASSWORD = "demo1234"
 DEMO_USER_FULLNAME = "Ada Reyes"
 DEMO_ORG_NAME = "LegalShelf — Demo"
 
+DEMO_PROVIDER_EMAIL = "proveedor.demo@checkwise.mx"
+DEMO_PROVIDER_TEMP_PASSWORD = "CheckWiseDemo!2026"
+DEMO_PROVIDER_FULLNAME = "Distribuidora Nogal"
+
 DEMO_CLIENT_NAME = "Acerogrupo Industrial · Demo"
 DEMO_CLIENT_RFC = "AID010101AB1"
 DEMO_VENDOR_NAME = "Distribuidora Nogal · Demo"
@@ -96,13 +100,14 @@ def _wipe_demo(db) -> None:
         db.query(Client).filter(Client.id == client_id).delete(synchronize_session=False)
         db.flush()
 
-    user = db.scalar(select(User).where(User.email == DEMO_USER_EMAIL))
-    if user is not None:
-        db.query(Membership).filter(Membership.user_id == user.id).delete(
-            synchronize_session=False
-        )
-        db.delete(user)
-        db.flush()
+    for demo_email in (DEMO_USER_EMAIL, DEMO_PROVIDER_EMAIL):
+        user = db.scalar(select(User).where(User.email == demo_email))
+        if user is not None:
+            db.query(Membership).filter(Membership.user_id == user.id).delete(
+                synchronize_session=False
+            )
+            db.delete(user)
+            db.flush()
 
     org = db.scalar(select(Organization).where(Organization.name == DEMO_ORG_NAME))
     if org is not None:
@@ -137,7 +142,26 @@ def _seed_admin(db) -> tuple[str, str]:
     return user.id, org.id
 
 
-def _seed_workspace(db) -> tuple[str, str, str]:
+def _seed_provider_user(db) -> str:
+    """Create the provider demo user and return its id.
+
+    Marked ``must_change_password=True`` so the first login forces the
+    user through ``/activate`` to set a permanent password before
+    reaching the workspace.
+    """
+    user = User(
+        email=DEMO_PROVIDER_EMAIL,
+        password_hash=hash_password(DEMO_PROVIDER_TEMP_PASSWORD),
+        full_name=DEMO_PROVIDER_FULLNAME,
+        status="active",
+        must_change_password=True,
+    )
+    db.add(user)
+    db.flush()
+    return user.id
+
+
+def _seed_workspace(db, *, owner_user_id: str) -> tuple[str, str, str]:
     client = Client(name=DEMO_CLIENT_NAME, rfc=DEMO_CLIENT_RFC)
     db.add(client)
     db.flush()
@@ -156,6 +180,7 @@ def _seed_workspace(db) -> tuple[str, str, str]:
         client_id=client.id,
         vendor_id=vendor.id,
         contract_id=None,
+        owner_user_id=owner_user_id,
         filial_name="Filial Norte",
         persona_type="moral",
         display_name="Distribuidora Nogal · Demo",
@@ -316,7 +341,10 @@ def main() -> None:
     try:
         _wipe_demo(db)
         user_id, org_id = _seed_admin(db)
-        client_id, vendor_id, workspace_id = _seed_workspace(db)
+        provider_user_id = _seed_provider_user(db)
+        client_id, vendor_id, workspace_id = _seed_workspace(
+            db, owner_user_id=provider_user_id
+        )
         submissions = _seed_submissions(db, client_id=client_id, vendor_id=vendor_id)
         db.commit()
     finally:
@@ -324,21 +352,24 @@ def main() -> None:
 
     print("Demo data ready.")
     print()
-    print("  Reviewer login:")
-    print("    URL      http://localhost:3000/admin/login")
-    print(f"    Email    {DEMO_USER_EMAIL}")
-    print(f"    Password {DEMO_USER_PASSWORD}")
-    print("    Roles    internal_admin, reviewer")
+    print("  Reviewer / admin login:")
+    print("    URL       http://localhost:3000/login")
+    print(f"    Email     {DEMO_USER_EMAIL}")
+    print(f"    Password  {DEMO_USER_PASSWORD}")
+    print("    Roles     internal_admin, reviewer")
     print()
-    print("  Provider portal:")
-    print("    URL              http://localhost:3000/")
-    print("    Use the access form with any client + filial + vendor name.")
-    print("    Each access call mints a fresh workspace + token.")
+    print("  Provider login (FIRST-LOGIN flow):")
+    print("    URL       http://localhost:3000/login")
+    print(f"    Email     {DEMO_PROVIDER_EMAIL}")
+    print(f"    Password  {DEMO_PROVIDER_TEMP_PASSWORD}  (temporary)")
+    print("    Note      must_change_password=True; after login the user is")
+    print("              forced through /activate to set a permanent password,")
+    print("              then enters workspace via /portal/enter.")
     print()
-    print("  Pre-seeded reviewer workspace (already in the DB):")
-    print(f"    workspace_id     {workspace_id}")
-    print(f"    access_token     {DEMO_WORKSPACE_TOKEN}")
-    print(f"    client / vendor  {DEMO_CLIENT_NAME} / {DEMO_VENDOR_NAME}")
+    print("  Pre-seeded provider workspace (assigned to the provider user):")
+    print(f"    workspace_id    {workspace_id}")
+    print(f"    owner_user_id   {provider_user_id}")
+    print(f"    client / vendor {DEMO_CLIENT_NAME} / {DEMO_VENDOR_NAME}")
     print(f"    {submissions} demo submission(s) in queue states.")
 
 

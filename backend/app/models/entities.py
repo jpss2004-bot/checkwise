@@ -351,6 +351,7 @@ class ProviderWorkspace(TimestampMixin, Base):
     client_id: Mapped[str] = mapped_column(ForeignKey("clients.id"), nullable=False)
     vendor_id: Mapped[str] = mapped_column(ForeignKey("vendors.id"), nullable=False)
     contract_id: Mapped[str | None] = mapped_column(ForeignKey("contracts.id"))
+    owner_user_id: Mapped[str | None] = mapped_column(ForeignKey("users.id"), index=True)
     filial_name: Mapped[str | None] = mapped_column(String(255))
     persona_type: Mapped[str] = mapped_column(String(20), nullable=False)
     display_name: Mapped[str | None] = mapped_column(String(255))
@@ -405,6 +406,9 @@ class User(TimestampMixin, Base):
     password_hash: Mapped[str | None] = mapped_column(String(255))
     full_name: Mapped[str] = mapped_column(String(255), nullable=False)
     status: Mapped[str] = mapped_column(String(40), default="active", nullable=False)
+    must_change_password: Mapped[bool] = mapped_column(
+        Boolean, default=False, nullable=False
+    )
     last_login_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
 
     memberships: Mapped[list[Membership]] = relationship(

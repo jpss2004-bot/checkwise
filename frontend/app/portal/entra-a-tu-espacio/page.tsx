@@ -14,7 +14,6 @@ import {
   type Icon,
 } from "@phosphor-icons/react";
 
-import { AccessDecisionBanner } from "@/components/checkwise/workspace/access-decision-banner";
 import { CorrectionRequestForm } from "@/components/checkwise/workspace/correction-request-form";
 import { WorkspaceIdentityCard } from "@/components/checkwise/workspace/workspace-identity-card";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
@@ -27,12 +26,7 @@ import {
   readEditableProfile,
   saveEditableProfile,
 } from "@/lib/mock/corrections";
-import { MOCK_EXPEDIENTE } from "@/lib/mock/expediente";
-import { verifyToken } from "@/lib/mock/invitations";
-import {
-  buildWorkspaceContext,
-  decideWorkspaceAccess,
-} from "@/lib/workspace/resolver";
+import { buildWorkspaceContext } from "@/lib/workspace/resolver";
 import type {
   EditableProfileFields,
   WorkspaceContext,
@@ -64,13 +58,13 @@ const STORAGE_KEY_CONFIRMED = "checkwise.workspace.confirmed.v1";
 function EntraATuEspacioInner({ session }: { session: PortalSession }) {
   const router = useRouter();
 
-  // Build the workspace snapshot. Today we synthesize from the portal
-  // session + the most-recently-used invitation (read-only lookup).
-  // TODO[backend-integration]: replace with GET /api/v1/portal/workspace.
-  const workspace = useMemo<WorkspaceContext>(() => {
-    const inv = verifyToken("demo").ok ? verifyToken("demo").invitation ?? null : null;
-    return buildWorkspaceContext(session, inv);
-  }, [session]);
+  // Workspace snapshot comes from the authenticated session
+  // (cookie-backed /portal/me). No more mock invitations — the user is
+  // already inside their assigned workspace by the time this page renders.
+  const workspace = useMemo<WorkspaceContext>(
+    () => buildWorkspaceContext(session, null),
+    [session],
+  );
 
   const storedProfile = useMemo(
     () => readEditableProfile(workspace.protected.workspace_id),
@@ -86,17 +80,6 @@ function EntraATuEspacioInner({ session }: { session: PortalSession }) {
       storedProfile.contact_preference ?? workspace.editable.contact_preference,
   });
   const [submitting, setSubmitting] = useState(false);
-
-  // Route the user post-confirmation based on the expediente snapshot.
-  const accessOutcome = useMemo(
-    () =>
-      decideWorkspaceAccess({
-        workspace,
-        alreadyConfirmed: true, // for the destination decision once they confirm
-        requirements: MOCK_EXPEDIENTE,
-      }),
-    [workspace],
-  );
 
   async function handleConfirm(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -115,21 +98,6 @@ function EntraATuEspacioInner({ session }: { session: PortalSession }) {
       window.localStorage.setItem(STORAGE_KEY_CONFIRMED, JSON.stringify(confirmed));
     }
     setSubmitting(false);
-
-    if (accessOutcome.decision === "blocked") {
-      return; // banner shows reason; no redirect
-    }
-    if (
-      accessOutcome.decision === "allow" ||
-      accessOutcome.decision === "allow_provisional"
-    ) {
-      router.push(accessOutcome.route);
-      return;
-    }
-    if (accessOutcome.decision === "redirect_onboarding") {
-      router.push(accessOutcome.route);
-      return;
-    }
     router.push("/portal/dashboard");
   }
 
@@ -152,10 +120,6 @@ function EntraATuEspacioInner({ session }: { session: PortalSession }) {
             documentos se asignen a la empresa incorrecta.
           </p>
         </header>
-
-        {accessOutcome.decision === "blocked" && (
-          <AccessDecisionBanner outcome={accessOutcome} />
-        )}
 
         <WorkspaceIdentityCard
           workspace={workspace}
@@ -255,7 +219,6 @@ function EntraATuEspacioInner({ session }: { session: PortalSession }) {
               type="submit"
               loading={submitting}
               size="lg"
-              disabled={accessOutcome.decision === "blocked"}
             >
               <span>Entrar a mi espacio</span>
               {!submitting && <ArrowRight className="h-4 w-4" weight="bold" aria-hidden="true" />}

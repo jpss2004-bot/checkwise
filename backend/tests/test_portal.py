@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import itertools
 from collections.abc import Generator
 from io import BytesIO
 
@@ -14,7 +15,8 @@ from app.core.config import settings
 from app.db.base import Base
 from app.db.session import get_db
 from app.main import app
-from app.models import entities  # noqa: F401
+from app.models import Client, ProviderWorkspace, User, Vendor, entities  # noqa: F401
+from app.services.auth import hash_password, issue_access_token
 
 
 @pytest.fixture
@@ -38,8 +40,12 @@ def api_client(tmp_path) -> Generator[TestClient, None, None]:
             db.close()
 
     app.dependency_overrides[get_db] = override_get_db
+    # Stash the session factory on the client so helpers can seed rows
+    # in the same SQLite engine the API uses.
+    client = TestClient(app)
+    client.app.state.testing_session = testing_session  # type: ignore[attr-defined]
     try:
-        yield TestClient(app)
+        yield client
     finally:
         app.dependency_overrides.clear()
         settings.LOCAL_STORAGE_PATH = previous
@@ -53,7 +59,19 @@ def _pdf_bytes() -> bytes:
     return output.getvalue()
 
 
+# Shared counter so each helper call gets a unique email — lets a single
+# test set up two distinct workspaces (each owned by a different user).
+_user_seq = itertools.count(1)
+
+
 def _access_payload(**overrides: object) -> dict:
+    """Default workspace identity used by tests.
+
+    The shape mirrors what the old POST /portal/access request body
+    looked like, so individual test bodies didn't need to change when
+    we removed that endpoint. ``_setup_workspace_session`` consumes
+    these fields when seeding the ProviderWorkspace row.
+    """
     base = {
         "client_name": "Cliente Piloto CheckWise",
         "filial_name": "Filial Norte",
@@ -66,24 +84,205 @@ def _access_payload(**overrides: object) -> dict:
     return base
 
 
-def test_portal_access_creates_workspace_and_returns_token(api_client: TestClient) -> None:
+def _setup_workspace_session(
+    api_client: TestClient,
+    *,
+    payload: dict | None = None,
+    fresh_client: TestClient | None = None,
+) -> dict:
+    """Seed a User + Client + Vendor + ProviderWorkspace in the test DB,
+    then call POST /api/v1/portal/enter as that user so the test
+    client picks up the portal session cookie.
+
+    Returns a dict matching the old ``/portal/access`` response shape so
+    most tests can keep their existing assertions.
+    """
+    payload = payload or _access_payload()
+    target_client = fresh_client or api_client
+    factory = api_client.app.state.testing_session  # type: ignore[attr-defined]
+    db: Session = factory()
+    try:
+        seq = next(_user_seq)
+        user = User(
+            email=f"prov-{seq}@checkwise.test",
+            password_hash=hash_password("CheckWiseTest!2026"),
+            full_name=str(payload["vendor_name"]),
+            status="active",
+            must_change_password=False,
+        )
+        db.add(user)
+        db.flush()
+
+        existing_client = db.query(Client).filter_by(name=payload["client_name"]).first()
+        if existing_client is None:
+            client_row = Client(name=str(payload["client_name"]))
+            db.add(client_row)
+            db.flush()
+        else:
+            client_row = existing_client
+
+        vendor = Vendor(
+            client_id=client_row.id,
+            name=str(payload["vendor_name"]),
+            rfc=str(payload["vendor_rfc"]).upper(),
+            persona_type=str(payload["persona_type"]),
+        )
+        db.add(vendor)
+        db.flush()
+
+        workspace = ProviderWorkspace(
+            client_id=client_row.id,
+            vendor_id=vendor.id,
+            owner_user_id=user.id,
+            filial_name=payload.get("filial_name"),  # type: ignore[arg-type]
+            persona_type=str(payload["persona_type"]),
+            display_name=str(payload["vendor_name"]),
+            access_token="placeholder-rotated-on-enter",
+        )
+        db.add(workspace)
+        db.commit()
+        ws_id = workspace.id
+        user_id = user.id
+        user_email = user.email
+        vendor_rfc = vendor.rfc
+    finally:
+        db.close()
+
+    token = issue_access_token(user_id=user_id, email=user_email, roles=[], orgs=[])
+    target_client.cookies.clear()
+    enter = target_client.post(
+        "/api/v1/portal/enter",
+        json={"workspace_id": ws_id},
+        headers={"Authorization": f"Bearer {token}"},
+    )
+    assert enter.status_code == 200, enter.text
+    body = enter.json()
+
+    # Pull the rotated access_token from DB (the cookie holds the JWT, but
+    # tests still assert via X-Workspace-Token in some negative cases).
+    db = factory()
+    try:
+        ws_row = db.get(ProviderWorkspace, ws_id)
+        rotated_token = ws_row.access_token if ws_row else ""
+    finally:
+        db.close()
+
+    return {
+        "workspace_id": body["workspace_id"],
+        "access_token": rotated_token,
+        "persona_type": body["persona_type"],
+        "client_name": body["client_name"],
+        "vendor_name": body["vendor_name"],
+        "vendor_rfc": body["vendor_rfc"],
+        "filial_name": body["filial_name"],
+        "contract_reference": body["contract_reference"],
+        "onboarding_completed_at": body["onboarding_completed_at"],
+    }
+
+
+# ---------------------------------------------------------------------------
+# Anonymous portal/access endpoint must be gone (CheckWise 1.8)
+# ---------------------------------------------------------------------------
+
+
+def test_anonymous_portal_access_endpoint_is_removed(api_client: TestClient) -> None:
+    """POST /portal/access used to allow anonymous workspace creation.
+    It MUST return 404/405 now — the only way in is /portal/enter."""
     response = api_client.post("/api/v1/portal/access", json=_access_payload())
-    assert response.status_code == 201
-    payload = response.json()
-    assert payload["workspace_id"]
-    assert payload["access_token"]
-    assert payload["persona_type"] == "moral"
-    assert payload["client_name"] == "Cliente Piloto CheckWise"
-    assert payload["filial_name"] == "Filial Norte"
+    assert response.status_code in {404, 405}
+
+
+def test_portal_enter_requires_authentication(api_client: TestClient) -> None:
+    """Without a bearer JWT, /enter must 401."""
+    api_client.cookies.clear()
+    response = api_client.post("/api/v1/portal/enter", json={})
+    assert response.status_code == 401
+
+
+def test_portal_enter_rejects_user_without_workspace(api_client: TestClient) -> None:
+    """A logged-in user with no owned workspace must get 404 from /enter."""
+    factory = api_client.app.state.testing_session  # type: ignore[attr-defined]
+    db: Session = factory()
+    try:
+        user = User(
+            email="orphan@checkwise.test",
+            password_hash=hash_password("CheckWiseTest!2026"),
+            full_name="Orphan User",
+            status="active",
+        )
+        db.add(user)
+        db.commit()
+        token = issue_access_token(
+            user_id=user.id, email=user.email, roles=[], orgs=[]
+        )
+    finally:
+        db.close()
+
+    api_client.cookies.clear()
+    response = api_client.post(
+        "/api/v1/portal/enter",
+        json={},
+        headers={"Authorization": f"Bearer {token}"},
+    )
+    assert response.status_code == 404
+
+
+def test_portal_enter_rejects_foreign_workspace_id(api_client: TestClient) -> None:
+    """If user A asks to enter user B's workspace, must 403."""
+    access_b = _setup_workspace_session(
+        api_client,
+        payload=_access_payload(
+            vendor_name="Otro Proveedor SA",
+            vendor_rfc="OTR260512AB1",
+        ),
+    )
+
+    # Create a different user with their own workspace, then try to enter
+    # access_b's workspace_id with that other user's token.
+    factory = api_client.app.state.testing_session  # type: ignore[attr-defined]
+    db: Session = factory()
+    try:
+        attacker = User(
+            email="attacker@checkwise.test",
+            password_hash=hash_password("CheckWiseTest!2026"),
+            full_name="Attacker",
+            status="active",
+        )
+        db.add(attacker)
+        db.commit()
+        attacker_token = issue_access_token(
+            user_id=attacker.id, email=attacker.email, roles=[], orgs=[]
+        )
+    finally:
+        db.close()
+
+    api_client.cookies.clear()
+    cross = api_client.post(
+        "/api/v1/portal/enter",
+        json={"workspace_id": access_b["workspace_id"]},
+        headers={"Authorization": f"Bearer {attacker_token}"},
+    )
+    assert cross.status_code == 403
+
+
+def test_portal_enter_happy_path(api_client: TestClient) -> None:
+    """An owner can enter their workspace and gets a session cookie."""
+    access = _setup_workspace_session(api_client)
+    assert access["workspace_id"]
+    assert access["persona_type"] == "moral"
+    assert access["client_name"] == "Cliente Piloto CheckWise"
+    assert access["filial_name"] == "Filial Norte"
+
+    # Cookie should now be valid; /me must succeed without a header.
+    me = api_client.get("/api/v1/portal/me")
+    assert me.status_code == 200
+    assert me.json()["workspace_id"] == access["workspace_id"]
 
 
 def test_portal_workspace_requires_correct_token(api_client: TestClient) -> None:
-    access = api_client.post("/api/v1/portal/access", json=_access_payload()).json()
+    access = _setup_workspace_session(api_client)
     workspace_id = access["workspace_id"]
 
-    # CheckWise 1.7: /access now also sets an httpOnly session cookie.
-    # Negative case must simulate a foreign attacker (no cookie + a
-    # guessed header), so clear the cookie first.
     api_client.cookies.clear()
 
     bad = api_client.get(
@@ -101,7 +300,7 @@ def test_portal_workspace_requires_correct_token(api_client: TestClient) -> None
 
 
 def test_portal_onboarding_reflects_existing_submission(api_client: TestClient) -> None:
-    access = api_client.post("/api/v1/portal/access", json=_access_payload()).json()
+    access = _setup_workspace_session(api_client)
     headers = {"X-Workspace-Token": access["access_token"]}
 
     # Upload a REPSE-original-flavoured submission.
@@ -136,7 +335,7 @@ def test_portal_onboarding_reflects_existing_submission(api_client: TestClient) 
 
 
 def test_portal_calendar_shape(api_client: TestClient) -> None:
-    access = api_client.post("/api/v1/portal/access", json=_access_payload()).json()
+    access = _setup_workspace_session(api_client)
     headers = {"X-Workspace-Token": access["access_token"]}
     response = api_client.get(
         f"/api/v1/portal/workspaces/{access['workspace_id']}/calendar?year=2026",
@@ -155,7 +354,7 @@ def test_portal_calendar_shape(api_client: TestClient) -> None:
 def test_portal_calendar_emits_period_key_on_every_item(api_client: TestClient) -> None:
     """Patch 3: provider calendar must expose period_key so the wizard can
     submit canonical keys back to /submissions."""
-    access = api_client.post("/api/v1/portal/access", json=_access_payload()).json()
+    access = _setup_workspace_session(api_client)
     headers = {"X-Workspace-Token": access["access_token"]}
     payload = api_client.get(
         f"/api/v1/portal/workspaces/{access['workspace_id']}/calendar?year=2026",
@@ -179,7 +378,7 @@ def test_portal_calendar_canonical_match_does_not_overflow_across_months(
     slot in the calendar, not every 2026-bearing INFONAVIT slot."""
     from app.core.compliance_catalog import recurring_for_year
 
-    access = api_client.post("/api/v1/portal/access", json=_access_payload()).json()
+    access = _setup_workspace_session(api_client)
     headers = {"X-Workspace-Token": access["access_token"]}
 
     catalog_item = next(
@@ -260,7 +459,7 @@ def _submit_canonical(api_client: TestClient, *, vendor_rfc: str) -> dict:
 
 def test_submission_detail_returns_shape(api_client: TestClient) -> None:
     """Patch 3: detail endpoint returns identity, reasons, events, history."""
-    access = api_client.post("/api/v1/portal/access", json=_access_payload()).json()
+    access = _setup_workspace_session(api_client)
     headers = {"X-Workspace-Token": access["access_token"]}
     submitted = _submit_canonical(api_client, vendor_rfc=access["vendor_rfc"])
 
@@ -292,7 +491,7 @@ def test_submission_detail_lists_previous_attempts_for_same_slot(
 ) -> None:
     """Patch 3: repeat submissions on the same (requirement_code, period_key)
     should show the older attempts in the correction page."""
-    access = api_client.post("/api/v1/portal/access", json=_access_payload()).json()
+    access = _setup_workspace_session(api_client)
     headers = {"X-Workspace-Token": access["access_token"]}
 
     first = _submit_canonical(api_client, vendor_rfc=access["vendor_rfc"])
@@ -308,7 +507,7 @@ def test_submission_detail_lists_previous_attempts_for_same_slot(
 
 
 def test_submission_detail_requires_correct_token(api_client: TestClient) -> None:
-    access = api_client.post("/api/v1/portal/access", json=_access_payload()).json()
+    access = _setup_workspace_session(api_client)
     submitted = _submit_canonical(api_client, vendor_rfc=access["vendor_rfc"])
     # CheckWise 1.7: simulate a foreign attacker — no valid cookie.
     api_client.cookies.clear()
@@ -324,12 +523,14 @@ def test_submission_detail_refuses_submission_from_other_workspace(
     api_client: TestClient,
 ) -> None:
     """Patch 3: a workspace must not be able to read another workspace's submission."""
-    access_a = api_client.post("/api/v1/portal/access", json=_access_payload()).json()
-    access_b = api_client.post(
-        "/api/v1/portal/access",
-        json=_access_payload(vendor_name="Proveedor Externo SA", vendor_rfc="EXT260512AB1"),
-    ).json()
+    access_a = _setup_workspace_session(api_client)
     submitted_a = _submit_canonical(api_client, vendor_rfc=access_a["vendor_rfc"])
+    access_b = _setup_workspace_session(
+        api_client,
+        payload=_access_payload(
+            vendor_name="Proveedor Externo SA", vendor_rfc="EXT260512AB1"
+        ),
+    )
 
     # access_b tries to read submission of access_a — must 404.
     cross = api_client.get(
@@ -346,7 +547,7 @@ def test_submission_detail_refuses_submission_from_other_workspace(
 
 
 def test_check_duplicate_returns_false_for_unseen_hash(api_client: TestClient) -> None:
-    access = api_client.post("/api/v1/portal/access", json=_access_payload()).json()
+    access = _setup_workspace_session(api_client)
     headers = {"X-Workspace-Token": access["access_token"]}
     response = api_client.get(
         f"/api/v1/portal/workspaces/{access['workspace_id']}/duplicate-check"
@@ -360,7 +561,7 @@ def test_check_duplicate_returns_false_for_unseen_hash(api_client: TestClient) -
 
 
 def test_check_duplicate_finds_existing_workspace_submission(api_client: TestClient) -> None:
-    access = api_client.post("/api/v1/portal/access", json=_access_payload()).json()
+    access = _setup_workspace_session(api_client)
     headers = {"X-Workspace-Token": access["access_token"]}
     submitted = _submit_canonical(api_client, vendor_rfc=access["vendor_rfc"])
 
@@ -381,12 +582,14 @@ def test_check_duplicate_does_not_leak_other_workspace_documents(
 ) -> None:
     """A duplicate uploaded by another vendor must NOT show as a duplicate
     for this workspace's pre-check."""
-    access_a = api_client.post("/api/v1/portal/access", json=_access_payload()).json()
-    access_b = api_client.post(
-        "/api/v1/portal/access",
-        json=_access_payload(vendor_name="Otro Proveedor", vendor_rfc="EXT260512AB1"),
-    ).json()
+    access_a = _setup_workspace_session(api_client)
     submitted_a = _submit_canonical(api_client, vendor_rfc=access_a["vendor_rfc"])
+    access_b = _setup_workspace_session(
+        api_client,
+        payload=_access_payload(
+            vendor_name="Otro Proveedor", vendor_rfc="EXT260512AB1"
+        ),
+    )
 
     response = api_client.get(
         f"/api/v1/portal/workspaces/{access_b['workspace_id']}/duplicate-check"
@@ -398,7 +601,7 @@ def test_check_duplicate_does_not_leak_other_workspace_documents(
 
 
 def test_check_duplicate_rejects_malformed_hash(api_client: TestClient) -> None:
-    access = api_client.post("/api/v1/portal/access", json=_access_payload()).json()
+    access = _setup_workspace_session(api_client)
     headers = {"X-Workspace-Token": access["access_token"]}
     response = api_client.get(
         f"/api/v1/portal/workspaces/{access['workspace_id']}/duplicate-check"
@@ -409,7 +612,7 @@ def test_check_duplicate_rejects_malformed_hash(api_client: TestClient) -> None:
 
 
 def test_check_duplicate_requires_workspace_token(api_client: TestClient) -> None:
-    access = api_client.post("/api/v1/portal/access", json=_access_payload()).json()
+    access = _setup_workspace_session(api_client)
     # CheckWise 1.7: simulate a foreign attacker — no valid cookie.
     api_client.cookies.clear()
     response = api_client.get(
@@ -428,20 +631,17 @@ def test_check_duplicate_requires_workspace_token(api_client: TestClient) -> Non
 COOKIE_NAME = "checkwise_portal_session"
 
 
-def test_access_sets_session_cookie(api_client: TestClient) -> None:
-    """/access must issue the httpOnly portal session cookie."""
-    response = api_client.post("/api/v1/portal/access", json=_access_payload())
-    assert response.status_code == 201
-    # cookie is delivered via Set-Cookie header
-    set_cookie = response.headers.get("set-cookie", "")
-    assert COOKIE_NAME in set_cookie
-    assert "HttpOnly" in set_cookie
-    assert "SameSite=lax" in set_cookie.lower() or "samesite=lax" in set_cookie.lower()
+def test_enter_sets_session_cookie(api_client: TestClient) -> None:
+    """/enter must issue the httpOnly portal session cookie."""
+    _setup_workspace_session(api_client)
+    # The cookie was set on the api_client by the /enter call inside the helper.
+    cookies = api_client.cookies.jar
+    assert any(c.name == COOKIE_NAME for c in cookies), [c.name for c in cookies]
 
 
 def test_me_reads_session_from_cookie(api_client: TestClient) -> None:
     """/me returns the workspace summary when only the cookie is present."""
-    access = api_client.post("/api/v1/portal/access", json=_access_payload()).json()
+    access = _setup_workspace_session(api_client)
     # Don't send the X-Workspace-Token header — cookie alone must work.
     me = api_client.get("/api/v1/portal/me")
     assert me.status_code == 200
@@ -457,7 +657,7 @@ def test_me_returns_401_without_session(api_client: TestClient) -> None:
 
 
 def test_logout_clears_session_cookie(api_client: TestClient) -> None:
-    api_client.post("/api/v1/portal/access", json=_access_payload())
+    _setup_workspace_session(api_client)
     logout = api_client.post("/api/v1/portal/logout")
     assert logout.status_code == 204
     # After logout, /me must 401.
@@ -468,18 +668,21 @@ def test_logout_clears_session_cookie(api_client: TestClient) -> None:
 def test_tenant_guard_rejects_path_mismatch(api_client: TestClient) -> None:
     """Cookie's workspace_id must match path's {workspace_id}.
 
-    Opens two workspaces in two clients; client_b holds the cookie for
-    workspace_b. Attempting to read workspace_a via the path must 403.
+    Opens two workspaces (one per user); the second client holds the
+    cookie for workspace_b. Attempting to read workspace_a via the path
+    must 403.
     """
-    access_a = api_client.post("/api/v1/portal/access", json=_access_payload()).json()
+    access_a = _setup_workspace_session(api_client)
 
     fresh = TestClient(api_client.app)
-    fresh.post(
-        "/api/v1/portal/access",
-        json=_access_payload(
+    fresh.app.state.testing_session = api_client.app.state.testing_session  # type: ignore[attr-defined]
+    _setup_workspace_session(
+        api_client,
+        payload=_access_payload(
             vendor_name="Otro Proveedor SA",
             vendor_rfc="OTR260512AB1",
         ),
+        fresh_client=fresh,
     )
     # fresh now holds the cookie for the OTHER workspace.
     cross = fresh.get(f"/api/v1/portal/workspaces/{access_a['workspace_id']}")

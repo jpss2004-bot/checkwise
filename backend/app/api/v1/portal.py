@@ -1,21 +1,29 @@
 """Provider portal endpoints.
 
-These endpoints support the provider-facing journey: a credential
-access flow, an onboarding view that compares the regulatory
+These endpoints support the provider-facing journey: an authenticated
+workspace-entry flow that mints an httpOnly cookie tied to the
+authenticated user, an onboarding view that compares the regulatory
 Expediente Corporativo against existing submissions, and a yearly
 compliance calendar that overlays the recurring Árbol against
 actual submissions.
 
-CheckWise 1.7 — Session model
+CheckWise 1.8 — Session model
 -----------------------------
-``POST /portal/access`` issues an httpOnly signed-JWT cookie
-(``checkwise_portal_session``) carrying ``workspace_id`` and the
-workspace's ``access_token``. Every protected endpoint reads that
-cookie, verifies the signature, and confirms the cookie's
-``workspace_id`` matches the path's ``{workspace_id}`` (tenant guard).
+The legacy anonymous ``POST /portal/access`` endpoint has been removed.
+The only way to obtain a portal session cookie is now ``POST
+/portal/enter``, which requires:
 
-Legacy clients can still send ``X-Workspace-Token`` while we transition.
-Backend remains the source of truth for tenant ownership.
+1. A valid bearer JWT from ``POST /api/v1/auth/login``.
+2. The authenticated user's ``user.id`` to match
+   ``ProviderWorkspace.owner_user_id`` for the requested workspace.
+
+After verification, the endpoint sets the same httpOnly signed-JWT
+cookie (``checkwise_portal_session``). All other portal endpoints
+continue to read that cookie and enforce the tenant guard.
+
+The legacy ``X-Workspace-Token`` header is still accepted by reads as
+a transition aid for tests and integration scripts, but it cannot mint
+a new session — the cookie can only be issued by ``/portal/enter``.
 """
 
 from __future__ import annotations
@@ -29,6 +37,7 @@ from pydantic import BaseModel, Field
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
+from app.api.v1.auth import CurrentUser, get_current_user
 from app.constants.statuses import DocumentStatus
 from app.core.compliance_catalog import (
     catalog_metadata,
@@ -50,11 +59,6 @@ from app.services.portal_session import (
     PortalSessionError,
     issue_portal_session_token,
     verify_portal_session_token,
-)
-from app.services.submission_service import (
-    get_or_create_client,
-    get_or_create_contract,
-    get_or_create_vendor,
 )
 
 router = APIRouter(prefix="/portal", tags=["portal"])
@@ -127,18 +131,23 @@ def _session_from_request(
 # ---------------------------------------------------------------------------
 
 
-class AccessRequest(BaseModel):
-    client_name: str = Field(..., min_length=2, max_length=255)
-    filial_name: str | None = Field(default=None, max_length=255)
-    vendor_name: str = Field(..., min_length=2, max_length=255)
-    vendor_rfc: str = Field(..., min_length=12, max_length=13)
-    persona_type: Literal["moral", "fisica"]
-    contract_reference: str | None = Field(default=None, max_length=120)
+class EnterRequest(BaseModel):
+    """Body for POST /portal/enter.
+
+    The user is already authenticated via Authorization: Bearer.
+    They identify which of their assigned workspaces they want to
+    enter. Today every provider user owns exactly one workspace, so
+    ``workspace_id`` is optional — the backend resolves it from the
+    user's ownership when omitted. We keep it on the schema so the
+    client can be explicit when a user owns multiple workspaces in
+    the future.
+    """
+
+    workspace_id: str | None = Field(default=None, max_length=64)
 
 
-class AccessResponse(BaseModel):
+class EnterResponse(BaseModel):
     workspace_id: str
-    access_token: str
     persona_type: str
     client_name: str
     vendor_name: str
@@ -146,10 +155,6 @@ class AccessResponse(BaseModel):
     filial_name: str | None
     contract_reference: str | None
     onboarding_completed_at: str | None
-    note: str = (
-        "Acceso de demostración. No es autenticación de producción. "
-        "Guarda el access_token en localStorage como sesión demo."
-    )
 
 
 class WorkspaceSummary(BaseModel):
@@ -312,84 +317,96 @@ def _workspace_submissions(db: Session, workspace: ProviderWorkspace) -> list[Su
 # ---------------------------------------------------------------------------
 
 
-@router.post("/access", response_model=AccessResponse, status_code=status.HTTP_201_CREATED)
-def create_or_resume_access(
-    payload: AccessRequest,
+@router.post("/enter", response_model=EnterResponse, status_code=status.HTTP_200_OK)
+def enter_workspace(
+    payload: EnterRequest,
+    current: Annotated[CurrentUser, Depends(get_current_user)],
     db: DbSession,
     response: Response,
-) -> AccessResponse:
-    """Create (or resume) a provider workspace, set the session cookie,
-    and return the workspace summary in the body.
+) -> EnterResponse:
+    """Mint the portal session cookie for an authenticated user.
 
-    The body still carries ``access_token`` during the V1.7 transition
-    so any pre-cookie client keeps working. New clients should ignore
-    it and rely on the cookie."""
+    Authorization model:
+      * Caller MUST present a valid bearer JWT (issued by /auth/login).
+      * Caller MUST own the workspace (provider_workspaces.owner_user_id
+        == current.user.id). Anonymous workspaces (owner_user_id IS NULL)
+        cannot be entered through this endpoint — they're either legacy
+        rows or admin-created without an owner yet.
 
-    normalized_rfc = payload.vendor_rfc.strip().upper()
-    client = get_or_create_client(db, payload.client_name.strip())
-    vendor = get_or_create_vendor(
-        db, client_id=client.id, name=payload.vendor_name.strip(), rfc=normalized_rfc
-    )
-    if vendor.persona_type != payload.persona_type:
-        vendor.persona_type = payload.persona_type
+    Behavior:
+      * If ``payload.workspace_id`` is provided, that specific workspace
+        is loaded and the ownership check is enforced.
+      * If omitted, the backend looks up the unique workspace owned by
+        the current user. 409 if the user owns multiple (caller must
+        disambiguate); 404 if they own none.
 
-    contract = get_or_create_contract(
-        db,
-        client_id=client.id,
-        vendor_id=vendor.id,
-        external_reference=(payload.contract_reference or "").strip() or None,
-    )
+    On success, rotates the workspace's ``access_token`` (so previous
+    cookies stop working) and sets the new httpOnly session cookie.
+    """
 
-    # Reuse an existing workspace for the same (client, vendor, contract) tuple
-    # so a returning provider continues with the same identity. We rotate the
-    # token on each access to keep the demo at least token-aware.
-    stmt = select(ProviderWorkspace).where(
-        ProviderWorkspace.client_id == client.id,
-        ProviderWorkspace.vendor_id == vendor.id,
-    )
-    if contract is None:
-        stmt = stmt.where(ProviderWorkspace.contract_id.is_(None))
-    else:
-        stmt = stmt.where(ProviderWorkspace.contract_id == contract.id)
-    workspace = db.scalar(stmt.limit(1))
-
-    new_token = secrets.token_urlsafe(32)
-    if workspace is None:
-        workspace = ProviderWorkspace(
-            client_id=client.id,
-            vendor_id=vendor.id,
-            contract_id=contract.id if contract else None,
-            filial_name=(payload.filial_name or "").strip() or None,
-            persona_type=payload.persona_type,
-            display_name=vendor.name,
-            access_token=new_token,
+    if payload.workspace_id:
+        workspace = db.scalar(
+            select(ProviderWorkspace)
+            .where(ProviderWorkspace.id == payload.workspace_id)
+            .limit(1)
         )
-        db.add(workspace)
+        if workspace is None:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="Workspace no encontrado.",
+            )
+        if (
+            workspace.owner_user_id is None
+            or workspace.owner_user_id != current.user.id
+        ):
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="No tienes permiso para entrar a este workspace.",
+            )
     else:
-        workspace.access_token = new_token
-        workspace.persona_type = payload.persona_type
-        workspace.filial_name = (payload.filial_name or "").strip() or None
-        workspace.display_name = vendor.name
+        owned = list(
+            db.scalars(
+                select(ProviderWorkspace).where(
+                    ProviderWorkspace.owner_user_id == current.user.id
+                )
+            )
+        )
+        if not owned:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="No tienes ningún espacio asignado todavía.",
+            )
+        if len(owned) > 1:
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail=(
+                    "Tienes varios espacios disponibles. Indica workspace_id."
+                ),
+            )
+        workspace = owned[0]
 
+    # Rotate the access token so any prior cookie tied to this
+    # workspace becomes invalid the moment the user re-enters.
+    workspace.access_token = secrets.token_urlsafe(32)
     db.flush()
     db.commit()
 
-    # CheckWise 1.7: issue the httpOnly session cookie.
     _set_portal_session_cookie(
         response,
         workspace_id=workspace.id,
         access_token=workspace.access_token,
     )
 
-    return AccessResponse(
+    return EnterResponse(
         workspace_id=workspace.id,
-        access_token=workspace.access_token,
         persona_type=workspace.persona_type,
-        client_name=client.name,
-        vendor_name=vendor.name,
-        vendor_rfc=vendor.rfc,
+        client_name=workspace.client.name,
+        vendor_name=workspace.vendor.name,
+        vendor_rfc=workspace.vendor.rfc,
         filial_name=workspace.filial_name,
-        contract_reference=(contract.external_reference if contract else None),
+        contract_reference=(
+            workspace.contract.external_reference if workspace.contract else None
+        ),
         onboarding_completed_at=(
             workspace.onboarding_completed_at.isoformat()
             if workspace.onboarding_completed_at

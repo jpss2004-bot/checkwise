@@ -41,6 +41,7 @@ from app.services.auth import (
     TokenClaims,
     TokenError,
     decode_access_token,
+    hash_password,
     issue_access_token,
     verify_password,
 )
@@ -77,6 +78,7 @@ class UserOut(BaseModel):
     email: str
     full_name: str
     status: str
+    must_change_password: bool = False
     last_login_at: datetime | None
 
 
@@ -87,6 +89,16 @@ class LoginResponse(BaseModel):
     user: UserOut
     roles: list[str]
     organization_ids: list[str]
+    must_change_password: bool = False
+
+
+class SetPasswordRequest(BaseModel):
+    new_password: str = Field(..., min_length=12, max_length=128)
+
+
+class SetPasswordResponse(BaseModel):
+    user: UserOut
+    must_change_password: bool
 
 
 class CurrentUser(BaseModel):
@@ -145,6 +157,7 @@ def get_current_user(
             email=user.email,
             full_name=user.full_name,
             status=user.status,
+            must_change_password=user.must_change_password,
             last_login_at=user.last_login_at,
         ),
         roles=list(claims.roles),
@@ -274,13 +287,56 @@ def login(payload: LoginRequest, db: DbSession) -> LoginResponse:
             email=user.email,
             full_name=user.full_name,
             status=user.status,
+            must_change_password=user.must_change_password,
             last_login_at=user.last_login_at,
         ),
         roles=roles,
         organization_ids=org_ids,
+        must_change_password=user.must_change_password,
     )
 
 
 @router.get("/me", response_model=CurrentUser)
 def me(current: Annotated[CurrentUser, Depends(get_current_user)]) -> CurrentUser:
     return current
+
+
+@router.post("/set-password", response_model=SetPasswordResponse)
+def set_password(
+    payload: SetPasswordRequest,
+    current: Annotated[CurrentUser, Depends(get_current_user)],
+    db: DbSession,
+) -> SetPasswordResponse:
+    """Update the authenticated user's password and clear the
+    must-change-password flag.
+
+    Used by:
+    - The first-login flow at ``/activate`` after a user signs in with
+      seed/temporary credentials. Backend issues a JWT (still valid
+      after the password swap), frontend posts the new password here,
+      then redirects to the workspace entry.
+    - Future "change my password" UI for any signed-in user.
+
+    The bearer token issued at login remains valid until its natural
+    expiry — this endpoint does not rotate the JWT.
+    """
+    user = db.get(User, current.user.id)
+    if user is None or user.status != "active":
+        raise HTTPException(status.HTTP_401_UNAUTHORIZED, detail="User not active")
+
+    user.password_hash = hash_password(payload.new_password)
+    user.must_change_password = False
+    db.flush()
+    db.commit()
+
+    return SetPasswordResponse(
+        user=UserOut(
+            id=user.id,
+            email=user.email,
+            full_name=user.full_name,
+            status=user.status,
+            must_change_password=user.must_change_password,
+            last_login_at=user.last_login_at,
+        ),
+        must_change_password=user.must_change_password,
+    )

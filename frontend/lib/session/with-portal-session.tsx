@@ -3,21 +3,31 @@
 import { useEffect, useState, type ComponentType } from "react";
 import { useRouter } from "next/navigation";
 
-import { fetchCurrentSession, readPortalSession, type PortalSession } from "./portal";
+import { enterPortal } from "@/lib/api/auth";
+import { readAdminSession } from "@/lib/session/admin";
+import {
+  fetchCurrentSession,
+  readPortalSession,
+  type PortalSession,
+} from "./portal";
 
 /**
  * HOC that fronts a portal page with the standard session-check.
  *
- * CheckWise 1.7: session lives in an httpOnly cookie. The HOC tries
- * the in-memory cache first (populated by a prior fetch in the same
- * SPA navigation), then falls back to `GET /api/v1/portal/me`. A
- * 401 / network failure redirects to `/`.
+ * CheckWise 1.8: there are two layers.
  *
- * Usage:
- *   function DashboardInner({ session }: { session: PortalSession }) { ... }
- *   export default withPortalSession(DashboardInner);
+ *   1. The httpOnly portal cookie (preferred) — checked via
+ *      ``GET /api/v1/portal/me``. Set the first time the user calls
+ *      ``POST /api/v1/portal/enter``.
+ *   2. The admin/user JWT in localStorage — used to mint the cookie
+ *      via ``/portal/enter`` when the cookie is missing or expired.
  *
- * Spec: docs/DESIGN_SYSTEM.md §5 (Auth Guard Pattern)
+ * Resolution order:
+ *   - In-memory cache wins (populated by an earlier mount).
+ *   - Otherwise call /portal/me. If 200, render.
+ *   - If /portal/me 401 but we have a JWT, call /portal/enter and
+ *     retry /portal/me.
+ *   - If we have no JWT either, redirect to /login.
  */
 export function withPortalSession<P extends { session: PortalSession }>(
   Component: ComponentType<P>,
@@ -33,14 +43,34 @@ export function withPortalSession<P extends { session: PortalSession }>(
         setSession(cached);
         return;
       }
-      fetchCurrentSession().then((s) => {
+
+      void (async () => {
+        let resolved = await fetchCurrentSession();
         if (cancelled) return;
-        if (!s) {
-          router.replace("/");
+
+        if (!resolved) {
+          const admin = readAdminSession();
+          if (!admin) {
+            router.replace("/login");
+            return;
+          }
+          try {
+            await enterPortal(admin.access_token);
+          } catch {
+            router.replace("/login");
+            return;
+          }
+          resolved = await fetchCurrentSession();
+        }
+
+        if (cancelled) return;
+        if (!resolved) {
+          router.replace("/login");
           return;
         }
-        setSession(s);
-      });
+        setSession(resolved);
+      })();
+
       return () => {
         cancelled = true;
       };

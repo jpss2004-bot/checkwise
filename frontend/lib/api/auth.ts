@@ -36,15 +36,18 @@ type LoginResponse = {
   access_token: string;
   token_type: string;
   expires_at: string;
-  user: AdminSessionUser;
+  user: AdminSessionUser & { must_change_password?: boolean };
   roles: string[];
   organization_ids: string[];
+  must_change_password?: boolean;
 };
+
+export type LoginResult = AdminSession & { must_change_password: boolean };
 
 export async function login(
   email: string,
   password: string,
-): Promise<AdminSession> {
+): Promise<LoginResult> {
   const payload = await fetchJson<LoginResponse>("/api/v1/auth/login", {
     method: "POST",
     body: JSON.stringify({ email, password }),
@@ -55,11 +58,15 @@ export async function login(
     user: payload.user,
     roles: payload.roles,
     organization_ids: payload.organization_ids,
+    must_change_password:
+      payload.must_change_password ??
+      payload.user.must_change_password ??
+      false,
   };
 }
 
 type MeResponse = {
-  user: AdminSessionUser;
+  user: AdminSessionUser & { must_change_password?: boolean };
   roles: string[];
   organization_ids: string[];
   token_expires_at: string;
@@ -69,5 +76,51 @@ export async function getCurrentAdmin(token: string): Promise<MeResponse> {
   return await fetchJson<MeResponse>("/api/v1/auth/me", {
     method: "GET",
     headers: { Authorization: `Bearer ${token}` },
+  });
+}
+
+type SetPasswordResponse = {
+  user: AdminSessionUser & { must_change_password: boolean };
+  must_change_password: boolean;
+};
+
+export async function setPassword(
+  token: string,
+  newPassword: string,
+): Promise<SetPasswordResponse> {
+  return await fetchJson<SetPasswordResponse>("/api/v1/auth/set-password", {
+    method: "POST",
+    headers: { Authorization: `Bearer ${token}` },
+    body: JSON.stringify({ new_password: newPassword }),
+  });
+}
+
+type EnterResponse = {
+  workspace_id: string;
+  persona_type: string;
+  client_name: string;
+  vendor_name: string;
+  vendor_rfc: string;
+  filial_name: string | null;
+  contract_reference: string | null;
+  onboarding_completed_at: string | null;
+};
+
+/**
+ * Mint the portal session cookie for an authenticated user.
+ *
+ * Requires the admin/user JWT issued by /auth/login. Sends
+ * credentials:include so the response Set-Cookie is honored by the
+ * browser. After this call, /portal/* endpoints work via cookie.
+ */
+export async function enterPortal(
+  token: string,
+  workspaceId?: string,
+): Promise<EnterResponse> {
+  return await fetchJson<EnterResponse>("/api/v1/portal/enter", {
+    method: "POST",
+    credentials: "include",
+    headers: { Authorization: `Bearer ${token}` },
+    body: JSON.stringify(workspaceId ? { workspace_id: workspaceId } : {}),
   });
 }
