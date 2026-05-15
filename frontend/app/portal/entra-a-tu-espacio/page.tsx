@@ -1,7 +1,6 @@
 "use client";
 
 import { useMemo, useState, type FormEvent } from "react";
-import Link from "next/link";
 import { useRouter } from "next/navigation";
 import {
   ArrowRight,
@@ -14,7 +13,6 @@ import {
   type Icon,
 } from "@phosphor-icons/react";
 
-import { CorrectionRequestForm } from "@/components/checkwise/workspace/correction-request-form";
 import { WorkspaceIdentityCard } from "@/components/checkwise/workspace/workspace-identity-card";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
@@ -211,10 +209,7 @@ function EntraATuEspacioInner({ session }: { session: PortalSession }) {
 
           <NextStepPreview workspace={workspace} />
 
-          <footer className="mt-6 flex flex-col gap-3 border-t border-[color:var(--border-subtle)] pt-4 sm:flex-row sm:items-center sm:justify-between">
-            <Button asChild variant="ghost" size="sm">
-              <a href="#correccion">Reportar información incorrecta</a>
-            </Button>
+          <footer className="mt-6 flex justify-end border-t border-[color:var(--border-subtle)] pt-4">
             <Button
               type="submit"
               loading={submitting}
@@ -237,30 +232,6 @@ function EntraATuEspacioInner({ session }: { session: PortalSession }) {
             salvaguarda contra accesos cruzados.
           </AlertDescription>
         </Alert>
-
-        <section
-          id="correccion"
-          className="scroll-mt-8 rounded-xl border border-[color:var(--border-default)] bg-[color:var(--surface-raised)] p-6 shadow-sm sm:p-8"
-        >
-          <header className="mb-4">
-            <p className="font-mono text-[10px] uppercase tracking-wide text-[color:var(--text-teal)]">
-              Solicitud de corrección
-            </p>
-            <h2 className="text-base font-semibold text-[color:var(--text-primary)]">
-              ¿Hay algo que no coincide?
-            </h2>
-            <p className="mt-1 text-[13px] text-[color:var(--text-secondary)]">
-              Captura el cambio que sugieres. Los campos sensibles
-              (razón social, RFC, rol, empresa) requieren revisión antes
-              de aplicarse.
-            </p>
-          </header>
-          <CorrectionRequestForm
-            workspace_id={workspace.protected.workspace_id}
-            initialField="rfc"
-            initialCurrentValue={workspace.protected.rfc ?? ""}
-          />
-        </section>
       </div>
     </main>
   );
@@ -354,5 +325,3 @@ function BackgroundOrnaments() {
   );
 }
 
-// Note: Link import retained for potential future external CTAs in this page.
-void Link;
