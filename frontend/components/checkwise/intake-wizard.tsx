@@ -177,9 +177,53 @@ export function IntakeWizard({
     return new Set<IntakeLockedField>(effective);
   }, [lockedFields, form, unlockedOverride]);
 
-  const selectedRequirement =
-    requirementGuides.find((requirement) => requirement.name === form.requirement_name) ??
-    requirementGuides[0];
+  // Resolve the requirement guide for the right-side context panel and
+  // step 2's "Requisito esperado" card. Two paths:
+  //
+  //   1. Exact name match in our local catalog (legacy, when the
+  //      requirement was picked from the wizard's own dropdown).
+  //   2. Synthesize from URL/form context when the name was supplied
+  //      from outside the wizard (e.g. /portal/onboarding sends
+  //      backend names like "Contrato original y anexos" or
+  //      "Acta constitutiva..." which won't match the local catalog).
+  //
+  // Without (2) the panel always defaulted to requirementGuides[0]
+  // (the SAT CSF entry) regardless of what the user clicked, which
+  // is exactly the bug the user reported.
+  const selectedRequirement = useMemo(() => {
+    const exact = requirementGuides.find(
+      (requirement) => requirement.name === form.requirement_name,
+    );
+    if (exact) return exact;
+    if (form.requirement_name) {
+      const institutionLabel =
+        institutions.find((i) => i.value === form.institution_code)?.label ??
+        form.institution_code ??
+        "—";
+      const frequencyLabel =
+        loadTypes.find((l) => l.value === form.load_type)?.label ??
+        form.load_type ??
+        "—";
+      return {
+        name: form.requirement_name,
+        institution: institutionLabel,
+        risk: "Alto",
+        frequency: frequencyLabel,
+        why:
+          "Este documento forma parte de tu expediente REPSE. Sigue las " +
+          "indicaciones del expediente para asegurarte de subir la versión correcta.",
+        validExample:
+          "PDF oficial vigente correspondiente al documento solicitado, " +
+          "legible y emitido a nombre del proveedor.",
+        rejectionCauses: [
+          "archivo ilegible o protegido con contraseña",
+          "documento de otro proveedor",
+          "versión vencida o desactualizada",
+        ],
+      };
+    }
+    return requirementGuides[0];
+  }, [form.requirement_name, form.institution_code, form.load_type]);
 
   function updateField(field: keyof IntakeForm, value: string) {
     setForm((current) => ({ ...current, [field]: value }));
@@ -1180,23 +1224,6 @@ function ConfirmationStep({
           </p>
         )}
       </div>
-
-      <details className="rounded-md border border-border bg-white p-4 text-sm">
-        <summary className="cursor-pointer text-xs font-medium uppercase tracking-wide text-muted-foreground">
-          Datos de trazabilidad
-        </summary>
-        <div className="mt-3 grid gap-2 text-xs text-muted-foreground md:grid-cols-2">
-          <span className="break-all">Submission: {result.submission_id}</span>
-          <span className="break-all">Documento: {result.document_id}</span>
-          <span>
-            Eventos registrados: {result.validation_events?.length ?? 0}
-          </span>
-          <span>Páginas PDF: {result.inspection?.page_count ?? "N/D"}</span>
-          <span className="break-all md:col-span-2">
-            SHA-256: {result.sha256}
-          </span>
-        </div>
-      </details>
 
       <ValidationSummary validations={result.validations} />
     </section>
