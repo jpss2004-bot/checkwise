@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
-import Link from "next/link";
+import { useRouter } from "next/navigation";
 import {
   ArrowRight,
   CheckCircle,
@@ -18,13 +18,14 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Progress } from "@/components/ui/progress";
 import { Skeleton } from "@/components/ui/skeleton";
-import { getOnboarding } from "@/lib/api/portal";
+import { completeOnboarding, getOnboarding } from "@/lib/api/portal";
 import {
   adaptOnboardingToRequirements,
   countRealExpediente,
 } from "@/lib/api/portal-adapters";
 import { MOCK_EXPEDIENTE, type ExpedienteRequirement } from "@/lib/mock/expediente";
 import { withPortalSession } from "@/lib/session/with-portal-session";
+import { fetchCurrentSession } from "@/lib/session/portal";
 import type { PortalSession } from "@/lib/session/portal";
 
 /**
@@ -43,10 +44,44 @@ function OnboardingInner({ session }: { session: PortalSession }) {
   // adapter enriches each item with UX copy (why/format/next_action)
   // that the backend doesn't yet ship — that enrichment will move
   // server-side in P1-1.
+  const router = useRouter();
   const [requirements, setRequirements] = useState<ExpedienteRequirement[] | null>(
     null,
   );
   const [loadError, setLoadError] = useState(false);
+  const [activating, setActivating] = useState(false);
+  const [activateError, setActivateError] = useState<string | null>(null);
+
+  /**
+   * Mark the initial expediente as complete and unlock the dashboard.
+   *
+   * Centralised here so the page has one entry point for completion —
+   * called both by the bottom "Activar dashboard" CTA and by the hero
+   * button when the gate is already satisfied.
+   *
+   * Refreshes the in-memory portal session afterwards so
+   * ``withOnboardingGate`` sees the new ``expediente_status`` and lets
+   * the user into ``/portal/dashboard`` instead of bouncing them back
+   * here.
+   */
+  async function handleActivateDashboard() {
+    setActivating(true);
+    setActivateError(null);
+    try {
+      if (session.expediente_status !== "complete") {
+        await completeOnboarding(session);
+        // Bust the in-memory session cache so the gate sees the new status.
+        await fetchCurrentSession();
+      }
+      router.push("/portal/dashboard");
+    } catch {
+      setActivateError(
+        "No pudimos activar tu dashboard. Revisa tu conexión e intenta de nuevo.",
+      );
+    } finally {
+      setActivating(false);
+    }
+  }
 
   useEffect(() => {
     let cancelled = false;
@@ -122,7 +157,12 @@ function OnboardingInner({ session }: { session: PortalSession }) {
             </AlertDescription>
           </Alert>
         )}
-        <GateHero counts={counts} banner={banner} />
+        <GateHero
+          counts={counts}
+          banner={banner}
+          onActivate={handleActivateDashboard}
+          activating={activating}
+        />
 
         {needsAction.length > 0 && (
           <ExpedienteSection
@@ -169,8 +209,106 @@ function OnboardingInner({ session }: { session: PortalSession }) {
             </div>
           </ExpedienteSection>
         )}
+
+        <ActivateDashboardCard
+          status={session.expediente_status}
+          counts={counts}
+          activating={activating}
+          error={activateError}
+          onActivate={handleActivateDashboard}
+        />
       </main>
     </>
+  );
+}
+
+// ─── Activate-dashboard CTA ─────────────────────────────────────
+//
+// The single entry point a provider uses to leave the expediente
+// flow and unlock /portal/dashboard. Visible always on this page so
+// the user is never guessing how to "finish onboarding". The button
+// degrades gracefully:
+//   * status === "complete"   → "Entrar al dashboard"   (skips API call)
+//   * counts gate satisfied   → "Activar dashboard"     (primary CTA)
+//   * neither                 → "Activar dashboard sin completar todo"
+//                               with a warning explaining the trade-off
+//                               (kept for the demo so the seeded user
+//                               can reach the dashboard without uploads)
+
+function ActivateDashboardCard({
+  status,
+  counts,
+  activating,
+  error,
+  onActivate,
+}: {
+  status: PortalSession["expediente_status"];
+  counts: ReturnType<typeof countRealExpediente>;
+  activating: boolean;
+  error: string | null;
+  onActivate: () => void;
+}) {
+  const alreadyComplete = status === "complete";
+  const gateReady = counts.is_gate_satisfied;
+  const ctaLabel = alreadyComplete
+    ? "Entrar al dashboard"
+    : gateReady
+      ? "Activar mi dashboard"
+      : "Activar mi dashboard de todos modos";
+
+  return (
+    <section className="cw-fade-up rounded-xl border border-[color:var(--border-default)] bg-[color:var(--surface-raised)] p-6 shadow-sm sm:p-8">
+      <header className="mb-3 flex items-center gap-3">
+        <span
+          className="flex h-10 w-10 items-center justify-center rounded-full bg-[color:var(--surface-brand-muted)]"
+          aria-hidden="true"
+        >
+          <ShieldCheck
+            className="h-5 w-5 text-[color:var(--text-brand)]"
+            weight="duotone"
+          />
+        </span>
+        <div>
+          <p className="font-mono text-[10px] uppercase tracking-wide text-[color:var(--text-teal)]">
+            Activación de dashboard
+          </p>
+          <h2 className="text-base font-semibold text-[color:var(--text-primary)]">
+            {alreadyComplete
+              ? "Tu expediente inicial está completo"
+              : "Cuando tu expediente esté listo, activa tu dashboard"}
+          </h2>
+        </div>
+      </header>
+
+      <p className="mb-4 max-w-prose text-[13px] leading-5 text-[color:var(--text-secondary)]">
+        {alreadyComplete
+          ? "Puedes entrar a tu dashboard cuando quieras. Si necesitas actualizar un documento, vuelve aquí desde la sección de configuración."
+          : gateReady
+            ? "Cumpliste lo necesario para arrancar. Activa tu dashboard para comenzar a darle seguimiento a tus obligaciones recurrentes."
+            : "Si quieres revisar tu dashboard antes de terminar de subir documentos, puedes activarlo ahora — los documentos que falten quedarán visibles en tu expediente."}
+      </p>
+
+      {error && (
+        <Alert variant="warning" className="mb-4">
+          <AlertTitle>No se pudo activar</AlertTitle>
+          <AlertDescription>{error}</AlertDescription>
+        </Alert>
+      )}
+
+      <div className="flex flex-wrap items-center gap-3">
+        <Button onClick={onActivate} loading={activating} size="lg">
+          <span>{ctaLabel}</span>
+          {!activating && (
+            <ArrowRight className="h-4 w-4" weight="bold" aria-hidden="true" />
+          )}
+        </Button>
+        <p className="text-xs text-[color:var(--text-tertiary)]">
+          {alreadyComplete
+            ? "El dashboard reemplaza este expediente como tu vista principal."
+            : "Una vez activado, podrás regresar aquí cuando necesites actualizar documentos."}
+        </p>
+      </div>
+    </section>
   );
 }
 
@@ -181,6 +319,8 @@ export default withPortalSession(OnboardingInner);
 function GateHero({
   counts,
   banner,
+  onActivate,
+  activating,
 }: {
   counts: ReturnType<typeof countRealExpediente>;
   banner:
@@ -188,6 +328,8 @@ function GateHero({
     | "provisional_access"
     | "expediente_blocked"
     | "needs_workspace_confirmation";
+  onActivate: () => void;
+  activating: boolean;
 }) {
   if (counts.is_gate_satisfied) {
     const isProvisional = banner === "provisional_access";
@@ -240,11 +382,11 @@ function GateHero({
               )}
             </p>
             <div className="mt-4 flex flex-wrap gap-2">
-              <Button asChild size="lg">
-                <Link href="/portal/dashboard">
-                  <span>Entrar al dashboard</span>
+              <Button onClick={onActivate} loading={activating} size="lg">
+                <span>Entrar al dashboard</span>
+                {!activating && (
                   <ArrowRight className="h-4 w-4" weight="bold" aria-hidden="true" />
-                </Link>
+                )}
               </Button>
             </div>
           </div>

@@ -272,6 +272,30 @@ export async function getSubmissionDetail(
   );
 }
 
+export type CompleteOnboardingResponse = {
+  workspace_id: string;
+  onboarding_completed_at: string;
+  expediente_status: "complete";
+};
+
+/**
+ * Mark the provider's initial expediente as complete.
+ *
+ * Backend gates ownership via the same JWT/cookie chain — the user
+ * can only complete their own workspace, never another company's.
+ * Idempotent on the server side: re-calling keeps the original
+ * timestamp.
+ */
+export async function completeOnboarding(
+  session: PortalSession,
+): Promise<CompleteOnboardingResponse> {
+  return await fetchJson<CompleteOnboardingResponse>(
+    `/api/v1/portal/workspaces/${session.workspace_id}/complete-onboarding`,
+    { method: "POST" },
+    session,
+  );
+}
+
 export type DuplicateCheck = {
   exists: boolean;
   submission_id: string | null;

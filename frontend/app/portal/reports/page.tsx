@@ -30,7 +30,7 @@ import {
   type ReportMeta,
   type ReportType,
 } from "@/lib/mock/reports";
-import { withPortalSession } from "@/lib/session/with-portal-session";
+import { withOnboardingGate } from "@/lib/session/with-onboarding-gate";
 import type { PortalSession } from "@/lib/session/portal";
 
 const TYPE_ICON: Record<ReportType, Icon> = {
@@ -115,7 +115,7 @@ function ReportsInner({ session }: { session: PortalSession }) {
   );
 }
 
-export default withPortalSession(ReportsInner);
+export default withOnboardingGate(ReportsInner);
 
 // ─── Report card ────────────────────────────────────────────────
 

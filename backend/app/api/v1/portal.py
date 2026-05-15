@@ -56,6 +56,7 @@ from app.models import (
     Validation,
     ValidationEvent,
 )
+from app.models.entities import utc_now
 from app.services.portal_session import (
     PortalSessionError,
     issue_portal_session_token,
@@ -156,6 +157,15 @@ class EnterResponse(BaseModel):
     filial_name: str | None
     contract_reference: str | None
     onboarding_completed_at: str | None
+    # Derived expediente lifecycle marker. The frontend uses this to
+    # decide whether to send the user to /portal/onboarding (when not
+    # complete) or directly to /portal/dashboard (when complete).
+    # Values:
+    #   * "complete"     — onboarding_completed_at is set; dashboard unlocked.
+    #   * "in_progress"  — at least one submission exists but the
+    #                      expediente has not been marked complete yet.
+    #   * "not_started"  — zero submissions and no completion timestamp.
+    expediente_status: Literal["not_started", "in_progress", "complete"]
 
 
 class WorkspaceSummary(BaseModel):
@@ -167,6 +177,13 @@ class WorkspaceSummary(BaseModel):
     filial_name: str | None
     contract_reference: str | None
     onboarding_completed_at: str | None
+    expediente_status: Literal["not_started", "in_progress", "complete"]
+
+
+class CompleteOnboardingResponse(BaseModel):
+    workspace_id: str
+    onboarding_completed_at: str
+    expediente_status: Literal["complete"]
 
 
 # ---------------------------------------------------------------------------
@@ -370,6 +387,37 @@ def _scope_from_path(workspace_id: str) -> str:
     return f"portal.workspaces.{workspace_id}"
 
 
+def _expediente_status(
+    db: Session, workspace: ProviderWorkspace
+) -> Literal["not_started", "in_progress", "complete"]:
+    """Derive the expediente lifecycle status from workspace state.
+
+    Single source of truth used by every endpoint that exposes
+    ``expediente_status``. Order matters:
+
+      1. ``onboarding_completed_at`` set → ``complete``. Dashboard
+         unlocked. The provider has finished initial setup (either by
+         clicking the explicit complete CTA or via admin override).
+      2. Any submission row exists for the (client, vendor) pair →
+         ``in_progress``. The provider has started uploading.
+      3. Otherwise → ``not_started``. Empty expediente, fresh provider.
+
+    Status is derived (not stored as a column) so it stays in sync if
+    submissions are added or deleted out-of-band.
+    """
+    if workspace.onboarding_completed_at is not None:
+        return "complete"
+    has_submission = db.scalar(
+        select(Submission.id)
+        .where(
+            Submission.client_id == workspace.client_id,
+            Submission.vendor_id == workspace.vendor_id,
+        )
+        .limit(1)
+    )
+    return "in_progress" if has_submission else "not_started"
+
+
 def _workspace_submissions(db: Session, workspace: ProviderWorkspace) -> list[Submission]:
     stmt = (
         select(Submission)
@@ -482,6 +530,7 @@ def enter_workspace(
             if workspace.onboarding_completed_at
             else None
         ),
+        expediente_status=_expediente_status(db, workspace),
     )
 
 
@@ -489,6 +538,39 @@ def enter_workspace(
 def portal_logout(response: Response) -> None:
     """Clear the portal session cookie."""
     _clear_portal_session_cookie(response)
+
+
+@router.post(
+    "/workspaces/{workspace_id}/complete-onboarding",
+    response_model=CompleteOnboardingResponse,
+    status_code=status.HTTP_200_OK,
+)
+def complete_onboarding(
+    workspace_id: str,
+    db: DbSession,
+    workspace: Annotated[ProviderWorkspace, Depends(current_portal_workspace)],
+) -> CompleteOnboardingResponse:
+    """Mark the provider's initial expediente as complete.
+
+    Authorization: same chain as every other ``/portal/workspaces/{id}/*``
+    endpoint — the caller must own this workspace (enforced by
+    ``current_portal_workspace`` via JWT or cookie). The path's
+    ``workspace_id`` is matched against the resolved workspace, so a
+    user cannot complete another company's expediente by guessing IDs.
+
+    Idempotent: re-calling on an already-completed workspace returns
+    the existing timestamp (does not move it forward).
+    """
+    _ = workspace_id  # tenant guard already enforced by dependency
+    if workspace.onboarding_completed_at is None:
+        workspace.onboarding_completed_at = utc_now()
+        db.flush()
+        db.commit()
+    return CompleteOnboardingResponse(
+        workspace_id=workspace.id,
+        onboarding_completed_at=workspace.onboarding_completed_at.isoformat(),
+        expediente_status="complete",
+    )
 
 
 @router.get("/me", response_model=WorkspaceSummary)
@@ -532,12 +614,14 @@ def get_portal_me(
             if workspace.onboarding_completed_at
             else None
         ),
+        expediente_status=_expediente_status(db, workspace),
     )
 
 
 @router.get("/workspaces/{workspace_id}", response_model=WorkspaceSummary)
 def get_workspace(
     workspace_id: str,
+    db: DbSession,
     workspace: Annotated[ProviderWorkspace, Depends(current_portal_workspace)],
 ) -> WorkspaceSummary:
     _ = workspace_id  # tenant guard already enforced by current_portal_workspace
@@ -556,6 +640,7 @@ def get_workspace(
             if workspace.onboarding_completed_at
             else None
         ),
+        expediente_status=_expediente_status(db, workspace),
     )
 
 

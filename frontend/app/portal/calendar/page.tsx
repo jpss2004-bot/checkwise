@@ -31,7 +31,7 @@ import {
   type CalendarEvent,
   type CalendarInstitution,
 } from "@/lib/mock/calendar";
-import { withPortalSession } from "@/lib/session/with-portal-session";
+import { withOnboardingGate } from "@/lib/session/with-onboarding-gate";
 import type { PortalSession } from "@/lib/session/portal";
 
 const INSTITUTIONS: CalendarInstitution[] = ["sat", "imss", "infonavit", "stps_repse"];
@@ -251,7 +251,7 @@ function CalendarInner({ session }: { session: PortalSession }) {
   );
 }
 
-export default withPortalSession(CalendarInner);
+export default withOnboardingGate(CalendarInner);
 
 // ─── Filter chips ───────────────────────────────────────────────
 

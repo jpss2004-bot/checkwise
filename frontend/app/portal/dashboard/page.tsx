@@ -36,7 +36,7 @@ import {
 } from "@/lib/mock/dashboard";
 import { MOCK_EXPEDIENTE, countExpediente } from "@/lib/mock/expediente";
 import { verifyToken } from "@/lib/mock/invitations";
-import { withPortalSession } from "@/lib/session/with-portal-session";
+import { withOnboardingGate } from "@/lib/session/with-onboarding-gate";
 import type { PortalSession } from "@/lib/session/portal";
 import type { DocumentStateCode } from "@/lib/types";
 import { buildWorkspaceContext } from "@/lib/workspace/resolver";
@@ -122,7 +122,7 @@ function DashboardInner({ session }: { session: PortalSession }) {
   );
 }
 
-export default withPortalSession(DashboardInner);
+export default withOnboardingGate(DashboardInner);
 
 // ─── Provisional access banner ───────────────────────────────────
 

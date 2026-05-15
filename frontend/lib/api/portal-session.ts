@@ -23,6 +23,8 @@ const API_BASE_URL =
   (typeof process !== "undefined" && process.env.NEXT_PUBLIC_API_BASE_URL) ||
   "http://127.0.0.1:8000";
 
+export type ExpedienteStatus = "not_started" | "in_progress" | "complete";
+
 export interface WorkspaceSummary {
   workspace_id: string;
   persona_type: string;
@@ -32,6 +34,7 @@ export interface WorkspaceSummary {
   filial_name: string | null;
   contract_reference: string | null;
   onboarding_completed_at: string | null;
+  expediente_status: ExpedienteStatus;
 }
 
 function bearerHeader(): Record<string, string> {

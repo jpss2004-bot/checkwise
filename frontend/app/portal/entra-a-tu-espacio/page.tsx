@@ -96,7 +96,14 @@ function EntraATuEspacioInner({ session }: { session: PortalSession }) {
       window.localStorage.setItem(STORAGE_KEY_CONFIRMED, JSON.stringify(confirmed));
     }
     setSubmitting(false);
-    router.push("/portal/dashboard");
+    // Onboarding gate: a brand-new provider must finish their initial
+    // expediente before the dashboard becomes available. The session's
+    // expediente_status comes from the backend (single source of truth).
+    const next =
+      session.expediente_status === "complete"
+        ? "/portal/dashboard"
+        : "/portal/onboarding";
+    router.push(next);
   }
 
   return (

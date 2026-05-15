@@ -665,6 +665,92 @@ def test_logout_clears_session_cookie(api_client: TestClient) -> None:
     assert me.status_code == 401
 
 
+# ---------------------------------------------------------------------------
+# Expediente gate (CheckWise 1.8) — status field + complete-onboarding
+# ---------------------------------------------------------------------------
+
+
+def test_me_returns_not_started_for_fresh_workspace(api_client: TestClient) -> None:
+    """A workspace with no submissions and no completion timestamp must
+    report expediente_status='not_started'."""
+    _setup_workspace_session(api_client)
+    me = api_client.get("/api/v1/portal/me")
+    assert me.status_code == 200
+    body = me.json()
+    assert body["expediente_status"] == "not_started"
+    assert body["onboarding_completed_at"] is None
+
+
+def test_me_returns_in_progress_after_first_submission(
+    api_client: TestClient,
+) -> None:
+    """Once any submission exists, status flips to 'in_progress'."""
+    access = _setup_workspace_session(api_client)
+    _submit_canonical(api_client, vendor_rfc=access["vendor_rfc"])
+    me = api_client.get("/api/v1/portal/me")
+    assert me.status_code == 200
+    assert me.json()["expediente_status"] == "in_progress"
+
+
+def test_complete_onboarding_marks_workspace_complete(
+    api_client: TestClient,
+) -> None:
+    """POST /complete-onboarding sets the timestamp + flips status."""
+    access = _setup_workspace_session(api_client)
+    response = api_client.post(
+        f"/api/v1/portal/workspaces/{access['workspace_id']}/complete-onboarding"
+    )
+    assert response.status_code == 200, response.text
+    body = response.json()
+    assert body["workspace_id"] == access["workspace_id"]
+    assert body["expediente_status"] == "complete"
+    assert body["onboarding_completed_at"]
+
+    # /me reflects it
+    me = api_client.get("/api/v1/portal/me").json()
+    assert me["expediente_status"] == "complete"
+    assert me["onboarding_completed_at"]
+
+
+def test_complete_onboarding_is_idempotent(api_client: TestClient) -> None:
+    """Calling complete-onboarding twice keeps the original timestamp."""
+    access = _setup_workspace_session(api_client)
+    first = api_client.post(
+        f"/api/v1/portal/workspaces/{access['workspace_id']}/complete-onboarding"
+    ).json()
+    second = api_client.post(
+        f"/api/v1/portal/workspaces/{access['workspace_id']}/complete-onboarding"
+    ).json()
+    assert first["onboarding_completed_at"] == second["onboarding_completed_at"]
+
+
+def test_complete_onboarding_rejects_foreign_workspace(
+    api_client: TestClient,
+) -> None:
+    """A user cannot complete another company's expediente by guessing
+    workspace_id — current_portal_workspace tenant guard catches it."""
+    access_b = _setup_workspace_session(
+        api_client,
+        payload=_access_payload(
+            vendor_name="Otro Proveedor SA", vendor_rfc="OTR260512AB1"
+        ),
+    )
+    # Switch to a different user with their own session.
+    fresh = TestClient(api_client.app)
+    fresh.app.state.testing_session = api_client.app.state.testing_session  # type: ignore[attr-defined]
+    _setup_workspace_session(
+        api_client,
+        payload=_access_payload(
+            vendor_name="Tercer Proveedor", vendor_rfc="TER260512AB1"
+        ),
+        fresh_client=fresh,
+    )
+    cross = fresh.post(
+        f"/api/v1/portal/workspaces/{access_b['workspace_id']}/complete-onboarding"
+    )
+    assert cross.status_code in {403, 404}
+
+
 def test_tenant_guard_rejects_path_mismatch(api_client: TestClient) -> None:
     """Cookie's workspace_id must match path's {workspace_id}.
 

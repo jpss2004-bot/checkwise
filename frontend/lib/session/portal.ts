@@ -29,6 +29,8 @@ const LEGACY_LOCAL_STORAGE_KEY = "checkwise.portal.session.v1";
 
 export type PersonaType = "moral" | "fisica";
 
+export type ExpedienteStatus = "not_started" | "in_progress" | "complete";
+
 export type PortalSession = {
   workspace_id: string;
   /** Kept on the type for backward compatibility with existing code paths.
@@ -41,6 +43,9 @@ export type PortalSession = {
   filial_name: string | null;
   contract_reference: string | null;
   onboarding_completed_at: string | null;
+  /** Initial-expediente lifecycle marker.
+   *  Only "complete" unlocks the dashboard. */
+  expediente_status: ExpedienteStatus;
 };
 
 let cached: PortalSession | null = null;
@@ -68,6 +73,7 @@ function summaryToSession(summary: WorkspaceSummary): PortalSession {
     filial_name: summary.filial_name,
     contract_reference: summary.contract_reference,
     onboarding_completed_at: summary.onboarding_completed_at,
+    expediente_status: summary.expediente_status,
   };
 }
 
