@@ -1,8 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
 import Link from "next/link";
-import { useRouter } from "next/navigation";
 import {
   ArrowRight,
   Buildings,
@@ -28,7 +26,6 @@ import { ContactForm } from "@/components/marketing/contact-form";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Progress } from "@/components/ui/progress";
-import { fetchCurrentSession } from "@/lib/session/portal";
 
 interface FeatureItem {
   icon: Icon;
@@ -132,29 +129,6 @@ const STEPS: StepItem[] = [
 ];
 
 export default function PublicHome() {
-  const router = useRouter();
-  const [hasSession, setHasSession] = useState(false);
-
-  useEffect(() => {
-    let cancelled = false;
-    // CheckWise 1.7: ask the backend whether a portal session cookie
-    // is valid. No localStorage trust.
-    fetchCurrentSession().then((session) => {
-      if (!cancelled) setHasSession(!!session);
-    });
-    return () => {
-      cancelled = true;
-    };
-  }, []);
-
-  // If a session already exists, send the user straight to the portal.
-  // Public marketing page is for unauthenticated visitors.
-  useEffect(() => {
-    // CheckWise 1.6: route returning sessions through the workspace
-    // confirmation step. Once confirmed it redirects onward.
-    if (hasSession) router.replace("/portal/entra-a-tu-espacio");
-  }, [hasSession, router]);
-
   return (
     <main className="min-h-[100dvh] bg-[color:var(--surface-page)]">
       <MarketingNav />
