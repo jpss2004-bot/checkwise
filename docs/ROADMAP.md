@@ -96,9 +96,49 @@ Frontend redesign pass that lifts vendor, client, and admin portals onto one com
 - Removed: orphan `access-decision-banner.tsx` (referenced a deleted type, zero consumers).
 - Full detail: [CHECKWISE_2_0.md](CHECKWISE_2_0.md).
 
-## Next
+### V2.x — Visual rework + Reports flagship (in progress)
 
-### V2.1 — Mock → real backend wiring
+The 2.x track unifies the rework into one release. Five phases.
+
+**Phase 1 — Audit + inspo map** (done, `384177f`)
+
+- Surface-by-surface audit of 12 routes; 7 cross-cutting findings.
+- 13 Pinterest inspos tagged ADOPT / TRANSLATE / REJECT.
+- 4 public-route current-state PNGs.
+- Full detail: [design-system/AUDIT_2_X.md](design-system/AUDIT_2_X.md), [design-system/INSPO_MAP.md](design-system/INSPO_MAP.md).
+
+**Phase 2 — Visual direction lock** (done, `67993aa`)
+
+- Three density tiers (`comfortable` / `dense` / `compact`).
+- 8-step type scale, four new utility classes (`.cw-eyebrow`, `.cw-metadata-strip`, `.cw-prose`, `.cw-display`).
+- 14 codified anti-patterns; peer-reference set (Vanta / Drata / Mercury / Ramp / Linear / Stripe).
+- Anchor spike: `/portal/dashboard` 4-up KPI grid → horizontal metadata strip.
+- Full detail: [design-system/VISUAL_DIRECTION_2_X.md](design-system/VISUAL_DIRECTION_2_X.md).
+
+**Phase 3 — Reports flagship** (in progress)
+
+Reports evolves into a living, AI-orchestrated compliance-intelligence workspace. Not a PDF exporter. See [REPORTS_ARCHITECTURE.md](REPORTS_ARCHITECTURE.md) + [REPORTS_BLOCK_REGISTRY.md](REPORTS_BLOCK_REGISTRY.md).
+
+- 3.0 — Architecture lock (this PR)
+- 3.1 — Backend foundation: reports + report_versions + report_conversations + compliance_snapshots + report_shares + report_exports tables; CRUD endpoints; no AI yet.
+- 3.2 — Canvas + 5 base blocks: BlockNote editor, registry skeleton, `text` / `divider` / `executive_summary` / `vendor_risk_matrix` / `kpi_strip`.
+- 3.3 — AI planner + content streaming (Anthropic Claude); 9 blocks total; tenant-isolation tests.
+- 3.4 — Chat copilot + refinement.
+- 3.5 — In-place editing + autosave + versioning.
+- 3.6 — Export pipeline (HTML print, DOCX, presentation mode); 14 blocks total.
+- 3.7 — Sharing + signed links.
+
+**Phase 4 — Hero + marketing visual rework**
+
+`/`, `/login`, `/activate`, `/portal/entra-a-tu-espacio` lifted into the V2.x visual register.
+
+**Phase 5 — Internal polish + roll-out**
+
+Locked visual direction applied across the remaining 19 routes. Final `impeccable-ui` pass. Verification gauntlet + branch + PR + tag `v2.1.0`.
+
+## Next (post-2.x)
+
+### V2.2 — Mock → real backend wiring
 
 Finish the backend-integration TODOs that 2.0 carried forward through `portal-adapters.ts`.
 
@@ -106,7 +146,7 @@ Finish the backend-integration TODOs that 2.0 carried forward through `portal-ad
 - Wire the admin + client dashboards to real `/api/v1/clients/*` payloads (today they still consume `lib/mock/*`).
 - Replace the V1.2 opaque `X-Workspace-Token` with the JWT/RBAC stack already used by `/admin/*`.
 
-### V2.2 — Importers + Source-of-Truth Migration
+### V2.3 — Importers + Source-of-Truth Migration
 
 - Audit JotForm / Google Sheets schemas.
 - Build a field dictionary.
@@ -114,17 +154,17 @@ Finish the backend-integration TODOs that 2.0 carried forward through `portal-ad
 - Idempotent importer into PostgreSQL.
 - Report unmappable rows, duplicates, divergences.
 
-### V2.3 — OCR + Structured Extraction
+### V2.4 — OCR + Structured Extraction
 
 - Background jobs (Redis + RQ or Celery) for OCR, hashing, dedup.
 - Field extraction per institution.
 - Confidence-scored validations attached to submissions.
 
-### V2.4 — Reports + Notifications
+### V2.5 — Notifications
 
-- Monthly client-facing report from normalized data.
 - Vendor alerts (overdue, rejected, action-required).
 - Reviewer alerts (queue depth, SLA risk).
+- Push reports (from Phase 3) as scheduled Slack / WhatsApp / email digests.
 
 ### Production readiness (parallel track)
 
