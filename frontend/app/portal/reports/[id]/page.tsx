@@ -1,14 +1,17 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useState, type FormEvent } from "react";
 import Link from "next/link";
-import { useParams, useRouter } from "next/navigation";
+import { useParams } from "next/navigation";
 import {
   ArrowLeft,
   ArrowsClockwise,
   CheckCircle,
+  CircleNotch,
   FloppyDisk,
+  Sparkle,
   WarningCircle,
+  X,
 } from "@phosphor-icons/react";
 
 import { Canvas } from "@/components/checkwise/reports/canvas";
@@ -28,6 +31,7 @@ import {
   type ReportContent,
   type ReportRead,
 } from "@/lib/api/reports";
+import { useReportGeneration } from "@/lib/reports/use-generation";
 import { withOnboardingGate } from "@/lib/session/with-onboarding-gate";
 import type { PortalSession } from "@/lib/session/portal";
 
@@ -44,7 +48,6 @@ import type { PortalSession } from "@/lib/session/portal";
 
 function EditorInner({ session }: { session: PortalSession }) {
   const params = useParams();
-  const router = useRouter();
   const reportId = typeof params?.id === "string" ? params.id : "";
 
   const [report, setReport] = useState<ReportRead | null>(null);
@@ -54,6 +57,31 @@ function EditorInner({ session }: { session: PortalSession }) {
   const [saving, setSaving] = useState(false);
   const [savedAt, setSavedAt] = useState<Date | null>(null);
   const [isDirty, setIsDirty] = useState(false);
+
+  // ─── AI generation ──────────────────────────────────────────
+  const [aiOpen, setAiOpen] = useState(false);
+  const [aiPrompt, setAiPrompt] = useState("");
+  const gen = useReportGeneration(reportId);
+
+  const onGenerateSubmit = useCallback(
+    async (e: FormEvent) => {
+      e.preventDefault();
+      if (!aiPrompt.trim()) return;
+      await gen.startGeneration(aiPrompt.trim());
+    },
+    [aiPrompt, gen],
+  );
+
+  // When generation completes, swap the editor's content over to the
+  // streamed result + reload the report metadata so version_number
+  // reflects the new persisted version.
+  useEffect(() => {
+    if (gen.state.status === "done" && gen.state.content) {
+      setContent(gen.state.content);
+      setIsDirty(false);
+      getReport(reportId).then(setReport).catch(() => {});
+    }
+  }, [gen.state.status, gen.state.content, reportId]);
 
   // ─── Load ───────────────────────────────────────────────────
   useEffect(() => {
@@ -173,6 +201,20 @@ function EditorInner({ session }: { session: PortalSession }) {
                 </Link>
               </Button>
               <Button
+                variant="outline"
+                size="sm"
+                onClick={() => setAiOpen((open) => !open)}
+                disabled={
+                  gen.state.status === "planning" ||
+                  gen.state.status === "streaming" ||
+                  gen.state.status === "saving"
+                }
+                title="Generar con IA a partir de un prompt"
+              >
+                <Sparkle className="h-4 w-4" weight="bold" aria-hidden="true" />
+                Generar con IA
+              </Button>
+              <Button
                 variant="default"
                 size="sm"
                 onClick={saveVersion}
@@ -233,7 +275,100 @@ function EditorInner({ session }: { session: PortalSession }) {
               </span>
             </div>
           )}
+          {gen.state.status !== "idle" && (
+            <div>
+              <span className="cw-eyebrow">IA</span>
+              <GenerationBadge status={gen.state.status} />
+            </div>
+          )}
         </div>
+
+        {aiOpen && (
+          <form
+            onSubmit={onGenerateSubmit}
+            className="cw-fade-up flex flex-col gap-3 rounded-md border border-[color:var(--status-ai-border)] bg-[color:var(--status-ai-bg)] p-4"
+          >
+            <div className="flex items-start gap-2 text-[13px] text-[color:var(--text-ai)]">
+              <Sparkle
+                className="mt-0.5 h-4 w-4 shrink-0"
+                weight="fill"
+                aria-hidden="true"
+              />
+              <p>
+                Describe el reporte que necesitas. La IA selecciona los bloques,
+                trae los datos y redacta el resumen ejecutivo. El plan se
+                ejecuta dentro del workspace; ningún dato cruza tenant.
+              </p>
+            </div>
+            <textarea
+              value={aiPrompt}
+              onChange={(e) => setAiPrompt(e.target.value)}
+              placeholder="ej. Genera un resumen REPSE de mayo 2026 para los proveedores con SAT pendiente."
+              rows={3}
+              className="w-full resize-none rounded-sm border border-[color:var(--border-default)] bg-[color:var(--surface-raised)] px-3 py-2 text-[14px] text-[color:var(--text-primary)] outline-none focus:border-[color:var(--border-focus)]"
+            />
+            <div className="flex items-center gap-2">
+              <Button
+                type="submit"
+                size="sm"
+                disabled={
+                  !aiPrompt.trim() ||
+                  gen.state.status === "planning" ||
+                  gen.state.status === "streaming" ||
+                  gen.state.status === "saving"
+                }
+              >
+                {gen.state.status === "planning" ||
+                gen.state.status === "streaming" ||
+                gen.state.status === "saving" ? (
+                  <CircleNotch
+                    className="h-4 w-4 animate-spin"
+                    weight="bold"
+                    aria-hidden="true"
+                  />
+                ) : (
+                  <Sparkle className="h-4 w-4" weight="bold" aria-hidden="true" />
+                )}
+                {gen.state.status === "planning"
+                  ? "Planeando…"
+                  : gen.state.status === "streaming"
+                    ? "Generando…"
+                    : gen.state.status === "saving"
+                      ? "Guardando…"
+                      : "Generar reporte"}
+              </Button>
+              {(gen.state.status === "streaming" ||
+                gen.state.status === "planning") && (
+                <Button
+                  type="button"
+                  size="sm"
+                  variant="ghost"
+                  onClick={gen.cancel}
+                >
+                  <X className="h-4 w-4" weight="bold" aria-hidden="true" />
+                  Cancelar
+                </Button>
+              )}
+              <Button
+                type="button"
+                size="sm"
+                variant="ghost"
+                onClick={() => {
+                  gen.reset();
+                  setAiOpen(false);
+                  setAiPrompt("");
+                }}
+              >
+                Cerrar
+              </Button>
+              {gen.state.error && (
+                <span className="text-[12px] text-[color:var(--status-error-text)]">
+                  {gen.state.error}
+                </span>
+              )}
+            </div>
+          </form>
+        )}
 
         <Canvas content={content} editable={true} onChange={onCanvasChange} />
       </main>
@@ -242,3 +377,53 @@ function EditorInner({ session }: { session: PortalSession }) {
 }
 
 export default withOnboardingGate(EditorInner);
+
+function GenerationBadge({
+  status,
+}: {
+  status: "planning" | "streaming" | "saving" | "done" | "error" | "cancelled";
+}) {
+  switch (status) {
+    case "planning":
+      return (
+        <span className="inline-flex items-center gap-1 font-mono text-[11px] text-[color:var(--text-ai)]">
+          <CircleNotch className="h-3 w-3 animate-spin" weight="bold" aria-hidden="true" />
+          planeando
+        </span>
+      );
+    case "streaming":
+      return (
+        <span className="inline-flex items-center gap-1 font-mono text-[11px] text-[color:var(--text-ai)]">
+          <Sparkle className="h-3 w-3 animate-pulse" weight="fill" aria-hidden="true" />
+          generando
+        </span>
+      );
+    case "saving":
+      return (
+        <span className="inline-flex items-center gap-1 font-mono text-[11px] text-[color:var(--text-ai)]">
+          <CircleNotch className="h-3 w-3 animate-spin" weight="bold" aria-hidden="true" />
+          guardando
+        </span>
+      );
+    case "done":
+      return (
+        <span className="inline-flex items-center gap-1 font-mono text-[11px] text-[color:var(--status-success-text)]">
+          <CheckCircle className="h-3 w-3" weight="fill" aria-hidden="true" />
+          listo
+        </span>
+      );
+    case "error":
+      return (
+        <span className="inline-flex items-center gap-1 font-mono text-[11px] text-[color:var(--status-error-text)]">
+          <WarningCircle className="h-3 w-3" weight="fill" aria-hidden="true" />
+          error
+        </span>
+      );
+    case "cancelled":
+      return (
+        <span className="font-mono text-[11px] text-[color:var(--text-tertiary)]">
+          cancelado
+        </span>
+      );
+  }
+}

@@ -16,9 +16,11 @@ catch domain errors → render HTTP.
 
 from __future__ import annotations
 
+import json as _json
 from typing import Annotated
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
+from fastapi.responses import StreamingResponse
 from sqlalchemy.orm import Session
 
 from app.api.v1.auth import CurrentUser, get_current_user
@@ -54,6 +56,7 @@ from app.services.report_service import (
     patch_report,
 )
 from app.services.reports.context import ReportScope, assemble_context
+from app.services.reports.executor import execute_plan
 from app.services.reports.llm import LLMError, get_llm_client
 from app.services.reports.planner import plan_report
 
@@ -379,3 +382,102 @@ def post_plan(
         snapshot_id=plan.snapshot_id,
         llm_backend=llm.name,
     )
+
+
+# ─── Phase 3.3b — Streaming generation ───────────────────────────
+
+
+@router.post(
+    "/{report_id}/generate",
+    summary="Stream a full AI-generated report version (SSE)",
+)
+def post_generate(
+    report_id: str,
+    payload: PlanReportRequest,
+    db: DbSession,
+    current: Annotated[CurrentUser, Depends(get_current_user)],
+) -> StreamingResponse:
+    """End-to-end report generation, streamed as Server-Sent Events.
+
+    Pipeline:
+        1. Plan the report (3.3a) using the user's natural-language
+           prompt. Same Context Assembler, same audience guards.
+        2. Execute the plan block-by-block, fetching tenant-scoped
+           data and streaming per-block AI summaries.
+        3. Persist a new ReportVersion when generation completes.
+
+    Event protocol (see docs/REPORTS_ARCHITECTURE.md §8):
+        event: plan
+        event: block_start
+        event: block_data
+        event: ai_summary_delta   (zero or more)
+        event: block_complete
+        event: version_saved
+        event: done
+        event: error              (zero or more, non-fatal per-block)
+
+    The client should treat any non-`done` final state as a partial
+    generation. On `done` the persisted version is canonical and the
+    canvas can switch from streaming-mode to editable-mode.
+    """
+    actor = _actor_from(current)
+
+    try:
+        report, _ = get_report(db, actor=actor, report_id=report_id)
+    except ReportNotFoundError as exc:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, str(exc)) from exc
+
+    scope = ReportScope(
+        organization_id=report.organization_id,
+        audience=ReportAudience(report.audience),
+        client_id=report.client_id,
+        vendor_id=report.vendor_id,
+        period=payload.period,
+    )
+
+    try:
+        context = assemble_context(db, actor=actor, scope=scope)
+    except ReportPermissionError as exc:
+        raise HTTPException(status.HTTP_403_FORBIDDEN, str(exc)) from exc
+
+    llm = get_llm_client()
+
+    try:
+        plan = plan_report(llm=llm, context=context, user_prompt=payload.prompt)
+    except LLMError as exc:
+        raise HTTPException(status.HTTP_502_BAD_GATEWAY, str(exc)) from exc
+
+    def _sse_iter() -> Annotated[any, 'sse']:
+        try:
+            for event_name, data in execute_plan(
+                db=db,
+                actor=actor,
+                report=report,
+                plan=plan,
+                context=context,
+                llm=llm,
+            ):
+                yield _sse_frame(event_name, data)
+        except Exception as exc:  # pragma: no cover — defensive
+            yield _sse_frame(
+                "error",
+                {"code": "execution_failed", "message": str(exc)},
+            )
+
+    return StreamingResponse(
+        _sse_iter(),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache, no-transform",
+            "X-Accel-Buffering": "no",  # disable Nginx/Vercel proxy buffering
+        },
+    )
+
+
+def _sse_frame(event_name: str, data: dict) -> str:
+    """Format a single Server-Sent Event frame.
+
+    The SSE spec wants ``event: <name>\\ndata: <payload>\\n\\n``.
+    Multi-line JSON is fine because we serialize without newlines.
+    """
+    return f"event: {event_name}\ndata: {_json.dumps(data, default=str)}\n\n"
