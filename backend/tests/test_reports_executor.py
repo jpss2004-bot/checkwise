@@ -26,12 +26,10 @@ from app.db.base import Base
 from app.db.session import get_db
 from app.main import app
 from app.models import (
-    Client,
     Membership,
     Organization,
     ReportVersion,
     User,
-    Vendor,
     entities,  # noqa: F401
 )
 from app.services.auth import hash_password
