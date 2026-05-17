@@ -22,10 +22,13 @@ from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy.orm import Session
 
 from app.api.v1.auth import CurrentUser, get_current_user
-from app.constants.reports import ReportStatus
+from app.constants.reports import ReportAudience, ReportStatus
 from app.db.session import get_db
 from app.models.entities import Report, ReportVersion
 from app.schemas.reports import (
+    PlannedBlockResponse,
+    PlanReportRequest,
+    PlanReportResponse,
     ReportCreate,
     ReportList,
     ReportPatch,
@@ -50,6 +53,9 @@ from app.services.report_service import (
     list_versions,
     patch_report,
 )
+from app.services.reports.context import ReportScope, assemble_context
+from app.services.reports.llm import LLMError, get_llm_client
+from app.services.reports.planner import plan_report
 
 router = APIRouter(prefix="/reports", tags=["reports"])
 DbSession = Annotated[Session, Depends(get_db)]
@@ -303,3 +309,73 @@ def get_one_version(
     except ReportVersionNotFoundError as exc:
         raise HTTPException(status.HTTP_404_NOT_FOUND, str(exc)) from exc
     return _version_read(version)
+
+
+# ─── Phase 3.3a — Plan ───────────────────────────────────────────
+
+
+@router.post(
+    "/{report_id}/plan",
+    response_model=PlanReportResponse,
+    summary="Generate a structured plan for a report (no execution)",
+)
+def post_plan(
+    report_id: str,
+    payload: PlanReportRequest,
+    db: DbSession,
+    current: Annotated[CurrentUser, Depends(get_current_user)],
+) -> PlanReportResponse:
+    """Translate a natural-language request into a structured plan.
+
+    Steps:
+        1. Confirm the caller can read the report (404 otherwise).
+        2. Assemble tenant-scoped context. Persists a
+           ComplianceSnapshot row capturing exactly what the LLM
+           was shown.
+        3. Call the planner (LLM with tool-use catalog).
+        4. Return the validated plan + the snapshot id.
+
+    The plan is NOT saved as a ReportVersion here. That's a Phase
+    3.3b decision (the streaming execution endpoint persists a
+    version once the per-block content is generated).
+    """
+    actor = _actor_from(current)
+
+    try:
+        report, _ = get_report(db, actor=actor, report_id=report_id)
+    except ReportNotFoundError as exc:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, str(exc)) from exc
+
+    scope = ReportScope(
+        organization_id=report.organization_id,
+        audience=ReportAudience(report.audience),
+        client_id=report.client_id,
+        vendor_id=report.vendor_id,
+        period=payload.period,
+    )
+
+    try:
+        context = assemble_context(db, actor=actor, scope=scope)
+    except ReportPermissionError as exc:
+        raise HTTPException(status.HTTP_403_FORBIDDEN, str(exc)) from exc
+
+    llm = get_llm_client()
+    try:
+        plan = plan_report(llm=llm, context=context, user_prompt=payload.prompt)
+    except LLMError as exc:
+        raise HTTPException(status.HTTP_502_BAD_GATEWAY, str(exc)) from exc
+
+    return PlanReportResponse(
+        blocks=[
+            PlannedBlockResponse(id=b.id, type=b.type, config=b.config)
+            for b in plan.blocks
+        ],
+        rationale=plan.rationale,
+        audience=ReportAudience(plan.audience),
+        scope_hint=plan.scope_hint,
+        model=plan.model,
+        stop_reason=plan.stop_reason,
+        usage=plan.usage,
+        snapshot_id=plan.snapshot_id,
+        llm_backend=llm.name,
+    )
