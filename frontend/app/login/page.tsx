@@ -6,7 +6,6 @@ import { useRouter } from "next/navigation";
 import {
   ArrowLeft,
   CircleNotch,
-  ShieldCheck,
   SignIn,
   Warning,
 } from "@phosphor-icons/react";
@@ -84,10 +83,16 @@ export default function LoginPage() {
   if (!bootChecked) return <LoginSkeleton />;
 
   return (
-    <main className="relative min-h-[100dvh] overflow-hidden">
-      <BackgroundOrnaments />
+    <main className="relative min-h-[100dvh] overflow-hidden bg-[color:var(--surface-page)]">
+      {/* V2.x ornament: the grid-pattern texture from globals.css.
+          Replaces the previous radial-blob gradients which violated
+          the locked direction (§"Color strategy — Restrained"). */}
+      <div
+        aria-hidden="true"
+        className="cw-grid-pattern pointer-events-none absolute inset-0 -z-10"
+      />
       <div className="relative mx-auto flex min-h-[100dvh] max-w-md flex-col gap-8 px-5 py-10 lg:py-14">
-        <header className="flex items-center justify-between cw-fade-up">
+        <header className="cw-fade-up flex items-center justify-between">
           <Link href="/" aria-label="Volver al inicio">
             <BrandLogo size="md" poweredBy />
           </Link>
@@ -102,41 +107,24 @@ export default function LoginPage() {
 
         <section className="cw-fade-up space-y-6" style={{ animationDelay: "60ms" }}>
           <div className="space-y-2">
-            <p className="font-mono text-[10px] uppercase tracking-[0.18em] text-[color:var(--text-teal)]">
+            <p className="cw-eyebrow text-[color:var(--text-teal)]">
               Iniciar sesión
             </p>
             <h1 className="text-3xl font-semibold tracking-tight text-[color:var(--text-primary)]">
               Bienvenido a CheckWise
             </h1>
-            <p className="text-[15px] text-[color:var(--text-secondary)]">
-              Usa tus credenciales (reales o temporales) para entrar.
+            <p className="text-[15px] leading-relaxed text-[color:var(--text-secondary)]">
+              Usa tus credenciales (reales o temporales) para entrar. Si recibiste
+              acceso temporal, te pediremos cambiar la contraseña en el siguiente
+              paso.
             </p>
           </div>
 
           <form
             onSubmit={onSubmit}
-            className="rounded-xl border border-[color:var(--border-default)] bg-[color:var(--surface-raised)] p-6 shadow-md sm:p-8"
+            className="rounded-md border border-[color:var(--border-default)] bg-[color:var(--surface-raised)] p-6 shadow-[var(--shadow-sm)]"
             noValidate
           >
-            <div className="mb-5 flex items-center gap-3">
-              <span className="flex h-10 w-10 items-center justify-center rounded-full bg-[color:var(--surface-brand-muted)]">
-                <ShieldCheck
-                  className="h-5 w-5 text-[color:var(--text-brand)]"
-                  weight="duotone"
-                  aria-hidden="true"
-                />
-              </span>
-              <div>
-                <h2 className="text-base font-semibold text-[color:var(--text-primary)]">
-                  Acceso a CheckWise
-                </h2>
-                <p className="text-xs text-[color:var(--text-secondary)]">
-                  Si recibiste credenciales temporales, te pediremos cambiar la
-                  contraseña en el siguiente paso.
-                </p>
-              </div>
-            </div>
-
             {error && (
               <Alert variant="error" className="mb-5">
                 <AlertTitle className="flex items-center gap-2">
@@ -186,6 +174,31 @@ export default function LoginPage() {
             </Button>
           </form>
 
+          {/* CheckWise-grounding metadata strip. Addresses the audit
+              note that /login feels like generic SaaS chrome — the
+              mono labels + Spanish copy declare this is a compliance
+              product. */}
+          <div className="cw-metadata-strip border-t border-b border-[color:var(--border-subtle)] py-3">
+            <div>
+              <span className="cw-eyebrow">Plataforma</span>
+              <span className="text-[12px] text-[color:var(--text-primary)]">
+                Cumplimiento REPSE
+              </span>
+            </div>
+            <div>
+              <span className="cw-eyebrow">Operado por</span>
+              <span className="text-[12px] text-[color:var(--text-primary)]">
+                Legal Shelf · México
+              </span>
+            </div>
+            <div>
+              <span className="cw-eyebrow">Revisión</span>
+              <span className="text-[12px] text-[color:var(--text-primary)]">
+                Humana obligatoria
+              </span>
+            </div>
+          </div>
+
           <p className="text-center text-xs text-[color:var(--text-tertiary)]">
             ¿No tienes acceso aún?{" "}
             <a
@@ -213,27 +226,6 @@ function decideDestination(
     return "/admin/reviewer";
   }
   return "/portal/entra-a-tu-espacio";
-}
-
-function BackgroundOrnaments() {
-  return (
-    <div aria-hidden="true" className="pointer-events-none absolute inset-0 overflow-hidden">
-      <div
-        className="absolute -top-32 -left-24 h-[480px] w-[480px] rounded-full opacity-[0.18] blur-3xl"
-        style={{
-          background:
-            "radial-gradient(circle, hsl(var(--brand-navy)/0.55) 0%, transparent 70%)",
-        }}
-      />
-      <div
-        className="absolute -bottom-40 -right-24 h-[520px] w-[520px] rounded-full opacity-[0.14] blur-3xl"
-        style={{
-          background:
-            "radial-gradient(circle, hsl(var(--brand-teal)/0.6) 0%, transparent 70%)",
-        }}
-      />
-    </div>
-  );
 }
 
 function LoginSkeleton() {

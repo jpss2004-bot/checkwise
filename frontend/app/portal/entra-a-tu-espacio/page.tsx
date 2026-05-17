@@ -108,8 +108,6 @@ function EntraATuEspacioInner({ session }: { session: PortalSession }) {
 
   return (
     <main className="relative min-h-[100dvh] overflow-hidden bg-[color:var(--surface-page)]">
-      <BackgroundOrnaments />
-
       <div className="relative mx-auto flex max-w-4xl flex-col gap-6 px-5 py-10 lg:py-14">
         <header className="cw-fade-up flex flex-col gap-2">
           <Badge variant="teal" className="self-start rounded-full px-3 py-1">
@@ -276,59 +274,53 @@ function NextStepPreview({ workspace }: { workspace: WorkspaceContext }) {
     },
   ];
 
+  // V2.x: replaces the previous 2×2 tile grid with a numbered
+  // vertical rail. The audit (AUDIT_2_X.md §"Provider portal") flagged
+  // the 4 tiles as at risk of being an identical-card-grid anti-
+  // pattern. The vertical rail keeps the same content but turns it
+  // into an ordered "what happens next" sequence, which is closer to
+  // the operator's mental model.
   return (
-    <section className="mt-6 rounded-lg border border-[color:var(--border-subtle)] bg-[color:var(--surface-page)] p-4">
-      <p className="mb-3 font-mono text-[10px] uppercase tracking-wide text-[color:var(--text-teal)]">
+    <section className="mt-6">
+      <p className="cw-eyebrow mb-3 text-[color:var(--text-teal)]">
         Tu próximo paso, {workspace.editable.first_name || "bienvenido"}
       </p>
-      <ul className="grid gap-3 sm:grid-cols-2">
-        {items.map(({ icon: IconComponent, title, body }) => (
+      <ol className="border-t border-b border-[color:var(--border-subtle)] divide-y divide-[color:var(--border-subtle)]">
+        {items.map(({ icon: IconComponent, title, body }, idx) => (
           <li
             key={title}
-            className="flex items-start gap-3 rounded-sm border border-[color:var(--border-subtle)] bg-[color:var(--surface-raised)] p-3"
+            className="flex items-start gap-4 py-3"
           >
             <span
-              className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-[color:var(--surface-brand-muted)]"
+              className="mt-0.5 flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-[color:var(--surface-brand-muted)] font-mono text-[11px] font-semibold text-[color:var(--text-brand)]"
               aria-hidden="true"
             >
-              <IconComponent
-                className="h-4 w-4 text-[color:var(--text-brand)]"
-                weight="duotone"
-              />
+              {idx + 1}
             </span>
-            <div>
-              <p className="text-[13px] font-semibold text-[color:var(--text-primary)]">
-                {title}
-              </p>
-              <p className="mt-0.5 text-xs leading-5 text-[color:var(--text-secondary)]">
+            <div className="min-w-0 flex-1">
+              <div className="flex items-center gap-2">
+                <IconComponent
+                  className="h-3.5 w-3.5 text-[color:var(--text-tertiary)]"
+                  weight="regular"
+                  aria-hidden="true"
+                />
+                <p className="text-[13px] font-semibold text-[color:var(--text-primary)]">
+                  {title}
+                </p>
+              </div>
+              <p className="mt-1 text-[12px] leading-relaxed text-[color:var(--text-secondary)]">
                 {body}
               </p>
             </div>
           </li>
         ))}
-      </ul>
+      </ol>
     </section>
   );
 }
 
-function BackgroundOrnaments() {
-  return (
-    <div aria-hidden="true" className="pointer-events-none absolute inset-0 overflow-hidden">
-      <div
-        className="absolute -top-32 left-1/4 h-[480px] w-[480px] rounded-full opacity-[0.14] blur-3xl"
-        style={{
-          background:
-            "radial-gradient(circle, hsl(var(--brand-navy)/0.55) 0%, transparent 70%)",
-        }}
-      />
-      <div
-        className="absolute -bottom-40 -right-24 h-[520px] w-[520px] rounded-full opacity-[0.12] blur-3xl"
-        style={{
-          background:
-            "radial-gradient(circle, hsl(var(--brand-teal)/0.6) 0%, transparent 70%)",
-        }}
-      />
-    </div>
-  );
-}
+// V2.x: BackgroundOrnaments removed. The previous radial-blob
+// gradients (navy + teal) violated §"Color strategy — Restrained".
+// The page now uses the standard --surface-page background; if more
+// texture is needed in a future polish, add cw-grid-pattern instead.
 
