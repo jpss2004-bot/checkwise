@@ -249,6 +249,15 @@
 }
 
 /* ── Density tokens ───────────────────────────────────────────── */
+/*
+ * Three tiers per VISUAL_DIRECTION_2_X.md:
+ *   comfortable → marketing / entry surfaces (/, /login, /activate, /portal/entra-a-tu-espacio)
+ *   dense       → admin + reports + client (/admin/*, /portal/reports, /client/*)
+ *   compact     → power-user tables when explicit toggle requested
+ * The provider portal default (no attribute) sits at the "Operational"
+ * tier between comfortable and dense; values inherit comfortable but
+ * pages tighten card padding to 20px via local class.
+ */
 :root,
 [data-density="comfortable"] {
   --density-base-font: 15px;
@@ -260,6 +269,16 @@
   --density-row-gap: 14px;
 }
 
+[data-density="dense"] {
+  --density-base-font: 14px;
+  --density-row-padding-y: 10px;
+  --density-row-padding-x: 14px;
+  --density-control-height: 36px;
+  --density-section-gap: 28px;
+  --density-card-padding: 20px;
+  --density-row-gap: 12px;
+}
+
 [data-density="compact"] {
   --density-base-font: 13px;
   --density-row-padding-y: 8px;
@@ -268,6 +287,23 @@
   --density-section-gap: 24px;
   --density-card-padding: 16px;
   --density-row-gap: 10px;
+}
+
+/* ── Type scale (locked in VISUAL_DIRECTION_2_X.md) ────────────── */
+:root {
+  --text-eyebrow:     0.6875rem;  /* 11px — small caps, tracked, mono */
+  --text-body-sm:     0.8125rem;  /* 13px — table cells, metadata, helper */
+  --text-body:        0.875rem;   /* 14px — default body */
+  --text-h3:          1rem;       /* 16px — section heads inside surfaces */
+  --text-h2:          1.25rem;    /* 20px — page subtitles, report sections */
+  --text-h1:          1.625rem;   /* 26px — page titles */
+  --text-display-sm:  2.25rem;    /* 36px — hero subhead, report cover sub */
+  --text-display:     3.5rem;     /* 56px — hero headline only */
+
+  --tracking-tight: -0.01em;
+  --tracking-eyebrow: 0.05em;
+
+  --prose-max-width: 65ch;
 }
 
 /* ── 3. Component tokens (shadcn-compatible aliases) ──────────── */
@@ -332,6 +368,63 @@ code,
 pre {
   font-family: var(--font-geist-mono), "Geist Mono", "Courier New", monospace;
   font-feature-settings: "ss01";
+}
+
+/* ── 2.x typographic utilities (VISUAL_DIRECTION_2_X.md) ──────── */
+
+/* Eyebrow label: mono, small caps, tracked. Used above section
+   headings, in page-header metadata strips, and as the label half
+   of label/value pairs throughout the product. */
+.cw-eyebrow {
+  font-family: var(--font-geist-mono), "Geist Mono", "Courier New", monospace;
+  font-size: var(--text-eyebrow);
+  font-weight: 500;
+  letter-spacing: var(--tracking-eyebrow);
+  text-transform: uppercase;
+  color: var(--text-tertiary);
+}
+
+/* Display headline — hero / report covers only. */
+.cw-display {
+  font-size: var(--text-display);
+  font-weight: 700;
+  letter-spacing: var(--tracking-tight);
+  line-height: 1;
+}
+.cw-display-sm {
+  font-size: var(--text-display-sm);
+  font-weight: 600;
+  letter-spacing: var(--tracking-tight);
+  line-height: 1.05;
+}
+
+/* Prose body width cap (65ch per impeccable). */
+.cw-prose {
+  max-width: var(--prose-max-width);
+}
+
+/* Metadata strip — the canonical horizontal label/value composition
+   used in page headers, hero, and detail surfaces.
+   Use:
+     <div className="cw-metadata-strip">
+       <div><span className="cw-eyebrow">Centro</span><span>Distribuidora Nogal</span></div>
+       <div><span className="cw-eyebrow">RFC</span><span className="font-mono">DNG890101AB1</span></div>
+     </div>
+*/
+.cw-metadata-strip {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 1.5rem;            /* 24px */
+  row-gap: 0.5rem;
+}
+.cw-metadata-strip > * {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 0.5rem;            /* 8px between label and value */
+}
+.cw-metadata-strip > * > .cw-eyebrow {
+  flex-shrink: 0;
 }
 
 /* ── Keyframes ────────────────────────────────────────────────── */
