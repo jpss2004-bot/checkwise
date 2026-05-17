@@ -17,7 +17,7 @@ import {
 } from "@phosphor-icons/react";
 
 import { DocStateBadge, DOC_STATE_LABELS } from "@/components/checkwise/doc-state-badge";
-import { ProviderContextBar } from "@/components/checkwise/portal/provider-context-bar";
+import { PortalAppShell } from "@/components/checkwise/portal/portal-app-shell";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { PageHeader } from "@/components/ui/page-header";
@@ -157,19 +157,17 @@ function CalendarInner({ session }: { session: PortalSession }) {
 
   if (!events) {
     return (
-      <>
-        <ProviderContextBar session={session} />
+      <PortalAppShell session={session}>
         <main className="mx-auto max-w-7xl space-y-6 px-5 py-8">
           <Skeleton className="h-24 w-1/2 rounded-xl" />
           <Skeleton className="h-[420px] w-full rounded-xl" />
         </main>
-      </>
+      </PortalAppShell>
     );
   }
 
   return (
-    <>
-      <ProviderContextBar session={session} />
+    <PortalAppShell session={session}>
       <main className="mx-auto max-w-7xl space-y-6 px-5 py-8">
         <PageHeader
           eyebrow={`Calendario REPSE · ${year}`}
@@ -286,7 +284,7 @@ function CalendarInner({ session }: { session: PortalSession }) {
       {selected && (
         <EventDrawer event={selected} onClose={() => setSelectedId(null)} />
       )}
-    </>
+    </PortalAppShell>
   );
 }
 

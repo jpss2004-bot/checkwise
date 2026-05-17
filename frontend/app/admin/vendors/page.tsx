@@ -1,7 +1,16 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
+import {
+  Buildings,
+  MagnifyingGlass,
+  Plus,
+  Storefront,
+  X,
+} from "@phosphor-icons/react";
 
+import { EmptyState, Surface } from "@/components/checkwise/dashboard/stat-card";
+import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -23,6 +32,8 @@ export default function AdminVendorsPage() {
   const [error, setError] = useState<string | null>(null);
   const [editing, setEditing] = useState<AdminVendor | null>(null);
   const [createOpen, setCreateOpen] = useState(false);
+  const [search, setSearch] = useState("");
+  const [clientFilter, setClientFilter] = useState("");
 
   async function refresh() {
     setError(null);
@@ -45,103 +56,198 @@ export default function AdminVendorsPage() {
     refresh();
   }, []);
 
+  const filtered = useMemo(() => {
+    const q = search.trim().toLowerCase();
+    return rows.filter((r) => {
+      if (clientFilter && r.client_id !== clientFilter) return false;
+      if (!q) return true;
+      return (
+        r.name.toLowerCase().includes(q) ||
+        r.rfc.toLowerCase().includes(q) ||
+        (r.contact_email ?? "").toLowerCase().includes(q)
+      );
+    });
+  }, [rows, search, clientFilter]);
+
   return (
-    <AdminShell title="Proveedores">
-      <div className="mb-4 flex items-center justify-between gap-3">
-        <p className="text-xs text-muted-foreground">
-          {loading ? "Cargando…" : `${rows.length} proveedor(es)`}
-        </p>
+    <AdminShell
+      title="Proveedores"
+      description="Catálogo completo de proveedores REPSE bajo gestión, sus contactos y tipo de persona."
+      actions={
         <Button
           size="sm"
-          onClick={() => setCreateOpen((v) => !v)}
           disabled={clients.length === 0}
-        >
-          {createOpen ? "Cancelar" : "Nuevo proveedor"}
-        </Button>
-      </div>
-
-      {clients.length === 0 ? (
-        <p className="mb-3 rounded-md border border-amber-300 bg-amber-50 p-3 text-xs text-amber-900">
-          Crea un cliente antes de registrar proveedores.
-        </p>
-      ) : null}
-
-      {createOpen ? (
-        <VendorForm
-          mode="create"
-          clients={clients}
-          onSubmit={async (data) => {
-            await createVendor(data);
-            setCreateOpen(false);
-            await refresh();
-          }}
-          onCancel={() => setCreateOpen(false)}
-        />
-      ) : null}
-
-      {editing ? (
-        <VendorForm
-          mode="edit"
-          initial={editing}
-          clients={clients}
-          onSubmit={async (data) => {
-            await updateVendor(editing.id, data);
+          onClick={() => {
             setEditing(null);
-            await refresh();
+            setCreateOpen((v) => !v);
           }}
-          onCancel={() => setEditing(null)}
-        />
-      ) : null}
+        >
+          {createOpen ? (
+            <>
+              <X className="h-4 w-4" weight="bold" aria-hidden="true" />
+              Cancelar
+            </>
+          ) : (
+            <>
+              <Plus className="h-4 w-4" weight="bold" aria-hidden="true" />
+              Nuevo proveedor
+            </>
+          )}
+        </Button>
+      }
+    >
+      <div className="space-y-5">
+        {clients.length === 0 ? (
+          <p className="rounded-md border border-[color:var(--status-warning-border)] bg-[color:var(--status-warning-bg)] p-3 text-xs text-[color:var(--status-warning-text)]">
+            Crea un cliente antes de registrar proveedores.
+          </p>
+        ) : null}
 
-      {error ? (
-        <p className="mb-3 rounded-md border border-amber-300 bg-amber-50 p-3 text-sm text-amber-900">
-          {error}
-        </p>
-      ) : null}
+        {(createOpen || editing) && (
+          <Surface
+            title={editing ? `Editar ${editing.name}` : "Nuevo proveedor"}
+            icon={Storefront}
+          >
+            <VendorForm
+              mode={editing ? "edit" : "create"}
+              initial={editing ?? undefined}
+              clients={clients}
+              onSubmit={async (data) => {
+                if (editing) {
+                  await updateVendor(editing.id, data);
+                  setEditing(null);
+                } else {
+                  await createVendor(data);
+                  setCreateOpen(false);
+                }
+                await refresh();
+              }}
+              onCancel={() => {
+                setCreateOpen(false);
+                setEditing(null);
+              }}
+            />
+          </Surface>
+        )}
 
-      <div className="overflow-x-auto rounded-md border border-border bg-white">
-        <table className="w-full text-sm">
-          <thead className="border-b border-border bg-muted/40 text-left text-xs uppercase text-muted-foreground">
-            <tr>
-              <th className="px-3 py-2">Nombre</th>
-              <th className="px-3 py-2">RFC</th>
-              <th className="px-3 py-2">Cliente</th>
-              <th className="px-3 py-2">Tipo</th>
-              <th className="px-3 py-2">Contacto</th>
-              <th className="px-3 py-2">Estado</th>
-              <th className="px-3 py-2"></th>
-            </tr>
-          </thead>
-          <tbody>
-            {rows.map((row) => {
-              const client = clients.find((c) => c.id === row.client_id);
-              return (
-                <tr key={row.id} className="border-b border-border last:border-0">
-                  <td className="px-3 py-2 font-medium">{row.name}</td>
-                  <td className="px-3 py-2 font-mono text-xs">{row.rfc}</td>
-                  <td className="px-3 py-2">{client?.name ?? row.client_id}</td>
-                  <td className="px-3 py-2">{row.persona_type ?? "—"}</td>
-                  <td className="px-3 py-2 text-xs">
-                    {row.contact_email ?? row.contact_name ?? "—"}
-                  </td>
-                  <td className="px-3 py-2">{row.status}</td>
-                  <td className="px-3 py-2 text-right">
-                    <Button size="sm" variant="outline" onClick={() => setEditing(row)}>
-                      Editar
-                    </Button>
-                  </td>
-                </tr>
-              );
-            })}
-            {!loading && rows.length === 0 ? (
-              <tr>
-                <td colSpan={7} className="px-3 py-6 text-center text-xs text-muted-foreground">
-                  Sin proveedores registrados.
-                </td>
-              </tr>
-            ) : null}
-          </tbody>
-        </table>
+        <Surface
+          title={`${filtered.length} proveedor${filtered.length === 1 ? "" : "es"}`}
+          actions={
+            <div className="flex flex-wrap items-center gap-2">
+              <div className="relative w-44">
+                <MagnifyingGlass
+                  className="absolute left-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-[color:var(--text-tertiary)]"
+                  weight="bold"
+                  aria-hidden="true"
+                />
+                <Input
+                  value={search}
+                  onChange={(e) => setSearch(e.target.value)}
+                  placeholder="Buscar"
+                  className="h-8 pl-8 text-xs"
+                />
+              </div>
+              <select
+                value={clientFilter}
+                onChange={(e) => setClientFilter(e.target.value)}
+                className="h-8 rounded-md border border-[color:var(--border-default)] bg-[color:var(--surface-raised)] px-2 text-xs"
+              >
+                <option value="">Todos los clientes</option>
+                {clients.map((c) => (
+                  <option key={c.id} value={c.id}>
+                    {c.name}
+                  </option>
+                ))}
+              </select>
+            </div>
+          }
+          bodyClassName="p-0"
+        >
+          {error ? (
+            <p className="p-4 text-sm text-[color:var(--status-warning-text)]">
+              {error}
+            </p>
+          ) : !loading && filtered.length === 0 ? (
+            <div className="p-8">
+              <EmptyState
+                icon={Storefront}
+                title="Sin proveedores"
+                description="No hay proveedores con esos filtros."
+              />
+            </div>
+          ) : (
+            <div className="overflow-x-auto">
+              <table className="w-full text-sm">
+                <thead className="border-b border-[color:var(--border-subtle)] bg-[color:var(--surface-page)] text-left font-mono text-[10px] uppercase tracking-wide text-[color:var(--text-tertiary)]">
+                  <tr>
+                    <th className="px-4 py-2.5">Proveedor</th>
+                    <th className="px-3 py-2.5">RFC</th>
+                    <th className="px-3 py-2.5">Cliente</th>
+                    <th className="px-3 py-2.5">Tipo</th>
+                    <th className="px-3 py-2.5">Contacto</th>
+                    <th className="px-3 py-2.5">Estado</th>
+                    <th className="px-3 py-2.5"></th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {filtered.map((row) => {
+                    const client = clients.find((c) => c.id === row.client_id);
+                    return (
+                      <tr
+                        key={row.id}
+                        className="border-b border-[color:var(--border-subtle)] transition-colors last:border-0 hover:bg-[color:var(--surface-hover)]"
+                      >
+                        <td className="px-4 py-2.5 font-medium text-[color:var(--text-primary)]">
+                          {row.name}
+                        </td>
+                        <td className="px-3 py-2.5 font-mono text-[11px] text-[color:var(--text-secondary)]">
+                          {row.rfc}
+                        </td>
+                        <td className="px-3 py-2.5 text-[12px] text-[color:var(--text-secondary)]">
+                          <Badge variant="brand">
+                            <Buildings
+                              className="h-3 w-3"
+                              weight="bold"
+                              aria-hidden="true"
+                            />
+                            {client?.name ?? row.client_id.slice(0, 8)}
+                          </Badge>
+                        </td>
+                        <td className="px-3 py-2.5">
+                          <Badge variant="outline">
+                            {row.persona_type ?? "—"}
+                          </Badge>
+                        </td>
+                        <td className="px-3 py-2.5 text-[11px] text-[color:var(--text-secondary)]">
+                          {row.contact_email ?? row.contact_name ?? "—"}
+                        </td>
+                        <td className="px-3 py-2.5">
+                          {row.status === "active" ? (
+                            <Badge variant="success">Activo</Badge>
+                          ) : (
+                            <Badge variant="secondary">{row.status}</Badge>
+                          )}
+                        </td>
+                        <td className="px-3 py-2.5 text-right">
+                          <Button
+                            size="sm"
+                            variant="outline"
+                            onClick={() => {
+                              setCreateOpen(false);
+                              setEditing(row);
+                            }}
+                          >
+                            Editar
+                          </Button>
+                        </td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </div>
+          )}
+        </Surface>
       </div>
     </AdminShell>
   );
@@ -169,7 +275,9 @@ function VendorForm({
   }) => Promise<void>;
   onCancel: () => void;
 }) {
-  const [clientId, setClientId] = useState(initial?.client_id ?? clients[0]?.id ?? "");
+  const [clientId, setClientId] = useState(
+    initial?.client_id ?? clients[0]?.id ?? "",
+  );
   const [name, setName] = useState(initial?.name ?? "");
   const [rfc, setRfc] = useState(initial?.rfc ?? "");
   const [contactName, setContactName] = useState(initial?.contact_name ?? "");
@@ -203,22 +311,16 @@ function VendorForm({
   }
 
   return (
-    <form
-      onSubmit={handleSubmit}
-      className="mb-4 rounded-md border border-border bg-muted/30 p-4"
-    >
-      <p className="mb-3 text-xs font-medium uppercase text-muted-foreground">
-        {mode === "create" ? "Nuevo proveedor" : `Editar ${initial?.name ?? ""}`}
-      </p>
+    <form onSubmit={handleSubmit} className="space-y-4">
       <div className="grid gap-3 sm:grid-cols-2">
         {mode === "create" ? (
-          <div>
+          <div className="space-y-1">
             <Label htmlFor="ven-client">Cliente</Label>
             <select
               id="ven-client"
               value={clientId}
               onChange={(e) => setClientId(e.target.value)}
-              className="h-9 w-full rounded-md border border-border bg-white px-2 text-sm"
+              className="h-9 w-full rounded-md border border-[color:var(--border-default)] bg-[color:var(--surface-raised)] px-2 text-sm"
               required
             >
               {clients.map((c) => (
@@ -229,12 +331,17 @@ function VendorForm({
             </select>
           </div>
         ) : null}
-        <div>
+        <div className="space-y-1">
           <Label htmlFor="ven-name">Nombre</Label>
-          <Input id="ven-name" value={name} onChange={(e) => setName(e.target.value)} required />
+          <Input
+            id="ven-name"
+            value={name}
+            onChange={(e) => setName(e.target.value)}
+            required
+          />
         </div>
         {mode === "create" ? (
-          <div>
+          <div className="space-y-1">
             <Label htmlFor="ven-rfc">RFC</Label>
             <Input
               id="ven-rfc"
@@ -242,15 +349,20 @@ function VendorForm({
               onChange={(e) => setRfc(e.target.value.toUpperCase())}
               minLength={12}
               maxLength={13}
+              className="font-mono"
               required
             />
           </div>
         ) : null}
-        <div>
+        <div className="space-y-1">
           <Label htmlFor="ven-contact">Contacto</Label>
-          <Input id="ven-contact" value={contactName} onChange={(e) => setContactName(e.target.value)} />
+          <Input
+            id="ven-contact"
+            value={contactName}
+            onChange={(e) => setContactName(e.target.value)}
+          />
         </div>
-        <div>
+        <div className="space-y-1">
           <Label htmlFor="ven-email">Email</Label>
           <Input
             id="ven-email"
@@ -259,39 +371,44 @@ function VendorForm({
             onChange={(e) => setContactEmail(e.target.value)}
           />
         </div>
-        <div>
+        <div className="space-y-1">
           <Label htmlFor="ven-repse">REPSE ID</Label>
-          <Input id="ven-repse" value={repseId} onChange={(e) => setRepseId(e.target.value)} />
+          <Input
+            id="ven-repse"
+            value={repseId}
+            onChange={(e) => setRepseId(e.target.value)}
+            className="font-mono"
+          />
         </div>
-        <div>
+        <div className="space-y-1">
           <Label htmlFor="ven-persona">Persona</Label>
           <select
             id="ven-persona"
             value={persona}
             onChange={(e) => setPersona(e.target.value)}
-            className="h-9 w-full rounded-md border border-border bg-white px-2 text-sm"
+            className="h-9 w-full rounded-md border border-[color:var(--border-default)] bg-[color:var(--surface-raised)] px-2 text-sm"
           >
             <option value="moral">moral</option>
             <option value="fisica">fisica</option>
           </select>
         </div>
-        <div>
+        <div className="space-y-1">
           <Label htmlFor="ven-status">Estado</Label>
           <select
             id="ven-status"
             value={status}
             onChange={(e) => setStatus(e.target.value)}
-            className="h-9 w-full rounded-md border border-border bg-white px-2 text-sm"
+            className="h-9 w-full rounded-md border border-[color:var(--border-default)] bg-[color:var(--surface-raised)] px-2 text-sm"
           >
             <option value="active">active</option>
             <option value="inactive">inactive</option>
           </select>
         </div>
       </div>
-      {err ? <p className="mt-3 text-xs text-red-700">{err}</p> : null}
-      <div className="mt-3 flex gap-2">
+      {err ? <p className="text-xs text-[color:var(--status-error-text)]">{err}</p> : null}
+      <div className="flex gap-2">
         <Button type="submit" size="sm" loading={submitting}>
-          Guardar
+          {mode === "create" ? "Crear" : "Guardar cambios"}
         </Button>
         <Button type="button" size="sm" variant="outline" onClick={onCancel}>
           Cancelar

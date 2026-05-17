@@ -1,7 +1,18 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import {
+  ListMagnifyingGlass,
+  MagnifyingGlass,
+  Robot,
+  User,
+} from "@phosphor-icons/react";
 
+import {
+  EmptyState,
+  Surface,
+} from "@/components/checkwise/dashboard/stat-card";
+import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -48,113 +59,179 @@ export default function AdminAuditLogPage() {
   }, []);
 
   return (
-    <AdminShell title="Audit log">
-      <form
-        onSubmit={(e) => {
-          e.preventDefault();
-          refresh();
-        }}
-        className="mb-4 grid gap-3 rounded-md border border-border bg-muted/30 p-4 sm:grid-cols-3 lg:grid-cols-5"
-      >
-        <div>
-          <Label htmlFor="al-actor">Actor type</Label>
-          <Input
-            id="al-actor"
-            value={filters.actor_type}
-            onChange={(e) => setFilters({ ...filters, actor_type: e.target.value })}
-            placeholder="internal_admin"
-          />
-        </div>
-        <div>
-          <Label htmlFor="al-action">Action</Label>
-          <Input
-            id="al-action"
-            value={filters.action}
-            onChange={(e) => setFilters({ ...filters, action: e.target.value })}
-            placeholder="admin.client.updated"
-          />
-        </div>
-        <div>
-          <Label htmlFor="al-entity">Entity type</Label>
-          <Input
-            id="al-entity"
-            value={filters.entity_type}
-            onChange={(e) => setFilters({ ...filters, entity_type: e.target.value })}
-            placeholder="client"
-          />
-        </div>
-        <div>
-          <Label htmlFor="al-entid">Entity id</Label>
-          <Input
-            id="al-entid"
-            value={filters.entity_id}
-            onChange={(e) => setFilters({ ...filters, entity_id: e.target.value })}
-          />
-        </div>
-        <div>
-          <Label htmlFor="al-limit">Limit</Label>
-          <Input
-            id="al-limit"
-            type="number"
-            min={1}
-            max={200}
-            value={filters.limit}
-            onChange={(e) => setFilters({ ...filters, limit: Number(e.target.value) || 50 })}
-          />
-        </div>
-        <div className="sm:col-span-3 lg:col-span-5">
-          <Button type="submit" size="sm" loading={loading}>
-            Filtrar
-          </Button>
-        </div>
-      </form>
+    <AdminShell
+      title="Audit log"
+      description="Bitácora completa de eventos del sistema. Cada cambio firma el actor, la acción, la entidad y el diff antes/después."
+    >
+      <div className="space-y-5">
+        <Surface title="Filtros" icon={MagnifyingGlass}>
+          <form
+            onSubmit={(e) => {
+              e.preventDefault();
+              refresh();
+            }}
+            className="grid gap-3 sm:grid-cols-2 lg:grid-cols-5"
+          >
+            <div className="space-y-1">
+              <Label htmlFor="al-actor">Actor type</Label>
+              <Input
+                id="al-actor"
+                value={filters.actor_type}
+                onChange={(e) => setFilters({ ...filters, actor_type: e.target.value })}
+                placeholder="internal_admin"
+              />
+            </div>
+            <div className="space-y-1">
+              <Label htmlFor="al-action">Action</Label>
+              <Input
+                id="al-action"
+                value={filters.action}
+                onChange={(e) => setFilters({ ...filters, action: e.target.value })}
+                placeholder="admin.client.updated"
+                className="font-mono"
+              />
+            </div>
+            <div className="space-y-1">
+              <Label htmlFor="al-entity">Entity type</Label>
+              <Input
+                id="al-entity"
+                value={filters.entity_type}
+                onChange={(e) => setFilters({ ...filters, entity_type: e.target.value })}
+                placeholder="client"
+              />
+            </div>
+            <div className="space-y-1">
+              <Label htmlFor="al-entid">Entity id</Label>
+              <Input
+                id="al-entid"
+                value={filters.entity_id}
+                onChange={(e) => setFilters({ ...filters, entity_id: e.target.value })}
+                className="font-mono"
+              />
+            </div>
+            <div className="space-y-1">
+              <Label htmlFor="al-limit">Límite</Label>
+              <Input
+                id="al-limit"
+                type="number"
+                min={1}
+                max={200}
+                value={filters.limit}
+                onChange={(e) =>
+                  setFilters({ ...filters, limit: Number(e.target.value) || 50 })
+                }
+              />
+            </div>
+            <div className="sm:col-span-2 lg:col-span-5">
+              <Button type="submit" size="sm" loading={loading}>
+                Aplicar filtros
+              </Button>
+            </div>
+          </form>
+        </Surface>
 
-      {error ? (
-        <p className="mb-3 rounded-md border border-amber-300 bg-amber-50 p-3 text-sm text-amber-900">
-          {error}
-        </p>
-      ) : null}
+        {error ? (
+          <p className="rounded-md border border-[color:var(--status-warning-border)] bg-[color:var(--status-warning-bg)] p-3 text-sm text-[color:var(--status-warning-text)]">
+            {error}
+          </p>
+        ) : null}
 
-      <div className="overflow-x-auto rounded-md border border-border bg-white">
-        <table className="w-full text-sm">
-          <thead className="border-b border-border bg-muted/40 text-left text-xs uppercase text-muted-foreground">
-            <tr>
-              <th className="px-3 py-2">Cuándo</th>
-              <th className="px-3 py-2">Actor</th>
-              <th className="px-3 py-2">Acción</th>
-              <th className="px-3 py-2">Entidad</th>
-              <th className="px-3 py-2">ID</th>
-              <th className="px-3 py-2">Fuente</th>
-            </tr>
-          </thead>
-          <tbody>
-            {rows.map((row) => (
-              <tr key={row.id} className="border-b border-border align-top last:border-0">
-                <td className="px-3 py-2 font-mono text-xs">
-                  {new Date(row.created_at).toLocaleString("es-MX")}
-                </td>
-                <td className="px-3 py-2 text-xs">
-                  {row.actor_type}
-                  {row.actor_id ? <div className="font-mono text-[10px] text-muted-foreground">{row.actor_id}</div> : null}
-                </td>
-                <td className="px-3 py-2 font-mono text-xs">{row.action}</td>
-                <td className="px-3 py-2">{row.entity_type}</td>
-                <td className="px-3 py-2 font-mono text-xs">{row.entity_id}</td>
-                <td className="px-3 py-2 text-xs">
-                  {(row.event_metadata?.source as string | undefined) ?? "—"}
-                </td>
-              </tr>
-            ))}
-            {!loading && rows.length === 0 ? (
-              <tr>
-                <td colSpan={6} className="px-3 py-6 text-center text-xs text-muted-foreground">
-                  Sin eventos con esos filtros.
-                </td>
-              </tr>
-            ) : null}
-          </tbody>
-        </table>
+        <Surface
+          title={`Resultados (${rows.length})`}
+          icon={ListMagnifyingGlass}
+          bodyClassName="p-0"
+        >
+          {!loading && rows.length === 0 ? (
+            <div className="p-8">
+              <EmptyState
+                icon={ListMagnifyingGlass}
+                title="Sin eventos"
+                description="No hay eventos para los filtros aplicados."
+              />
+            </div>
+          ) : (
+            <div className="overflow-x-auto">
+              <table className="w-full text-sm">
+                <thead className="border-b border-[color:var(--border-subtle)] bg-[color:var(--surface-page)] text-left font-mono text-[10px] uppercase tracking-wide text-[color:var(--text-tertiary)]">
+                  <tr>
+                    <th className="px-3 py-2.5">Cuándo</th>
+                    <th className="px-3 py-2.5">Actor</th>
+                    <th className="px-3 py-2.5">Acción</th>
+                    <th className="px-3 py-2.5">Entidad</th>
+                    <th className="px-3 py-2.5">ID</th>
+                    <th className="px-3 py-2.5">Fuente</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {rows.map((row) => (
+                    <tr
+                      key={row.id}
+                      className="border-b border-[color:var(--border-subtle)] align-top transition-colors last:border-0 hover:bg-[color:var(--surface-hover)]"
+                    >
+                      <td className="px-3 py-2.5 font-mono text-[11px] text-[color:var(--text-secondary)]">
+                        {new Date(row.created_at).toLocaleString("es-MX")}
+                      </td>
+                      <td className="px-3 py-2.5 text-[12px]">
+                        <ActorChip actorType={row.actor_type} actorId={row.actor_id} />
+                      </td>
+                      <td className="px-3 py-2.5">
+                        <code className="rounded-sm bg-[color:var(--surface-sunken)] px-1.5 py-0.5 font-mono text-[11px] text-[color:var(--text-primary)]">
+                          {row.action}
+                        </code>
+                      </td>
+                      <td className="px-3 py-2.5">
+                        <Badge variant="outline">{row.entity_type}</Badge>
+                      </td>
+                      <td className="px-3 py-2.5 font-mono text-[11px] text-[color:var(--text-tertiary)]">
+                        {row.entity_id.slice(0, 8)}…
+                      </td>
+                      <td className="px-3 py-2.5 text-[11px] text-[color:var(--text-secondary)]">
+                        {(row.event_metadata?.source as string | undefined) ?? "—"}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
+        </Surface>
       </div>
     </AdminShell>
+  );
+}
+
+function ActorChip({
+  actorType,
+  actorId,
+}: {
+  actorType: string;
+  actorId: string | null;
+}) {
+  const isBot = actorType.includes("system") || actorType.includes("bot");
+  const IconComponent = isBot ? Robot : User;
+  return (
+    <div className="flex items-center gap-2">
+      <span
+        className={
+          "flex h-6 w-6 items-center justify-center rounded-full " +
+          (isBot
+            ? "bg-[color:var(--surface-teal-muted)] text-[color:var(--text-teal)]"
+            : "bg-[color:var(--surface-brand-muted)] text-[color:var(--text-brand)]")
+        }
+        aria-hidden="true"
+      >
+        <IconComponent className="h-3 w-3" weight="bold" />
+      </span>
+      <div className="min-w-0">
+        <p className="text-[12px] font-medium text-[color:var(--text-primary)]">
+          {actorType}
+        </p>
+        {actorId ? (
+          <p className="font-mono text-[10px] text-[color:var(--text-tertiary)]">
+            {actorId.slice(0, 12)}…
+          </p>
+        ) : null}
+      </div>
+    </div>
   );
 }

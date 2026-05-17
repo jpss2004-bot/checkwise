@@ -10,7 +10,7 @@ import {
   type IntakeLockedField,
   type IntakeWizardPrefill,
 } from "@/components/checkwise/intake-wizard";
-import { ProviderContextBar } from "@/components/checkwise/portal/provider-context-bar";
+import { PortalAppShell } from "@/components/checkwise/portal/portal-app-shell";
 import { UploadWizardSkeleton } from "@/components/checkwise/portal/state-surfaces";
 import { Button } from "@/components/ui/button";
 import { PageHeader } from "@/components/ui/page-header";
@@ -102,8 +102,7 @@ function PortalUploadInner() {
   }
 
   return (
-    <>
-      <ProviderContextBar session={session} />
+    <PortalAppShell session={session}>
       <main className="mx-auto max-w-7xl space-y-5 px-5 py-6">
         <PageHeader
           eyebrow="Guided upload resolver"
@@ -137,7 +136,7 @@ function PortalUploadInner() {
           supersedesSubmissionId={supersedesSubmissionId}
         />
       </main>
-    </>
+    </PortalAppShell>
   );
 }
 

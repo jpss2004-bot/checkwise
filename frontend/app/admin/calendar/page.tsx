@@ -1,6 +1,15 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
+import { CalendarBlank } from "@phosphor-icons/react";
+
+import { MiniBars } from "@/components/checkwise/charts";
+import {
+  StatCard,
+  Surface,
+} from "@/components/checkwise/dashboard/stat-card";
+import { Badge } from "@/components/ui/badge";
+import { Input } from "@/components/ui/input";
 
 import { AdminShell } from "../_shell";
 import {
@@ -10,7 +19,7 @@ import {
   listPeriods,
 } from "@/lib/api/admin";
 
-const MONTH_LABELS_SHORT = [
+const MONTH_SHORT = [
   "Ene",
   "Feb",
   "Mar",
@@ -49,85 +58,170 @@ export default function AdminCalendarPage() {
     };
   }, [year]);
 
-  return (
-    <AdminShell title="Calendario operativo">
-      <div className="mb-4 flex items-center gap-3">
-        <label className="text-xs font-medium uppercase text-muted-foreground">
-          Año
-        </label>
-        <input
-          type="number"
-          min={2024}
-          max={2030}
-          value={year}
-          onChange={(e) => setYear(Number(e.target.value))}
-          className="h-9 w-24 rounded-md border border-border bg-white px-2 text-sm"
-        />
-      </div>
+  const expectedBars = useMemo(() => {
+    if (!calendar) return [];
+    return calendar.months.map((m) => ({
+      label: MONTH_SHORT[m.month - 1] ?? `${m.month}`,
+      value: m.expected_total,
+      tone: "brand" as const,
+    }));
+  }, [calendar]);
 
+  const totalExpected = useMemo(() => {
+    if (!calendar) return 0;
+    return calendar.months.reduce((sum, m) => sum + m.expected_total, 0);
+  }, [calendar]);
+
+  return (
+    <AdminShell
+      title="Calendario operativo"
+      description="Vista del año regulatorio: obligaciones esperadas por mes y los periodos cargados en la base."
+      actions={
+        <label className="flex items-center gap-2 rounded-md border border-[color:var(--border-default)] bg-[color:var(--surface-raised)] px-3 py-1 text-xs">
+          <CalendarBlank
+            className="h-3.5 w-3.5 text-[color:var(--text-secondary)]"
+            weight="bold"
+            aria-hidden="true"
+          />
+          <span className="font-mono text-[10px] uppercase tracking-wide text-[color:var(--text-tertiary)]">
+            Año
+          </span>
+          <Input
+            type="number"
+            min={2024}
+            max={2030}
+            value={year}
+            onChange={(e) => setYear(Number(e.target.value))}
+            className="h-7 w-20 border-0 bg-transparent p-0 font-mono text-sm font-semibold focus-visible:ring-0"
+          />
+        </label>
+      }
+    >
       {error ? (
-        <p className="rounded-md border border-amber-300 bg-amber-50 p-3 text-sm text-amber-900">
+        <p className="rounded-md border border-[color:var(--status-warning-border)] bg-[color:var(--status-warning-bg)] p-3 text-sm text-[color:var(--status-warning-text)]">
           {error}
         </p>
       ) : !calendar ? (
-        <p className="text-sm text-muted-foreground">Cargando…</p>
+        <p className="text-sm text-[color:var(--text-secondary)]">Cargando…</p>
       ) : (
-        <section className="space-y-4">
-          <div className="overflow-x-auto rounded-md border border-border bg-white">
-            <table className="w-full text-sm">
-              <thead className="border-b border-border bg-muted/40 text-left text-xs uppercase text-muted-foreground">
-                <tr>
-                  <th className="px-3 py-2">Mes</th>
-                  <th className="px-3 py-2">Obligaciones esperadas</th>
-                  <th className="px-3 py-2">Por institución</th>
-                </tr>
-              </thead>
-              <tbody>
-                {calendar.months.map((m) => (
-                  <tr key={m.month} className="border-b border-border last:border-0">
-                    <td className="px-3 py-2 font-medium">
-                      {MONTH_LABELS_SHORT[m.month - 1]}
-                    </td>
-                    <td className="px-3 py-2 font-mono tabular-nums">{m.expected_total}</td>
-                    <td className="px-3 py-2 text-xs">
-                      {m.institutions.length === 0
-                        ? "—"
-                        : m.institutions
-                            .map((i) => `${i.institution}: ${i.expected}`)
-                            .join(" · ")}
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
+        <div className="space-y-6">
+          <div className="cw-stagger grid gap-3 sm:grid-cols-3">
+            <StatCard
+              label="Obligaciones esperadas"
+              value={totalExpected}
+              tone="brand"
+              caption={`Año ${calendar.year} · ${calendar.persona_type}`}
+            />
+            <StatCard
+              label="Periodos en BD"
+              value={periods.length}
+              tone="teal"
+              caption="Registros de periodos para este año."
+            />
+            <StatCard
+              label="Cobertura mensual"
+              value={`${calendar.months.length}/12`}
+              tone="info"
+              caption="Meses con obligaciones definidas."
+            />
           </div>
 
-          <div>
-            <h2 className="mb-2 text-sm font-semibold">Periodos en BD ({periods.length})</h2>
-            <div className="overflow-x-auto rounded-md border border-border bg-white">
+          <Surface
+            title="Distribución mensual"
+            description="Cuántas obligaciones esperan los proveedores por mes."
+          >
+            <MiniBars data={expectedBars} height={120} showValues />
+          </Surface>
+
+          <Surface
+            title="Detalle por mes"
+            bodyClassName="p-0"
+          >
+            <div className="overflow-x-auto">
               <table className="w-full text-sm">
-                <thead className="border-b border-border bg-muted/40 text-left text-xs uppercase text-muted-foreground">
+                <thead className="border-b border-[color:var(--border-subtle)] bg-[color:var(--surface-page)] text-left font-mono text-[10px] uppercase tracking-wide text-[color:var(--text-tertiary)]">
                   <tr>
-                    <th className="px-3 py-2">Código</th>
-                    <th className="px-3 py-2">Period key</th>
-                    <th className="px-3 py-2">Tipo</th>
-                    <th className="px-3 py-2">Año</th>
-                    <th className="px-3 py-2">Mes</th>
+                    <th className="px-4 py-2.5">Mes</th>
+                    <th className="px-3 py-2.5 text-right">Esperadas</th>
+                    <th className="px-3 py-2.5">Por institución</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {calendar.months.map((m) => (
+                    <tr
+                      key={m.month}
+                      className="border-b border-[color:var(--border-subtle)] last:border-0 hover:bg-[color:var(--surface-hover)]"
+                    >
+                      <td className="px-4 py-2.5 font-medium text-[color:var(--text-primary)]">
+                        {MONTH_SHORT[m.month - 1]}
+                      </td>
+                      <td className="px-3 py-2.5 text-right font-mono tabular-nums">
+                        {m.expected_total}
+                      </td>
+                      <td className="px-3 py-2.5">
+                        {m.institutions.length === 0 ? (
+                          <span className="text-[color:var(--text-tertiary)]">—</span>
+                        ) : (
+                          <div className="flex flex-wrap gap-1.5">
+                            {m.institutions.map((i) => (
+                              <Badge key={i.institution} variant="outline">
+                                {i.institution}: {i.expected}
+                              </Badge>
+                            ))}
+                          </div>
+                        )}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </Surface>
+
+          <Surface
+            title={`Periodos en BD (${periods.length})`}
+            bodyClassName="p-0"
+          >
+            <div className="overflow-x-auto">
+              <table className="w-full text-sm">
+                <thead className="border-b border-[color:var(--border-subtle)] bg-[color:var(--surface-page)] text-left font-mono text-[10px] uppercase tracking-wide text-[color:var(--text-tertiary)]">
+                  <tr>
+                    <th className="px-4 py-2.5">Código</th>
+                    <th className="px-3 py-2.5">Period key</th>
+                    <th className="px-3 py-2.5">Tipo</th>
+                    <th className="px-3 py-2.5">Año</th>
+                    <th className="px-3 py-2.5">Mes</th>
                   </tr>
                 </thead>
                 <tbody>
                   {periods.map((p) => (
-                    <tr key={p.id} className="border-b border-border last:border-0">
-                      <td className="px-3 py-2 font-mono text-xs">{p.code}</td>
-                      <td className="px-3 py-2 font-mono text-xs">{p.period_key ?? "—"}</td>
-                      <td className="px-3 py-2">{p.period_type}</td>
-                      <td className="px-3 py-2">{p.year ?? "—"}</td>
-                      <td className="px-3 py-2">{p.month ?? "—"}</td>
+                    <tr
+                      key={p.id}
+                      className="border-b border-[color:var(--border-subtle)] last:border-0 hover:bg-[color:var(--surface-hover)]"
+                    >
+                      <td className="px-4 py-2.5 font-mono text-[11px] text-[color:var(--text-secondary)]">
+                        {p.code}
+                      </td>
+                      <td className="px-3 py-2.5 font-mono text-[11px] text-[color:var(--text-secondary)]">
+                        {p.period_key ?? "—"}
+                      </td>
+                      <td className="px-3 py-2.5">
+                        <Badge variant="outline">{p.period_type}</Badge>
+                      </td>
+                      <td className="px-3 py-2.5 font-mono tabular-nums">
+                        {p.year ?? "—"}
+                      </td>
+                      <td className="px-3 py-2.5 font-mono tabular-nums">
+                        {p.month ?? "—"}
+                      </td>
                     </tr>
                   ))}
                   {periods.length === 0 ? (
                     <tr>
-                      <td colSpan={5} className="px-3 py-6 text-center text-xs text-muted-foreground">
+                      <td
+                        colSpan={5}
+                        className="px-3 py-6 text-center text-xs text-[color:var(--text-tertiary)]"
+                      >
                         Sin periodos para el año seleccionado.
                       </td>
                     </tr>
@@ -135,8 +229,8 @@ export default function AdminCalendarPage() {
                 </tbody>
               </table>
             </div>
-          </div>
-        </section>
+          </Surface>
+        </div>
       )}
     </AdminShell>
   );

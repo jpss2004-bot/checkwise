@@ -1,7 +1,10 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
+import { IdentificationCard, MagnifyingGlass, Plus, X } from "@phosphor-icons/react";
 
+import { EmptyState, Surface } from "@/components/checkwise/dashboard/stat-card";
+import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -20,6 +23,7 @@ export default function AdminClientsPage() {
   const [error, setError] = useState<string | null>(null);
   const [editing, setEditing] = useState<AdminClient | null>(null);
   const [createOpen, setCreateOpen] = useState(false);
+  const [search, setSearch] = useState("");
 
   async function refresh() {
     setError(null);
@@ -38,89 +42,159 @@ export default function AdminClientsPage() {
     refresh();
   }, []);
 
+  const filtered = useMemo(() => {
+    const q = search.trim().toLowerCase();
+    if (!q) return rows;
+    return rows.filter(
+      (r) =>
+        r.name.toLowerCase().includes(q) ||
+        (r.rfc ?? "").toLowerCase().includes(q) ||
+        (r.responsible_name ?? "").toLowerCase().includes(q),
+    );
+  }, [rows, search]);
+
   return (
-    <AdminShell title="Clientes">
-      <div className="mb-4 flex items-center justify-between gap-3">
-        <p className="text-xs text-muted-foreground">
-          {loading ? "Cargando…" : `${rows.length} cliente(s)`}
-        </p>
-        <Button size="sm" onClick={() => setCreateOpen((v) => !v)}>
-          {createOpen ? "Cancelar" : "Nuevo cliente"}
-        </Button>
-      </div>
-
-      {createOpen ? (
-        <ClientForm
-          mode="create"
-          onSubmit={async (data) => {
-            await createClient(data);
-            setCreateOpen(false);
-            await refresh();
-          }}
-          onCancel={() => setCreateOpen(false)}
-        />
-      ) : null}
-
-      {editing ? (
-        <ClientForm
-          mode="edit"
-          initial={editing}
-          onSubmit={async (data) => {
-            await updateClient(editing.id, data);
+    <AdminShell
+      title="Clientes"
+      description="Empresas dadas de alta en CheckWise. Cada cliente puede tener uno o varios proveedores REPSE bajo gestión."
+      actions={
+        <Button
+          size="sm"
+          onClick={() => {
             setEditing(null);
-            await refresh();
+            setCreateOpen((v) => !v);
           }}
-          onCancel={() => setEditing(null)}
-        />
-      ) : null}
+        >
+          {createOpen ? (
+            <>
+              <X className="h-4 w-4" weight="bold" aria-hidden="true" />
+              Cancelar
+            </>
+          ) : (
+            <>
+              <Plus className="h-4 w-4" weight="bold" aria-hidden="true" />
+              Nuevo cliente
+            </>
+          )}
+        </Button>
+      }
+    >
+      <div className="space-y-5">
+        {(createOpen || editing) && (
+          <Surface
+            title={editing ? `Editar ${editing.name}` : "Nuevo cliente"}
+            icon={IdentificationCard}
+          >
+            <ClientForm
+              mode={editing ? "edit" : "create"}
+              initial={editing ?? undefined}
+              onSubmit={async (data) => {
+                if (editing) {
+                  await updateClient(editing.id, data);
+                  setEditing(null);
+                } else {
+                  await createClient(data);
+                  setCreateOpen(false);
+                }
+                await refresh();
+              }}
+              onCancel={() => {
+                setCreateOpen(false);
+                setEditing(null);
+              }}
+            />
+          </Surface>
+        )}
 
-      {error ? (
-        <p className="mb-3 rounded-md border border-amber-300 bg-amber-50 p-3 text-sm text-amber-900">
-          {error}
-        </p>
-      ) : null}
-
-      <div className="overflow-x-auto rounded-md border border-border bg-white">
-        <table className="w-full text-sm">
-          <thead className="border-b border-border bg-muted/40 text-left text-xs uppercase text-muted-foreground">
-            <tr>
-              <th className="px-3 py-2">Nombre</th>
-              <th className="px-3 py-2">RFC</th>
-              <th className="px-3 py-2">Responsable</th>
-              <th className="px-3 py-2">Estado</th>
-              <th className="px-3 py-2"></th>
-            </tr>
-          </thead>
-          <tbody>
-            {rows.map((row) => (
-              <tr key={row.id} className="border-b border-border last:border-0">
-                <td className="px-3 py-2 font-medium">{row.name}</td>
-                <td className="px-3 py-2 font-mono text-xs">{row.rfc ?? "—"}</td>
-                <td className="px-3 py-2">{row.responsible_name ?? "—"}</td>
-                <td className="px-3 py-2">{row.status}</td>
-                <td className="px-3 py-2 text-right">
-                  <Button
-                    size="sm"
-                    variant="outline"
-                    onClick={() => setEditing(row)}
-                  >
-                    Editar
-                  </Button>
-                </td>
-              </tr>
-            ))}
-            {!loading && rows.length === 0 ? (
-              <tr>
-                <td colSpan={5} className="px-3 py-6 text-center text-xs text-muted-foreground">
-                  Sin clientes registrados.
-                </td>
-              </tr>
-            ) : null}
-          </tbody>
-        </table>
+        <Surface
+          title={`${filtered.length} cliente${filtered.length === 1 ? "" : "s"}`}
+          actions={
+            <div className="relative w-56">
+              <MagnifyingGlass
+                className="absolute left-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-[color:var(--text-tertiary)]"
+                weight="bold"
+                aria-hidden="true"
+              />
+              <Input
+                value={search}
+                onChange={(e) => setSearch(e.target.value)}
+                placeholder="Buscar nombre o RFC"
+                className="h-8 pl-8 text-xs"
+              />
+            </div>
+          }
+          bodyClassName="p-0"
+        >
+          {error ? (
+            <p className="p-4 text-sm text-[color:var(--status-warning-text)]">
+              {error}
+            </p>
+          ) : !loading && filtered.length === 0 ? (
+            <div className="p-8">
+              <EmptyState
+                icon={IdentificationCard}
+                title="Sin clientes"
+                description="Aún no hay clientes registrados con esos filtros."
+              />
+            </div>
+          ) : (
+            <div className="overflow-x-auto">
+              <table className="w-full text-sm">
+                <thead className="border-b border-[color:var(--border-subtle)] bg-[color:var(--surface-page)] text-left font-mono text-[10px] uppercase tracking-wide text-[color:var(--text-tertiary)]">
+                  <tr>
+                    <th className="px-4 py-2.5">Nombre</th>
+                    <th className="px-3 py-2.5">RFC</th>
+                    <th className="px-3 py-2.5">Responsable</th>
+                    <th className="px-3 py-2.5">Estado</th>
+                    <th className="px-3 py-2.5"></th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {filtered.map((row) => (
+                    <tr
+                      key={row.id}
+                      className="border-b border-[color:var(--border-subtle)] transition-colors last:border-0 hover:bg-[color:var(--surface-hover)]"
+                    >
+                      <td className="px-4 py-2.5 font-medium text-[color:var(--text-primary)]">
+                        {row.name}
+                      </td>
+                      <td className="px-3 py-2.5 font-mono text-[11px] text-[color:var(--text-secondary)]">
+                        {row.rfc ?? "—"}
+                      </td>
+                      <td className="px-3 py-2.5 text-[12px] text-[color:var(--text-primary)]">
+                        {row.responsible_name ?? "—"}
+                      </td>
+                      <td className="px-3 py-2.5">
+                        <StatusBadge status={row.status} />
+                      </td>
+                      <td className="px-3 py-2.5 text-right">
+                        <Button
+                          size="sm"
+                          variant="outline"
+                          onClick={() => {
+                            setCreateOpen(false);
+                            setEditing(row);
+                          }}
+                        >
+                          Editar
+                        </Button>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
+        </Surface>
       </div>
     </AdminShell>
   );
+}
+
+function StatusBadge({ status }: { status: string }) {
+  if (status === "active") return <Badge variant="success">Activo</Badge>;
+  if (status === "inactive") return <Badge variant="secondary">Inactivo</Badge>;
+  return <Badge variant="outline">{status}</Badge>;
 }
 
 function ClientForm({
@@ -165,23 +239,28 @@ function ClientForm({
   }
 
   return (
-    <form
-      onSubmit={handleSubmit}
-      className="mb-4 rounded-md border border-border bg-muted/30 p-4"
-    >
-      <p className="mb-3 text-xs font-medium uppercase text-muted-foreground">
-        {mode === "create" ? "Nuevo cliente" : `Editar ${initial?.name ?? ""}`}
-      </p>
+    <form onSubmit={handleSubmit} className="space-y-4">
       <div className="grid gap-3 sm:grid-cols-2">
-        <div>
+        <div className="space-y-1">
           <Label htmlFor="cli-name">Nombre</Label>
-          <Input id="cli-name" value={name} onChange={(e) => setName(e.target.value)} required />
+          <Input
+            id="cli-name"
+            value={name}
+            onChange={(e) => setName(e.target.value)}
+            required
+          />
         </div>
-        <div>
+        <div className="space-y-1">
           <Label htmlFor="cli-rfc">RFC</Label>
-          <Input id="cli-rfc" value={rfc} onChange={(e) => setRfc(e.target.value.toUpperCase())} maxLength={13} />
+          <Input
+            id="cli-rfc"
+            value={rfc}
+            onChange={(e) => setRfc(e.target.value.toUpperCase())}
+            maxLength={13}
+            className="font-mono"
+          />
         </div>
-        <div>
+        <div className="space-y-1">
           <Label htmlFor="cli-resp">Responsable</Label>
           <Input
             id="cli-resp"
@@ -189,25 +268,23 @@ function ClientForm({
             onChange={(e) => setResponsible(e.target.value)}
           />
         </div>
-        <div>
+        <div className="space-y-1">
           <Label htmlFor="cli-status">Estado</Label>
           <select
             id="cli-status"
             value={status}
             onChange={(e) => setStatus(e.target.value)}
-            className="h-9 w-full rounded-md border border-border bg-white px-2 text-sm"
+            className="h-9 w-full rounded-md border border-[color:var(--border-default)] bg-[color:var(--surface-raised)] px-2 text-sm"
           >
             <option value="active">active</option>
             <option value="inactive">inactive</option>
           </select>
         </div>
       </div>
-      {err ? (
-        <p className="mt-3 text-xs text-red-700">{err}</p>
-      ) : null}
-      <div className="mt-3 flex gap-2">
+      {err ? <p className="text-xs text-[color:var(--status-error-text)]">{err}</p> : null}
+      <div className="flex gap-2">
         <Button type="submit" size="sm" loading={submitting}>
-          Guardar
+          {mode === "create" ? "Crear" : "Guardar cambios"}
         </Button>
         <Button type="button" size="sm" variant="outline" onClick={onCancel}>
           Cancelar

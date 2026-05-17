@@ -16,7 +16,7 @@ import {
   expedienteCardItemFromOnboarding,
   type ExpedienteCardItem,
 } from "@/components/checkwise/portal/expediente-card";
-import { ProviderContextBar } from "@/components/checkwise/portal/provider-context-bar";
+import { PortalAppShell } from "@/components/checkwise/portal/portal-app-shell";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -122,14 +122,13 @@ function OnboardingInner({ session }: { session: PortalSession }) {
 
   if (!requirements) {
     return (
-      <>
-        <ProviderContextBar session={session} />
+      <PortalAppShell session={session}>
         <main className="mx-auto max-w-6xl space-y-6 px-5 py-8">
           <Skeleton className="h-40 w-full rounded-xl" />
           <Skeleton className="h-48 w-full rounded-xl" />
           <Skeleton className="h-48 w-full rounded-xl" />
         </main>
-      </>
+      </PortalAppShell>
     );
   }
 
@@ -169,8 +168,7 @@ function OnboardingInner({ session }: { session: PortalSession }) {
   }
 
   return (
-    <>
-      <ProviderContextBar session={session} />
+    <PortalAppShell session={session}>
       <main className="mx-auto max-w-6xl space-y-8 px-5 py-8">
         {loadError && (
           <Alert variant="warning">
@@ -283,7 +281,7 @@ function OnboardingInner({ session }: { session: PortalSession }) {
           onActivate={handleActivateDashboard}
         />
       </main>
-    </>
+    </PortalAppShell>
   );
 }
 
