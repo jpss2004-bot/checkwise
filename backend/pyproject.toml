@@ -9,7 +9,9 @@ description = "CheckWise V1 FastAPI backend"
 requires-python = ">=3.11"
 dependencies = [
   "alembic>=1.13",
+  "anthropic>=0.40",
   "bcrypt>=4.0",
+  "jsonschema>=4.21",
   "boto3>=1.35",
   "fastapi>=0.111",
   "psycopg[binary]>=3.1",
@@ -46,3 +48,6 @@ select = ["E", "F", "I", "UP", "B"]
 [tool.ruff.lint.per-file-ignores]
 "alembic/versions/*.py" = ["E501"]
 "tools/*.py" = ["E501"]
+# Test files: long lines are acceptable for assertion strings, seeded
+# fixtures, and descriptive parametrize ids.
+"tests/*.py" = ["E501"]

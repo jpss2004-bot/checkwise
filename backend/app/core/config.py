@@ -52,6 +52,14 @@ class Settings(BaseSettings):
     PORTAL_SESSION_COOKIE_NAME: str = "checkwise_portal_session"
     PORTAL_SESSION_EXPIRES_MINUTES: int = 60 * 24  # 24h, matches AUTH_JWT default
 
+    # Reports AI (Phase 3.3+). Anthropic Claude powers the report
+    # planner + per-block content generator. Empty string means "no
+    # API key configured" — the LLM client factory will fall back to
+    # DeterministicMockLLMClient. Setting CHECKWISE_LLM_BACKEND=mock
+    # forces the mock even when a key is present (useful for CI).
+    ANTHROPIC_API_KEY: str = ""
+    CHECKWISE_LLM_BACKEND: str = ""  # '' | 'anthropic' | 'mock'
+
     model_config = SettingsConfigDict(env_file=".env", env_file_encoding="utf-8", extra="ignore")
 
     @property

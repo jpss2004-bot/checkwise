@@ -180,3 +180,46 @@ class ReportExportRead(BaseModel):
     requested_at: datetime
     ready_at: datetime | None
     error_text: str | None
+
+
+# ─── Planner (Phase 3.3a) ────────────────────────────────────────
+
+
+class PlanReportRequest(BaseModel):
+    """Body for ``POST /api/v1/reports/{id}/plan``.
+
+    The user supplies a natural-language description of what they
+    want. The server assembles tenant-scoped context and asks the
+    LLM to plan the structured block sequence.
+    """
+
+    prompt: str = Field(min_length=1, max_length=4000)
+    period: str | None = Field(default=None, max_length=20)
+
+
+class PlannedBlockResponse(BaseModel):
+    """One block in a plan response."""
+
+    id: str
+    type: str
+    config: dict
+
+
+class PlanReportResponse(BaseModel):
+    """``POST /api/v1/reports/{id}/plan`` returns this.
+
+    The plan is not yet executed and no new ``report_versions`` row
+    is created — that's Phase 3.3b. The endpoint persists a
+    ``compliance_snapshots`` row so the plan can be audited; the
+    snapshot_id is included here.
+    """
+
+    blocks: list[PlannedBlockResponse]
+    rationale: str
+    audience: ReportAudience
+    scope_hint: dict
+    model: str
+    stop_reason: str
+    usage: dict
+    snapshot_id: str
+    llm_backend: str

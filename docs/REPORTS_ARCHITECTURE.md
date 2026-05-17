@@ -658,4 +658,9 @@ Each sub-phase is shippable on its own.
 
 ## 20. Status
 
-Phase 3.0 architecture locked. Phase 3.1 (backend foundation) opens after this merges.
+- Phase 3.0 — architecture locked (`02fa193`).
+- Phase 3.1 — backend foundation merged (`8295024`). 6 tables, 7 CRUD endpoints, tenant isolation tested.
+- Phase 3.2 — canvas + 5 blocks merged (`79ca440`). Frontend block registry + editor route + list rewrite.
+- Phase 3.3a — AI planner + tenant-safe context **(in progress)**. LLM client abstraction (Anthropic + deterministic mock), Context Assembler with PII sanitizer + snapshot writer, Planner service with tool-use, `POST /reports/{id}/plan` endpoint. **Critical safety guards**: snapshot persisted before LLM call, user prompt delimited in `<user_request>` tags, audience locked from report row (never from prompt), unknown / invalid tool calls dropped, safety-net plan when LLM emits nothing valid.
+- Phase 3.3b — streaming execution pipeline + AI-aware blocks (next).
+- Phase 3.3c — embedded conversational copilot.
