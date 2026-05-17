@@ -16,7 +16,7 @@ import {
 } from "@phosphor-icons/react";
 
 import { DocStateBadge } from "@/components/checkwise/doc-state-badge";
-import { ProviderContextBar } from "@/components/checkwise/portal/provider-context-bar";
+import { PortalAppShell } from "@/components/checkwise/portal/portal-app-shell";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -56,8 +56,7 @@ const TYPE_ICON: Record<ReportType, Icon> = {
  */
 function ReportsInner({ session }: { session: PortalSession }) {
   return (
-    <>
-      <ProviderContextBar session={session} />
+    <PortalAppShell session={session}>
       <main className="mx-auto max-w-7xl space-y-8 px-5 py-8">
         <header className="flex flex-wrap items-end justify-between gap-3">
           <div className="space-y-1">
@@ -111,7 +110,7 @@ function ReportsInner({ session }: { session: PortalSession }) {
 
         <ReportsFutureRoadmap />
       </main>
-    </>
+    </PortalAppShell>
   );
 }
 

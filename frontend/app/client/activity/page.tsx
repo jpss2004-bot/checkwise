@@ -1,6 +1,22 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
+import {
+  ChatTeardrop,
+  CheckCircle,
+  ClockClockwise,
+  FileText,
+  Gear,
+  Storefront,
+  User,
+  type Icon,
+} from "@phosphor-icons/react";
+
+import {
+  EmptyState,
+  Surface,
+} from "@/components/checkwise/dashboard/stat-card";
+import { Badge } from "@/components/ui/badge";
 
 import { ClientShell } from "../_shell";
 import {
@@ -8,13 +24,18 @@ import {
   type ClientActivityItem,
 } from "@/lib/api/client";
 
+/**
+ * Activity feed — vertical timeline grouped by day. Replaces the
+ * flat table with a feed pattern that scans the way most operators
+ * actually read it.
+ */
 export default function ClientActivityPage() {
   const [rows, setRows] = useState<ClientActivityItem[]>([]);
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
     let cancelled = false;
-    listClientActivity({ limit: 100 })
+    listClientActivity({ limit: 200 })
       .then((data) => {
         if (!cancelled) setRows(data.items);
       })
@@ -27,47 +48,150 @@ export default function ClientActivityPage() {
     };
   }, []);
 
+  const groups = useMemo(() => groupByDay(rows), [rows]);
+
   return (
-    <ClientShell title="Actividad reciente">
+    <ClientShell
+      title="Actividad reciente"
+      description="Bitácora de eventos en tus proveedores: cargas, revisiones, cambios de estado, notas."
+    >
       {error ? (
-        <p className="rounded-md border border-amber-300 bg-amber-50 p-3 text-sm text-amber-900">
+        <p className="rounded-md border border-[color:var(--status-warning-border)] bg-[color:var(--status-warning-bg)] p-3 text-sm text-[color:var(--status-warning-text)]">
           {error}
         </p>
+      ) : rows.length === 0 ? (
+        <Surface>
+          <EmptyState
+            icon={ClockClockwise}
+            title="Sin actividad reciente"
+            description="No hay eventos registrados para este cliente."
+          />
+        </Surface>
       ) : (
-        <div className="overflow-x-auto rounded-md border border-border bg-white">
-          <table className="w-full text-sm">
-            <thead className="border-b border-border bg-muted/40 text-left text-xs uppercase text-muted-foreground">
-              <tr>
-                <th className="px-3 py-2">Cuándo</th>
-                <th className="px-3 py-2">Actor</th>
-                <th className="px-3 py-2">Acción</th>
-                <th className="px-3 py-2">Proveedor</th>
-                <th className="px-3 py-2">Resumen</th>
-              </tr>
-            </thead>
-            <tbody>
-              {rows.map((row) => (
-                <tr key={row.id} className="border-b border-border last:border-0">
-                  <td className="px-3 py-2 font-mono text-xs">
-                    {new Date(row.occurred_at).toLocaleString("es-MX")}
-                  </td>
-                  <td className="px-3 py-2 text-xs">{row.actor_type}</td>
-                  <td className="px-3 py-2 font-mono text-xs">{row.action}</td>
-                  <td className="px-3 py-2 text-xs">{row.vendor_name ?? "—"}</td>
-                  <td className="px-3 py-2 text-xs">{row.summary}</td>
-                </tr>
-              ))}
-              {rows.length === 0 ? (
-                <tr>
-                  <td colSpan={5} className="px-3 py-6 text-center text-xs text-muted-foreground">
-                    Sin actividad reciente.
-                  </td>
-                </tr>
-              ) : null}
-            </tbody>
-          </table>
-        </div>
+        <Surface
+          title="Cronología"
+          icon={ClockClockwise}
+          description={`${rows.length} evento${rows.length === 1 ? "" : "s"} en los últimos días.`}
+        >
+          <ol className="space-y-7">
+            {groups.map((g) => (
+              <li key={g.day} className="space-y-3">
+                <p className="font-mono text-[10px] uppercase tracking-wide text-[color:var(--text-tertiary)]">
+                  {g.label}
+                </p>
+                <ul className="relative space-y-3 border-l border-[color:var(--border-subtle)] pl-5">
+                  {g.items.map((row) => (
+                    <ActivityRow key={row.id} row={row} />
+                  ))}
+                </ul>
+              </li>
+            ))}
+          </ol>
+        </Surface>
       )}
     </ClientShell>
   );
+}
+
+function ActivityRow({ row }: { row: ClientActivityItem }) {
+  const { icon, tone } = pickIcon(row);
+  const IconComponent = icon;
+  return (
+    <li className="relative">
+      <span
+        aria-hidden="true"
+        className={`absolute -left-[28px] top-0.5 flex h-5 w-5 items-center justify-center rounded-full ${tone}`}
+      >
+        <IconComponent className="h-3 w-3" weight="bold" />
+      </span>
+      <div className="rounded-md border border-[color:var(--border-subtle)] bg-[color:var(--surface-page)] p-3">
+        <div className="flex flex-wrap items-center justify-between gap-2">
+          <p className="text-[13px] text-[color:var(--text-primary)]">
+            {row.summary}
+          </p>
+          <span className="font-mono text-[10px] text-[color:var(--text-tertiary)]">
+            {new Date(row.occurred_at).toLocaleTimeString("es-MX", {
+              hour: "2-digit",
+              minute: "2-digit",
+            })}
+          </span>
+        </div>
+        <div className="mt-1 flex flex-wrap items-center gap-1.5">
+          <Badge variant="outline">{row.actor_type}</Badge>
+          <span className="font-mono text-[10px] text-[color:var(--text-tertiary)]">
+            {row.action}
+          </span>
+          {row.vendor_name ? (
+            <Badge variant="brand">{row.vendor_name}</Badge>
+          ) : null}
+        </div>
+      </div>
+    </li>
+  );
+}
+
+function pickIcon(row: ClientActivityItem): {
+  icon: Icon;
+  tone: string;
+} {
+  const action = row.action.toLowerCase();
+  if (action.includes("approved") || action.includes("aprob"))
+    return {
+      icon: CheckCircle,
+      tone: "bg-[color:var(--status-success-bg)] text-[color:var(--status-success-text)]",
+    };
+  if (action.includes("reject") || action.includes("rechaz"))
+    return {
+      icon: FileText,
+      tone: "bg-[color:var(--status-error-bg)] text-[color:var(--status-error-text)]",
+    };
+  if (action.includes("submission") || action.includes("upload"))
+    return {
+      icon: FileText,
+      tone: "bg-[color:var(--status-info-bg)] text-[color:var(--status-info-text)]",
+    };
+  if (action.includes("comment") || action.includes("note"))
+    return {
+      icon: ChatTeardrop,
+      tone: "bg-[color:var(--surface-teal-muted)] text-[color:var(--text-teal)]",
+    };
+  if (action.includes("vendor"))
+    return {
+      icon: Storefront,
+      tone: "bg-[color:var(--surface-brand-muted)] text-[color:var(--text-brand)]",
+    };
+  if (action.includes("user") || row.actor_type === "user")
+    return {
+      icon: User,
+      tone: "bg-[color:var(--surface-sunken)] text-[color:var(--text-secondary)]",
+    };
+  return {
+    icon: Gear,
+    tone: "bg-[color:var(--surface-sunken)] text-[color:var(--text-secondary)]",
+  };
+}
+
+function groupByDay(rows: ClientActivityItem[]): Array<{
+  day: string;
+  label: string;
+  items: ClientActivityItem[];
+}> {
+  const map = new Map<string, ClientActivityItem[]>();
+  for (const row of rows) {
+    const date = new Date(row.occurred_at);
+    const day = date.toISOString().slice(0, 10);
+    const list = map.get(day) ?? [];
+    list.push(row);
+    map.set(day, list);
+  }
+  return [...map.entries()].map(([day, items]) => ({
+    day,
+    label: new Date(day).toLocaleDateString("es-MX", {
+      weekday: "long",
+      day: "2-digit",
+      month: "long",
+      year: "numeric",
+    }),
+    items,
+  }));
 }

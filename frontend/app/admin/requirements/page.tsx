@@ -1,7 +1,10 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
+import { Books, MagnifyingGlass, Plus, X } from "@phosphor-icons/react";
 
+import { EmptyState, Surface } from "@/components/checkwise/dashboard/stat-card";
+import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -14,12 +17,23 @@ import {
   updateRequirement,
 } from "@/lib/api/admin";
 
+const RISK_VARIANT: Record<
+  string,
+  "success" | "warning" | "destructive" | "info" | "outline"
+> = {
+  low: "success",
+  medium: "warning",
+  high: "destructive",
+  critical: "destructive",
+};
+
 export default function AdminRequirementsPage() {
   const [rows, setRows] = useState<AdminRequirement[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [editing, setEditing] = useState<AdminRequirement | null>(null);
   const [createOpen, setCreateOpen] = useState(false);
+  const [search, setSearch] = useState("");
 
   async function refresh() {
     setError(null);
@@ -38,88 +52,168 @@ export default function AdminRequirementsPage() {
     refresh();
   }, []);
 
+  const filtered = useMemo(() => {
+    const q = search.trim().toLowerCase();
+    if (!q) return rows;
+    return rows.filter(
+      (r) =>
+        r.code.toLowerCase().includes(q) ||
+        r.name.toLowerCase().includes(q) ||
+        r.load_type.toLowerCase().includes(q),
+    );
+  }, [rows, search]);
+
   return (
-    <AdminShell title="Requisitos">
-      <div className="mb-4 flex items-center justify-between gap-3">
-        <p className="text-xs text-muted-foreground">
-          {loading ? "Cargando…" : `${rows.length} requisito(s)`}
-        </p>
-        <Button size="sm" onClick={() => setCreateOpen((v) => !v)}>
-          {createOpen ? "Cancelar" : "Nuevo requisito"}
-        </Button>
-      </div>
-
-      {createOpen ? (
-        <RequirementForm
-          mode="create"
-          onSubmit={async (data) => {
-            await createRequirement(data);
-            setCreateOpen(false);
-            await refresh();
-          }}
-          onCancel={() => setCreateOpen(false)}
-        />
-      ) : null}
-
-      {editing ? (
-        <RequirementForm
-          mode="edit"
-          initial={editing}
-          onSubmit={async (data) => {
-            await updateRequirement(editing.id, data);
+    <AdminShell
+      title="Catálogo de requisitos"
+      description="Documentos REPSE que CheckWise rastrea por proveedor — alta, frecuencia y nivel de riesgo."
+      actions={
+        <Button
+          size="sm"
+          onClick={() => {
             setEditing(null);
-            await refresh();
+            setCreateOpen((v) => !v);
           }}
-          onCancel={() => setEditing(null)}
-        />
-      ) : null}
+        >
+          {createOpen ? (
+            <>
+              <X className="h-4 w-4" weight="bold" aria-hidden="true" />
+              Cancelar
+            </>
+          ) : (
+            <>
+              <Plus className="h-4 w-4" weight="bold" aria-hidden="true" />
+              Nuevo requisito
+            </>
+          )}
+        </Button>
+      }
+    >
+      <div className="space-y-5">
+        {(createOpen || editing) && (
+          <Surface
+            title={editing ? `Editar ${editing.code}` : "Nuevo requisito"}
+            icon={Books}
+          >
+            <RequirementForm
+              mode={editing ? "edit" : "create"}
+              initial={editing ?? undefined}
+              onSubmit={async (data) => {
+                if (editing) {
+                  await updateRequirement(editing.id, data);
+                  setEditing(null);
+                } else {
+                  await createRequirement(data);
+                  setCreateOpen(false);
+                }
+                await refresh();
+              }}
+              onCancel={() => {
+                setCreateOpen(false);
+                setEditing(null);
+              }}
+            />
+          </Surface>
+        )}
 
-      {error ? (
-        <p className="mb-3 rounded-md border border-amber-300 bg-amber-50 p-3 text-sm text-amber-900">
-          {error}
-        </p>
-      ) : null}
-
-      <div className="overflow-x-auto rounded-md border border-border bg-white">
-        <table className="w-full text-sm">
-          <thead className="border-b border-border bg-muted/40 text-left text-xs uppercase text-muted-foreground">
-            <tr>
-              <th className="px-3 py-2">Código</th>
-              <th className="px-3 py-2">Nombre</th>
-              <th className="px-3 py-2">Tipo</th>
-              <th className="px-3 py-2">Frecuencia</th>
-              <th className="px-3 py-2">Riesgo</th>
-              <th className="px-3 py-2">Activo</th>
-              <th className="px-3 py-2">Versión</th>
-              <th className="px-3 py-2"></th>
-            </tr>
-          </thead>
-          <tbody>
-            {rows.map((row) => (
-              <tr key={row.id} className="border-b border-border last:border-0">
-                <td className="px-3 py-2 font-mono text-xs">{row.code}</td>
-                <td className="px-3 py-2">{row.name}</td>
-                <td className="px-3 py-2">{row.load_type}</td>
-                <td className="px-3 py-2">{row.frequency}</td>
-                <td className="px-3 py-2">{row.risk_level}</td>
-                <td className="px-3 py-2">{row.is_active ? "sí" : "no"}</td>
-                <td className="px-3 py-2">v{row.current_version}</td>
-                <td className="px-3 py-2 text-right">
-                  <Button size="sm" variant="outline" onClick={() => setEditing(row)}>
-                    Editar
-                  </Button>
-                </td>
-              </tr>
-            ))}
-            {!loading && rows.length === 0 ? (
-              <tr>
-                <td colSpan={8} className="px-3 py-6 text-center text-xs text-muted-foreground">
-                  Sin requisitos registrados.
-                </td>
-              </tr>
-            ) : null}
-          </tbody>
-        </table>
+        <Surface
+          title={`${filtered.length} requisito${filtered.length === 1 ? "" : "s"}`}
+          actions={
+            <div className="relative w-56">
+              <MagnifyingGlass
+                className="absolute left-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-[color:var(--text-tertiary)]"
+                weight="bold"
+                aria-hidden="true"
+              />
+              <Input
+                value={search}
+                onChange={(e) => setSearch(e.target.value)}
+                placeholder="Código, nombre o tipo"
+                className="h-8 pl-8 text-xs"
+              />
+            </div>
+          }
+          bodyClassName="p-0"
+        >
+          {error ? (
+            <p className="p-4 text-sm text-[color:var(--status-warning-text)]">
+              {error}
+            </p>
+          ) : !loading && filtered.length === 0 ? (
+            <div className="p-8">
+              <EmptyState
+                icon={Books}
+                title="Sin requisitos"
+                description="No hay requisitos con esos filtros."
+              />
+            </div>
+          ) : (
+            <div className="overflow-x-auto">
+              <table className="w-full text-sm">
+                <thead className="border-b border-[color:var(--border-subtle)] bg-[color:var(--surface-page)] text-left font-mono text-[10px] uppercase tracking-wide text-[color:var(--text-tertiary)]">
+                  <tr>
+                    <th className="px-4 py-2.5">Código</th>
+                    <th className="px-3 py-2.5">Nombre</th>
+                    <th className="px-3 py-2.5">Tipo de carga</th>
+                    <th className="px-3 py-2.5">Frecuencia</th>
+                    <th className="px-3 py-2.5">Riesgo</th>
+                    <th className="px-3 py-2.5">Activo</th>
+                    <th className="px-3 py-2.5">Versión</th>
+                    <th className="px-3 py-2.5"></th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {filtered.map((row) => (
+                    <tr
+                      key={row.id}
+                      className="border-b border-[color:var(--border-subtle)] transition-colors last:border-0 hover:bg-[color:var(--surface-hover)]"
+                    >
+                      <td className="px-4 py-2.5 font-mono text-[11px] text-[color:var(--text-secondary)]">
+                        {row.code}
+                      </td>
+                      <td className="px-3 py-2.5 text-[13px] font-medium text-[color:var(--text-primary)]">
+                        {row.name}
+                      </td>
+                      <td className="px-3 py-2.5 text-[12px] text-[color:var(--text-secondary)]">
+                        {row.load_type}
+                      </td>
+                      <td className="px-3 py-2.5">
+                        <Badge variant="outline">{row.frequency}</Badge>
+                      </td>
+                      <td className="px-3 py-2.5">
+                        <Badge variant={RISK_VARIANT[row.risk_level] ?? "outline"}>
+                          {row.risk_level}
+                        </Badge>
+                      </td>
+                      <td className="px-3 py-2.5">
+                        {row.is_active ? (
+                          <Badge variant="success">Sí</Badge>
+                        ) : (
+                          <Badge variant="secondary">No</Badge>
+                        )}
+                      </td>
+                      <td className="px-3 py-2.5 font-mono text-[11px] text-[color:var(--text-tertiary)]">
+                        v{row.current_version}
+                      </td>
+                      <td className="px-3 py-2.5 text-right">
+                        <Button
+                          size="sm"
+                          variant="outline"
+                          onClick={() => {
+                            setCreateOpen(false);
+                            setEditing(row);
+                          }}
+                        >
+                          Editar
+                        </Button>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
+        </Surface>
       </div>
     </AdminShell>
   );
@@ -190,59 +284,80 @@ function RequirementForm({
   }
 
   return (
-    <form
-      onSubmit={handleSubmit}
-      className="mb-4 rounded-md border border-border bg-muted/30 p-4"
-    >
-      <p className="mb-3 text-xs font-medium uppercase text-muted-foreground">
-        {mode === "create" ? "Nuevo requisito" : `Editar ${initial?.code ?? ""}`}
-      </p>
+    <form onSubmit={handleSubmit} className="space-y-4">
       <div className="grid gap-3 sm:grid-cols-2">
         {mode === "create" ? (
           <>
-            <div>
+            <div className="space-y-1">
               <Label htmlFor="req-code">Código</Label>
-              <Input id="req-code" value={code} onChange={(e) => setCode(e.target.value)} required />
+              <Input
+                id="req-code"
+                value={code}
+                onChange={(e) => setCode(e.target.value)}
+                className="font-mono"
+                required
+              />
             </div>
-            <div>
+            <div className="space-y-1">
               <Label htmlFor="req-inst">Institution ID (uuid)</Label>
               <Input
                 id="req-inst"
                 value={institutionId}
                 onChange={(e) => setInstitutionId(e.target.value)}
+                className="font-mono"
                 required
               />
             </div>
           </>
         ) : null}
-        <div className={mode === "create" ? "" : "sm:col-span-2"}>
+        <div className={mode === "create" ? "space-y-1" : "space-y-1 sm:col-span-2"}>
           <Label htmlFor="req-name">Nombre</Label>
-          <Input id="req-name" value={name} onChange={(e) => setName(e.target.value)} required />
+          <Input
+            id="req-name"
+            value={name}
+            onChange={(e) => setName(e.target.value)}
+            required
+          />
         </div>
-        <div>
+        <div className="space-y-1">
           <Label htmlFor="req-load">Tipo de carga</Label>
-          <Input id="req-load" value={loadType} onChange={(e) => setLoadType(e.target.value)} required />
+          <Input
+            id="req-load"
+            value={loadType}
+            onChange={(e) => setLoadType(e.target.value)}
+            required
+          />
         </div>
-        <div>
+        <div className="space-y-1">
           <Label htmlFor="req-freq">Frecuencia</Label>
-          <Input id="req-freq" value={frequency} onChange={(e) => setFrequency(e.target.value)} required />
+          <Input
+            id="req-freq"
+            value={frequency}
+            onChange={(e) => setFrequency(e.target.value)}
+            required
+          />
         </div>
-        <div>
+        <div className="space-y-1">
           <Label htmlFor="req-risk">Nivel de riesgo</Label>
-          <Input id="req-risk" value={riskLevel} onChange={(e) => setRiskLevel(e.target.value)} />
+          <Input
+            id="req-risk"
+            value={riskLevel}
+            onChange={(e) => setRiskLevel(e.target.value)}
+          />
         </div>
-        <div className="flex items-center gap-2 pt-6">
+        <div className="flex items-end gap-2 pb-1">
           <input
             id="req-active"
             type="checkbox"
             checked={isActive}
             onChange={(e) => setIsActive(e.target.checked)}
+            className="h-4 w-4"
           />
           <Label htmlFor="req-active">Activo</Label>
         </div>
         {mode === "create" ? (
-          <div className="sm:col-span-2">
-            <Label htmlFor="req-legal">Base legal (opcional, crea version 1)</Label>
+          <div className="space-y-1 sm:col-span-2">
+            <Label htmlFor="req-legal">Base legal (opcional · crea versión 1)</Label>
             <Input
               id="req-legal"
               value={legalBasis}
@@ -252,10 +367,10 @@ function RequirementForm({
           </div>
         ) : null}
       </div>
-      {err ? <p className="mt-3 text-xs text-red-700">{err}</p> : null}
-      <div className="mt-3 flex gap-2">
+      {err ? <p className="text-xs text-[color:var(--status-error-text)]">{err}</p> : null}
+      <div className="flex gap-2">
         <Button type="submit" size="sm" loading={submitting}>
-          Guardar
+          {mode === "create" ? "Crear" : "Guardar cambios"}
         </Button>
         <Button type="button" size="sm" variant="outline" onClick={onCancel}>
           Cancelar

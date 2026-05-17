@@ -15,7 +15,7 @@ import {
   CloudArrowUp,
 } from "@phosphor-icons/react";
 
-import { ProviderContextBar } from "@/components/checkwise/portal/provider-context-bar";
+import { PortalAppShell } from "@/components/checkwise/portal/portal-app-shell";
 import { RequirementStatusBadge } from "@/components/checkwise/portal/requirement-status-badge";
 import {
   ErrorState,
@@ -98,8 +98,7 @@ export default function SubmissionDetailPage({ params }: PageProps) {
   if (!session) return null;
 
   return (
-    <>
-      <ProviderContextBar session={session} />
+    <PortalAppShell session={session}>
       <main className="mx-auto max-w-7xl space-y-5 px-5 py-6">
         <PageHeader
           eyebrow="Resultado de carga"
@@ -168,7 +167,7 @@ export default function SubmissionDetailPage({ params }: PageProps) {
           </div>
         ) : null}
       </main>
-    </>
+    </PortalAppShell>
   );
 }
 
