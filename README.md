@@ -4,20 +4,32 @@ REPSE-compliance SaaS for Mexico. Vendors upload monthly / bimonthly / four-mont
 
 ## Status
 
-V1.6 is operational locally. Shipped surfaces:
+**V2.0 is operational locally** — frontend redesign pass that unifies the vendor, client, and admin portals onto one design language and one component spine. Backend contracts are unchanged.
 
-- Public marketing page (`/`) with dual CTAs and contact form
+### Shipped in 2.0
+
+- New shared dashboard primitive family — `StatCard`, `Surface`, `EmptyState` — replaces the three drifted `Tile` implementations.
+- Inline-SVG chart primitives — `RadialGauge`, `Donut`, `Sparkline`, `MiniBars`, `StackedBars`, `TrendArrow` — zero external dependencies, token-bound.
+- `PortalAppShell` — sidebar-driven shell for the vendor portal (replaces top-only `ProviderContextBar`).
+- Centralized post-login routing in `lib/routing/post-login.ts` (used by `/login`, `/activate`, returning sessions).
+- Backend-to-UI adapter layer (`lib/api/portal-adapters.ts`) that bridges real payloads to the UX-curated mock shapes until the API emits enriched fields directly.
+- 20 routes redesigned across `/admin/*`, `/client/*`, and `/portal/*`.
+
+Full detail: [docs/CHECKWISE_2_0.md](docs/CHECKWISE_2_0.md).
+
+### Shipped earlier (V1.x)
+
+- Public marketing page (`/`) with the "CheckWise 2.0 launch hero" reveal, dual CTAs, and contact form
 - Role-aware login (`/login`) for provider · cliente · administrador
 - Welcome-email activation flow (`/activate?token=…`) with 3-step wizard + role confirmation
 - Workspace confirmation gate (`/portal/entra-a-tu-espacio`) with tenant-locked field display + correction-request form
 - Initial expediente gate (`/portal/onboarding`) with mandatory/optional pills, provisional-access banner
-- Provider dashboard (`/portal/dashboard`) with workspace identity, semaphore, suggested actions, attention rows, calendar teaser
 - REPSE calendar (`/portal/calendar`) with institution × month grid + detail drawer
 - Reports center scaffold (`/portal/reports`) with 5 report types and `ready`/`generating`/`needs_review`/`blocked`/`unavailable` states
 - Reviewer queue + decision workflow (`/admin/reviewer/*`) with real JWT auth and tenant-scoped detail
 - Real backend auth (`/api/v1/auth/login`), RBAC (`require_role` / `require_org_role`), audit log
 
-**Important.** The 1.5 + 1.6 frontend pages currently consume `lib/mock/*` data. The backend already has many of the equivalent endpoints — wiring them up is the next major task (see [docs/CHECKWISE_1_6.md](docs/CHECKWISE_1_6.md) §Backend integration TODOs).
+**Important.** Several 2.0 dashboards still consume `lib/mock/*` data through the new `portal-adapters.ts` bridge. The backend already has many of the equivalent endpoints — finishing that wiring is the headline 2.1 task (see [docs/CHECKWISE_2_0.md](docs/CHECKWISE_2_0.md) §Carry-forward and [docs/CHECKWISE_1_6.md](docs/CHECKWISE_1_6.md) §Backend integration TODOs).
 
 ## Stack
 
@@ -121,16 +133,31 @@ CheckWise/
 ├── docs/                             14 docs incl. DESIGN_SYSTEM, CHECKWISE_1_5,
 │                                     CHECKWISE_1_6, ONBOARDING_V1, ARCHITECTURE,
 │                                     DATA_MODEL, ROADMAP, PROVIDER_PORTAL_FLOW, …
-├── scripts/reports/                  one-off report + demo-asset generators
-├── brand_assets/                     source logo files
+├── scripts/                          register-design-skills + reports/ generators
+├── brand_assets/                     CANONICAL CheckWise logos (see README)
 ├── demo_assets/                      screenshots + demo guide PDF
+├── design-concepts/                  active design inspiration (inspo-screenshots/)
+├── .claude/skills/                   project-discoverable Claude Code skills
+│                                     (14 checkwise-* + 4 local design overrides
+│                                     + 5 bridged upstream skills via symlink)
+├── .agents/skills/                   untracked upstream design skill installs
+│                                     (reproducible from skills-lock.json)
 ├── .github/workflows/ci.yml          backend (ruff + pytest) + frontend (tsc + lint + build)
 ├── dev.sh                            one-shot launcher for the whole stack
 ├── docker-compose.yml                local Postgres
 ├── .env.example                      env-var template
+├── install_checkwise_claude_skills.sh  generator for .claude/skills/checkwise-*
+├── skills-lock.json                  pins the upstream design skills bridged via
+│                                     scripts/register-design-skills.sh
 ├── CONTRIBUTING.md                   conventions, commit style, PR process
+├── PRODUCT.md                        product context for AI design skills
+├── DESIGN.md                         visual context for AI design skills
 └── AGENTS.md                         rules for AI agents working on this repo
 ```
+
+> Workspace-level orientation (one folder up from this repo) lives in
+> [../MAP.md](../MAP.md). It explains where `brand-identity/`,
+> `_reference/`, and this repo fit together.
 
 ## Verification gauntlet
 
@@ -182,6 +209,7 @@ Production blockers and the full integration plan live in [docs/CHECKWISE_1_6.md
 - Demo guide → [docs/DEMO_GUIDE.md](docs/DEMO_GUIDE.md)
 - CheckWise 1.5 implementation → [docs/CHECKWISE_1_5.md](docs/CHECKWISE_1_5.md)
 - CheckWise 1.6 implementation → [docs/CHECKWISE_1_6.md](docs/CHECKWISE_1_6.md)
+- CheckWise 2.0 implementation → [docs/CHECKWISE_2_0.md](docs/CHECKWISE_2_0.md)
 - Design system → [docs/DESIGN_SYSTEM.md](docs/DESIGN_SYSTEM.md)
 - Contributing (conventions, commit style, PR process) → [CONTRIBUTING.md](CONTRIBUTING.md)
 - AI-agent rules → [AGENTS.md](AGENTS.md)

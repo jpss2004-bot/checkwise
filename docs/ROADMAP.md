@@ -64,34 +64,49 @@
 - `AnimatedCheck` in the success step of the wizard.
 - Plain-language status labels: `Esperando revisión` · `Posible inconsistencia` · `Necesita aclaración`.
 
-## In progress
+### V1.5 — Client Overview ("Patch 8")
 
-### Cleanup — Structural pass (this branch)
+Out-of-tenant read-only view for `client_admin`. Shipped.
 
-- Removed dead artifacts and legacy run script.
-- Consolidated docs into a single README + focused per-topic docs in `docs/`.
-- Backend service extraction (`submission_service.py`, `requirement_service.py`).
-- Frontend wizard split into step-per-file structure.
-- Sample-doc sandbox built from the May-2026 Banco Docs Sample ZIP.
-- Added CI workflow + CONTRIBUTING.md.
+- `/api/v1/clients/{org_id}/...` endpoints, guarded by `require_org_role("client_admin")`.
+- Per-vendor aggregation of `ReviewerDecision` + risk signals.
+- `/admin/clients/[organization_id]` route.
+- Client dashboard surfaces under `/client/*`.
+- Correction-flow links per vendor.
+
+### V1.6 — Workspace Confirmation + Security Hardening
+
+- `/portal/entra-a-tu-espacio` workspace-confirmation gate between auth-success and the rest of the portal.
+- `ProtectedFieldNotice` + `CorrectionRequestForm` for locked tenant identifiers.
+- `WorkspaceIdentityCard` on the vendor dashboard.
+- `blocked` + `unavailable` states added to `/portal/reports`.
+- Tenant-isolation rules tightened: backend is the source of truth for every protected field; client-side display values are hints only.
+- Full detail: [CHECKWISE_1_6.md](CHECKWISE_1_6.md).
+
+### V2.0 — Unified visual language across portals
+
+Frontend redesign pass that lifts vendor, client, and admin portals onto one component spine. Backend contracts unchanged.
+
+- Shared dashboard primitive family (`StatCard`, `Surface`, `EmptyState`) replaces three drifted `Tile` implementations.
+- Inline-SVG chart primitives (`RadialGauge`, `Donut`, `Sparkline`, `MiniBars`, `StackedBars`, `TrendArrow`) — zero external deps, token-bound.
+- `PortalAppShell` — sidebar-driven vendor portal chrome.
+- `lib/routing/post-login.ts` — centralized post-auth routing decision.
+- `lib/api/portal-adapters.ts` — bridge from real backend payloads to UX-curated UI shapes.
+- 20 routes redesigned across `/admin/*`, `/client/*`, `/portal/*`.
+- Removed: orphan `access-decision-banner.tsx` (referenced a deleted type, zero consumers).
+- Full detail: [CHECKWISE_2_0.md](CHECKWISE_2_0.md).
 
 ## Next
 
-### V1.5 — Client Overview ("Patch 8")
+### V2.1 — Mock → real backend wiring
 
-Out-of-tenant read-only view for `client_admin`.
+Finish the backend-integration TODOs that 2.0 carried forward through `portal-adapters.ts`.
 
-Backend:
-- `/api/v1/clients/{org_id}/...` endpoints, guarded by `require_org_role("client_admin")`.
-- Per-vendor aggregation of `ReviewerDecision` + risk signals (overdue, pending, recently rejected).
-- Decide: `ClientWorkspace` join table vs. derive scope from `Membership`.
+- Enrich `/portal/workspaces/{id}/onboarding` with `why` / `format` / `next_action` / `reviewer_note` fields so the adapter can be dropped.
+- Wire the admin + client dashboards to real `/api/v1/clients/*` payloads (today they still consume `lib/mock/*`).
+- Replace the V1.2 opaque `X-Workspace-Token` with the JWT/RBAC stack already used by `/admin/*`.
 
-Frontend:
-- `/admin/clients/[organization_id]` route.
-- Client dashboard tile under `/admin` (currently dimmed).
-- Surface correction-flow links per vendor.
-
-### V1.6 — Importers + Source-of-Truth Migration
+### V2.2 — Importers + Source-of-Truth Migration
 
 - Audit JotForm / Google Sheets schemas.
 - Build a field dictionary.
@@ -99,17 +114,23 @@ Frontend:
 - Idempotent importer into PostgreSQL.
 - Report unmappable rows, duplicates, divergences.
 
-### V1.7 — OCR + Structured Extraction
+### V2.3 — OCR + Structured Extraction
 
 - Background jobs (Redis + RQ or Celery) for OCR, hashing, dedup.
 - Field extraction per institution.
 - Confidence-scored validations attached to submissions.
 
-### V1.8 — Reports + Notifications
+### V2.4 — Reports + Notifications
 
 - Monthly client-facing report from normalized data.
 - Vendor alerts (overdue, rejected, action-required).
 - Reviewer alerts (queue depth, SLA risk).
+
+### Production readiness (parallel track)
+
+- S3-compatible storage path (currently `LocalStorageService` writes to `./storage`).
+- Managed Postgres (Neon or equivalent).
+- Frontend → Vercel; backend → Render/Railway/Fly/Cloud Run.
 
 ## Guiding constraint
 
