@@ -343,24 +343,11 @@ function BackgroundOrnaments() {
       aria-hidden="true"
       className="pointer-events-none absolute inset-0 -z-10 overflow-hidden"
     >
-      {/* Subtle navy grid texture, masked toward center-top */}
+      {/* Subtle navy grid texture, masked toward center-top.
+          V2.x: gradient blobs removed — they violated §"Color
+          strategy — Restrained". The grid alone carries enough
+          atmospheric depth to anchor the hero without decoration. */}
       <div className="cw-grid-pattern absolute inset-0" />
-      {/* Navy soft blob */}
-      <div
-        className="absolute -top-32 left-[14%] h-[580px] w-[580px] rounded-full opacity-[0.16] blur-3xl"
-        style={{
-          background:
-            "radial-gradient(circle, hsl(var(--brand-navy)/0.55) 0%, transparent 70%)",
-        }}
-      />
-      {/* Teal soft blob */}
-      <div
-        className="absolute -bottom-44 -right-24 h-[620px] w-[620px] rounded-full opacity-[0.14] blur-3xl"
-        style={{
-          background:
-            "radial-gradient(circle, hsl(var(--brand-teal)/0.6) 0%, transparent 70%)",
-        }}
-      />
     </div>
   );
 }

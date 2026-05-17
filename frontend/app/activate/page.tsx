@@ -1,6 +1,7 @@
 "use client";
 
 import {
+  Suspense,
   useCallback,
   useEffect,
   useMemo,
@@ -8,7 +9,7 @@ import {
   type FormEvent,
 } from "react";
 import Link from "next/link";
-import { useRouter } from "next/navigation";
+import { useRouter, useSearchParams } from "next/navigation";
 import {
   ArrowLeft,
   ArrowRight,
@@ -47,11 +48,26 @@ import {
  *   * /portal/entra-a-tu-espacio otherwise.
  */
 export default function ActivatePage() {
+  // useSearchParams() forces client-side rendering; Next.js requires
+  // it to live inside a Suspense boundary or the static generator
+  // bails out (NEXT_NOT_FOUND / missing-suspense-with-csr-bailout).
+  // Wrapping ActivateInner in <Suspense> keeps the prerender path
+  // clean and falls back to the skeleton during hydration.
+  return (
+    <Suspense fallback={<ActivateSkeleton />}>
+      <ActivateInner />
+    </Suspense>
+  );
+}
+
+function ActivateInner() {
   const router = useRouter();
+  const searchParams = useSearchParams();
   const [bootChecked, setBootChecked] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [success, setSuccess] = useState(false);
+  const [invalidLink, setInvalidLink] = useState(false);
 
   const [password, setPasswordValue] = useState("");
   const [confirm, setConfirm] = useState("");
@@ -65,11 +81,22 @@ export default function ActivatePage() {
   useEffect(() => {
     const stored = readAdminSession();
     if (!stored) {
+      // V2.x: surface an explicit invalid-link state when the user
+      // landed via an old-style /activate?token=... URL but isn't
+      // authenticated. Previously the page silently redirected, which
+      // the audit flagged as confusing — the user couldn't tell
+      // whether their token was bad or the page was broken.
+      const token = searchParams?.get("token");
+      if (token) {
+        setInvalidLink(true);
+        setBootChecked(true);
+        return;
+      }
       router.replace("/login");
       return;
     }
     setBootChecked(true);
-  }, [router]);
+  }, [router, searchParams]);
 
   const rules = useMemo(() => evaluatePassword(password), [password]);
   const allRulesPassed = rules.every((rule) => rule.passed);
@@ -126,7 +153,13 @@ export default function ActivatePage() {
     [password, passwordsMatch, router],
   );
 
-  if (!bootChecked || !session) return <ActivateSkeleton />;
+  if (!bootChecked) return <ActivateSkeleton />;
+
+  if (invalidLink) {
+    return <InvalidLinkState />;
+  }
+
+  if (!session) return <ActivateSkeleton />;
 
   return (
     <main className="min-h-[100dvh] bg-[color:var(--surface-page)]">
@@ -307,6 +340,80 @@ function ActivateSkeleton() {
         <Skeleton className="h-8 w-32" />
         <Skeleton className="h-10 w-full rounded-lg" />
         <Skeleton className="h-[480px] w-full rounded-xl" />
+      </div>
+    </main>
+  );
+}
+
+function InvalidLinkState() {
+  return (
+    <main className="relative min-h-[100dvh] overflow-hidden bg-[color:var(--surface-page)]">
+      <div
+        aria-hidden="true"
+        className="cw-grid-pattern pointer-events-none absolute inset-0 -z-10"
+      />
+      <div className="mx-auto flex min-h-[100dvh] max-w-md flex-col gap-8 px-5 py-10 lg:py-14">
+        <header className="cw-fade-up flex items-center justify-between">
+          <Link href="/" aria-label="Volver al inicio">
+            <BrandLogo size="md" poweredBy />
+          </Link>
+          <Link
+            href="/"
+            className="inline-flex items-center gap-1.5 text-xs font-medium text-[color:var(--text-link)] hover:underline"
+          >
+            <ArrowLeft className="h-3.5 w-3.5" weight="bold" aria-hidden="true" />
+            Volver al inicio
+          </Link>
+        </header>
+
+        <section className="cw-fade-up space-y-6" style={{ animationDelay: "60ms" }}>
+          <div className="space-y-2">
+            <p className="cw-eyebrow text-[color:var(--text-tertiary)]">
+              Enlace de activación
+            </p>
+            <h1 className="text-3xl font-semibold tracking-tight text-[color:var(--text-primary)]">
+              Este enlace ya no es válido.
+            </h1>
+            <p className="text-[15px] leading-relaxed text-[color:var(--text-secondary)]">
+              CheckWise 1.8 reemplazó el flujo anterior. Ahora la activación
+              ocurre directamente desde el inicio de sesión: usa el correo y la
+              contraseña temporal que te enviamos, y te pediremos cambiarla en
+              el siguiente paso.
+            </p>
+          </div>
+
+          <div className="cw-metadata-strip border-t border-b border-[color:var(--border-subtle)] py-3">
+            <div>
+              <span className="cw-eyebrow">Motivo</span>
+              <span className="text-[12px] text-[color:var(--text-primary)]">
+                Formato anterior
+              </span>
+            </div>
+            <div>
+              <span className="cw-eyebrow">Siguiente paso</span>
+              <span className="text-[12px] text-[color:var(--text-primary)]">
+                Iniciar sesión
+              </span>
+            </div>
+          </div>
+
+          <Button asChild size="lg" className="w-full">
+            <Link href="/login">
+              Ir a iniciar sesión
+              <ArrowRight className="h-4 w-4" weight="bold" aria-hidden="true" />
+            </Link>
+          </Button>
+
+          <p className="text-center text-xs text-[color:var(--text-tertiary)]">
+            ¿No recibiste credenciales?{" "}
+            <a
+              href="mailto:soporte@legalshelf.mx"
+              className="text-[color:var(--text-link)] hover:underline"
+            >
+              Contacta soporte.
+            </a>
+          </p>
+        </section>
       </div>
     </main>
   );
