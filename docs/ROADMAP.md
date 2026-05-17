@@ -115,18 +115,20 @@ The 2.x track unifies the rework into one release. Five phases.
 - Anchor spike: `/portal/dashboard` 4-up KPI grid → horizontal metadata strip.
 - Full detail: [design-system/VISUAL_DIRECTION_2_X.md](design-system/VISUAL_DIRECTION_2_X.md).
 
-**Phase 3 — Reports flagship** (in progress)
+**Phase 3 — Reports flagship** (v1 closed)
 
-Reports evolves into a living, AI-orchestrated compliance-intelligence workspace. Not a PDF exporter. See [REPORTS_ARCHITECTURE.md](REPORTS_ARCHITECTURE.md) + [REPORTS_BLOCK_REGISTRY.md](REPORTS_BLOCK_REGISTRY.md).
+Reports evolved into a living, AI-orchestrated compliance-intelligence workspace. Not a PDF exporter.
 
-- 3.0 — Architecture lock (this PR)
-- 3.1 — Backend foundation: reports + report_versions + report_conversations + compliance_snapshots + report_shares + report_exports tables; CRUD endpoints; no AI yet.
-- 3.2 — Canvas + 5 base blocks: BlockNote editor, registry skeleton, `text` / `divider` / `executive_summary` / `vendor_risk_matrix` / `kpi_strip`.
-- 3.3 — AI planner + content streaming (Anthropic Claude); 9 blocks total; tenant-isolation tests.
-- 3.4 — Chat copilot + refinement.
-- 3.5 — In-place editing + autosave + versioning.
-- 3.6 — Export pipeline (HTML print, DOCX, presentation mode); 14 blocks total.
-- 3.7 — Sharing + signed links.
+- 3.0 — Architecture lock (`02fa193`)
+- 3.1 — Backend foundation: 6 tables, 7 CRUD endpoints, tenant isolation (`8295024`)
+- 3.2 — Canvas + 5 base blocks: text, divider, executive_summary, vendor_risk_matrix, kpi_strip (`79ca440`)
+- 3.3a — AI planner + tenant-safe context orchestrator + 6 explicit safety tests (`a27c97a`)
+- 3.3b — Streaming generation pipeline + AI-aware blocks + ai_recommendation (`330b5e2`)
+- 3.3c — Embedded conversational copilot + per-block Regenerate/Explain + print mode (this PR)
+
+**Phase 3 v1 closes after 3.3c merges.** Six working block types, two AI endpoints (plan + generate), one chat endpoint, two per-block actions, print mode. Backend gauntlet: 320+ tests including the AI safety suite. Architecture spec carries §21 listing what's deferred to 2.2 production polish (server-rendered DOCX/PDF, signed-link sharing, autosave, Inspector panel, 8 remaining block types).
+
+See [REPORTS_ARCHITECTURE.md](REPORTS_ARCHITECTURE.md) + [REPORTS_BLOCK_REGISTRY.md](REPORTS_BLOCK_REGISTRY.md).
 
 **Phase 4 — Hero + marketing visual rework**
 

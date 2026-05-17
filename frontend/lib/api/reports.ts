@@ -239,3 +239,44 @@ export function getVersion(
 export function emptyContent(): ReportContent {
   return { schema_version: 1, blocks: [], global: {} };
 }
+
+// ─── Phase 3.3c — per-block actions ──────────────────────────────
+
+export interface ExplainBlockResponse {
+  block_id: string;
+  explanation: string;
+  llm_backend: string;
+}
+
+export function explainBlock(
+  reportId: string,
+  blockId: string,
+  question?: string,
+): Promise<ExplainBlockResponse> {
+  return fetchJson<ExplainBlockResponse>(
+    `/api/v1/reports/${reportId}/blocks/${blockId}/explain`,
+    {
+      method: "POST",
+      body: JSON.stringify({ question: question ?? null }),
+    },
+  );
+}
+
+export interface RegenerateBlockResponse {
+  block_id: string;
+  ai_summary_text: string;
+  model: string;
+  llm_backend: string;
+  version_id: string;
+  version_number: number;
+}
+
+export function regenerateBlock(
+  reportId: string,
+  blockId: string,
+): Promise<RegenerateBlockResponse> {
+  return fetchJson<RegenerateBlockResponse>(
+    `/api/v1/reports/${reportId}/blocks/${blockId}/regenerate`,
+    { method: "POST", body: JSON.stringify({}) },
+  );
+}

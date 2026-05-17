@@ -17,14 +17,21 @@ catch domain errors → render HTTP.
 from __future__ import annotations
 
 import json as _json
+from datetime import datetime
 from typing import Annotated
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from fastapi.responses import StreamingResponse
+from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
 
 from app.api.v1.auth import CurrentUser, get_current_user
-from app.constants.reports import ReportAudience, ReportStatus
+from app.constants.reports import (
+    ConversationRole,
+    ReportAudience,
+    ReportStatus,
+    ReportVersionOrigin,
+)
 from app.db.session import get_db
 from app.models.entities import Report, ReportVersion
 from app.schemas.reports import (
@@ -56,6 +63,14 @@ from app.services.report_service import (
     patch_report,
 )
 from app.services.reports.context import ReportScope, assemble_context
+from app.services.reports.conversation import (
+    append_turn,
+    error_turn,
+    list_conversation,
+    recent_messages_for_llm,
+    text_turn,
+)
+from app.services.reports.copilot import chat_completion, explain_block
 from app.services.reports.executor import execute_plan
 from app.services.reports.llm import LLMError, get_llm_client
 from app.services.reports.planner import plan_report
@@ -481,3 +496,371 @@ def _sse_frame(event_name: str, data: dict) -> str:
     Multi-line JSON is fine because we serialize without newlines.
     """
     return f"event: {event_name}\ndata: {_json.dumps(data, default=str)}\n\n"
+
+
+# ─── Phase 3.3c — Copilot ────────────────────────────────────────
+
+
+class ConversationTurnPayload(BaseModel):
+    id: str
+    turn_number: int
+    role: ConversationRole
+    content: dict
+    created_at: datetime
+
+
+class ConversationList(BaseModel):
+    items: list[ConversationTurnPayload]
+
+
+@router.get(
+    "/{report_id}/conversation",
+    response_model=ConversationList,
+    summary="Read the full conversation for a report",
+)
+def get_conversation(
+    report_id: str,
+    db: DbSession,
+    current: Annotated[CurrentUser, Depends(get_current_user)],
+) -> ConversationList:
+    actor = _actor_from(current)
+    try:
+        get_report(db, actor=actor, report_id=report_id)
+    except ReportNotFoundError as exc:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, str(exc)) from exc
+
+    turns = list_conversation(db, report_id=report_id)
+    return ConversationList(
+        items=[
+            ConversationTurnPayload(
+                id=t.id,
+                turn_number=t.turn_number,
+                role=ConversationRole(t.role),
+                content=t.content_json,
+                created_at=t.created_at,
+            )
+            for t in turns
+        ]
+    )
+
+
+class ConversationSendRequest(BaseModel):
+    message: str = Field(min_length=1, max_length=4000)
+    canvas_summary: dict | None = None
+
+
+@router.post(
+    "/{report_id}/conversation",
+    summary="Send a chat message; copilot replies via SSE",
+)
+def post_conversation(
+    report_id: str,
+    payload: ConversationSendRequest,
+    db: DbSession,
+    current: Annotated[CurrentUser, Depends(get_current_user)],
+) -> StreamingResponse:
+    """Stream the copilot's reply to a user message.
+
+    Pipeline:
+        1. Append the user turn (text-shaped) to report_conversations.
+        2. Assemble fresh context (cheap — same Context Assembler).
+        3. Stream the assistant's reply token-by-token via SSE.
+        4. Append the full assistant turn at end of stream.
+
+    Event protocol:
+        event: turn_start    { role: 'assistant' }
+        event: delta         { text }                (0..N)
+        event: turn_complete { turn: ConversationTurn }
+        event: done          { }
+        event: error         { code, message }       (terminal)
+    """
+    actor = _actor_from(current)
+
+    try:
+        report, _ = get_report(db, actor=actor, report_id=report_id)
+    except ReportNotFoundError as exc:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, str(exc)) from exc
+
+    scope = ReportScope(
+        organization_id=report.organization_id,
+        audience=ReportAudience(report.audience),
+        client_id=report.client_id,
+        vendor_id=report.vendor_id,
+    )
+
+    try:
+        context = assemble_context(db, actor=actor, scope=scope)
+    except ReportPermissionError as exc:
+        raise HTTPException(status.HTTP_403_FORBIDDEN, str(exc)) from exc
+
+    # Persist the user turn BEFORE streaming the reply so the
+    # conversation history is correct even if the stream is cancelled.
+    user_turn = append_turn(
+        db,
+        report_id=report_id,
+        role=ConversationRole.USER,
+        content=text_turn(payload.message),
+        actor=actor,
+    )
+
+    history = list(recent_messages_for_llm(db, report_id=report_id))
+    canvas_summary = payload.canvas_summary or {}
+    llm = get_llm_client()
+
+    def _sse_iter():
+        yield _sse_frame("turn_start", {"role": "assistant"})
+        accumulated = ""
+        try:
+            for chunk in chat_completion(
+                llm=llm,
+                context=context,
+                canvas_summary=canvas_summary,
+                history=history,
+                user_message=payload.message,
+            ):
+                accumulated += chunk
+                yield _sse_frame("delta", {"text": chunk})
+        except Exception as exc:  # pragma: no cover — defensive
+            yield _sse_frame(
+                "error", {"code": "chat_failed", "message": str(exc)}
+            )
+            # Persist an error turn so the next request can see it.
+            append_turn(
+                db,
+                report_id=report_id,
+                role=ConversationRole.ASSISTANT,
+                content=error_turn("chat_failed", str(exc)),
+                actor=actor,
+            )
+            return
+
+        # Persist the assistant turn with the full text.
+        assistant_turn = append_turn(
+            db,
+            report_id=report_id,
+            role=ConversationRole.ASSISTANT,
+            content=text_turn(accumulated),
+            actor=actor,
+        )
+        yield _sse_frame(
+            "turn_complete",
+            {
+                "turn": {
+                    "id": assistant_turn.id,
+                    "turn_number": assistant_turn.turn_number,
+                    "role": assistant_turn.role,
+                    "content": assistant_turn.content_json,
+                    "created_at": assistant_turn.created_at.isoformat(),
+                }
+            },
+        )
+        yield _sse_frame(
+            "done", {"user_turn_id": user_turn.id, "snapshot_id": context.snapshot_id}
+        )
+
+    return StreamingResponse(
+        _sse_iter(),
+        media_type="text/event-stream",
+        headers={"Cache-Control": "no-cache, no-transform", "X-Accel-Buffering": "no"},
+    )
+
+
+class BlockExplainRequest(BaseModel):
+    question: str | None = Field(default=None, max_length=2000)
+
+
+class BlockExplainResponse(BaseModel):
+    block_id: str
+    explanation: str
+    llm_backend: str
+
+
+@router.post(
+    "/{report_id}/blocks/{block_id}/explain",
+    response_model=BlockExplainResponse,
+    summary="Generate a focused explanation for one block",
+)
+def post_explain_block(
+    report_id: str,
+    block_id: str,
+    payload: BlockExplainRequest,
+    db: DbSession,
+    current: Annotated[CurrentUser, Depends(get_current_user)],
+) -> BlockExplainResponse:
+    """Return a short narrative explaining one block of the current
+    report version. Synchronous (not SSE) — explanations are short.
+    """
+    actor = _actor_from(current)
+    try:
+        report, current_version = get_report(
+            db, actor=actor, report_id=report_id
+        )
+    except ReportNotFoundError as exc:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, str(exc)) from exc
+
+    if current_version is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Report has no version yet.")
+
+    blocks = current_version.content_json.get("blocks") or []
+    block = next((b for b in blocks if b.get("id") == block_id), None)
+    if block is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, f"Block {block_id} not found.")
+
+    scope = ReportScope(
+        organization_id=report.organization_id,
+        audience=ReportAudience(report.audience),
+        client_id=report.client_id,
+        vendor_id=report.vendor_id,
+    )
+    try:
+        context = assemble_context(db, actor=actor, scope=scope)
+    except ReportPermissionError as exc:
+        raise HTTPException(status.HTTP_403_FORBIDDEN, str(exc)) from exc
+
+    llm = get_llm_client()
+    chunks: list[str] = []
+    try:
+        for chunk in explain_block(
+            llm=llm,
+            context=context,
+            block_type=block.get("type", "unknown"),
+            block_data=block.get("data"),
+            audience=ReportAudience(report.audience),
+            question=payload.question,
+        ):
+            chunks.append(chunk)
+    except LLMError as exc:
+        raise HTTPException(status.HTTP_502_BAD_GATEWAY, str(exc)) from exc
+
+    return BlockExplainResponse(
+        block_id=block_id,
+        explanation="".join(chunks),
+        llm_backend=llm.name,
+    )
+
+
+class BlockRegenerateRequest(BaseModel):
+    """No body fields required; the regenerate uses the block's stored
+    config + the current scope. Reserved for future overrides."""
+
+    pass
+
+
+class BlockRegenerateResponse(BaseModel):
+    block_id: str
+    ai_summary_text: str
+    model: str
+    llm_backend: str
+    version_id: str
+    version_number: int
+
+
+@router.post(
+    "/{report_id}/blocks/{block_id}/regenerate",
+    response_model=BlockRegenerateResponse,
+    summary="Regenerate the AI summary for one block (persists a new version)",
+)
+def post_regenerate_block(
+    report_id: str,
+    block_id: str,
+    _payload: BlockRegenerateRequest,
+    db: DbSession,
+    current: Annotated[CurrentUser, Depends(get_current_user)],
+) -> BlockRegenerateResponse:
+    """Re-run the per-block AI summary generator for one block.
+
+    Persists a new ReportVersion with the regenerated summary
+    embedded. The rest of the content is copied from the current
+    version. The block must already exist in the current version.
+    """
+    from app.services.reports.blocks.ai_summaries import (
+        collect_summary,
+        has_ai_summary,
+    )
+
+    actor = _actor_from(current)
+    try:
+        report, current_version = get_report(db, actor=actor, report_id=report_id)
+    except ReportNotFoundError as exc:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, str(exc)) from exc
+
+    if current_version is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Report has no version yet.")
+
+    blocks = list(current_version.content_json.get("blocks") or [])
+    target_idx = next(
+        (i for i, b in enumerate(blocks) if b.get("id") == block_id), None
+    )
+    if target_idx is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, f"Block {block_id} not found.")
+    target = blocks[target_idx]
+    block_type = target.get("type", "")
+    if not has_ai_summary(block_type):
+        raise HTTPException(
+            status.HTTP_422_UNPROCESSABLE_ENTITY,
+            f"Block type '{block_type}' has no AI summary to regenerate.",
+        )
+
+    scope = ReportScope(
+        organization_id=report.organization_id,
+        audience=ReportAudience(report.audience),
+        client_id=report.client_id,
+        vendor_id=report.vendor_id,
+    )
+    try:
+        context = assemble_context(db, actor=actor, scope=scope)
+    except ReportPermissionError as exc:
+        raise HTTPException(status.HTTP_403_FORBIDDEN, str(exc)) from exc
+
+    llm = get_llm_client()
+    try:
+        new_text = collect_summary(
+            block_type=block_type,
+            config=target.get("config") or {},
+            data=target.get("data"),
+            audience=ReportAudience(report.audience),
+            llm=llm,
+        )
+    except LLMError as exc:
+        raise HTTPException(status.HTTP_502_BAD_GATEWAY, str(exc)) from exc
+
+    blocks[target_idx] = {
+        **target,
+        "ai_summary": {
+            "text": new_text,
+            "model": llm.content_model,
+            "prompt_hash": context.snapshot_hash,
+            "generated_at": datetime.utcnow().isoformat(),
+            "source_snapshot_id": context.snapshot_id,
+        },
+    }
+
+    new_content = {
+        **current_version.content_json,
+        "blocks": blocks,
+    }
+    new_version = create_version(
+        db,
+        actor=actor,
+        report_id=report_id,
+        content_json=new_content,
+        label=f"Regenerated {block_type}",
+        plan_json=current_version.plan_json,
+        generated_by=ReportVersionOrigin.AI_REFINED,
+        parent_version_id=current_version.id,
+        source_snapshot_id=context.snapshot_id,
+        llm_metadata={
+            "backend": llm.name,
+            "model": llm.content_model,
+            "regenerated_block_id": block_id,
+        },
+    )
+
+    return BlockRegenerateResponse(
+        block_id=block_id,
+        ai_summary_text=new_text,
+        model=llm.content_model,
+        llm_backend=llm.name,
+        version_id=new_version.id,
+        version_number=new_version.version_number,
+    )
