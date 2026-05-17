@@ -10,6 +10,7 @@ from app.api.v1 import (
     endpoints,
     metadata_dry_run,
     portal,
+    reports,
     reviewer,
 )
 
@@ -22,3 +23,4 @@ api_router.include_router(reviewer.router)
 api_router.include_router(admin.router)
 api_router.include_router(client.router)
 api_router.include_router(metadata_dry_run.router)
+api_router.include_router(reports.router)

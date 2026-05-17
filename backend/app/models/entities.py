@@ -50,7 +50,6 @@ class Client(TimestampMixin, Base):
     vendors: Mapped[list[Vendor]] = relationship(back_populates="client")
     contracts: Mapped[list[Contract]] = relationship(back_populates="client")
     submissions: Mapped[list[Submission]] = relationship(back_populates="client")
-    reports: Mapped[list[Report]] = relationship(back_populates="client")
 
 
 class Vendor(TimestampMixin, Base):
@@ -114,7 +113,6 @@ class Period(TimestampMixin, Base):
     due_on: Mapped[date | None] = mapped_column(Date)
 
     submissions: Mapped[list[Submission]] = relationship(back_populates="period")
-    reports: Mapped[list[Report]] = relationship(back_populates="period")
 
 
 class Institution(TimestampMixin, Base):
@@ -328,22 +326,6 @@ class DocumentStatusHistory(Base):
     document: Mapped[Document] = relationship(back_populates="status_history")
 
 
-class Report(TimestampMixin, Base):
-    __tablename__ = "reports"
-
-    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=new_id)
-    client_id: Mapped[str] = mapped_column(ForeignKey("clients.id"), nullable=False)
-    period_id: Mapped[str] = mapped_column(ForeignKey("periods.id"), nullable=False)
-    report_type: Mapped[str] = mapped_column(String(60), nullable=False)
-    status: Mapped[str] = mapped_column(String(40), default="draft", nullable=False)
-    score: Mapped[float | None] = mapped_column(Float)
-    file_url: Mapped[str | None] = mapped_column(String(500))
-    generated_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
-
-    client: Mapped[Client] = relationship(back_populates="reports")
-    period: Mapped[Period] = relationship(back_populates="reports")
-
-
 class ProviderWorkspace(TimestampMixin, Base):
     """Demo-grade provider session/workspace tying a vendor to a client+contract.
 
@@ -466,3 +448,219 @@ class AuditLog(Base):
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), default=utc_now, nullable=False
     )
+
+
+# ─────────────────────────────────────────────────────────────────
+# Phase 3 — Reports
+#
+# Models for the AI-orchestrated reports workspace. Migration: 0009.
+# Full architecture: docs/REPORTS_ARCHITECTURE.md.
+# Block catalog:    docs/REPORTS_BLOCK_REGISTRY.md.
+# ─────────────────────────────────────────────────────────────────
+
+
+class Report(TimestampMixin, Base):
+    """A report entity. Owned by an organization, optionally scoped to
+    a client + vendor pair.
+
+    Audience gates who can see the report; the API layer enforces the
+    matching role. The report itself never stores block content —
+    that's the responsibility of ``ReportVersion.content_json``.
+
+    See docs/REPORTS_ARCHITECTURE.md §4 for the full schema rationale.
+    """
+
+    __tablename__ = "reports"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=new_id)
+    organization_id: Mapped[str] = mapped_column(
+        ForeignKey("organizations.id"), nullable=False
+    )
+    client_id: Mapped[str | None] = mapped_column(ForeignKey("clients.id"))
+    vendor_id: Mapped[str | None] = mapped_column(ForeignKey("vendors.id"))
+    title: Mapped[str] = mapped_column(String(255), nullable=False)
+    description: Mapped[str | None] = mapped_column(Text)
+    audience: Mapped[str] = mapped_column(String(40), nullable=False)
+    status: Mapped[str] = mapped_column(String(40), default="draft", nullable=False)
+    created_by_user_id: Mapped[str] = mapped_column(
+        ForeignKey("users.id"), nullable=False
+    )
+    # Pointer to the latest version. Not a DB-enforced FK because of
+    # the cycle between reports and report_versions; the service
+    # layer keeps it consistent.
+    current_version_id: Mapped[str | None] = mapped_column(String(36))
+
+    versions: Mapped[list[ReportVersion]] = relationship(
+        back_populates="report",
+        cascade="all, delete-orphan",
+        foreign_keys="ReportVersion.report_id",
+    )
+
+
+class ReportVersion(Base):
+    """Every persisted snapshot of a report. Block data lives inside
+    ``content_json`` as a JSON tree.
+
+    Versions are NOT created on every keystroke. Per spec §9.3:
+        - Inline edits patch content_json in place, no new version.
+        - AI generate / refinement turns: new version.
+        - Manual save: new version with optional label.
+        - Auto-version every N=20 edits OR 5 minutes (Phase 3.5).
+    """
+
+    __tablename__ = "report_versions"
+    __table_args__ = (
+        UniqueConstraint(
+            "report_id", "version_number", name="uq_report_versions_report_version"
+        ),
+    )
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=new_id)
+    report_id: Mapped[str] = mapped_column(
+        ForeignKey("reports.id", ondelete="CASCADE"), nullable=False
+    )
+    version_number: Mapped[int] = mapped_column(Integer, nullable=False)
+    parent_version_id: Mapped[str | None] = mapped_column(
+        ForeignKey("report_versions.id")
+    )
+    label: Mapped[str | None] = mapped_column(String(120))
+    content_json: Mapped[dict] = mapped_column(JSON, nullable=False)
+    plan_json: Mapped[dict | None] = mapped_column(JSON)
+    generated_by: Mapped[str] = mapped_column(String(40), nullable=False)
+    source_snapshot_id: Mapped[str | None] = mapped_column(
+        ForeignKey("compliance_snapshots.id")
+    )
+    llm_metadata: Mapped[dict | None] = mapped_column(JSON)
+    created_by_user_id: Mapped[str] = mapped_column(
+        ForeignKey("users.id"), nullable=False
+    )
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=utc_now, nullable=False
+    )
+
+    report: Mapped[Report] = relationship(
+        back_populates="versions", foreign_keys=[report_id]
+    )
+
+
+class ReportConversation(Base):
+    """Chat turns associated with a report's copilot.
+
+    Each turn is one role's content. The full conversation is
+    materialized by ordering on (report_id, turn_number). Older turns
+    can be dropped from the LLM context but stay visible in the UI.
+    """
+
+    __tablename__ = "report_conversations"
+    __table_args__ = (
+        UniqueConstraint(
+            "report_id", "turn_number", name="uq_report_conversations_report_turn"
+        ),
+    )
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=new_id)
+    report_id: Mapped[str] = mapped_column(
+        ForeignKey("reports.id", ondelete="CASCADE"), nullable=False
+    )
+    turn_number: Mapped[int] = mapped_column(Integer, nullable=False)
+    role: Mapped[str] = mapped_column(String(40), nullable=False)
+    content_json: Mapped[dict] = mapped_column(JSON, nullable=False)
+    attached_version_id: Mapped[str | None] = mapped_column(
+        ForeignKey("report_versions.id")
+    )
+    created_by_user_id: Mapped[str | None] = mapped_column(ForeignKey("users.id"))
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=utc_now, nullable=False
+    )
+
+
+class ComplianceSnapshot(Base):
+    """Frozen copy of the data the LLM saw at report-generation time.
+
+    Used by Phase 3.3+. Lets a report be re-rendered identically next
+    week (regulatory / audit) and lets the planner cache hit on the
+    same data_hash.
+
+    Lives outside ``reports`` because one snapshot can be reused
+    across multiple versions or multiple reports (if the same scope +
+    period is requested).
+    """
+
+    __tablename__ = "compliance_snapshots"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=new_id)
+    organization_id: Mapped[str] = mapped_column(
+        ForeignKey("organizations.id"), nullable=False
+    )
+    client_id: Mapped[str | None] = mapped_column(ForeignKey("clients.id"))
+    vendor_id: Mapped[str | None] = mapped_column(ForeignKey("vendors.id"))
+    scope_filter: Mapped[dict] = mapped_column(JSON, nullable=False)
+    data_json: Mapped[dict] = mapped_column(JSON, nullable=False)
+    row_count: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+    data_hash: Mapped[str] = mapped_column(String(64), nullable=False)
+    taken_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=utc_now, nullable=False
+    )
+
+
+class ReportShare(Base):
+    """Signed-link records for external sharing.
+
+    The token itself is never stored. Only the SHA-256 hash. The
+    consumer presents the raw token; the API hashes and looks up.
+    """
+
+    __tablename__ = "report_shares"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=new_id)
+    report_id: Mapped[str] = mapped_column(
+        ForeignKey("reports.id", ondelete="CASCADE"), nullable=False
+    )
+    version_id: Mapped[str] = mapped_column(
+        ForeignKey("report_versions.id"), nullable=False
+    )
+    token_hash: Mapped[str] = mapped_column(String(64), unique=True, nullable=False)
+    audience: Mapped[str] = mapped_column(String(40), nullable=False)
+    watermark: Mapped[str | None] = mapped_column(String(255))
+    password_hash: Mapped[str | None] = mapped_column(String(255))
+    expires_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    revoked_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    created_by_user_id: Mapped[str] = mapped_column(
+        ForeignKey("users.id"), nullable=False
+    )
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=utc_now, nullable=False
+    )
+    last_accessed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    access_count: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+
+
+class ReportExport(Base):
+    """Async export artifact (DOCX / PDF / PPTX / HTML).
+
+    State machine: pending → rendering → ready | failed. Phase 3.6
+    fills in the rendering worker.
+    """
+
+    __tablename__ = "report_exports"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=new_id)
+    report_id: Mapped[str] = mapped_column(
+        ForeignKey("reports.id", ondelete="CASCADE"), nullable=False
+    )
+    version_id: Mapped[str] = mapped_column(
+        ForeignKey("report_versions.id"), nullable=False
+    )
+    format: Mapped[str] = mapped_column(String(20), nullable=False)
+    status: Mapped[str] = mapped_column(String(40), default="pending", nullable=False)
+    storage_key: Mapped[str | None] = mapped_column(String(512))
+    error_text: Mapped[str | None] = mapped_column(Text)
+    bytes: Mapped[int | None] = mapped_column(Integer)
+    requested_by_user_id: Mapped[str] = mapped_column(
+        ForeignKey("users.id"), nullable=False
+    )
+    requested_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=utc_now, nullable=False
+    )
+    ready_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    expires_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
