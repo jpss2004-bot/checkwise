@@ -656,11 +656,29 @@ Each sub-phase is shippable on its own.
 - Tenant-isolation test added for every new endpoint touching compliance data.
 - For 3.3+: AI-isolation tests (no cross-tenant data in LLM context), prompt-injection suite green, cost-per-report telemetry recorded.
 
-## 20. Status
+## 20. Status — Phase 3 closed
 
 - Phase 3.0 — architecture locked (`02fa193`).
 - Phase 3.1 — backend foundation merged (`8295024`). 6 tables, 7 CRUD endpoints, tenant isolation tested.
 - Phase 3.2 — canvas + 5 blocks merged (`79ca440`). Frontend block registry + editor route + list rewrite.
-- Phase 3.3a — AI planner + tenant-safe context **(in progress)**. LLM client abstraction (Anthropic + deterministic mock), Context Assembler with PII sanitizer + snapshot writer, Planner service with tool-use, `POST /reports/{id}/plan` endpoint. **Critical safety guards**: snapshot persisted before LLM call, user prompt delimited in `<user_request>` tags, audience locked from report row (never from prompt), unknown / invalid tool calls dropped, safety-net plan when LLM emits nothing valid.
-- Phase 3.3b — streaming execution pipeline + AI-aware blocks (next).
-- Phase 3.3c — embedded conversational copilot.
+- Phase 3.3a — AI planner + tenant-safe context merged (`a27c97a`). LLM client abstraction (Anthropic + deterministic mock), Context Assembler with PII sanitizer + snapshot writer, Planner service with tool-use, `POST /reports/{id}/plan`. **6 explicit safety scenarios tested.**
+- Phase 3.3b — streaming execution pipeline + AI-aware blocks merged (`330b5e2`). Per-block data fetchers + AI summary generators, executor with per-block PII redaction, `POST /reports/{id}/generate` SSE, `ai_recommendation` block. End-to-end browser-verified (14-event sequence, persisted v2 with full provenance).
+- **Phase 3.3c — embedded copilot + per-block actions + print mode** *(this PR — Phase 3 final)*. Right-rail chat copilot bound to one report, `report_conversations` persistence, refinement messages, suggested-prompts chip rail, per-block Regenerate + Explain actions, print-mode route at `/portal/reports/[id]/print` for executive-grade PDF via browser print.
+
+**Phase 3 v1 closes after 3.3c merges.** The Reports module is now a living, AI-orchestrated compliance-intelligence workspace.
+
+## 21. Deferred to a 2.2 production-polish track
+
+The architecture spec named 14 block types + several v1 cuts that are deliberately out of scope for Phase 3 v1 because they're production polish, not core workflow:
+
+| Deferred | Reason | Future home |
+|---|---|---|
+| Server-rendered DOCX export | Needs `python-docx` + async worker | 2.2 |
+| Server-rendered PDF export | Print-mode already gives Cmd+P → PDF; server PDF needs Puppeteer or similar | 2.2 |
+| Signed-link sharing (`/shared/[token]`) | Tables exist (`report_shares`); needs JWT + audience-redacted public route | 2.2 |
+| Autosave + version-history drawer | Manual save works; autosave is polish | 2.2 |
+| Inspector panel (config edits) | Inline block configs work today via small per-block hooks | 2.2 |
+| Patch-card chat flow (copilot mutates canvas) | Today the copilot suggests, the user inserts from palette | 2.2 |
+| 8 remaining block types from §15 | `compliance_heatmap`, `missing_documents`, `timeline`, `regulatory_status`, `exception_list`, `audit_trail`, `chart`, `evidence_attachment`, `vendor_comparison_table` | 2.2 or 2.3 |
+
+None of these change the architectural contract — they extend it. Each can ship independently against the existing trust boundaries.

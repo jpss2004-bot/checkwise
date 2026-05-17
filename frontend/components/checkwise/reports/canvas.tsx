@@ -32,9 +32,26 @@ interface CanvasProps {
   content: ReportContent;
   editable: boolean;
   onChange: (next: ReportContent) => void;
+  /** Block types that carry an AI summary (per backend ai_summaries.py). */
+  aiAwareTypes?: string[];
+  /** Block currently being regenerated. */
+  regeneratingBlockId?: string | null;
+  /** Per-block actions; if omitted the action button is hidden. */
+  onRegenerateBlock?: (blockId: string) => void;
+  onExplainBlock?: (blockId: string) => void;
 }
 
-export function Canvas({ content, editable, onChange }: CanvasProps) {
+const DEFAULT_AI_AWARE_TYPES = ["executive_summary", "ai_recommendation"];
+
+export function Canvas({
+  content,
+  editable,
+  onChange,
+  aiAwareTypes = DEFAULT_AI_AWARE_TYPES,
+  regeneratingBlockId = null,
+  onRegenerateBlock,
+  onExplainBlock,
+}: CanvasProps) {
   const [paletteOpen, setPaletteOpen] = useState(false);
 
   const patchBlock = useCallback(
@@ -110,8 +127,16 @@ export function Canvas({ content, editable, onChange }: CanvasProps) {
                 icon={def.icon}
                 locked={block.locked}
                 editable={editable}
+                hasAiSummary={aiAwareTypes.includes(block.type)}
+                regenerating={regeneratingBlockId === block.id}
                 onLockToggle={() => toggleLock(block.id)}
                 onDelete={() => deleteBlock(block.id)}
+                onRegenerate={
+                  onRegenerateBlock && aiAwareTypes.includes(block.type)
+                    ? () => onRegenerateBlock(block.id)
+                    : undefined
+                }
+                onExplain={onExplainBlock ? () => onExplainBlock(block.id) : undefined}
               />
               <BlockComponent
                 block={block}

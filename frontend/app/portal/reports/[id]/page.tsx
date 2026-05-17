@@ -7,14 +7,17 @@ import {
   ArrowLeft,
   ArrowsClockwise,
   CheckCircle,
+  ChatCircle,
   CircleNotch,
   FloppyDisk,
+  Printer,
   Sparkle,
   WarningCircle,
   X,
 } from "@phosphor-icons/react";
 
 import { Canvas } from "@/components/checkwise/reports/canvas";
+import { ChatCopilot } from "@/components/checkwise/reports/chat-copilot";
 import { PortalAppShell } from "@/components/checkwise/portal/portal-app-shell";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
@@ -27,7 +30,9 @@ import {
 import {
   ReportsApiError,
   createVersion,
+  explainBlock,
   getReport,
+  regenerateBlock,
   type ReportContent,
   type ReportRead,
 } from "@/lib/api/reports";
@@ -62,6 +67,53 @@ function EditorInner({ session }: { session: PortalSession }) {
   const [aiOpen, setAiOpen] = useState(false);
   const [aiPrompt, setAiPrompt] = useState("");
   const gen = useReportGeneration(reportId);
+
+  // ─── Copilot chat (right rail) ─────────────────────────────
+  const [chatOpen, setChatOpen] = useState(false);
+
+  // ─── Per-block actions ────────────────────────────────────
+  const [regeneratingBlockId, setRegeneratingBlockId] = useState<string | null>(null);
+  const [explanation, setExplanation] = useState<{
+    blockId: string;
+    text: string;
+  } | null>(null);
+
+  const onRegenerateBlock = useCallback(
+    async (blockId: string) => {
+      setRegeneratingBlockId(blockId);
+      try {
+        await regenerateBlock(reportId, blockId);
+        const fresh = await getReport(reportId);
+        setReport(fresh);
+        if (fresh.current_version) {
+          setContent(fresh.current_version.content_json);
+          setIsDirty(false);
+        }
+      } catch (e) {
+        const msg =
+          e instanceof ReportsApiError ? e.message : "Error al regenerar.";
+        setError(msg);
+      } finally {
+        setRegeneratingBlockId(null);
+      }
+    },
+    [reportId],
+  );
+
+  const onExplainBlockClicked = useCallback(
+    async (blockId: string) => {
+      setExplanation({ blockId, text: "Generando explicación…" });
+      try {
+        const resp = await explainBlock(reportId, blockId);
+        setExplanation({ blockId, text: resp.explanation });
+      } catch (e) {
+        const msg =
+          e instanceof ReportsApiError ? e.message : "Error al explicar.";
+        setExplanation({ blockId, text: `❌ ${msg}` });
+      }
+    },
+    [reportId],
+  );
 
   const onGenerateSubmit = useCallback(
     async (e: FormEvent) => {
@@ -213,6 +265,25 @@ function EditorInner({ session }: { session: PortalSession }) {
               >
                 <Sparkle className="h-4 w-4" weight="bold" aria-hidden="true" />
                 Generar con IA
+              </Button>
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => setChatOpen((open) => !open)}
+                title="Abrir / cerrar copiloto"
+              >
+                <ChatCircle className="h-4 w-4" weight="bold" aria-hidden="true" />
+                Copiloto
+              </Button>
+              <Button asChild variant="ghost" size="sm" title="Vista de impresión">
+                <Link
+                  href={`/portal/reports/${reportId}/print`}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                >
+                  <Printer className="h-4 w-4" weight="bold" aria-hidden="true" />
+                  Imprimir
+                </Link>
               </Button>
               <Button
                 variant="default"
@@ -370,7 +441,46 @@ function EditorInner({ session }: { session: PortalSession }) {
           </form>
         )}
 
-        <Canvas content={content} editable={true} onChange={onCanvasChange} />
+        {explanation && (
+          <div className="cw-fade-up rounded-md border border-[color:var(--status-ai-border)] bg-[color:var(--status-ai-bg)] p-4">
+            <div className="mb-2 flex items-center justify-between">
+              <span className="cw-eyebrow text-[color:var(--text-ai)]">
+                Explicación · bloque {explanation.blockId.slice(0, 8)}
+              </span>
+              <button
+                type="button"
+                onClick={() => setExplanation(null)}
+                aria-label="Cerrar explicación"
+                className="rounded-sm p-1 text-[color:var(--text-tertiary)] hover:bg-[color:var(--surface-hover)]"
+              >
+                <X className="h-3.5 w-3.5" weight="bold" aria-hidden="true" />
+              </button>
+            </div>
+            <p className="cw-prose text-[13px] leading-relaxed text-[color:var(--text-primary)]">
+              {explanation.text}
+            </p>
+          </div>
+        )}
+
+        <div className="flex gap-0">
+          <div className="flex-1">
+            <Canvas
+              content={content}
+              editable={true}
+              onChange={onCanvasChange}
+              regeneratingBlockId={regeneratingBlockId}
+              onRegenerateBlock={onRegenerateBlock}
+              onExplainBlock={onExplainBlockClicked}
+            />
+          </div>
+          {chatOpen && (
+            <ChatCopilot
+              reportId={reportId}
+              content={content}
+              onClose={() => setChatOpen(false)}
+            />
+          )}
+        </div>
       </main>
     </PortalAppShell>
   );
