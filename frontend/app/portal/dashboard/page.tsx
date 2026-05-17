@@ -19,7 +19,6 @@ import {
 import { Donut, RadialGauge, StackedBars, type ChartSegment } from "@/components/checkwise/charts";
 import {
   EmptyState,
-  StatCard,
   Surface,
 } from "@/components/checkwise/dashboard/stat-card";
 import { DocStateBadge } from "@/components/checkwise/doc-state-badge";
@@ -123,11 +122,11 @@ function DashboardInner({ session }: { session: PortalSession }) {
 
   return (
     <PortalAppShell session={session} onboardingPct={onboardingPct}>
-      <main className="mx-auto max-w-7xl space-y-7 px-5 py-7 md:px-7">
+      <main className="mx-auto max-w-7xl space-y-6 px-5 py-6 md:px-7">
         <PageHeader
-          eyebrow="Compliance command center"
-          title={`Hola, ${session.vendor_name.split(" ")[0] ?? "operación REPSE"}`}
-          description="Tu vista operativa: lo que falta, lo que está en revisión y la próxima acción concreta para mantener tu cumplimiento al día."
+          eyebrow="Centro de cumplimiento"
+          title={session.vendor_name}
+          description="Lo que falta, lo que está en revisión y la próxima acción concreta para mantener tu cumplimiento al día."
           actions={
             <Button asChild size="sm" variant="outline">
               <Link href="/portal/upload">
@@ -138,18 +137,20 @@ function DashboardInner({ session }: { session: PortalSession }) {
           }
         />
 
+        <WorkspaceMetadataStrip
+          summary={onboarding}
+          counts={dashboard.document_state_counts}
+          nextDeadline={dashboard.upcoming_deadlines[0] ?? null}
+          rfc={session.vendor_rfc}
+          personaType={session.persona_type}
+        />
+
         {gateBlocked ? <LockedDashboardHero summary={onboarding} /> : null}
         {provisional ? <ProvisionalAccessBanner /> : null}
 
         <SemaphoreHero
           semaphore={dashboard.semaphore}
           counts={dashboard.document_state_counts}
-        />
-
-        <KpiStrip
-          summary={onboarding}
-          counts={dashboard.document_state_counts}
-          nextDeadline={dashboard.upcoming_deadlines[0] ?? null}
         />
 
         <NextActionRail
@@ -293,79 +294,83 @@ function SemaphoreHero({
   );
 }
 
-// ─── KPI strip ────────────────────────────────────────────────────
+// ─── Workspace metadata strip ────────────────────────────────────
+//
+// 2.x direction: replaces the previous 4-up KPI card grid (AUDIT F2 —
+// identical card grids). The same 4 signals — workspace identity,
+// pending-action count, in-review count, next deadline — render as a
+// single horizontal label/value strip below the page header. The
+// dense composition matches the V2.0 hero's monospace metadata
+// signature and removes one cliché SaaS pattern from the surface.
 
-function KpiStrip({
+function WorkspaceMetadataStrip({
   summary,
   counts,
   nextDeadline,
+  rfc,
+  personaType,
 }: {
   summary: DashboardOnboardingSummary;
   counts: DashboardPayload["document_state_counts"];
   nextDeadline: DashboardUpcomingDeadline | null;
+  rfc: string;
+  personaType: PortalSession["persona_type"];
 }) {
-  // Lightweight trends derived from doc state counts (just for the
-  // sparkline shape — replace with backend time-series when available).
-  const trend = (seed: number) => {
-    const base = Math.max(1, seed);
-    return [
-      Math.max(0, base - 4),
-      Math.max(0, base - 2),
-      Math.max(0, base - 3),
-      Math.max(0, base + 1),
-      Math.max(0, base - 1),
-      base,
-    ];
-  };
+  const deadlineLabel = nextDeadline
+    ? `${INSTITUTION_LABEL[nextDeadline.institution] ?? nextDeadline.institution} · ${nextDeadline.period_key ?? ""}`
+    : "Sin vencimientos próximos";
+
   return (
-    <div className="cw-stagger grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
-      <StatCard
-        label="Acciones por atender"
-        value={summary.needs_action}
-        tone={summary.needs_action > 0 ? "warning" : "success"}
-        icon={Warning}
-        caption={
-          summary.needs_action > 0
-            ? "Documentos que requieren tu acción."
-            : "Sin acciones urgentes — ¡bien hecho!"
-        }
-        trend={trend(summary.needs_action)}
-      />
-      <StatCard
-        label="En revisión"
-        value={summary.in_review}
-        tone="info"
-        icon={HourglassHigh}
-        caption="Nuestro equipo legal está validando."
-        trend={trend(summary.in_review)}
-      />
-      <StatCard
-        label="Aprobados"
-        value={counts.approved}
-        tone="success"
-        icon={CheckCircle}
-        caption={`${counts.approved} documentos validados.`}
-        trend={trend(counts.approved)}
-      />
-      <StatCard
-        label="Próximo vencimiento"
-        value={nextDeadline ? truncate(nextDeadline.title, 18) : "—"}
-        tone="brand"
-        icon={CalendarBlank}
-        caption={
-          nextDeadline
-            ? `${INSTITUTION_LABEL[nextDeadline.institution] ?? nextDeadline.institution} · ${nextDeadline.period_key ?? ""}`
-            : "Sin vencimientos próximos"
-        }
-        href={nextDeadline?.href}
-      />
+    <div className="cw-metadata-strip cw-fade-up border-t border-b border-[color:var(--border-subtle)] py-3">
+      <div>
+        <span className="cw-eyebrow">RFC</span>
+        <span className="font-mono text-[13px] text-[color:var(--text-primary)]">{rfc}</span>
+      </div>
+      <div>
+        <span className="cw-eyebrow">Persona</span>
+        <span className="text-[13px] text-[color:var(--text-primary)]">
+          {personaType === "moral" ? "Moral" : "Física"}
+        </span>
+      </div>
+      <div>
+        <span className="cw-eyebrow">Por atender</span>
+        <span
+          className={`font-mono text-[13px] font-semibold tabular-nums ${
+            summary.needs_action > 0
+              ? "text-[color:var(--status-warning-text)]"
+              : "text-[color:var(--status-success-text)]"
+          }`}
+        >
+          {summary.needs_action}
+        </span>
+      </div>
+      <div>
+        <span className="cw-eyebrow">En revisión</span>
+        <span className="font-mono text-[13px] tabular-nums text-[color:var(--text-primary)]">
+          {summary.in_review}
+        </span>
+      </div>
+      <div>
+        <span className="cw-eyebrow">Aprobados</span>
+        <span className="font-mono text-[13px] tabular-nums text-[color:var(--status-success-text)]">
+          {counts.approved}
+        </span>
+      </div>
+      <div>
+        <span className="cw-eyebrow">Próximo</span>
+        {nextDeadline?.href ? (
+          <Link
+            href={nextDeadline.href}
+            className="text-[13px] text-[color:var(--text-primary)] hover:underline"
+          >
+            {deadlineLabel}
+          </Link>
+        ) : (
+          <span className="text-[13px] text-[color:var(--text-tertiary)]">{deadlineLabel}</span>
+        )}
+      </div>
     </div>
   );
-}
-
-function truncate(s: string, max: number): string {
-  if (s.length <= max) return s;
-  return s.slice(0, max - 1) + "…";
 }
 
 // ─── Adapters ────────────────────────────────────────────────────
