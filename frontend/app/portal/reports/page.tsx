@@ -1,343 +1,285 @@
 "use client";
 
+import { useCallback, useEffect, useState, type FormEvent } from "react";
 import Link from "next/link";
+import { useRouter } from "next/navigation";
 import {
   ArrowRight,
-  CalendarBlank,
   ChartLineUp,
-  DownloadSimple,
-  Files,
-  Lightbulb,
-  PaperPlaneTilt,
-  ShieldCheck,
+  CircleNotch,
+  FileText,
+  Plus,
+  Sparkle,
   Warning,
-  WarningCircle,
-  type Icon,
 } from "@phosphor-icons/react";
 
-import { DocStateBadge } from "@/components/checkwise/doc-state-badge";
 import { PortalAppShell } from "@/components/checkwise/portal/portal-app-shell";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { Progress } from "@/components/ui/progress";
+import { PageHeader } from "@/components/ui/page-header";
 import {
-  MOCK_REPORTS,
+  REPORT_AUDIENCE_LABEL,
   REPORT_STATUS_LABEL,
-  REPORT_STATUS_VARIANT,
-  REPORT_TYPE_BLURB,
-  REPORT_TYPE_LABEL,
-  type ReportMeta,
-  type ReportType,
-} from "@/lib/mock/reports";
+  type ReportAudience,
+} from "@/lib/reports/constants";
+import {
+  ReportsApiError,
+  createReport,
+  listReports,
+  type ReportSummary,
+} from "@/lib/api/reports";
 import { withOnboardingGate } from "@/lib/session/with-onboarding-gate";
 import type { PortalSession } from "@/lib/session/portal";
 
-const TYPE_ICON: Record<ReportType, Icon> = {
-  monthly_compliance: ChartLineUp,
-  provider_expediente: ShieldCheck,
-  missing_documents: WarningCircle,
-  risk_action: Warning,
-};
-
 /**
- * Reports scaffold.
+ * Reports list view — Phase 3.2.
  *
- * This is the V1.5 scaffold of CheckWise's reporting surface. The
- * generation pipeline lives behind backend integration TODOs in
- * lib/mock/reports.ts — today the page renders four representative
- * report types with realistic metadata so demos, screenshots, and
- * sales conversations have something to point at.
+ * Replaces the V1.5 mock-data card grid. Reads real reports from the
+ * 3.1 backend, surfaces a "New report" CTA that creates an empty
+ * report and routes into the editor.
  *
- * Reports are a CheckWise differentiator: not just exports, but
- * summaries of risk, faltantes, deadlines, responsable parties, and
- * next actions. The tile + drawer pattern here is sized to grow into
- * a real report list with filters + per-report deep dives.
+ * The 3.3 chat-first creation flow will replace this CTA with the
+ * copilot landing surface; until then we ship a minimal create form
+ * so 3.2 is self-contained.
  */
-function ReportsInner({ session }: { session: PortalSession }) {
+function ReportsListInner({ session }: { session: PortalSession }) {
+  const router = useRouter();
+  const [reports, setReports] = useState<ReportSummary[] | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const [creating, setCreating] = useState(false);
+  const [newOpen, setNewOpen] = useState(false);
+  const [newTitle, setNewTitle] = useState("");
+
+  useEffect(() => {
+    let cancelled = false;
+    listReports({ limit: 100 })
+      .then((payload) => {
+        if (cancelled) return;
+        setReports(payload.items);
+        setError(null);
+      })
+      .catch((e: ReportsApiError) => {
+        if (cancelled) return;
+        if (e.status === 401 || e.status === 403) {
+          setError(
+            "Tu sesión de proveedor todavía no tiene acceso al motor de reportes. " +
+              "El equipo legal de CheckWise puede activarlo desde el panel de admin.",
+          );
+        } else {
+          setError(`No pudimos cargar tus reportes: ${e.message}`);
+        }
+        setReports([]);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  const onCreate = useCallback(
+    async (e: FormEvent) => {
+      e.preventDefault();
+      if (!newTitle.trim() || creating) return;
+      setCreating(true);
+      try {
+        const r = await createReport({
+          title: newTitle.trim(),
+          description: null,
+          audience: "internal_only",
+          initial_content_json: {
+            schema_version: 1,
+            blocks: [],
+            global: {},
+          },
+        });
+        router.push(`/portal/reports/${r.id}`);
+      } catch (e2) {
+        setCreating(false);
+        const msg =
+          e2 instanceof ReportsApiError ? e2.message : "Error creando el reporte.";
+        setError(msg);
+      }
+    },
+    [newTitle, creating, router],
+  );
+
   return (
     <PortalAppShell session={session}>
-      <main className="mx-auto max-w-7xl space-y-8 px-5 py-8">
-        <header className="flex flex-wrap items-end justify-between gap-3">
-          <div className="space-y-1">
-            <p className="font-mono text-[10px] uppercase tracking-wide text-[color:var(--text-teal)]">
-              Reportes
-            </p>
-            <h1 className="text-2xl font-semibold tracking-tight text-[color:var(--text-primary)]">
-              Reportes ejecutivos de CheckWise
-            </h1>
-            <p className="max-w-prose text-[13px] text-[color:var(--text-secondary)]">
-              Resúmenes de cumplimiento, faltantes, riesgo y expediente — listos
-              para enviar al cliente. Esta vista es la primera versión del
-              motor; las acciones avanzadas se habilitan en V1.6.
-            </p>
+      <main className="mx-auto max-w-5xl space-y-6 px-5 py-6">
+        <PageHeader
+          eyebrow="Centro de cumplimiento"
+          title="Reportes"
+          description="Centro de inteligencia de cumplimiento. Genera, edita y comparte reportes ejecutivos."
+          actions={
+            <Button
+              variant="default"
+              size="sm"
+              onClick={() => setNewOpen((open) => !open)}
+            >
+              <Plus className="h-4 w-4" weight="bold" aria-hidden="true" />
+              Nuevo reporte
+            </Button>
+          }
+        />
+
+        {newOpen && (
+          <form
+            onSubmit={onCreate}
+            className="cw-fade-up flex flex-col gap-3 rounded-md border border-[color:var(--border-default)] bg-[color:var(--surface-raised)] p-4 shadow-[var(--shadow-sm)] sm:flex-row sm:items-center"
+          >
+            <input
+              type="text"
+              placeholder="Título del reporte (ej. Resumen REPSE — mayo 2026)"
+              value={newTitle}
+              onChange={(e) => setNewTitle(e.target.value)}
+              autoFocus
+              className="flex-1 rounded-sm border border-[color:var(--border-default)] bg-[color:var(--surface-page)] px-3 py-1.5 text-[14px] text-[color:var(--text-primary)] outline-none focus:border-[color:var(--border-focus)]"
+            />
+            <Button type="submit" size="sm" disabled={!newTitle.trim() || creating}>
+              {creating ? (
+                <CircleNotch
+                  className="h-4 w-4 animate-spin"
+                  weight="bold"
+                  aria-hidden="true"
+                />
+              ) : (
+                <Sparkle className="h-4 w-4" weight="bold" aria-hidden="true" />
+              )}
+              {creating ? "Creando…" : "Crear y abrir"}
+            </Button>
+            <Button
+              type="button"
+              variant="ghost"
+              size="sm"
+              onClick={() => {
+                setNewOpen(false);
+                setNewTitle("");
+              }}
+            >
+              Cancelar
+            </Button>
+          </form>
+        )}
+
+        {error && (
+          <Alert variant="warning">
+            <AlertTitle className="flex items-center gap-2">
+              <Warning className="h-4 w-4" weight="bold" aria-hidden="true" />
+              No se pudieron cargar los reportes
+            </AlertTitle>
+            <AlertDescription>{error}</AlertDescription>
+          </Alert>
+        )}
+
+        {!error && reports !== null && reports.length === 0 && (
+          <EmptyState onNew={() => setNewOpen(true)} />
+        )}
+
+        {!error && reports && reports.length > 0 && (
+          <div className="overflow-hidden border-t border-b border-[color:var(--border-default)]">
+            <table className="min-w-full text-[13px]">
+              <thead>
+                <tr className="border-b border-[color:var(--border-subtle)]">
+                  <th className="cw-eyebrow py-2 pr-4 text-left">Título</th>
+                  <th className="cw-eyebrow py-2 pr-4 text-left">Audiencia</th>
+                  <th className="cw-eyebrow py-2 pr-4 text-left">Estado</th>
+                  <th className="cw-eyebrow py-2 pr-4 text-left">Actualizado</th>
+                  <th className="cw-eyebrow py-2 text-right">Abrir</th>
+                </tr>
+              </thead>
+              <tbody>
+                {reports.map((r) => (
+                  <ReportRow key={r.id} report={r} />
+                ))}
+              </tbody>
+            </table>
           </div>
-          <Button variant="outline" size="sm" disabled>
-            <ChartLineUp className="h-4 w-4" weight="bold" aria-hidden="true" />
-            <span>Generar reporte personalizado</span>
-          </Button>
-        </header>
+        )}
 
-        <Alert variant="info">
-          <AlertTitle className="flex items-center gap-2">
-            <Lightbulb className="h-4 w-4" weight="bold" aria-hidden="true" />
-            Los reportes son un diferenciador clave
-          </AlertTitle>
-          <AlertDescription>
-            No son simples exportaciones: resumen riesgo, faltantes, deadlines
-            y responsables, y se conectan con el calendario REPSE y la revisión
-            humana. Esta es la base. La generación automática, programación y
-            envío a cliente entran como capa siguiente.
-          </AlertDescription>
-        </Alert>
-
-        <div className="rounded-lg border border-[color:var(--border-subtle)] bg-[color:var(--surface-sunken)] px-4 py-3 text-xs text-[color:var(--text-secondary)]">
-          <p>
-            <span className="font-semibold text-[color:var(--text-brand)]">
-              Aislamiento por tenant.
-            </span>{" "}
-            Cada reporte sólo incluye datos del workspace autenticado. Nunca
-            seleccionamos clientes o proveedores por ID en el frontend — la
-            backend valida ownership antes de generar un PDF.
-          </p>
-        </div>
-
-        <section aria-label="Listado de reportes" className="grid gap-5 lg:grid-cols-2">
-          {MOCK_REPORTS.map((report) => (
-            <ReportCard key={report.id} report={report} />
-          ))}
-        </section>
-
-        <ReportsFutureRoadmap />
+        {!error && reports === null && (
+          <div className="space-y-2 py-8 text-center text-[13px] text-[color:var(--text-tertiary)]">
+            <CircleNotch
+              className="mx-auto h-5 w-5 animate-spin"
+              weight="bold"
+              aria-hidden="true"
+            />
+            Cargando reportes…
+          </div>
+        )}
       </main>
     </PortalAppShell>
   );
 }
 
-export default withOnboardingGate(ReportsInner);
+export default withOnboardingGate(ReportsListInner);
 
-// ─── Report card ────────────────────────────────────────────────
-
-function ReportCard({ report }: { report: ReportMeta }) {
-  const IconComponent = TYPE_ICON[report.type];
-  const isReady = report.status === "ready";
-
+function ReportRow({ report }: { report: ReportSummary }) {
   return (
-    <article
-      className="cw-hover-lift flex flex-col gap-4 rounded-xl border border-[color:var(--border-default)] bg-[color:var(--surface-raised)] p-5 shadow-xs"
-      aria-labelledby={`report-${report.id}-title`}
-    >
-      <header className="flex items-start justify-between gap-3">
-        <div className="flex items-start gap-3 min-w-0">
-          <span
-            className="mt-0.5 flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-[color:var(--surface-brand-muted)]"
+    <tr className="border-b border-[color:var(--border-subtle)] last:border-0 hover:bg-[color:var(--surface-hover)]">
+      <td className="py-3 pr-4">
+        <Link
+          href={`/portal/reports/${report.id}`}
+          className="flex items-center gap-2 text-[13px] font-medium text-[color:var(--text-primary)] hover:underline"
+        >
+          <FileText
+            className="h-4 w-4 text-[color:var(--text-tertiary)]"
+            weight="regular"
             aria-hidden="true"
-          >
-            <IconComponent
-              className="h-5 w-5 text-[color:var(--text-brand)]"
-              weight="duotone"
-            />
-          </span>
-          <div className="min-w-0">
-            <p className="font-mono text-[10px] uppercase tracking-wide text-[color:var(--text-tertiary)]">
-              {REPORT_TYPE_LABEL[report.type]}
-            </p>
-            <h3
-              id={`report-${report.id}-title`}
-              className="mt-1 text-[15px] font-semibold leading-5 text-[color:var(--text-primary)]"
-            >
-              {report.title}
-            </h3>
-            <p className="mt-1 text-[12px] leading-5 text-[color:var(--text-secondary)]">
-              {report.blurb || REPORT_TYPE_BLURB[report.type]}
-            </p>
-          </div>
-        </div>
-        <Badge variant={REPORT_STATUS_VARIANT[report.status]}>
+          />
+          {report.title}
+        </Link>
+        {report.description && (
+          <p className="mt-0.5 text-[11px] text-[color:var(--text-tertiary)]">
+            {report.description}
+          </p>
+        )}
+      </td>
+      <td className="py-3 pr-4 text-[12px] text-[color:var(--text-secondary)]">
+        {REPORT_AUDIENCE_LABEL[report.audience as ReportAudience]}
+      </td>
+      <td className="py-3 pr-4">
+        <Badge variant={report.status === "active" ? "success" : "outline"}>
           {REPORT_STATUS_LABEL[report.status]}
         </Badge>
-      </header>
-
-      <dl className="grid gap-3 sm:grid-cols-3">
-        <Meta label="Periodo" value={report.period} mono />
-        <Meta label="Alcance" value={report.scope} />
-        <Meta
-          label="Generado"
-          value={
-            report.generated_at_iso ? formatDate(report.generated_at_iso) : "—"
-          }
-          mono
-        />
-      </dl>
-
-      {(report.compliance_pct !== null ||
-        report.document_coverage_pct !== null) && (
-        <div className="grid gap-3 sm:grid-cols-2">
-          {report.compliance_pct !== null && (
-            <Progress
-              value={report.compliance_pct}
-              label="Cumplimiento"
-              showValue
-              tone={report.compliance_pct >= 80 ? "success" : report.compliance_pct >= 60 ? "warning" : "error"}
-            />
-          )}
-          {report.document_coverage_pct !== null && (
-            <Progress
-              value={report.document_coverage_pct}
-              label="Cobertura documental"
-              showValue
-              tone="brand"
-            />
-          )}
-        </div>
-      )}
-
-      {report.highlights.length > 0 && (
-        <ul className="space-y-1.5 border-t border-[color:var(--border-subtle)] pt-3">
-          {report.highlights.map((h, idx) => (
-            <li key={idx} className="flex items-center justify-between gap-2">
-              <span className="truncate text-xs text-[color:var(--text-primary)]">
-                {h.label}
-              </span>
-              <DocStateBadge state={h.state} withIcon={false} />
-            </li>
-          ))}
-        </ul>
-      )}
-
-      <footer className="mt-auto flex flex-wrap items-center justify-between gap-3 border-t border-[color:var(--border-subtle)] pt-3">
-        <p className="font-mono text-[10px] uppercase tracking-wide text-[color:var(--text-tertiary)]">
-          {report.pending_actions > 0
-            ? `${report.pending_actions} acciones pendientes`
-            : "Sin acciones pendientes"}
-        </p>
-        <div className="flex flex-wrap gap-2">
-          <Button
-            size="sm"
-            variant="outline"
-            disabled={!isReady}
-            title={isReady ? undefined : "El reporte aún se está generando."}
-          >
-            <Files className="h-3.5 w-3.5" weight="bold" aria-hidden="true" />
-            <span>Ver reporte</span>
-          </Button>
-          <Button size="sm" disabled={!isReady}>
-            <DownloadSimple className="h-3.5 w-3.5" weight="bold" aria-hidden="true" />
-            <span>Descargar PDF</span>
-          </Button>
-        </div>
-      </footer>
-
-      {isReady && (
-        <p className="text-xs text-[color:var(--text-tertiary)]">
-          <button
-            type="button"
-            disabled
-            className="inline-flex items-center gap-1.5 text-[color:var(--text-link)] disabled:cursor-not-allowed disabled:opacity-60"
-            title="Se habilita cuando se conecte el envío automático (V1.6)."
-          >
-            <PaperPlaneTilt className="h-3 w-3" weight="bold" aria-hidden="true" />
-            Enviar a cliente
-          </button>{" "}
-          · disponible en V1.6 cuando se conecte el envío automático.
-        </p>
-      )}
-    </article>
+      </td>
+      <td className="py-3 pr-4 font-mono text-[11px] text-[color:var(--text-tertiary)]">
+        {new Date(report.updated_at).toLocaleString("es-MX", {
+          dateStyle: "medium",
+          timeStyle: "short",
+        })}
+      </td>
+      <td className="py-3 text-right">
+        <Link
+          href={`/portal/reports/${report.id}`}
+          aria-label={`Abrir ${report.title}`}
+          className="inline-flex items-center justify-center rounded-sm p-1 text-[color:var(--text-tertiary)] hover:bg-[color:var(--surface-hover)] hover:text-[color:var(--text-primary)]"
+        >
+          <ArrowRight className="h-4 w-4" weight="bold" aria-hidden="true" />
+        </Link>
+      </td>
+    </tr>
   );
 }
 
-function Meta({
-  label,
-  value,
-  mono = false,
-}: {
-  label: string;
-  value: string;
-  mono?: boolean;
-}) {
+function EmptyState({ onNew }: { onNew: () => void }) {
   return (
-    <div className="min-w-0">
-      <dt className="font-mono text-[10px] uppercase tracking-wide text-[color:var(--text-tertiary)]">
-        {label}
-      </dt>
-      <dd
-        className={
-          "truncate text-[13px] text-[color:var(--text-primary)] " +
-          (mono ? "font-mono" : "")
-        }
-      >
-        {value}
-      </dd>
+    <div className="rounded-md border border-dashed border-[color:var(--border-subtle)] py-16 text-center">
+      <ChartLineUp
+        className="mx-auto mb-2 h-6 w-6 text-[color:var(--text-ai)]"
+        weight="regular"
+        aria-hidden="true"
+      />
+      <p className="text-[15px] font-semibold text-[color:var(--text-primary)]">
+        Aún no hay reportes
+      </p>
+      <p className="mx-auto mt-2 max-w-md text-[13px] text-[color:var(--text-secondary)]">
+        Cuando crees tu primer reporte aparecerá aquí. En la próxima fase podrás
+        pedirle al copiloto que arme uno a partir de tus datos.
+      </p>
+      <Button variant="default" size="sm" className="mt-4" onClick={onNew}>
+        <Plus className="h-4 w-4" weight="bold" aria-hidden="true" />
+        Crear primer reporte
+      </Button>
     </div>
   );
-}
-
-function ReportsFutureRoadmap() {
-  return (
-    <section className="rounded-lg border border-[color:var(--border-subtle)] bg-[color:var(--surface-raised)] p-5">
-      <header className="mb-3 flex items-center gap-2">
-        <CalendarBlank
-          className="h-4 w-4 text-[color:var(--text-teal)]"
-          weight="duotone"
-          aria-hidden="true"
-        />
-        <h2 className="text-[13px] font-semibold uppercase tracking-wide text-[color:var(--text-primary)]">
-          Próximas funcionalidades
-        </h2>
-      </header>
-      <ul className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
-        {[
-          {
-            title: "Generación automática",
-            body: "Reportes mensuales programados con cierre del periodo + envío al cliente.",
-          },
-          {
-            title: "Plantillas personalizables",
-            body: "Por cliente: branding, métricas elegidas, observaciones legales.",
-          },
-          {
-            title: "Comparativos históricos",
-            body: "Cumplimiento mes vs. mes, tendencias por proveedor y por institución.",
-          },
-          {
-            title: "Acciones embebidas",
-            body: "Que cada faltante / riesgo abra la acción correspondiente en el portal.",
-          },
-        ].map((item) => (
-          <li
-            key={item.title}
-            className="rounded-sm border border-[color:var(--border-subtle)] bg-[color:var(--surface-page)] p-3"
-          >
-            <p className="text-[13px] font-semibold text-[color:var(--text-primary)]">
-              {item.title}
-            </p>
-            <p className="mt-1 text-xs leading-5 text-[color:var(--text-secondary)]">
-              {item.body}
-            </p>
-          </li>
-        ))}
-      </ul>
-      <p className="mt-4 flex items-center gap-2 text-xs text-[color:var(--text-tertiary)]">
-        <Link
-          href="/portal/dashboard"
-          className="inline-flex items-center gap-1 text-[color:var(--text-link)] hover:underline"
-        >
-          <span>Volver al dashboard</span>
-          <ArrowRight className="h-3 w-3" weight="bold" aria-hidden="true" />
-        </Link>
-      </p>
-    </section>
-  );
-}
-
-function formatDate(iso: string): string {
-  try {
-    return new Date(iso).toLocaleDateString("es-MX", {
-      day: "2-digit",
-      month: "short",
-      year: "numeric",
-    });
-  } catch {
-    return iso;
-  }
 }
