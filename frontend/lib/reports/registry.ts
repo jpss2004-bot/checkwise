@@ -90,6 +90,10 @@ import {
   VendorRiskMatrixBlock,
   vendorRiskMatrixDefinition,
 } from "@/components/checkwise/reports/blocks/vendor-risk-matrix";
+import {
+  AiRecommendationBlock,
+  aiRecommendationDefinition,
+} from "@/components/checkwise/reports/blocks/ai-recommendation";
 
 function register<TConfig, TData>(
   partial: Omit<BlockDefinition<TConfig, TData>, "Component">,
@@ -113,6 +117,10 @@ export const BLOCK_REGISTRY: Record<string, ErasedBlockDefinition> = {
     vendorRiskMatrixDefinition,
     VendorRiskMatrixBlock,
   ),
+  [aiRecommendationDefinition.type]: register(
+    aiRecommendationDefinition,
+    AiRecommendationBlock,
+  ),
 };
 
 /** Slash-menu order. New blocks append. */
@@ -121,6 +129,7 @@ export const PALETTE_ORDER: string[] = [
   executiveSummaryDefinition.type,
   kpiStripDefinition.type,
   vendorRiskMatrixDefinition.type,
+  aiRecommendationDefinition.type,
   dividerDefinition.type,
 ];
 
