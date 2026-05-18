@@ -1001,29 +1001,17 @@ def main() -> None:
         )
         # V2.1 evidence pack — seed 3 reports for the executive demo.
         client_user = db.scalar(select(User).where(User.email == CLIENT_DEMO_EMAIL))
-        # V2.1 evidence — give boss.demo memberships so the Reports
-        # surface is populated when she visits /portal/reports (the
-        # listing endpoint scopes by org membership). Without this,
-        # boss.demo can pass the portal gate but sees an empty list.
-        boss_user_for_member = db.scalar(select(User).where(User.email == BOSS_DEMO_EMAIL))
-        if boss_user_for_member:
-            for target_org_id in (org_id, client_org_id):
-                exists = db.scalar(
-                    select(Membership).where(
-                        Membership.user_id == boss_user_for_member.id,
-                        Membership.organization_id == target_org_id,
-                    )
-                )
-                if not exists:
-                    db.add(
-                        Membership(
-                            user_id=boss_user_for_member.id,
-                            organization_id=target_org_id,
-                            role="client_admin",
-                            status="active",
-                        )
-                    )
-            db.flush()
+        # R-bug-2026-05-18: Earlier versions of this seed gave
+        # boss.demo a ``client_admin`` membership so /portal/reports
+        # would not look empty. Side effect: the login router saw
+        # the client_admin role and routed her to /client/dashboard
+        # instead of the provider workspace at /portal/*.
+        #
+        # boss.demo is documented (README, docs/DEMO_1.7.1.md) as the
+        # *provider* B account. Leave her membership-free so the login
+        # router falls through to /portal/entra-a-tu-espacio. The
+        # /portal/reports list will render empty for her until vendor
+        # report delivery ships in R1.2 — that is the honest state.
         reports_seeded = _seed_reports(
             db,
             legalshelf_org_id=org_id,
