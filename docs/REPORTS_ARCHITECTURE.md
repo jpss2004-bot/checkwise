@@ -789,3 +789,81 @@ After R1.1 the three-role promise is 2/3 fulfilled at the surface level:
 | internal_admin / reviewer | `/admin/reports` (R1.0) ✓ |
 | client_admin | `/client/reports` (R1.1) ✓ |
 | Provider (no user account) | `external_signed` signed-link delivery (R1.2 — not yet shipped) |
+
+## 24. R2 — Interactive list filters + shared list view (2026-05-18)
+
+R2 makes the role-aware list pages actually queryable instead of "everything visible to me." It also retires the near-duplicate admin / client list pages from R1.0 + R1.1 into a single shared component.
+
+### What ships
+
+**Backend (additive — no schema change):**
+
+`GET /api/v1/reports` accepts a new optional `audience` query param (a `ReportAudience` enum value). The service layer's `list_reports()` takes an optional `audience` argument and uses it like so:
+
+```python
+allowed = visible_audiences(actor)
+if not allowed:
+    return [], 0
+if audience is not None:
+    if audience not in allowed:
+        return [], 0           # forbidden → empty list, NOT 403
+    stmt = stmt.where(Report.audience == audience.value)
+else:
+    stmt = stmt.where(Report.audience.in_([a.value for a in allowed]))
+```
+
+The `audience not in allowed → return [], 0` branch is intentional: a `client_admin` who asks for `?audience=internal_only` receives an empty page, not a `403`. This mirrors the not-found semantics elsewhere in the router (`get_report` returns `404` for forbidden-audience reads) so that the response shape never leaks the existence of internal_only rows that an unauthorised caller cannot see.
+
+The existing `?status=` param continues to work; it composes cleanly with `?audience=` via SQL `AND`.
+
+**Frontend:**
+
+A new shared component at `frontend/components/checkwise/reports/list/reports-list-view.tsx` owns the entire list body: preset gallery, filter bar, report table, empty state. It takes:
+
+```ts
+interface ReportsListViewProps {
+  role: "admin" | "client" | "portal";
+  editorHrefBase: string;          // "/admin/reports" or "/client/reports"
+  presetCreateRedirectBase: string; // same shape — preset → editor
+  eyebrowDescription: string;
+  showAudienceFilter?: boolean;    // admin only
+}
+```
+
+`frontend/app/admin/reports/page.tsx` and `frontend/app/client/reports/page.tsx` are now thin `unframed` shell wrappers (~25 LOC each) around this component. `/portal/reports` still uses its V2.1 implementation in R2 — migration is part of the proposed P1 (Provider-first Reports) slice.
+
+### Filter UX
+
+| Filter | Mechanism | Why |
+|---|---|---|
+| Title search | client-side substring, instant | typing has to feel instant; the page only holds up to 100 rows anyway |
+| Estado | server-side via `?status=` | composes with pagination |
+| Audiencia | server-side via `?audience=` (admin only) | composes with pagination; client_admins only see one audience so the filter would be a no-op |
+| Limpiar | resets all three to default | only visible when any filter is active |
+| Empty state | branches on `hasActiveFilter` | the "no reports yet" copy and the "no reports match" copy say different things and offer the right CTA |
+
+The dropdowns are native `<select>` elements. No new dependency, full keyboard + a11y semantics for free, looks the same as every other form input in the codebase.
+
+### Security boundary
+
+The R2 filter does **not** weaken any existing audience boundary. Every layer still enforces `visible_audiences(actor)`:
+
+1. The default-branch SQL clause (`Report.audience IN (visible_audiences)`) keeps the list scoped to what the actor can see when no filter is supplied.
+2. The filter branch first checks `audience not in allowed → return [], 0` before adding the equality clause.
+3. `get_report()` independently rejects forbidden-audience reads with a `404` — id enumeration of internal_only or vendor_facing reports is impossible.
+
+Three tests in `backend/tests/test_reports_presets.py` lock this behavior in:
+
+- `test_list_audience_filter_admin_narrows_to_one` — happy path.
+- `test_list_audience_filter_client_admin_requesting_forbidden_returns_empty` — the security-critical case. Admin seeds an internal_only report **inside the client_admin's own org**; client_admin's call with `?audience=internal_only` returns `{"items": [], "total": 0}`.
+- `test_list_status_filter_narrows_correctly` — orthogonal `status` partitioning.
+
+### What R2 does NOT ship
+
+- No date-range filter.
+- No vendor / client selector dropdown.
+- No URL-persisted filter state.
+- No filters on `/portal/reports` (still uses the V2.1 implementation; migration is part of P1).
+- No new audience values; no new presets; no new block types; no schema change.
+
+After R2, the role-aware promise of Reports is structurally complete for admin and client_admin but still empty for the provider — the seeded vendor-facing reports cannot be reached because role-less actors' `visible_audiences()` returns `()`. That gap is the entire scope of P1 (Provider-first Reports), not part of R2.
