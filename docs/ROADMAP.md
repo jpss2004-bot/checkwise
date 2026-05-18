@@ -134,9 +134,11 @@ See [REPORTS_ARCHITECTURE.md](REPORTS_ARCHITECTURE.md) + [REPORTS_BLOCK_REGISTRY
 
 `/`, `/login`, `/activate`, `/portal/entra-a-tu-espacio` lifted into the V2.x visual register.
 
-**Phase 5 — Internal polish + roll-out**
+**Phase 5 — Internal polish + roll-out** (closed at `v2.1.0`)
 
-Locked visual direction applied across the remaining 19 routes. Final `impeccable-ui` pass. Verification gauntlet + branch + PR + tag `v2.1.0`.
+Locked visual direction applied across the remaining ~20 admin / client / portal surfaces. Foundation work first: role-aware `withOnboardingGate` (internal staff bypass the expediente check), `cliente.demo@checkwise.mx` client_admin seed with a 3-vendor portfolio, shared `<DataTable>` and `<MetadataStrip>` primitives. Shells run at `data-density="dense"` with a drawer fallback below 1024px. Identical-card grids killed everywhere (admin + client 4-up KPI strips → asymmetric bordered lists, `/portal/onboarding` 2×2 → vertical bordered list). All `bg-gradient-to-br` ornaments dropped in product surfaces. State coverage normalised: loading skeleton + error state with retry + empty state on every changed surface. README bumped to V2.1.
+
+The full 2.x track is complete at this tag.
 
 ## Next (post-2.x)
 

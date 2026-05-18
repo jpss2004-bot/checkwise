@@ -22,7 +22,6 @@ import {
 } from "@/components/checkwise/charts";
 import {
   EmptyState,
-  StatCard,
   Surface,
 } from "@/components/checkwise/dashboard/stat-card";
 import { Badge } from "@/components/ui/badge";
@@ -179,35 +178,30 @@ function ClientHero({ overview }: { overview: ClientOverview }) {
         ? "warning"
         : "error";
   return (
-    <section className="cw-fade-up overflow-hidden rounded-xl border border-[color:var(--border-default)] bg-gradient-to-br from-[color:var(--surface-brand-muted)] via-[color:var(--surface-raised)] to-[color:var(--surface-raised)] p-6 md:p-8">
-      <div className="grid gap-6 md:grid-cols-[auto,1fr] md:items-center">
+    <section className="cw-fade-up rounded-lg border border-[color:var(--border-default)] bg-[color:var(--surface-raised)] p-5 shadow-xs md:p-6">
+      <div className="grid gap-5 md:grid-cols-[auto,1fr] md:items-center md:gap-8">
         <RadialGauge
           value={overview.compliance_pct}
           tone={tone}
-          size={148}
+          size={140}
           thickness={12}
           label={`${Math.round(overview.compliance_pct)}%`}
           caption="cumplimiento"
         />
         <div className="min-w-0 space-y-3">
-          <div className="flex flex-wrap items-center gap-2">
-            <Badge variant="brand">
-              {overview.client_name}
-            </Badge>
-            <span className="font-mono text-[10px] uppercase tracking-wide text-[color:var(--text-tertiary)]">
-              {overview.active_workspaces_total} workspace
-              {overview.active_workspaces_total === 1 ? "" : "s"} activo
-              {overview.active_workspaces_total === 1 ? "" : "s"}
-            </span>
-          </div>
-          <p className="text-lg font-semibold tracking-tight text-[color:var(--text-primary)] md:text-xl">
+          <p className="cw-eyebrow">
+            {overview.client_name} · {overview.active_workspaces_total} workspace
+            {overview.active_workspaces_total === 1 ? "" : "s"} activo
+            {overview.active_workspaces_total === 1 ? "" : "s"}
+          </p>
+          <p className="text-xl font-semibold leading-tight tracking-tight text-[color:var(--text-primary)]">
             {summaryHeadline(overview)}
           </p>
           <p className="max-w-2xl text-[13px] leading-relaxed text-[color:var(--text-secondary)]">
             {summaryDescription(overview)}
           </p>
           {overview.last_activity_at ? (
-            <p className="font-mono text-[11px] text-[color:var(--text-tertiary)]">
+            <p className="font-mono text-[11px] tabular-nums text-[color:var(--text-tertiary)]">
               Última actividad ·{" "}
               {new Date(overview.last_activity_at).toLocaleString("es-MX")}
             </p>
@@ -244,39 +238,109 @@ function summaryDescription(o: ClientOverview): string {
 // ─── KPI strip ────────────────────────────────────────────────────
 
 function ClientKpiStrip({ overview }: { overview: ClientOverview }) {
+  const rows: {
+    href?: string;
+    icon: typeof Storefront;
+    label: string;
+    caption: string;
+    value: number;
+    tone?: "default" | "warning" | "teal";
+  }[] = [
+    {
+      href: "/client/vendors",
+      icon: Storefront,
+      label: "Proveedores",
+      caption: `${overview.active_workspaces_total} workspaces activos.`,
+      value: overview.vendors_total,
+    },
+    {
+      icon: Files,
+      label: "Faltantes obligatorios",
+      caption: "Documentos REPSE pendientes de carga.",
+      value: overview.missing_required_total,
+      tone:
+        overview.missing_required_total > 0 ? "warning" : "default",
+    },
+    {
+      icon: HourglassHigh,
+      label: "En revisión",
+      caption: "Nuestro equipo legal está validando.",
+      value: overview.pending_reviews_total,
+    },
+    {
+      href: "/client/calendar",
+      icon: CalendarBlank,
+      label: "Vencen ≤14 días",
+      caption: "Próximas obligaciones críticas.",
+      value: overview.due_soon_total,
+      tone:
+        overview.due_soon_total > 0 ? "warning" : "default",
+    },
+  ];
+
   return (
-    <div className="cw-stagger grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
-      <StatCard
-        label="Proveedores"
-        value={overview.vendors_total}
-        tone="brand"
-        icon={Storefront}
-        caption={`${overview.active_workspaces_total} workspaces activos`}
-        href="/client/vendors"
-      />
-      <StatCard
-        label="Faltantes obligatorios"
-        value={overview.missing_required_total}
-        tone={overview.missing_required_total > 0 ? "warning" : "success"}
-        icon={Files}
-        caption="Documentos REPSE pendientes de carga."
-      />
-      <StatCard
-        label="En revisión"
-        value={overview.pending_reviews_total}
-        tone="info"
-        icon={HourglassHigh}
-        caption="Nuestro equipo legal está validando."
-      />
-      <StatCard
-        label="Vencen ≤14 días"
-        value={overview.due_soon_total}
-        tone={overview.due_soon_total > 0 ? "warning" : "success"}
-        icon={CalendarBlank}
-        caption="Próximas obligaciones críticas."
-        href="/client/calendar"
-      />
-    </div>
+    <section
+      aria-label="Señales del portafolio"
+      className="cw-fade-up rounded-lg border border-[color:var(--border-default)] bg-[color:var(--surface-raised)] shadow-xs"
+    >
+      <header className="border-b border-[color:var(--border-subtle)] px-5 py-3">
+        <p className="cw-eyebrow">Señales del portafolio</p>
+      </header>
+      <ul className="divide-y divide-[color:var(--border-subtle)]">
+        {rows.map((row) => {
+          const Icon = row.icon;
+          const tone =
+            row.tone === "warning"
+              ? "text-[color:var(--status-warning-text)]"
+              : row.tone === "teal"
+              ? "text-[color:var(--text-teal)]"
+              : "text-[color:var(--text-primary)]";
+          const content = (
+            <div className="flex items-center gap-3 px-5 py-3 transition-colors hover:bg-[color:var(--surface-hover)]">
+              <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-md bg-[color:var(--surface-sunken)] text-[color:var(--text-secondary)]">
+                <Icon className="h-4 w-4" weight="bold" aria-hidden />
+              </span>
+              <div className="min-w-0 flex-1">
+                <p className="text-[13px] font-semibold text-[color:var(--text-primary)]">
+                  {row.label}
+                </p>
+                <p className="text-[11px] text-[color:var(--text-tertiary)]">
+                  {row.caption}
+                </p>
+              </div>
+              <span
+                className={`font-mono text-lg font-semibold tabular-nums ${tone}`}
+              >
+                {row.value === 0 ? "—" : row.value}
+              </span>
+              {row.href ? (
+                <ArrowRight
+                  className="h-4 w-4 shrink-0 text-[color:var(--text-tertiary)]"
+                  weight="bold"
+                  aria-hidden
+                />
+              ) : (
+                <span className="h-4 w-4 shrink-0" aria-hidden />
+              )}
+            </div>
+          );
+          return (
+            <li key={row.label}>
+              {row.href ? (
+                <Link
+                  href={row.href}
+                  className="block focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-[color:var(--border-focus)]/40"
+                >
+                  {content}
+                </Link>
+              ) : (
+                content
+              )}
+            </li>
+          );
+        })}
+      </ul>
+    </section>
   );
 }
 
@@ -477,20 +541,27 @@ function QuickLinks() {
     },
   ];
   return (
-    <Surface title="Accesos rápidos">
-      <ul className="grid grid-cols-2 gap-2">
+    <Surface title="Accesos rápidos" bodyClassName="p-0">
+      <ul className="divide-y divide-[color:var(--border-subtle)]">
         {items.map((item) => (
           <li key={item.href}>
             <Link
               href={item.href}
-              className="block rounded-md border border-[color:var(--border-subtle)] bg-[color:var(--surface-page)] px-3 py-2 text-[12px] transition-colors hover:bg-[color:var(--surface-hover)]"
+              className="flex items-center justify-between gap-3 px-4 py-2.5 text-[12px] transition-colors hover:bg-[color:var(--surface-hover)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-[color:var(--border-focus)]/40"
             >
-              <p className="font-semibold text-[color:var(--text-primary)]">
-                {item.label}
-              </p>
-              <p className="mt-0.5 text-[color:var(--text-secondary)]">
-                {item.helper}
-              </p>
+              <div className="min-w-0">
+                <p className="font-semibold text-[color:var(--text-primary)]">
+                  {item.label}
+                </p>
+                <p className="mt-0.5 text-[11px] text-[color:var(--text-secondary)]">
+                  {item.helper}
+                </p>
+              </div>
+              <ArrowRight
+                className="h-3.5 w-3.5 shrink-0 text-[color:var(--text-tertiary)]"
+                weight="bold"
+                aria-hidden
+              />
             </Link>
           </li>
         ))}

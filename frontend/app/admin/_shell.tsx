@@ -7,19 +7,19 @@ import {
   Books,
   CalendarBlank,
   ClipboardText,
-  GearSix,
   Gauge,
   IdentificationCard,
+  List,
   ListMagnifyingGlass,
   SignOut,
   Storefront,
-  Users,
+  X,
   type Icon,
 } from "@phosphor-icons/react";
 
 import { BrandLogo } from "@/components/checkwise/brand-logo";
-import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import { MetadataStrip } from "@/components/ui/metadata-strip";
 import { cn } from "@/lib/utils";
 import {
   type AdminSession,
@@ -28,15 +28,12 @@ import {
 } from "@/lib/session/admin";
 
 /**
- * AdminShell — polished operations console shell.
+ * AdminShell — premium-dense operations console shell (V2.1).
  *
- * Top bar:
- *   • brand mark + role context
- *   • horizontal nav with active pill, hover state, and icon affordance
- *   • right-side user chip with role badges + sign-out
- *
- * Replaces the previous "plain, operational" header. The nav order is
- * unchanged — only chrome is refreshed.
+ * Density: dense (per VISUAL_DIRECTION_2_X tier lock).
+ * Header: brand mark + horizontal nav + user chip on desktop, drawer
+ * on mobile (<1024px). Page header carries title + MetadataStrip
+ * (workspace identity demoted from greeting block to mono metadata).
  */
 
 const NAV: { href: string; label: string; icon: Icon }[] = [
@@ -64,6 +61,7 @@ export function AdminShell({
   const pathname = usePathname();
   const [session, setSession] = useState<AdminSession | null>(null);
   const [ready, setReady] = useState(false);
+  const [drawerOpen, setDrawerOpen] = useState(false);
 
   useEffect(() => {
     const current = readAdminSession();
@@ -79,6 +77,10 @@ export function AdminShell({
     setReady(true);
   }, [router]);
 
+  useEffect(() => {
+    setDrawerOpen(false);
+  }, [pathname]);
+
   function onLogout() {
     clearAdminSession();
     router.replace("/admin/login");
@@ -87,41 +89,45 @@ export function AdminShell({
   if (!ready || !session) return null;
 
   return (
-    <div className="min-h-screen bg-[color:var(--surface-page)]">
+    <div
+      data-density="dense"
+      className="min-h-screen bg-[color:var(--surface-page)]"
+    >
       <header className="sticky top-0 z-30 border-b border-[color:var(--border-subtle)] bg-[color:var(--surface-raised)]/95 backdrop-blur supports-[backdrop-filter]:bg-[color:var(--surface-raised)]/85">
-        <div className="mx-auto flex max-w-7xl items-center gap-4 px-5 py-3">
+        <div className="mx-auto flex max-w-7xl items-center gap-3 px-5 py-2.5">
           <Link href="/admin" aria-label="CheckWise admin">
             <BrandLogo size="md" />
           </Link>
-          <div className="hidden h-7 w-px bg-[color:var(--border-subtle)] sm:block" />
-          <div className="hidden min-w-0 flex-1 sm:block">
-            <p className="font-mono text-[10px] uppercase tracking-wide text-[color:var(--text-teal)]">
-              Operaciones internas
-            </p>
-            <p className="truncate text-[13px] font-medium text-[color:var(--text-primary)]">
-              <span className="font-mono">{session.user.email}</span>
-              <span className="ml-2 text-[color:var(--text-tertiary)]">
-                ·{" "}
-                {session.roles
-                  .map((r) => r.replace(/_/g, " "))
-                  .join(", ")}
-              </span>
-            </p>
-          </div>
+          <span className="hidden h-6 w-px bg-[color:var(--border-subtle)] lg:block" />
+          <p className="hidden font-mono text-[10px] uppercase tracking-[0.18em] text-[color:var(--text-teal)] lg:block">
+            Operaciones internas
+          </p>
           <div className="ml-auto flex items-center gap-2">
-            <Badge variant="brand" className="hidden md:inline-flex">
-              <GearSix className="h-3 w-3" weight="bold" aria-hidden="true" />
-              {session.user.full_name}
-            </Badge>
+            <span className="hidden font-mono text-[11px] text-[color:var(--text-tertiary)] md:inline">
+              {session.user.email}
+            </span>
             <Button type="button" variant="outline" size="sm" onClick={onLogout}>
-              <SignOut className="h-4 w-4" weight="bold" aria-hidden="true" />
+              <SignOut className="h-3.5 w-3.5" weight="bold" aria-hidden="true" />
               <span className="hidden sm:inline">Cerrar sesión</span>
             </Button>
+            <button
+              type="button"
+              aria-label={drawerOpen ? "Cerrar menú" : "Abrir menú"}
+              aria-expanded={drawerOpen}
+              onClick={() => setDrawerOpen((open) => !open)}
+              className="inline-flex h-8 w-8 items-center justify-center rounded-md border border-[color:var(--border-subtle)] text-[color:var(--text-secondary)] transition-colors hover:bg-[color:var(--surface-hover)] lg:hidden"
+            >
+              {drawerOpen ? (
+                <X className="h-4 w-4" weight="bold" />
+              ) : (
+                <List className="h-4 w-4" weight="bold" />
+              )}
+            </button>
           </div>
         </div>
         <nav
           aria-label="Operaciones admin"
-          className="mx-auto flex max-w-7xl gap-1 overflow-x-auto px-3 pb-2"
+          className="mx-auto hidden max-w-7xl gap-1 overflow-x-auto px-3 pb-2 lg:flex"
         >
           {NAV.map((item) => {
             const isActive =
@@ -131,6 +137,7 @@ export function AdminShell({
               <Link
                 key={item.href}
                 href={item.href}
+                aria-current={isActive ? "page" : undefined}
                 className={cn(
                   "inline-flex shrink-0 items-center gap-1.5 rounded-md border px-2.5 py-1.5 text-[12px] font-medium transition-colors duration-fast",
                   isActive
@@ -150,31 +157,88 @@ export function AdminShell({
         </nav>
       </header>
 
-      <main className="mx-auto max-w-7xl space-y-6 px-5 py-6">
-        <header className="cw-fade-up flex flex-wrap items-end justify-between gap-3 border-b border-[color:var(--border-subtle)] pb-4">
-          <div className="min-w-0 space-y-1">
-            <p className="font-mono text-[10px] uppercase tracking-[0.18em] text-[color:var(--text-teal)]">
-              Admin · CheckWise
-            </p>
-            <h1 className="text-2xl font-semibold tracking-tight text-[color:var(--text-primary)]">
-              {title}
-            </h1>
-            {description ? (
-              <p className="max-w-prose text-[13px] text-[color:var(--text-secondary)]">
-                {description}
-              </p>
+      {drawerOpen ? (
+        <div
+          role="dialog"
+          aria-label="Menú admin"
+          className="fixed inset-0 z-40 flex lg:hidden"
+        >
+          <button
+            type="button"
+            aria-label="Cerrar"
+            onClick={() => setDrawerOpen(false)}
+            className="absolute inset-0 bg-[color:var(--text-primary)]/40 backdrop-blur-sm"
+          />
+          <nav
+            aria-label="Operaciones admin"
+            className="relative ml-auto flex h-full w-72 max-w-[85vw] flex-col gap-1 border-l border-[color:var(--border-subtle)] bg-[color:var(--surface-raised)] p-4 shadow-lg"
+          >
+            <p className="cw-eyebrow mb-2">Navegación</p>
+            {NAV.map((item) => {
+              const isActive =
+                pathname === item.href || pathname?.startsWith(item.href + "/");
+              const IconComponent = item.icon;
+              return (
+                <Link
+                  key={item.href}
+                  href={item.href}
+                  aria-current={isActive ? "page" : undefined}
+                  className={cn(
+                    "flex items-center gap-2 rounded-md border px-3 py-2 text-sm font-medium transition-colors",
+                    isActive
+                      ? "border-[color:var(--border-brand)] bg-[color:var(--surface-brand)] text-[color:var(--text-inverse)]"
+                      : "border-transparent text-[color:var(--text-secondary)] hover:bg-[color:var(--surface-hover)] hover:text-[color:var(--text-primary)]",
+                  )}
+                >
+                  <IconComponent
+                    className="h-4 w-4"
+                    weight={isActive ? "fill" : "bold"}
+                    aria-hidden="true"
+                  />
+                  {item.label}
+                </Link>
+              );
+            })}
+          </nav>
+        </div>
+      ) : null}
+
+      <main className="mx-auto max-w-7xl space-y-5 px-5 py-5">
+        <header className="cw-fade-up space-y-3">
+          <div className="flex flex-wrap items-end justify-between gap-3">
+            <div className="min-w-0 space-y-1">
+              <p className="cw-eyebrow">Admin · CheckWise</p>
+              <h1 className="text-[26px] font-semibold leading-tight tracking-tight text-[color:var(--text-primary)]">
+                {title}
+              </h1>
+              {description ? (
+                <p className="max-w-prose text-[13px] text-[color:var(--text-secondary)]">
+                  {description}
+                </p>
+              ) : null}
+            </div>
+            {actions ? (
+              <div className="flex flex-wrap gap-2">{actions}</div>
             ) : null}
           </div>
-          {actions ? (
-            <div className="flex flex-wrap gap-2">{actions}</div>
-          ) : null}
+          <MetadataStrip
+            items={[
+              { label: "Usuario", value: session.user.full_name },
+              { label: "Correo", value: session.user.email, mono: true },
+              {
+                label: "Roles",
+                value: session.roles.map((r) => r.replace(/_/g, " ")).join(", "),
+                mono: true,
+                tone: "teal",
+              },
+            ]}
+          />
         </header>
         <section>{children}</section>
       </main>
 
       <footer className="mx-auto max-w-7xl px-5 py-6 text-center font-mono text-[10px] uppercase tracking-wide text-[color:var(--text-tertiary)]">
-        <Users className="mr-1 inline h-3 w-3" weight="bold" aria-hidden="true" />
-        Internal operations — Legal Shelf · CheckWise
+        Internal operations · Legal Shelf · CheckWise
       </footer>
     </div>
   );

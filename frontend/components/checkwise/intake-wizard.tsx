@@ -484,7 +484,7 @@ export function IntakeWizard({
                 index === step
                   ? "border-primary bg-primary text-primary-foreground"
                   : index < step
-                    ? "border-primary/30 bg-emerald-50 text-primary"
+                    ? "border-[color:var(--status-success-border)] bg-[color:var(--status-success-bg)] text-[color:var(--status-success-text)]"
                     : "border-border bg-white text-muted-foreground"
               }`}
             >
@@ -877,13 +877,13 @@ function UploadStep({
               event.preventDefault();
               onFileSelected(event.dataTransfer.files?.[0] ?? null);
             }}
-            className="flex min-h-[180px] cursor-pointer flex-col items-center justify-center rounded-md border border-dashed border-primary/40 bg-emerald-50/50 p-6 text-center transition-colors hover:bg-emerald-50"
+            className="flex min-h-[180px] cursor-pointer flex-col items-center justify-center rounded-md border border-dashed border-[color:var(--border-brand)] bg-[color:var(--surface-teal-muted)]/40 p-6 text-center transition-colors hover:bg-[color:var(--surface-teal-muted)]/70"
           >
-            <CloudArrowUp className="h-9 w-9 text-primary" aria-hidden="true" />
-            <p className="mt-3 text-sm font-semibold">
+            <CloudArrowUp className="h-9 w-9 text-[color:var(--text-brand)]" aria-hidden="true" />
+            <p className="mt-3 text-sm font-semibold text-[color:var(--text-primary)]">
               Arrastra o selecciona el PDF
             </p>
-            <p className="mt-1 text-sm text-muted-foreground">
+            <p className="mt-1 text-sm text-[color:var(--text-secondary)]">
               Solo PDF, máximo 15 MB. No subas archivos protegidos con contraseña.
             </p>
             <input
@@ -1176,11 +1176,11 @@ function ConfirmationStep({
   const isClarification = result.status === DocumentStatus.REQUIERE_ACLARACION;
   const isAttention = isMismatch || isClarification;
   const heroTone = isAttention
-    ? "border-amber-300 bg-amber-50"
-    : "border-emerald-200 bg-emerald-50";
+    ? "border-[color:var(--status-warning-border)] bg-[color:var(--status-warning-bg)]"
+    : "border-[color:var(--status-success-border)] bg-[color:var(--status-success-bg)]";
   const heroIconBg = isAttention
-    ? "bg-amber-500 text-white"
-    : "bg-emerald-500 text-white";
+    ? "bg-[color:var(--status-warning-text)] text-[color:var(--text-inverse)]"
+    : "bg-[color:var(--status-success-text)] text-[color:var(--text-inverse)]";
   const HeroIcon = isAttention ? Warning : CheckCircle;
   const heroHeadline = isMismatch
     ? "Recibimos tu documento, pero detectamos una posible inconsistencia"

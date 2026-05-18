@@ -4,18 +4,23 @@ REPSE-compliance SaaS for Mexico. Vendors upload monthly / bimonthly / four-mont
 
 ## Status
 
-**V2.0 is operational locally** — frontend redesign pass that unifies the vendor, client, and admin portals onto one design language and one component spine. Backend contracts are unchanged.
+**V2.1 is operational locally** — closes the five-phase 2.x rework: a locked visual direction applied across every inner surface, a Reports flagship with embedded copilot, the marketing hero rework, and the final polish + roll-out pass.
 
-### Shipped in 2.0
+### Shipped in 2.1
 
-- New shared dashboard primitive family — `StatCard`, `Surface`, `EmptyState` — replaces the three drifted `Tile` implementations.
-- Inline-SVG chart primitives — `RadialGauge`, `Donut`, `Sparkline`, `MiniBars`, `StackedBars`, `TrendArrow` — zero external dependencies, token-bound.
-- `PortalAppShell` — sidebar-driven shell for the vendor portal (replaces top-only `ProviderContextBar`).
-- Centralized post-login routing in `lib/routing/post-login.ts` (used by `/login`, `/activate`, returning sessions).
-- Backend-to-UI adapter layer (`lib/api/portal-adapters.ts`) that bridges real payloads to the UX-curated mock shapes until the API emits enriched fields directly.
-- 20 routes redesigned across `/admin/*`, `/client/*`, and `/portal/*`.
+- **Reports flagship** (Phase 3) — six block types, AI planner + streaming generator + embedded copilot, per-block Regenerate / Explain, print mode. 320+ backend tests including AI-safety suite. Architecture: [docs/REPORTS_ARCHITECTURE.md](docs/REPORTS_ARCHITECTURE.md).
+- **Marketing hero + auth rework** (Phase 4) — `/`, `/login`, `/activate`, `/portal/entra-a-tu-espacio` lifted to the V2.x visual register.
+- **Internal polish + roll-out** (Phase 5) — locked direction applied to the remaining ~20 admin / client / portal surfaces:
+  - Shared `<DataTable>` primitive extracted from `/admin/reviewer` and rolled out to 7 roster surfaces.
+  - Shared `<MetadataStrip>` primitive promotes workspace identity to mono key/value rows, replacing the "Hola, [vendor]" greeting blocks.
+  - All F2 identical-card grids killed (`/admin/dashboard` 4-up, `/client/dashboard` 4-up, `/portal/onboarding` 2×2) and replaced with bordered vertical lists or asymmetric layouts.
+  - Admin and client shells run at `data-density="dense"` with a drawer fallback below 1024px.
+  - All `bg-gradient-to-br` hero ornaments dropped in the product surfaces; marketing register kept.
+  - State coverage normalised: loading skeleton + error state with retry + empty state on every changed surface.
+  - Role-aware `withOnboardingGate` (internal_admin / reviewer bypass the expediente check) so admin users can reach `/portal/*` without bouncing.
+  - New `cliente.demo@checkwise.mx` seed user with a 3-vendor portfolio so `/client/*` is reachable in dev / demo.
 
-Full detail: [docs/CHECKWISE_2_0.md](docs/CHECKWISE_2_0.md).
+Full detail: [docs/CHECKWISE_2_0.md](docs/CHECKWISE_2_0.md) + [docs/design-system/VISUAL_DIRECTION_2_X.md](docs/design-system/VISUAL_DIRECTION_2_X.md).
 
 ### Shipped earlier (V1.x)
 
@@ -75,14 +80,22 @@ Created by `backend/scripts/dev_seed.py`.
 | Surface | URL | Auth |
 | --- | --- | --- |
 | Public marketing | `http://localhost:3000/` | none |
-| Login (provider / cliente) | `http://localhost:3000/login` | seeded demo client + free-form RFC |
+| Login (provider / cliente) | `http://localhost:3000/login` | seeded demo accounts (below) |
 | Activation demo | `http://localhost:3000/activate?token=demo` | resolves to a seeded provider invitation |
 | Reviewer / admin | `http://localhost:3000/admin/login` | `ada@legalshelf.mx` / `demo1234` |
 
+Seeded demo accounts (`backend/scripts/dev_seed.py`):
+
+| Role | Email | Password | Reaches |
+| --- | --- | --- | --- |
+| internal_admin · reviewer | `ada@legalshelf.mx` | `demo1234` | `/admin/*` + `/portal/*` (gate bypass) |
+| provider (boss demo, expediente complete) | `boss.demo@checkwise.mx` | `BossDemo!2026` | `/portal/*` |
+| provider (first login, expediente pending) | `proveedor.demo@checkwise.mx` | `CheckWiseDemo!2026` (temp) | `/activate` → `/portal/onboarding` |
+| **client_admin (V2.1)** | `cliente.demo@checkwise.mx` | `ClienteDemo!2026` | `/client/*` (3-vendor portfolio) |
+
 Pre-seeded provider workspace:
 
-- `workspace_id`: `ws-demo-0001`
-- `access_token`: `demo-token`
+- `workspace_id`: `ws-demo-0001`, `access_token`: `demo-token`
 - 4 demo submissions in states `pendiente_revision`, `posible_mismatch`, `aprobado`, `rechazado`
 
 ## Repo layout (tracked)

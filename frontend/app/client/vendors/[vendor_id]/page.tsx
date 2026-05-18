@@ -121,8 +121,8 @@ function VendorHero({ detail }: { detail: ClientVendorDetail }) {
         ? Warning
         : WarningOctagon;
   return (
-    <section className="cw-fade-up overflow-hidden rounded-xl border border-[color:var(--border-default)] bg-gradient-to-br from-[color:var(--surface-brand-muted)] via-[color:var(--surface-raised)] to-[color:var(--surface-raised)] p-6 md:p-8">
-      <div className="grid gap-6 md:grid-cols-[auto,1fr] md:items-center">
+    <section className="cw-fade-up rounded-lg border border-[color:var(--border-default)] bg-[color:var(--surface-raised)] p-5 shadow-xs md:p-6">
+      <div className="grid gap-5 md:grid-cols-[auto,1fr] md:items-center md:gap-8">
         <RadialGauge
           value={detail.semaphore.compliance_pct}
           tone={tone}
@@ -138,10 +138,10 @@ function VendorHero({ detail }: { detail: ClientVendorDetail }) {
                 tone === "success" ? "success" : tone === "warning" ? "warning" : "destructive"
               }
             >
-              <ToneIcon className="h-3 w-3" weight="fill" aria-hidden="true" />
+              <ToneIcon className="h-3 w-3" weight="bold" aria-hidden="true" />
               {detail.semaphore.label}
             </Badge>
-            <span className="font-mono text-[10px] uppercase tracking-wide text-[color:var(--text-tertiary)]">
+            <span className="cw-eyebrow">
               {detail.semaphore.on_track} de {detail.semaphore.total_tracked} obligaciones al día
             </span>
             {detail.onboarding_summary.is_gate_satisfied ? (
@@ -175,7 +175,7 @@ function ExpedienteMicroBar({ detail }: { detail: ClientVendorDetail }) {
   return (
     <div className="space-y-1.5">
       <div className="flex items-center justify-between text-[11px]">
-        <p className="font-mono uppercase tracking-wide text-[color:var(--text-tertiary)]">
+        <p className="cw-eyebrow">
           Expediente inicial · {s.completion_pct}%
         </p>
         <p className="font-mono tabular-nums text-[color:var(--text-tertiary)]">

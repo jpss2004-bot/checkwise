@@ -4,12 +4,14 @@ import { useEffect, useMemo, useState } from "react";
 import { CalendarBlank } from "@phosphor-icons/react";
 
 import { MiniBars } from "@/components/checkwise/charts";
-import {
-  StatCard,
-  Surface,
-} from "@/components/checkwise/dashboard/stat-card";
+import { Surface } from "@/components/checkwise/dashboard/stat-card";
 import { Badge } from "@/components/ui/badge";
 import { Input } from "@/components/ui/input";
+import { MetadataStrip } from "@/components/ui/metadata-strip";
+import {
+  ErrorState,
+  Skeleton,
+} from "@/components/checkwise/portal/state-surfaces";
 
 import { AdminShell } from "../_shell";
 import {
@@ -98,33 +100,40 @@ export default function AdminCalendarPage() {
       }
     >
       {error ? (
-        <p className="rounded-md border border-[color:var(--status-warning-border)] bg-[color:var(--status-warning-bg)] p-3 text-sm text-[color:var(--status-warning-text)]">
-          {error}
-        </p>
+        <ErrorState
+          title="No pudimos cargar el calendario"
+          description={error}
+          onRetry={() => setYear((y) => y)}
+        />
       ) : !calendar ? (
-        <p className="text-sm text-[color:var(--text-secondary)]">Cargando…</p>
+        <CalendarSkeleton />
       ) : (
         <div className="space-y-6">
-          <div className="cw-stagger grid gap-3 sm:grid-cols-3">
-            <StatCard
-              label="Obligaciones esperadas"
-              value={totalExpected}
-              tone="brand"
-              caption={`Año ${calendar.year} · ${calendar.persona_type}`}
-            />
-            <StatCard
-              label="Periodos en BD"
-              value={periods.length}
-              tone="teal"
-              caption="Registros de periodos para este año."
-            />
-            <StatCard
-              label="Cobertura mensual"
-              value={`${calendar.months.length}/12`}
-              tone="info"
-              caption="Meses con obligaciones definidas."
-            />
-          </div>
+          <MetadataStrip
+            items={[
+              {
+                label: "Esperadas",
+                value: totalExpected.toString(),
+                mono: true,
+              },
+              {
+                label: "Periodos BD",
+                value: periods.length.toString(),
+                mono: true,
+                tone: "teal",
+              },
+              {
+                label: "Cobertura",
+                value: `${calendar.months.length}/12`,
+                mono: true,
+              },
+              {
+                label: "Año",
+                value: `${calendar.year} · ${calendar.persona_type}`,
+                mono: true,
+              },
+            ]}
+          />
 
           <Surface
             title="Distribución mensual"
@@ -233,5 +242,16 @@ export default function AdminCalendarPage() {
         </div>
       )}
     </AdminShell>
+  );
+}
+
+function CalendarSkeleton() {
+  return (
+    <div className="space-y-5" aria-busy="true" aria-live="polite">
+      <span className="sr-only">Cargando calendario operativo…</span>
+      <Skeleton className="h-12 w-full rounded-md" />
+      <Skeleton className="h-32 w-full rounded-lg" />
+      <Skeleton className="h-64 w-full rounded-lg" />
+    </div>
   );
 }
