@@ -94,6 +94,22 @@ import {
   AiRecommendationBlock,
   aiRecommendationDefinition,
 } from "@/components/checkwise/reports/blocks/ai-recommendation";
+import {
+  ComplianceStateBlock,
+  complianceStateDefinition,
+} from "@/components/checkwise/reports/blocks/compliance-state";
+import {
+  AttentionListBlock,
+  attentionListDefinition,
+} from "@/components/checkwise/reports/blocks/attention-list";
+import {
+  UpcomingDeadlinesBlock,
+  upcomingDeadlinesDefinition,
+} from "@/components/checkwise/reports/blocks/upcoming-deadlines";
+import {
+  PrioritizedActionsBlock,
+  prioritizedActionsDefinition,
+} from "@/components/checkwise/reports/blocks/prioritized-actions";
 
 function register<TConfig, TData>(
   partial: Omit<BlockDefinition<TConfig, TData>, "Component">,
@@ -121,10 +137,30 @@ export const BLOCK_REGISTRY: Record<string, ErasedBlockDefinition> = {
     aiRecommendationDefinition,
     AiRecommendationBlock,
   ),
+  [complianceStateDefinition.type]: register(
+    complianceStateDefinition,
+    ComplianceStateBlock,
+  ),
+  [attentionListDefinition.type]: register(
+    attentionListDefinition,
+    AttentionListBlock,
+  ),
+  [upcomingDeadlinesDefinition.type]: register(
+    upcomingDeadlinesDefinition,
+    UpcomingDeadlinesBlock,
+  ),
+  [prioritizedActionsDefinition.type]: register(
+    prioritizedActionsDefinition,
+    PrioritizedActionsBlock,
+  ),
 };
 
 /** Slash-menu order. New blocks append. */
 export const PALETTE_ORDER: string[] = [
+  complianceStateDefinition.type,
+  attentionListDefinition.type,
+  upcomingDeadlinesDefinition.type,
+  prioritizedActionsDefinition.type,
   textDefinition.type,
   executiveSummaryDefinition.type,
   kpiStripDefinition.type,

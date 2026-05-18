@@ -15,7 +15,7 @@ from collections.abc import Generator
 
 import pytest
 from fastapi.testclient import TestClient
-from sqlalchemy import create_engine
+from sqlalchemy import create_engine, select
 from sqlalchemy.orm import Session, sessionmaker
 from sqlalchemy.pool import StaticPool
 
@@ -774,3 +774,231 @@ def test_admin_sees_all_nine_presets_after_p1(api_client, db_factory) -> None:
         "client-monthly-executive",
         "client-vendor-risk-matrix",
     ]
+
+
+# ─── P1.1 — Safety scaffolding for provider blocks ─────────────
+
+
+def _seed_second_workspace_for(
+    db_factory,
+    *,
+    user_email: str,
+    client_name: str,
+    vendor_name: str,
+) -> tuple[str, str]:
+    """Attach a SECOND active ProviderWorkspace to an existing user.
+
+    Used to reproduce the dual-workspace ambiguity: one User row
+    owning more than one ProviderWorkspace. Returns
+    ``(vendor_id, client_id)`` for the new workspace.
+    """
+    db = db_factory()
+    try:
+        user = db.scalar(select(User).where(User.email == user_email))
+        assert user is not None, f"seed user {user_email} not found"
+
+        client = Client(name=client_name)
+        db.add(client)
+        db.flush()
+
+        org = Organization(
+            name=f"{client_name} — Cliente",
+            kind="client",
+            client_id=client.id,
+        )
+        db.add(org)
+        db.flush()
+
+        vendor = Vendor(
+            client_id=client.id,
+            name=vendor_name,
+            rfc=f"V{abs(hash(vendor_name)) % 10**11:011d}A",
+            persona_type="moral",
+        )
+        db.add(vendor)
+        db.flush()
+
+        workspace = ProviderWorkspace(
+            client_id=client.id,
+            vendor_id=vendor.id,
+            contract_id=None,
+            owner_user_id=user.id,
+            filial_name="Filial test",
+            persona_type="moral",
+            display_name=vendor_name,
+            access_token=f"tok-{vendor.id}",
+            onboarding_completed_at=None,
+            status="active",
+        )
+        db.add(workspace)
+        db.commit()
+        return vendor.id, client.id
+    finally:
+        db.close()
+
+
+def test_dual_workspace_owner_resolution_is_deterministic_and_isolated(
+    api_client, db_factory
+) -> None:
+    """P1.1: when one user owns two active ProviderWorkspaces, the API
+    must (a) deterministically pick the same workspace on every
+    request and (b) never leak the *other* workspace's reports.
+
+    Multi-workspace visibility (seeing reports from both vendors at
+    once) is a deferred follow-up. Until then the contract is: the
+    lowest-id workspace wins and the other vendor's reports stay
+    invisible — exactly as if the second workspace did not exist.
+    """
+    # Provider with workspace A.
+    tok, vendor_a, _client_a = _provider_workspace_user(
+        api_client,
+        db_factory,
+        email="dual_ws@presets.test",
+        client_name="Cliente DualA",
+        vendor_name="Vendor DualA",
+    )
+
+    # Same user gains a second active workspace pointing at vendor B.
+    vendor_b, _client_b = _seed_second_workspace_for(
+        db_factory,
+        user_email="dual_ws@presets.test",
+        client_name="Cliente DualB",
+        vendor_name="Vendor DualB",
+    )
+    assert vendor_a != vendor_b
+
+    # Admin seeds a vendor_facing report against each vendor so we can
+    # see which side the actor resolution lands on.
+    admin_tok = _admin_token(api_client, db_factory)
+    r_a = api_client.post(
+        "/api/v1/reports",
+        headers=_h(admin_tok),
+        json={"title": "About vendor A", "audience": "vendor_facing", "vendor_id": vendor_a},
+    )
+    r_b = api_client.post(
+        "/api/v1/reports",
+        headers=_h(admin_tok),
+        json={"title": "About vendor B", "audience": "vendor_facing", "vendor_id": vendor_b},
+    )
+    assert r_a.status_code == 201 and r_b.status_code == 201, (r_a.text, r_b.text)
+
+    # Determinism: the same user, repeated calls, same resolved
+    # workspace. We don't pin which workspace wins (UUID id ordering is
+    # implementation-defined) — only that it is consistent and that
+    # the *other* workspace's report is hidden either way.
+    first = api_client.get("/api/v1/reports", headers=_h(tok))
+    second = api_client.get("/api/v1/reports", headers=_h(tok))
+    assert first.status_code == 200 and second.status_code == 200
+
+    titles_first = sorted(r["title"] for r in first.json()["items"])
+    titles_second = sorted(r["title"] for r in second.json()["items"])
+    assert titles_first == titles_second, (
+        "Workspace pick must be deterministic across requests"
+    )
+
+    # Isolation: the user sees exactly ONE of the two seeded reports,
+    # and direct-by-id reads on the other return 404.
+    visible_titles = set(titles_first)
+    assert visible_titles in (
+        {"About vendor A"},
+        {"About vendor B"},
+    ), visible_titles
+
+    hidden_id = (
+        r_b.json()["id"]
+        if "About vendor A" in visible_titles
+        else r_a.json()["id"]
+    )
+    direct = api_client.get(f"/api/v1/reports/{hidden_id}", headers=_h(tok))
+    assert direct.status_code == 404, direct.text
+
+    # Belt-and-braces: confirm the API actually picked the
+    # lowest-ordered workspace by id (matches the ORDER BY clause in
+    # _actor_from). Reads the DB directly so a future refactor that
+    # changes the ordering also has to update this assertion.
+    db = db_factory()
+    try:
+        ws_ids = list(
+            db.scalars(
+                select(ProviderWorkspace.id)
+                .where(ProviderWorkspace.owner_user_id == (
+                    db.scalar(select(User.id).where(User.email == "dual_ws@presets.test"))
+                ))
+                .order_by(ProviderWorkspace.id)
+            )
+        )
+        expected_vendor = db.scalar(
+            select(ProviderWorkspace.vendor_id).where(
+                ProviderWorkspace.id == ws_ids[0]
+            )
+        )
+    finally:
+        db.close()
+
+    expected_title = (
+        "About vendor A" if expected_vendor == vendor_a else "About vendor B"
+    )
+    assert visible_titles == {expected_title}, (
+        "API resolution must agree with ORDER BY ProviderWorkspace.id"
+    )
+
+
+def test_workspace_actor_from_preset_rejects_foreign_vendor_id(
+    api_client, db_factory
+) -> None:
+    """P1.1 safety fix: a workspace-owning provider must not be able
+    to author a vendor_facing report against a *different* vendor by
+    passing its id in the from-preset body.
+
+    Before this guard, the auto-resolve only fired when ``vendor_id``
+    was ``None`` — so a provider passing an explicit foreign id sailed
+    through and created an orphan report tagged with the other
+    vendor's id. The provider could never read it back (the list /
+    get filters scope to their own workspace_vendor_id), but the row
+    polluted the other vendor's surface.
+    """
+    # Provider A, with their own workspace.
+    tok_a, _vendor_a, _client_a = _provider_workspace_user(
+        api_client,
+        db_factory,
+        email="foreign_vid@presets.test",
+        client_name="Cliente Foreign",
+        vendor_name="Vendor Foreign A",
+    )
+
+    # Admin seeds an unrelated vendor B that provider A has no claim to.
+    db = db_factory()
+    try:
+        other_client = Client(name="Cliente Otro")
+        db.add(other_client)
+        db.flush()
+        other_vendor = Vendor(
+            client_id=other_client.id,
+            name="Vendor Otro",
+            rfc="VOTRO99988877X",
+            persona_type="moral",
+        )
+        db.add(other_vendor)
+        db.commit()
+        other_vendor_id = other_vendor.id
+    finally:
+        db.close()
+
+    # Provider A attempts to instantiate a provider preset against
+    # vendor B's id. Must be rejected, not silently accepted.
+    resp = api_client.post(
+        "/api/v1/reports/from-preset",
+        headers=_h(tok_a),
+        json={
+            "preset_id": "provider-current-state",
+            "vendor_id": other_vendor_id,
+        },
+    )
+    assert resp.status_code == 403, resp.text
+
+    # And the report list still shows nothing scoped to vendor B —
+    # there must be no row created under the rejected request.
+    listed = api_client.get("/api/v1/reports", headers=_h(tok_a))
+    assert listed.status_code == 200
+    vendor_ids_visible = {r.get("vendor_id") for r in listed.json()["items"]}
+    assert other_vendor_id not in vendor_ids_visible

@@ -29,6 +29,12 @@ from app.models.entities import (
     Submission,
     Vendor,
 )
+from app.services.reports.blocks.attention_list import fetch_attention_list
+from app.services.reports.blocks.compliance_state import fetch_compliance_state
+from app.services.reports.blocks.prioritized_actions import (
+    fetch_prioritized_actions,
+)
+from app.services.reports.blocks.upcoming_deadlines import fetch_upcoming_deadlines
 from app.services.reports.context import ReportScope
 
 # ─── Fetchers ──────────────────────────────────────────────────
@@ -160,6 +166,10 @@ _FETCHERS: dict[str, Callable[[dict, ReportScope, Session], dict | None]] = {
     "text": fetch_text_or_divider,
     "divider": fetch_text_or_divider,
     "ai_recommendation": fetch_ai_recommendation,
+    "compliance_state": fetch_compliance_state,
+    "attention_list": fetch_attention_list,
+    "upcoming_deadlines": fetch_upcoming_deadlines,
+    "prioritized_actions": fetch_prioritized_actions,
 }
 
 

@@ -203,11 +203,18 @@ _PROVIDER_CURRENT_STATE = ReportPreset(
     required_roles=(),
     recommended_prompt=(
         "Genera un reporte del estado actual de cumplimiento de este "
-        "proveedor: empieza con un resumen ejecutivo enfocado en "
-        "cumplimiento, un KPI strip con porcentaje de cumplimiento, "
-        "documentos en revisión, documentos vencidos y días hasta el "
-        "próximo vencimiento, y una recomendación final de 3 acciones "
-        "priorizadas que el proveedor debe atender."
+        "proveedor. Empieza SIEMPRE con un bloque compliance_state que "
+        "muestre el semáforo (verde/amarillo/rojo), motivo, porcentaje "
+        "de cumplimiento y conteos de documentos por estado. Sigue con "
+        "un bloque attention_list sin filtros (todos los documentos "
+        "que requieren atención inmediata, máximo 10) para que el "
+        "proveedor pueda corregir con un click. Agrega un bloque "
+        "upcoming_deadlines (top 6) mostrando los próximos "
+        "vencimientos por institución en una línea de tiempo visual. "
+        "Cierra con un bloque prioritized_actions (3 tarjetas) — NO "
+        "uses ai_recommendation; las acciones provienen de la lista "
+        "canónica de suggested_actions del workspace y siempre llevan "
+        "un botón para subir el documento corregido."
     ),
 )
 
@@ -222,11 +229,16 @@ _PROVIDER_MISSING_DOCUMENTS = ReportPreset(
     audience=ReportAudience.VENDOR_FACING,
     required_roles=(),
     recommended_prompt=(
-        "Genera un reporte de documentos faltantes para este proveedor: "
-        "resumen ejecutivo enfocado en expediente, un KPI strip con "
-        "total de obligaciones, documentos vencidos y en revisión, y "
-        "una recomendación final de 3 acciones priorizadas indicando "
-        "qué subir primero y a qué institución corresponde."
+        "Genera un reporte de documentos faltantes para este proveedor. "
+        "Empieza SIEMPRE con un bloque compliance_state (semáforo + "
+        "conteos). Sigue con un bloque attention_list filtrado a estados "
+        "missing / in_review / uploaded y solo elementos por vencer en "
+        "los próximos 14 días — cada renglón muestra institución, "
+        "título, días al vencimiento y un botón para subir. Cierra con "
+        "un bloque prioritized_actions (3 tarjetas, filtrado a tipos "
+        "complete_onboarding y upcoming) — NO uses ai_recommendation: "
+        "las acciones provienen de la lista canónica y siempre llevan "
+        "un botón para subir el documento."
     ),
 )
 
@@ -241,11 +253,16 @@ _PROVIDER_RECENT_REJECTIONS = ReportPreset(
     audience=ReportAudience.VENDOR_FACING,
     required_roles=(),
     recommended_prompt=(
-        "Genera un reporte de rechazos recientes para este proveedor: "
-        "resumen ejecutivo enfocado en auditoría que liste documentos "
-        "con incidencias del periodo, un KPI strip con totales por "
-        "estatus y una recomendación final de 3 acciones correctivas "
-        "priorizadas."
+        "Genera un reporte de rechazos recientes para este proveedor. "
+        "Empieza SIEMPRE con un bloque compliance_state (semáforo + "
+        "conteos). Sigue con un bloque attention_list filtrado a estados "
+        "rejected / needs_correction / possible_mismatch — cada renglón "
+        "muestra el motivo del revisor y un botón para subir la versión "
+        "corregida con replaces= preconfigurado. Cierra con un bloque "
+        "prioritized_actions (3 tarjetas, filtrado a prioridad high y "
+        "tipos reupload / clarify / verify_mismatch) — NO uses "
+        "ai_recommendation: las acciones provienen de la lista canónica "
+        "y siempre llevan un botón para resubir con el id correcto."
     ),
 )
 

@@ -286,7 +286,271 @@ AI_RECOMMENDATION = CatalogEntry(
 )
 
 
+# P1.2 — provider-aware blocks. New entries APPEND to the catalog so
+# planner tool-call ordering stays stable for prompt-cache hit rates.
+
+
+COMPLIANCE_STATE = CatalogEntry(
+    type="compliance_state",
+    description=(
+        "Provider compliance pulse: green/yellow/red semáforo, reason "
+        "line, compliance %, on-track vs total tracked, and the eight-"
+        "bucket document counts (approved, in_review, uploaded, "
+        "pending, needs_review, rejected, expired, exception). Always "
+        "FIRST in a vendor_facing report — sets the room before any "
+        "narrative. Pulls live data from the workspace's evidence "
+        "slots (no AI text). Use whenever the user asks about 'mi "
+        "estado', 'cómo vamos', 'cumplimiento actual', or a vendor's "
+        "current pulse. Skip on internal portfolio-wide reports — use "
+        "vendor_risk_matrix there instead."
+    ),
+    input_schema={
+        "type": "object",
+        "properties": {
+            "year": {
+                "type": "integer",
+                "description": (
+                    "Optional calendar year to scope the calendar "
+                    "slots. Defaults to the current year. Only use "
+                    "when the user explicitly asks about a past year."
+                ),
+                "minimum": 2020,
+                "maximum": 2100,
+            },
+        },
+        "additionalProperties": False,
+    },
+    example_configs=[{}],
+)
+
+
 # ─── Catalog assembly ──────────────────────────────────────────
+
+
+ATTENTION_LIST = CatalogEntry(
+    type="attention_list",
+    description=(
+        "Scannable table of documents requiring the provider's attention "
+        "right now: rejected, needs_correction, possible_mismatch, "
+        "expired, plus calendar slots due within 14 days. Each row is "
+        "one obligation with a state chip, institution, title, "
+        "days-to-deadline, and a one-click /portal/upload link that "
+        "carries replaces=<submission_id> when the slot already has a "
+        "prior attempt. Use whenever the user asks 'qué tengo que "
+        "arreglar', 'documentos por corregir', 'rechazos', 'qué falta'. "
+        "Filter by states / institutions / only_due_within_days to "
+        "narrow. ALWAYS for vendor_facing reports; skip for portfolio-"
+        "wide internal reports (use vendor_risk_matrix instead)."
+    ),
+    input_schema={
+        "type": "object",
+        "properties": {
+            "filter": {
+                "type": "object",
+                "properties": {
+                    "states": {
+                        "type": "array",
+                        "items": {
+                            "type": "string",
+                            "enum": [
+                                "rejected",
+                                "needs_correction",
+                                "possible_mismatch",
+                                "expired",
+                                "missing",
+                                "in_review",
+                                "uploaded",
+                            ],
+                        },
+                        "description": (
+                            "Restrict the list to these slot states. Omit "
+                            "to surface every attention-worthy state."
+                        ),
+                    },
+                    "institutions": {
+                        "type": "array",
+                        "items": {
+                            "type": "string",
+                            "enum": [
+                                "sat",
+                                "imss",
+                                "infonavit",
+                                "stps_repse",
+                                "interno_cliente",
+                            ],
+                        },
+                        "description": (
+                            "Restrict to these institutions. Omit to "
+                            "include all."
+                        ),
+                    },
+                    "only_due_within_days": {
+                        "type": "integer",
+                        "minimum": 1,
+                        "maximum": 90,
+                        "description": (
+                            "Restrict to items whose due_in_days is "
+                            "<= this value (overdue items count as "
+                            "<= 0 ≤ N)."
+                        ),
+                    },
+                },
+                "additionalProperties": False,
+            },
+            "max_rows": {
+                "type": "integer",
+                "minimum": 1,
+                "maximum": 25,
+                "description": "Cap on rendered rows (default 10).",
+            },
+        },
+        "additionalProperties": False,
+    },
+    example_configs=[
+        # Provider rejections preset — only blocking states.
+        {
+            "filter": {
+                "states": ["rejected", "needs_correction", "possible_mismatch"]
+            },
+            "max_rows": 10,
+        },
+        # Provider missing preset — pending / in-flight, due soon.
+        {
+            "filter": {
+                "states": ["missing", "in_review", "uploaded"],
+                "only_due_within_days": 14,
+            },
+            "max_rows": 10,
+        },
+        # Provider current-state preset — everything.
+        {"max_rows": 10},
+    ],
+)
+
+
+UPCOMING_DEADLINES = CatalogEntry(
+    type="upcoming_deadlines",
+    description=(
+        "Next 1–12 calendar deadlines the provider must meet, sorted "
+        "by days remaining ascending. Renders as a visual urgency "
+        "timeline + per-row cards (institution, title, period, days "
+        "left, one-click upload link). Includes urgency_buckets counts "
+        "(this week / 2 weeks / month / later) for the timeline header. "
+        "Use whenever the user asks 'qué viene', 'vencimientos', "
+        "'próximos plazos', 'calendario'. Pairs well with "
+        "compliance_state above and prioritized_actions below."
+    ),
+    input_schema={
+        "type": "object",
+        "properties": {
+            "top": {
+                "type": "integer",
+                "minimum": 1,
+                "maximum": 12,
+                "description": (
+                    "Max items rendered (default 5 — matches the "
+                    "dashboard hero). Use 8–10 when the report should "
+                    "show a fuller calendar view."
+                ),
+            },
+            "filter": {
+                "type": "object",
+                "properties": {
+                    "institutions": {
+                        "type": "array",
+                        "items": {
+                            "type": "string",
+                            "enum": [
+                                "sat",
+                                "imss",
+                                "infonavit",
+                                "stps_repse",
+                                "interno_cliente",
+                            ],
+                        },
+                    },
+                },
+                "additionalProperties": False,
+            },
+        },
+        "additionalProperties": False,
+    },
+    example_configs=[
+        {"top": 5},
+        {"top": 8, "filter": {"institutions": ["sat", "imss"]}},
+    ],
+)
+
+
+PRIORITIZED_ACTIONS = CatalogEntry(
+    type="prioritized_actions",
+    description=(
+        "Numbered, vendor-facing action cards that close a provider "
+        "report. Each card carries a stable id, action type "
+        "(reupload / clarify / verify_mismatch / complete_onboarding / "
+        "upcoming), priority chip (high / medium / low), canonical "
+        "title + body, period chip, and a one-click /portal/upload "
+        "link. Data is GROUNDED in the canonical suggested_actions "
+        "list — no LLM-authored copy. Use this INSTEAD of "
+        "ai_recommendation for every vendor_facing report. Filter by "
+        "priorities or types when the report focuses on a sub-set "
+        "(e.g. only rejections)."
+    ),
+    input_schema={
+        "type": "object",
+        "properties": {
+            "max_actions": {
+                "type": "integer",
+                "minimum": 1,
+                "maximum": 5,
+                "description": "Cap on rendered cards (default 3).",
+            },
+            "filter": {
+                "type": "object",
+                "properties": {
+                    "priorities": {
+                        "type": "array",
+                        "items": {
+                            "type": "string",
+                            "enum": ["high", "medium", "low"],
+                        },
+                        "description": (
+                            "Narrow to these priorities. Omit to "
+                            "include all."
+                        ),
+                    },
+                    "types": {
+                        "type": "array",
+                        "items": {
+                            "type": "string",
+                            "enum": [
+                                "reupload",
+                                "clarify",
+                                "verify_mismatch",
+                                "complete_onboarding",
+                                "upcoming",
+                            ],
+                        },
+                        "description": (
+                            "Narrow to these action types. Omit to "
+                            "include all."
+                        ),
+                    },
+                },
+                "additionalProperties": False,
+            },
+        },
+        "additionalProperties": False,
+    },
+    example_configs=[
+        {"max_actions": 3},
+        {"max_actions": 3, "filter": {"priorities": ["high"]}},
+        {
+            "max_actions": 5,
+            "filter": {"types": ["reupload", "clarify", "verify_mismatch"]},
+        },
+    ],
+)
 
 
 CATALOG: list[CatalogEntry] = [
@@ -296,6 +560,10 @@ CATALOG: list[CatalogEntry] = [
     AI_RECOMMENDATION,
     TEXT,
     DIVIDER,
+    COMPLIANCE_STATE,
+    ATTENTION_LIST,
+    UPCOMING_DEADLINES,
+    PRIORITIZED_ACTIONS,
 ]
 
 
