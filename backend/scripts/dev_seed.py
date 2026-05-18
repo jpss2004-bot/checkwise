@@ -21,6 +21,7 @@ Usage:
 from __future__ import annotations
 
 import sys
+import uuid
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
@@ -39,6 +40,9 @@ from app.models import (  # noqa: E402
     Organization,
     Period,
     ProviderWorkspace,
+    Report,
+    ReportConversation,
+    ReportVersion,
     Requirement,
     RequirementVersion,
     Submission,
@@ -124,22 +128,44 @@ def _utc(year: int, month: int, day: int = 1) -> datetime:
 def _wipe_demo(db) -> None:
     """Remove anything tagged with the demo identifiers so the seed
     is idempotent. Order matters because of FKs."""
-    client_portfolio_ws_ids = tuple(
-        v["workspace_id"] for v in CLIENT_PORTFOLIO_VENDORS
+    # Phase 5 (V2.1) — wipe seeded reports first so their cascades
+    # release the user FK and the org row before we touch users/orgs.
+    demo_org_names = (DEMO_ORG_NAME, CLIENT_PORTFOLIO_ORG_NAME)
+    for org in db.scalars(select(Organization).where(Organization.name.in_(demo_org_names))):
+        for rep in list(db.scalars(select(Report).where(Report.organization_id == org.id))):
+            db.query(ReportConversation).filter(ReportConversation.report_id == rep.id).delete(
+                synchronize_session=False
+            )
+            db.query(ReportVersion).filter(ReportVersion.report_id == rep.id).delete(
+                synchronize_session=False
+            )
+            db.delete(rep)
+        db.flush()
+
+    client_portfolio_ws_ids = tuple(v["workspace_id"] for v in CLIENT_PORTFOLIO_VENDORS)
+    demo_client_names = (
+        DEMO_CLIENT_NAME,
+        BOSS_DEMO_CLIENT_NAME,
+        CLIENT_PORTFOLIO_CLIENT_NAME,
     )
+
+    vendor_ids_to_drop: set[str] = set()
+    client_ids_to_drop: set[str] = set()
+
+    # First pass: collect vendor + client ids, then strip submissions
+    # and workspaces. We defer vendor/client deletion until every
+    # workspace has been cleared so multi-workspace clients (e.g. the
+    # portfolio with 3 vendors) drop cleanly.
     for ws_id in (DEMO_WORKSPACE_ID, BOSS_DEMO_WORKSPACE_ID, *client_portfolio_ws_ids):
-        workspace = db.scalar(
-            select(ProviderWorkspace).where(ProviderWorkspace.id == ws_id)
-        )
+        workspace = db.scalar(select(ProviderWorkspace).where(ProviderWorkspace.id == ws_id))
         if workspace is None:
             continue
-        vendor_id = workspace.vendor_id
-        client_id = workspace.client_id
+        vendor_ids_to_drop.add(workspace.vendor_id)
+        client_ids_to_drop.add(workspace.client_id)
 
-        submissions = list(
-            db.scalars(select(Submission).where(Submission.vendor_id == vendor_id))
-        )
-        for sub in submissions:
+        for sub in list(
+            db.scalars(select(Submission).where(Submission.vendor_id == workspace.vendor_id))
+        ):
             db.query(DocumentStatusHistory).filter(
                 DocumentStatusHistory.submission_id == sub.id
             ).delete(synchronize_session=False)
@@ -152,8 +178,30 @@ def _wipe_demo(db) -> None:
         db.delete(workspace)
         db.flush()
 
-        db.query(Vendor).filter(Vendor.id == vendor_id).delete(synchronize_session=False)
-        db.query(Client).filter(Client.id == client_id).delete(synchronize_session=False)
+    # Also collect any client_id that matches a demo client by name —
+    # covers vendors created outside the workspace iteration above.
+    for client_row in db.scalars(select(Client).where(Client.name.in_(demo_client_names))):
+        client_ids_to_drop.add(client_row.id)
+        for v in db.scalars(select(Vendor).where(Vendor.client_id == client_row.id)):
+            vendor_ids_to_drop.add(v.id)
+
+    if vendor_ids_to_drop:
+        db.query(Vendor).filter(Vendor.id.in_(vendor_ids_to_drop)).delete(synchronize_session=False)
+        db.flush()
+
+    # Drop demo orgs (they hold the Client FK on kind='client' rows) and
+    # their memberships BEFORE we drop the clients themselves.
+    for org_name in (DEMO_ORG_NAME, CLIENT_PORTFOLIO_ORG_NAME):
+        org = db.scalar(select(Organization).where(Organization.name == org_name))
+        if org is not None:
+            db.query(Membership).filter(Membership.organization_id == org.id).delete(
+                synchronize_session=False
+            )
+            db.delete(org)
+            db.flush()
+
+    if client_ids_to_drop:
+        db.query(Client).filter(Client.id.in_(client_ids_to_drop)).delete(synchronize_session=False)
         db.flush()
 
     for demo_email in (
@@ -169,19 +217,6 @@ def _wipe_demo(db) -> None:
             )
             db.delete(user)
             db.flush()
-
-    for org_name in (DEMO_ORG_NAME, CLIENT_PORTFOLIO_ORG_NAME):
-        org = db.scalar(select(Organization).where(Organization.name == org_name))
-        if org is not None:
-            db.delete(org)
-            db.flush()
-
-    portfolio_client = db.scalar(
-        select(Client).where(Client.name == CLIENT_PORTFOLIO_CLIENT_NAME)
-    )
-    if portfolio_client is not None:
-        db.delete(portfolio_client)
-        db.flush()
 
 
 def _seed_admin(db) -> tuple[str, str]:
@@ -382,9 +417,7 @@ def _seed_submissions(db, *, client_id: str, vendor_id: str) -> int:
 
     inserted = 0
     for spec in demo_specs:
-        requirement = db.scalar(
-            select(Requirement).where(Requirement.code == spec["code"])
-        )
+        requirement = db.scalar(select(Requirement).where(Requirement.code == spec["code"]))
         if requirement is None:
             # If the catalog seed hasn't run, skip — but normally it has.
             continue
@@ -525,20 +558,429 @@ def _seed_client_portfolio(db) -> tuple[str, str, int, int]:
             display_name=spec["name"],
             access_token=f"cli-portfolio-{spec['workspace_id']}",
             onboarding_completed_at=(
-                datetime.now(UTC) - timedelta(days=21)
-                if spec["complete"]
-                else None
+                datetime.now(UTC) - timedelta(days=21) if spec["complete"] else None
             ),
             status="active",
         )
         db.add(workspace)
         db.flush()
 
-        submissions_total += _seed_submissions(
-            db, client_id=client.id, vendor_id=vendor.id
-        )
+        submissions_total += _seed_submissions(db, client_id=client.id, vendor_id=vendor.id)
 
     return org.id, client.id, len(CLIENT_PORTFOLIO_VENDORS), submissions_total
+
+
+def _seed_reports(
+    db,
+    *,
+    legalshelf_org_id: str,
+    legalshelf_user_id: str,
+    client_org_id: str,
+    client_user_id: str,
+    client_id: str,
+    boss_vendor_id: str,
+) -> int:
+    """Seed 3 reports with realistic block content so /portal/reports
+    has populated entries for the executive demo.
+
+    Reports cover the three canonical demo narratives:
+      1. Internal executive view (LegalShelf operations)
+      2. Client-facing portfolio risk view (cliente.demo)
+      3. Vendor-specific missing-documents narrative
+    """
+
+    # Block specs use the exact shapes the frontend renderers expect:
+    #   text     → {heading?, body}
+    #   divider  → {label?}
+    #   kpi_strip → config.metrics: [{label, metric_key, format}],
+    #              data.resolved: [{metric_key, value, trend_pct_vs_prior}]
+    # Data-driven blocks (executive_summary, vendor_risk_matrix,
+    # ai_recommendation) require the AI execution pipeline to populate
+    # data and are intentionally omitted from seeds — they would render
+    # in their "no data" placeholder state otherwise.
+    specs = [
+        {
+            "id": str(uuid.uuid4()),
+            "organization_id": legalshelf_org_id,
+            "client_id": None,
+            "vendor_id": None,
+            "title": "Resumen ejecutivo · Mayo 2026",
+            "description": (
+                "Vista panorámica del control plane: clientes, proveedores, "
+                "workspaces activos, bandeja de revisión y eventos audit log."
+            ),
+            "audience": "internal_only",
+            "status": "active",
+            "created_by_user_id": legalshelf_user_id,
+            "blocks": [
+                {
+                    "id": str(uuid.uuid4()),
+                    "type": "text",
+                    "config": {
+                        "heading": "Contexto",
+                        "body": (
+                            "Durante mayo 2026, CheckWise procesó 87 entregas "
+                            "REPSE distribuidas entre SAT, IMSS e INFONAVIT. La "
+                            "bandeja humana mantuvo un tiempo medio de decisión "
+                            "de 9.4 horas, dentro del SLA interno de 24 horas."
+                        ),
+                    },
+                },
+                {
+                    "id": str(uuid.uuid4()),
+                    "type": "kpi_strip",
+                    "config": {
+                        "metrics": [
+                            {
+                                "label": "Cumplimiento",
+                                "metric_key": "completion_pct",
+                                "format": "percent",
+                            },
+                            {
+                                "label": "Proveedores",
+                                "metric_key": "vendors_total",
+                                "format": "number",
+                            },
+                            {
+                                "label": "En revisión",
+                                "metric_key": "in_review_count",
+                                "format": "number",
+                            },
+                            {
+                                "label": "Revisión prom.",
+                                "metric_key": "avg_review_hours",
+                                "format": "duration_hours",
+                            },
+                        ],
+                    },
+                    "data": {
+                        "resolved": [
+                            {"metric_key": "completion_pct", "value": 86, "trend_pct_vs_prior": 4},
+                            {"metric_key": "vendors_total", "value": 5, "trend_pct_vs_prior": 0},
+                            {
+                                "metric_key": "in_review_count",
+                                "value": 10,
+                                "trend_pct_vs_prior": -12,
+                            },
+                            {
+                                "metric_key": "avg_review_hours",
+                                "value": 9,
+                                "trend_pct_vs_prior": -25,
+                            },
+                        ],
+                    },
+                },
+                {
+                    "id": str(uuid.uuid4()),
+                    "type": "divider",
+                    "config": {"label": "Bandeja humana"},
+                },
+                {
+                    "id": str(uuid.uuid4()),
+                    "type": "text",
+                    "config": {
+                        "heading": "Estado operativo",
+                        "body": (
+                            "El portafolio se mantiene saludable. Tres "
+                            "proveedores presentan obligaciones vencidas "
+                            "concentradas en IMSS marzo, y un proveedor "
+                            "cliente está en aclaración por RFC inconsistente. "
+                            "La automatización capturó 4 de cada 5 mismatches "
+                            "antes de llegar al revisor humano."
+                        ),
+                    },
+                },
+                {
+                    "id": str(uuid.uuid4()),
+                    "type": "text",
+                    "config": {
+                        "heading": "Recomendación",
+                        "body": (
+                            "Priorizar el seguimiento con Constructora "
+                            "Pacífico — su expediente lleva 21 días incompleto "
+                            "y bloquea la vista de cumplimiento del cliente."
+                        ),
+                    },
+                },
+            ],
+        },
+        {
+            "id": str(uuid.uuid4()),
+            "organization_id": client_org_id,
+            "client_id": client_id,
+            "vendor_id": None,
+            "title": "Riesgo del portafolio · Q2 2026",
+            "description": (
+                "Distribución del semáforo de cumplimiento por proveedor, con "
+                "foco en obligaciones críticas próximas a vencer."
+            ),
+            "audience": "client_facing",
+            "status": "active",
+            "created_by_user_id": client_user_id,
+            "blocks": [
+                {
+                    "id": str(uuid.uuid4()),
+                    "type": "text",
+                    "config": {
+                        "heading": "Resumen para dirección",
+                        "body": (
+                            "Tu portafolio de 3 proveedores REPSE presenta un "
+                            "cumplimiento del 78% al cierre del Q2. Dos "
+                            "proveedores están en verde, uno en amarillo por "
+                            "un faltante de IMSS de marzo. No hay proveedores "
+                            "en rojo este trimestre."
+                        ),
+                    },
+                },
+                {
+                    "id": str(uuid.uuid4()),
+                    "type": "kpi_strip",
+                    "config": {
+                        "metrics": [
+                            {
+                                "label": "Cumplimiento",
+                                "metric_key": "completion_pct",
+                                "format": "percent",
+                            },
+                            {
+                                "label": "En riesgo",
+                                "metric_key": "vendors_at_risk",
+                                "format": "number",
+                            },
+                            {
+                                "label": "Vencidos",
+                                "metric_key": "overdue_count",
+                                "format": "number",
+                            },
+                            {
+                                "label": "Próximo en",
+                                "metric_key": "days_to_next_deadline",
+                                "format": "duration_days",
+                            },
+                        ],
+                    },
+                    "data": {
+                        "resolved": [
+                            {"metric_key": "completion_pct", "value": 78, "trend_pct_vs_prior": 3},
+                            {
+                                "metric_key": "vendors_at_risk",
+                                "value": 1,
+                                "trend_pct_vs_prior": -50,
+                            },
+                            {"metric_key": "overdue_count", "value": 0, "trend_pct_vs_prior": -100},
+                            {
+                                "metric_key": "days_to_next_deadline",
+                                "value": 12,
+                                "trend_pct_vs_prior": 0,
+                            },
+                        ],
+                    },
+                },
+                {
+                    "id": str(uuid.uuid4()),
+                    "type": "divider",
+                    "config": {"label": "Detalle por proveedor"},
+                },
+                {
+                    "id": str(uuid.uuid4()),
+                    "type": "text",
+                    "config": {
+                        "heading": "Logística Andina",
+                        "body": (
+                            "Cumplimiento al 96%. 0 faltantes obligatorios, "
+                            "0 rechazos en el trimestre. Categoría: Verde."
+                        ),
+                    },
+                },
+                {
+                    "id": str(uuid.uuid4()),
+                    "type": "text",
+                    "config": {
+                        "heading": "Servicios Hidalgo",
+                        "body": (
+                            "Cumplimiento al 92%. 0 faltantes, 1 rechazo "
+                            "resuelto durante el trimestre (acuse INFONAVIT "
+                            "reemitido). Categoría: Verde."
+                        ),
+                    },
+                },
+                {
+                    "id": str(uuid.uuid4()),
+                    "type": "text",
+                    "config": {
+                        "heading": "Constructora Pacífico",
+                        "body": (
+                            "Cumplimiento al 71%. 1 faltante obligatorio "
+                            "(IMSS marzo 2026). 0 rechazos. Categoría: "
+                            "Amarillo. Dentro del periodo de gracia."
+                        ),
+                    },
+                },
+                {
+                    "id": str(uuid.uuid4()),
+                    "type": "text",
+                    "config": {
+                        "heading": "Notas legales",
+                        "body": (
+                            "El semáforo amarillo de Constructora Pacífico "
+                            "no constituye incumplimiento contractual al "
+                            "cierre del Q2. CheckWise está coordinando el "
+                            "reenvío del acuse IMSS."
+                        ),
+                    },
+                },
+            ],
+        },
+        {
+            "id": str(uuid.uuid4()),
+            "organization_id": client_org_id,
+            "client_id": client_id,
+            "vendor_id": boss_vendor_id,
+            "title": "Documentos faltantes · Servicios Especializados Aurora",
+            "description": (
+                "Análisis detallado de documentos pendientes y rechazados para "
+                "un proveedor específico del portafolio."
+            ),
+            "audience": "client_facing",
+            "status": "draft",
+            "created_by_user_id": client_user_id,
+            "blocks": [
+                {
+                    "id": str(uuid.uuid4()),
+                    "type": "text",
+                    "config": {
+                        "heading": "Alcance",
+                        "body": (
+                            "Reporte específico para Servicios Especializados "
+                            "Aurora durante los últimos 90 días. Foco en las "
+                            "entregas que requirieron intervención del "
+                            "proveedor."
+                        ),
+                    },
+                },
+                {
+                    "id": str(uuid.uuid4()),
+                    "type": "kpi_strip",
+                    "config": {
+                        "metrics": [
+                            {
+                                "label": "Envíos",
+                                "metric_key": "submissions_period",
+                                "format": "number",
+                            },
+                            {
+                                "label": "Aprobados",
+                                "metric_key": "approved_pct",
+                                "format": "percent",
+                            },
+                            {
+                                "label": "Vencidos",
+                                "metric_key": "overdue_count",
+                                "format": "number",
+                            },
+                            {
+                                "label": "Revisión prom.",
+                                "metric_key": "avg_review_hours",
+                                "format": "duration_hours",
+                            },
+                        ],
+                    },
+                    "data": {
+                        "resolved": [
+                            {
+                                "metric_key": "submissions_period",
+                                "value": 4,
+                                "trend_pct_vs_prior": 0,
+                            },
+                            {"metric_key": "approved_pct", "value": 25, "trend_pct_vs_prior": -10},
+                            {"metric_key": "overdue_count", "value": 0, "trend_pct_vs_prior": 0},
+                            {
+                                "metric_key": "avg_review_hours",
+                                "value": 14,
+                                "trend_pct_vs_prior": 5,
+                            },
+                        ],
+                    },
+                },
+                {
+                    "id": str(uuid.uuid4()),
+                    "type": "divider",
+                    "config": {"label": "Hallazgos"},
+                },
+                {
+                    "id": str(uuid.uuid4()),
+                    "type": "text",
+                    "config": {
+                        "heading": "Recomendación de CheckWise",
+                        "body": (
+                            "Sugerimos solicitar al proveedor el reenvío "
+                            "del acuse IMSS marzo 2026 con el RFC corregido. "
+                            "El documento previo presentó inconsistencia "
+                            "entre el RFC del PDF y el del proveedor "
+                            "registrado."
+                        ),
+                    },
+                },
+            ],
+        },
+    ]
+
+    for spec in specs:
+        report = Report(
+            id=spec["id"],
+            organization_id=spec["organization_id"],
+            client_id=spec["client_id"],
+            vendor_id=spec["vendor_id"],
+            title=spec["title"],
+            description=spec["description"],
+            audience=spec["audience"],
+            status=spec["status"],
+            created_by_user_id=spec["created_by_user_id"],
+        )
+        db.add(report)
+        db.flush()
+
+        # Pass through each block's optional `data` field so the
+        # renderers have pre-resolved values to display (without
+        # having to run the AI executor on demo data).
+        version_blocks = []
+        for b in spec["blocks"]:
+            entry = {"id": b["id"], "type": b["type"], "config": b["config"]}
+            if "data" in b:
+                entry["data"] = b["data"]
+            version_blocks.append(entry)
+
+        version_id = str(uuid.uuid4())
+        version = ReportVersion(
+            id=version_id,
+            report_id=report.id,
+            version_number=1,
+            parent_version_id=None,
+            label="Versión inicial · seed demo",
+            content_json={
+                "blocks": version_blocks,
+                "audience": spec["audience"],
+            },
+            plan_json={
+                "blocks": [
+                    {"id": b["id"], "type": b["type"], "config": b["config"]}
+                    for b in spec["blocks"]
+                ],
+                "rationale": "Seeded executive demo content (V2.1 evidence pack).",
+                "scope_hint": spec.get("description", ""),
+            },
+            generated_by="user",
+            source_snapshot_id=None,
+            llm_metadata=None,
+            created_by_user_id=spec["created_by_user_id"],
+        )
+        db.add(version)
+        db.flush()
+
+        report.current_version_id = version_id
+        db.flush()
+
+    return len(specs)
 
 
 def main() -> None:
@@ -547,19 +989,49 @@ def main() -> None:
         _wipe_demo(db)
         user_id, org_id = _seed_admin(db)
         provider_user_id = _seed_provider_user(db)
-        client_id, vendor_id, workspace_id = _seed_workspace(
-            db, owner_user_id=provider_user_id
-        )
+        client_id, vendor_id, workspace_id = _seed_workspace(db, owner_user_id=provider_user_id)
         submissions = _seed_submissions(db, client_id=client_id, vendor_id=vendor_id)
         boss_user_id = _seed_boss_demo_user(db)
         boss_client_id, boss_vendor_id, boss_workspace_id = _seed_boss_demo_workspace(
             db, owner_user_id=boss_user_id
         )
-        boss_submissions = _seed_submissions(
-            db, client_id=boss_client_id, vendor_id=boss_vendor_id
+        boss_submissions = _seed_submissions(db, client_id=boss_client_id, vendor_id=boss_vendor_id)
+        client_org_id, client_portfolio_id, cli_vendors, cli_submissions = _seed_client_portfolio(
+            db
         )
-        client_org_id, client_portfolio_id, cli_vendors, cli_submissions = (
-            _seed_client_portfolio(db)
+        # V2.1 evidence pack — seed 3 reports for the executive demo.
+        client_user = db.scalar(select(User).where(User.email == CLIENT_DEMO_EMAIL))
+        # V2.1 evidence — give boss.demo memberships so the Reports
+        # surface is populated when she visits /portal/reports (the
+        # listing endpoint scopes by org membership). Without this,
+        # boss.demo can pass the portal gate but sees an empty list.
+        boss_user_for_member = db.scalar(select(User).where(User.email == BOSS_DEMO_EMAIL))
+        if boss_user_for_member:
+            for target_org_id in (org_id, client_org_id):
+                exists = db.scalar(
+                    select(Membership).where(
+                        Membership.user_id == boss_user_for_member.id,
+                        Membership.organization_id == target_org_id,
+                    )
+                )
+                if not exists:
+                    db.add(
+                        Membership(
+                            user_id=boss_user_for_member.id,
+                            organization_id=target_org_id,
+                            role="client_admin",
+                            status="active",
+                        )
+                    )
+            db.flush()
+        reports_seeded = _seed_reports(
+            db,
+            legalshelf_org_id=org_id,
+            legalshelf_user_id=user_id,
+            client_org_id=client_org_id,
+            client_user_id=client_user.id if client_user else user_id,
+            client_id=client_portfolio_id,
+            boss_vendor_id=boss_vendor_id,
         )
         db.commit()
     finally:
@@ -597,6 +1069,11 @@ def main() -> None:
     print(f"    org       {client_org_id}  ({CLIENT_PORTFOLIO_ORG_NAME})")
     print(f"    client    {client_portfolio_id}  ({CLIENT_PORTFOLIO_CLIENT_NAME})")
     print(f"    seeded    {cli_vendors} vendor(s) · {cli_submissions} submission(s)")
+    print()
+    print(f"  Reports seeded for the executive demo: {reports_seeded}")
+    print("    · Resumen ejecutivo (internal_only · LegalShelf)")
+    print("    · Riesgo del portafolio (client_facing · Operadora Multinacional)")
+    print("    · Documentos faltantes (vendor-scoped · draft)")
 
 
 if __name__ == "__main__":

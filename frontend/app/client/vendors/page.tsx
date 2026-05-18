@@ -6,7 +6,6 @@ import {
   ArrowRight,
   CheckCircle,
   MagnifyingGlass,
-  Storefront,
   Warning,
   WarningOctagon,
   type Icon,
