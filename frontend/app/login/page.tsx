@@ -3,12 +3,7 @@
 import { useEffect, useState, type FormEvent } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import {
-  ArrowLeft,
-  CircleNotch,
-  SignIn,
-  Warning,
-} from "@phosphor-icons/react";
+import { ArrowLeft, SignIn, Warning } from "@phosphor-icons/react";
 
 import { BrandLogo } from "@/components/checkwise/brand-logo";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
@@ -166,9 +161,7 @@ export default function LoginPage() {
               size="lg"
               className="mt-6 w-full"
             >
-              {submitting ? (
-                <CircleNotch className="h-4 w-4 animate-spin" aria-hidden="true" />
-              ) : (
+              {!submitting && (
                 <SignIn className="h-4 w-4" weight="bold" aria-hidden="true" />
               )}
               <span>{submitting ? "Verificando…" : "Entrar"}</span>
