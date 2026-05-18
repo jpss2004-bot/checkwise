@@ -62,7 +62,7 @@ export default function ReviewerSubmissionPage({ params }: PageProps) {
   useEffect(() => {
     const current = readAdminSession();
     if (!current) {
-      router.replace("/admin/login");
+      router.replace("/login");
       return;
     }
     if (!current.roles.some((r) => (REVIEWER_ROLES as readonly string[]).includes(r))) {
@@ -85,7 +85,7 @@ export default function ReviewerSubmissionPage({ params }: PageProps) {
         if (cancelled) return;
         if (err instanceof ReviewerApiError && err.status === 401) {
           clearAdminSession();
-          router.replace("/admin/login");
+          router.replace("/login");
           return;
         }
         if (err instanceof ReviewerApiError && err.status === 404) {

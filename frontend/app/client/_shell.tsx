@@ -71,7 +71,7 @@ export function ClientShell({
   useEffect(() => {
     const current = readAdminSession();
     if (!current) {
-      router.replace("/admin/login");
+      router.replace("/login");
       return;
     }
     if (
@@ -91,7 +91,7 @@ export function ClientShell({
 
   function onLogout() {
     clearAdminSession();
-    router.replace("/admin/login");
+    router.replace("/login");
   }
 
   if (!ready || !session) return null;
@@ -114,7 +114,13 @@ export function ClientShell({
             <span className="hidden font-mono text-[11px] text-[color:var(--text-tertiary)] md:inline">
               {session.user.email}
             </span>
-            <Button type="button" variant="outline" size="sm" onClick={onLogout}>
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              onClick={onLogout}
+              aria-label="Cerrar sesión"
+            >
               <SignOut className="h-3.5 w-3.5" weight="bold" aria-hidden="true" />
               <span className="hidden sm:inline">Cerrar sesión</span>
             </Button>

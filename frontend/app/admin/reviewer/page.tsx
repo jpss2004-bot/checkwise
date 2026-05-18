@@ -77,7 +77,7 @@ export default function ReviewerQueuePage() {
   useEffect(() => {
     const current = readAdminSession();
     if (!current) {
-      router.replace("/admin/login");
+      router.replace("/login");
       return;
     }
     if (!current.roles.some((r) => (REVIEWER_ROLES as readonly string[]).includes(r))) {
@@ -100,7 +100,7 @@ export default function ReviewerQueuePage() {
         if (cancelled) return;
         if (err instanceof ReviewerApiError && err.status === 401) {
           clearAdminSession();
-          router.replace("/admin/login");
+          router.replace("/login");
           return;
         }
         setError("No pudimos cargar la bandeja.");

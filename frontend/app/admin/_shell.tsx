@@ -77,7 +77,7 @@ export function AdminShell({
   useEffect(() => {
     const current = readAdminSession();
     if (!current) {
-      router.replace("/admin/login");
+      router.replace("/login");
       return;
     }
     // Accept either internal_admin or reviewer. Earlier this gated
@@ -101,7 +101,7 @@ export function AdminShell({
 
   function onLogout() {
     clearAdminSession();
-    router.replace("/admin/login");
+    router.replace("/login");
   }
 
   if (!ready || !session) return null;
@@ -124,7 +124,13 @@ export function AdminShell({
             <span className="hidden font-mono text-[11px] text-[color:var(--text-tertiary)] md:inline">
               {session.user.email}
             </span>
-            <Button type="button" variant="outline" size="sm" onClick={onLogout}>
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              onClick={onLogout}
+              aria-label="Cerrar sesión"
+            >
               <SignOut className="h-3.5 w-3.5" weight="bold" aria-hidden="true" />
               <span className="hidden sm:inline">Cerrar sesión</span>
             </Button>

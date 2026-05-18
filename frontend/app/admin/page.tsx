@@ -31,7 +31,7 @@ export default function AdminHomePage() {
   useEffect(() => {
     const current = readAdminSession();
     if (!current) {
-      router.replace("/admin/login");
+      router.replace("/login");
       return;
     }
     setSession(current);
@@ -39,7 +39,7 @@ export default function AdminHomePage() {
 
   function onLogout() {
     clearAdminSession();
-    router.replace("/admin/login");
+    router.replace("/login");
   }
 
   if (!session) return null;
