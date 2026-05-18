@@ -325,16 +325,32 @@ consumers, no cross-tenant leak path found in this pass.
 
 ## 5. Resolution log
 
-(Populated during Phase C. Each row gets a commit SHA on completion.)
+All P0 / P1 / actionable P2 items closed on branch
+`stabilization/2026-05-18`. Verification gauntlet re-run after every
+commit; final results captured in §6.
 
 | ID | Status | Commit | Notes |
 |---|---|---|---|
-| P0-1 | Pending | — | — |
-| P1-1 | Pending | — | — |
-| P1-2 | Pending | — | — |
-| P2-1 | Pending | — | — |
-| P2-2 | Pending | — | — |
-| P2-3 | Pending | — | — |
-| P2-4 | Pending | — | — |
+| P0-1 | Resolved | `f536329` | `decideDestination` gains a `client_admin` branch returning `/client/dashboard`. Browser-verified: `cliente.demo` logs in and lands on the V2.1 client shell with no console errors. |
+| P1-1 | Resolved | `748d3a8` | `dev_seed.py` working-tree refactor staged as-is; `test_seed.py` (7 tests) green against the new version. |
+| P1-2 | Resolved | `43a9511` | `.gitignore` adds narrow rules for `docs/CREDENTIALS.md`, `docs/EXECUTIVE_REPORT*.html`, `docs/executive-evidence/`. Local files left in place; `git status` is clean of them. |
+| P2-1 | Resolved | `66634da` | Deleted `lib/mock/activation.ts`, `lib/mock/reports.ts`. |
+| P2-2 | Resolved | `66634da` | Deleted 4 orphan portal components + `lib/mock/dashboard.ts` (last consumer was the `semaphore-card` deleted alongside). |
+| P2-3 | Resolved | `66634da` | Deleted `lib/routing/post-login.ts` (the entire `lib/routing/` directory collapsed cleanly with no remaining files). |
+| P2-4 | Resolved | `66634da` | Removed `Storefront` and `useMemo` unused imports; renamed `_demo` destructure to `_demoIgnored` + explicit void. `next lint` warnings: 3 → 0. |
 
-End of Phase A.
+## 6. Post-stabilization gauntlet
+
+Re-run on `stabilization/2026-05-18` after the final commit.
+
+| Check | Result |
+|---|---|
+| `backend/.venv/bin/pytest -q` | **312 passed** (unchanged) |
+| `backend/.venv/bin/ruff check .` | **All checks passed** |
+| `frontend/node_modules/.bin/tsc --noEmit` | **0 errors** |
+| `frontend/node_modules/.bin/next lint --quiet` | **0 errors, 0 warnings** (was 0 errors, 3 warnings) |
+| `frontend/node_modules/.bin/next build` | **27/27 routes compile** |
+
+Branch is 5 commits ahead of `origin/main`. Not pushed.
+
+End of stabilization session.
