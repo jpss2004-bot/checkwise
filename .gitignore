@@ -75,6 +75,13 @@ backend/*.db-journal
 outputs/
 *.zip
 
+# Local-only operator artefacts under docs/ (demo credentials, executive
+# evidence bundles, ad-hoc HTML reports). Tracked docs live alongside —
+# only the explicitly-named local artefacts are ignored.
+docs/CREDENTIALS.md
+docs/EXECUTIVE_REPORT*.html
+docs/executive-evidence/
+
 # Local session artifacts and AI tooling
 CodexConvo.txt
 .claude/*
