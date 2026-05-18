@@ -91,11 +91,19 @@ class ReportActor:
     Built once per request in the API layer and passed verbatim through
     the service. Keeping it separate from CurrentUser means service
     functions can be unit-tested without an HTTP fixture.
+
+    ``workspace_vendor_id`` / ``workspace_client_id`` are populated for
+    role-less providers who own a ``ProviderWorkspace``. They power the
+    P1 vendor_facing visibility branch — see ``visible_audiences``.
+    Internal staff and client_admins keep these as ``None`` (membership
+    drives their scope instead).
     """
 
     user_id: str
     organization_ids: tuple[str, ...]
     roles: tuple[str, ...]
+    workspace_vendor_id: str | None = None
+    workspace_client_id: str | None = None
 
     @property
     def is_internal(self) -> bool:
@@ -108,6 +116,17 @@ class ReportActor:
             MembershipRole.INTERNAL_ADMIN in self.roles
             or MembershipRole.REVIEWER in self.roles
         )
+
+    @property
+    def is_workspace_owner(self) -> bool:
+        """True for role-less providers bound to a ``ProviderWorkspace``.
+
+        Used to gate the vendor_facing visibility branch. A user who is
+        BOTH an internal_admin AND a workspace owner is treated as
+        internal staff — workspace-owner status only matters when the
+        user has no other path to Reports visibility.
+        """
+        return not self.roles and self.workspace_vendor_id is not None
 
 
 # ─── Audience visibility (R1.0) ─────────────────────────────────
@@ -132,6 +151,11 @@ def visible_audiences(actor: ReportActor) -> tuple[ReportAudience, ...]:
         )
     if MembershipRole.CLIENT_ADMIN in actor.roles:
         return (ReportAudience.CLIENT_FACING,)
+    if actor.is_workspace_owner:
+        # P1: role-less providers see only reports targeted at them.
+        # list_reports() additionally restricts by Report.vendor_id ==
+        # actor.workspace_vendor_id so cross-vendor reads return empty.
+        return (ReportAudience.VENDOR_FACING,)
     return ()
 
 
@@ -151,6 +175,8 @@ def writable_audiences(actor: ReportActor) -> tuple[ReportAudience, ...]:
         )
     if MembershipRole.CLIENT_ADMIN in actor.roles:
         return (ReportAudience.CLIENT_FACING,)
+    if actor.is_workspace_owner:
+        return (ReportAudience.VENDOR_FACING,)
     return ()
 
 
@@ -303,9 +329,15 @@ def list_reports(
     stmt = select(Report)
 
     if not actor.is_internal:
-        if not actor.organization_ids:
-            return [], 0
-        stmt = stmt.where(Report.organization_id.in_(actor.organization_ids))
+        if actor.is_workspace_owner:
+            # P1: scope to reports targeting this provider's workspace.
+            # Filter on vendor_id (not organization_id) because providers
+            # don't hold an org membership — the workspace IS their tenant.
+            stmt = stmt.where(Report.vendor_id == actor.workspace_vendor_id)
+        else:
+            if not actor.organization_ids:
+                return [], 0
+            stmt = stmt.where(Report.organization_id.in_(actor.organization_ids))
 
     if organization_id:
         if not actor.is_internal and organization_id not in actor.organization_ids:
@@ -352,9 +384,15 @@ def get_report(
     if report is None:
         raise ReportNotFoundError(f"Report {report_id} not found.")
 
-    if not actor.is_internal and report.organization_id not in actor.organization_ids:
-        # Indistinguishable from not-found by design (no enumeration).
-        raise ReportNotFoundError(f"Report {report_id} not found.")
+    if not actor.is_internal:
+        if actor.is_workspace_owner:
+            # P1: providers only see their own vendor's reports. Cross-
+            # vendor reads return 404 to avoid id enumeration.
+            if report.vendor_id != actor.workspace_vendor_id:
+                raise ReportNotFoundError(f"Report {report_id} not found.")
+        elif report.organization_id not in actor.organization_ids:
+            # Indistinguishable from not-found by design (no enumeration).
+            raise ReportNotFoundError(f"Report {report_id} not found.")
 
     allowed = visible_audiences(actor)
     if report.audience not in {a.value for a in allowed}:

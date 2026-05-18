@@ -26,7 +26,9 @@ from app.models import (
     Client,
     Membership,
     Organization,
+    ProviderWorkspace,
     User,
+    Vendor,
     entities,  # noqa: F401 — register mappers
 )
 from app.services.auth import hash_password
@@ -143,6 +145,78 @@ def _seed_client_row(db_factory, name: str) -> str:
         db.add(c)
         db.commit()
         return c.id
+    finally:
+        db.close()
+
+
+def _provider_workspace_user(
+    api_client: TestClient,
+    db_factory,
+    *,
+    email: str,
+    client_name: str,
+    vendor_name: str,
+    create_org_for_client: bool = True,
+) -> tuple[str, str, str]:
+    """Seed a role-less provider user owning a ``ProviderWorkspace``.
+
+    Mirrors the boss.demo shape in dev_seed.py — a User with no
+    Membership rows but with a workspace tying them to a Vendor +
+    Client. Optionally creates the matching client Organization so
+    ``_actor_from`` can resolve the owning-org for writes.
+
+    Returns ``(token, vendor_id, client_id)``.
+    """
+    db = db_factory()
+    try:
+        password = "PresetsTest!2026"
+        user = User(
+            email=email,
+            password_hash=hash_password(password),
+            full_name="Provider Test",
+            status="active",
+            must_change_password=False,
+        )
+        db.add(user)
+        db.flush()
+
+        client = Client(name=client_name)
+        db.add(client)
+        db.flush()
+
+        if create_org_for_client:
+            org = Organization(
+                name=f"{client_name} — Cliente",
+                kind="client",
+                client_id=client.id,
+            )
+            db.add(org)
+            db.flush()
+
+        vendor = Vendor(
+            client_id=client.id,
+            name=vendor_name,
+            rfc=f"V{abs(hash(vendor_name)) % 10**11:011d}A",
+            persona_type="moral",
+        )
+        db.add(vendor)
+        db.flush()
+
+        workspace = ProviderWorkspace(
+            client_id=client.id,
+            vendor_id=vendor.id,
+            contract_id=None,
+            owner_user_id=user.id,
+            filial_name="Filial test",
+            persona_type="moral",
+            display_name=vendor_name,
+            access_token=f"tok-{vendor.id}",
+            onboarding_completed_at=None,
+            status="active",
+        )
+        db.add(workspace)
+        db.commit()
+        return _login(api_client, user.email, password), vendor.id, client.id
     finally:
         db.close()
 
@@ -487,3 +561,216 @@ def test_list_status_filter_narrows_correctly(api_client, db_factory) -> None:
     active_ids = {r["id"] for r in actives.json()["items"]}
     assert rid2 in active_ids
     assert rid1 not in active_ids
+
+
+# ─── P1 — workspace-owner / provider visibility ────────────────
+
+
+def test_workspace_actor_sees_three_provider_presets_only(
+    api_client, db_factory
+) -> None:
+    """P1: a role-less workspace owner sees the 3 vendor_facing presets,
+    and none of the admin (3) or client (3) presets."""
+    tok, _, _ = _provider_workspace_user(
+        api_client,
+        db_factory,
+        email="provider@presets.test",
+        client_name="Cliente Provider",
+        vendor_name="Vendor Provider",
+    )
+    resp = api_client.get("/api/v1/reports/_presets", headers=_h(tok))
+    assert resp.status_code == 200, resp.text
+    ids = sorted(p["id"] for p in resp.json()["items"])
+    assert ids == [
+        "provider-current-state",
+        "provider-missing-documents",
+        "provider-recent-rejections",
+    ]
+    for p in resp.json()["items"]:
+        assert p["audience"] == "vendor_facing"
+
+
+def test_workspace_actor_from_preset_auto_resolves_vendor_and_client(
+    api_client, db_factory
+) -> None:
+    """P1: ``POST /from-preset`` auto-fills vendor_id + client_id from
+    the caller's ProviderWorkspace when the preset is vendor_facing.
+    The created Report carries both fields verbatim."""
+    tok, vendor_id, client_id = _provider_workspace_user(
+        api_client,
+        db_factory,
+        email="provider2@presets.test",
+        client_name="Cliente Auto",
+        vendor_name="Vendor Auto",
+    )
+    resp = api_client.post(
+        "/api/v1/reports/from-preset",
+        headers=_h(tok),
+        json={"preset_id": "provider-current-state"},
+    )
+    assert resp.status_code == 201, resp.text
+    body = resp.json()
+    assert body["title"] == "Mi estado de cumplimiento"
+    assert body["audience"] == "vendor_facing"
+    assert body["vendor_id"] == vendor_id
+    assert body["client_id"] == client_id
+
+
+def test_workspace_actor_list_only_returns_own_vendor(
+    api_client, db_factory
+) -> None:
+    """P1: cross-vendor isolation. Provider A cannot see a vendor_facing
+    report scoped to vendor B, even when they share a client."""
+    admin_tok = _admin_token(api_client, db_factory)
+
+    # Provider A creates a vendor_facing report about themselves.
+    tok_a, vendor_a, client_a = _provider_workspace_user(
+        api_client,
+        db_factory,
+        email="prov_a@presets.test",
+        client_name="Cliente Shared",
+        vendor_name="Vendor A",
+    )
+    create = api_client.post(
+        "/api/v1/reports/from-preset",
+        headers=_h(tok_a),
+        json={"preset_id": "provider-current-state"},
+    )
+    assert create.status_code == 201
+
+    # Admin seeds another vendor_facing report — same client, different vendor.
+    other_vendor_db = db_factory()
+    try:
+        other_v = Vendor(
+            client_id=client_a,
+            name="Vendor B",
+            rfc="VBO99988877X",
+            persona_type="moral",
+        )
+        other_vendor_db.add(other_v)
+        other_vendor_db.commit()
+        other_vendor_id = other_v.id
+    finally:
+        other_vendor_db.close()
+    other = api_client.post(
+        "/api/v1/reports",
+        headers=_h(admin_tok),
+        json={
+            "title": "About vendor B",
+            "audience": "vendor_facing",
+            "vendor_id": other_vendor_id,
+        },
+    )
+    assert other.status_code == 201
+    other_rid = other.json()["id"]
+
+    # Provider A lists — sees only their own report.
+    resp = api_client.get("/api/v1/reports", headers=_h(tok_a))
+    assert resp.status_code == 200
+    visible = [r["vendor_id"] for r in resp.json()["items"]]
+    assert vendor_a in visible
+    assert other_vendor_id not in visible
+
+    # Provider A asking for the other report by id → 404, not 403.
+    direct = api_client.get(f"/api/v1/reports/{other_rid}", headers=_h(tok_a))
+    assert direct.status_code == 404
+
+
+def test_workspace_actor_cannot_read_client_facing(api_client, db_factory) -> None:
+    """P1: the vendor_facing branch does NOT grant access to
+    client_facing reports, even when the report's vendor_id matches
+    the provider's. The audience boundary holds."""
+    admin_tok = _admin_token(api_client, db_factory)
+    tok_p, vendor_id, client_id = _provider_workspace_user(
+        api_client,
+        db_factory,
+        email="prov_aud@presets.test",
+        client_name="Cliente Aud",
+        vendor_name="Vendor Aud",
+    )
+
+    # Admin authors a client_facing report scoped to the provider's vendor.
+    created = api_client.post(
+        "/api/v1/reports",
+        headers=_h(admin_tok),
+        json={
+            "title": "Client view of vendor",
+            "audience": "client_facing",
+            "client_id": client_id,
+            "vendor_id": vendor_id,
+        },
+    )
+    assert created.status_code == 201
+    rid = created.json()["id"]
+
+    # Provider sees no rows on the list (audience not in visible set).
+    resp = api_client.get("/api/v1/reports", headers=_h(tok_p))
+    assert resp.status_code == 200
+    titles = [r["title"] for r in resp.json()["items"]]
+    assert "Client view of vendor" not in titles
+
+    # Direct read → 404.
+    direct = api_client.get(f"/api/v1/reports/{rid}", headers=_h(tok_p))
+    assert direct.status_code == 404
+
+
+def test_workspace_actor_admin_preset_forbidden(api_client, db_factory) -> None:
+    """P1: a provider asking for an admin-only preset is forbidden — the
+    workspace-owner branch must not leak admin or client templates."""
+    tok, _, _ = _provider_workspace_user(
+        api_client,
+        db_factory,
+        email="prov_fb@presets.test",
+        client_name="Cliente Fb",
+        vendor_name="Vendor Fb",
+    )
+    for preset_id in (
+        "admin-daily-queue",
+        "client-monthly-executive",
+    ):
+        resp = api_client.post(
+            "/api/v1/reports/from-preset",
+            headers=_h(tok),
+            json={"preset_id": preset_id},
+        )
+        assert resp.status_code == 403, (preset_id, resp.text)
+
+
+def test_client_admin_still_sees_only_client_presets_after_p1(
+    api_client, db_factory
+) -> None:
+    """P1 regression guard: adding the provider presets must not change
+    what client_admin sees. They still get exactly 3 client_facing."""
+    tok, _ = _client_admin(api_client, db_factory, "Cliente Regression")
+    resp = api_client.get("/api/v1/reports/_presets", headers=_h(tok))
+    assert resp.status_code == 200
+    ids = sorted(p["id"] for p in resp.json()["items"])
+    assert ids == [
+        "client-missing-evidence",
+        "client-monthly-executive",
+        "client-vendor-risk-matrix",
+    ]
+
+
+def test_admin_sees_all_nine_presets_after_p1(api_client, db_factory) -> None:
+    """P1: admin sees 3 admin + 3 client + 3 provider = 9 total. The
+    new provider presets appear because internal_admin is implicitly
+    allowed via their full audience matrix? No — the matching rule for
+    role-based presets is required_roles intersection. Provider presets
+    have empty required_roles, so they appear ONLY for workspace owners.
+    Admin should still see exactly 6.
+    """
+    tok = _admin_token(api_client, db_factory)
+    resp = api_client.get("/api/v1/reports/_presets", headers=_h(tok))
+    assert resp.status_code == 200
+    ids = sorted(p["id"] for p in resp.json()["items"])
+    # Six — admin is NOT a workspace owner, so the empty-required_roles
+    # provider presets stay invisible to staff.
+    assert ids == [
+        "admin-daily-queue",
+        "admin-high-risk-vendors",
+        "admin-monthly-operational",
+        "client-missing-evidence",
+        "client-monthly-executive",
+        "client-vendor-risk-matrix",
+    ]

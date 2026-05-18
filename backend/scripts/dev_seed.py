@@ -130,7 +130,11 @@ def _wipe_demo(db) -> None:
     is idempotent. Order matters because of FKs."""
     # Phase 5 (V2.1) — wipe seeded reports first so their cascades
     # release the user FK and the org row before we touch users/orgs.
-    demo_org_names = (DEMO_ORG_NAME, CLIENT_PORTFOLIO_ORG_NAME)
+    demo_org_names = (
+        DEMO_ORG_NAME,
+        CLIENT_PORTFOLIO_ORG_NAME,
+        f"{BOSS_DEMO_CLIENT_NAME} — Cliente",  # P1
+    )
     for org in db.scalars(select(Organization).where(Organization.name.in_(demo_org_names))):
         for rep in list(db.scalars(select(Report).where(Report.organization_id == org.id))):
             db.query(ReportConversation).filter(ReportConversation.report_id == rep.id).delete(
@@ -191,7 +195,11 @@ def _wipe_demo(db) -> None:
 
     # Drop demo orgs (they hold the Client FK on kind='client' rows) and
     # their memberships BEFORE we drop the clients themselves.
-    for org_name in (DEMO_ORG_NAME, CLIENT_PORTFOLIO_ORG_NAME):
+    for org_name in (
+        DEMO_ORG_NAME,
+        CLIENT_PORTFOLIO_ORG_NAME,
+        f"{BOSS_DEMO_CLIENT_NAME} — Cliente",  # P1
+    ):
         org = db.scalar(select(Organization).where(Organization.name == org_name))
         if org is not None:
             db.query(Membership).filter(Membership.organization_id == org.id).delete(
@@ -287,9 +295,26 @@ def _seed_boss_demo_user(db) -> str:
 def _seed_boss_demo_workspace(db, *, owner_user_id: str) -> tuple[str, str, str]:
     """Boss demo workspace: provider whose initial expediente is
     already complete, so the dashboard is unlocked from first login.
+
+    P1: also creates an Organization tied to the workspace's client so
+    ``_actor_from`` can resolve an owning-org for provider-authored
+    reports. Without this org, boss.demo can read vendor_facing reports
+    but ``create_report`` would fail with "User has no organization
+    memberships."
     """
     client = Client(name=BOSS_DEMO_CLIENT_NAME, rfc=BOSS_DEMO_CLIENT_RFC)
     db.add(client)
+    db.flush()
+
+    # P1: client-kind org so create_report can pick an owning_org for
+    # vendor_facing reports authored by the boss provider.
+    db.add(
+        Organization(
+            name=f"{BOSS_DEMO_CLIENT_NAME} — Cliente",
+            kind="client",
+            client_id=client.id,
+        )
+    )
     db.flush()
 
     vendor = Vendor(
@@ -579,6 +604,8 @@ def _seed_reports(
     client_user_id: str,
     client_id: str,
     boss_vendor_id: str,
+    boss_client_id: str,
+    boss_org_id: str,
 ) -> int:
     """Seed 3 reports with realistic block content so /portal/reports
     has populated entries for the executive demo.
@@ -832,18 +859,22 @@ def _seed_reports(
             ],
         },
         {
+            # P1: this report is the boss provider's own vendor-facing
+            # view. organization_id + client_id now point at boss's
+            # client (consistent tenant scope) and audience flipped to
+            # vendor_facing so /portal/reports populates for boss.demo.
             "id": str(uuid.uuid4()),
-            "organization_id": client_org_id,
-            "client_id": client_id,
+            "organization_id": boss_org_id,
+            "client_id": boss_client_id,
             "vendor_id": boss_vendor_id,
             "title": "Documentos faltantes · Servicios Especializados Aurora",
             "description": (
-                "Análisis detallado de documentos pendientes y rechazados para "
-                "un proveedor específico del portafolio."
+                "Análisis detallado de documentos pendientes y rechazados "
+                "para este proveedor."
             ),
-            "audience": "client_facing",
+            "audience": "vendor_facing",
             "status": "draft",
-            "created_by_user_id": client_user_id,
+            "created_by_user_id": legalshelf_user_id,
             "blocks": [
                 {
                     "id": str(uuid.uuid4()),
@@ -1009,9 +1040,16 @@ def main() -> None:
         #
         # boss.demo is documented (README, docs/DEMO_1.7.1.md) as the
         # *provider* B account. Leave her membership-free so the login
-        # router falls through to /portal/entra-a-tu-espacio. The
-        # /portal/reports list will render empty for her until vendor
-        # report delivery ships in R1.2 — that is the honest state.
+        # router falls through to /portal/entra-a-tu-espacio. P1 adds
+        # a vendor_facing seeded report so /portal/reports has signal
+        # for boss.demo via the workspace-derived visibility branch.
+        boss_org_id = db.scalar(
+            select(Organization.id).where(Organization.client_id == boss_client_id)
+        )
+        if boss_org_id is None:
+            raise RuntimeError(
+                "Seed invariant broken: no Organization for boss client"
+            )
         reports_seeded = _seed_reports(
             db,
             legalshelf_org_id=org_id,
@@ -1020,6 +1058,8 @@ def main() -> None:
             client_user_id=client_user.id if client_user else user_id,
             client_id=client_portfolio_id,
             boss_vendor_id=boss_vendor_id,
+            boss_client_id=boss_client_id,
+            boss_org_id=boss_org_id,
         )
         db.commit()
     finally:

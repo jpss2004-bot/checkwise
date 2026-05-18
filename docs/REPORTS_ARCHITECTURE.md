@@ -867,3 +867,129 @@ Three tests in `backend/tests/test_reports_presets.py` lock this behavior in:
 - No new audience values; no new presets; no new block types; no schema change.
 
 After R2, the role-aware promise of Reports is structurally complete for admin and client_admin but still empty for the provider — the seeded vendor-facing reports cannot be reached because role-less actors' `visible_audiences()` returns `()`. That gap is the entire scope of P1 (Provider-first Reports), not part of R2.
+
+## 25. P1 — Provider-first Reports (2026-05-18)
+
+P1 makes the provider — the role most central to CheckWise's product story — a first-class Reports user. After P1, the three-role promise is structurally complete: admin, client_admin, and the role-less provider each have a populated list, a role-appropriate preset gallery, and an editor that mounts inside their own shell.
+
+### Workspace-derived visibility (no new MembershipRole)
+
+`ProviderWorkspace.owner_user_id` is already the authoritative link from a `User` to a `vendor_id` + `client_id`. P1 reuses that link instead of introducing a `vendor` membership role — keeping the role vocabulary stable and the single source of provider identity in `ProviderWorkspace`.
+
+The `ReportActor` dataclass gains two optional fields:
+
+```python
+@dataclass(frozen=True)
+class ReportActor:
+    user_id: str
+    organization_ids: tuple[str, ...]
+    roles: tuple[str, ...]
+    workspace_vendor_id: str | None = None  # P1
+    workspace_client_id: str | None = None  # P1
+
+    @property
+    def is_workspace_owner(self) -> bool:
+        return not self.roles and self.workspace_vendor_id is not None
+```
+
+`_actor_from(current, db)` in `api/v1/reports.py` does **one** extra SQL hit when the caller has no roles: look up their `ProviderWorkspace` and, when present, also fetch the matching client `Organization` so `create_report`'s owning-org resolution still works.
+
+### Visibility / writability matrix update
+
+| Actor shape | Visible audiences |
+|---|---|
+| `internal_admin` / `reviewer` | all 4 (unchanged) |
+| `client_admin` | `(client_facing,)` (unchanged) |
+| **role-less + `workspace_vendor_id` set** | **`(vendor_facing,)`** ← P1 |
+| role-less + no workspace | `()` (default-deny, unchanged) |
+
+The default branch of `list_reports()` (when no explicit audience filter is supplied) still uses `Report.audience IN (visible_audiences)`. For workspace-owners it adds **one more** WHERE clause: `Report.vendor_id == actor.workspace_vendor_id`. Cross-vendor reads return empty / 404, not 403, mirroring the not-found semantics already in place.
+
+### Three provider presets
+
+`backend/app/services/reports/templates.py`:
+
+- `provider-current-state` — *Mi estado de cumplimiento*
+- `provider-missing-documents` — *Documentos faltantes*
+- `provider-recent-rejections` — *Rechazos recientes*
+
+Each declares `required_roles=()` — an empty tuple. The matching rule in `presets_for_roles()` is extended:
+
+```python
+def presets_for_roles(roles, *, is_workspace_owner=False):
+    return tuple(
+        p for p in PRESETS
+        if (
+            (p.required_roles and held.intersection(...))     # legacy role branch
+            or (not p.required_roles and is_workspace_owner)  # P1 branch
+        )
+    )
+```
+
+An empty-`required_roles` preset is **only** included when `is_workspace_owner` is true. Admin and client_admin keep seeing exactly the presets they saw in R1.0 + R1.1 — locked in by the `test_admin_sees_all_nine_presets_after_p1` and `test_client_admin_still_sees_only_client_presets_after_p1` regression tests.
+
+### `from-preset` auto-resolve for `vendor_facing`
+
+`CreateFromPresetRequest` already carried optional `client_id` / `vendor_id` from R1.1. P1 adds a branch in `post_from_preset`:
+
+```python
+elif preset.audience == ReportAudience.VENDOR_FACING:
+    if vendor_id is None and actor.workspace_vendor_id is not None:
+        vendor_id = actor.workspace_vendor_id
+    if client_id is None and actor.workspace_client_id is not None:
+        client_id = actor.workspace_client_id
+```
+
+The `_validate_scope` rule (audience ≠ `internal_only` requires at least one of `client_id`/`vendor_id`) is satisfied via the auto-fill. Internal staff using a provider preset must pass `vendor_id` explicitly in the body — they have no implicit anchor.
+
+### Frontend
+
+`frontend/app/portal/reports/page.tsx` is collapsed from the V2.1 inline-create implementation to a thin `PortalAppShell` wrapper around `<ReportsListView role="portal">`. The provider gets for free:
+
+- The 3 vendor-facing preset cards
+- The R2 filter bar (search + Estado; Audiencia hidden — provider sees only one audience)
+- The shared empty-state / filter-clear behavior
+- Visual consistency with `/admin/reports` and `/client/reports`
+
+The editor route `/portal/reports/[id]` is unchanged — it already used the shared `<ReportEditor>` from R1.0.1.
+
+### Seed adjustment
+
+`backend/scripts/dev_seed.py`:
+
+- Adds an `Organization` (kind=`client`) tied to `BOSS_DEMO_CLIENT_NAME` so `_actor_from`'s workspace → owning-org resolution succeeds for boss.demo.
+- Re-audiences the seeded vendor-scoped report from `client_facing` to `vendor_facing` and corrects its `organization_id` + `client_id` to match the boss-client tenant (the previous shape was cross-tenant).
+
+### Tests
+
+`backend/tests/test_reports_presets.py` adds **7 new tests** (total now 20):
+
+| Test | Locks in |
+|---|---|
+| `test_workspace_actor_sees_three_provider_presets_only` | the workspace-owner branch returns exactly 3 vendor_facing presets |
+| `test_workspace_actor_from_preset_auto_resolves_vendor_and_client` | auto-fill of vendor_id + client_id from the workspace |
+| `test_workspace_actor_list_only_returns_own_vendor` | cross-vendor isolation — provider A cannot see vendor B's report even when sharing a client |
+| `test_workspace_actor_cannot_read_client_facing` | audience boundary holds — same-vendor client_facing report still 404 for provider |
+| `test_workspace_actor_admin_preset_forbidden` | provider asking for admin/client preset → 403 |
+| `test_client_admin_still_sees_only_client_presets_after_p1` | regression guard |
+| `test_admin_sees_all_nine_presets_after_p1` | regression guard — admin still sees exactly 6, not 9 |
+
+### Three-role promise — fully closed
+
+| Role | List | Editor | Filters | Presets |
+|---|---|---|---|---|
+| internal_admin / reviewer | ✅ /admin/reports | ✅ AdminShell | ✅ status + audience + search | ✅ 3 |
+| client_admin | ✅ /client/reports | ✅ ClientShell | ✅ status + search | ✅ 3 |
+| **role-less provider** | **✅ /portal/reports** | **✅ PortalAppShell** | **✅ status + search** | **✅ 3** |
+
+### What P1 deliberately does NOT ship
+
+- No new `MembershipRole`. Provider identity stays in `ProviderWorkspace`.
+- No `external_signed` signed-link delivery for vendors without user accounts (R1.2).
+- No PDF/DOCX export.
+- No new block types.
+- No new schema, migrations, or columns.
+- No redesign.
+- No changes to the upload / onboarding flow.
+
+What it requires from the operator: re-run `scripts/dev_seed.py` once to pick up the seed changes (boss client gets an Organization; the seeded vendor report flips to `vendor_facing`).

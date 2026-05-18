@@ -179,6 +179,77 @@ _CLIENT_MISSING_EVIDENCE = ReportPreset(
 )
 
 
+# ─── Provider presets (P1 — vendor_facing) ─────────────────────
+#
+# Three vendor-facing presets for the role-less provider who owns a
+# ProviderWorkspace. ``required_roles`` is intentionally empty: the
+# matching logic in ``presets_for_roles`` has a workspace-owner branch
+# that picks up presets with no role requirements when the actor is a
+# workspace owner, instead of inventing a "vendor" string role.
+#
+# internal_admin staff can still author from these presets via the
+# request body's ``vendor_id`` field (no implicit anchor for them).
+
+
+_PROVIDER_CURRENT_STATE = ReportPreset(
+    id="provider-current-state",
+    title="Mi estado de cumplimiento",
+    description=(
+        "Estado actual del expediente del proveedor: porcentaje de "
+        "cumplimiento, documentos en revisión, vencimientos próximos y "
+        "siguientes acciones prioritarias."
+    ),
+    audience=ReportAudience.VENDOR_FACING,
+    required_roles=(),
+    recommended_prompt=(
+        "Genera un reporte del estado actual de cumplimiento de este "
+        "proveedor: empieza con un resumen ejecutivo enfocado en "
+        "cumplimiento, un KPI strip con porcentaje de cumplimiento, "
+        "documentos en revisión, documentos vencidos y días hasta el "
+        "próximo vencimiento, y una recomendación final de 3 acciones "
+        "priorizadas que el proveedor debe atender."
+    ),
+)
+
+
+_PROVIDER_MISSING_DOCUMENTS = ReportPreset(
+    id="provider-missing-documents",
+    title="Documentos faltantes",
+    description=(
+        "Lista de obligaciones del periodo con evidencia pendiente, "
+        "agrupada por institución y prioridad."
+    ),
+    audience=ReportAudience.VENDOR_FACING,
+    required_roles=(),
+    recommended_prompt=(
+        "Genera un reporte de documentos faltantes para este proveedor: "
+        "resumen ejecutivo enfocado en expediente, un KPI strip con "
+        "total de obligaciones, documentos vencidos y en revisión, y "
+        "una recomendación final de 3 acciones priorizadas indicando "
+        "qué subir primero y a qué institución corresponde."
+    ),
+)
+
+
+_PROVIDER_RECENT_REJECTIONS = ReportPreset(
+    id="provider-recent-rejections",
+    title="Rechazos recientes",
+    description=(
+        "Documentos rechazados o con inconsistencias en los últimos "
+        "periodos y las acciones correctivas correspondientes."
+    ),
+    audience=ReportAudience.VENDOR_FACING,
+    required_roles=(),
+    recommended_prompt=(
+        "Genera un reporte de rechazos recientes para este proveedor: "
+        "resumen ejecutivo enfocado en auditoría que liste documentos "
+        "con incidencias del periodo, un KPI strip con totales por "
+        "estatus y una recomendación final de 3 acciones correctivas "
+        "priorizadas."
+    ),
+)
+
+
 # ─── Registry ───────────────────────────────────────────────────
 
 
@@ -189,6 +260,9 @@ PRESETS: tuple[ReportPreset, ...] = (
     _CLIENT_MONTHLY_EXECUTIVE,
     _CLIENT_VENDOR_RISK_MATRIX,
     _CLIENT_MISSING_EVIDENCE,
+    _PROVIDER_CURRENT_STATE,
+    _PROVIDER_MISSING_DOCUMENTS,
+    _PROVIDER_RECENT_REJECTIONS,
 )
 
 
@@ -199,16 +273,29 @@ def get_preset(preset_id: str) -> ReportPreset | None:
     return None
 
 
-def presets_for_roles(roles: tuple[str, ...]) -> tuple[ReportPreset, ...]:
-    """Return the presets whose ``required_roles`` intersect the caller's roles.
+def presets_for_roles(
+    roles: tuple[str, ...],
+    *,
+    is_workspace_owner: bool = False,
+) -> tuple[ReportPreset, ...]:
+    """Return the presets the caller may instantiate.
 
-    Empty tuple if the caller has no matching role for any preset — the
-    list endpoint then returns an empty list, and the create endpoint
-    will 403 on attempts to instantiate.
+    Match rules:
+    - A preset with non-empty ``required_roles`` is included when the
+      caller holds any of those roles.
+    - A preset with empty ``required_roles`` is the P1 provider
+      shape: included only when ``is_workspace_owner`` is True (the
+      caller owns a ``ProviderWorkspace`` and has no other role).
+
+    Empty tuple if no preset matches — the list endpoint then returns
+    an empty list, and ``from-preset`` 403s on attempts to instantiate.
     """
     held = set(roles)
     return tuple(
         p
         for p in PRESETS
-        if held.intersection(r.value for r in p.required_roles)
+        if (
+            (p.required_roles and held.intersection(r.value for r in p.required_roles))
+            or (not p.required_roles and is_workspace_owner)
+        )
     )

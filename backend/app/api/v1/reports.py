@@ -87,11 +87,57 @@ DbSession = Annotated[Session, Depends(get_db)]
 # ─── Helpers ─────────────────────────────────────────────────────
 
 
-def _actor_from(current: CurrentUser) -> ReportActor:
+def _actor_from(current: CurrentUser, db: Session | None = None) -> ReportActor:
+    """Build a tenant-scoping ReportActor from the request principal.
+
+    For role-less users, P1 adds a workspace lookup: if the caller
+    owns a ``ProviderWorkspace`` (the provider portal binding), pick
+    up its ``vendor_id`` / ``client_id`` and inject them into the
+    actor. If an ``Organization`` exists with the same ``client_id``,
+    the actor also gains that org in ``organization_ids`` so
+    ``create_report``'s owning-org resolution still works.
+
+    ``db`` is optional for back-compat — callers that don't need the
+    workspace branch (e.g. lightweight reads in the AI pipeline that
+    already have the actor pre-built) can omit it.
+    """
+    workspace_vendor_id: str | None = None
+    workspace_client_id: str | None = None
+    org_ids: list[str] = list(current.organization_ids)
+
+    if db is not None and not current.roles:
+        from app.models.entities import (  # local import to avoid cycle
+            Organization,
+            ProviderWorkspace,
+        )
+
+        ws = db.scalar(
+            select(ProviderWorkspace).where(
+                ProviderWorkspace.owner_user_id == current.user.id,
+                ProviderWorkspace.status == "active",
+            )
+        )
+        if ws is not None:
+            workspace_vendor_id = ws.vendor_id
+            workspace_client_id = ws.client_id
+            # Find the org that represents the workspace's client so the
+            # owning-org resolution path keeps working for provider-
+            # authored reports. If none exists, providers can still
+            # read but writes will surface a clear error.
+            ws_org_id = db.scalar(
+                select(Organization.id)
+                .where(Organization.client_id == ws.client_id)
+                .limit(1)
+            )
+            if ws_org_id and ws_org_id not in org_ids:
+                org_ids.append(ws_org_id)
+
     return ReportActor(
         user_id=current.user.id,
-        organization_ids=tuple(current.organization_ids),
+        organization_ids=tuple(org_ids),
         roles=tuple(current.roles),
+        workspace_vendor_id=workspace_vendor_id,
+        workspace_client_id=workspace_client_id,
     )
 
 
@@ -187,15 +233,20 @@ def get_engine(
     summary="List report presets the caller may use",
 )
 def get_presets(
+    db: DbSession,
     current: Annotated[CurrentUser, Depends(get_current_user)],
 ) -> ReportPresetList:
     """Return the registry filtered by the caller's roles.
 
-    Empty list is a valid, non-error response: it just means the
-    caller's role has no presets defined yet (e.g. client_admin in
-    R1.0 — admin presets ship first, client presets land in R1.1).
+    Empty list is a valid, non-error response. P1 adds a workspace-owner
+    branch: role-less providers owning a ``ProviderWorkspace`` see the
+    three vendor-facing presets.
     """
-    presets = presets_for_roles(tuple(current.roles))
+    actor = _actor_from(current, db)
+    presets = presets_for_roles(
+        tuple(current.roles),
+        is_workspace_owner=actor.is_workspace_owner,
+    )
     return ReportPresetList(
         items=[
             ReportPresetSummary(
@@ -233,9 +284,20 @@ def post_from_preset(
     if preset is None:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Unknown preset.")
 
+    # Build the actor once and reuse for both the role-gate check and
+    # the scope auto-resolve below — saves a duplicate workspace lookup.
+    actor = _actor_from(current, db)
+
     # Role gate: never let a caller instantiate a preset they couldn't
-    # even see in the list endpoint.
-    allowed = {p.id for p in presets_for_roles(tuple(current.roles))}
+    # even see in the list endpoint. The workspace-owner branch lets
+    # role-less providers (P1) reach the vendor_facing presets.
+    allowed = {
+        p.id
+        for p in presets_for_roles(
+            tuple(current.roles),
+            is_workspace_owner=actor.is_workspace_owner,
+        )
+    }
     if preset.id not in allowed:
         raise HTTPException(
             status.HTTP_403_FORBIDDEN,
@@ -243,11 +305,9 @@ def post_from_preset(
         )
 
     # client_facing / vendor_facing presets require a scoping id per the
-    # _validate_scope rule. For client_admin callers the right value is
-    # implicit: their org row's client_id. Auto-resolve when the caller
-    # did not supply one explicitly. internal_admin staff who use a
-    # client preset must pass client_id in the body (or organization_id
-    # + client_id) — they don't have an implicit anchor.
+    # _validate_scope rule. Auto-resolve when the caller did not supply
+    # one explicitly. internal_admin staff who use a client preset must
+    # pass client_id in the body (no implicit anchor).
     client_id = payload.client_id
     vendor_id = payload.vendor_id
     if (
@@ -267,11 +327,19 @@ def post_from_preset(
             )
             .limit(1)
         )
+    elif preset.audience == ReportAudience.VENDOR_FACING:
+        # P1: for workspace-owning providers, auto-fill vendor_id +
+        # client_id from their ProviderWorkspace. Internal staff using
+        # a vendor preset must supply at least vendor_id in the body.
+        if vendor_id is None and actor.workspace_vendor_id is not None:
+            vendor_id = actor.workspace_vendor_id
+        if client_id is None and actor.workspace_client_id is not None:
+            client_id = actor.workspace_client_id
 
     try:
         report, version = create_report(
             db,
-            actor=_actor_from(current),
+            actor=actor,
             title=preset.title,
             description=preset.description,
             audience=preset.audience,
@@ -311,7 +379,7 @@ def post_report(
     try:
         report, version = create_report(
             db,
-            actor=_actor_from(current),
+            actor=_actor_from(current, db),
             title=payload.title,
             description=payload.description,
             audience=payload.audience,
@@ -352,7 +420,7 @@ def get_reports(
     try:
         rows, total = list_reports(
             db,
-            actor=_actor_from(current),
+            actor=_actor_from(current, db),
             organization_id=organization_id,
             status=report_status,
             audience=audience,
@@ -375,7 +443,7 @@ def get_one_report(
     current: Annotated[CurrentUser, Depends(get_current_user)],
 ) -> ReportRead:
     try:
-        report, version = get_report(db, actor=_actor_from(current), report_id=report_id)
+        report, version = get_report(db, actor=_actor_from(current, db), report_id=report_id)
     except ReportNotFoundError as exc:
         raise HTTPException(status.HTTP_404_NOT_FOUND, str(exc)) from exc
     return _read(report, version)
@@ -395,7 +463,7 @@ def patch_one_report(
     try:
         report = patch_report(
             db,
-            actor=_actor_from(current),
+            actor=_actor_from(current, db),
             report_id=report_id,
             title=payload.title,
             description=payload.description,
@@ -412,7 +480,7 @@ def patch_one_report(
         raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, str(exc)) from exc
 
     # Re-fetch with the version so the response is symmetric to GET.
-    _, version = get_report(db, actor=_actor_from(current), report_id=report.id)
+    _, version = get_report(db, actor=_actor_from(current, db), report_id=report.id)
     return _read(report, version)
 
 
@@ -431,7 +499,7 @@ def post_version(
     try:
         version = create_version(
             db,
-            actor=_actor_from(current),
+            actor=_actor_from(current, db),
             report_id=report_id,
             content_json=payload.content_json,
             label=payload.label,
@@ -459,7 +527,7 @@ def get_versions(
     current: Annotated[CurrentUser, Depends(get_current_user)],
 ) -> ReportVersionList:
     try:
-        rows = list_versions(db, actor=_actor_from(current), report_id=report_id)
+        rows = list_versions(db, actor=_actor_from(current, db), report_id=report_id)
     except ReportNotFoundError as exc:
         raise HTTPException(status.HTTP_404_NOT_FOUND, str(exc)) from exc
     return ReportVersionList(items=[_version_summary(r) for r in rows], total=len(rows))
@@ -479,7 +547,7 @@ def get_one_version(
     try:
         version = get_version(
             db,
-            actor=_actor_from(current),
+            actor=_actor_from(current, db),
             report_id=report_id,
             version_number=version_number,
         )
@@ -518,7 +586,7 @@ def post_plan(
     3.3b decision (the streaming execution endpoint persists a
     version once the per-block content is generated).
     """
-    actor = _actor_from(current)
+    actor = _actor_from(current, db)
 
     try:
         report, _ = get_report(db, actor=actor, report_id=report_id)
@@ -596,7 +664,7 @@ def post_generate(
     generation. On `done` the persisted version is canonical and the
     canvas can switch from streaming-mode to editable-mode.
     """
-    actor = _actor_from(current)
+    actor = _actor_from(current, db)
 
     try:
         report, _ = get_report(db, actor=actor, report_id=report_id)
@@ -684,7 +752,7 @@ def get_conversation(
     db: DbSession,
     current: Annotated[CurrentUser, Depends(get_current_user)],
 ) -> ConversationList:
-    actor = _actor_from(current)
+    actor = _actor_from(current, db)
     try:
         get_report(db, actor=actor, report_id=report_id)
     except ReportNotFoundError as exc:
@@ -735,7 +803,7 @@ def post_conversation(
         event: done          { }
         event: error         { code, message }       (terminal)
     """
-    actor = _actor_from(current)
+    actor = _actor_from(current, db)
 
     try:
         report, _ = get_report(db, actor=actor, report_id=report_id)
@@ -851,7 +919,7 @@ def post_explain_block(
     """Return a short narrative explaining one block of the current
     report version. Synchronous (not SSE) — explanations are short.
     """
-    actor = _actor_from(current)
+    actor = _actor_from(current, db)
     try:
         report, current_version = get_report(
             db, actor=actor, report_id=report_id
@@ -939,7 +1007,7 @@ def post_regenerate_block(
         has_ai_summary,
     )
 
-    actor = _actor_from(current)
+    actor = _actor_from(current, db)
     try:
         report, current_version = get_report(db, actor=actor, report_id=report_id)
     except ReportNotFoundError as exc:
