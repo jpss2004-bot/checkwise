@@ -1,11 +1,12 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { Files, MagnifyingGlass } from "@phosphor-icons/react";
+import { ChatCircle, MagnifyingGlass } from "@phosphor-icons/react";
 
-import { EmptyState, Surface } from "@/components/checkwise/dashboard/stat-card";
+import { Surface } from "@/components/checkwise/dashboard/stat-card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import { DataTable, type DataTableColumn } from "@/components/ui/data-table";
 import { Input } from "@/components/ui/input";
 
 import { ClientShell } from "../_shell";
@@ -32,7 +33,7 @@ const STATUS_META: Record<
 };
 
 export default function ClientSubmissionsPage() {
-  const [rows, setRows] = useState<ClientSubmissionItem[]>([]);
+  const [rows, setRows] = useState<ClientSubmissionItem[] | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [filters, setFilters] = useState({
@@ -57,6 +58,7 @@ export default function ClientSubmissionsPage() {
       setRows(data.items);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Error al cargar entregas.");
+      setRows(null);
     } finally {
       setLoading(false);
     }
@@ -129,105 +131,121 @@ export default function ClientSubmissionsPage() {
           </form>
         </Surface>
 
-        {error ? (
-          <p className="rounded-md border border-[color:var(--status-warning-border)] bg-[color:var(--status-warning-bg)] p-3 text-sm text-[color:var(--status-warning-text)]">
-            {error}
-          </p>
-        ) : null}
-
-        <Surface
-          title={`Resultados (${rows.length})`}
-          bodyClassName="p-0"
-        >
-          {rows.length === 0 && !loading ? (
-            <div className="p-8">
-              <EmptyState
-                icon={Files}
-                title="Sin entregas con esos filtros"
-                description="Modifica los filtros para ver más resultados."
-              />
-            </div>
-          ) : (
-            <div className="overflow-x-auto">
-              <table className="w-full text-sm">
-                <thead className="border-b border-[color:var(--border-subtle)] bg-[color:var(--surface-page)] text-left font-mono text-[10px] uppercase tracking-wide text-[color:var(--text-tertiary)]">
-                  <tr>
-                    <th className="px-3 py-2.5">Cuándo</th>
-                    <th className="px-3 py-2.5">Proveedor</th>
-                    <th className="px-3 py-2.5">Requisito</th>
-                    <th className="px-3 py-2.5">Periodo</th>
-                    <th className="px-3 py-2.5">Estado</th>
-                    <th className="px-3 py-2.5">Archivo / Nota</th>
-                    <th className="px-3 py-2.5">Lineage</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {rows.map((row) => {
-                    const meta = STATUS_META[row.status] ?? {
-                      variant: "secondary" as const,
-                      label: row.status,
-                    };
-                    return (
-                      <tr
-                        key={row.submission_id}
-                        className="border-b border-[color:var(--border-subtle)] align-top last:border-0 hover:bg-[color:var(--surface-hover)]"
-                      >
-                        <td className="px-3 py-2.5 font-mono text-[11px] text-[color:var(--text-secondary)]">
-                          {new Date(row.submitted_at).toLocaleString("es-MX", {
-                            day: "2-digit",
-                            month: "short",
-                            hour: "2-digit",
-                            minute: "2-digit",
-                          })}
-                        </td>
-                        <td className="px-3 py-2.5">
-                          <p className="text-[13px] font-medium text-[color:var(--text-primary)]">
-                            {row.vendor_name}
-                          </p>
-                          <p className="font-mono text-[10px] text-[color:var(--text-tertiary)]">
-                            {row.vendor_id.slice(0, 8)}…
-                          </p>
-                        </td>
-                        <td className="px-3 py-2.5 text-[12px] text-[color:var(--text-primary)]">
-                          {row.requirement_name ?? row.requirement_code ?? "—"}
-                        </td>
-                        <td className="px-3 py-2.5 font-mono text-[11px]">
-                          {row.period_key ?? "—"}
-                        </td>
-                        <td className="px-3 py-2.5">
-                          <Badge variant={meta.variant}>{meta.label}</Badge>
-                        </td>
-                        <td className="px-3 py-2.5 text-[11px]">
-                          {row.filename ? (
-                            <p className="truncate text-[color:var(--text-primary)]">
-                              {row.filename}
-                            </p>
-                          ) : null}
-                          {row.reviewer_note ? (
-                            <p className="mt-0.5 truncate text-[color:var(--text-secondary)]">
-                              💬 {row.reviewer_note}
-                            </p>
-                          ) : null}
-                          {!row.filename && !row.reviewer_note ? "—" : null}
-                        </td>
-                        <td className="px-3 py-2.5 font-mono text-[10px]">
-                          <LineageBadges
-                            supersedes={row.supersedes_submission_id}
-                            supersededBy={row.superseded_by_submission_id}
-                          />
-                        </td>
-                      </tr>
-                    );
-                  })}
-                </tbody>
-              </table>
-            </div>
-          )}
-        </Surface>
+        <DataTable<ClientSubmissionItem>
+          items={rows}
+          loading={loading}
+          error={error}
+          onRetry={refresh}
+          columns={SUBMISSIONS_COLUMNS}
+          rowKey={(row) => row.submission_id}
+          ariaLabel="Entregas del portafolio"
+          emptyTitle="Sin entregas con esos filtros"
+          emptyDescription="Modifica los filtros para ver más resultados."
+          metaBadge={`${rows?.length ?? 0} entregas`}
+          skeletonRows={8}
+        />
       </div>
     </ClientShell>
   );
 }
+
+const SUBMISSIONS_COLUMNS: DataTableColumn<ClientSubmissionItem>[] = [
+  {
+    id: "when",
+    header: "Cuándo",
+    width: "140px",
+    cell: (row) => (
+      <span className="font-mono text-[11px] tabular-nums text-[color:var(--text-secondary)]">
+        {new Date(row.submitted_at).toLocaleString("es-MX", {
+          day: "2-digit",
+          month: "short",
+          hour: "2-digit",
+          minute: "2-digit",
+        })}
+      </span>
+    ),
+  },
+  {
+    id: "vendor",
+    header: "Proveedor",
+    cell: (row) => (
+      <div className="min-w-0">
+        <p className="text-[13px] font-medium text-[color:var(--text-primary)]">
+          {row.vendor_name}
+        </p>
+        <p className="font-mono text-[10px] tabular-nums text-[color:var(--text-tertiary)]">
+          {row.vendor_id.slice(0, 8)}…
+        </p>
+      </div>
+    ),
+  },
+  {
+    id: "requirement",
+    header: "Requisito",
+    cell: (row) => (
+      <span className="text-[12px] text-[color:var(--text-primary)]">
+        {row.requirement_name ?? row.requirement_code ?? "—"}
+      </span>
+    ),
+  },
+  {
+    id: "period",
+    header: "Periodo",
+    width: "100px",
+    cell: (row) => (
+      <span className="font-mono text-[11px] tabular-nums">
+        {row.period_key ?? "—"}
+      </span>
+    ),
+  },
+  {
+    id: "status",
+    header: "Estado",
+    width: "140px",
+    cell: (row) => {
+      const meta = STATUS_META[row.status] ?? {
+        variant: "secondary" as const,
+        label: row.status,
+      };
+      return <Badge variant={meta.variant}>{meta.label}</Badge>;
+    },
+  },
+  {
+    id: "file",
+    header: "Archivo / Nota",
+    cell: (row) => (
+      <div className="text-[11px]">
+        {row.filename ? (
+          <p className="truncate text-[color:var(--text-primary)]">
+            {row.filename}
+          </p>
+        ) : null}
+        {row.reviewer_note ? (
+          <p className="mt-0.5 flex items-center gap-1 truncate text-[color:var(--text-secondary)]">
+            <ChatCircle
+              className="h-3 w-3 shrink-0 text-[color:var(--text-tertiary)]"
+              weight="bold"
+              aria-hidden
+            />
+            {row.reviewer_note}
+          </p>
+        ) : null}
+        {!row.filename && !row.reviewer_note ? "—" : null}
+      </div>
+    ),
+  },
+  {
+    id: "lineage",
+    header: "Lineage",
+    width: "120px",
+    cell: (row) => (
+      <LineageBadges
+        supersedes={row.supersedes_submission_id}
+        supersededBy={row.superseded_by_submission_id}
+      />
+    ),
+  },
+];
 
 function FilterField({
   label,

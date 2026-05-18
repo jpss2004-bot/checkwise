@@ -3,9 +3,10 @@
 import { useEffect, useMemo, useState } from "react";
 import { IdentificationCard, MagnifyingGlass, Plus, X } from "@phosphor-icons/react";
 
-import { EmptyState, Surface } from "@/components/checkwise/dashboard/stat-card";
+import { Surface } from "@/components/checkwise/dashboard/stat-card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import { DataTable } from "@/components/ui/data-table";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 
@@ -106,86 +107,86 @@ export default function AdminClientsPage() {
           </Surface>
         )}
 
-        <Surface
-          title={`${filtered.length} cliente${filtered.length === 1 ? "" : "s"}`}
-          actions={
-            <div className="relative w-56">
-              <MagnifyingGlass
-                className="absolute left-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-[color:var(--text-tertiary)]"
-                weight="bold"
-                aria-hidden="true"
-              />
-              <Input
-                value={search}
-                onChange={(e) => setSearch(e.target.value)}
-                placeholder="Buscar nombre o RFC"
-                className="h-8 pl-8 text-xs"
-              />
-            </div>
-          }
-          bodyClassName="p-0"
-        >
-          {error ? (
-            <p className="p-4 text-sm text-[color:var(--status-warning-text)]">
-              {error}
-            </p>
-          ) : !loading && filtered.length === 0 ? (
-            <div className="p-8">
-              <EmptyState
-                icon={IdentificationCard}
-                title="Sin clientes"
-                description="Aún no hay clientes registrados con esos filtros."
-              />
-            </div>
-          ) : (
-            <div className="overflow-x-auto">
-              <table className="w-full text-sm">
-                <thead className="border-b border-[color:var(--border-subtle)] bg-[color:var(--surface-page)] text-left font-mono text-[10px] uppercase tracking-wide text-[color:var(--text-tertiary)]">
-                  <tr>
-                    <th className="px-4 py-2.5">Nombre</th>
-                    <th className="px-3 py-2.5">RFC</th>
-                    <th className="px-3 py-2.5">Responsable</th>
-                    <th className="px-3 py-2.5">Estado</th>
-                    <th className="px-3 py-2.5"></th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {filtered.map((row) => (
-                    <tr
-                      key={row.id}
-                      className="border-b border-[color:var(--border-subtle)] transition-colors last:border-0 hover:bg-[color:var(--surface-hover)]"
-                    >
-                      <td className="px-4 py-2.5 font-medium text-[color:var(--text-primary)]">
-                        {row.name}
-                      </td>
-                      <td className="px-3 py-2.5 font-mono text-[11px] text-[color:var(--text-secondary)]">
-                        {row.rfc ?? "—"}
-                      </td>
-                      <td className="px-3 py-2.5 text-[12px] text-[color:var(--text-primary)]">
-                        {row.responsible_name ?? "—"}
-                      </td>
-                      <td className="px-3 py-2.5">
-                        <StatusBadge status={row.status} />
-                      </td>
-                      <td className="px-3 py-2.5 text-right">
-                        <Button
-                          size="sm"
-                          variant="outline"
-                          onClick={() => {
-                            setCreateOpen(false);
-                            setEditing(row);
-                          }}
-                        >
-                          Editar
-                        </Button>
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-          )}
-        </Surface>
+        <div className="relative w-56">
+          <MagnifyingGlass
+            className="absolute left-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-[color:var(--text-tertiary)]"
+            weight="bold"
+            aria-hidden="true"
+          />
+          <Input
+            value={search}
+            onChange={(e) => setSearch(e.target.value)}
+            placeholder="Buscar nombre o RFC"
+            className="h-8 pl-8 text-xs"
+            aria-label="Buscar cliente"
+          />
+        </div>
+
+        <DataTable<AdminClient>
+          items={loading ? null : filtered}
+          loading={loading}
+          error={error}
+          onRetry={refresh}
+          columns={[
+            {
+              id: "name",
+              header: "Nombre",
+              cell: (row) => (
+                <p className="font-medium text-[color:var(--text-primary)]">
+                  {row.name}
+                </p>
+              ),
+            },
+            {
+              id: "rfc",
+              header: "RFC",
+              width: "160px",
+              cell: (row) => (
+                <span className="font-mono text-[11px] tabular-nums text-[color:var(--text-secondary)]">
+                  {row.rfc ?? "—"}
+                </span>
+              ),
+            },
+            {
+              id: "responsible",
+              header: "Responsable",
+              cell: (row) => (
+                <span className="text-[12px] text-[color:var(--text-primary)]">
+                  {row.responsible_name ?? "—"}
+                </span>
+              ),
+            },
+            {
+              id: "status",
+              header: "Estado",
+              width: "120px",
+              cell: (row) => <StatusBadge status={row.status} />,
+            },
+            {
+              id: "action",
+              header: "",
+              width: "100px",
+              align: "right",
+              cell: (row) => (
+                <Button
+                  size="sm"
+                  variant="outline"
+                  onClick={() => {
+                    setCreateOpen(false);
+                    setEditing(row);
+                  }}
+                >
+                  Editar
+                </Button>
+              ),
+            },
+          ]}
+          rowKey={(row) => row.id}
+          ariaLabel="Catálogo de clientes"
+          emptyTitle="Sin clientes"
+          emptyDescription="Aún no hay clientes registrados con esos filtros."
+          metaBadge={`${filtered.length} cliente${filtered.length === 1 ? "" : "s"}`}
+        />
       </div>
     </AdminShell>
   );

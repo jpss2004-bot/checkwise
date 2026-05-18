@@ -18,12 +18,13 @@ import {
 } from "@phosphor-icons/react";
 
 import { RadialGauge } from "@/components/checkwise/charts";
-import {
-  StatCard,
-  Surface,
-} from "@/components/checkwise/dashboard/stat-card";
-import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import { MetadataStrip } from "@/components/ui/metadata-strip";
+import {
+  EmptyState,
+  ErrorState,
+  Skeleton,
+} from "@/components/checkwise/portal/state-surfaces";
 
 import { AdminShell } from "../_shell";
 import { getAdminOverview, type AdminOverview } from "@/lib/api/admin";
@@ -31,9 +32,12 @@ import { getAdminOverview, type AdminOverview } from "@/lib/api/admin";
 export default function AdminDashboardPage() {
   const [data, setData] = useState<AdminOverview | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [reloadKey, setReloadKey] = useState(0);
 
   useEffect(() => {
     let cancelled = false;
+    setData(null);
+    setError(null);
     getAdminOverview()
       .then((overview) => {
         if (!cancelled) setData(overview);
@@ -45,7 +49,7 @@ export default function AdminDashboardPage() {
     return () => {
       cancelled = true;
     };
-  }, []);
+  }, [reloadKey]);
 
   return (
     <AdminShell
@@ -61,74 +65,17 @@ export default function AdminDashboardPage() {
       }
     >
       {error ? (
-        <p className="rounded-md border border-[color:var(--status-warning-border)] bg-[color:var(--status-warning-bg)] p-3 text-sm text-[color:var(--status-warning-text)]">
-          {error}
-        </p>
+        <ErrorState
+          title="No pudimos cargar el resumen"
+          description={error}
+          onRetry={() => setReloadKey((k) => k + 1)}
+        />
       ) : !data ? (
         <DashboardSkeleton />
       ) : (
         <div className="space-y-6">
           <AdminHero data={data} />
-
-          <div className="cw-stagger grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
-            <StatCard
-              label="Clientes"
-              value={data.clients_total}
-              tone="brand"
-              icon={IdentificationCard}
-              caption="Empresas dadas de alta en CheckWise."
-              href="/admin/clients"
-            />
-            <StatCard
-              label="Proveedores"
-              value={data.vendors_total}
-              tone="brand"
-              icon={Storefront}
-              caption="Total de proveedores REPSE registrados."
-              href="/admin/vendors"
-            />
-            <StatCard
-              label="Workspaces activos"
-              value={data.active_workspaces_total}
-              tone="teal"
-              icon={Users}
-              caption="Proveedores con expediente vivo."
-            />
-            <StatCard
-              label="En revisión"
-              value={data.pending_reviews_total}
-              tone="info"
-              icon={HourglassHigh}
-              caption="Documentos en cola humana."
-              href="/admin/reviewer"
-            />
-          </div>
-
-          <div className="cw-stagger grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
-            <StatCard
-              label="Rechazos / aclaración"
-              value={data.rejected_or_correction_total}
-              tone={data.rejected_or_correction_total > 0 ? "warning" : "success"}
-              icon={WarningCircle}
-              caption="Documentos que requieren acción del proveedor."
-            />
-            <StatCard
-              label="Entregas recientes"
-              value={data.recent_submissions_total}
-              tone="brand"
-              icon={Files}
-              caption="Cargas en los últimos días."
-            />
-            <StatCard
-              label="Eventos audit log"
-              value={data.recent_audit_events_total}
-              tone="neutral"
-              icon={ListMagnifyingGlass}
-              caption="Trazabilidad reciente del sistema."
-              href="/admin/audit-log"
-            />
-          </div>
-
+          <AdminSignals data={data} />
           <OperationsLauncher />
         </div>
       )}
@@ -136,42 +83,62 @@ export default function AdminDashboardPage() {
   );
 }
 
-// ─── Hero ────────────────────────────────────────────────────────
+// ─── Hero (asymmetric, no gradient) ─────────────────────────────
 
 function AdminHero({ data }: { data: AdminOverview }) {
   const utilisation =
     data.vendors_total === 0
       ? 0
       : Math.round((data.active_workspaces_total / Math.max(1, data.vendors_total)) * 100);
-  const reviewBacklog = data.pending_reviews_total + data.rejected_or_correction_total;
+  const reviewBacklog =
+    data.pending_reviews_total + data.rejected_or_correction_total;
   return (
-    <section className="cw-fade-up overflow-hidden rounded-xl border border-[color:var(--border-default)] bg-gradient-to-br from-[color:var(--surface-brand-muted)] via-[color:var(--surface-raised)] to-[color:var(--surface-raised)] p-6 md:p-8">
-      <div className="grid gap-6 md:grid-cols-[auto,1fr] md:items-center">
-        <RadialGauge
-          value={utilisation}
-          tone="brand"
-          size={148}
-          thickness={12}
-          label={`${utilisation}%`}
-          caption="workspaces activos"
+    <section className="cw-fade-up grid gap-5 rounded-lg border border-[color:var(--border-default)] bg-[color:var(--surface-raised)] p-5 shadow-xs md:grid-cols-[auto,1fr] md:items-center md:gap-8 md:p-6">
+      <RadialGauge
+        value={utilisation}
+        tone="brand"
+        size={140}
+        thickness={12}
+        label={`${utilisation}%`}
+        caption="workspaces activos"
+      />
+      <div className="min-w-0 space-y-3">
+        <p className="cw-eyebrow">Control plane · {data.clients_total} clientes · {data.vendors_total} proveedores</p>
+        <p className="text-xl font-semibold leading-tight tracking-tight text-[color:var(--text-primary)]">
+          {heroHeadline(data, reviewBacklog)}
+        </p>
+        <p className="max-w-2xl text-[13px] leading-relaxed text-[color:var(--text-secondary)]">
+          {heroDescription(data, reviewBacklog)}
+        </p>
+        <MetadataStrip
+          bordered={false}
+          className="!py-0"
+          items={[
+            {
+              label: "Revisar",
+              value: formatCount(data.pending_reviews_total),
+              mono: true,
+            },
+            {
+              label: "Correcciones",
+              value: formatCount(data.rejected_or_correction_total),
+              mono: true,
+              tone: data.rejected_or_correction_total > 0 ? "warning" : "default",
+            },
+            {
+              label: "Audit recientes",
+              value: formatCount(data.recent_audit_events_total),
+              mono: true,
+            },
+          ]}
         />
-        <div className="min-w-0 space-y-3">
-          <div className="flex flex-wrap items-center gap-2">
-            <Badge variant="brand">Control plane</Badge>
-            <span className="font-mono text-[10px] uppercase tracking-wide text-[color:var(--text-tertiary)]">
-              {data.clients_total} clientes · {data.vendors_total} proveedores
-            </span>
-          </div>
-          <p className="text-lg font-semibold tracking-tight text-[color:var(--text-primary)] md:text-xl">
-            {heroHeadline(data, reviewBacklog)}
-          </p>
-          <p className="max-w-2xl text-[13px] leading-relaxed text-[color:var(--text-secondary)]">
-            {heroDescription(data, reviewBacklog)}
-          </p>
-        </div>
       </div>
     </section>
   );
+}
+
+function formatCount(n: number): string {
+  return n === 0 ? "—" : n.toString();
 }
 
 function heroHeadline(data: AdminOverview, backlog: number): string {
@@ -195,12 +162,147 @@ function heroDescription(data: AdminOverview, backlog: number): string {
     parts.push(`${data.recent_audit_events_total} eventos audit log recientes`);
   if (parts.length === 0)
     return backlog === 0
-      ? "No hay actividad operativa pendiente — todo está al día."
+      ? "No hay actividad operativa pendiente. Todo está al día."
       : "Todo bajo control. Revisa la sección inferior para entrar a cada superficie.";
   return parts.join(" · ") + ".";
 }
 
-// ─── Operations launcher ─────────────────────────────────────────
+// ─── Vertical signals list (replaces 4-up + 3-up StatCard grids) ──
+
+type SignalRow = {
+  href?: string;
+  icon: typeof IdentificationCard;
+  label: string;
+  caption: string;
+  value: number;
+  tone?: "default" | "warning" | "teal";
+};
+
+function AdminSignals({ data }: { data: AdminOverview }) {
+  const rows: SignalRow[] = [
+    {
+      href: "/admin/clients",
+      icon: IdentificationCard,
+      label: "Clientes",
+      caption: "Empresas dadas de alta en CheckWise.",
+      value: data.clients_total,
+    },
+    {
+      href: "/admin/vendors",
+      icon: Storefront,
+      label: "Proveedores",
+      caption: "Proveedores REPSE registrados.",
+      value: data.vendors_total,
+    },
+    {
+      icon: Users,
+      label: "Workspaces activos",
+      caption: "Proveedores con expediente vivo.",
+      value: data.active_workspaces_total,
+      tone: "teal",
+    },
+    {
+      href: "/admin/reviewer",
+      icon: HourglassHigh,
+      label: "En revisión",
+      caption: "Documentos en cola humana.",
+      value: data.pending_reviews_total,
+    },
+    {
+      icon: WarningCircle,
+      label: "Rechazos / aclaración",
+      caption: "Documentos que requieren acción del proveedor.",
+      value: data.rejected_or_correction_total,
+      tone: data.rejected_or_correction_total > 0 ? "warning" : "default",
+    },
+    {
+      icon: Files,
+      label: "Entregas recientes",
+      caption: "Cargas en los últimos días.",
+      value: data.recent_submissions_total,
+    },
+    {
+      href: "/admin/audit-log",
+      icon: ListMagnifyingGlass,
+      label: "Eventos audit log",
+      caption: "Trazabilidad reciente del sistema.",
+      value: data.recent_audit_events_total,
+    },
+  ];
+
+  return (
+    <section
+      aria-label="Estado operativo"
+      className="cw-fade-up rounded-lg border border-[color:var(--border-default)] bg-[color:var(--surface-raised)] shadow-xs"
+    >
+      <header className="border-b border-[color:var(--border-subtle)] px-5 py-3">
+        <p className="cw-eyebrow">Estado operativo</p>
+        <p className="text-sm font-semibold text-[color:var(--text-primary)]">
+          Señales agrupadas
+        </p>
+      </header>
+      <ul className="divide-y divide-[color:var(--border-subtle)]">
+        {rows.map((row) => (
+          <li key={row.label}>
+            <SignalRow row={row} />
+          </li>
+        ))}
+      </ul>
+    </section>
+  );
+}
+
+function SignalRow({ row }: { row: SignalRow }) {
+  const Icon = row.icon;
+  const valueTone =
+    row.tone === "warning"
+      ? "text-[color:var(--status-warning-text)]"
+      : row.tone === "teal"
+      ? "text-[color:var(--text-teal)]"
+      : "text-[color:var(--text-primary)]";
+  const content = (
+    <div className="flex items-center gap-3 px-5 py-3 transition-colors hover:bg-[color:var(--surface-hover)]">
+      <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-md bg-[color:var(--surface-sunken)] text-[color:var(--text-secondary)]">
+        <Icon className="h-4 w-4" weight="bold" aria-hidden="true" />
+      </span>
+      <div className="min-w-0 flex-1">
+        <p className="text-[13px] font-semibold text-[color:var(--text-primary)]">
+          {row.label}
+        </p>
+        <p className="text-[11px] text-[color:var(--text-tertiary)]">
+          {row.caption}
+        </p>
+      </div>
+      <span
+        className={`font-mono text-lg font-semibold tabular-nums ${valueTone}`}
+      >
+        {row.value === 0 ? "—" : row.value}
+      </span>
+      {row.href ? (
+        <ArrowRight
+          className="h-4 w-4 shrink-0 text-[color:var(--text-tertiary)]"
+          weight="bold"
+          aria-hidden="true"
+        />
+      ) : (
+        <span className="h-4 w-4 shrink-0" aria-hidden />
+      )}
+    </div>
+  );
+  if (row.href) {
+    return (
+      <Link
+        href={row.href}
+        className="block focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-[color:var(--border-focus)]/40"
+      >
+        {content}
+      </Link>
+    );
+  }
+  return content;
+}
+
+// ─── Operations launcher (vertical bordered list) ────────────────
 
 function OperationsLauncher() {
   const items: {
@@ -247,63 +349,83 @@ function OperationsLauncher() {
     },
   ];
   return (
-    <Surface
-      title="Superficies operativas"
-      description="Cada cambio queda firmado en el audit log."
+    <section
+      aria-label="Superficies operativas"
+      className="cw-fade-up rounded-lg border border-[color:var(--border-default)] bg-[color:var(--surface-raised)] shadow-xs"
     >
-      <ul className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
+      <header className="border-b border-[color:var(--border-subtle)] px-5 py-3">
+        <p className="cw-eyebrow">Superficies operativas</p>
+        <p className="text-sm font-semibold text-[color:var(--text-primary)]">
+          Cada cambio queda firmado en el audit log
+        </p>
+      </header>
+      <ul className="divide-y divide-[color:var(--border-subtle)]">
         {items.map((item) => (
           <li key={item.href}>
             <Link
               href={item.href}
-              className="cw-hover-lift block rounded-md border border-[color:var(--border-default)] bg-[color:var(--surface-page)] p-3 transition-colors hover:bg-[color:var(--surface-hover)]"
+              className="flex items-center gap-3 px-5 py-3 transition-colors hover:bg-[color:var(--surface-hover)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-[color:var(--border-focus)]/40"
             >
-              <div className="flex items-center gap-2.5">
-                <span className="flex h-9 w-9 items-center justify-center rounded-md bg-[color:var(--surface-brand-muted)] text-[color:var(--text-brand)]">
-                  <item.icon className="h-4 w-4" weight="duotone" aria-hidden="true" />
-                </span>
-                <div className="min-w-0 flex-1">
-                  <p className="flex items-center justify-between gap-1 text-[13px] font-semibold text-[color:var(--text-primary)]">
-                    {item.label}
-                    <ArrowRight
-                      className="h-3 w-3 text-[color:var(--text-tertiary)]"
-                      weight="bold"
-                      aria-hidden="true"
-                    />
-                  </p>
-                  <p className="text-[11px] text-[color:var(--text-secondary)]">
-                    {item.helper}
-                  </p>
-                </div>
+              <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-md bg-[color:var(--surface-brand-muted)] text-[color:var(--text-brand)]">
+                <item.icon className="h-4 w-4" weight="bold" aria-hidden="true" />
+              </span>
+              <div className="min-w-0 flex-1">
+                <p className="text-[13px] font-semibold text-[color:var(--text-primary)]">
+                  {item.label}
+                </p>
+                <p className="text-[11px] text-[color:var(--text-tertiary)]">
+                  {item.helper}
+                </p>
               </div>
+              <ArrowRight
+                className="h-4 w-4 shrink-0 text-[color:var(--text-tertiary)]"
+                weight="bold"
+                aria-hidden="true"
+              />
             </Link>
           </li>
         ))}
       </ul>
-    </Surface>
+    </section>
   );
 }
 
 function DashboardSkeleton() {
   return (
-    <div className="space-y-6">
-      <div className="h-40 animate-pulse rounded-xl border border-[color:var(--border-default)] bg-[color:var(--surface-raised)]" />
-      <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
-        {[0, 1, 2, 3].map((i) => (
-          <div
-            key={i}
-            className="h-28 animate-pulse rounded-lg border border-[color:var(--border-default)] bg-[color:var(--surface-raised)]"
-          />
-        ))}
+    <div className="space-y-6" aria-busy="true" aria-live="polite">
+      <span className="sr-only">Cargando resumen operativo…</span>
+      <div className="rounded-lg border border-[color:var(--border-default)] bg-[color:var(--surface-raised)] p-5 shadow-xs">
+        <div className="grid gap-5 md:grid-cols-[auto,1fr] md:items-center">
+          <Skeleton className="h-[140px] w-[140px] rounded-full" />
+          <div className="space-y-2">
+            <Skeleton className="h-3 w-3/12" />
+            <Skeleton className="h-6 w-9/12" />
+            <Skeleton className="h-3 w-8/12" />
+          </div>
+        </div>
       </div>
-      <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
-        {[0, 1, 2].map((i) => (
-          <div
-            key={i}
-            className="h-28 animate-pulse rounded-lg border border-[color:var(--border-default)] bg-[color:var(--surface-raised)]"
-          />
-        ))}
-      </div>
+      {[0, 1].map((g) => (
+        <div
+          key={g}
+          className="rounded-lg border border-[color:var(--border-default)] bg-[color:var(--surface-raised)] shadow-xs"
+        >
+          <div className="border-b border-[color:var(--border-subtle)] px-5 py-3">
+            <Skeleton className="h-3 w-2/12" />
+          </div>
+          <div className="divide-y divide-[color:var(--border-subtle)]">
+            {Array.from({ length: 4 }).map((_, i) => (
+              <div key={i} className="flex items-center gap-3 px-5 py-3">
+                <Skeleton className="h-8 w-8 rounded-md" />
+                <div className="flex-1 space-y-1">
+                  <Skeleton className="h-3 w-4/12" />
+                  <Skeleton className="h-3 w-6/12" />
+                </div>
+                <Skeleton className="h-5 w-10" />
+              </div>
+            ))}
+          </div>
+        </div>
+      ))}
     </div>
   );
 }

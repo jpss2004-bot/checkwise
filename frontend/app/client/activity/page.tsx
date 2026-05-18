@@ -17,6 +17,10 @@ import {
   Surface,
 } from "@/components/checkwise/dashboard/stat-card";
 import { Badge } from "@/components/ui/badge";
+import {
+  ErrorState,
+  Skeleton,
+} from "@/components/checkwise/portal/state-surfaces";
 
 import { ClientShell } from "../_shell";
 import {
@@ -30,11 +34,14 @@ import {
  * actually read it.
  */
 export default function ClientActivityPage() {
-  const [rows, setRows] = useState<ClientActivityItem[]>([]);
+  const [rows, setRows] = useState<ClientActivityItem[] | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [reloadKey, setReloadKey] = useState(0);
 
   useEffect(() => {
     let cancelled = false;
+    setRows(null);
+    setError(null);
     listClientActivity({ limit: 200 })
       .then((data) => {
         if (!cancelled) setRows(data.items);
@@ -46,9 +53,9 @@ export default function ClientActivityPage() {
     return () => {
       cancelled = true;
     };
-  }, []);
+  }, [reloadKey]);
 
-  const groups = useMemo(() => groupByDay(rows), [rows]);
+  const groups = useMemo(() => groupByDay(rows ?? []), [rows]);
 
   return (
     <ClientShell
@@ -56,9 +63,13 @@ export default function ClientActivityPage() {
       description="Bitácora de eventos en tus proveedores: cargas, revisiones, cambios de estado, notas."
     >
       {error ? (
-        <p className="rounded-md border border-[color:var(--status-warning-border)] bg-[color:var(--status-warning-bg)] p-3 text-sm text-[color:var(--status-warning-text)]">
-          {error}
-        </p>
+        <ErrorState
+          title="No pudimos cargar la actividad"
+          description={error}
+          onRetry={() => setReloadKey((k) => k + 1)}
+        />
+      ) : rows === null ? (
+        <ActivitySkeleton />
       ) : rows.length === 0 ? (
         <Surface>
           <EmptyState
@@ -76,9 +87,7 @@ export default function ClientActivityPage() {
           <ol className="space-y-7">
             {groups.map((g) => (
               <li key={g.day} className="space-y-3">
-                <p className="font-mono text-[10px] uppercase tracking-wide text-[color:var(--text-tertiary)]">
-                  {g.label}
-                </p>
+                <p className="cw-eyebrow">{g.label}</p>
                 <ul className="relative space-y-3 border-l border-[color:var(--border-subtle)] pl-5">
                   {g.items.map((row) => (
                     <ActivityRow key={row.id} row={row} />
@@ -127,6 +136,29 @@ function ActivityRow({ row }: { row: ClientActivityItem }) {
         </div>
       </div>
     </li>
+  );
+}
+
+function ActivitySkeleton() {
+  return (
+    <Surface title="Cronología" icon={ClockClockwise}>
+      <ol className="space-y-6" aria-busy="true" aria-live="polite">
+        <span className="sr-only">Cargando actividad…</span>
+        {Array.from({ length: 3 }).map((_, gi) => (
+          <li key={gi} className="space-y-3">
+            <Skeleton className="h-3 w-40" />
+            <ul className="relative space-y-3 border-l border-[color:var(--border-subtle)] pl-5">
+              {Array.from({ length: 3 }).map((_, ri) => (
+                <li key={ri} className="rounded-md border border-[color:var(--border-subtle)] bg-[color:var(--surface-page)] p-3">
+                  <Skeleton className="h-3 w-9/12" />
+                  <Skeleton className="mt-2 h-3 w-4/12" />
+                </li>
+              ))}
+            </ul>
+          </li>
+        ))}
+      </ol>
+    </Surface>
   );
 }
 

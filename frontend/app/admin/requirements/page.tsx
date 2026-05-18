@@ -3,9 +3,10 @@
 import { useEffect, useMemo, useState } from "react";
 import { Books, MagnifyingGlass, Plus, X } from "@phosphor-icons/react";
 
-import { EmptyState, Surface } from "@/components/checkwise/dashboard/stat-card";
+import { Surface } from "@/components/checkwise/dashboard/stat-card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import { DataTable } from "@/components/ui/data-table";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 
@@ -116,104 +117,118 @@ export default function AdminRequirementsPage() {
           </Surface>
         )}
 
-        <Surface
-          title={`${filtered.length} requisito${filtered.length === 1 ? "" : "s"}`}
-          actions={
-            <div className="relative w-56">
-              <MagnifyingGlass
-                className="absolute left-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-[color:var(--text-tertiary)]"
-                weight="bold"
-                aria-hidden="true"
-              />
-              <Input
-                value={search}
-                onChange={(e) => setSearch(e.target.value)}
-                placeholder="Código, nombre o tipo"
-                className="h-8 pl-8 text-xs"
-              />
-            </div>
-          }
-          bodyClassName="p-0"
-        >
-          {error ? (
-            <p className="p-4 text-sm text-[color:var(--status-warning-text)]">
-              {error}
-            </p>
-          ) : !loading && filtered.length === 0 ? (
-            <div className="p-8">
-              <EmptyState
-                icon={Books}
-                title="Sin requisitos"
-                description="No hay requisitos con esos filtros."
-              />
-            </div>
-          ) : (
-            <div className="overflow-x-auto">
-              <table className="w-full text-sm">
-                <thead className="border-b border-[color:var(--border-subtle)] bg-[color:var(--surface-page)] text-left font-mono text-[10px] uppercase tracking-wide text-[color:var(--text-tertiary)]">
-                  <tr>
-                    <th className="px-4 py-2.5">Código</th>
-                    <th className="px-3 py-2.5">Nombre</th>
-                    <th className="px-3 py-2.5">Tipo de carga</th>
-                    <th className="px-3 py-2.5">Frecuencia</th>
-                    <th className="px-3 py-2.5">Riesgo</th>
-                    <th className="px-3 py-2.5">Activo</th>
-                    <th className="px-3 py-2.5">Versión</th>
-                    <th className="px-3 py-2.5"></th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {filtered.map((row) => (
-                    <tr
-                      key={row.id}
-                      className="border-b border-[color:var(--border-subtle)] transition-colors last:border-0 hover:bg-[color:var(--surface-hover)]"
-                    >
-                      <td className="px-4 py-2.5 font-mono text-[11px] text-[color:var(--text-secondary)]">
-                        {row.code}
-                      </td>
-                      <td className="px-3 py-2.5 text-[13px] font-medium text-[color:var(--text-primary)]">
-                        {row.name}
-                      </td>
-                      <td className="px-3 py-2.5 text-[12px] text-[color:var(--text-secondary)]">
-                        {row.load_type}
-                      </td>
-                      <td className="px-3 py-2.5">
-                        <Badge variant="outline">{row.frequency}</Badge>
-                      </td>
-                      <td className="px-3 py-2.5">
-                        <Badge variant={RISK_VARIANT[row.risk_level] ?? "outline"}>
-                          {row.risk_level}
-                        </Badge>
-                      </td>
-                      <td className="px-3 py-2.5">
-                        {row.is_active ? (
-                          <Badge variant="success">Sí</Badge>
-                        ) : (
-                          <Badge variant="secondary">No</Badge>
-                        )}
-                      </td>
-                      <td className="px-3 py-2.5 font-mono text-[11px] text-[color:var(--text-tertiary)]">
-                        v{row.current_version}
-                      </td>
-                      <td className="px-3 py-2.5 text-right">
-                        <Button
-                          size="sm"
-                          variant="outline"
-                          onClick={() => {
-                            setCreateOpen(false);
-                            setEditing(row);
-                          }}
-                        >
-                          Editar
-                        </Button>
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-          )}
-        </Surface>
+        <div className="relative w-56">
+          <MagnifyingGlass
+            className="absolute left-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-[color:var(--text-tertiary)]"
+            weight="bold"
+            aria-hidden="true"
+          />
+          <Input
+            value={search}
+            onChange={(e) => setSearch(e.target.value)}
+            placeholder="Código, nombre o tipo"
+            className="h-8 pl-8 text-xs"
+            aria-label="Buscar requisito"
+          />
+        </div>
+
+        <DataTable<AdminRequirement>
+          items={loading ? null : filtered}
+          loading={loading}
+          error={error}
+          onRetry={refresh}
+          columns={[
+            {
+              id: "code",
+              header: "Código",
+              width: "220px",
+              cell: (row) => (
+                <span className="font-mono text-[11px] tabular-nums text-[color:var(--text-secondary)]">
+                  {row.code}
+                </span>
+              ),
+            },
+            {
+              id: "name",
+              header: "Nombre",
+              cell: (row) => (
+                <p className="text-[13px] font-medium text-[color:var(--text-primary)]">
+                  {row.name}
+                </p>
+              ),
+            },
+            {
+              id: "load_type",
+              header: "Carga",
+              width: "100px",
+              cell: (row) => (
+                <span className="text-[12px] text-[color:var(--text-secondary)]">
+                  {row.load_type}
+                </span>
+              ),
+            },
+            {
+              id: "frequency",
+              header: "Frecuencia",
+              width: "120px",
+              cell: (row) => <Badge variant="outline">{row.frequency}</Badge>,
+            },
+            {
+              id: "risk",
+              header: "Riesgo",
+              width: "100px",
+              cell: (row) => (
+                <Badge variant={RISK_VARIANT[row.risk_level] ?? "outline"}>
+                  {row.risk_level}
+                </Badge>
+              ),
+            },
+            {
+              id: "active",
+              header: "Activo",
+              width: "80px",
+              cell: (row) =>
+                row.is_active ? (
+                  <Badge variant="success">Sí</Badge>
+                ) : (
+                  <Badge variant="secondary">No</Badge>
+                ),
+            },
+            {
+              id: "version",
+              header: "Versión",
+              width: "80px",
+              cell: (row) => (
+                <span className="font-mono text-[11px] tabular-nums text-[color:var(--text-tertiary)]">
+                  v{row.current_version}
+                </span>
+              ),
+            },
+            {
+              id: "action",
+              header: "",
+              width: "100px",
+              align: "right",
+              cell: (row) => (
+                <Button
+                  size="sm"
+                  variant="outline"
+                  onClick={() => {
+                    setCreateOpen(false);
+                    setEditing(row);
+                  }}
+                >
+                  Editar
+                </Button>
+              ),
+            },
+          ]}
+          rowKey={(row) => row.id}
+          ariaLabel="Catálogo de requisitos"
+          emptyTitle="Sin requisitos"
+          emptyDescription="No hay requisitos con esos filtros."
+          metaBadge={`${filtered.length} requisito${filtered.length === 1 ? "" : "s"}`}
+        />
       </div>
     </AdminShell>
   );

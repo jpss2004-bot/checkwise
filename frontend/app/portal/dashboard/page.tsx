@@ -226,11 +226,9 @@ const TONE_TO_ICON: Record<DashboardSemaphoreLevel, Icon> = {
 };
 
 const TONE_TO_HERO_BG: Record<DashboardSemaphoreLevel, string> = {
-  green:
-    "from-[color:var(--status-success-bg)] to-[color:var(--surface-raised)] border-[color:var(--status-success-border)]",
-  yellow:
-    "from-[color:var(--status-warning-bg)] to-[color:var(--surface-raised)] border-[color:var(--status-warning-border)]",
-  red: "from-[color:var(--status-error-bg)] to-[color:var(--surface-raised)] border-[color:var(--status-error-border)]",
+  green: "border-[color:var(--status-success-border)]",
+  yellow: "border-[color:var(--status-warning-border)]",
+  red: "border-[color:var(--status-error-border)]",
 };
 
 const TONE_TO_ACCENT: Record<
@@ -260,7 +258,7 @@ function SemaphoreHero({
   ];
   return (
     <section
-      className={`cw-fade-up overflow-hidden rounded-xl border bg-gradient-to-br ${TONE_TO_HERO_BG[semaphore.level]}`}
+      className={`cw-fade-up rounded-lg border bg-[color:var(--surface-raised)] shadow-xs ${TONE_TO_HERO_BG[semaphore.level]}`}
       aria-label="Estado de cumplimiento"
     >
       <div className="grid gap-6 p-6 md:grid-cols-[auto,1fr] md:items-center md:p-8">

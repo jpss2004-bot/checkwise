@@ -13,14 +13,11 @@ import {
 } from "@phosphor-icons/react";
 
 import { StackedBars, type ChartSegment } from "@/components/checkwise/charts";
-import {
-  EmptyState,
-  StatCard,
-  Surface,
-} from "@/components/checkwise/dashboard/stat-card";
-import { Badge } from "@/components/ui/badge";
+import { Surface } from "@/components/checkwise/dashboard/stat-card";
 import { Button } from "@/components/ui/button";
+import { DataTable, type DataTableColumn } from "@/components/ui/data-table";
 import { Input } from "@/components/ui/input";
+import { MetadataStrip } from "@/components/ui/metadata-strip";
 import { Progress } from "@/components/ui/progress";
 
 import { ClientShell } from "../_shell";
@@ -39,7 +36,7 @@ const LEVELS = [
 type SemaphoreLevel = "green" | "yellow" | "red";
 
 export default function ClientVendorsPage() {
-  const [rows, setRows] = useState<ClientVendorRow[]>([]);
+  const [rows, setRows] = useState<ClientVendorRow[] | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [search, setSearch] = useState("");
@@ -56,6 +53,7 @@ export default function ClientVendorsPage() {
       setRows(data.items);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Error al cargar proveedores.");
+      setRows(null);
     } finally {
       setLoading(false);
     }
@@ -68,12 +66,12 @@ export default function ClientVendorsPage() {
 
   const counts = useMemo(() => {
     const c = { green: 0, yellow: 0, red: 0 };
-    for (const r of rows) c[r.semaphore_level] += 1;
+    for (const r of rows ?? []) c[r.semaphore_level] += 1;
     return c;
   }, [rows]);
 
   const sums = useMemo(() => {
-    return rows.reduce(
+    return (rows ?? []).reduce(
       (acc, r) => {
         acc.missing += r.missing_required_count;
         acc.rejected += r.rejected_or_correction_count;
@@ -97,34 +95,16 @@ export default function ClientVendorsPage() {
       description="Lista de proveedores que tienes bajo administración con su semáforo, % de cumplimiento y faltantes."
     >
       <div className="space-y-6">
-        {/* KPI strip */}
-        <div className="cw-stagger grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
-          <StatCard
-            label="Proveedores"
-            value={rows.length}
-            tone="brand"
-            icon={Storefront}
-            caption={`${counts.green} en verde · ${counts.yellow} en amarillo · ${counts.red} en rojo`}
-          />
-          <StatCard
-            label="Faltantes obligatorios"
-            value={sums.missing}
-            tone={sums.missing > 0 ? "warning" : "success"}
-            caption="Documentos REPSE pendientes."
-          />
-          <StatCard
-            label="En revisión"
-            value={sums.pending}
-            tone="info"
-            caption="Pendientes de validación humana."
-          />
-          <StatCard
-            label="Vencen ≤14 días"
-            value={sums.dueSoon}
-            tone={sums.dueSoon > 0 ? "warning" : "success"}
-            caption="Obligaciones próximas a vencer."
-          />
-        </div>
+        <MetadataStrip
+          items={[
+            { label: "Proveedores", value: (rows?.length ?? 0).toString(), mono: true },
+            { label: "Verde", value: counts.green.toString(), mono: true, tone: "default" },
+            { label: "Amarillo", value: counts.yellow.toString(), mono: true, tone: counts.yellow > 0 ? "warning" : "default" },
+            { label: "Rojo", value: counts.red.toString(), mono: true, tone: counts.red > 0 ? "warning" : "default" },
+            { label: "Faltantes", value: sums.missing.toString(), mono: true, tone: sums.missing > 0 ? "warning" : "default" },
+            { label: "Vencen ≤14d", value: sums.dueSoon.toString(), mono: true, tone: sums.dueSoon > 0 ? "warning" : "default" },
+          ]}
+        />
 
         {/* Distribution bar */}
         <Surface
@@ -191,130 +171,140 @@ export default function ClientVendorsPage() {
           </form>
         </Surface>
 
-        {error ? (
-          <p className="rounded-md border border-[color:var(--status-warning-border)] bg-[color:var(--status-warning-bg)] p-3 text-sm text-[color:var(--status-warning-text)]">
-            {error}
-          </p>
-        ) : null}
-
-        {/* Table */}
-        <Surface bodyClassName="p-0">
-          {rows.length === 0 && !loading ? (
-            <div className="p-8">
-              <EmptyState
-                icon={Storefront}
-                title="Sin proveedores con esos filtros"
-                description="Modifica la búsqueda o limpia los filtros para ver más resultados."
-              />
-            </div>
-          ) : (
-            <div className="overflow-x-auto">
-              <table className="w-full text-sm">
-                <thead className="border-b border-[color:var(--border-subtle)] bg-[color:var(--surface-page)] text-left">
-                  <tr className="font-mono text-[10px] uppercase tracking-wide text-[color:var(--text-tertiary)]">
-                    <th className="px-4 py-2.5">Proveedor</th>
-                    <th className="px-3 py-2.5">Semáforo</th>
-                    <th className="px-3 py-2.5">% cumplimiento</th>
-                    <th className="px-3 py-2.5 text-right">Revisión</th>
-                    <th className="px-3 py-2.5 text-right">Faltantes</th>
-                    <th className="px-3 py-2.5 text-right">Rechazos</th>
-                    <th className="px-3 py-2.5 text-right">Vencen</th>
-                    <th className="px-3 py-2.5"></th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {rows.map((row) => (
-                    <tr
-                      key={row.vendor_id}
-                      className="group border-b border-[color:var(--border-subtle)] transition-colors last:border-0 hover:bg-[color:var(--surface-hover)]"
-                    >
-                      <td className="px-4 py-3 align-top">
-                        <p className="font-medium text-[color:var(--text-primary)]">
-                          {row.vendor_name}
-                        </p>
-                        <p className="font-mono text-[11px] text-[color:var(--text-tertiary)]">
-                          {row.vendor_rfc ?? "—"}
-                          {row.persona_type
-                            ? ` · ${row.persona_type}`
-                            : ""}
-                        </p>
-                      </td>
-                      <td className="px-3 py-3 align-top">
-                        <SemaphorePill level={row.semaphore_level} />
-                      </td>
-                      <td className="px-3 py-3 align-top">
-                        <div className="w-32">
-                          <Progress
-                            value={row.compliance_pct}
-                            showValue
-                            tone={
-                              row.compliance_pct >= 80
-                                ? "success"
-                                : row.compliance_pct >= 60
-                                  ? "warning"
-                                  : "error"
-                            }
-                          />
-                        </div>
-                      </td>
-                      <Cell value={row.pending_reviews_count} />
-                      <Cell
-                        value={row.missing_required_count}
-                        warn={row.missing_required_count > 0}
-                      />
-                      <Cell
-                        value={row.rejected_or_correction_count}
-                        warn={row.rejected_or_correction_count > 0}
-                      />
-                      <Cell
-                        value={row.due_soon_count}
-                        warn={row.due_soon_count > 0}
-                      />
-                      <td className="px-3 py-3 text-right align-top">
-                        <Button asChild size="sm" variant="outline">
-                          <Link
-                            href={`/client/vendors/${row.vendor_id}`}
-                            className="inline-flex items-center gap-1"
-                          >
-                            Ver
-                            <ArrowRight
-                              className="h-3 w-3 transition-transform group-hover:translate-x-0.5"
-                              weight="bold"
-                              aria-hidden="true"
-                            />
-                          </Link>
-                        </Button>
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-          )}
-        </Surface>
+        <DataTable<ClientVendorRow>
+          items={rows}
+          loading={loading}
+          error={error}
+          onRetry={refresh}
+          columns={vendorColumns}
+          rowKey={(row) => row.vendor_id}
+          ariaLabel="Proveedores del portafolio"
+          emptyTitle="Sin proveedores con esos filtros"
+          emptyDescription="Modifica la búsqueda o limpia los filtros para ver más resultados."
+          metaBadge={`${rows?.length ?? 0} proveedor${(rows?.length ?? 0) === 1 ? "" : "es"}`}
+        />
       </div>
     </ClientShell>
   );
 }
 
-function Cell({ value, warn }: { value: number; warn?: boolean }) {
+function MetricCell({ value, warn }: { value: number; warn?: boolean }) {
   return (
-    <td className="px-3 py-3 text-right align-top">
-      <span
-        className={
-          "font-mono tabular-nums " +
-          (warn
-            ? "font-semibold text-[color:var(--status-warning-text)]"
-            : value === 0
-              ? "text-[color:var(--text-tertiary)]"
-              : "text-[color:var(--text-primary)]")
-        }
-      >
-        {value}
-      </span>
-    </td>
+    <span
+      className={
+        "font-mono tabular-nums " +
+        (warn
+          ? "font-semibold text-[color:var(--status-warning-text)]"
+          : value === 0
+            ? "text-[color:var(--text-tertiary)]"
+            : "text-[color:var(--text-primary)]")
+      }
+    >
+      {value === 0 ? "—" : value}
+    </span>
   );
 }
+
+const vendorColumns: DataTableColumn<ClientVendorRow>[] = [
+  {
+    id: "vendor",
+    header: "Proveedor",
+    cell: (row) => (
+      <div className="min-w-0">
+        <p className="font-medium text-[color:var(--text-primary)]">
+          {row.vendor_name}
+        </p>
+        <p className="font-mono text-[11px] tabular-nums text-[color:var(--text-tertiary)]">
+          {row.vendor_rfc ?? "—"}
+          {row.persona_type ? ` · ${row.persona_type}` : ""}
+        </p>
+      </div>
+    ),
+  },
+  {
+    id: "semaphore",
+    header: "Semáforo",
+    width: "120px",
+    cell: (row) => <SemaphorePill level={row.semaphore_level} />,
+  },
+  {
+    id: "compliance",
+    header: "% cumplimiento",
+    width: "160px",
+    cell: (row) => (
+      <div className="w-32">
+        <Progress
+          value={row.compliance_pct}
+          showValue
+          tone={
+            row.compliance_pct >= 80
+              ? "success"
+              : row.compliance_pct >= 60
+                ? "warning"
+                : "error"
+          }
+        />
+      </div>
+    ),
+  },
+  {
+    id: "pending",
+    header: "Revisión",
+    width: "90px",
+    align: "right",
+    cell: (row) => <MetricCell value={row.pending_reviews_count} />,
+  },
+  {
+    id: "missing",
+    header: "Faltantes",
+    width: "100px",
+    align: "right",
+    cell: (row) => (
+      <MetricCell
+        value={row.missing_required_count}
+        warn={row.missing_required_count > 0}
+      />
+    ),
+  },
+  {
+    id: "rejected",
+    header: "Rechazos",
+    width: "100px",
+    align: "right",
+    cell: (row) => (
+      <MetricCell
+        value={row.rejected_or_correction_count}
+        warn={row.rejected_or_correction_count > 0}
+      />
+    ),
+  },
+  {
+    id: "due_soon",
+    header: "Vencen",
+    width: "90px",
+    align: "right",
+    cell: (row) => (
+      <MetricCell value={row.due_soon_count} warn={row.due_soon_count > 0} />
+    ),
+  },
+  {
+    id: "action",
+    header: "",
+    width: "80px",
+    align: "right",
+    cell: (row) => (
+      <Button asChild size="sm" variant="outline">
+        <Link
+          href={`/client/vendors/${row.vendor_id}`}
+          className="inline-flex items-center gap-1"
+        >
+          Ver
+          <ArrowRight className="h-3 w-3" weight="bold" aria-hidden="true" />
+        </Link>
+      </Button>
+    ),
+  },
+];
 
 const SEMAPHORE_META: Record<
   SemaphoreLevel,
@@ -323,19 +313,19 @@ const SEMAPHORE_META: Record<
   green: {
     label: "Verde",
     tone:
-      "border-[color:var(--status-success-border)] bg-[color:var(--status-success-bg)] text-[color:var(--status-success-text)]",
+      "bg-[color:var(--status-success-bg)] text-[color:var(--status-success-text)]",
     icon: CheckCircle,
   },
   yellow: {
     label: "Amarillo",
     tone:
-      "border-[color:var(--status-warning-border)] bg-[color:var(--status-warning-bg)] text-[color:var(--status-warning-text)]",
+      "bg-[color:var(--status-warning-bg)] text-[color:var(--status-warning-text)]",
     icon: Warning,
   },
   red: {
     label: "Rojo",
     tone:
-      "border-[color:var(--status-error-border)] bg-[color:var(--status-error-bg)] text-[color:var(--status-error-text)]",
+      "bg-[color:var(--status-error-bg)] text-[color:var(--status-error-text)]",
     icon: WarningOctagon,
   },
 };
@@ -345,9 +335,9 @@ function SemaphorePill({ level }: { level: SemaphoreLevel }) {
   const IconComponent = meta.icon;
   return (
     <span
-      className={`inline-flex items-center gap-1 rounded-full border px-2 py-0.5 text-xs font-medium ${meta.tone}`}
+      className={`inline-flex items-center gap-1.5 rounded-full px-2 py-0.5 text-[12px] font-medium ${meta.tone}`}
     >
-      <IconComponent className="h-3 w-3" weight="fill" aria-hidden="true" />
+      <IconComponent className="h-3 w-3" weight="bold" aria-hidden="true" />
       {meta.label}
     </span>
   );

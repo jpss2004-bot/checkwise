@@ -82,6 +82,40 @@ BOSS_DEMO_VENDOR_RFC = "SEA050101EF3"
 BOSS_DEMO_WORKSPACE_ID = "ws-demo-0002"
 BOSS_DEMO_WORKSPACE_TOKEN = "boss-demo-token"
 
+# ── Client-admin demo account (CheckWise 2.1) ──────────────────────
+# Read-only view across a portfolio of vendors. /client/* is gated by
+# ``client_admin`` membership; we seed one Client + Organization with
+# 3 vendors at varied compliance states so the client surfaces have
+# real signal during demo + browser verify.
+CLIENT_DEMO_EMAIL = "cliente.demo@checkwise.mx"
+CLIENT_DEMO_PASSWORD = "ClienteDemo!2026"
+CLIENT_DEMO_FULLNAME = "Mariana Soto"
+
+CLIENT_PORTFOLIO_CLIENT_NAME = "Operadora Multinacional · Demo"
+CLIENT_PORTFOLIO_CLIENT_RFC = "OMN010101GH4"
+CLIENT_PORTFOLIO_ORG_NAME = "Operadora Multinacional — Cliente"
+
+CLIENT_PORTFOLIO_VENDORS = [
+    {
+        "name": "Logística Andina · Demo",
+        "rfc": "LAN020202IJ5",
+        "workspace_id": "ws-demo-cli-01",
+        "complete": True,
+    },
+    {
+        "name": "Servicios Hidalgo · Demo",
+        "rfc": "SHI030303KL6",
+        "workspace_id": "ws-demo-cli-02",
+        "complete": True,
+    },
+    {
+        "name": "Constructora Pacífico · Demo",
+        "rfc": "CPA040404MN7",
+        "workspace_id": "ws-demo-cli-03",
+        "complete": False,
+    },
+]
+
 
 def _utc(year: int, month: int, day: int = 1) -> datetime:
     return datetime(year, month, day, 12, 0, 0, tzinfo=UTC)
@@ -90,7 +124,10 @@ def _utc(year: int, month: int, day: int = 1) -> datetime:
 def _wipe_demo(db) -> None:
     """Remove anything tagged with the demo identifiers so the seed
     is idempotent. Order matters because of FKs."""
-    for ws_id in (DEMO_WORKSPACE_ID, BOSS_DEMO_WORKSPACE_ID):
+    client_portfolio_ws_ids = tuple(
+        v["workspace_id"] for v in CLIENT_PORTFOLIO_VENDORS
+    )
+    for ws_id in (DEMO_WORKSPACE_ID, BOSS_DEMO_WORKSPACE_ID, *client_portfolio_ws_ids):
         workspace = db.scalar(
             select(ProviderWorkspace).where(ProviderWorkspace.id == ws_id)
         )
@@ -119,7 +156,12 @@ def _wipe_demo(db) -> None:
         db.query(Client).filter(Client.id == client_id).delete(synchronize_session=False)
         db.flush()
 
-    for demo_email in (DEMO_USER_EMAIL, DEMO_PROVIDER_EMAIL, BOSS_DEMO_EMAIL):
+    for demo_email in (
+        DEMO_USER_EMAIL,
+        DEMO_PROVIDER_EMAIL,
+        BOSS_DEMO_EMAIL,
+        CLIENT_DEMO_EMAIL,
+    ):
         user = db.scalar(select(User).where(User.email == demo_email))
         if user is not None:
             db.query(Membership).filter(Membership.user_id == user.id).delete(
@@ -128,9 +170,17 @@ def _wipe_demo(db) -> None:
             db.delete(user)
             db.flush()
 
-    org = db.scalar(select(Organization).where(Organization.name == DEMO_ORG_NAME))
-    if org is not None:
-        db.delete(org)
+    for org_name in (DEMO_ORG_NAME, CLIENT_PORTFOLIO_ORG_NAME):
+        org = db.scalar(select(Organization).where(Organization.name == org_name))
+        if org is not None:
+            db.delete(org)
+            db.flush()
+
+    portfolio_client = db.scalar(
+        select(Client).where(Client.name == CLIENT_PORTFOLIO_CLIENT_NAME)
+    )
+    if portfolio_client is not None:
+        db.delete(portfolio_client)
         db.flush()
 
 
@@ -412,6 +462,85 @@ def _seed_submissions(db, *, client_id: str, vendor_id: str) -> int:
     return inserted
 
 
+def _seed_client_portfolio(db) -> tuple[str, str, int, int]:
+    """Phase 5 (V2.1): seed a Client + Organization + 3 vendors + sample
+    submissions so /client/* is reachable and shows real signal.
+
+    Returns (org_id, client_id, vendors_inserted, submissions_inserted).
+    """
+    user = User(
+        email=CLIENT_DEMO_EMAIL,
+        password_hash=hash_password(CLIENT_DEMO_PASSWORD),
+        full_name=CLIENT_DEMO_FULLNAME,
+        status="active",
+        must_change_password=False,
+    )
+    db.add(user)
+    db.flush()
+
+    client = Client(
+        name=CLIENT_PORTFOLIO_CLIENT_NAME,
+        rfc=CLIENT_PORTFOLIO_CLIENT_RFC,
+    )
+    db.add(client)
+    db.flush()
+
+    org = Organization(
+        name=CLIENT_PORTFOLIO_ORG_NAME,
+        kind="client",
+        client_id=client.id,
+    )
+    db.add(org)
+    db.flush()
+
+    db.add(
+        Membership(
+            user_id=user.id,
+            organization_id=org.id,
+            role="client_admin",
+            status="active",
+        )
+    )
+    db.flush()
+
+    submissions_total = 0
+    for spec in CLIENT_PORTFOLIO_VENDORS:
+        vendor = Vendor(
+            client_id=client.id,
+            name=spec["name"],
+            rfc=spec["rfc"],
+            persona_type="moral",
+        )
+        db.add(vendor)
+        db.flush()
+
+        workspace = ProviderWorkspace(
+            id=spec["workspace_id"],
+            client_id=client.id,
+            vendor_id=vendor.id,
+            contract_id=None,
+            owner_user_id=user.id,
+            filial_name="Filial principal",
+            persona_type="moral",
+            display_name=spec["name"],
+            access_token=f"cli-portfolio-{spec['workspace_id']}",
+            onboarding_completed_at=(
+                datetime.now(UTC) - timedelta(days=21)
+                if spec["complete"]
+                else None
+            ),
+            status="active",
+        )
+        db.add(workspace)
+        db.flush()
+
+        submissions_total += _seed_submissions(
+            db, client_id=client.id, vendor_id=vendor.id
+        )
+
+    return org.id, client.id, len(CLIENT_PORTFOLIO_VENDORS), submissions_total
+
+
 def main() -> None:
     db = SessionLocal()
     try:
@@ -429,11 +558,14 @@ def main() -> None:
         boss_submissions = _seed_submissions(
             db, client_id=boss_client_id, vendor_id=boss_vendor_id
         )
+        client_org_id, client_portfolio_id, cli_vendors, cli_submissions = (
+            _seed_client_portfolio(db)
+        )
         db.commit()
     finally:
         db.close()
 
-    print("CheckWise 1.7.1 demo data ready.")
+    print("CheckWise 2.1 demo data ready.")
     print()
     print("  Reviewer / admin login:")
     print("    URL       http://localhost:3000/login")
@@ -456,6 +588,15 @@ def main() -> None:
     print("    Flow      login → /portal/entra-a-tu-espacio → /portal/dashboard")
     print(f"    workspace {boss_workspace_id}  ({BOSS_DEMO_VENDOR_NAME})")
     print(f"    seeded    {boss_submissions} sample submission(s)")
+    print()
+    print("  Account C — client-admin (V2.1, /client/* portfolio view):")
+    print("    URL       http://localhost:3000/login")
+    print(f"    Email     {CLIENT_DEMO_EMAIL}")
+    print(f"    Password  {CLIENT_DEMO_PASSWORD}")
+    print("    Flow      login → /client/dashboard (top-nav console)")
+    print(f"    org       {client_org_id}  ({CLIENT_PORTFOLIO_ORG_NAME})")
+    print(f"    client    {client_portfolio_id}  ({CLIENT_PORTFOLIO_CLIENT_NAME})")
+    print(f"    seeded    {cli_vendors} vendor(s) · {cli_submissions} submission(s)")
 
 
 if __name__ == "__main__":

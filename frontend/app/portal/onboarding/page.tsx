@@ -202,7 +202,7 @@ function OnboardingInner({ session }: { session: PortalSession }) {
             tone="attention"
             count={needsActionMandatory.length}
           >
-            <div className="grid gap-4 lg:grid-cols-2">
+            <div className="space-y-3">
               {needsActionMandatory.map((req) => (
                 <ExpedienteCard
                   key={req.id}
@@ -222,7 +222,7 @@ function OnboardingInner({ session }: { session: PortalSession }) {
             count={needsActionOptional.length}
             collapsible
           >
-            <div className="grid gap-4 lg:grid-cols-2">
+            <div className="space-y-3">
               {needsActionOptional.map((req) => (
                 <ExpedienteCard
                   key={req.id}
@@ -241,7 +241,7 @@ function OnboardingInner({ session }: { session: PortalSession }) {
             tone="info"
             count={inProgress.length}
           >
-            <div className="grid gap-4 lg:grid-cols-2">
+            <div className="space-y-3">
               {inProgress.map((req) => (
                 <ExpedienteCard
                   key={req.id}
@@ -261,7 +261,7 @@ function OnboardingInner({ session }: { session: PortalSession }) {
             count={completed.length}
             collapsible
           >
-            <div className="grid gap-4 lg:grid-cols-2">
+            <div className="space-y-3">
               {completed.map((req) => (
                 <ExpedienteCard
                   key={req.id}

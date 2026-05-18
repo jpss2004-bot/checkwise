@@ -8,11 +8,13 @@ import {
   StackedBars,
   type ChartSegment,
 } from "@/components/checkwise/charts";
-import {
-  StatCard,
-  Surface,
-} from "@/components/checkwise/dashboard/stat-card";
+import { Surface } from "@/components/checkwise/dashboard/stat-card";
 import { Input } from "@/components/ui/input";
+import { MetadataStrip } from "@/components/ui/metadata-strip";
+import {
+  ErrorState,
+  Skeleton,
+} from "@/components/checkwise/portal/state-surfaces";
 
 import { ClientShell } from "../_shell";
 import { getClientCalendar, type ClientCalendar } from "@/lib/api/client";
@@ -113,47 +115,30 @@ export default function ClientCalendarPage() {
       }
     >
       {error ? (
-        <p className="rounded-md border border-[color:var(--status-warning-border)] bg-[color:var(--status-warning-bg)] p-3 text-sm text-[color:var(--status-warning-text)]">
-          {error}
-        </p>
+        <ErrorState
+          title="No pudimos cargar el calendario"
+          description={error}
+          onRetry={() => setYear((y) => y)}
+        />
       ) : !data ? (
-        <div className="space-y-5">
-          <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
-            {[0, 1, 2, 3].map((i) => (
-              <div
-                key={i}
-                className="h-24 animate-pulse rounded-lg border border-[color:var(--border-default)] bg-[color:var(--surface-raised)]"
-              />
-            ))}
-          </div>
-          <div className="h-64 animate-pulse rounded-lg border border-[color:var(--border-default)] bg-[color:var(--surface-raised)]" />
-          <div className="h-80 animate-pulse rounded-lg border border-[color:var(--border-default)] bg-[color:var(--surface-raised)]" />
-        </div>
+        <CalendarSkeleton />
       ) : (
         <div className="space-y-6">
-          <div className="cw-stagger grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
-            <StatCard
-              label="Obligaciones totales"
-              value={totals.due}
-              tone="brand"
-              caption={`Año ${data.year}`}
-            />
-            <StatCard
-              label="Aprobadas"
-              value={totals.approved}
-              tone="success"
-            />
-            <StatCard
-              label="Pendientes / en revisión"
-              value={totals.pending}
-              tone="info"
-            />
-            <StatCard
-              label="Faltantes + rechazos"
-              value={totals.missing + totals.rejected}
-              tone={totals.missing + totals.rejected > 0 ? "warning" : "success"}
-            />
-          </div>
+          <MetadataStrip
+            items={[
+              { label: "Año", value: data.year.toString(), mono: true },
+              { label: "Obligaciones", value: totals.due.toString(), mono: true },
+              { label: "Aprobadas", value: totals.approved.toString(), mono: true, tone: "teal" },
+              { label: "Pendientes", value: totals.pending.toString(), mono: true },
+              {
+                label: "Faltantes+Rechazos",
+                value: (totals.missing + totals.rejected).toString(),
+                mono: true,
+                tone: totals.missing + totals.rejected > 0 ? "warning" : "default",
+              },
+              { label: "Vencen ≤14d", value: totals.dueSoon.toString(), mono: true, tone: totals.dueSoon > 0 ? "warning" : "default" },
+            ]}
+          />
 
           <Surface
             title="Ritmo anual"
@@ -161,15 +146,11 @@ export default function ClientCalendarPage() {
           >
             <div className="grid gap-6 md:grid-cols-2">
               <div>
-                <p className="mb-2 font-mono text-[10px] uppercase tracking-wide text-[color:var(--text-tertiary)]">
-                  Aprobadas por mes
-                </p>
+                <p className="cw-eyebrow mb-2">Aprobadas por mes</p>
                 <MiniBars data={barsApproved} height={100} showValues />
               </div>
               <div>
-                <p className="mb-2 font-mono text-[10px] uppercase tracking-wide text-[color:var(--text-tertiary)]">
-                  Faltantes + rechazos por mes
-                </p>
+                <p className="cw-eyebrow mb-2">Faltantes + rechazos por mes</p>
                 <MiniBars data={barsMissing} height={100} showValues />
               </div>
             </div>
@@ -230,5 +211,16 @@ export default function ClientCalendarPage() {
         </div>
       )}
     </ClientShell>
+  );
+}
+
+function CalendarSkeleton() {
+  return (
+    <div className="space-y-5" aria-busy="true" aria-live="polite">
+      <span className="sr-only">Cargando calendario…</span>
+      <Skeleton className="h-12 w-full rounded-md" />
+      <Skeleton className="h-56 w-full rounded-lg" />
+      <Skeleton className="h-80 w-full rounded-lg" />
+    </div>
   );
 }

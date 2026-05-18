@@ -1,19 +1,11 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import {
-  ListMagnifyingGlass,
-  MagnifyingGlass,
-  Robot,
-  User,
-} from "@phosphor-icons/react";
+import { MagnifyingGlass, Robot, User } from "@phosphor-icons/react";
 
-import {
-  EmptyState,
-  Surface,
-} from "@/components/checkwise/dashboard/stat-card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import { DataTable, type DataTableColumn } from "@/components/ui/data-table";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 
@@ -24,7 +16,7 @@ import {
 } from "@/lib/api/admin";
 
 export default function AdminAuditLogPage() {
-  const [rows, setRows] = useState<AdminAuditLogItem[]>([]);
+  const [rows, setRows] = useState<AdminAuditLogItem[] | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [filters, setFilters] = useState({
@@ -48,6 +40,7 @@ export default function AdminAuditLogPage() {
       setRows(data.items);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Error al cargar audit log.");
+      setRows(null);
     } finally {
       setLoading(false);
     }
@@ -58,19 +51,85 @@ export default function AdminAuditLogPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
+  const columns: DataTableColumn<AdminAuditLogItem>[] = [
+    {
+      id: "when",
+      header: "Cuándo",
+      width: "180px",
+      cell: (row) => (
+        <span className="font-mono text-[11px] tabular-nums text-[color:var(--text-secondary)]">
+          {new Date(row.created_at).toLocaleString("es-MX")}
+        </span>
+      ),
+    },
+    {
+      id: "actor",
+      header: "Actor",
+      cell: (row) => (
+        <ActorChip actorType={row.actor_type} actorId={row.actor_id} />
+      ),
+    },
+    {
+      id: "action",
+      header: "Acción",
+      cell: (row) => (
+        <code className="rounded-sm bg-[color:var(--surface-sunken)] px-1.5 py-0.5 font-mono text-[11px] text-[color:var(--text-primary)]">
+          {row.action}
+        </code>
+      ),
+    },
+    {
+      id: "entity",
+      header: "Entidad",
+      width: "120px",
+      cell: (row) => <Badge variant="outline">{row.entity_type}</Badge>,
+    },
+    {
+      id: "id",
+      header: "ID",
+      width: "140px",
+      cell: (row) => (
+        <span className="font-mono text-[11px] tabular-nums text-[color:var(--text-tertiary)]">
+          {row.entity_id.slice(0, 8)}…
+        </span>
+      ),
+    },
+    {
+      id: "source",
+      header: "Fuente",
+      width: "120px",
+      cell: (row) => (
+        <span className="text-[11px] text-[color:var(--text-secondary)]">
+          {(row.event_metadata?.source as string | undefined) ?? "—"}
+        </span>
+      ),
+    },
+  ];
+
   return (
     <AdminShell
       title="Audit log"
       description="Bitácora completa de eventos del sistema. Cada cambio firma el actor, la acción, la entidad y el diff antes/después."
     >
       <div className="space-y-5">
-        <Surface title="Filtros" icon={MagnifyingGlass}>
+        <section
+          aria-label="Filtros"
+          className="rounded-lg border border-[color:var(--border-default)] bg-[color:var(--surface-raised)] shadow-xs"
+        >
+          <header className="flex items-center gap-2 border-b border-[color:var(--border-subtle)] px-5 py-3">
+            <MagnifyingGlass
+              className="h-3.5 w-3.5 text-[color:var(--text-tertiary)]"
+              weight="bold"
+              aria-hidden
+            />
+            <p className="cw-eyebrow">Filtros</p>
+          </header>
           <form
             onSubmit={(e) => {
               e.preventDefault();
               refresh();
             }}
-            className="grid gap-3 sm:grid-cols-2 lg:grid-cols-5"
+            className="grid gap-3 p-5 sm:grid-cols-2 lg:grid-cols-5"
           >
             <div className="space-y-1">
               <Label htmlFor="al-actor">Actor type</Label>
@@ -128,73 +187,21 @@ export default function AdminAuditLogPage() {
               </Button>
             </div>
           </form>
-        </Surface>
+        </section>
 
-        {error ? (
-          <p className="rounded-md border border-[color:var(--status-warning-border)] bg-[color:var(--status-warning-bg)] p-3 text-sm text-[color:var(--status-warning-text)]">
-            {error}
-          </p>
-        ) : null}
-
-        <Surface
-          title={`Resultados (${rows.length})`}
-          icon={ListMagnifyingGlass}
-          bodyClassName="p-0"
-        >
-          {!loading && rows.length === 0 ? (
-            <div className="p-8">
-              <EmptyState
-                icon={ListMagnifyingGlass}
-                title="Sin eventos"
-                description="No hay eventos para los filtros aplicados."
-              />
-            </div>
-          ) : (
-            <div className="overflow-x-auto">
-              <table className="w-full text-sm">
-                <thead className="border-b border-[color:var(--border-subtle)] bg-[color:var(--surface-page)] text-left font-mono text-[10px] uppercase tracking-wide text-[color:var(--text-tertiary)]">
-                  <tr>
-                    <th className="px-3 py-2.5">Cuándo</th>
-                    <th className="px-3 py-2.5">Actor</th>
-                    <th className="px-3 py-2.5">Acción</th>
-                    <th className="px-3 py-2.5">Entidad</th>
-                    <th className="px-3 py-2.5">ID</th>
-                    <th className="px-3 py-2.5">Fuente</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {rows.map((row) => (
-                    <tr
-                      key={row.id}
-                      className="border-b border-[color:var(--border-subtle)] align-top transition-colors last:border-0 hover:bg-[color:var(--surface-hover)]"
-                    >
-                      <td className="px-3 py-2.5 font-mono text-[11px] text-[color:var(--text-secondary)]">
-                        {new Date(row.created_at).toLocaleString("es-MX")}
-                      </td>
-                      <td className="px-3 py-2.5 text-[12px]">
-                        <ActorChip actorType={row.actor_type} actorId={row.actor_id} />
-                      </td>
-                      <td className="px-3 py-2.5">
-                        <code className="rounded-sm bg-[color:var(--surface-sunken)] px-1.5 py-0.5 font-mono text-[11px] text-[color:var(--text-primary)]">
-                          {row.action}
-                        </code>
-                      </td>
-                      <td className="px-3 py-2.5">
-                        <Badge variant="outline">{row.entity_type}</Badge>
-                      </td>
-                      <td className="px-3 py-2.5 font-mono text-[11px] text-[color:var(--text-tertiary)]">
-                        {row.entity_id.slice(0, 8)}…
-                      </td>
-                      <td className="px-3 py-2.5 text-[11px] text-[color:var(--text-secondary)]">
-                        {(row.event_metadata?.source as string | undefined) ?? "—"}
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-          )}
-        </Surface>
+        <DataTable<AdminAuditLogItem>
+          items={rows}
+          loading={loading}
+          error={error}
+          onRetry={() => refresh()}
+          columns={columns}
+          rowKey={(row) => row.id}
+          ariaLabel="Eventos del audit log"
+          emptyTitle="Sin eventos"
+          emptyDescription="No hay eventos para los filtros aplicados."
+          metaBadge={`${rows?.length ?? 0} eventos`}
+          skeletonRows={8}
+        />
       </div>
     </AdminShell>
   );
@@ -213,7 +220,7 @@ function ActorChip({
     <div className="flex items-center gap-2">
       <span
         className={
-          "flex h-6 w-6 items-center justify-center rounded-full " +
+          "flex h-6 w-6 shrink-0 items-center justify-center rounded-full " +
           (isBot
             ? "bg-[color:var(--surface-teal-muted)] text-[color:var(--text-teal)]"
             : "bg-[color:var(--surface-brand-muted)] text-[color:var(--text-brand)]")
@@ -227,7 +234,7 @@ function ActorChip({
           {actorType}
         </p>
         {actorId ? (
-          <p className="font-mono text-[10px] text-[color:var(--text-tertiary)]">
+          <p className="font-mono text-[10px] tabular-nums text-[color:var(--text-tertiary)]">
             {actorId.slice(0, 12)}…
           </p>
         ) : null}
