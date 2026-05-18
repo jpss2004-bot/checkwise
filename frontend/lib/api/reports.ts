@@ -283,6 +283,37 @@ export function regenerateBlock(
   );
 }
 
+// ─── P1.7 — Refresh data (no LLM) ────────────────────────────────
+
+export interface RefreshedBlockSummary {
+  block_id: string;
+  block_type: string;
+  refreshed: boolean;
+}
+
+export interface RefreshDataResponse {
+  version_id: string;
+  version_number: number;
+  refreshed_blocks: RefreshedBlockSummary[];
+  fetched_at: string;
+}
+
+/**
+ * Re-run every block's data fetcher against today's snapshot.
+ * Deterministic — never re-prompts the LLM. `ai_summary` payloads
+ * are preserved verbatim. Persists a new ReportVersion labeled
+ * "Datos actualizados". Used by the editor's "Actualizar con datos
+ * de hoy" toolbar action and the per-block inline refresh affordance.
+ */
+export function refreshReportData(
+  reportId: string,
+): Promise<RefreshDataResponse> {
+  return fetchJson<RefreshDataResponse>(
+    `/api/v1/reports/${reportId}/refresh-data`,
+    { method: "POST", body: JSON.stringify({}) },
+  );
+}
+
 // ─── Engine info — used to surface "AI not configured" banner ────
 
 export interface ReportsEngineInfo {

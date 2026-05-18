@@ -2,6 +2,7 @@
 
 import { GridFour } from "@phosphor-icons/react";
 
+import { FreshnessLabel } from "@/components/checkwise/reports/freshness-label";
 import type { BlockDefinition, BlockProps } from "@/lib/reports/registry";
 
 /**
@@ -43,6 +44,8 @@ interface KpiStripData {
     value: number | null;
     trend_pct_vs_prior: number | null;
   }>;
+  /** P1.7: ISO8601 stamp from the backend fetcher. */
+  fetched_at?: string | null;
 }
 
 const METRIC_LABEL: Record<MetricKey, string> = {
@@ -149,6 +152,8 @@ export function KpiStripBlock({
           </button>
         </div>
       )}
+
+      <FreshnessLabel fetchedAt={block.data?.fetched_at} />
     </section>
   );
 }

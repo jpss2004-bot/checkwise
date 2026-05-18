@@ -17,6 +17,7 @@ catch domain errors → render HTTP.
 from __future__ import annotations
 
 import json as _json
+import logging
 from datetime import datetime
 from typing import Annotated
 
@@ -80,6 +81,8 @@ from app.services.reports.llm import LLMError, get_llm_client
 from app.services.reports.planner import plan_report
 from app.services.reports.templates import get_preset, presets_for_roles
 
+logger = logging.getLogger(__name__)
+
 router = APIRouter(prefix="/reports", tags=["reports"])
 DbSession = Annotated[Session, Depends(get_db)]
 
@@ -111,11 +114,19 @@ def _actor_from(current: CurrentUser, db: Session | None = None) -> ReportActor:
             ProviderWorkspace,
         )
 
+        # Deterministic pick when a user owns more than one workspace:
+        # order by id so the same user resolves to the same workspace
+        # every request. Multi-workspace visibility (seeing reports
+        # across two vendors at once) is a deferred follow-up; until
+        # then the lowest-id workspace wins.
         ws = db.scalar(
-            select(ProviderWorkspace).where(
+            select(ProviderWorkspace)
+            .where(
                 ProviderWorkspace.owner_user_id == current.user.id,
                 ProviderWorkspace.status == "active",
             )
+            .order_by(ProviderWorkspace.id)
+            .limit(1)
         )
         if ws is not None:
             workspace_vendor_id = ws.vendor_id
@@ -335,6 +346,20 @@ def post_from_preset(
             vendor_id = actor.workspace_vendor_id
         if client_id is None and actor.workspace_client_id is not None:
             client_id = actor.workspace_client_id
+
+        # P1.1 safety: a workspace-owning provider must not be able to
+        # author a vendor_facing report against a *different* vendor by
+        # passing its id in the body. Internal staff still may
+        # (cross-tenant authorship is part of their role).
+        if (
+            actor.is_workspace_owner
+            and vendor_id is not None
+            and vendor_id != actor.workspace_vendor_id
+        ):
+            raise HTTPException(
+                status.HTTP_403_FORBIDDEN,
+                "Cannot create a report for a vendor outside your workspace.",
+            )
 
     try:
         report, version = create_report(
@@ -1092,4 +1117,166 @@ def post_regenerate_block(
         llm_backend=llm.name,
         version_id=new_version.id,
         version_number=new_version.version_number,
+    )
+
+
+# ─── P1.7 — Refresh report data (no LLM) ────────────────────────
+
+
+class RefreshDataRequest(BaseModel):
+    """No body fields required. Reserved for future overrides (e.g.
+    selectively refreshing a subset of block types)."""
+
+    pass
+
+
+class RefreshedBlockSummary(BaseModel):
+    block_id: str
+    block_type: str
+    refreshed: bool
+
+
+class RefreshDataResponse(BaseModel):
+    version_id: str
+    version_number: int
+    refreshed_blocks: list[RefreshedBlockSummary]
+    fetched_at: str
+
+
+@router.post(
+    "/{report_id}/refresh-data",
+    response_model=RefreshDataResponse,
+    summary=(
+        "Refresh deterministic block data without re-prompting the LLM. "
+        "P1.7: 'Actualizar con datos de hoy'."
+    ),
+)
+def post_refresh_report_data(
+    report_id: str,
+    _payload: RefreshDataRequest,
+    db: DbSession,
+    current: Annotated[CurrentUser, Depends(get_current_user)],
+) -> RefreshDataResponse:
+    """Re-run every block's data fetcher against today's snapshot.
+
+    For each block in the current version:
+
+    - ``text`` / ``divider`` / any block whose fetcher returns ``None``
+      → passes through unchanged.
+    - ``ai_recommendation`` → unchanged. Its ``data`` carries the
+      upstream block summaries baked in at generation time; refreshing
+      without re-prompting would desynchronize the prose from its
+      grounding.
+    - Everything else (``compliance_state``, ``attention_list``,
+      ``upcoming_deadlines``, ``prioritized_actions``,
+      ``executive_summary``, ``kpi_strip``, ``vendor_risk_matrix``)
+      → ``block["data"]`` is replaced with the fresh, audience-sanitized
+      fetch. ``block["ai_summary"]`` is preserved verbatim — the LLM is
+      never consulted in this path.
+
+    Persists a new ``ReportVersion`` labeled ``Datos actualizados``,
+    advances ``current_version_id`` and returns the per-block refresh
+    summary so the editor can light up freshness indicators.
+    """
+    from app.services.reports.blocks.data_fetchers import fetch_for_block
+    from app.services.reports.executor import _redact_for_audience
+
+    actor = _actor_from(current, db)
+    try:
+        report, current_version = get_report(db, actor=actor, report_id=report_id)
+    except ReportNotFoundError as exc:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, str(exc)) from exc
+
+    if current_version is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Report has no version yet.")
+
+    audience = ReportAudience(report.audience)
+    scope = ReportScope(
+        organization_id=report.organization_id,
+        audience=audience,
+        client_id=report.client_id,
+        vendor_id=report.vendor_id,
+    )
+    try:
+        context = assemble_context(db, actor=actor, scope=scope)
+    except ReportPermissionError as exc:
+        raise HTTPException(status.HTTP_403_FORBIDDEN, str(exc)) from exc
+
+    fetched_at = datetime.utcnow().isoformat() + "Z"
+    blocks_in = list(current_version.content_json.get("blocks") or [])
+    blocks_out: list[dict] = []
+    summary: list[RefreshedBlockSummary] = []
+
+    for block in blocks_in:
+        block_type = block.get("type", "")
+        block_id = block.get("id", "")
+        # ai_recommendation's data is the LLM grounding — refreshing it
+        # without re-prompting would break the contract. Pass through.
+        if block_type == "ai_recommendation":
+            blocks_out.append(block)
+            summary.append(
+                RefreshedBlockSummary(
+                    block_id=block_id, block_type=block_type, refreshed=False
+                )
+            )
+            continue
+        try:
+            fresh_data = fetch_for_block(
+                block_type=block_type,
+                config=block.get("config") or {},
+                scope=scope,
+                db=db,
+            )
+        except Exception as exc:  # noqa: BLE001 — fetcher failure shouldn't 500 the whole refresh
+            logger.exception(
+                "[reports.refresh] fetch failed for block_type=%s", block_type
+            )
+            del exc
+            blocks_out.append(block)
+            summary.append(
+                RefreshedBlockSummary(
+                    block_id=block_id, block_type=block_type, refreshed=False
+                )
+            )
+            continue
+        if fresh_data is None:
+            # text / divider / unknown — keep as-is.
+            blocks_out.append(block)
+            summary.append(
+                RefreshedBlockSummary(
+                    block_id=block_id, block_type=block_type, refreshed=False
+                )
+            )
+            continue
+        sanitized = _redact_for_audience(block_type, fresh_data, audience)
+        blocks_out.append({**block, "data": sanitized})
+        summary.append(
+            RefreshedBlockSummary(
+                block_id=block_id, block_type=block_type, refreshed=True
+            )
+        )
+
+    new_content = {**current_version.content_json, "blocks": blocks_out}
+    new_version = create_version(
+        db,
+        actor=actor,
+        report_id=report_id,
+        content_json=new_content,
+        label="Datos actualizados",
+        plan_json=current_version.plan_json,
+        generated_by=ReportVersionOrigin.AI_REFINED,
+        parent_version_id=current_version.id,
+        source_snapshot_id=context.snapshot_id,
+        llm_metadata={
+            "backend": "none",
+            "model": "data_refresh",
+            "refreshed_block_count": sum(1 for s in summary if s.refreshed),
+        },
+    )
+
+    return RefreshDataResponse(
+        version_id=new_version.id,
+        version_number=new_version.version_number,
+        refreshed_blocks=summary,
+        fetched_at=fetched_at,
     )

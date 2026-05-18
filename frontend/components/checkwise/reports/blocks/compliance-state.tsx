@@ -2,6 +2,7 @@
 
 import { Gauge } from "@phosphor-icons/react";
 
+import { FreshnessLabel } from "@/components/checkwise/reports/freshness-label";
 import type { BlockDefinition, BlockProps } from "@/lib/reports/registry";
 
 /**
@@ -49,6 +50,9 @@ interface ComplianceStateData {
   document_state_counts: DocumentStateCounts;
   workspace_id: string | null;
   persona_type: string | null;
+  /** P1.7: ISO8601 of when the backend builder fetched this payload.
+   *  Drives the freshness label + "Actualizar" affordance. */
+  fetched_at?: string | null;
 }
 
 // Ordered for display: actionable buckets first, then in-flight, then resolved.
@@ -152,6 +156,8 @@ export function ComplianceStateBlock({
           ))}
         </div>
       </div>
+
+      <FreshnessLabel fetchedAt={data.fetched_at} />
     </section>
   );
 }

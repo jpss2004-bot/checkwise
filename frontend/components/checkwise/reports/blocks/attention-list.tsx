@@ -2,6 +2,7 @@
 
 import { ListChecks } from "@phosphor-icons/react";
 
+import { FreshnessLabel } from "@/components/checkwise/reports/freshness-label";
 import type { BlockDefinition, BlockProps } from "@/lib/reports/registry";
 
 /**
@@ -246,9 +247,9 @@ export function AttentionListBlock({
         })}
       </ul>
       <p className="text-[11px] text-[color:var(--text-tertiary)]">
-        {items.length} de {data.total_before_filter} elementos · datos al{" "}
-        {data.fetched_at?.slice(0, 10) ?? "—"}
+        {items.length} de {data.total_before_filter} elementos
       </p>
+      <FreshnessLabel fetchedAt={data.fetched_at} />
     </section>
   );
 }

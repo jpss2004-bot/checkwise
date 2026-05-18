@@ -2,6 +2,7 @@
 
 import { ChartLineUp, Sparkle } from "@phosphor-icons/react";
 
+import { FreshnessLabel } from "@/components/checkwise/reports/freshness-label";
 import type { BlockDefinition, BlockProps } from "@/lib/reports/registry";
 
 /**
@@ -40,6 +41,8 @@ interface ExecutiveSummaryData {
     submissions_in_review?: number;
     next_critical_deadline?: string | null;
   };
+  /** P1.7: ISO8601 stamp from the backend fetcher. */
+  fetched_at?: string | null;
 }
 
 export const executiveSummaryDefinition: Omit<
@@ -146,6 +149,8 @@ export function ExecutiveSummaryBlock({
           </span>
         </div>
       )}
+
+      <FreshnessLabel fetchedAt={data?.fetched_at} />
     </section>
   );
 }

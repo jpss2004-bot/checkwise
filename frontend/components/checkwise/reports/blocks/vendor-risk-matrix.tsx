@@ -2,6 +2,7 @@
 
 import { Table } from "@phosphor-icons/react";
 
+import { FreshnessLabel } from "@/components/checkwise/reports/freshness-label";
 import type { BlockDefinition, BlockProps } from "@/lib/reports/registry";
 
 /**
@@ -52,6 +53,8 @@ interface VendorRiskMatrixData {
     >;
     last_event_at: string;
   }>;
+  /** P1.7: ISO8601 stamp from the backend fetcher. */
+  fetched_at?: string | null;
 }
 
 const INSTITUTION_LABEL: Record<InstitutionCode, string> = {
@@ -156,7 +159,7 @@ export function VendorRiskMatrixBlock({
   }
 
   return (
-    <section className="py-2">
+    <section className="space-y-2 py-2">
       <div className="overflow-x-auto border-t border-b border-[color:var(--border-default)]">
         <table className="min-w-full text-[13px]">
           <thead>
@@ -243,6 +246,8 @@ export function VendorRiskMatrixBlock({
           </tbody>
         </table>
       </div>
+
+      <FreshnessLabel fetchedAt={block.data?.fetched_at} />
     </section>
   );
 }

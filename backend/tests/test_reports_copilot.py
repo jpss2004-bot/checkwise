@@ -363,3 +363,75 @@ def test_regenerate_block_rejected_for_non_ai_block(api_client, db_factory):
     )
     assert resp.status_code == 422
     assert "no AI summary" in resp.json()["detail"]
+
+
+# ─── Refresh data (P1.7) ─────────────────────────────────────────
+
+
+def test_refresh_data_creates_new_version_and_preserves_ai_summaries(
+    api_client, db_factory
+):
+    """P1.7: /refresh-data re-runs deterministic fetchers without
+    re-prompting the LLM. The new version must:
+
+    1. Have a higher version_number than the previous current version.
+    2. Carry the same `ai_summary` payloads as before — no LLM in the
+       loop on this path.
+    3. Be persisted with origin ``ai_refined`` and label ``Datos
+       actualizados`` (the existing enum value is reused to avoid a
+       schema migration).
+    4. Refresh at least one data-bearing block (executive_summary or
+       kpi_strip from the v1 generate run).
+    """
+    pw, email = _seed_admin(db_factory)
+    token = _login(api_client, email, pw)
+    rid = _create_report_with_v1_blocks(api_client, token)
+
+    fresh_before = api_client.get(
+        f"/api/v1/reports/{rid}", headers=_h(token)
+    ).json()
+    before_version = fresh_before["current_version"]["version_number"]
+    before_blocks = fresh_before["current_version"]["content_json"]["blocks"]
+    before_ai_summaries = {
+        b["id"]: (b.get("ai_summary") or {}).get("text")
+        for b in before_blocks
+    }
+
+    resp = api_client.post(
+        f"/api/v1/reports/{rid}/refresh-data", headers=_h(token), json={}
+    )
+    assert resp.status_code == 200, resp.text
+    body = resp.json()
+    assert body["version_number"] > before_version
+    assert isinstance(body["fetched_at"], str) and body["fetched_at"].endswith("Z")
+    # At least one refreshable block in the v1 generate output.
+    assert any(b["refreshed"] for b in body["refreshed_blocks"])
+
+    db = db_factory()
+    try:
+        v = db.scalar(
+            select(ReportVersion).where(ReportVersion.id == body["version_id"])
+        )
+        assert v is not None
+        assert v.generated_by == "ai_refined"
+        assert v.label == "Datos actualizados"
+        # AI summaries are preserved verbatim — no LLM in this path.
+        for block in v.content_json["blocks"]:
+            previous = before_ai_summaries.get(block["id"])
+            current = (block.get("ai_summary") or {}).get("text")
+            assert current == previous, (
+                f"refresh-data must not alter ai_summary for block {block['id']}"
+            )
+    finally:
+        db.close()
+
+
+def test_refresh_data_404_when_report_missing(api_client, db_factory):
+    pw, email = _seed_admin(db_factory)
+    token = _login(api_client, email, pw)
+    resp = api_client.post(
+        "/api/v1/reports/00000000-0000-0000-0000-000000000000/refresh-data",
+        headers=_h(token),
+        json={},
+    )
+    assert resp.status_code == 404

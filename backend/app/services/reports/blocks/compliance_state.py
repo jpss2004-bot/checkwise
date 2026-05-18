@@ -23,6 +23,8 @@ Scope contract:
 
 from __future__ import annotations
 
+from datetime import datetime
+
 from sqlalchemy.orm import Session
 
 from app.services.dashboard_compute import build_compliance_state_for_vendor
@@ -51,6 +53,7 @@ def fetch_compliance_state(
     no user-configurable parameters in v1. Reserved for future
     options like ``year`` override on the calendar slot scan.
     """
+    fetched_at = datetime.utcnow().isoformat() + "Z"
     if scope.vendor_id is None:
         return {
             "semaphore": {
@@ -73,9 +76,17 @@ def fetch_compliance_state(
             },
             "workspace_id": None,
             "persona_type": None,
+            "fetched_at": fetched_at,
         }
 
     year = config.get("year") if isinstance(config, dict) else None
-    return build_compliance_state_for_vendor(
+    payload = build_compliance_state_for_vendor(
         db, vendor_id=scope.vendor_id, year=year
     )
+    # P1.7: stamp the freshness timestamp on every payload so the
+    # block renderer can show "Datos al: …" and the refresh CTA can
+    # detect stale data. The canonical builder is shape-stable, so we
+    # add the field at the block boundary rather than altering
+    # dashboard_compute (which is shared with /portal/dashboard).
+    payload["fetched_at"] = fetched_at
+    return payload

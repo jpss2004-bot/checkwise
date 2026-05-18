@@ -18,6 +18,7 @@ fetchers, so the fetchers stay focused on data shape.
 from __future__ import annotations
 
 from collections.abc import Callable
+from datetime import datetime
 from typing import Any
 
 from sqlalchemy import func, select
@@ -40,6 +41,15 @@ from app.services.reports.context import ReportScope
 # ─── Fetchers ──────────────────────────────────────────────────
 
 
+def _now_iso() -> str:
+    """ISO8601 UTC stamp with explicit Z suffix.
+
+    Centralised so every fetcher's freshness stamp has the same shape;
+    the per-block ``FreshnessLabel`` renderer reads this verbatim.
+    """
+    return datetime.utcnow().isoformat() + "Z"
+
+
 def fetch_executive_summary(
     config: dict, scope: ReportScope, db: Session
 ) -> dict:
@@ -55,6 +65,7 @@ def fetch_executive_summary(
             "submissions_in_review": submissions_in_review,
             "next_critical_deadline": None,
         },
+        "fetched_at": _now_iso(),
     }
 
 
@@ -68,7 +79,7 @@ def fetch_kpi_strip(config: dict, scope: ReportScope, db: Session) -> dict:
         resolved.append(
             {"metric_key": key, "value": value, "trend_pct_vs_prior": None}
         )
-    return {"resolved": resolved}
+    return {"resolved": resolved, "fetched_at": _now_iso()}
 
 
 def fetch_vendor_risk_matrix(
@@ -134,7 +145,7 @@ def fetch_vendor_risk_matrix(
     rows = rows[:max_rows]
 
     totals: dict[str, dict[str, int]] = {}
-    return {"rows": rows, "totals": totals}
+    return {"rows": rows, "totals": totals, "fetched_at": _now_iso()}
 
 
 def fetch_text_or_divider(config: dict, scope: ReportScope, db: Session) -> dict | None:

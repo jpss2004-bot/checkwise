@@ -22,6 +22,7 @@ import {
 
 import { Canvas } from "@/components/checkwise/reports/canvas";
 import { ChatCopilot } from "@/components/checkwise/reports/chat-copilot";
+import { ReportActionsContext } from "@/components/checkwise/reports/freshness-label";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -36,6 +37,7 @@ import {
   explainBlock,
   getReport,
   getReportsEngine,
+  refreshReportData,
   regenerateBlock,
   type ReportContent,
   type ReportRead,
@@ -143,6 +145,39 @@ export function ReportEditor({
     },
     [reportId],
   );
+
+  // ─── P1.7 — Refresh data (no LLM) ──────────────────────────
+  // "Actualizar con datos de hoy": re-runs every block's deterministic
+  // data fetcher and persists a new ReportVersion. ai_summary text is
+  // preserved verbatim (no LLM). After the round-trip we reload the
+  // report so the canvas re-renders with the fresh `data` payloads and
+  // the per-block freshness labels update.
+  const [refreshingData, setRefreshingData] = useState(false);
+  const [lastRefreshAt, setLastRefreshAt] = useState<Date | null>(null);
+
+  const onRefreshData = useCallback(async () => {
+    if (refreshingData) return;
+    setRefreshingData(true);
+    setError(null);
+    try {
+      const resp = await refreshReportData(reportId);
+      const fresh = await getReport(reportId);
+      setReport(fresh);
+      if (fresh.current_version) {
+        setContent(fresh.current_version.content_json);
+        setIsDirty(false);
+      }
+      setLastRefreshAt(new Date(resp.fetched_at));
+    } catch (e) {
+      setError(
+        e instanceof ReportsApiError
+          ? `No pudimos actualizar los datos: ${e.message}`
+          : "No pudimos actualizar los datos.",
+      );
+    } finally {
+      setRefreshingData(false);
+    }
+  }, [refreshingData, reportId]);
 
   const onExplainBlockClicked = useCallback(
     async (blockId: string) => {
@@ -328,6 +363,28 @@ export function ReportEditor({
               <ChatCircle className="h-4 w-4" weight="bold" aria-hidden="true" />
               Copiloto
             </Button>
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={onRefreshData}
+              disabled={refreshingData}
+              title="Re-ejecutar los lectores de datos canónicos sin tocar la IA"
+            >
+              {refreshingData ? (
+                <ArrowsClockwise
+                  className="h-4 w-4 animate-spin"
+                  weight="bold"
+                  aria-hidden="true"
+                />
+              ) : (
+                <ArrowsClockwise
+                  className="h-4 w-4"
+                  weight="bold"
+                  aria-hidden="true"
+                />
+              )}
+              {refreshingData ? "Actualizando…" : "Actualizar con datos de hoy"}
+            </Button>
             <Button asChild variant="ghost" size="sm" title="Vista de impresión">
               <Link href={printHref} target="_blank" rel="noopener noreferrer">
                 <Printer className="h-4 w-4" weight="bold" aria-hidden="true" />
@@ -397,6 +454,18 @@ export function ReportEditor({
           <div>
             <span className="cw-eyebrow">IA</span>
             <GenerationBadge status={gen.state.status} />
+          </div>
+        )}
+        {lastRefreshAt && (
+          <div>
+            <span className="cw-eyebrow">Datos</span>
+            <span className="font-mono text-[11px] text-[color:var(--text-tertiary)]">
+              {lastRefreshAt.toLocaleTimeString("es-MX", {
+                hour: "2-digit",
+                minute: "2-digit",
+                second: "2-digit",
+              })}
+            </span>
           </div>
         )}
       </div>
@@ -527,25 +596,29 @@ export function ReportEditor({
         </Alert>
       )}
 
-      <div className="flex gap-0">
-        <div className="flex-1">
-          <Canvas
-            content={content}
-            editable={true}
-            onChange={onCanvasChange}
-            regeneratingBlockId={regeneratingBlockId}
-            onRegenerateBlock={onRegenerateBlock}
-            onExplainBlock={onExplainBlockClicked}
-          />
+      <ReportActionsContext.Provider
+        value={{ onRefreshData, refreshingData }}
+      >
+        <div className="flex gap-0">
+          <div className="flex-1">
+            <Canvas
+              content={content}
+              editable={true}
+              onChange={onCanvasChange}
+              regeneratingBlockId={regeneratingBlockId}
+              onRegenerateBlock={onRegenerateBlock}
+              onExplainBlock={onExplainBlockClicked}
+            />
+          </div>
+          {chatOpen && (
+            <ChatCopilot
+              reportId={reportId}
+              content={content}
+              onClose={() => setChatOpen(false)}
+            />
+          )}
         </div>
-        {chatOpen && (
-          <ChatCopilot
-            reportId={reportId}
-            content={content}
-            onClose={() => setChatOpen(false)}
-          />
-        )}
-      </div>
+      </ReportActionsContext.Provider>
     </div>
   );
 }

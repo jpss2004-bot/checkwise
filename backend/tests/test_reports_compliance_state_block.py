@@ -348,9 +348,12 @@ def test_fetcher_returns_builder_output_when_vendor_set(db_factory) -> None:
         expected = build_compliance_state_for_vendor(db, vendor_id=vendor_id)
     finally:
         db.close()
-    # Same shape — fetcher should be a thin pass-through.
-    assert out.keys() == expected.keys()
+    # Same shape — fetcher should be a thin pass-through over the
+    # canonical builder, plus a block-level ``fetched_at`` stamp added
+    # in P1.7 so the renderer can show "Datos al: …".
+    assert out.keys() == expected.keys() | {"fetched_at"}
     assert out["workspace_id"] == expected["workspace_id"]
+    assert isinstance(out["fetched_at"], str) and out["fetched_at"].endswith("Z")
 
 
 def test_fetcher_renders_for_internal_audience_too(db_factory) -> None:
