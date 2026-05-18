@@ -33,7 +33,8 @@ import {
  *
  *   1. ``must_change_password`` → /activate (forced first-login)
  *   2. role contains internal_admin or reviewer → /admin/reviewer
- *   3. otherwise → /portal/entra-a-tu-espacio
+ *   3. role contains client_admin → /client/dashboard
+ *   4. otherwise → /portal/entra-a-tu-espacio
  */
 export default function LoginPage() {
   const router = useRouter();
@@ -224,6 +225,9 @@ function decideDestination(
     session.roles.includes("reviewer")
   ) {
     return "/admin/reviewer";
+  }
+  if (session.roles.includes("client_admin")) {
+    return "/client/dashboard";
   }
   return "/portal/entra-a-tu-espacio";
 }
