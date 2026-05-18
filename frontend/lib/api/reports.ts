@@ -280,3 +280,15 @@ export function regenerateBlock(
     { method: "POST", body: JSON.stringify({}) },
   );
 }
+
+// ─── Engine info — used to surface "AI not configured" banner ────
+
+export interface ReportsEngineInfo {
+  backend: string;
+  planner_model: string;
+  content_model: string;
+}
+
+export function getReportsEngine(): Promise<ReportsEngineInfo> {
+  return fetchJson<ReportsEngineInfo>(`/api/v1/reports/_engine`);
+}

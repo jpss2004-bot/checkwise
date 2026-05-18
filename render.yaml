@@ -82,3 +82,18 @@ services:
       # ---- Support links (optional; populate when finalized) ----
       - key: SUPPORT_WHATSAPP_URL
         sync: false
+
+      # ---- Reports AI (Phase 3.3+) ----
+      # ANTHROPIC_API_KEY powers the report planner + per-block content
+      # generator + copilot chat. Without it, the backend silently falls
+      # back to a deterministic mock LLM and "Generate with AI" emits
+      # canned text. Paste the production key in the Render dashboard
+      # — sync: false keeps the value out of this file.
+      - key: ANTHROPIC_API_KEY
+        sync: false
+      # Optional override: "" (default = auto-detect from ANTHROPIC_API_KEY),
+      # "anthropic" (force real, fail loudly if key missing), or "mock"
+      # (force the deterministic mock even if a key is present — useful
+      # to disable LLM cost while keeping the surface usable).
+      - key: CHECKWISE_LLM_BACKEND
+        sync: false

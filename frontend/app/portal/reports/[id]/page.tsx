@@ -32,9 +32,11 @@ import {
   createVersion,
   explainBlock,
   getReport,
+  getReportsEngine,
   regenerateBlock,
   type ReportContent,
   type ReportRead,
+  type ReportsEngineInfo,
 } from "@/lib/api/reports";
 import { useReportGeneration } from "@/lib/reports/use-generation";
 import { withOnboardingGate } from "@/lib/session/with-onboarding-gate";
@@ -67,6 +69,27 @@ function EditorInner({ session }: { session: PortalSession }) {
   const [aiOpen, setAiOpen] = useState(false);
   const [aiPrompt, setAiPrompt] = useState("");
   const gen = useReportGeneration(reportId);
+
+  // ─── LLM backend probe ─────────────────────────────────────
+  // Honest signal: if the backend has no ANTHROPIC_API_KEY the
+  // factory falls back to the deterministic mock and `name` is
+  // "mock". Surface a banner so the operator never confuses canned
+  // text with real AI output.
+  const [engine, setEngine] = useState<ReportsEngineInfo | null>(null);
+  useEffect(() => {
+    let cancelled = false;
+    getReportsEngine()
+      .then((info) => {
+        if (!cancelled) setEngine(info);
+      })
+      .catch(() => {
+        // Non-fatal: a stale or unauthenticated probe just hides the
+        // banner; it never blocks the editor.
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   // ─── Copilot chat (right rail) ─────────────────────────────
   const [chatOpen, setChatOpen] = useState(false);
@@ -460,6 +483,24 @@ function EditorInner({ session }: { session: PortalSession }) {
               {explanation.text}
             </p>
           </div>
+        )}
+
+        {engine?.backend === "mock" && (
+          <Alert variant="warning">
+            <AlertTitle className="flex items-center gap-2">
+              <WarningCircle className="h-4 w-4" weight="bold" aria-hidden="true" />
+              Generación con IA no configurada en este entorno
+            </AlertTitle>
+            <AlertDescription>
+              El motor de IA está en modo mock determinista (no hay
+              <code className="mx-1 rounded-sm bg-[color:var(--surface-sunken)] px-1 font-mono text-[11px]">
+                ANTHROPIC_API_KEY
+              </code>
+              configurada en el backend). Las acciones de IA (Generar, Copiloto,
+              Regenerar, Explicar) producen texto canned para que la interfaz
+              siga funcionando; verifícalo antes de compartir.
+            </AlertDescription>
+          </Alert>
         )}
 
         <div className="flex gap-0">

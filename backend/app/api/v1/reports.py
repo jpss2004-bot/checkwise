@@ -140,6 +140,42 @@ def _read(report: Report, current: ReportVersion | None) -> ReportRead:
 # ─── Endpoints ───────────────────────────────────────────────────
 
 
+class ReportsEngineInfo(BaseModel):
+    """Tells the frontend which LLM backend is currently wired up.
+
+    Used by the editor to surface an honest banner when the
+    deterministic mock is active (no ``ANTHROPIC_API_KEY`` configured)
+    so the operator never confuses canned text with real AI output.
+    """
+
+    backend: str
+    planner_model: str
+    content_model: str
+
+
+@router.get(
+    "/_engine",
+    response_model=ReportsEngineInfo,
+    summary="Active LLM backend for reports (mock vs anthropic)",
+)
+def get_engine(
+    _current: Annotated[CurrentUser, Depends(get_current_user)],
+) -> ReportsEngineInfo:
+    """Return the active LLM client's identifier + default models.
+
+    Cheap: no DB hit, no LLM call. Auth-gated so anonymous callers
+    can't enumerate engine state. The static ``/_engine`` segment is
+    deliberately leading-underscore so it can never collide with a
+    real report id (report ids are UUID-shaped).
+    """
+    llm = get_llm_client()
+    return ReportsEngineInfo(
+        backend=llm.name,
+        planner_model=llm.planner_model,
+        content_model=llm.content_model,
+    )
+
+
 @router.post(
     "",
     response_model=ReportRead,
