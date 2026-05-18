@@ -1,0 +1,60 @@
+[
+  {
+    "role": "admin",
+    "page": "/admin/reports",
+    "initialRows": 6,
+    "presetButtons": 6,
+    "selectCount": 2,
+    "draftRows": 4,
+    "clientAudienceRows": 2,
+    "searchRows": 0,
+    "clearButtons": 1,
+    "afterTemplateUrl": "http://localhost:3000/admin/reports/22d71263-e3eb-4efc-81f2-32bbc2a58d06",
+    "snapshot": "- banner:\n  - link \"CheckWise admin\":\n    - /url: /admin\n    - generic \"CheckWise\":\n      - generic: Check\n      - generic: Wise\n  - button:\n  - button \"Abrir menú\":\n- main:\n  - paragraph: Reporte\n  - heading \"Cola diaria de revisión\" [level=1]\n  - paragraph: \"Resumen operativo del día: documentos pendientes de revisión, vencimientos próximos y tiempo medio de revisión.\"\n  - link \"Volver\":\n    - /url: /admin/reports\n    - text: Volver\n  - button \"Generar con IA\":\n    - text: Generar con IA\n  - button \"Copiloto\":\n    - text: Copiloto\n  - link \"Imprimir\":\n    - /url: /portal/reports/22d71263-e3eb-4efc-81f2-32bbc2a58d06/print\n    - text: Imprimir\n  - button \"Sin cambios\" [disabled]:\n    - text: Sin cambios\n  - generic: Audiencia\n  - generic: Solo interno\n  - generic: Estado\n  - generic: Borrador\n  - generic: Versión\n  - generic: v1\n  - paragraph: Describe el reporte que necesitas. La IA selecciona los bloques, trae los datos y redacta el resumen ejecutivo. El plan se ejecuta dentro del workspace; ningún dato cruza tenant.\n  - textbox \"ej. Genera un resumen REPSE de mayo 2026 para los proveedores con SAT pendiente.\": \"Genera un reporte operativo del día con: un resumen ejecutivo del es"
+  },
+  {
+    "role": "client",
+    "page": "/client/reports",
+    "initialRows": 3,
+    "presetButtons": 3,
+    "selectCount": 1,
+    "activeRows": 1,
+    "searchRows": 1,
+    "clearButtons": 1,
+    "afterTemplateUrl": "http://localhost:3000/client/reports/41d0ad6e-cd06-4cef-adaf-41034b026629",
+    "snapshot": "- banner:\n  - link \"CheckWise · vista cliente\":\n    - /url: /client/dashboard\n    - generic \"CheckWise\":\n      - generic: Check\n      - generic: Wise\n  - button:\n  - button \"Abrir menú\":\n- main:\n  - paragraph: Reporte\n  - heading \"Resumen ejecutivo mensual\" [level=1]\n  - paragraph: \"Panorama mensual del portafolio: cumplimiento global, proveedores en riesgo, evolución y recomendaciones para dirección.\"\n  - link \"Volver\":\n    - /url: /client/reports\n    - text: Volver\n  - button \"Generar con IA\":\n    - text: Generar con IA\n  - button \"Copiloto\":\n    - text: Copiloto\n  - link \"Imprimir\":\n    - /url: /portal/reports/41d0ad6e-cd06-4cef-adaf-41034b026629/print\n    - text: Imprimir\n  - button \"Sin cambios\" [disabled]:\n    - text: Sin cambios\n  - generic: Audiencia\n  - generic: Para el cliente\n  - generic: Estado\n  - generic: Borrador\n  - generic: Versión\n  - generic: v1\n  - paragraph: Describe el reporte que necesitas. La IA selecciona los bloques, trae los datos y redacta el resumen ejecutivo. El plan se ejecuta dentro del workspace; ningún dato cruza tenant.\n  - textbox \"ej. Genera un resumen REPSE de mayo 2026 para los proveedores con SAT pendiente.\": \"Genera un resumen ejecutivo mens"
+  },
+  {
+    "role": "admin",
+    "page": "/admin/reports",
+    "positiveSearch": "Cola diaria",
+    "searchRows": 2,
+    "url": "http://localhost:3000/admin/reports",
+    "snapshot": "- banner:\n  - link \"CheckWise admin\":\n    - /url: /admin\n    - generic \"CheckWise\":\n      - generic: Check\n      - generic: Wise\n  - button:\n  - button \"Abrir menú\":\n- main:\n  - main:\n    - paragraph: Admin · CheckWise\n    - heading \"Reportes\" [level=1]\n    - paragraph: Centro de inteligencia operativa. Genera reportes internos sobre la bandeja de revisión, proveedores en riesgo y cumplimiento mensual.\n    - heading \"Plantillas operativas\" [level=2]\n    - generic: 6 disponibles\n    - article:\n      - generic: Solo interno\n      - heading \"Cola diaria de revisión\" [level=3]\n      - paragraph: \"Resumen operativo del día: documentos pendientes de revisión, vencimientos próximos y tiempo medio de revisión.\"\n      - button \"Usar plantilla\":\n        - text: Usar plantilla\n    - article:\n      - generic: Solo interno\n      - heading \"Proveedores de alto riesgo\" [level=3]\n      - paragraph: Matriz cruzada de proveedores con peor score de cumplimiento y obligaciones SAT / IMSS / INFONAVIT / STP"
+  },
+  {
+    "role": "provider",
+    "page": "/portal/reports",
+    "presetButtons": 3,
+    "selectCount": 1,
+    "rows": 0,
+    "afterTemplateUrl": "http://localhost:3000/portal/reports",
+    "snapshot": "- banner:\n  - button \"Abrir menú\":\n  - generic \"CheckWise\":\n- main:\n  - paragraph: Centro de cumplimiento\n  - heading \"Reportes\" [level=1]\n  - paragraph: \"Centro de cumplimiento personal: estado del expediente, obligaciones pendientes y rechazos por corregir.\"\n  - heading \"Plantillas\" [level=2]\n  - generic: 3 disponibles\n  - article:\n    - generic: Para el proveedor\n    - heading \"Mi estado de cumplimiento\" [level=3]\n    - paragraph: \"Estado actual del expediente del proveedor: porcentaje de cumplimiento, documentos en revisión, vencimientos próximos y siguientes acciones prioritarias.\"\n    - button \"Usar plantilla\":\n      - text: Usar plantilla\n  - article:\n    - generic: Para el proveedor\n    - heading \"Documentos faltantes\" [level=3]\n    - paragraph: Lista de obligaciones del periodo con evidencia pendiente, agrupada por institución y prioridad.\n    - button \"Usar plantilla\":\n      - text: Usar plantilla\n  - article:\n    - generic: Para el proveedor\n    - heading \"Rechazos recientes\" [level=3]\n    - paragraph: Documentos rechazados o con inconsistencias en los últimos periodos y las acciones correctivas correspondientes.\n    - button \"Usar plantilla\":\n      - text: Usar plantilla\n  - heading \"Reportes recientes\" [level=2]\n  - generic: 0 de 0\n  - searchbox \"Buscar por título\"\n  - generic: Estado\n  - combobox \"Estado\":\n    - option \"Todos\" [selected]\n    - option \"Borrador\"\n    - option \"Activo\"\n    - option \"Archivado\"\n  - paragraph: Aún no hay reportes\n  - paragraph: Usa una de las plantillas arriba para crear el primero.\n- region \"Notifications alt+T\"\n- button \"Open Nex"
+  },
+  {
+    "role": "provider",
+    "page": "/portal/reports",
+    "action": "click first Usar plantilla",
+    "expected": "create vendor-facing report and open /portal/reports/[id] in PortalShell",
+    "actual": "stays on /portal/reports and shows {detail: User has no organization memberships.}",
+    "severity": "P1",
+    "snapshot": "- banner:\n  - button \"Abrir menú\":\n  - generic \"CheckWise\":\n- main:\n  - paragraph: Centro de cumplimiento\n  - heading \"Reportes\" [level=1]\n  - paragraph: \"Centro de cumplimiento personal: estado del expediente, obligaciones pendientes y rechazos por corregir.\"\n  - alert:\n    - heading \"No se pudieron cargar los reportes\" [level=3]:\n      - text: No se pudieron cargar los reportes\n    - paragraph: \"{\\\"detail\\\":\\\"User has no organization memberships.\\\"}\"\n  - heading \"Plantillas\" [level=2]\n  - generic: 3 disponibles\n  - article:\n    - generic: Para el proveedor\n    - heading \"Mi estado de cumplimiento\" [level=3]\n    - paragraph: \"Estado actual del expediente del proveedor: porcentaje de cumplimiento, documentos en revisión, vencimientos próximos y siguientes acciones prioritarias.\"\n    - button \"Usar plantilla\":\n      - text: Usar plantilla\n  - article:\n    - generic: Para el proveedor\n    - heading \"Documentos faltantes\" [level=3]\n    - paragraph: Lista de obligaciones del periodo con evidencia pendiente, agrupada por institución y prioridad.\n    - button \"Usar plantilla\":\n      - text: Usar plantilla\n  - article:\n    - generic: Para el proveedor\n    - heading \"Rechazos recientes\" [level=3]\n    - paragraph: Documentos rechazados o con inconsistencias en los últimos periodos y las acciones correctivas correspondientes.\n    - button \"Usar plantilla\":\n      - text: Usar plantilla\n  - heading \"Reportes recientes\" [level=2]\n  - generic: 0 de 0\n  - searchbox \"Buscar por título\"\n  - generic: Estado\n  - combobox \"Estado\":\n    - option \"Todos\" [selected]\n    - option \"Borrador\"\n    - "
+  },
+  {
+    "role": "activation",
+    "action": "cancel activation via link",
+    "expected": "clear temporary session or remain on login requiring credentials",
+    "actualUrl": "http://localhost:3000/portal/entra-a-tu-espacio",
+    "snapshot": "- main:\n  - text: Confirmación de espacio\n  - heading \"Entra a tu espacio\" [level=1]\n  - paragraph: Confirma que esta información es correcta antes de continuar. Usamos estos datos para proteger tu expediente y evitar que los documentos se asignen a la empresa incorrecta.\n  - paragraph: Tu espacio en CheckWise\n  - heading \"Distribuidora Nogal · Demo\" [level=2]\n  - paragraph: Workspace creado por tu cliente\n  - generic: Proveedor\n  - paragraph: Rol asignado\n  - img \"Campo protegido\"\n  - paragraph: Proveedor\n  - paragraph: Definido por la invitación.\n  - paragraph: RFC\n  - img \"Campo protegido\"\n  - paragraph: DNG890101AB1\n  - paragraph: Locked al alta.\n  - paragraph: Razón social\n  - img \"Campo protegido\"\n  - paragraph: Distribuidora Nogal · Demo\n  - paragraph: Locked al alta. Solicita corrección si difiere.\n  - paragraph: Workspace\n  - img \"Campo protegido\"\n  - paragraph: ws-demo-0001\n  - paragraph: Identificador interno.\n  - paragraph:\n    - text: Cambios sensibles pasan por revisión.\n  - heading \"Confirma tus datos de contacto\" [level=2]\n  - paragraph: Estos campos sí los puedes editar directamente.\n  - generic: Nombre\n  - generic: \"*\"\n  - textbox \"Nombre\"\n  - generic: Apellido\n  - generic: \"*\"\n  - textbox \"Apellido\"\n  - generic: Teléfono\n  - textbox \"Teléfono\":\n    - /placeholder: +52 55 1234 5678\n  - paragraph: Opcional, para recordatorios.\n  - generic: Cargo o puesto\n  - textbox \"Cargo o puesto\":\n    - /placeholder: Responsable de cumplimiento\n  - generic: Canal preferido\n  - combobox \"Canal preferido\":\n    - option \"Correo\" [selected]\n    - option \"WhatsApp\"\n    - option \"Correo + WhatsApp\"\n  - paragraph: ¿Por dónde quieres recibir avisos?\n  - paragraph: Tu próximo paso, bienvenido\n  - list:\n    - generic: \"1\"\n    - paragraph: Completar expediente inicial\n    - par"
+  }
+]

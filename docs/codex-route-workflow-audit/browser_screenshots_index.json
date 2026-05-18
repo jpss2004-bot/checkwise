@@ -1,0 +1,158 @@
+[
+  {
+    "name": "public-home",
+    "file": "/Users/josepablosamano/Desktop/Work — LegalShelf/checkwise/CheckWise/docs/codex-route-workflow-audit/screenshots/01-public-home.png"
+  },
+  {
+    "name": "login",
+    "file": "/Users/josepablosamano/Desktop/Work — LegalShelf/checkwise/CheckWise/docs/codex-route-workflow-audit/screenshots/02-login.png"
+  },
+  {
+    "name": "activate-token-logged-out",
+    "file": "/Users/josepablosamano/Desktop/Work — LegalShelf/checkwise/CheckWise/docs/codex-route-workflow-audit/screenshots/03-activate-token-logged-out.png"
+  },
+  {
+    "name": "logged-out-/admin/reviewer",
+    "file": "/Users/josepablosamano/Desktop/Work — LegalShelf/checkwise/CheckWise/docs/codex-route-workflow-audit/screenshots/04-logged-out-admin-reviewer.png"
+  },
+  {
+    "name": "logged-out-/client/dashboard",
+    "file": "/Users/josepablosamano/Desktop/Work — LegalShelf/checkwise/CheckWise/docs/codex-route-workflow-audit/screenshots/05-logged-out-client-dashboard.png"
+  },
+  {
+    "name": "logged-out-/portal/dashboard",
+    "file": "/Users/josepablosamano/Desktop/Work — LegalShelf/checkwise/CheckWise/docs/codex-route-workflow-audit/screenshots/06-logged-out-portal-dashboard.png"
+  },
+  {
+    "name": "admin-landing",
+    "file": "/Users/josepablosamano/Desktop/Work — LegalShelf/checkwise/CheckWise/docs/codex-route-workflow-audit/screenshots/07-admin-landing.png"
+  },
+  {
+    "name": "admin-reports",
+    "file": "/Users/josepablosamano/Desktop/Work — LegalShelf/checkwise/CheckWise/docs/codex-route-workflow-audit/screenshots/08-admin-reports.png"
+  },
+  {
+    "name": "admin-report-editor",
+    "file": "/Users/josepablosamano/Desktop/Work — LegalShelf/checkwise/CheckWise/docs/codex-route-workflow-audit/screenshots/09-admin-report-editor.png"
+  },
+  {
+    "name": "admin-access-portal-dashboard",
+    "file": "/Users/josepablosamano/Desktop/Work — LegalShelf/checkwise/CheckWise/docs/codex-route-workflow-audit/screenshots/10-admin-access-portal-dashboard.png"
+  },
+  {
+    "name": "client-landing",
+    "file": "/Users/josepablosamano/Desktop/Work — LegalShelf/checkwise/CheckWise/docs/codex-route-workflow-audit/screenshots/11-client-landing.png"
+  },
+  {
+    "name": "client-reports",
+    "file": "/Users/josepablosamano/Desktop/Work — LegalShelf/checkwise/CheckWise/docs/codex-route-workflow-audit/screenshots/12-client-reports.png"
+  },
+  {
+    "name": "client-report-editor",
+    "file": "/Users/josepablosamano/Desktop/Work — LegalShelf/checkwise/CheckWise/docs/codex-route-workflow-audit/screenshots/13-client-report-editor.png"
+  },
+  {
+    "name": "client-forbidden-/admin/reviewer",
+    "file": "/Users/josepablosamano/Desktop/Work — LegalShelf/checkwise/CheckWise/docs/codex-route-workflow-audit/screenshots/14-client-forbidden-admin-reviewer.png"
+  },
+  {
+    "name": "client-forbidden-/admin/reports",
+    "file": "/Users/josepablosamano/Desktop/Work — LegalShelf/checkwise/CheckWise/docs/codex-route-workflow-audit/screenshots/15-client-forbidden-admin-reports.png"
+  },
+  {
+    "name": "client-forbidden-/portal/dashboard",
+    "file": "/Users/josepablosamano/Desktop/Work — LegalShelf/checkwise/CheckWise/docs/codex-route-workflow-audit/screenshots/16-client-forbidden-portal-dashboard.png"
+  },
+  {
+    "name": "provider-landing",
+    "file": "/Users/josepablosamano/Desktop/Work — LegalShelf/checkwise/CheckWise/docs/codex-route-workflow-audit/screenshots/17-provider-landing.png"
+  },
+  {
+    "name": "provider-dashboard",
+    "file": "/Users/josepablosamano/Desktop/Work — LegalShelf/checkwise/CheckWise/docs/codex-route-workflow-audit/screenshots/18-provider-dashboard.png"
+  },
+  {
+    "name": "provider-upload",
+    "file": "/Users/josepablosamano/Desktop/Work — LegalShelf/checkwise/CheckWise/docs/codex-route-workflow-audit/screenshots/19-provider-upload.png"
+  },
+  {
+    "name": "provider-reports",
+    "file": "/Users/josepablosamano/Desktop/Work — LegalShelf/checkwise/CheckWise/docs/codex-route-workflow-audit/screenshots/20-provider-reports.png"
+  },
+  {
+    "name": "provider-report-direct",
+    "file": "/Users/josepablosamano/Desktop/Work — LegalShelf/checkwise/CheckWise/docs/codex-route-workflow-audit/screenshots/21-provider-report-direct.png"
+  },
+  {
+    "name": "provider-report-direct",
+    "file": "/Users/josepablosamano/Desktop/Work — LegalShelf/checkwise/CheckWise/docs/codex-route-workflow-audit/screenshots/22-provider-report-direct.png"
+  },
+  {
+    "name": "provider-forbidden-/client/dashboard",
+    "file": "/Users/josepablosamano/Desktop/Work — LegalShelf/checkwise/CheckWise/docs/codex-route-workflow-audit/screenshots/23-provider-forbidden-client-dashboard.png"
+  },
+  {
+    "name": "provider-forbidden-/admin/reviewer",
+    "file": "/Users/josepablosamano/Desktop/Work — LegalShelf/checkwise/CheckWise/docs/codex-route-workflow-audit/screenshots/24-provider-forbidden-admin-reviewer.png"
+  },
+  {
+    "name": "admin-reports-interaction-landing",
+    "file": "/Users/josepablosamano/Desktop/Work — LegalShelf/checkwise/CheckWise/docs/codex-route-workflow-audit/screenshots/25-admin-reports-interaction-landing.png"
+  },
+  {
+    "name": "admin-reports-filtered-verified",
+    "file": "/Users/josepablosamano/Desktop/Work — LegalShelf/checkwise/CheckWise/docs/codex-route-workflow-audit/screenshots/26-admin-reports-filtered-verified.png"
+  },
+  {
+    "name": "admin-template-editor-verified",
+    "file": "/Users/josepablosamano/Desktop/Work — LegalShelf/checkwise/CheckWise/docs/codex-route-workflow-audit/screenshots/27-admin-template-editor-verified.png"
+  },
+  {
+    "name": "client-reports-interaction-landing",
+    "file": "/Users/josepablosamano/Desktop/Work — LegalShelf/checkwise/CheckWise/docs/codex-route-workflow-audit/screenshots/28-client-reports-interaction-landing.png"
+  },
+  {
+    "name": "client-reports-filtered-verified",
+    "file": "/Users/josepablosamano/Desktop/Work — LegalShelf/checkwise/CheckWise/docs/codex-route-workflow-audit/screenshots/29-client-reports-filtered-verified.png"
+  },
+  {
+    "name": "client-template-editor-verified",
+    "file": "/Users/josepablosamano/Desktop/Work — LegalShelf/checkwise/CheckWise/docs/codex-route-workflow-audit/screenshots/30-client-template-editor-verified.png"
+  },
+  {
+    "name": "admin-search-positive-landing",
+    "file": "/Users/josepablosamano/Desktop/Work — LegalShelf/checkwise/CheckWise/docs/codex-route-workflow-audit/screenshots/31-admin-search-positive-landing.png"
+  },
+  {
+    "name": "admin-reports-search-positive",
+    "file": "/Users/josepablosamano/Desktop/Work — LegalShelf/checkwise/CheckWise/docs/codex-route-workflow-audit/screenshots/32-admin-reports-search-positive.png"
+  },
+  {
+    "name": "provider-after-p1-landing",
+    "file": "/Users/josepablosamano/Desktop/Work — LegalShelf/checkwise/CheckWise/docs/codex-route-workflow-audit/screenshots/33-provider-after-p1-landing.png"
+  },
+  {
+    "name": "provider-reports-p1-shared-list-verified",
+    "file": "/Users/josepablosamano/Desktop/Work — LegalShelf/checkwise/CheckWise/docs/codex-route-workflow-audit/screenshots/34-provider-reports-p1-shared-list-verified.png"
+  },
+  {
+    "name": "provider-template-editor-verified",
+    "file": "/Users/josepablosamano/Desktop/Work — LegalShelf/checkwise/CheckWise/docs/codex-route-workflow-audit/screenshots/35-provider-template-editor-verified.png"
+  },
+  {
+    "name": "provider-preset-click-error-no-org",
+    "file": "/Users/josepablosamano/Desktop/Work — LegalShelf/checkwise/CheckWise/docs/codex-route-workflow-audit/screenshots/36-provider-preset-click-error-no-org.png"
+  },
+  {
+    "name": "provider-entry-robust",
+    "file": "/Users/josepablosamano/Desktop/Work — LegalShelf/checkwise/CheckWise/docs/codex-route-workflow-audit/screenshots/37-provider-entry-robust.png"
+  },
+  {
+    "name": "provider-dashboard-robust",
+    "file": "/Users/josepablosamano/Desktop/Work — LegalShelf/checkwise/CheckWise/docs/codex-route-workflow-audit/screenshots/38-provider-dashboard-robust.png"
+  },
+  {
+    "name": "provider-upload-robust",
+    "file": "/Users/josepablosamano/Desktop/Work — LegalShelf/checkwise/CheckWise/docs/codex-route-workflow-audit/screenshots/39-provider-upload-robust.png"
+  }
+]

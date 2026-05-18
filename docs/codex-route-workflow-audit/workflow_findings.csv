@@ -1,0 +1,7 @@
+workflow,steps_tested,classification,finding
+Admin/reviewer,login -> reviewer queue -> dashboard/nav -> reports -> preset -> editor -> filters,Working,"Admin login and shell work. Reports list has 6 presets, 2 selects, status/audience filters and template click opens AdminShell editor."
+Client,login -> dashboard -> vendors -> reports -> preset -> editor -> filters,Working,"Client sees only client_facing report rows via API, 3 client presets, no audience filter, template click opens ClientShell editor."
+Provider,login -> entry -> dashboard -> upload -> reports,Partially working,"Core portal entry/dashboard/upload render. Reports show new provider presets, but preset click fails 403 in current DB."
+Activation,temp login -> /activate -> cancel,Broken,"Must-change login reaches /activate, but Cancelar e iniciar sesión de nuevo routes into provider portal without password change. Did not submit final password change."
+Reports R2 filters,admin/client/provider lists,Partially working,Admin/client filters verified. Provider list has status/search control but create is blocked; existing provider rows absent in current DB.
+Security/role safety,API role probes + browser forbidden route checks,Working with one P1 activation exception,API rejects client/provider access to admin/client endpoints. Client cannot see internal_only reports. Activation bypass needs fix.

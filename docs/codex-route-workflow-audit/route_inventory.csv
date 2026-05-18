@@ -1,0 +1,36 @@
+path,expected_role,expected_purpose,actual_result,status,notes
+/,public,Marketing/home,renders public CheckWise page,PASS,Browser route smoke
+/login,public,Unified login,renders login form,PASS,Browser route smoke
+/activate?token=demo,public,Invalid/old activation link state,renders invalid-link/auth guard state,PASS,Browser route smoke
+/admin/login,public,Legacy admin login,redirects to /login,PASS/P3,"Functional, but double-hop remains"
+/admin/reviewer logged out,logged-out,Protected admin route,redirects to /login,PASS,Browser redirect
+/client/dashboard logged out,logged-out,Protected client route,redirects to /login,PASS,Browser redirect
+/portal/dashboard logged out,logged-out,Protected portal route,redirects to /login,PASS,Browser redirect
+/admin,admin/reviewer,Internal landing/fallback,renders internal session/status page,PASS,Browser/source
+/admin/dashboard,admin/reviewer,Admin dashboard,renders admin shell/dashboard,PASS,Browser/source
+/admin/reviewer,admin/reviewer,Reviewer queue,renders queue with 10 seeded rows,PASS,Browser/API
+/admin/reports,admin/reviewer,Admin Reports list,"renders shared list, presets, filters",PASS,Browser interaction verified
+/admin/reports/[id],admin/reviewer,Admin report editor,renders in AdminShell with AI/save/print controls,PASS,Browser interaction verified
+/admin/clients,admin/reviewer,Clients roster,renders,PASS,Browser/API
+/admin/vendors,admin/reviewer,Vendors roster,renders,PASS,Browser/API
+/admin/requirements,admin/reviewer,Requirements catalog,renders,PASS,Browser/API
+/admin/calendar,admin/reviewer,Admin calendar,renders,PASS,Browser/API
+/admin/audit-log,admin/reviewer,Audit log,renders,PASS,Browser/API
+/client,client_admin,Client index redirect,redirects/renders client dashboard,PASS,Browser/source
+/client/dashboard,client_admin,Client dashboard,renders portfolio risk view,PASS,Browser/API
+/client/reports,client_admin,Client Reports list,"renders shared list, 3 presets, status/search filters",PASS,Browser interaction verified
+/client/reports/[id],client_admin,Client report editor,renders in ClientShell,PASS,Browser interaction verified
+/client/vendors,client_admin,Client vendors,renders 3 vendors,PASS,Browser/API
+/client/vendors/[vendor_id],client_admin,Client vendor detail,renders vendor detail,PASS,Browser/API
+/client/submissions,client_admin,Client submissions,renders seeded submissions,PASS,Browser/API
+/client/calendar,client_admin,Client calendar,renders empty/safe calendar state,PASS,Browser/API
+/client/activity,client_admin,Client activity,renders activity surface,PASS,Browser/API
+/portal/entra-a-tu-espacio,provider,Workspace confirmation,renders provider identity/contact confirmation,PASS,Robust browser snapshot
+/portal/dashboard,provider,Provider dashboard,renders provider dashboard and next actions,PASS/P2,Dashboard works; copy can still read as limited despite completed expediente data
+/portal/onboarding,provider,Provider onboarding,renders onboarding checklist,PASS,Browser route smoke
+/portal/upload,provider,Provider upload,renders guided upload surface,PASS,Robust browser snapshot
+/portal/submissions/[id],provider,Provider submission detail,route exists; direct tested id was not provider-owned in one pass,NEEDS DATA,Requires provider-owned submission id for definitive pass
+/portal/calendar,provider,Provider calendar,renders portal calendar,PASS,Browser route smoke
+/portal/reports,provider,Provider Reports list,shows 3 provider presets and R2 status/search controls,PARTIAL/P1,Preset creation fails in current DB with 403 no organization memberships
+/portal/reports/[id],provider,Provider report editor,not fully testable because provider cannot create/open own report in current DB,FAIL/P1,Blocked by Provider Reports creation failure
+/portal/reports/[id]/print,provider,Provider print route,safe not-available state for forbidden id,PARTIAL,Own report print not testable until provider report creation works

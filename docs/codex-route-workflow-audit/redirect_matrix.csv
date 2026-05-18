@@ -1,0 +1,16 @@
+check,start_url,account_or_state,expected_destination,actual_destination,status,notes
+logged-out admin protected,/admin/reviewer,logged-out,/login,/login,PASS,AdminShell double-hops through /admin/login but lands on /login
+logged-out client protected,/client/dashboard,logged-out,/login,/login,PASS,ClientShell double-hops through /admin/login but lands on /login
+logged-out portal protected,/portal/dashboard,logged-out,/login,/login,PASS,Portal guard returns to unified login
+admin login,/login,ada@legalshelf.mx,/admin/reviewer,/admin/reviewer,PASS,Browser UI login
+client login,/login,cliente.demo@checkwise.mx,/client/dashboard,/client/dashboard,PASS,Browser UI login
+provider login,/login,boss.demo@checkwise.mx,/portal/entra-a-tu-espacio,/portal/entra-a-tu-espacio,PASS,Browser UI login
+must-change-password login,/login,proveedor.demo@checkwise.mx,/activate,/activate,PASS,Browser UI login + API must_change_password=true
+activation cancel,/activate,proveedor.demo@checkwise.mx,login with cleared temp session,/portal/entra-a-tu-espacio,FAIL/P1,Cancel link to /login does not clear stored JWT; login boot routes temp-password user into portal
+client attempts admin reviewer,/admin/reviewer,client_admin,/admin or login/forbidden,/admin (expected after guard),PASS,API returns 403 for reviewer/admin data
+provider attempts admin reviewer,/admin/reviewer,provider,/admin or login/forbidden,/admin fallback,PASS,No admin data shown; fallback page lists disabled surfaces
+provider attempts client dashboard,/client/dashboard,provider,/admin or login/forbidden,/admin fallback,PASS,No client data shown; API client endpoints 403
+client attempts portal dashboard,/portal/dashboard,client_admin,/login or no portal session,cookie-dependent/needs clean isolation,NEEDS REVIEW,Portal cookie/session residue can make this ambiguous in browser; backend portal ownership remains enforced
+admin report editor shell,/admin/reports/[id],admin,AdminShell,AdminShell,PASS,Observed admin chrome + /admin back link
+client report editor shell,/client/reports/[id],client,ClientShell,ClientShell,PASS,Observed client chrome + /client back link
+provider report editor shell,/portal/reports/[id],provider,PortalShell,blocked,FAIL/P1,Provider cannot create own report in current DB; direct non-owned id shows not available
