@@ -20,6 +20,14 @@ export type AdminSessionUser = {
   full_name: string;
   status: string;
   last_login_at: string | null;
+  /**
+   * Forced-first-login flag. Set when the user logged in with a
+   * temporary password and has not yet rotated it via /activate.
+   * /login's boot effect routes such sessions back to /activate so
+   * the user cannot bypass the rotation by closing the activation
+   * page (security fix CW-AUD-P1-01).
+   */
+  must_change_password?: boolean;
 };
 
 export type AdminSession = {

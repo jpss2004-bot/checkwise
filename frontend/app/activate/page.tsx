@@ -168,13 +168,23 @@ function ActivateInner() {
           <Link href="/" aria-label="Volver al inicio">
             <BrandLogo size="md" />
           </Link>
-          <Link
-            href="/login"
-            className="inline-flex items-center gap-1.5 text-xs font-medium text-[color:var(--text-link)] hover:underline"
+          <button
+            type="button"
+            onClick={() => {
+              // Security fix (CW-AUD-P1-01): clear the temp-password
+              // JWT before bouncing to /login. Otherwise /login's boot
+              // effect would read the stored session and route the user
+              // back into the portal — bypassing the forced password
+              // change. Confirmed via the Codex audit in
+              // docs/codex-route-workflow-audit/.
+              clearAdminSession();
+              router.replace("/login");
+            }}
+            className="inline-flex cursor-pointer items-center gap-1.5 text-xs font-medium text-[color:var(--text-link)] hover:underline"
           >
             <ArrowLeft className="h-3.5 w-3.5" weight="bold" aria-hidden="true" />
             Cancelar e iniciar sesión de nuevo
-          </Link>
+          </button>
         </header>
 
         <Alert variant="info">

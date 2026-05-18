@@ -117,7 +117,15 @@ function DashboardInner({ session }: { session: PortalSession }) {
   }
 
   const onboarding = dashboard.onboarding_summary;
-  const gateBlocked = onboarding.needs_action > 0;
+  // Only treat the dashboard as "initial-expediente locked" when the
+  // provider has not yet completed onboarding. Once onboarding_completed_at
+  // is set, any remaining `needs_action` documents are recurring monthly
+  // obligations, not blockers on the initial expediente — so the
+  // "Tu dashboard está limitado" banner (which talks about "expediente
+  // inicial") is misleading for a returning provider. (Codex audit
+  // finding CW-AUD-P2-02.)
+  const initialOnboardingDone = session.onboarding_completed_at !== null;
+  const gateBlocked = !initialOnboardingDone && onboarding.needs_action > 0;
   const provisional = !gateBlocked && onboarding.in_review > 0;
 
   return (

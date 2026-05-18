@@ -42,7 +42,13 @@ export default function LoginPage() {
   useEffect(() => {
     const session = readAdminSession();
     if (session) {
-      router.replace(decideDestination(session, false));
+      // Security fix (CW-AUD-P1-01): honor must_change_password on
+      // the stored session. Previously the boot effect always passed
+      // `false`, so a user who had a temp-password JWT and then
+      // cancelled out of /activate could re-enter the portal via the
+      // boot redirect — bypassing the forced password change.
+      const mustChange = session.user?.must_change_password ?? false;
+      router.replace(decideDestination(session, mustChange));
       return;
     }
     setBootChecked(true);
