@@ -35,12 +35,15 @@ from app.constants.reports import (
 from app.db.session import get_db
 from app.models.entities import Report, ReportVersion
 from app.schemas.reports import (
+    CreateFromPresetRequest,
     PlannedBlockResponse,
     PlanReportRequest,
     PlanReportResponse,
     ReportCreate,
     ReportList,
     ReportPatch,
+    ReportPresetList,
+    ReportPresetSummary,
     ReportRead,
     ReportSummary,
     ReportVersionCreate,
@@ -74,6 +77,7 @@ from app.services.reports.copilot import chat_completion, explain_block
 from app.services.reports.executor import execute_plan
 from app.services.reports.llm import LLMError, get_llm_client
 from app.services.reports.planner import plan_report
+from app.services.reports.templates import get_preset, presets_for_roles
 
 router = APIRouter(prefix="/reports", tags=["reports"])
 DbSession = Annotated[Session, Depends(get_db)]
@@ -174,6 +178,90 @@ def get_engine(
         planner_model=llm.planner_model,
         content_model=llm.content_model,
     )
+
+
+@router.get(
+    "/_presets",
+    response_model=ReportPresetList,
+    summary="List report presets the caller may use",
+)
+def get_presets(
+    current: Annotated[CurrentUser, Depends(get_current_user)],
+) -> ReportPresetList:
+    """Return the registry filtered by the caller's roles.
+
+    Empty list is a valid, non-error response: it just means the
+    caller's role has no presets defined yet (e.g. client_admin in
+    R1.0 — admin presets ship first, client presets land in R1.1).
+    """
+    presets = presets_for_roles(tuple(current.roles))
+    return ReportPresetList(
+        items=[
+            ReportPresetSummary(
+                id=p.id,
+                title=p.title,
+                description=p.description,
+                audience=p.audience,
+                recommended_prompt=p.recommended_prompt,
+            )
+            for p in presets
+        ]
+    )
+
+
+@router.post(
+    "/from-preset",
+    response_model=ReportRead,
+    status_code=status.HTTP_201_CREATED,
+    summary="Create a report from a preset",
+)
+def post_from_preset(
+    payload: CreateFromPresetRequest,
+    db: DbSession,
+    current: Annotated[CurrentUser, Depends(get_current_user)],
+    organization_id: Annotated[str | None, Query()] = None,
+) -> ReportRead:
+    """Instantiate a report from a registered preset.
+
+    Pre-fills title / description / audience from the preset. Does
+    NOT run AI generation — the editor opens with the recommended
+    prompt pre-populated and the user hits "Generate" to fill in
+    the blocks via the existing pipeline.
+    """
+    preset = get_preset(payload.preset_id)
+    if preset is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Unknown preset.")
+
+    # Role gate: never let a caller instantiate a preset they couldn't
+    # even see in the list endpoint.
+    allowed = {p.id for p in presets_for_roles(tuple(current.roles))}
+    if preset.id not in allowed:
+        raise HTTPException(
+            status.HTTP_403_FORBIDDEN,
+            "Role cannot instantiate this preset.",
+        )
+
+    try:
+        report, version = create_report(
+            db,
+            actor=_actor_from(current),
+            title=preset.title,
+            description=preset.description,
+            audience=preset.audience,
+            organization_id=organization_id,
+            client_id=None,
+            vendor_id=None,
+            initial_content_json={
+                "schema_version": 1,
+                "blocks": [],
+                "global": {"preset_id": preset.id, "recommended_prompt": preset.recommended_prompt},
+            },
+        )
+    except ReportScopeError as exc:
+        raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, str(exc)) from exc
+    except ReportPermissionError as exc:
+        raise HTTPException(status.HTTP_403_FORBIDDEN, str(exc)) from exc
+    return _read(report, version)
 
 
 @router.post(

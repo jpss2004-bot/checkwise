@@ -292,3 +292,30 @@ export interface ReportsEngineInfo {
 export function getReportsEngine(): Promise<ReportsEngineInfo> {
   return fetchJson<ReportsEngineInfo>(`/api/v1/reports/_engine`);
 }
+
+// ─── Presets (R1.0) ──────────────────────────────────────────────
+
+export interface ReportPresetSummary {
+  id: string;
+  title: string;
+  description: string;
+  audience: ReportAudience;
+  recommended_prompt: string;
+}
+
+export interface ReportPresetList {
+  items: ReportPresetSummary[];
+}
+
+export function listPresets(): Promise<ReportPresetList> {
+  return fetchJson<ReportPresetList>(`/api/v1/reports/_presets`);
+}
+
+export function createReportFromPreset(
+  presetId: string,
+): Promise<ReportRead> {
+  return fetchJson<ReportRead>(`/api/v1/reports/from-preset`, {
+    method: "POST",
+    body: JSON.stringify({ preset_id: presetId }),
+  });
+}

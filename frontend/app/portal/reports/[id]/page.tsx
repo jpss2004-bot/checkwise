@@ -167,11 +167,21 @@ function EditorInner({ session }: { session: PortalSession }) {
       .then((payload) => {
         if (cancelled) return;
         setReport(payload);
-        setContent(payload.current_version?.content_json ?? {
+        const loaded = payload.current_version?.content_json ?? {
           schema_version: 1,
           blocks: [],
           global: {},
-        });
+        };
+        setContent(loaded);
+        // R1.0: preset-created reports park their recommended prompt
+        // on global.recommended_prompt. Pre-fill + auto-open the AI
+        // panel so "Use template" → Enter is one click.
+        const rec = (loaded as { global?: { recommended_prompt?: unknown } })
+          .global?.recommended_prompt;
+        if (typeof rec === "string" && rec.trim() && (loaded.blocks?.length ?? 0) === 0) {
+          setAiPrompt(rec);
+          setAiOpen(true);
+        }
         setLoading(false);
       })
       .catch((e: ReportsApiError) => {

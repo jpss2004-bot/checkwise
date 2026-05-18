@@ -682,3 +682,60 @@ The architecture spec named 14 block types + several v1 cuts that are deliberate
 | 8 remaining block types from §15 | `compliance_heatmap`, `missing_documents`, `timeline`, `regulatory_status`, `exception_list`, `audit_trail`, `chart`, `evidence_attachment`, `vendor_comparison_table` | 2.2 or 2.3 |
 
 None of these change the architectural contract — they extend it. Each can ship independently against the existing trust boundaries.
+
+## 22. R1.0 — Role-aware reports surface (2026-05-18)
+
+R1.0 turns Reports from a single provider-portal page into a role-aware intelligence layer with shared backend infrastructure.
+
+### Role × audience matrix
+
+| Membership role | Visible audiences (read) | Writable audiences (create / patch) |
+|---|---|---|
+| `internal_admin`, `reviewer` | all 4 | all 4 |
+| `client_admin` | `client_facing` only | `client_facing` only |
+| (no recognised role) | none — default-deny | none |
+
+Source of truth: `visible_audiences()` and `writable_audiences()` in `backend/app/services/report_service.py`. The list endpoint intersects with `visible_audiences`; create + patch reject audiences outside `writable_audiences`; `get_report` returns 404 (not 403) for forbidden audiences to avoid id enumeration.
+
+Vendor users are intentionally absent from the matrix in R1.0. Vendors do not hold a `User` row — they authenticate via `X-Workspace-Token` on the upload-flow portal. Vendor-targeted reports are delivered via the existing `external_signed` audience (Phase 2.2 share-link work).
+
+### Preset registry
+
+`backend/app/services/reports/templates.py` defines `ReportPreset` — a starting point for a report: title, description, audience, `required_roles`, and `recommended_prompt`. R1.0 ships three internal-only presets:
+
+- `admin-daily-queue` — operational triage for the review team
+- `admin-high-risk-vendors` — cross-vendor risk matrix
+- `admin-monthly-operational` — monthly compliance overview
+
+API surface:
+
+```
+GET  /api/v1/reports/_presets           # role-filtered list
+POST /api/v1/reports/from-preset        # create + seed v1 from a preset
+```
+
+`from-preset` does **not** run AI generation at creation time. It creates a report with the preset's metadata and parks `recommended_prompt` on `content_json.global.recommended_prompt`. The editor reads that on first load and pre-fills + auto-opens the AI prompt panel, so "Use template" → Enter is a one-click flow without coupling preset creation to a streaming generation endpoint.
+
+### Route surface
+
+```
+/admin/reports                          R1.0 — list + preset gallery for internal team
+/admin/reports/[id]                     R1.0 — redirects to /portal/reports/[id]
+/portal/reports                         existing — kept running unchanged
+/portal/reports/[id]                    existing — editor (reads preset hint from global)
+/client/reports                         R1.1 — not shipped
+/share/r/[token]                        R1.2 — external_signed delivery, not shipped
+```
+
+The editor lives at exactly one place (`/portal/reports/[id]`) to avoid duplicating the 500-line surface. The shared-editor extraction is deferred to R1.0.1 once the admin surface proves itself.
+
+### What is intentionally *not* in R1.0
+
+- No client_admin presets — those land with R1.1 alongside the `/client/reports` surface.
+- No new block types — the existing 6 cover all three presets.
+- No interactive filters beyond audience + status — those land in R2.
+- No automatic post-creation AI generation — kept as a manual click in the editor.
+- No share-link delivery for vendors — deferred to R1.2.
+- No shared editor component — the admin editor route redirects to the portal one.
+
+R1.0 is the foundation. R1.1 (client surface) and R1.2 (vendor signed-link delivery) build directly on top without re-touching the permission helpers or the preset registry shape.

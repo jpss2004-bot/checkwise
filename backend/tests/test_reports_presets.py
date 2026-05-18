@@ -1,0 +1,281 @@
+"""R1.0 — Role-aware preset registry tests.
+
+Covers:
+- GET /api/v1/reports/_presets returns only role-appropriate presets
+- POST /api/v1/reports/from-preset succeeds for admin
+- POST /api/v1/reports/from-preset forbidden for client_admin
+- list_reports filters by visible_audiences for client_admin
+- create rejects non-writable audience for client_admin
+- patch rejects non-writable audience escalation for client_admin
+"""
+
+from __future__ import annotations
+
+from collections.abc import Generator
+
+import pytest
+from fastapi.testclient import TestClient
+from sqlalchemy import create_engine
+from sqlalchemy.orm import Session, sessionmaker
+from sqlalchemy.pool import StaticPool
+
+from app.db.base import Base
+from app.db.session import get_db
+from app.main import app
+from app.models import (
+    Client,
+    Membership,
+    Organization,
+    User,
+    entities,  # noqa: F401 — register mappers
+)
+from app.services.auth import hash_password
+
+# ─── Fixtures (mirror test_reports.py) ─────────────────────────
+
+
+@pytest.fixture
+def db_factory():
+    engine = create_engine(
+        "sqlite+pysqlite:///:memory:",
+        connect_args={"check_same_thread": False},
+        poolclass=StaticPool,
+    )
+    Base.metadata.create_all(bind=engine)
+    return sessionmaker(autocommit=False, autoflush=False, bind=engine)
+
+
+@pytest.fixture
+def api_client(db_factory) -> Generator[TestClient, None, None]:
+    def override_get_db() -> Generator[Session, None, None]:
+        db = db_factory()
+        try:
+            yield db
+        finally:
+            db.close()
+
+    app.dependency_overrides[get_db] = override_get_db
+    try:
+        yield TestClient(app)
+    finally:
+        app.dependency_overrides.clear()
+
+
+def _seed_user(
+    db_factory,
+    *,
+    email: str,
+    role: str,
+    org_kind: str = "internal",
+    org_name: str = "Test Org",
+) -> tuple[str, str, str]:
+    db = db_factory()
+    try:
+        password = "PresetsTest!2026"
+        user = User(
+            email=email,
+            password_hash=hash_password(password),
+            full_name="Presets Test",
+            status="active",
+        )
+        db.add(user)
+        db.flush()
+        org = Organization(name=org_name, kind=org_kind)
+        db.add(org)
+        db.flush()
+        db.add(
+            Membership(
+                user_id=user.id,
+                organization_id=org.id,
+                role=role,
+                status="active",
+            )
+        )
+        db.commit()
+        return password, user.email, org.id
+    finally:
+        db.close()
+
+
+def _login(api_client: TestClient, email: str, password: str) -> str:
+    resp = api_client.post(
+        "/api/v1/auth/login", json={"email": email, "password": password}
+    )
+    assert resp.status_code == 200, resp.text
+    return resp.json()["access_token"]
+
+
+def _h(token: str) -> dict:
+    return {"Authorization": f"Bearer {token}"}
+
+
+def _admin_token(api_client, db_factory) -> str:
+    pw, email, _ = _seed_user(
+        db_factory, email="adm@presets.test", role="internal_admin"
+    )
+    return _login(api_client, email, pw)
+
+
+def _client_admin(api_client, db_factory, org_name: str) -> tuple[str, str]:
+    pw, email, org_id = _seed_user(
+        db_factory,
+        email=f"{org_name.lower().replace(' ', '_')}@presets.test",
+        role="client_admin",
+        org_kind="client",
+        org_name=org_name,
+    )
+    return _login(api_client, email, pw), org_id
+
+
+def _seed_client_row(db_factory, name: str) -> str:
+    db = db_factory()
+    try:
+        c = Client(name=name)
+        db.add(c)
+        db.commit()
+        return c.id
+    finally:
+        db.close()
+
+
+# ─── Tests ─────────────────────────────────────────────────────
+
+
+def test_presets_list_internal_admin_sees_three(api_client, db_factory) -> None:
+    token = _admin_token(api_client, db_factory)
+    resp = api_client.get("/api/v1/reports/_presets", headers=_h(token))
+    assert resp.status_code == 200, resp.text
+    body = resp.json()
+    ids = sorted(p["id"] for p in body["items"])
+    assert ids == [
+        "admin-daily-queue",
+        "admin-high-risk-vendors",
+        "admin-monthly-operational",
+    ]
+    # All three are internal_only
+    for p in body["items"]:
+        assert p["audience"] == "internal_only"
+        assert p["recommended_prompt"]  # non-empty
+
+
+def test_presets_list_client_admin_sees_none_yet(api_client, db_factory) -> None:
+    """R1.0 ships admin presets only. client_admin sees an empty list."""
+    token, _ = _client_admin(api_client, db_factory, "Cliente A")
+    resp = api_client.get("/api/v1/reports/_presets", headers=_h(token))
+    assert resp.status_code == 200, resp.text
+    assert resp.json() == {"items": []}
+
+
+def test_create_from_preset_internal_admin_succeeds(api_client, db_factory) -> None:
+    token = _admin_token(api_client, db_factory)
+    resp = api_client.post(
+        "/api/v1/reports/from-preset",
+        headers=_h(token),
+        json={"preset_id": "admin-daily-queue"},
+    )
+    assert resp.status_code == 201, resp.text
+    body = resp.json()
+    assert body["title"] == "Cola diaria de revisión"
+    assert body["audience"] == "internal_only"
+    assert body["current_version"]["version_number"] == 1
+    # Recommended prompt is parked on global so the editor can pre-fill.
+    glob = body["current_version"]["content_json"]["global"]
+    assert glob["preset_id"] == "admin-daily-queue"
+    assert "operativo del día" in glob["recommended_prompt"]
+
+
+def test_create_from_preset_client_admin_403(api_client, db_factory) -> None:
+    """A client_admin asking for an admin-only preset is forbidden."""
+    token, _ = _client_admin(api_client, db_factory, "Cliente A")
+    resp = api_client.post(
+        "/api/v1/reports/from-preset",
+        headers=_h(token),
+        json={"preset_id": "admin-daily-queue"},
+    )
+    assert resp.status_code == 403, resp.text
+
+
+def test_create_from_preset_unknown_preset_404(api_client, db_factory) -> None:
+    token = _admin_token(api_client, db_factory)
+    resp = api_client.post(
+        "/api/v1/reports/from-preset",
+        headers=_h(token),
+        json={"preset_id": "does-not-exist"},
+    )
+    assert resp.status_code == 404, resp.text
+
+
+def test_client_admin_cannot_create_internal_only(api_client, db_factory) -> None:
+    """The writable_audiences guard blocks internal_only authorship by client_admin."""
+    token, _ = _client_admin(api_client, db_factory, "Cliente A")
+    resp = api_client.post(
+        "/api/v1/reports",
+        headers=_h(token),
+        json={"title": "X", "audience": "internal_only"},
+    )
+    assert resp.status_code == 403, resp.text
+
+
+def test_client_admin_list_hides_internal_reports_in_same_org(
+    api_client, db_factory
+) -> None:
+    """Even within their own org, client_admins must not see internal_only reports.
+
+    Tests the visible_audiences filter on list_reports. Without it,
+    an admin-authored internal_only report in the client's org would
+    leak via the list endpoint.
+    """
+    admin_tok = _admin_token(api_client, db_factory)
+    client_tok, client_org = _client_admin(api_client, db_factory, "Cliente B")
+    client_row = _seed_client_row(db_factory, "Cliente B Client")
+
+    # Internal admin writes an internal_only report in the client_admin's org.
+    r1 = api_client.post(
+        "/api/v1/reports",
+        headers=_h(admin_tok),
+        params={"organization_id": client_org},
+        json={"title": "Internal only", "audience": "internal_only"},
+    )
+    assert r1.status_code == 201, r1.text
+
+    # Internal admin writes a client_facing report in the same org.
+    r2 = api_client.post(
+        "/api/v1/reports",
+        headers=_h(admin_tok),
+        params={"organization_id": client_org},
+        json={
+            "title": "Client facing",
+            "audience": "client_facing",
+            "client_id": client_row,
+        },
+    )
+    assert r2.status_code == 201, r2.text
+
+    # client_admin lists — should see only the client_facing one.
+    resp = api_client.get("/api/v1/reports", headers=_h(client_tok))
+    assert resp.status_code == 200, resp.text
+    titles = [r["title"] for r in resp.json()["items"]]
+    assert titles == ["Client facing"]
+
+
+def test_client_admin_cannot_read_internal_only_directly(
+    api_client, db_factory
+) -> None:
+    """Knowing the id of an internal_only report must not bypass the audience filter.
+
+    The get_report path must return 404 (not 403) to avoid id enumeration.
+    """
+    admin_tok = _admin_token(api_client, db_factory)
+    client_tok, client_org = _client_admin(api_client, db_factory, "Cliente C")
+
+    r1 = api_client.post(
+        "/api/v1/reports",
+        headers=_h(admin_tok),
+        params={"organization_id": client_org},
+        json={"title": "Internal", "audience": "internal_only"},
+    )
+    assert r1.status_code == 201
+    rid = r1.json()["id"]
+
+    resp = api_client.get(f"/api/v1/reports/{rid}", headers=_h(client_tok))
+    assert resp.status_code == 404

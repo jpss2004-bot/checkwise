@@ -182,6 +182,38 @@ class ReportExportRead(BaseModel):
     error_text: str | None
 
 
+# ─── Presets (R1.0) ──────────────────────────────────────────────
+
+
+class ReportPresetSummary(BaseModel):
+    """One preset entry returned by GET /api/v1/reports/_presets.
+
+    The frontend renders these as cards in the role-scoped report
+    list page. ``recommended_prompt`` is the string the editor
+    pre-fills into the AI prompt textarea on first open.
+    """
+
+    id: str
+    title: str
+    description: str
+    audience: ReportAudience
+    recommended_prompt: str
+
+
+class ReportPresetList(BaseModel):
+    items: list[ReportPresetSummary]
+
+
+class CreateFromPresetRequest(BaseModel):
+    """Body for POST /api/v1/reports/from-preset.
+
+    ``organization_id`` is required for callers with more than one
+    membership; otherwise we use the single org just like ReportCreate.
+    """
+
+    preset_id: str = Field(min_length=1, max_length=80)
+
+
 # ─── Planner (Phase 3.3a) ────────────────────────────────────────
 
 

@@ -110,6 +110,50 @@ class ReportActor:
         )
 
 
+# ─── Audience visibility (R1.0) ─────────────────────────────────
+#
+# Role → audience matrix. Source of truth for who can read or write
+# which audiences. UI hiding alone is never the protection — list /
+# create / patch must intersect with these.
+#
+# Internal staff: all four audiences (they operate the platform).
+# client_admin: client_facing only (their own org).
+# Anyone else (no recognised role): empty — default-deny.
+
+
+def visible_audiences(actor: ReportActor) -> tuple[ReportAudience, ...]:
+    """Audiences this actor is allowed to *read*."""
+    if actor.is_internal:
+        return (
+            ReportAudience.INTERNAL_ONLY,
+            ReportAudience.CLIENT_FACING,
+            ReportAudience.VENDOR_FACING,
+            ReportAudience.EXTERNAL_SIGNED,
+        )
+    if MembershipRole.CLIENT_ADMIN in actor.roles:
+        return (ReportAudience.CLIENT_FACING,)
+    return ()
+
+
+def writable_audiences(actor: ReportActor) -> tuple[ReportAudience, ...]:
+    """Audiences this actor is allowed to *create or patch into*.
+
+    Currently identical to visible_audiences. Kept separate so we can
+    diverge later (e.g. a client_admin can read external_signed reports
+    sent to them but can't author them).
+    """
+    if actor.is_internal:
+        return (
+            ReportAudience.INTERNAL_ONLY,
+            ReportAudience.CLIENT_FACING,
+            ReportAudience.VENDOR_FACING,
+            ReportAudience.EXTERNAL_SIGNED,
+        )
+    if MembershipRole.CLIENT_ADMIN in actor.roles:
+        return (ReportAudience.CLIENT_FACING,)
+    return ()
+
+
 # ─── Helpers ────────────────────────────────────────────────────
 
 
@@ -186,6 +230,11 @@ def create_report(
             "User does not belong to the target organization."
         )
 
+    if audience not in writable_audiences(actor):
+        raise ReportPermissionError(
+            f"Role cannot create reports with audience '{audience.value}'."
+        )
+
     _validate_scope(audience.value, client_id, vendor_id)
 
     now = utc_now()
@@ -259,6 +308,14 @@ def list_reports(
             )
         stmt = stmt.where(Report.organization_id == organization_id)
 
+    # Audience filter — UI hiding is not the protection. A client_admin
+    # logged in with cross-tenant org membership still must not see
+    # internal_only reports.
+    allowed = visible_audiences(actor)
+    if not allowed:
+        return [], 0
+    stmt = stmt.where(Report.audience.in_([a.value for a in allowed]))
+
     if status:
         stmt = stmt.where(Report.status == status.value)
 
@@ -283,6 +340,12 @@ def get_report(
 
     if not actor.is_internal and report.organization_id not in actor.organization_ids:
         # Indistinguishable from not-found by design (no enumeration).
+        raise ReportNotFoundError(f"Report {report_id} not found.")
+
+    allowed = visible_audiences(actor)
+    if report.audience not in {a.value for a in allowed}:
+        # Same not-found surface — never reveal that the report exists
+        # but the audience is forbidden.
         raise ReportNotFoundError(f"Report {report_id} not found.")
 
     current = (
@@ -320,6 +383,10 @@ def patch_report(
     if description is not None:
         report.description = description
     if audience is not None:
+        if audience not in writable_audiences(actor):
+            raise ReportPermissionError(
+                f"Role cannot patch reports to audience '{audience.value}'."
+            )
         report.audience = audience.value
     if status is not None:
         report.status = status.value
