@@ -209,9 +209,18 @@ class CreateFromPresetRequest(BaseModel):
 
     ``organization_id`` is required for callers with more than one
     membership; otherwise we use the single org just like ReportCreate.
+
+    ``client_id`` / ``vendor_id`` are forwarded to the underlying
+    create_report call. The service layer rejects audiences other than
+    ``internal_only`` unless at least one is supplied. For preset
+    callers the endpoint auto-resolves ``client_id`` from the
+    caller's client_admin membership when not supplied — see
+    ``post_from_preset``.
     """
 
     preset_id: str = Field(min_length=1, max_length=80)
+    client_id: str | None = None
+    vendor_id: str | None = None
 
 
 # ─── Planner (Phase 3.3a) ────────────────────────────────────────

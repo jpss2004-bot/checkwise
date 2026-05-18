@@ -80,7 +80,16 @@ def _seed_user(
         )
         db.add(user)
         db.flush()
-        org = Organization(name=org_name, kind=org_kind)
+        # Mirror dev_seed.py: client-kind orgs are linked to a Client
+        # row via Organization.client_id. This is what the preset
+        # auto-resolve relies on for client_admin callers.
+        client_id: str | None = None
+        if org_kind == "client":
+            client_row = Client(name=org_name + " (client)")
+            db.add(client_row)
+            db.flush()
+            client_id = client_row.id
+        org = Organization(name=org_name, kind=org_kind, client_id=client_id)
         db.add(org)
         db.flush()
         db.add(
@@ -141,7 +150,13 @@ def _seed_client_row(db_factory, name: str) -> str:
 # ─── Tests ─────────────────────────────────────────────────────
 
 
-def test_presets_list_internal_admin_sees_three(api_client, db_factory) -> None:
+def test_presets_list_internal_admin_sees_all_six(api_client, db_factory) -> None:
+    """R1.1 ships 3 admin presets + 3 client presets.
+
+    internal_admin is in the ``required_roles`` of every preset (so
+    staff can author on behalf of either audience). The list must
+    return all six.
+    """
     token = _admin_token(api_client, db_factory)
     resp = api_client.get("/api/v1/reports/_presets", headers=_h(token))
     assert resp.status_code == 200, resp.text
@@ -151,19 +166,44 @@ def test_presets_list_internal_admin_sees_three(api_client, db_factory) -> None:
         "admin-daily-queue",
         "admin-high-risk-vendors",
         "admin-monthly-operational",
+        "client-missing-evidence",
+        "client-monthly-executive",
+        "client-vendor-risk-matrix",
     ]
-    # All three are internal_only
+    # Audiences split exactly 3+3.
+    audiences = sorted(p["audience"] for p in body["items"])
+    assert audiences == [
+        "client_facing",
+        "client_facing",
+        "client_facing",
+        "internal_only",
+        "internal_only",
+        "internal_only",
+    ]
     for p in body["items"]:
-        assert p["audience"] == "internal_only"
-        assert p["recommended_prompt"]  # non-empty
+        assert p["recommended_prompt"]  # non-empty for every preset
 
 
-def test_presets_list_client_admin_sees_none_yet(api_client, db_factory) -> None:
-    """R1.0 ships admin presets only. client_admin sees an empty list."""
+def test_presets_list_client_admin_sees_only_client_presets(
+    api_client, db_factory
+) -> None:
+    """R1.1: client_admin sees the 3 client_facing presets only.
+
+    The 3 admin presets require internal_admin OR reviewer in their
+    required_roles, so a client_admin must never see them in the list.
+    """
     token, _ = _client_admin(api_client, db_factory, "Cliente A")
     resp = api_client.get("/api/v1/reports/_presets", headers=_h(token))
     assert resp.status_code == 200, resp.text
-    assert resp.json() == {"items": []}
+    body = resp.json()
+    ids = sorted(p["id"] for p in body["items"])
+    assert ids == [
+        "client-missing-evidence",
+        "client-monthly-executive",
+        "client-vendor-risk-matrix",
+    ]
+    for p in body["items"]:
+        assert p["audience"] == "client_facing"
 
 
 def test_create_from_preset_internal_admin_succeeds(api_client, db_factory) -> None:
@@ -193,6 +233,56 @@ def test_create_from_preset_client_admin_403(api_client, db_factory) -> None:
         json={"preset_id": "admin-daily-queue"},
     )
     assert resp.status_code == 403, resp.text
+
+
+def test_create_from_preset_client_admin_can_instantiate_client_preset(
+    api_client, db_factory
+) -> None:
+    """R1.1: client_admin must be able to instantiate a client_facing preset.
+
+    The created report carries the preset's audience and parks the
+    recommended_prompt on content_json.global so the editor pre-fills
+    the AI prompt panel.
+    """
+    token, _ = _client_admin(api_client, db_factory, "Cliente Demo")
+    resp = api_client.post(
+        "/api/v1/reports/from-preset",
+        headers=_h(token),
+        json={"preset_id": "client-monthly-executive"},
+    )
+    assert resp.status_code == 201, resp.text
+    body = resp.json()
+    assert body["title"] == "Resumen ejecutivo mensual"
+    assert body["audience"] == "client_facing"
+    glob = body["current_version"]["content_json"]["global"]
+    assert glob["preset_id"] == "client-monthly-executive"
+    assert "ejecutivo" in glob["recommended_prompt"]
+
+
+def test_create_from_preset_internal_admin_can_use_client_preset(
+    api_client, db_factory
+) -> None:
+    """internal_admin appears in every preset's required_roles so staff
+    can author on behalf of a client. Verify the cross-audience case.
+
+    An internal_admin lives in an "internal" org (no client_id), so the
+    auto-resolve path doesn't fire — staff must pass client_id in the
+    body. That's the only difference from the client_admin path.
+    """
+    token = _admin_token(api_client, db_factory)
+    target_client = _seed_client_row(db_factory, "Cliente Target")
+    resp = api_client.post(
+        "/api/v1/reports/from-preset",
+        headers=_h(token),
+        json={
+            "preset_id": "client-vendor-risk-matrix",
+            "client_id": target_client,
+        },
+    )
+    assert resp.status_code == 201, resp.text
+    body = resp.json()
+    assert body["audience"] == "client_facing"
+    assert body["client_id"] == target_client
 
 
 def test_create_from_preset_unknown_preset_404(api_client, db_factory) -> None:

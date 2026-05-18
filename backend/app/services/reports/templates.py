@@ -107,6 +107,78 @@ _ADMIN_MONTHLY_OPERATIONAL = ReportPreset(
 )
 
 
+# ─── Client presets (R1.1) ──────────────────────────────────────
+#
+# Three client_facing presets for client_admin role. Each targets a
+# real question a client executive answers about their vendor
+# portfolio. internal_admin also sees these (per required_roles) so
+# staff can author from the same templates on behalf of a client.
+
+
+_CLIENT_MONTHLY_EXECUTIVE = ReportPreset(
+    id="client-monthly-executive",
+    title="Resumen ejecutivo mensual",
+    description=(
+        "Panorama mensual del portafolio: cumplimiento global, "
+        "proveedores en riesgo, evolución y recomendaciones para "
+        "dirección."
+    ),
+    audience=ReportAudience.CLIENT_FACING,
+    required_roles=(MembershipRole.CLIENT_ADMIN, MembershipRole.INTERNAL_ADMIN),
+    recommended_prompt=(
+        "Genera un resumen ejecutivo mensual de cumplimiento del "
+        "portafolio para la dirección del cliente: empieza con un "
+        "resumen ejecutivo enfocado en cumplimiento, sigue con un "
+        "KPI strip con porcentaje de cumplimiento, total de "
+        "proveedores, proveedores en riesgo y próximos vencimientos, "
+        "y cierra con 3 recomendaciones priorizadas para la dirección."
+    ),
+)
+
+
+_CLIENT_VENDOR_RISK_MATRIX = ReportPreset(
+    id="client-vendor-risk-matrix",
+    title="Matriz de riesgo de proveedores",
+    description=(
+        "Vista cruzada de los proveedores del portafolio con su score "
+        "de riesgo y obligaciones SAT / IMSS / INFONAVIT / STPS-REPSE."
+    ),
+    audience=ReportAudience.CLIENT_FACING,
+    required_roles=(MembershipRole.CLIENT_ADMIN, MembershipRole.INTERNAL_ADMIN),
+    recommended_prompt=(
+        "Genera una matriz de riesgo de proveedores del portafolio: "
+        "un resumen ejecutivo enfocado en riesgo, un KPI strip con "
+        "total de proveedores y proveedores en riesgo, una matriz "
+        "cruzada de los proveedores ordenada por risk_score "
+        "mostrando SAT, IMSS, INFONAVIT y STPS-REPSE, y una "
+        "recomendación final de 3 acciones priorizadas para "
+        "comunicar con los proveedores que requieren atención."
+    ),
+)
+
+
+_CLIENT_MISSING_EVIDENCE = ReportPreset(
+    id="client-missing-evidence",
+    title="Documentos faltantes por proveedor",
+    description=(
+        "Detalle de evidencia documental pendiente, agrupada por "
+        "proveedor y obligación."
+    ),
+    audience=ReportAudience.CLIENT_FACING,
+    required_roles=(MembershipRole.CLIENT_ADMIN, MembershipRole.INTERNAL_ADMIN),
+    recommended_prompt=(
+        "Genera un reporte de documentos faltantes del portafolio: "
+        "resumen ejecutivo enfocado en expediente, KPI strip con "
+        "total de documentos vencidos, en revisión, aprobados y "
+        "rechazados, una matriz cruzada de proveedores filtrada por "
+        "instituciones con faltantes ordenada por mayor número de "
+        "faltantes, y una recomendación final de 3 acciones "
+        "priorizadas para que el equipo del cliente coordine con "
+        "sus proveedores."
+    ),
+)
+
+
 # ─── Registry ───────────────────────────────────────────────────
 
 
@@ -114,6 +186,9 @@ PRESETS: tuple[ReportPreset, ...] = (
     _ADMIN_DAILY_QUEUE,
     _ADMIN_HIGH_RISK_VENDORS,
     _ADMIN_MONTHLY_OPERATIONAL,
+    _CLIENT_MONTHLY_EXECUTIVE,
+    _CLIENT_VENDOR_RISK_MATRIX,
+    _CLIENT_MISSING_EVIDENCE,
 )
 
 

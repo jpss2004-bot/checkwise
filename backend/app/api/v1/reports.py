@@ -23,6 +23,7 @@ from typing import Annotated
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field
+from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.api.v1.auth import CurrentUser, get_current_user
@@ -241,6 +242,32 @@ def post_from_preset(
             "Role cannot instantiate this preset.",
         )
 
+    # client_facing / vendor_facing presets require a scoping id per the
+    # _validate_scope rule. For client_admin callers the right value is
+    # implicit: their org row's client_id. Auto-resolve when the caller
+    # did not supply one explicitly. internal_admin staff who use a
+    # client preset must pass client_id in the body (or organization_id
+    # + client_id) — they don't have an implicit anchor.
+    client_id = payload.client_id
+    vendor_id = payload.vendor_id
+    if (
+        preset.audience == ReportAudience.CLIENT_FACING
+        and client_id is None
+        and not vendor_id
+    ):
+        from app.models.entities import Membership, Organization  # local import
+
+        client_id = db.scalar(
+            select(Organization.client_id)
+            .join(Membership, Membership.organization_id == Organization.id)
+            .where(
+                Membership.user_id == current.user.id,
+                Membership.status == "active",
+                Organization.client_id.isnot(None),
+            )
+            .limit(1)
+        )
+
     try:
         report, version = create_report(
             db,
@@ -249,8 +276,8 @@ def post_from_preset(
             description=preset.description,
             audience=preset.audience,
             organization_id=organization_id,
-            client_id=None,
-            vendor_id=None,
+            client_id=client_id,
+            vendor_id=vendor_id,
             initial_content_json={
                 "schema_version": 1,
                 "blocks": [],

@@ -5,6 +5,7 @@ import Link from "next/link";
 import { useRouter, usePathname } from "next/navigation";
 import {
   CalendarBlank,
+  ChartLineUp,
   ClockClockwise,
   Files,
   Gauge,
@@ -38,6 +39,7 @@ const NAV: { href: string; label: string; icon: Icon }[] = [
   { href: "/client/vendors", label: "Proveedores", icon: Storefront },
   { href: "/client/calendar", label: "Calendario", icon: CalendarBlank },
   { href: "/client/submissions", label: "Entregas", icon: Files },
+  { href: "/client/reports", label: "Reportes", icon: ChartLineUp },
   { href: "/client/activity", label: "Actividad", icon: ClockClockwise },
 ];
 

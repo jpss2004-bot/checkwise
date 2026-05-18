@@ -739,3 +739,53 @@ The editor lives at exactly one place (`/portal/reports/[id]`) to avoid duplicat
 - No shared editor component — the admin editor route redirects to the portal one.
 
 R1.0 is the foundation. R1.1 (client surface) and R1.2 (vendor signed-link delivery) build directly on top without re-touching the permission helpers or the preset registry shape.
+
+## 23. R1.1 — Client preset gallery (2026-05-18)
+
+R1.1 closes the second of the three role-aware surfaces. `client_admin`
+users now have a parallel preset experience to what `internal_admin`
+got in R1.0. No new auth, no new schema, no new block types — purely
+content + a new shell entry.
+
+### New presets
+
+Three `client_facing` presets in `backend/app/services/reports/templates.py`:
+
+- `client-monthly-executive` — Resumen ejecutivo mensual
+- `client-vendor-risk-matrix` — Matriz de riesgo de proveedores
+- `client-missing-evidence` — Documentos faltantes por proveedor
+
+Each declares `required_roles=(CLIENT_ADMIN, INTERNAL_ADMIN)`. Internal staff can author from client presets on behalf of a client; client_admins can only see and use these three (the 3 admin presets stay invisible to them).
+
+### Auto-resolve client_id
+
+`client_facing` presets require a `client_id` per the existing `_validate_scope` rule. The `POST /api/v1/reports/from-preset` endpoint now:
+
+- For `client_admin` callers: auto-resolves `client_id` from the caller's `client_admin` membership (joins `Membership` → `Organization` and picks `Organization.client_id`).
+- For `internal_admin` staff using a client preset: requires `client_id` in the request body.
+
+`CreateFromPresetRequest` accepts optional `client_id` and `vendor_id` so the body path stays open for either role.
+
+### New routes
+
+```
+/client/reports                         R1.1 — list + preset gallery for client_admin
+/client/reports/[id]                    R1.1 — redirects to /portal/reports/[id]
+```
+
+The `ClientShell` nav gets a `Reportes` entry with `ChartLineUp` between `Entregas` and `Actividad`.
+
+### What R1.1 does NOT ship
+
+- No new block types.
+- No shared editor component — `/client/reports/[id]` redirects to `/portal/reports/[id]` (R1.0.1 still pending).
+- No interactive filters (R2).
+- No vendor surface or signed-link delivery (R1.2).
+
+After R1.1 the three-role promise is 2/3 fulfilled at the surface level:
+
+| Role | Reports surface |
+|---|---|
+| internal_admin / reviewer | `/admin/reports` (R1.0) ✓ |
+| client_admin | `/client/reports` (R1.1) ✓ |
+| Provider (no user account) | `external_signed` signed-link delivery (R1.2 — not yet shipped) |
