@@ -71,7 +71,14 @@ export function AdminShell({
       router.replace("/admin/login");
       return;
     }
-    if (!current.roles.includes("internal_admin")) {
+    // Accept either internal_admin or reviewer. Earlier this gated
+    // strictly on internal_admin and locked out reviewer-only users,
+    // even though /admin/reviewer is the reviewer role's primary
+    // landing surface per decideDestination() in /login.
+    if (
+      !current.roles.includes("internal_admin") &&
+      !current.roles.includes("reviewer")
+    ) {
       router.replace("/admin");
       return;
     }
