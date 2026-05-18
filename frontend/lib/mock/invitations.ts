@@ -68,7 +68,8 @@ function loadStore(): Record<string, Invitation> {
 function saveStore(store: Record<string, Invitation>) {
   if (typeof window === "undefined") return;
   // Always persist without the demo (it's recreated on every load).
-  const { demo: _demo, ...rest } = store;
+  const { demo: _demoIgnored, ...rest } = store;
+  void _demoIgnored;
   window.localStorage.setItem(STORAGE_KEY, JSON.stringify(rest));
 }
 
