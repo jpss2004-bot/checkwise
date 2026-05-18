@@ -20,6 +20,7 @@ Usage:
 
 from __future__ import annotations
 
+import os
 import sys
 import uuid
 from datetime import UTC, datetime, timedelta
@@ -1015,6 +1016,42 @@ def _seed_reports(
 
 
 def main() -> None:
+    # P0 guard (added 2026-05-18): this script seeds a documented-password
+    # admin user. If it ever runs against a production database, the
+    # documented password becomes a public backdoor. Refuse to run unless
+    # DATABASE_URL points at a local-development host.
+    #
+    # We allow localhost / 127.0.0.1 / *.local. Anything else (e.g. a
+    # *.neon.tech, *.render.com, RDS endpoint) is rejected. To explicitly
+    # bypass the guard for a recovery scenario, set
+    # CHECKWISE_ALLOW_SEED_AGAINST=<host substring> in the environment.
+    from app.core.config import get_settings  # local import
+
+    settings = get_settings()
+    raw_url = settings.DATABASE_URL
+    # Strip query string and credentials, keep only the host fragment.
+    try:
+        host = raw_url.split("@", 1)[1].split("/", 1)[0].split(":")[0].lower()
+    except IndexError:
+        host = ""
+
+    local_hosts = ("localhost", "127.0.0.1")
+    is_local = host in local_hosts or host.endswith(".local")
+    override = os.environ.get("CHECKWISE_ALLOW_SEED_AGAINST", "").strip().lower()
+    if not is_local and (not override or override not in host):
+        sys.stderr.write(
+            "ERROR: dev_seed.py refuses to run against a non-local host.\n"
+            f"  Detected DATABASE_URL host: {host or '<unknown>'}\n"
+            "  Allowed: localhost, 127.0.0.1, *.local\n"
+            "  This script seeds the documented demo admin password\n"
+            "  (see README and docs/CREDENTIALS.md). Running it against a\n"
+            "  shared / production database is a security incident.\n"
+            "  If you genuinely need to bypass this guard, set\n"
+            "    CHECKWISE_ALLOW_SEED_AGAINST=<substring of the host>\n"
+            "  and re-run. Use with extreme caution.\n"
+        )
+        sys.exit(2)
+
     db = SessionLocal()
     try:
         _wipe_demo(db)
