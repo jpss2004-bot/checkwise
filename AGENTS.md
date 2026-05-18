@@ -34,6 +34,10 @@ The current operation uses JotForm, Google Sheets, human/legal review, and Looke
 - Avoid broad refactors unless they directly support the requested change.
 - Do not hardcode regulation into form-only logic; update requirements/catalogs or seed data instead.
 
+## Permission-efficient command style
+
+When running routine checks, prefer simple standalone commands that match the project allowlist in `.claude/settings.local.json`. Avoid long chained shell commands with multiple `cd`, `&&`, pipes, redirection, fallback operators, or broad file-printing commands unless necessary. Prefer focused commands such as `git status`, `git diff`, frontend typecheck/build, and backend pytest/ruff. Do not use dangerous bypass mode on this repo. Use `acceptEdits` plus the project-local permission allowlist.
+
 ## Current Phase Definition
 
 V1.4 is operational: provider portal, reviewer queue + decision workflow, real auth + RBAC, brand application, and motion polish are all shipped. Next planned work is V1.5 — Client Overview (read-only client_admin view across a vendor portfolio).
