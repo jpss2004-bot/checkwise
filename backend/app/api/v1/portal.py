@@ -1630,6 +1630,11 @@ class DashboardUpcomingDeadline(BaseModel):
     due_month: int
     state: str
     href: str
+    # Days until the conventional 17th-of-period_month deadline.
+    # Added in P1.6 so /portal/reports can render an urgency timeline
+    # without re-parsing the period_key on the client. Always >= 0
+    # because `_compute_upcoming_deadlines` filters overdue rows.
+    due_in_days: int | None = None
 
 
 class DashboardResponse(BaseModel):
@@ -2048,6 +2053,7 @@ def _compute_upcoming_deadlines(
                     due_month=deadline_month,
                     state=view.state.value,
                     href=_calendar_reupload_href(view),
+                    due_in_days=due_in,
                 ),
             )
         )

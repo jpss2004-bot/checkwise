@@ -389,6 +389,11 @@ export type DashboardUpcomingDeadline = {
   due_month: number;
   state: string;
   href: string;
+  /** P1.6: days-until-deadline so the reports pulse strip can bucket
+   *  upcoming items by urgency without re-parsing period_key. May be
+   *  undefined on older payloads or null when the period_key isn't
+   *  parseable. */
+  due_in_days?: number | null;
 };
 
 export type DashboardPayload = {

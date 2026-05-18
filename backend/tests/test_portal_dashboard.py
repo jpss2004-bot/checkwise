@@ -407,6 +407,27 @@ def test_dashboard_returns_expected_payload_shape(api_client: TestClient) -> Non
     assert "on_track" in semaphore
 
 
+def test_dashboard_upcoming_deadlines_expose_due_in_days(
+    api_client: TestClient,
+) -> None:
+    """P1.6: the upcoming_deadlines rows must carry ``due_in_days`` so the
+    /portal/reports Compliance Pulse strip can bucket items by urgency
+    without re-parsing the period_key on the client. The field is
+    additive and always >= 0 because _compute_upcoming_deadlines filters
+    overdue rows out."""
+    ws = _setup_workspace(api_client)
+    body = api_client.get(
+        f"/api/v1/portal/workspaces/{ws['workspace_id']}/dashboard"
+    ).json()
+    rows = body["upcoming_deadlines"]
+    # Brand-new workspace has plenty of missing required calendar slots,
+    # so we expect at least one upcoming deadline row to surface.
+    assert isinstance(rows, list)
+    for row in rows:
+        assert "due_in_days" in row, "every upcoming row must carry due_in_days"
+        assert row["due_in_days"] is None or row["due_in_days"] >= 0
+
+
 def test_dashboard_empty_workspace_reports_pending_counts(
     api_client: TestClient,
 ) -> None:

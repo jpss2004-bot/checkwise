@@ -1,5 +1,6 @@
 "use client";
 
+import { CompliancePulseStrip } from "@/components/checkwise/reports/list/compliance-pulse-strip";
 import { PortalAppShell } from "@/components/checkwise/portal/portal-app-shell";
 import { ReportsListView } from "@/components/checkwise/reports/list/reports-list-view";
 import { withOnboardingGate } from "@/lib/session/with-onboarding-gate";
@@ -27,6 +28,7 @@ function PortalReportsListPage({ session }: { session: PortalSession }) {
         editorHrefBase="/portal/reports"
         presetCreateRedirectBase="/portal/reports"
         eyebrowDescription="Centro de cumplimiento personal: estado del expediente, obligaciones pendientes y rechazos por corregir."
+        headerSlot={<CompliancePulseStrip session={session} />}
       />
     </PortalAppShell>
   );

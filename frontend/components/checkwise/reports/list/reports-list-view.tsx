@@ -71,6 +71,13 @@ export interface ReportsListViewProps {
   eyebrowDescription: string;
   /** Show the audience filter dropdown. Default false for client/portal. */
   showAudienceFilter?: boolean;
+  /**
+   * Optional content rendered between the page header and the preset
+   * gallery. Provider portal uses this to mount the Compliance Pulse
+   * strip (P1.6) above the report list without forcing a session
+   * dependency onto the shared view.
+   */
+  headerSlot?: React.ReactNode;
 }
 
 export function ReportsListView({
@@ -79,6 +86,7 @@ export function ReportsListView({
   presetCreateRedirectBase,
   eyebrowDescription,
   showAudienceFilter = false,
+  headerSlot,
 }: ReportsListViewProps) {
   const router = useRouter();
   const [presets, setPresets] = useState<ReportPresetSummary[] | null>(null);
@@ -197,6 +205,8 @@ export function ReportsListView({
           {eyebrowDescription}
         </p>
       </header>
+
+      {headerSlot}
 
       {error && (
         <Alert variant="warning">
