@@ -337,15 +337,25 @@ def get_reports(
     current: Annotated[CurrentUser, Depends(get_current_user)],
     organization_id: Annotated[str | None, Query()] = None,
     report_status: Annotated[ReportStatus | None, Query(alias="status")] = None,
+    audience: Annotated[ReportAudience | None, Query()] = None,
     limit: Annotated[int, Query(ge=1, le=200)] = 50,
     offset: Annotated[int, Query(ge=0)] = 0,
 ) -> ReportList:
+    """List reports visible to the caller.
+
+    ``audience`` narrows the list to a single audience. Server-side
+    ``visible_audiences()`` is the security boundary — if a caller
+    requests an audience they cannot see, the list returns empty
+    rather than 403, mirroring the not-found semantics elsewhere in
+    this router (avoids enumeration).
+    """
     try:
         rows, total = list_reports(
             db,
             actor=_actor_from(current),
             organization_id=organization_id,
             status=report_status,
+            audience=audience,
             limit=limit,
             offset=offset,
         )

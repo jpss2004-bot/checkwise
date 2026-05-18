@@ -162,6 +162,7 @@ export function createReport(
 export interface ListReportsOptions {
   organizationId?: string;
   status?: ReportStatus;
+  audience?: ReportAudience;
   limit?: number;
   offset?: number;
 }
@@ -172,6 +173,7 @@ export function listReports(
   const params = new URLSearchParams();
   if (options.organizationId) params.set("organization_id", options.organizationId);
   if (options.status) params.set("status", options.status);
+  if (options.audience) params.set("audience", options.audience);
   if (options.limit !== undefined) params.set("limit", String(options.limit));
   if (options.offset !== undefined) params.set("offset", String(options.offset));
   const qs = params.toString();

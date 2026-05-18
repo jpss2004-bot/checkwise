@@ -369,3 +369,121 @@ def test_client_admin_cannot_read_internal_only_directly(
 
     resp = api_client.get(f"/api/v1/reports/{rid}", headers=_h(client_tok))
     assert resp.status_code == 404
+
+
+# ─── R2 — list filters ────────────────────────────────────────
+
+
+def test_list_audience_filter_admin_narrows_to_one(api_client, db_factory) -> None:
+    """R2: ?audience=client_facing returns only that audience for admin."""
+    admin_tok = _admin_token(api_client, db_factory)
+    target_client = _seed_client_row(db_factory, "Cliente Audience")
+
+    # Author 2 reports of different audiences.
+    r_internal = api_client.post(
+        "/api/v1/reports",
+        headers=_h(admin_tok),
+        json={"title": "Internal only", "audience": "internal_only"},
+    )
+    assert r_internal.status_code == 201, r_internal.text
+    r_client = api_client.post(
+        "/api/v1/reports",
+        headers=_h(admin_tok),
+        json={
+            "title": "Client facing",
+            "audience": "client_facing",
+            "client_id": target_client,
+        },
+    )
+    assert r_client.status_code == 201, r_client.text
+
+    # Without filter → both visible to admin.
+    all_resp = api_client.get("/api/v1/reports", headers=_h(admin_tok))
+    assert all_resp.status_code == 200
+    assert {r["title"] for r in all_resp.json()["items"]} >= {
+        "Internal only",
+        "Client facing",
+    }
+
+    # With filter → only the client_facing one.
+    filtered = api_client.get(
+        "/api/v1/reports",
+        headers=_h(admin_tok),
+        params={"audience": "client_facing"},
+    )
+    assert filtered.status_code == 200
+    titles = [r["title"] for r in filtered.json()["items"]]
+    assert "Client facing" in titles
+    assert "Internal only" not in titles
+    for r in filtered.json()["items"]:
+        assert r["audience"] == "client_facing"
+
+
+def test_list_audience_filter_client_admin_requesting_forbidden_returns_empty(
+    api_client, db_factory
+) -> None:
+    """R2: a client_admin requesting ?audience=internal_only must not see
+    anything. The endpoint must return an empty list (not 403) to avoid
+    leaking that any internal_only reports exist."""
+    admin_tok = _admin_token(api_client, db_factory)
+    client_tok, client_org = _client_admin(
+        api_client, db_factory, "Cliente Forbidden"
+    )
+
+    # Admin seeds an internal_only report inside the client_admin's org.
+    seed = api_client.post(
+        "/api/v1/reports",
+        headers=_h(admin_tok),
+        params={"organization_id": client_org},
+        json={"title": "Internal seeded", "audience": "internal_only"},
+    )
+    assert seed.status_code == 201
+
+    resp = api_client.get(
+        "/api/v1/reports",
+        headers=_h(client_tok),
+        params={"audience": "internal_only"},
+    )
+    assert resp.status_code == 200
+    assert resp.json() == {"items": [], "total": 0}
+
+
+def test_list_status_filter_narrows_correctly(api_client, db_factory) -> None:
+    """R2: ?status=draft and ?status=active partition the list correctly."""
+    admin_tok = _admin_token(api_client, db_factory)
+
+    # Two reports — patch one to active.
+    r1 = api_client.post(
+        "/api/v1/reports",
+        headers=_h(admin_tok),
+        json={"title": "Draft one", "audience": "internal_only"},
+    )
+    rid1 = r1.json()["id"]
+    r2 = api_client.post(
+        "/api/v1/reports",
+        headers=_h(admin_tok),
+        json={"title": "Active one", "audience": "internal_only"},
+    )
+    rid2 = r2.json()["id"]
+    patch = api_client.patch(
+        f"/api/v1/reports/{rid2}",
+        headers=_h(admin_tok),
+        json={"status": "active"},
+    )
+    assert patch.status_code == 200, patch.text
+
+    drafts = api_client.get(
+        "/api/v1/reports", headers=_h(admin_tok), params={"status": "draft"}
+    )
+    assert drafts.status_code == 200
+    draft_ids = {r["id"] for r in drafts.json()["items"]}
+    assert rid1 in draft_ids
+    assert rid2 not in draft_ids
+
+    actives = api_client.get(
+        "/api/v1/reports", headers=_h(admin_tok), params={"status": "active"}
+    )
+    assert actives.status_code == 200
+    active_ids = {r["id"] for r in actives.json()["items"]}
+    assert rid2 in active_ids
+    assert rid1 not in active_ids

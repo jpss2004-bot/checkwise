@@ -285,6 +285,7 @@ def list_reports(
     actor: ReportActor,
     organization_id: str | None = None,
     status: ReportStatus | None = None,
+    audience: ReportAudience | None = None,
     limit: int = 50,
     offset: int = 0,
 ) -> tuple[list[Report], int]:
@@ -293,6 +294,11 @@ def list_reports(
     Internal staff see everything; everyone else is scoped to their
     organization_ids. Optional ``organization_id`` filter narrows
     further (and is enforced against the actor's memberships).
+
+    ``audience`` narrows to a single value when present. The
+    visible_audiences() intersection still applies — a caller cannot
+    bypass it by passing a forbidden audience; the list just returns
+    empty in that case.
     """
     stmt = select(Report)
 
@@ -314,7 +320,15 @@ def list_reports(
     allowed = visible_audiences(actor)
     if not allowed:
         return [], 0
-    stmt = stmt.where(Report.audience.in_([a.value for a in allowed]))
+    if audience is not None:
+        # Intersect the requested audience with the visible set. If the
+        # caller asks for one they cannot see, return empty rather than
+        # raise — mirrors the not-found-shape semantics elsewhere.
+        if audience not in allowed:
+            return [], 0
+        stmt = stmt.where(Report.audience == audience.value)
+    else:
+        stmt = stmt.where(Report.audience.in_([a.value for a in allowed]))
 
     if status:
         stmt = stmt.where(Report.status == status.value)
