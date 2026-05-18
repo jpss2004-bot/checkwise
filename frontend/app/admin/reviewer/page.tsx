@@ -1,17 +1,15 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useState } from "react";
-import Link from "next/link";
 import { useRouter } from "next/navigation";
 import {
   Warning,
-  ArrowLeft,
   ArrowRight,
   Clock,
   Tray,
-  SignOut,
 } from "@phosphor-icons/react";
 
+import { AdminShell } from "../_shell";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { PageHeader } from "@/components/ui/page-header";
@@ -117,10 +115,8 @@ export default function ReviewerQueuePage() {
 
   const retry = useCallback(() => setReloadKey((k) => k + 1), []);
 
-  function onLogout() {
-    clearAdminSession();
-    router.replace("/admin/login");
-  }
+  // F1: logout is now provided by the AdminShell header, so this
+  // page no longer renders its own Cerrar sesión action.
 
   const items = useMemo(() => queue?.items ?? [], [queue]);
   const filteredItems = useMemo(
@@ -146,26 +142,13 @@ export default function ReviewerQueuePage() {
   if (!session) return null;
 
   return (
-    <main className="mx-auto max-w-6xl space-y-6 px-5 py-8">
-      <PageHeader
-        eyebrow="Reviewer workbench"
-        title="Documentos por revisar"
-        description="Empieza por lo más viejo. Cada documento espera tu decisión humana. La automatización no aprueba ni rechaza nada."
-        actions={
-          <>
-            <Button asChild variant="outline" size="sm">
-              <Link href="/admin">
-                <ArrowLeft className="h-4 w-4" aria-hidden />
-                Inicio
-              </Link>
-            </Button>
-            <Button type="button" variant="outline" size="sm" onClick={onLogout}>
-              <SignOut className="h-4 w-4" aria-hidden />
-              Cerrar sesión
-            </Button>
-          </>
-        }
-      />
+    <AdminShell unframed>
+      <div className="mx-auto max-w-6xl space-y-6 px-5 py-8">
+        <PageHeader
+          eyebrow="Reviewer workbench"
+          title="Documentos por revisar"
+          description="Empieza por lo más viejo. Cada documento espera tu decisión humana. La automatización no aprueba ni rechaza nada."
+        />
 
       {loading ? (
         <QueueTableSkeleton />
@@ -241,7 +224,8 @@ export default function ReviewerQueuePage() {
           )}
         </section>
       )}
-    </main>
+      </div>
+    </AdminShell>
   );
 }
 
