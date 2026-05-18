@@ -1,25 +1,27 @@
 "use client";
 
-import { useEffect } from "react";
-import { useParams, useRouter } from "next/navigation";
+import { useParams } from "next/navigation";
+
+import { ClientShell } from "../../_shell";
+import { ReportEditor } from "@/components/checkwise/reports/editor/report-editor";
 
 /**
- * /client/reports/[id] — R1.1 placeholder.
+ * Client report editor — R1.0.1.
  *
- * The editor is a 500+ line component currently wrapped in
- * PortalAppShell. Lifting it to support all three shells in one
- * slice is more refactor than R1.1 budgets; instead this route
- * redirects to the existing editor. The shared editor extraction
- * lands in R1.0.1.
+ * Mounts the shared <ReportEditor> inside ClientShell so client_admins
+ * stay in their own shell. Mirrors the admin route exactly except for
+ * the back href.
  */
-export default function ClientReportEditorRedirect() {
+export default function ClientReportEditorPage() {
   const params = useParams();
-  const router = useRouter();
-  const id = typeof params?.id === "string" ? params.id : "";
-
-  useEffect(() => {
-    if (id) router.replace(`/portal/reports/${id}`);
-  }, [id, router]);
-
-  return null;
+  const reportId = typeof params?.id === "string" ? params.id : "";
+  return (
+    <ClientShell unframed>
+      <ReportEditor
+        reportId={reportId}
+        backHref="/client/reports"
+        printHref={`/portal/reports/${reportId}/print`}
+      />
+    </ClientShell>
+  );
 }

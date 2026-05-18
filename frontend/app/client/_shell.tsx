@@ -48,11 +48,19 @@ export function ClientShell({
   description,
   actions,
   children,
+  unframed = false,
 }: {
-  title: string;
+  title?: string;
   description?: React.ReactNode;
   actions?: React.ReactNode;
   children: React.ReactNode;
+  /**
+   * When true, skip the shell's internal page header. Same purpose as
+   * AdminShell.unframed — lets the shared <ReportEditor> render its
+   * own full-width header inside the client shell without duplicating
+   * the title block.
+   */
+  unframed?: boolean;
 }) {
   const router = useRouter();
   const pathname = usePathname();
@@ -203,39 +211,48 @@ export function ClientShell({
         </div>
       ) : null}
 
-      <main className="mx-auto max-w-7xl space-y-5 px-5 py-5">
-        <header className="cw-fade-up space-y-3">
-          <div className="flex flex-wrap items-end justify-between gap-3">
-            <div className="min-w-0 space-y-1">
-              <p className="cw-eyebrow">Cliente · CheckWise</p>
-              <h1 className="text-[26px] font-semibold leading-tight tracking-tight text-[color:var(--text-primary)]">
-                {title}
-              </h1>
-              {description ? (
-                <p className="max-w-prose text-[13px] text-[color:var(--text-secondary)]">
-                  {description}
-                </p>
+      <main
+        className={cn(
+          "mx-auto",
+          unframed ? "w-full" : "max-w-7xl space-y-5 px-5 py-5",
+        )}
+      >
+        {!unframed && (
+          <header className="cw-fade-up space-y-3">
+            <div className="flex flex-wrap items-end justify-between gap-3">
+              <div className="min-w-0 space-y-1">
+                <p className="cw-eyebrow">Cliente · CheckWise</p>
+                {title ? (
+                  <h1 className="text-[26px] font-semibold leading-tight tracking-tight text-[color:var(--text-primary)]">
+                    {title}
+                  </h1>
+                ) : null}
+                {description ? (
+                  <p className="max-w-prose text-[13px] text-[color:var(--text-secondary)]">
+                    {description}
+                  </p>
+                ) : null}
+              </div>
+              {actions ? (
+                <div className="flex flex-wrap gap-2">{actions}</div>
               ) : null}
             </div>
-            {actions ? (
-              <div className="flex flex-wrap gap-2">{actions}</div>
-            ) : null}
-          </div>
-          <MetadataStrip
-            items={[
-              { label: "Usuario", value: session.user.full_name },
-              { label: "Correo", value: session.user.email, mono: true },
-              {
-                label: "Rol",
-                value: session.roles
-                  .map((r) => r.replace(/_/g, " "))
-                  .join(", "),
-                mono: true,
-                tone: "teal",
-              },
-            ]}
-          />
-        </header>
+            <MetadataStrip
+              items={[
+                { label: "Usuario", value: session.user.full_name },
+                { label: "Correo", value: session.user.email, mono: true },
+                {
+                  label: "Rol",
+                  value: session.roles
+                    .map((r) => r.replace(/_/g, " "))
+                    .join(", "),
+                  mono: true,
+                  tone: "teal",
+                },
+              ]}
+            />
+          </header>
+        )}
         <section>{children}</section>
       </main>
 

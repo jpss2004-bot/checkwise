@@ -1,24 +1,31 @@
 "use client";
 
-import { useEffect } from "react";
-import { useParams, useRouter } from "next/navigation";
+import { useParams } from "next/navigation";
+
+import { AdminShell } from "../../_shell";
+import { ReportEditor } from "@/components/checkwise/reports/editor/report-editor";
 
 /**
- * /admin/reports/[id] — R1.0 placeholder.
+ * Admin report editor — R1.0.1.
  *
- * The editor itself is a 500+ line component currently wrapped in
- * PortalAppShell. Lifting it to support both shells in the same slice
- * is more refactor than R1.0 budgets; instead this route redirects to
- * the existing editor. The shared editor extraction lands in R1.0.1.
+ * Mounts the shared <ReportEditor> inside AdminShell so internal
+ * users stay in their own shell instead of being bounced to the
+ * portal. The shell is set unframed so the editor renders its own
+ * full page header (with the report-specific title + AI actions).
+ *
+ * Print route is shared (/portal/reports/[id]/print) — chrome-less
+ * and identical across roles.
  */
-export default function AdminReportEditorRedirect() {
+export default function AdminReportEditorPage() {
   const params = useParams();
-  const router = useRouter();
-  const id = typeof params?.id === "string" ? params.id : "";
-
-  useEffect(() => {
-    if (id) router.replace(`/portal/reports/${id}`);
-  }, [id, router]);
-
-  return null;
+  const reportId = typeof params?.id === "string" ? params.id : "";
+  return (
+    <AdminShell unframed>
+      <ReportEditor
+        reportId={reportId}
+        backHref="/admin/reports"
+        printHref={`/portal/reports/${reportId}/print`}
+      />
+    </AdminShell>
+  );
 }

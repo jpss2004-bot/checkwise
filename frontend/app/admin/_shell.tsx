@@ -53,11 +53,20 @@ export function AdminShell({
   description,
   actions,
   children,
+  unframed = false,
 }: {
-  title: string;
+  title?: string;
   description?: React.ReactNode;
   actions?: React.ReactNode;
   children: React.ReactNode;
+  /**
+   * When true, skip the shell's internal page header (eyebrow,
+   * title, description, actions, MetadataStrip). Use this when the
+   * page renders its own complete header — e.g. the shared
+   * <ReportEditor>. Defaults to false so existing pages keep their
+   * current chrome.
+   */
+  unframed?: boolean;
 }) {
   const router = useRouter();
   const pathname = usePathname();
@@ -212,38 +221,49 @@ export function AdminShell({
         </div>
       ) : null}
 
-      <main className="mx-auto max-w-7xl space-y-5 px-5 py-5">
-        <header className="cw-fade-up space-y-3">
-          <div className="flex flex-wrap items-end justify-between gap-3">
-            <div className="min-w-0 space-y-1">
-              <p className="cw-eyebrow">Admin · CheckWise</p>
-              <h1 className="text-[26px] font-semibold leading-tight tracking-tight text-[color:var(--text-primary)]">
-                {title}
-              </h1>
-              {description ? (
-                <p className="max-w-prose text-[13px] text-[color:var(--text-secondary)]">
-                  {description}
-                </p>
+      <main
+        className={cn(
+          "mx-auto",
+          unframed ? "w-full" : "max-w-7xl space-y-5 px-5 py-5",
+        )}
+      >
+        {!unframed && (
+          <header className="cw-fade-up space-y-3">
+            <div className="flex flex-wrap items-end justify-between gap-3">
+              <div className="min-w-0 space-y-1">
+                <p className="cw-eyebrow">Admin · CheckWise</p>
+                {title ? (
+                  <h1 className="text-[26px] font-semibold leading-tight tracking-tight text-[color:var(--text-primary)]">
+                    {title}
+                  </h1>
+                ) : null}
+                {description ? (
+                  <p className="max-w-prose text-[13px] text-[color:var(--text-secondary)]">
+                    {description}
+                  </p>
+                ) : null}
+              </div>
+              {actions ? (
+                <div className="flex flex-wrap gap-2">{actions}</div>
               ) : null}
             </div>
-            {actions ? (
-              <div className="flex flex-wrap gap-2">{actions}</div>
-            ) : null}
-          </div>
-          <MetadataStrip
-            items={[
-              { label: "Usuario", value: session.user.full_name },
-              { label: "Correo", value: session.user.email, mono: true },
-              {
-                label: "Roles",
-                value: session.roles.map((r) => r.replace(/_/g, " ")).join(", "),
-                mono: true,
-                tone: "teal",
-              },
-            ]}
-          />
-        </header>
-        <section>{children}</section>
+            <MetadataStrip
+              items={[
+                { label: "Usuario", value: session.user.full_name },
+                { label: "Correo", value: session.user.email, mono: true },
+                {
+                  label: "Roles",
+                  value: session.roles
+                    .map((r) => r.replace(/_/g, " "))
+                    .join(", "),
+                  mono: true,
+                  tone: "teal",
+                },
+              ]}
+            />
+          </header>
+        )}
+        <section className={unframed ? undefined : ""}>{children}</section>
       </main>
 
       <footer className="mx-auto max-w-7xl px-5 py-6 text-center font-mono text-[10px] uppercase tracking-wide text-[color:var(--text-tertiary)]">
