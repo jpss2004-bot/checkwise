@@ -66,6 +66,15 @@ class Settings(BaseSettings):
     # endpoint never fails because of a missing/broken webhook.
     SLACK_CONTACT_WEBHOOK_URL: str = ""
 
+    # Internal feedback delivery (tester bug/improvement reports).
+    # Requires a Slack *bot* token (xoxb-…) because attaching a PNG
+    # uses files.upload_v2, which incoming webhooks do not support.
+    # Both empty (default) → endpoint validates the request and
+    # responds 202 with delivered=false, so the frontend can be
+    # exercised before the Slack app is provisioned.
+    SLACK_BOT_TOKEN: str = ""
+    SLACK_FEEDBACK_CHANNEL_ID: str = ""
+
     model_config = SettingsConfigDict(env_file=".env", env_file_encoding="utf-8", extra="ignore")
 
     @property
