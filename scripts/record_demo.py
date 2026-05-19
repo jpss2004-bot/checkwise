@@ -1,29 +1,30 @@
 #!/usr/bin/env python3
-"""Record a professional CheckWise demo video.
+"""Record the narrated CheckWise demo video (v2 — paced to voice-over).
 
-Drives a headless Chromium at 1920×1080 through the 7-step demo
-path from docs/SYSTEM_UX_AUDIT_REPORT.pdf. Adds:
+Drives a headless Chromium at 1920×1080 through the demo path. Reads
+voice-over clip durations from
+docs/audit-screenshots/2026-05-18-system-audit/voice/manifest.json
+and times each scene's on-screen dwell to match the narration so
+caption + voice + visuals stay in sync.
 
+On-screen polish:
   - branded intro + outro cards (data: URLs)
   - injected animated cursor (teal, soft shadow)
-  - click ripple effect
-  - bottom caption bar (dark background, backdrop blur)
-  - smooth interpolated mouse motion between clicks
-  - typing animation on form fields
+  - click ripple on every interaction
+  - bottom caption bar (eyebrow + body, glassmorphism)
+  - element highlight system: draws a pulsing teal outline + label
+    over any DOM element, used to point at UI features the narrator
+    is explaining
+  - smooth interpolated mouse motion
+  - typing animation on credential fields
 
-Captures a single continuous WebM (Playwright native), then post-
-processes to MP4 H.264 1080p via ffmpeg.
-
-Output:
-  docs/audit-screenshots/2026-05-18-system-audit/demo.mp4
-
-Prereqs (one-time):
-  - ./dev_demo.sh — boots Docker + Postgres + seed + uvicorn + Next
-  - backend/.venv has playwright + chromium installed (see P1.9 work)
-  - ffmpeg installed (brew install ffmpeg)
+This script ONLY records a silent WebM. Audio mixing (voice +
+music) happens in scripts/finalize_demo.py after recording so each
+step is independently re-runnable.
 """
 from __future__ import annotations
 
+import base64
 import json
 import shutil
 import subprocess
@@ -39,13 +40,18 @@ OUT_DIR = ROOT / "docs" / "audit-screenshots" / "2026-05-18-system-audit"
 OUT_DIR.mkdir(parents=True, exist_ok=True)
 RAW_DIR = OUT_DIR / "_raw_demo"
 RAW_DIR.mkdir(exist_ok=True)
-OUT_MP4 = OUT_DIR / "demo.mp4"
+SILENT_MP4 = OUT_DIR / "demo.silent.mp4"
+VOICE_MANIFEST = OUT_DIR / "voice" / "manifest.json"
 
 API = "http://127.0.0.1:8000"
 APP = "http://localhost:3000"
 
 VIEWPORT = {"width": 1920, "height": 1080}
 VIDEO_SIZE = {"width": 1920, "height": 1080}
+
+# How much extra dwell time on screen AFTER the narration finishes.
+# Gives the viewer a beat to absorb the UI before the next scene.
+SCENE_TAIL = 0.6
 
 ACCOUNTS = {
     "provider": ("boss.demo@checkwise.mx", "BossDemo!2026"),
@@ -54,13 +60,24 @@ ACCOUNTS = {
 }
 
 
-# ── Injected cursor + caption + ripple ────────────────────────────
+# ── Voice-clip durations (drives scene pacing) ────────────────────
+
+def load_durations() -> dict[str, float]:
+    if not VOICE_MANIFEST.exists():
+        raise SystemExit(
+            f"Voice manifest not found at {VOICE_MANIFEST}. "
+            "Run scripts/generate_voiceover.py first."
+        )
+    data = json.loads(VOICE_MANIFEST.read_text(encoding="utf-8"))
+    return {k: float(v) for k, v in data["durations"].items()}
+
+
+# ── Injected cursor + caption + highlight ─────────────────────────
 
 INJECT_JS = r"""
 (() => {
-  // Re-install on every navigation: window flags survive but the DOM
-  // elements get torn down with the previous document, so we check for
-  // the actual element rather than a window flag.
+  // Re-install on every navigation — DOM elements get torn down with
+  // the previous document, so we check for the actual element.
   if (document.getElementById('__demo_cursor')) return;
 
   const ROOT = document.documentElement;
@@ -70,8 +87,7 @@ INJECT_JS = r"""
   cursor.id = '__demo_cursor';
   Object.assign(cursor.style, {
     position: 'fixed',
-    width: '24px',
-    height: '24px',
+    width: '24px', height: '24px',
     background: 'rgba(13, 132, 117, 0.85)',
     border: '3px solid white',
     borderRadius: '50%',
@@ -84,25 +100,19 @@ INJECT_JS = r"""
   });
   ROOT.appendChild(cursor);
 
-  let cursorX = window.innerWidth / 2;
-  let cursorY = window.innerHeight / 2;
-  function moveCursor(x, y) {
-    cursorX = x; cursorY = y;
-    cursor.style.left = x + 'px';
-    cursor.style.top = y + 'px';
+  window.addEventListener('mousemove', e => {
+    cursor.style.left = e.clientX + 'px';
+    cursor.style.top = e.clientY + 'px';
     cursor.style.opacity = '1';
-  }
-  window.addEventListener('mousemove', e => moveCursor(e.clientX, e.clientY));
+  });
 
-  // Click ripple on real mousedown
+  // Click ripple
   window.addEventListener('mousedown', e => {
     const ripple = document.createElement('div');
     Object.assign(ripple.style, {
       position: 'fixed',
-      left: e.clientX + 'px',
-      top: e.clientY + 'px',
-      width: '12px',
-      height: '12px',
+      left: e.clientX + 'px', top: e.clientY + 'px',
+      width: '12px', height: '12px',
       background: 'rgba(13, 132, 117, 0.45)',
       border: '2px solid rgba(13, 132, 117, 0.9)',
       borderRadius: '50%',
@@ -122,7 +132,7 @@ INJECT_JS = r"""
     setTimeout(() => { cursor.style.transform = 'translate(-50%, -50%) scale(1)'; }, 140);
   }, true);
 
-  // Caption bar
+  // Caption bar (bottom-center)
   const cap = document.createElement('div');
   cap.id = '__demo_caption';
   Object.assign(cap.style, {
@@ -150,10 +160,7 @@ INJECT_JS = r"""
     pointerEvents: 'none',
   });
   ROOT.appendChild(cap);
-
-  // Subtle teal eyebrow above caption text
   const eyebrow = document.createElement('div');
-  eyebrow.id = '__demo_caption_eyebrow';
   Object.assign(eyebrow.style, {
     fontSize: '11px',
     fontWeight: '700',
@@ -164,14 +171,12 @@ INJECT_JS = r"""
     opacity: '0.95',
   });
   cap.appendChild(eyebrow);
-
-  const bodyEl = document.createElement('div');
-  bodyEl.id = '__demo_caption_body';
-  cap.appendChild(bodyEl);
+  const body = document.createElement('div');
+  cap.appendChild(body);
 
   window.__caption = (text, eyebrowText) => {
     eyebrow.textContent = eyebrowText || 'CHECKWISE · DEMO';
-    bodyEl.textContent = text;
+    body.textContent = text;
     cap.style.opacity = '1';
     cap.style.transform = 'translateX(-50%) translateY(0)';
   };
@@ -179,11 +184,117 @@ INJECT_JS = r"""
     cap.style.opacity = '0';
     cap.style.transform = 'translateX(-50%) translateY(20px)';
   };
+
+  // ── Element highlight system ──
+  // Draws a 4px teal outline + soft glow over a target element, plus
+  // an optional label tooltip that points at the top-right corner.
+  // The overlay is absolutely positioned, never disturbs the DOM,
+  // and animates with a slow breathing pulse so it reads as
+  // "look here" without distracting.
+  let highlightObserver = null;
+
+  window.__highlight = (selector, labelText) => {
+    window.__unhighlight();
+    const target = document.querySelector(selector);
+    if (!target) return false;
+    const box = document.createElement('div');
+    box.id = '__demo_highlight';
+    Object.assign(box.style, {
+      position: 'fixed',
+      pointerEvents: 'none',
+      zIndex: '2147483640',
+      border: '3px solid rgba(13, 132, 117, 0.95)',
+      borderRadius: '10px',
+      boxShadow: '0 0 0 6px rgba(13, 132, 117, 0.18), 0 0 30px rgba(13, 132, 117, 0.35)',
+      transition: 'left 0.25s ease, top 0.25s ease, width 0.25s ease, height 0.25s ease, opacity 0.25s ease',
+      opacity: '0',
+      animation: 'demoBreathe 2.4s ease-in-out infinite',
+    });
+
+    // Inject keyframes once
+    if (!document.getElementById('__demo_kf')) {
+      const style = document.createElement('style');
+      style.id = '__demo_kf';
+      style.textContent = `@keyframes demoBreathe {
+        0%, 100% { box-shadow: 0 0 0 6px rgba(13, 132, 117, 0.18), 0 0 30px rgba(13, 132, 117, 0.35); }
+        50%      { box-shadow: 0 0 0 10px rgba(13, 132, 117, 0.10), 0 0 44px rgba(13, 132, 117, 0.55); }
+      }`;
+      document.head.appendChild(style);
+    }
+
+    ROOT.appendChild(box);
+
+    // Optional label that sits above the highlight box, brand-colored
+    let label = null;
+    if (labelText) {
+      label = document.createElement('div');
+      label.id = '__demo_highlight_label';
+      Object.assign(label.style, {
+        position: 'fixed',
+        pointerEvents: 'none',
+        zIndex: '2147483641',
+        background: 'rgba(13, 132, 117, 0.96)',
+        color: 'white',
+        padding: '8px 14px',
+        borderRadius: '8px',
+        fontFamily: '-apple-system, BlinkMacSystemFont, Inter, sans-serif',
+        fontSize: '14px',
+        fontWeight: '600',
+        boxShadow: '0 6px 18px rgba(13, 132, 117, 0.35)',
+        opacity: '0',
+        transition: 'opacity 0.3s ease, transform 0.3s ease',
+        transform: 'translateY(6px)',
+        maxWidth: '420px',
+        textAlign: 'center',
+        lineHeight: '1.3',
+      });
+      label.textContent = labelText;
+      ROOT.appendChild(label);
+    }
+
+    function place() {
+      const r = target.getBoundingClientRect();
+      const padX = 8, padY = 6;
+      box.style.left = (r.left - padX) + 'px';
+      box.style.top = (r.top - padY) + 'px';
+      box.style.width = (r.width + padX * 2) + 'px';
+      box.style.height = (r.height + padY * 2) + 'px';
+      box.style.opacity = '1';
+      if (label) {
+        // Place label above the highlight if there's room, else below
+        const labelGap = 12;
+        label.style.opacity = '1';
+        label.style.transform = 'translateY(0)';
+        // Measure label after it's visible
+        requestAnimationFrame(() => {
+          const lr = label.getBoundingClientRect();
+          let lx = r.left + (r.width / 2) - (lr.width / 2);
+          lx = Math.max(16, Math.min(window.innerWidth - lr.width - 16, lx));
+          let ly = r.top - lr.height - labelGap - padY;
+          if (ly < 24) ly = r.bottom + padY + labelGap;
+          label.style.left = lx + 'px';
+          label.style.top = ly + 'px';
+        });
+      }
+    }
+
+    place();
+    highlightObserver = setInterval(place, 100);
+    return true;
+  };
+
+  window.__unhighlight = () => {
+    if (highlightObserver) { clearInterval(highlightObserver); highlightObserver = null; }
+    const b = document.getElementById('__demo_highlight');
+    const l = document.getElementById('__demo_highlight_label');
+    if (b) b.remove();
+    if (l) l.remove();
+  };
 })();
 """
 
 
-# ── Branded intro / outro cards (data URLs) ───────────────────────
+# ── Branded intro / outro cards ───────────────────────────────────
 
 def card_html(eyebrow: str, title: str, subtitle: str) -> str:
     return f"""<!DOCTYPE html>
@@ -217,24 +328,29 @@ html, body {{ height: 100%; font-family: 'Inter', -apple-system, sans-serif; bac
 </body></html>"""
 
 
-INTRO_URL = "data:text/html;base64," + __import__("base64").b64encode(
-    card_html(
-        "DEMO · 2026-05-18",
-        "CheckWise",
-        "Cumplimiento documental REPSE guiado, trazable y accionable. Tres roles, una plataforma.",
-    ).encode()
-).decode()
+def data_url(html: str) -> str:
+    return "data:text/html;base64," + base64.b64encode(html.encode()).decode()
 
-OUTRO_URL = "data:text/html;base64," + __import__("base64").b64encode(
+
+INTRO_URL = data_url(
+    card_html(
+        "DEMO GUIADA · 2026",
+        "CheckWise",
+        "Cumplimiento documental REPSE guiado, trazable y accionable. "
+        "Tres roles, una plataforma. Esta es una demostración narrada.",
+    )
+)
+OUTRO_URL = data_url(
     card_html(
         "GRACIAS",
         "checkwise.mx",
-        "Reporte ejecutivo, expediente trazable, revisión humana obligatoria. Listo para tu próxima demo a cliente.",
-    ).encode()
-).decode()
+        "Reporte ejecutivo, expediente trazable, revisión humana "
+        "obligatoria. Operado por Legal Shelf, en México.",
+    )
+)
 
 
-# ── Helpers ───────────────────────────────────────────────────────
+# ── HTTP helpers ──────────────────────────────────────────────────
 
 def login(email: str, password: str) -> dict:
     body = json.dumps({"email": email, "password": password}).encode()
@@ -274,6 +390,8 @@ def reviewer_queue(token: str) -> list[dict]:
         return json.loads(resp.read().decode()).get("items", [])
 
 
+# ── Page helpers ──────────────────────────────────────────────────
+
 def caption(page: Page, text: str, eyebrow: str | None = None) -> None:
     page.evaluate(
         "([t, e]) => window.__caption && window.__caption(t, e)",
@@ -285,12 +403,28 @@ def caption_clear(page: Page) -> None:
     page.evaluate("() => window.__caption_clear && window.__caption_clear()")
 
 
+def highlight(page: Page, selector: str, label: str | None = None) -> bool:
+    return bool(
+        page.evaluate(
+            "([s, l]) => window.__highlight && window.__highlight(s, l)",
+            [selector, label],
+        )
+    )
+
+
+def unhighlight(page: Page) -> None:
+    page.evaluate("() => window.__unhighlight && window.__unhighlight()")
+
+
 def hover_smooth(page: Page, x: float, y: float, steps: int = 30) -> None:
     page.mouse.move(x, y, steps=steps)
 
 
 def hover_element(page: Page, selector: str, steps: int = 30) -> tuple[float, float] | None:
-    el = page.query_selector(selector)
+    try:
+        el = page.query_selector(selector)
+    except Exception:
+        return None
     if not el:
         return None
     box = el.bounding_box()
@@ -312,10 +446,10 @@ def click_element(page: Page, selector: str, steps: int = 30) -> None:
         page.click(selector)
 
 
-def type_into(page: Page, selector: str, text: str, delay_ms: int = 75) -> None:
-    hover_element(page, selector, steps=20)
+def type_into(page: Page, selector: str, text: str, delay_ms: int = 65) -> None:
+    hover_element(page, selector, steps=18)
     page.focus(selector)
-    time.sleep(0.2)
+    time.sleep(0.18)
     page.fill(selector, "")
     page.type(selector, text, delay=delay_ms)
 
@@ -329,11 +463,6 @@ def settle(page: Page, seconds: float) -> None:
 def goto(page: Page, url: str, *, wait_until: str = "networkidle") -> None:
     try:
         page.goto(url, wait_until=wait_until, timeout=30000)
-    except Exception:
-        pass
-    # Re-inject after navigation (init script handles new docs, but defensively)
-    try:
-        page.evaluate(INJECT_JS)
     except Exception:
         pass
 
@@ -352,150 +481,238 @@ def inject_session(page: Page, login_response: dict) -> None:
     )
 
 
-# ── Scenes ────────────────────────────────────────────────────────
+def dwell_to(page: Page, narration_seconds: float, *, used: float = 0.0) -> None:
+    """Hold on screen until the scene's narration finishes (+tail)."""
+    remaining = narration_seconds + SCENE_TAIL - used
+    if remaining > 0:
+        settle(page, remaining)
 
-def scene_intro(page: Page) -> None:
+
+# ── Scenes (each consumes its named voice duration) ───────────────
+
+def scene_intro(page: Page, d: dict) -> None:
     goto(page, INTRO_URL)
-    settle(page, 3.2)
+    dwell_to(page, d["intro"])
 
 
-def scene_landing(page: Page) -> None:
+def scene_landing(page: Page, d: dict) -> None:
+    t0 = time.time()
     goto(page, f"{APP}/")
-    caption(page, "Página pública: propuesta REPSE en 5 segundos.", "ESCENA 1 · MARKETING")
-    settle(page, 3.5)
+    caption(page, "Hero claro y un solo CTA primario.", "ESCENA 1 · PÚBLICO")
+    settle(page, 0.4)
+    highlight(page, "h1", "Promesa en una frase")
+    used = time.time() - t0
+    dwell_to(page, d["landing"], used=used)
+    unhighlight(page)
     caption_clear(page)
 
 
-def scene_provider(page: Page) -> None:
-    # Login
+def scene_provider_login(page: Page, d: dict) -> None:
+    t0 = time.time()
     goto(page, f"{APP}/login")
-    caption(page, "Iniciando sesión como proveedor.", "ESCENA 2 · PROVEEDOR")
-    settle(page, 1.5)
+    caption(page, "Entramos como proveedor.", "ESCENA 2 · PROVEEDOR")
+    settle(page, 0.6)
+    # Highlight the subtitle the narrator references
+    highlight(
+        page,
+        "p:has-text('credenciales')",
+        "Si tu acceso es temporal, te pedimos rotar la contraseña",
+    )
+    settle(page, 3.5)
+    unhighlight(page)
     type_into(page, "#login-email", "boss.demo@checkwise.mx", delay_ms=55)
     type_into(page, "#login-password", "BossDemo!2026", delay_ms=55)
-    settle(page, 0.5)
-    click_element(page, "button[type='submit']")
+    settle(page, 0.3)
+    hover_element(page, "button[type='submit']")
+    settle(page, 0.3)
+    page.locator("button[type='submit']").click()
     page.wait_for_url("**/portal/entra-a-tu-espacio", timeout=15000)
-    settle(page, 1.0)
+    used = time.time() - t0
+    dwell_to(page, d["provider_login"], used=used)
+    caption_clear(page)
 
-    # Workspace entry — confirm contact data
-    caption(page, "Onramp humano: confirma datos antes de entrar.", "ESCENA 2 · PROVEEDOR")
-    settle(page, 1.5)
-    # Use page.fill (instant + React-compatible) for the transition form; the
-    # viewer's eye is on the caption, not on per-key animation here.
+
+def scene_workspace_entry(page: Page, d: dict) -> None:
+    t0 = time.time()
+    caption(page, "Confirmación de identidad antes del dashboard.", "ESCENA 2 · PROVEEDOR")
+    settle(page, 0.5)
+    highlight(page, "h2:has-text('Confirma')", "Onramp humano")
+    settle(page, 2.5)
+    unhighlight(page)
     page.fill("#ws-first-name", "Marina")
     page.fill("#ws-last-name", "Quintero")
-    settle(page, 0.8)
-    # Hover then click — gives us the cursor visual + the click ripple.
+    settle(page, 0.6)
     hover_element(page, "form button[type='submit']")
-    settle(page, 0.4)
+    settle(page, 0.3)
     page.locator("form button[type='submit']").click()
     try:
         page.wait_for_url("**/portal/dashboard", timeout=20000)
     except Exception:
-        # Fallback: navigate directly if the entry form didn't redirect.
         goto(page, f"{APP}/portal/dashboard")
-    settle(page, 1.2)
+    used = time.time() - t0
+    dwell_to(page, d["workspace_entry"], used=used)
+    caption_clear(page)
 
-    # Dashboard
-    caption(page, "Dashboard centrado en 'Tu siguiente acción'.", "ESCENA 2 · PROVEEDOR")
-    settle(page, 3.0)
-    page.mouse.wheel(0, 200)
-    settle(page, 2.5)
 
-    # Reports — Compliance Pulse
-    goto(page, f"{APP}/portal/reports")
-    caption(page, "Compliance Pulse: estado en 4 KPIs.", "ESCENA 2 · PROVEEDOR")
+def scene_provider_dashboard(page: Page, d: dict) -> None:
+    t0 = time.time()
+    caption(page, "El dashboard responde una sola pregunta: '¿qué sigue?'.", "ESCENA 3 · PROVEEDOR")
+    settle(page, 1.0)
+    highlight(page, "h2:has-text('TU SIGUIENTE')", "Centro de acción del proveedor")
     settle(page, 3.5)
-
-    # Open the first vendor_facing report
-    token = login(*ACCOUNTS["provider"])["access_token"]
-    reports = list_reports(token)
-    target = next((r for r in reports if r.get("audience") == "vendor_facing"), reports[0] if reports else None)
-    if target:
-        goto(page, f"{APP}/portal/reports/{target['id']}")
-        caption(page, "Editor de reporte con toolbar PDF (P1.8).", "ESCENA 2 · PROVEEDOR")
-        settle(page, 3.0)
-
-        # Hover + click Vista previa PDF
-        try:
-            hover_element(page, "a:has-text('Vista previa PDF')")
-            settle(page, 0.8)
-        except Exception:
-            pass
-
-        goto(page, f"{APP}/portal/reports/{target['id']}/print")
-        caption(page, "Vista imprimible con sello 'Datos al…'.", "ESCENA 2 · PROVEEDOR")
-        settle(page, 4.0)
-
-
-def scene_client(page: Page) -> None:
-    # Logout (clear localStorage) → login
-    page.evaluate("() => window.localStorage.clear()")
-    goto(page, f"{APP}/login")
-    caption(page, "Ahora como cliente: vista del portafolio.", "ESCENA 3 · CLIENTE")
-    settle(page, 1.5)
-    type_into(page, "#login-email", "cliente.demo@checkwise.mx", delay_ms=55)
-    type_into(page, "#login-password", "ClienteDemo!2026", delay_ms=55)
-    settle(page, 0.4)
-    click_element(page, "button[type='submit']")
-    page.wait_for_url("**/client/dashboard", timeout=15000)
+    unhighlight(page)
+    # Scroll to show more cards
+    page.mouse.wheel(0, 220)
     settle(page, 1.2)
-
-    caption(page, "Headline en una frase: 'Tienes 3 proveedores en amarillo.'", "ESCENA 3 · CLIENTE")
-    settle(page, 4.0)
-
-    # Vendors list
-    goto(page, f"{APP}/client/vendors")
-    caption(page, "Lista de proveedores con barra de riesgo.", "ESCENA 3 · CLIENTE")
-    settle(page, 3.0)
-
-    # Pick first vendor
-    token = login(*ACCOUNTS["client"])["access_token"]
-    vendors = list_vendors(token)
-    if vendors:
-        vid = vendors[0].get("id") or vendors[0].get("vendor_id")
-        goto(page, f"{APP}/client/vendors/{vid}")
-        caption(page, "Detalle del proveedor: narrativa de 6 secciones.", "ESCENA 3 · CLIENTE")
-        settle(page, 4.5)
+    used = time.time() - t0
+    dwell_to(page, d["provider_dashboard"], used=used)
+    caption_clear(page)
 
 
-def scene_admin(page: Page) -> None:
+def scene_compliance_pulse(page: Page, d: dict) -> None:
+    t0 = time.time()
+    goto(page, f"{APP}/portal/reports")
+    caption(page, "Compliance Pulse: 4 indicadores ejecutivos.", "ESCENA 4 · PROVEEDOR")
+    settle(page, 0.6)
+    highlight(page, "h2:has-text('Pulso de cumplimiento')", "¿Cómo estoy hoy?")
+    settle(page, 5.0)
+    unhighlight(page)
+    used = time.time() - t0
+    dwell_to(page, d["compliance_pulse"], used=used)
+    caption_clear(page)
+
+
+def scene_report_editor(page: Page, d: dict, report_id: str) -> None:
+    t0 = time.time()
+    goto(page, f"{APP}/portal/reports/{report_id}")
+    caption(page, "Editor con IA + copiloto + 'Actualizar con datos de hoy'.", "ESCENA 5 · REPORTES")
+    settle(page, 0.8)
+    highlight(page, "a:has-text('Vista previa PDF')", "Toolbar de exportación PDF")
+    settle(page, 4.5)
+    unhighlight(page)
+    hover_element(page, "a:has-text('Vista previa PDF')")
+    settle(page, 0.6)
+    used = time.time() - t0
+    dwell_to(page, d["report_editor"], used=used)
+    caption_clear(page)
+
+
+def scene_print_page(page: Page, d: dict, report_id: str) -> None:
+    t0 = time.time()
+    goto(page, f"{APP}/portal/reports/{report_id}/print")
+    caption(page, "Reporte imprimible con cabecera, paginación y sello de frescura.", "ESCENA 6 · PDF")
+    settle(page, 1.2)
+    highlight(page, ".cw-print-seal", "Sello 'Datos al…' visible en página 1")
+    settle(page, 5.0)
+    unhighlight(page)
+    used = time.time() - t0
+    dwell_to(page, d["print_page"], used=used)
+    caption_clear(page)
+
+
+def scene_client_login(page: Page, d: dict) -> None:
+    t0 = time.time()
     page.evaluate("() => window.localStorage.clear()")
     goto(page, f"{APP}/login")
-    caption(page, "Como revisor interno de Legal Shelf.", "ESCENA 4 · REVISOR")
-    settle(page, 1.5)
+    caption(page, "Cambio de rol: ahora como cliente.", "ESCENA 7 · CLIENTE")
+    settle(page, 0.6)
+    type_into(page, "#login-email", "cliente.demo@checkwise.mx", delay_ms=50)
+    type_into(page, "#login-password", "ClienteDemo!2026", delay_ms=50)
+    settle(page, 0.3)
+    hover_element(page, "button[type='submit']")
+    settle(page, 0.3)
+    page.locator("button[type='submit']").click()
+    page.wait_for_url("**/client/dashboard", timeout=15000)
+    used = time.time() - t0
+    dwell_to(page, d["client_login"], used=used)
+    caption_clear(page)
+
+
+def scene_client_dashboard(page: Page, d: dict) -> None:
+    t0 = time.time()
+    caption(page, "Titular ejecutivo en una sola frase.", "ESCENA 8 · CLIENTE")
+    settle(page, 0.8)
+    highlight(page, "h2:has-text('proveedores')", "Lectura de 3 segundos")
+    settle(page, 4.5)
+    unhighlight(page)
+    used = time.time() - t0
+    dwell_to(page, d["client_dashboard"], used=used)
+    caption_clear(page)
+
+
+def scene_vendor_detail(page: Page, d: dict, vendor_id: str) -> None:
+    t0 = time.time()
+    goto(page, f"{APP}/client/vendors/{vendor_id}")
+    caption(page, "Narrativa de 6 secciones por proveedor.", "ESCENA 9 · CLIENTE")
+    settle(page, 1.0)
+    highlight(page, "h2:has-text('ACCIONES SUGERIDAS')", "Sección 1 de 6")
+    settle(page, 3.5)
+    unhighlight(page)
+    highlight(page, "h2:has-text('DOCUMENTOS POR ESTADO')", "Sección 4 de 6")
+    settle(page, 3.0)
+    unhighlight(page)
+    used = time.time() - t0
+    dwell_to(page, d["vendor_detail"], used=used)
+    caption_clear(page)
+
+
+def scene_admin_login(page: Page, d: dict) -> None:
+    t0 = time.time()
+    page.evaluate("() => window.localStorage.clear()")
+    goto(page, f"{APP}/login")
+    caption(page, "Tercer rol: revisor interno de Legal Shelf.", "ESCENA 10 · REVISOR")
+    settle(page, 0.6)
     type_into(page, "#login-email", "ada@legalshelf.mx", delay_ms=55)
     type_into(page, "#login-password", "demo1234", delay_ms=55)
-    settle(page, 0.4)
-    click_element(page, "button[type='submit']")
+    settle(page, 0.3)
+    hover_element(page, "button[type='submit']")
+    settle(page, 0.3)
+    page.locator("button[type='submit']").click()
     page.wait_for_url("**/admin/reviewer", timeout=15000)
-    settle(page, 1.2)
-
-    caption(page, "Bandeja: ningún documento auto-aprueba.", "ESCENA 4 · REVISOR")
-    settle(page, 3.5)
-
-    token = login(*ACCOUNTS["admin"])["access_token"]
-    queue = reviewer_queue(token)
-    if queue:
-        goto(page, f"{APP}/admin/reviewer/{queue[0]['submission_id']}")
-        caption(page, "Detalle de revisión + decisión humana.", "ESCENA 4 · REVISOR")
-        settle(page, 4.5)
+    used = time.time() - t0
+    dwell_to(page, d["admin_login"], used=used)
+    caption_clear(page)
 
 
-def scene_outro(page: Page) -> None:
+def scene_reviewer_queue(page: Page, d: dict) -> None:
+    t0 = time.time()
+    caption(page, "Doctrina del producto: ningún documento auto-aprueba.", "ESCENA 11 · REVISOR")
+    settle(page, 0.6)
+    highlight(page, "h1:has-text('Documentos por revisar') + p", "La automatización no firma")
+    settle(page, 5.0)
+    unhighlight(page)
+    used = time.time() - t0
+    dwell_to(page, d["reviewer_queue"], used=used)
+    caption_clear(page)
+
+
+def scene_reviewer_detail(page: Page, d: dict, submission_id: str) -> None:
+    t0 = time.time()
+    goto(page, f"{APP}/admin/reviewer/{submission_id}")
+    caption(page, "Cuatro acciones explícitas + bitácora de trazabilidad.", "ESCENA 12 · REVISOR")
+    settle(page, 1.0)
+    highlight(page, "h2:has-text('Tu decisión'), h3:has-text('Tu decisión')", "Decisión humana")
+    settle(page, 5.5)
+    unhighlight(page)
+    used = time.time() - t0
+    dwell_to(page, d["reviewer_detail"], used=used)
+    caption_clear(page)
+
+
+def scene_outro(page: Page, d: dict) -> None:
     goto(page, OUTRO_URL)
-    settle(page, 3.5)
+    dwell_to(page, d["outro"])
 
 
 # ── Main ──────────────────────────────────────────────────────────
 
 def run(pw: Playwright) -> Path:
-    # Clean prior recording artifacts
     for f in RAW_DIR.glob("*.webm"):
         f.unlink()
-    for f in RAW_DIR.glob("*.mp4"):
-        f.unlink()
+
+    durations = load_durations()
+    total = sum(durations.values()) + SCENE_TAIL * len(durations)
+    print(f"Target runtime: ~{total:.1f}s\n")
 
     browser = pw.chromium.launch(headless=True)
     ctx = browser.new_context(
@@ -504,43 +721,62 @@ def run(pw: Playwright) -> Path:
         record_video_dir=str(RAW_DIR),
         record_video_size=VIDEO_SIZE,
     )
-    # Re-inject the overlay JS on every navigation
     ctx.add_init_script(INJECT_JS)
-
     page = ctx.new_page()
 
-    print("→ Intro card")
-    scene_intro(page)
-    print("→ Landing")
-    scene_landing(page)
-    print("→ Provider flow")
-    scene_provider(page)
-    print("→ Client flow")
-    scene_client(page)
-    print("→ Admin flow")
-    scene_admin(page)
-    print("→ Outro card")
-    scene_outro(page)
+    # Pre-fetch the report + vendor + submission IDs we'll need.
+    prov_token = login(*ACCOUNTS["provider"])["access_token"]
+    reports = list_reports(prov_token)
+    report_id = next(
+        (r["id"] for r in reports if r.get("audience") == "vendor_facing"),
+        reports[0]["id"] if reports else None,
+    )
 
-    # Close context to flush video to disk
+    cli_token = login(*ACCOUNTS["client"])["access_token"]
+    vendors = list_vendors(cli_token)
+    vendor_id = (vendors[0].get("id") or vendors[0].get("vendor_id")) if vendors else None
+
+    adm_token = login(*ACCOUNTS["admin"])["access_token"]
+    queue = reviewer_queue(adm_token)
+    submission_id = queue[0]["submission_id"] if queue else None
+
+    scenes = [
+        ("intro", lambda: scene_intro(page, durations)),
+        ("landing", lambda: scene_landing(page, durations)),
+        ("provider_login", lambda: scene_provider_login(page, durations)),
+        ("workspace_entry", lambda: scene_workspace_entry(page, durations)),
+        ("provider_dashboard", lambda: scene_provider_dashboard(page, durations)),
+        ("compliance_pulse", lambda: scene_compliance_pulse(page, durations)),
+        ("report_editor", lambda: scene_report_editor(page, durations, report_id)),
+        ("print_page", lambda: scene_print_page(page, durations, report_id)),
+        ("client_login", lambda: scene_client_login(page, durations)),
+        ("client_dashboard", lambda: scene_client_dashboard(page, durations)),
+        ("vendor_detail", lambda: scene_vendor_detail(page, durations, vendor_id)),
+        ("admin_login", lambda: scene_admin_login(page, durations)),
+        ("reviewer_queue", lambda: scene_reviewer_queue(page, durations)),
+        ("reviewer_detail", lambda: scene_reviewer_detail(page, durations, submission_id)),
+        ("outro", lambda: scene_outro(page, durations)),
+    ]
+    for name, fn in scenes:
+        target = durations[name] + SCENE_TAIL
+        print(f"→ {name:24s} ({target:5.1f}s)")
+        fn()
+
     ctx.close()
     browser.close()
 
-    # Find the produced webm
     webms = sorted(RAW_DIR.glob("*.webm"))
     if not webms:
         raise SystemExit("no video produced")
     return webms[0]
 
 
-def encode_mp4(webm: Path) -> Path:
-    """Convert WebM (VP8) → MP4 H.264 1080p with sensible quality."""
+def encode_silent_mp4(webm: Path) -> Path:
     if not shutil.which("ffmpeg"):
         raise SystemExit("ffmpeg not on PATH; brew install ffmpeg")
-    print(f"→ Encoding {webm.name} → MP4")
+    print(f"→ Encoding {webm.name} → silent MP4")
     cmd = [
-        "ffmpeg",
-        "-y",
+        "ffmpeg", "-y",
         "-i", str(webm),
         "-vf", "scale=1920:1080:flags=lanczos",
         "-c:v", "libx264",
@@ -549,25 +785,23 @@ def encode_mp4(webm: Path) -> Path:
         "-pix_fmt", "yuv420p",
         "-movflags", "+faststart",
         "-an",
-        str(OUT_MP4),
+        str(SILENT_MP4),
     ]
     subprocess.run(cmd, check=True, capture_output=True)
-    return OUT_MP4
+    dur = float(
+        subprocess.check_output(
+            ["ffprobe", "-v", "error", "-show_entries", "format=duration",
+             "-of", "default=noprint_wrappers=1:nokey=1", str(SILENT_MP4)],
+            text=True,
+        ).strip()
+    )
+    size_mb = SILENT_MP4.stat().st_size / (1024 * 1024)
+    print(f"✓ {SILENT_MP4.relative_to(ROOT)}  ({dur:.1f}s · {size_mb:.1f} MB)")
+    return SILENT_MP4
 
 
 if __name__ == "__main__":
     with sync_playwright() as pw:
         webm = run(pw)
-    mp4 = encode_mp4(webm)
-    # Probe duration + size for the user
-    try:
-        probe = subprocess.check_output(
-            ["ffprobe", "-v", "error", "-show_entries", "format=duration",
-             "-of", "default=noprint_wrappers=1:nokey=1", str(mp4)],
-            text=True,
-        ).strip()
-        dur = float(probe)
-        size_mb = mp4.stat().st_size / (1024 * 1024)
-        print(f"\n✓ {mp4.relative_to(ROOT)}  ({dur:.1f}s · {size_mb:.1f} MB)")
-    except Exception:
-        print(f"\n✓ {mp4.relative_to(ROOT)}")
+    encode_silent_mp4(webm)
+    print("\n→ Next: backend/.venv/bin/python scripts/finalize_demo.py")

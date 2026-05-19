@@ -1,0 +1,23 @@
+{
+  "voice": "es-MX-DaliaNeural",
+  "rate": "-7%",
+  "pitch": "+0Hz",
+  "durations": {
+    "intro": 18.048,
+    "landing": 12.552,
+    "provider_login": 12.384,
+    "workspace_entry": 10.824,
+    "provider_dashboard": 14.424,
+    "compliance_pulse": 16.608,
+    "report_editor": 16.08,
+    "print_page": 14.736,
+    "client_login": 7.896,
+    "client_dashboard": 14.064,
+    "vendor_detail": 16.776,
+    "admin_login": 7.584,
+    "reviewer_queue": 12.744,
+    "reviewer_detail": 13.992,
+    "outro": 13.968
+  },
+  "total": 202.68
+}
