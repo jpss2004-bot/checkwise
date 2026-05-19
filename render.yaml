@@ -97,3 +97,11 @@ services:
       # to disable LLM cost while keeping the surface usable).
       - key: CHECKWISE_LLM_BACKEND
         sync: false
+
+      # ---- Contact form delivery (P0-3) ----
+      # Optional Slack incoming-webhook URL. When set, each new public
+      # contact-form submission is also posted to this channel as a
+      # background task. Persistence to the `contact_requests` table
+      # happens regardless; empty value = persistence-only.
+      - key: SLACK_CONTACT_WEBHOOK_URL
+        sync: false

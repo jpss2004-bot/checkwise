@@ -7,6 +7,7 @@ from app.api.v1 import (
     auth,
     client,
     compliance,
+    contact,
     endpoints,
     metadata_dry_run,
     portal,
@@ -24,3 +25,4 @@ api_router.include_router(admin.router)
 api_router.include_router(client.router)
 api_router.include_router(metadata_dry_run.router)
 api_router.include_router(reports.router)
+api_router.include_router(contact.router)

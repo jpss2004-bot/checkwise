@@ -664,3 +664,35 @@ class ReportExport(Base):
     )
     ready_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     expires_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+
+
+class ContactRequest(TimestampMixin, Base):
+    """Inbound lead from the public landing-page contact form.
+
+    Replaces the V1.x mock helper at ``frontend/lib/mock/contact-requests.ts``
+    that returned a fake folio without persisting. Persistence is the
+    canonical truth; an optional Slack webhook delivery is fired by the
+    service layer as a background task and never gates the response.
+
+    Fields stay deliberately small. ``ip_hash`` is a SHA-256 of the
+    submitter's client IP salted with ``AUTH_JWT_SECRET`` and truncated
+    to 16 hex chars — enough to cluster suspicious activity without
+    enabling reverse-IP lookup from a DB dump. ``source`` lets us tell
+    landing-page submissions apart from any future embedded form.
+    ``status`` starts ``new`` and is moved through ``reviewed``,
+    ``contacted``, ``closed`` by the ops team (no admin UI ships in
+    this PR — query the table directly until that lands).
+    """
+
+    __tablename__ = "contact_requests"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=new_id)
+    name: Mapped[str] = mapped_column(String(120), nullable=False)
+    email: Mapped[str] = mapped_column(String(254), nullable=False)
+    company: Mapped[str | None] = mapped_column(String(200))
+    role: Mapped[str | None] = mapped_column(String(60))
+    message: Mapped[str] = mapped_column(Text, nullable=False)
+    source: Mapped[str] = mapped_column(String(60), default="landing", nullable=False)
+    status: Mapped[str] = mapped_column(String(40), default="new", nullable=False)
+    ip_hash: Mapped[str | None] = mapped_column(String(64))
+    user_agent: Mapped[str | None] = mapped_column(String(512))

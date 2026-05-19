@@ -60,6 +60,12 @@ class Settings(BaseSettings):
     ANTHROPIC_API_KEY: str = ""
     CHECKWISE_LLM_BACKEND: str = ""  # '' | 'anthropic' | 'mock'
 
+    # Contact-form delivery (P0-3). Optional Slack incoming-webhook
+    # URL that receives a formatted message for each new public
+    # contact request. Empty (default) → persistence only; the
+    # endpoint never fails because of a missing/broken webhook.
+    SLACK_CONTACT_WEBHOOK_URL: str = ""
+
     model_config = SettingsConfigDict(env_file=".env", env_file_encoding="utf-8", extra="ignore")
 
     @property

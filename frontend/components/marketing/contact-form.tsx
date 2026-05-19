@@ -14,7 +14,7 @@ import {
   submitContactRequest,
   type ContactRequestPayload,
   type LeadInterest,
-} from "@/lib/mock/contact-requests";
+} from "@/lib/api/contact";
 
 const initial: ContactRequestPayload = {
   name: "",
@@ -26,7 +26,10 @@ const initial: ContactRequestPayload = {
 
 /**
  * Inline contact / demo-request form used on the public landing.
- * Mock submission — see lib/mock/contact-requests.ts.
+ *
+ * Real submission — posts to `POST /api/v1/contact` via `lib/api/contact.ts`.
+ * Persisted as a `ContactRequest` row, plus optional Slack delivery when
+ * `SLACK_CONTACT_WEBHOOK_URL` is configured on the backend.
  */
 export function ContactForm() {
   const [form, setForm] = useState<ContactRequestPayload>(initial);
