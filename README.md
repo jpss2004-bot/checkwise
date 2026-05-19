@@ -124,22 +124,24 @@ CheckWise/
 │   │   └── admin/                    login · reviewer · reviewer/[id]
 │   ├── components/
 │   │   ├── ui/                       Button · Field · Input · Alert · Progress ·
-│   │   │                             Skeleton · Spinner · Stepper · Badge · …
-│   │   ├── checkwise/                BrandLogo · IntakeWizard · DocStateBadge ·
-│   │   │                             ConfidenceBadge
-│   │   ├── checkwise/portal/         ProviderContextBar · SemaphoreCard ·
-│   │   │                             SuggestedActions · ExpedienteCard ·
-│   │   │                             ComplianceCalendar · OnboardingChecklist · …
-│   │   ├── checkwise/workspace/      WorkspaceIdentityCard · ProtectedFieldNotice ·
-│   │   │                             CorrectionRequestForm · AccessDecisionBanner
+│   │   │                             Skeleton · Spinner · Badge · DataTable ·
+│   │   │                             MetadataStrip · PageHeader · …
+│   │   ├── checkwise/                BrandLogo · IntakeWizard · DocStateBadge · …
+│   │   ├── checkwise/portal/         PortalAppShell · SemaphoreCard ·
+│   │   │                             ExpedienteCard · ComplianceCalendar ·
+│   │   │                             OnboardingChecklist · …
+│   │   ├── checkwise/workspace/      WorkspaceIdentityCard · ProtectedFieldNotice
+│   │   ├── checkwise/reports/        list/ · editor/ · blocks/ · canvas ·
+│   │   │                             chat-copilot · freshness-label
 │   │   └── marketing/                ContactForm
 │   └── lib/
-│       ├── api/                      auth · portal · reviewer · catalogs
+│       ├── api/                      admin · auth · catalogs · client · contact ·
+│       │                             portal · portal-adapters · portal-session ·
+│       │                             reports · reviewer
 │       ├── constants/                statuses (mirror of backend)
 │       ├── email/                    welcome (HTML + plaintext templates)
-│       ├── mock/                     activation · calendar · contact-requests ·
-│       │                             corrections · dashboard · expediente ·
-│       │                             invitations · reports
+│       ├── mock/                     calendar · corrections · expediente ·
+│       │                             invitations (remaining V1.x bridges)
 │       ├── routing/                  post-login (decision helper)
 │       ├── session/                  admin · portal · with-portal-session HOC
 │       └── workspace/                resolver · types

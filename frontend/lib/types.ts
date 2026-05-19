@@ -28,8 +28,8 @@ export type DocumentStateCode =
 export type ConfidenceLevel = "high" | "medium" | "low" | "none";
 
 /**
- * Validation signal result. Used by ValidationSummary,
- * PrevalidationStep, and DocumentSubmissionForm.
+ * Validation signal result. Used by ValidationSummary and
+ * PrevalidationStep.
  */
 export type ValidationResult = "valid" | "warning" | "error" | "pending";
 

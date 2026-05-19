@@ -2,7 +2,6 @@
  * Public contact-form API client.
  *
  * Backed by `POST /api/v1/contact` (see backend `app/api/v1/contact.py`).
- * Replaces the V1.x mock at `lib/mock/contact-requests.ts`.
  *
  * Unauthenticated by design — the landing-page form is public. The
  * backend enforces per-IP rate limits (5 / hour) and field-length
