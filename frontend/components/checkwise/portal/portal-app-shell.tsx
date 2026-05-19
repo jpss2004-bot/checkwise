@@ -18,6 +18,7 @@ import {
 } from "@phosphor-icons/react";
 
 import { BrandLogo } from "@/components/checkwise/brand-logo";
+import { FeedbackLauncher } from "@/components/feedback/feedback-launcher";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
@@ -204,6 +205,7 @@ export function PortalAppShell({
         />
         <div className="flex-1">{children}</div>
       </div>
+      <FeedbackLauncher />
     </div>
   );
 }

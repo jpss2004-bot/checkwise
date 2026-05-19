@@ -23,6 +23,7 @@ import {
   SubmissionDetailSkeleton,
 } from "@/components/checkwise/portal/state-surfaces";
 import { SubmissionTimeline } from "@/components/checkwise/portal/submission-timeline";
+import { FeedbackLauncher } from "@/components/feedback/feedback-launcher";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { PageHeader } from "@/components/ui/page-header";
@@ -142,6 +143,7 @@ export default function ReviewerSubmissionPage({ params }: PageProps) {
   const panelDisabled = isTerminal || !!decided;
 
   return (
+    <>
     <main className="mx-auto max-w-6xl space-y-5 px-5 py-8">
       <PageHeader
         eyebrow="Reviewer workbench"
@@ -232,6 +234,8 @@ export default function ReviewerSubmissionPage({ params }: PageProps) {
         </div>
       ) : null}
     </main>
+    <FeedbackLauncher />
+    </>
   );
 }
 

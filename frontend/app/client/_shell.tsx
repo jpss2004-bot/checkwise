@@ -17,6 +17,7 @@ import {
 } from "@phosphor-icons/react";
 
 import { BrandLogo } from "@/components/checkwise/brand-logo";
+import { FeedbackLauncher } from "@/components/feedback/feedback-launcher";
 import { Button } from "@/components/ui/button";
 import { MetadataStrip } from "@/components/ui/metadata-strip";
 import { cn } from "@/lib/utils";
@@ -265,6 +266,7 @@ export function ClientShell({
       <footer className="mx-auto max-w-7xl px-5 py-6 text-center font-mono text-[10px] uppercase tracking-wide text-[color:var(--text-tertiary)]">
         Powered by Legal Shelf · CheckWise
       </footer>
+      <FeedbackLauncher />
     </div>
   );
 }
