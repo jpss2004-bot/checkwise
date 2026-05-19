@@ -49,6 +49,7 @@ from app.db.session import get_db
 from app.models import (
     AuditLog,
     Client,
+    ContactRequest,
     Institution,
     Period,
     ProviderWorkspace,
@@ -870,6 +871,136 @@ def get_admin_calendar(
             for m in months.values()
         ],
     }
+
+
+# ---------------------------------------------------------------------------
+# Contact requests (public landing-form leads, P0-3 follow-up)
+#
+# Valid status values: ``new`` → ``reviewed`` → ``contacted`` → ``closed``.
+# Enforced at the Pydantic boundary via ``Literal`` on
+# ``ContactRequestStatusUpdate`` and the ``status`` query param of the
+# list endpoint; no separate enum needed.
+# ---------------------------------------------------------------------------
+
+
+class ContactRequestAdminItem(BaseModel):
+    id: str
+    name: str
+    email: str
+    company: str | None
+    role: str | None
+    message: str
+    source: str
+    status: str
+    ip_hash: str | None
+    user_agent: str | None
+    created_at: datetime
+    updated_at: datetime
+
+
+class ContactRequestList(BaseModel):
+    items: list[ContactRequestAdminItem]
+    total: int
+    limit: int
+    offset: int
+
+
+class ContactRequestStatusUpdate(BaseModel):
+    status: Literal["new", "reviewed", "contacted", "closed"]
+
+
+def _contact_to_dict(row: ContactRequest) -> ContactRequestAdminItem:
+    return ContactRequestAdminItem(
+        id=row.id,
+        name=row.name,
+        email=row.email,
+        company=row.company,
+        role=row.role,
+        message=row.message,
+        source=row.source,
+        status=row.status,
+        ip_hash=row.ip_hash,
+        user_agent=row.user_agent,
+        created_at=row.created_at,
+        updated_at=row.updated_at,
+    )
+
+
+@router.get("/contact-requests", response_model=ContactRequestList)
+def list_contact_requests(
+    db: DbSession,
+    current: AdminUser,
+    status_filter: Annotated[
+        Literal["new", "reviewed", "contacted", "closed"] | None,
+        Query(alias="status"),
+    ] = None,
+    limit: Annotated[int, Query(ge=1, le=200)] = 50,
+    offset: Annotated[int, Query(ge=0)] = 0,
+) -> ContactRequestList:
+    """List public-landing contact requests, newest first.
+
+    Internal-admin only. Pagination via ``limit`` (max 200) + ``offset``.
+    Optional ``status`` query narrows to one of new/reviewed/contacted/closed.
+    """
+    _ = current
+    stmt = select(ContactRequest)
+    if status_filter:
+        stmt = stmt.where(ContactRequest.status == status_filter)
+
+    total_stmt = select(func.count()).select_from(ContactRequest)
+    if status_filter:
+        total_stmt = total_stmt.where(ContactRequest.status == status_filter)
+    total = int(db.scalar(total_stmt) or 0)
+
+    stmt = stmt.order_by(ContactRequest.created_at.desc()).limit(limit).offset(offset)
+    rows = list(db.scalars(stmt))
+    return ContactRequestList(
+        items=[_contact_to_dict(r) for r in rows],
+        total=total,
+        limit=limit,
+        offset=offset,
+    )
+
+
+@router.patch(
+    "/contact-requests/{request_id}",
+    response_model=ContactRequestAdminItem,
+)
+def update_contact_request_status(
+    request_id: str,
+    payload: ContactRequestStatusUpdate,
+    db: DbSession,
+    current: AdminUser,
+) -> ContactRequestAdminItem:
+    """Move a contact request through the triage lifecycle.
+
+    The valid transitions are recorded for audit; we do NOT enforce a
+    strict graph (admins can correct a mis-set status). Status values
+    are validated by the Pydantic Literal on the payload.
+    """
+    row = db.get(ContactRequest, request_id)
+    if row is None:
+        raise HTTPException(
+            status.HTTP_404_NOT_FOUND, detail="Solicitud no encontrada."
+        )
+    # ``mode="json"`` so datetime fields land as ISO strings — required
+    # because the audit_log.before/after columns store as JSON.
+    before = _contact_to_dict(row).model_dump(mode="json")
+    row.status = payload.status
+    db.flush()
+    after = _contact_to_dict(row).model_dump(mode="json")
+    _audit_admin(
+        db,
+        actor=current,
+        action="admin.contact_request.status_changed",
+        entity_type="contact_request",
+        entity_id=row.id,
+        before=before,
+        after=after,
+    )
+    db.commit()
+    db.refresh(row)
+    return _contact_to_dict(row)
 
 
 # ---------------------------------------------------------------------------

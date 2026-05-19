@@ -8,6 +8,7 @@ import {
   CalendarBlank,
   ChartLineUp,
   ClipboardText,
+  EnvelopeSimple,
   Gauge,
   IdentificationCard,
   List,
@@ -45,6 +46,7 @@ const NAV: { href: string; label: string; icon: Icon }[] = [
   { href: "/admin/calendar", label: "Calendario", icon: CalendarBlank },
   { href: "/admin/reviewer", label: "Bandeja", icon: ClipboardText },
   { href: "/admin/reports", label: "Reportes", icon: ChartLineUp },
+  { href: "/admin/contact-requests", label: "Solicitudes", icon: EnvelopeSimple },
   { href: "/admin/audit-log", label: "Audit log", icon: ListMagnifyingGlass },
 ];
 

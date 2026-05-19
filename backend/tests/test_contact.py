@@ -291,3 +291,217 @@ def test_hash_ip_is_deterministic_and_truncated() -> None:
 def test_hash_ip_none_for_missing_ip() -> None:
     assert contact_service.hash_ip(None) is None
     assert contact_service.hash_ip("") is None
+
+
+# ─── Admin endpoints ─────────────────────────────────────────────
+
+
+def _seed_admin_user(db_factory) -> str:
+    """Insert an internal_admin user and return a Bearer JWT."""
+    from app.constants.roles import MembershipRole
+    from app.models import Membership, Organization, User
+    from app.services.auth import hash_password, issue_access_token
+
+    with db_factory() as db:
+        org = Organization(name="LegalShelf", kind="internal", status="active")
+        db.add(org)
+        db.flush()
+        user = User(
+            email="ada@legalshelf.mx",
+            password_hash=hash_password("test-pwd-123"),
+            full_name="Ada Admin",
+            status="active",
+            must_change_password=False,
+        )
+        db.add(user)
+        db.flush()
+        db.add(
+            Membership(
+                user_id=user.id,
+                organization_id=org.id,
+                role=MembershipRole.INTERNAL_ADMIN.value,
+                status="active",
+            )
+        )
+        db.commit()
+        token = issue_access_token(
+            user_id=user.id,
+            email=user.email,
+            roles=[MembershipRole.INTERNAL_ADMIN.value],
+            orgs=[org.id],
+        )
+    return token
+
+
+def _seed_contact_rows(db_factory, count: int = 3, *, status_value: str = "new") -> None:
+    from app.models import ContactRequest
+    from app.models.entities import new_id, utc_now
+
+    with db_factory() as db:
+        for i in range(count):
+            db.add(
+                ContactRequest(
+                    id=new_id(),
+                    name=f"Seed {i}",
+                    email=f"seed{i}@example.com",
+                    company=None,
+                    role=None,
+                    message=f"Mensaje {i}",
+                    source="landing",
+                    status=status_value,
+                    ip_hash=None,
+                    user_agent=None,
+                    created_at=utc_now(),
+                    updated_at=utc_now(),
+                )
+            )
+        db.commit()
+
+
+def test_admin_list_contact_requests_requires_auth(api_client: TestClient) -> None:
+    resp = api_client.get("/api/v1/admin/contact-requests")
+    assert resp.status_code == 401
+
+
+def test_admin_list_returns_rows_newest_first(api_client, db_factory) -> None:
+    token = _seed_admin_user(db_factory)
+    _seed_contact_rows(db_factory, count=3)
+    resp = api_client.get(
+        "/api/v1/admin/contact-requests",
+        headers={"Authorization": f"Bearer {token}"},
+    )
+    assert resp.status_code == 200, resp.text
+    body = resp.json()
+    assert body["total"] == 3
+    assert body["limit"] == 50
+    assert body["offset"] == 0
+    assert len(body["items"]) == 3
+    # The seed loop's first iteration gets the earliest timestamp;
+    # ordered desc means item[0] is the most recent → "Seed 2".
+    names = [it["name"] for it in body["items"]]
+    assert names[0].startswith("Seed")
+    # Internal fields preserved
+    assert body["items"][0]["status"] == "new"
+    assert body["items"][0]["source"] == "landing"
+
+
+def test_admin_list_filters_by_status(api_client, db_factory) -> None:
+    token = _seed_admin_user(db_factory)
+    _seed_contact_rows(db_factory, count=2, status_value="new")
+    _seed_contact_rows(db_factory, count=1, status_value="reviewed")
+    resp = api_client.get(
+        "/api/v1/admin/contact-requests?status=reviewed",
+        headers={"Authorization": f"Bearer {token}"},
+    )
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["total"] == 1
+    assert all(it["status"] == "reviewed" for it in body["items"])
+
+
+def test_admin_list_pagination_offset_and_limit(api_client, db_factory) -> None:
+    token = _seed_admin_user(db_factory)
+    _seed_contact_rows(db_factory, count=5)
+    resp = api_client.get(
+        "/api/v1/admin/contact-requests?limit=2&offset=2",
+        headers={"Authorization": f"Bearer {token}"},
+    )
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["total"] == 5  # unaffected by limit/offset
+    assert len(body["items"]) == 2
+    assert body["limit"] == 2
+    assert body["offset"] == 2
+
+
+def test_admin_patch_status_updates_row_and_writes_audit(api_client, db_factory) -> None:
+    from sqlalchemy import select
+
+    from app.models import AuditLog, ContactRequest
+
+    token = _seed_admin_user(db_factory)
+    _seed_contact_rows(db_factory, count=1)
+    with db_factory() as db:
+        target_id = db.scalar(select(ContactRequest.id))
+    assert target_id
+
+    resp = api_client.patch(
+        f"/api/v1/admin/contact-requests/{target_id}",
+        json={"status": "reviewed"},
+        headers={"Authorization": f"Bearer {token}"},
+    )
+    assert resp.status_code == 200, resp.text
+    body = resp.json()
+    assert body["status"] == "reviewed"
+
+    with db_factory() as db:
+        row = db.get(ContactRequest, target_id)
+        assert row is not None
+        assert row.status == "reviewed"
+        audit_rows = list(
+            db.scalars(
+                select(AuditLog).where(
+                    AuditLog.action == "admin.contact_request.status_changed"
+                )
+            )
+        )
+        assert len(audit_rows) == 1
+        assert audit_rows[0].entity_id == target_id
+        assert audit_rows[0].before["status"] == "new"
+        assert audit_rows[0].after["status"] == "reviewed"
+
+
+def test_admin_patch_status_404_for_missing_id(api_client, db_factory) -> None:
+    token = _seed_admin_user(db_factory)
+    resp = api_client.patch(
+        "/api/v1/admin/contact-requests/does-not-exist",
+        json={"status": "closed"},
+        headers={"Authorization": f"Bearer {token}"},
+    )
+    assert resp.status_code == 404
+
+
+@pytest.mark.parametrize("bad_status", ["unknown", "deleted", "NEW", ""])
+def test_admin_patch_status_rejects_invalid_value(
+    api_client, db_factory, bad_status: str
+) -> None:
+    from sqlalchemy import select
+
+    from app.models import ContactRequest
+
+    token = _seed_admin_user(db_factory)
+    _seed_contact_rows(db_factory, count=1)
+    with db_factory() as db:
+        target_id = db.scalar(select(ContactRequest.id))
+    resp = api_client.patch(
+        f"/api/v1/admin/contact-requests/{target_id}",
+        json={"status": bad_status},
+        headers={"Authorization": f"Bearer {token}"},
+    )
+    assert resp.status_code == 422
+
+
+def test_admin_endpoints_reject_non_admin_token(api_client, db_factory) -> None:
+    """A user without the internal_admin role gets 403."""
+    from app.models import User
+    from app.services.auth import hash_password, issue_access_token
+
+    with db_factory() as db:
+        user = User(
+            email="provider@example.com",
+            password_hash=hash_password("test-pwd-123"),
+            full_name="Provider Demo",
+            status="active",
+            must_change_password=False,
+        )
+        db.add(user)
+        db.commit()
+        token = issue_access_token(
+            user_id=user.id, email=user.email, roles=[], orgs=[]
+        )
+
+    resp = api_client.get(
+        "/api/v1/admin/contact-requests",
+        headers={"Authorization": f"Bearer {token}"},
+    )
+    assert resp.status_code == 403

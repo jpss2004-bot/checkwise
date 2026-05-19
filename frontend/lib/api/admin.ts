@@ -409,3 +409,61 @@ export async function listAuditLog(params?: {
   const suffix = qs.toString() ? `?${qs.toString()}` : "";
   return fetchJson(`/api/v1/admin/audit-log${suffix}`);
 }
+
+// ---------------------------------------------------------------------------
+// Contact requests (P0-3 follow-up)
+// ---------------------------------------------------------------------------
+
+export type ContactRequestStatus =
+  | "new"
+  | "reviewed"
+  | "contacted"
+  | "closed";
+
+export interface AdminContactRequest {
+  id: string;
+  name: string;
+  email: string;
+  company: string | null;
+  role: string | null;
+  message: string;
+  source: string;
+  status: ContactRequestStatus;
+  ip_hash: string | null;
+  user_agent: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface AdminContactRequestList {
+  items: AdminContactRequest[];
+  total: number;
+  limit: number;
+  offset: number;
+}
+
+export async function listContactRequests(params?: {
+  status?: ContactRequestStatus;
+  limit?: number;
+  offset?: number;
+}): Promise<AdminContactRequestList> {
+  const qs = new URLSearchParams();
+  for (const [key, value] of Object.entries(params ?? {})) {
+    if (value === undefined || value === null) continue;
+    const asString = String(value);
+    if (!asString) continue;
+    qs.set(key, asString);
+  }
+  const suffix = qs.toString() ? `?${qs.toString()}` : "";
+  return fetchJson(`/api/v1/admin/contact-requests${suffix}`);
+}
+
+export async function updateContactRequestStatus(
+  id: string,
+  status: ContactRequestStatus,
+): Promise<AdminContactRequest> {
+  return fetchJson(`/api/v1/admin/contact-requests/${id}`, {
+    method: "PATCH",
+    body: JSON.stringify({ status }),
+  });
+}
