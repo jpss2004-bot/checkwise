@@ -1,0 +1,111 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1400" height="720" viewBox="0 0 1400 720">
+  <defs>
+    <marker id="arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M 0 0 L 10 5 L 0 10 z" fill="#02558a"/>
+    </marker>
+    <filter id="shadow" x="-20%" y="-20%" width="140%" height="140%">
+      <feDropShadow dx="0" dy="8" stdDeviation="10" flood-color="#013557" flood-opacity=".10"/>
+    </filter>
+  </defs>
+  <rect width="1400" height="720" fill="#ffffff"/>
+  <text x="44" y="54" fill="#013557" font-family="Inter, Open Sans, Arial, sans-serif" font-size="26" font-weight="900">03 · Flujo de proveedor y carga documental</text>
+  <line x1="44" y1="76" x2="1356" y2="76" stroke="#dde2ec" stroke-width="2"/>
+  
+  <g>
+    <rect x="44" y="118" width="185" height="86" rx="14" fill="#eff6fb" stroke="#02558a" stroke-width="2"/>
+    <text x="62" y="148" fill="#013557" font-family="Inter, Open Sans, Arial, sans-serif" font-size="18" font-weight="800" text-anchor="start"><tspan x="62" dy="0">/portal/dashboard</tspan></text><text x="62" y="182" fill="#4a5670" font-family="Inter, Open Sans, Arial, sans-serif" font-size="13" font-weight="500" text-anchor="start"><tspan x="62" dy="0">Ve semáforo, acciones y faltantes</tspan></text>
+  </g>
+  <g>
+    <rect x="270" y="118" width="185" height="86" rx="14" fill="#eff6fb" stroke="#02558a" stroke-width="2"/>
+    <text x="288" y="148" fill="#013557" font-family="Inter, Open Sans, Arial, sans-serif" font-size="18" font-weight="800" text-anchor="start"><tspan x="288" dy="0">/portal/onboarding</tspan></text><text x="288" y="182" fill="#4a5670" font-family="Inter, Open Sans, Arial, sans-serif" font-size="13" font-weight="500" text-anchor="start"><tspan x="288" dy="0">Checklist por requisito</tspan></text>
+  </g>
+  <g>
+    <rect x="496" y="118" width="185" height="86" rx="14" fill="#eff6fb" stroke="#02558a" stroke-width="2"/>
+    <text x="514" y="148" fill="#013557" font-family="Inter, Open Sans, Arial, sans-serif" font-size="18" font-weight="800" text-anchor="start"><tspan x="514" dy="0">/portal/upload</tspan></text><text x="514" y="182" fill="#4a5670" font-family="Inter, Open Sans, Arial, sans-serif" font-size="13" font-weight="500" text-anchor="start"><tspan x="514" dy="0">Selecciona periodo, institución,</tspan><tspan x="514" dy="16">requisito y PDF</tspan></text>
+  </g>
+  <g>
+    <rect x="722" y="92" width="208" height="86" rx="14" fill="#eff6fb" stroke="#02558a" stroke-width="2"/>
+    <text x="740" y="122" fill="#013557" font-family="Inter, Open Sans, Arial, sans-serif" font-size="18" font-weight="800" text-anchor="start"><tspan x="740" dy="0">Pre-check browser</tspan></text><text x="740" y="156" fill="#4a5670" font-family="Inter, Open Sans, Arial, sans-serif" font-size="13" font-weight="500" text-anchor="start"><tspan x="740" dy="0">SHA-256 opcional y duplicate-check</tspan></text>
+  </g>
+  <g>
+    <rect x="722" y="210" width="208" height="86" rx="14" fill="#fff7e6" stroke="#b87500" stroke-width="2"/>
+    <text x="740" y="240" fill="#013557" font-family="Inter, Open Sans, Arial, sans-serif" font-size="18" font-weight="800" text-anchor="start"><tspan x="740" dy="0">POST</tspan><tspan x="740" dy="20">/portal/.../submissions</tspan></text><text x="740" y="274" fill="#4a5670" font-family="Inter, Open Sans, Arial, sans-serif" font-size="13" font-weight="500" text-anchor="start"><tspan x="740" dy="0">Tenant identity desde workspace,</tspan><tspan x="740" dy="16">no desde form</tspan></text>
+  </g>
+  <g>
+    <rect x="984" y="92" width="190" height="86" rx="14" fill="#f7f9fb" stroke="#b8c0d0" stroke-width="2"/>
+    <text x="1002" y="122" fill="#013557" font-family="Inter, Open Sans, Arial, sans-serif" font-size="18" font-weight="800" text-anchor="start"><tspan x="1002" dy="0">Storage</tspan></text><text x="1002" y="156" fill="#4a5670" font-family="Inter, Open Sans, Arial, sans-serif" font-size="13" font-weight="500" text-anchor="start"><tspan x="1002" dy="0">Local o S3/R2; storage_key y bytes</tspan></text>
+  </g>
+  <g>
+    <rect x="984" y="210" width="190" height="86" rx="14" fill="#fff7e6" stroke="#b87500" stroke-width="2"/>
+    <text x="1002" y="240" fill="#013557" font-family="Inter, Open Sans, Arial, sans-serif" font-size="18" font-weight="800" text-anchor="start"><tspan x="1002" dy="0">PDF inspection</tspan></text><text x="1002" y="274" fill="#4a5670" font-family="Inter, Open Sans, Arial, sans-serif" font-size="13" font-weight="500" text-anchor="start"><tspan x="1002" dy="0">Cabecera PDF, cifrado, páginas,</tspan><tspan x="1002" dy="16">texto</tspan></text>
+  </g>
+  <g>
+    <rect x="984" y="328" width="190" height="86" rx="14" fill="#fff7e6" stroke="#b87500" stroke-width="2"/>
+    <text x="1002" y="358" fill="#013557" font-family="Inter, Open Sans, Arial, sans-serif" font-size="18" font-weight="800" text-anchor="start"><tspan x="1002" dy="0">Document intelligence</tspan></text><text x="1002" y="392" fill="#4a5670" font-family="Inter, Open Sans, Arial, sans-serif" font-size="13" font-weight="500" text-anchor="start"><tspan x="1002" dy="0">Señales determinísticas:</tspan><tspan x="1002" dy="16">institución, tipo, RFC, periodo</tspan></text>
+  </g>
+  <g>
+    <rect x="722" y="446" width="208" height="86" rx="14" fill="#f7f9fb" stroke="#b8c0d0" stroke-width="2"/>
+    <text x="740" y="476" fill="#013557" font-family="Inter, Open Sans, Arial, sans-serif" font-size="18" font-weight="800" text-anchor="start"><tspan x="740" dy="0">DB writes</tspan></text><text x="740" y="510" fill="#4a5670" font-family="Inter, Open Sans, Arial, sans-serif" font-size="13" font-weight="500" text-anchor="start"><tspan x="740" dy="0">Submission, Document, Inspection,</tspan><tspan x="740" dy="16">Validation, Events, History,</tspan><tspan x="740" dy="16">AuditLog</tspan></text>
+  </g>
+  <g>
+    <rect x="496" y="446" width="185" height="86" rx="14" fill="#f9fbff" stroke="#09c1b0" stroke-width="2"/>
+    <text x="514" y="476" fill="#013557" font-family="Inter, Open Sans, Arial, sans-serif" font-size="18" font-weight="800" text-anchor="start"><tspan x="514" dy="0">Estado inicial</tspan></text><text x="514" y="510" fill="#4a5670" font-family="Inter, Open Sans, Arial, sans-serif" font-size="13" font-weight="500" text-anchor="start"><tspan x="514" dy="0">pendiente_revision,</tspan><tspan x="514" dy="16">posible_mismatch o</tspan><tspan x="514" dy="16">requiere_aclaracion</tspan></text>
+  </g>
+  <g>
+    <rect x="270" y="446" width="185" height="86" rx="14" fill="#eff6fb" stroke="#02558a" stroke-width="2"/>
+    <text x="288" y="476" fill="#013557" font-family="Inter, Open Sans, Arial, sans-serif" font-size="18" font-weight="800" text-anchor="start"><tspan x="288" dy="0">/portal/submissions/[id]</tspan></text><text x="288" y="510" fill="#4a5670" font-family="Inter, Open Sans, Arial, sans-serif" font-size="13" font-weight="500" text-anchor="start"><tspan x="288" dy="0">Detalle, motivos, historial y</tspan><tspan x="288" dy="16">reintentos</tspan></text>
+  </g>
+  <g>
+    <rect x="44" y="446" width="185" height="86" rx="14" fill="#fff0f0" stroke="#c32020" stroke-width="2"/>
+    <text x="62" y="476" fill="#c32020" font-family="Inter, Open Sans, Arial, sans-serif" font-size="18" font-weight="800" text-anchor="start"><tspan x="62" dy="0">Excepciones</tspan></text><text x="62" y="510" fill="#4a5670" font-family="Inter, Open Sans, Arial, sans-serif" font-size="13" font-weight="500" text-anchor="start"><tspan x="62" dy="0">PDF inválido, tamaño, MIME,</tspan><tspan x="62" dy="16">unauthorized, mismatch, duplicado</tspan></text>
+  </g>
+  <g>
+    <line x1="229" y1="161" x2="270" y2="161" stroke="#02558a" stroke-width="2.4"  marker-end="url(#arrow)"/>
+    
+  </g>
+  <g>
+    <line x1="455" y1="161" x2="496" y2="161" stroke="#02558a" stroke-width="2.4"  marker-end="url(#arrow)"/>
+    
+  </g>
+  <g>
+    <line x1="681" y1="161" x2="722" y2="135" stroke="#02558a" stroke-width="2.4"  marker-end="url(#arrow)"/>
+    <rect x="627.5" y="130" width="148" height="26" rx="13" fill="#ffffff" stroke="#dde2ec"/><text x="701.5" y="148" text-anchor="middle" fill="#4a5670" font-family="Inter, Arial" font-size="11" font-weight="700">hash</text>
+  </g>
+  <g>
+    <line x1="826" y1="178" x2="826" y2="210" stroke="#02558a" stroke-width="2.4"  marker-end="url(#arrow)"/>
+    
+  </g>
+  <g>
+    <line x1="930" y1="253" x2="984" y2="135" stroke="#02558a" stroke-width="2.4"  marker-end="url(#arrow)"/>
+    <rect x="883" y="176" width="148" height="26" rx="13" fill="#ffffff" stroke="#dde2ec"/><text x="957" y="194" text-anchor="middle" fill="#4a5670" font-family="Inter, Arial" font-size="11" font-weight="700">save</text>
+  </g>
+  <g>
+    <line x1="930" y1="253" x2="984" y2="253" stroke="#02558a" stroke-width="2.4"  marker-end="url(#arrow)"/>
+    <rect x="883" y="235" width="148" height="26" rx="13" fill="#ffffff" stroke="#dde2ec"/><text x="957" y="253" text-anchor="middle" fill="#4a5670" font-family="Inter, Arial" font-size="11" font-weight="700">inspect</text>
+  </g>
+  <g>
+    <line x1="1079" y1="296" x2="1079" y2="328" stroke="#02558a" stroke-width="2.4"  marker-end="url(#arrow)"/>
+    
+  </g>
+  <g>
+    <line x1="984" y1="371" x2="930" y2="489" stroke="#02558a" stroke-width="2.4"  marker-end="url(#arrow)"/>
+    <rect x="883" y="412" width="148" height="26" rx="13" fill="#ffffff" stroke="#dde2ec"/><text x="957" y="430" text-anchor="middle" fill="#4a5670" font-family="Inter, Arial" font-size="11" font-weight="700">signals</text>
+  </g>
+  <g>
+    <line x1="722" y1="489" x2="681" y2="489" stroke="#02558a" stroke-width="2.4"  marker-end="url(#arrow)"/>
+    
+  </g>
+  <g>
+    <line x1="496" y1="489" x2="455" y2="489" stroke="#02558a" stroke-width="2.4"  marker-end="url(#arrow)"/>
+    
+  </g>
+  <g>
+    <line x1="270" y1="489" x2="229" y2="489" stroke="#02558a" stroke-width="2.4" stroke-dasharray="7 7" marker-end="url(#arrow)"/>
+    <rect x="175.5" y="471" width="148" height="26" rx="13" fill="#ffffff" stroke="#dde2ec"/><text x="249.5" y="489" text-anchor="middle" fill="#4a5670" font-family="Inter, Arial" font-size="11" font-weight="700">feedback</text>
+  </g>
+  <g>
+    <line x1="826" y1="296" x2="148" y2="446" stroke="#02558a" stroke-width="2.4" stroke-dasharray="7 7" marker-end="url(#arrow)"/>
+    <rect x="413" y="353" width="148" height="26" rx="13" fill="#ffffff" stroke="#dde2ec"/><text x="487" y="371" text-anchor="middle" fill="#4a5670" font-family="Inter, Arial" font-size="11" font-weight="700">error paths</text>
+  </g>
+
+</svg>

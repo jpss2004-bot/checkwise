@@ -1,0 +1,219 @@
+<!doctype html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>CheckWise — Mapa Final del Flujo del Sistema</title>
+<style>
+  @page { size: A3 landscape; margin: 0; }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: #dfe7ef; color: #1b2638; font-family: Inter, "Open Sans", Arial, sans-serif; }
+  .page { width: 420mm; height: 297mm; padding: 20mm 22mm; background: #fff; page-break-after: always; position: relative; overflow: hidden; }
+  .page:last-child { page-break-after: auto; }
+  .cover { background: linear-gradient(90deg, #013557 0%, #02324f 62%, #f7f9fb 62%); color: #fff; }
+  .cover h1 { font-size: 60px; line-height: .98; margin: 58mm 0 8mm; letter-spacing: 0; width: 56%; }
+  .cover .sub { font-size: 24px; line-height: 1.35; width: 58%; color: #d8eef5; }
+  .cover .meta { position: absolute; bottom: 28mm; left: 22mm; font-size: 15px; line-height: 1.8; color: #d8eef5; }
+  .cover .panel { position: absolute; right: 22mm; top: 28mm; width: 120mm; height: 236mm; color: #1b2638; padding: 16mm; border-left: 4px solid #09c1b0; }
+  .logo { height: 15mm; background: white; padding: 3mm 5mm; border: 1px solid #dde2ec; }
+  h2 { margin: 0 0 5mm; color: #013557; font-size: 34px; line-height: 1.08; letter-spacing: 0; }
+  h3 { margin: 0 0 4mm; color: #013557; font-size: 19px; }
+  .eyebrow { color: #058178; font-weight: 900; letter-spacing: .08em; text-transform: uppercase; font-size: 12px; margin-bottom: 4mm; }
+  .lead { font-size: 17px; color: #4a5670; line-height: 1.45; max-width: 330mm; margin-bottom: 8mm; }
+  .footer { position: absolute; left: 22mm; right: 22mm; bottom: 10mm; border-top: 1px solid #dde2ec; padding-top: 4mm; display: flex; justify-content: space-between; color: #5f6e87; font-size: 10px; font-weight: 700; }
+  .diagram-img { width: 100%; max-height: 205mm; object-fit: contain; display: block; border: 1px solid #dde2ec; border-radius: 8px; background: #fff; }
+  .grid { display: grid; gap: 6mm; }
+  .cols-2 { grid-template-columns: 1fr 1fr; }
+  .cols-3 { grid-template-columns: repeat(3, 1fr); }
+  .card { border: 1px solid #dde2ec; border-top: 3px solid #013557; border-radius: 8px; padding: 6mm; background: #fff; box-shadow: 0 6px 22px rgba(1,53,87,.07); }
+  .card.teal { border-top-color: #09c1b0; }
+  .card.warn { border-top-color: #b87500; background: #fffaf0; }
+  .card.err { border-top-color: #c32020; background: #fff7f7; }
+  .card p, li { font-size: 13px; line-height: 1.38; color: #374157; }
+  ul { padding-left: 18px; margin: 2mm 0 0; }
+  code { font-family: "JetBrains Mono", Consolas, monospace; color: #013557; font-size: .92em; }
+  .legend { display: grid; grid-template-columns: repeat(4, 1fr); gap: 4mm; }
+  .legend-item { border: 1px solid #dde2ec; border-radius: 8px; padding: 4mm; font-size: 13px; display: flex; align-items: center; gap: 3mm; min-height: 18mm; }
+  .swatch { width: 16px; height: 16px; border-radius: 4px; border: 2px solid #b8c0d0; flex: 0 0 auto; }
+  table { width: 100%; border-collapse: collapse; font-size: 10.4px; table-layout: fixed; }
+  th { background: #013557; color: #fff; text-align: left; padding: 8px; font-size: 10px; }
+  td { border-bottom: 1px solid #dde2ec; padding: 7px 8px; vertical-align: top; color: #374157; overflow-wrap: anywhere; }
+  tbody tr:nth-child(even) td { background: #f7f9fb; }
+  .route-table th:nth-child(1), .route-table td:nth-child(1) { width: 20%; font-family: "JetBrains Mono", Consolas, monospace; color: #013557; }
+  .route-table th:nth-child(2), .route-table td:nth-child(2) { width: 17%; }
+  .route-table th:nth-child(3), .route-table td:nth-child(3) { width: 34%; font-family: "JetBrains Mono", Consolas, monospace; font-size: 9.5px; }
+  .route-table th:nth-child(4), .route-table td:nth-child(4) { width: 17%; }
+  .route-table th:nth-child(5), .route-table td:nth-child(5) { width: 12%; }
+  .maturity th:nth-child(1), .maturity td:nth-child(1) { width: 17%; font-weight: 800; color: #013557; }
+  .maturity th:nth-child(2), .maturity td:nth-child(2) { width: 13%; }
+  .maturity th:nth-child(3), .maturity td:nth-child(3) { width: 25%; font-family: "JetBrains Mono", Consolas, monospace; font-size: 9.7px; }
+  .maturity th:nth-child(4), .maturity td:nth-child(4) { width: 22%; }
+  .maturity th:nth-child(5), .maturity td:nth-child(5) { width: 23%; }
+  .badge { display: inline-block; border: 1px solid; border-radius: 999px; padding: 3px 8px; font-size: 9px; line-height: 1; font-weight: 900; white-space: nowrap; }
+  .note { border-left: 4px solid #09c1b0; background: #effdfb; padding: 5mm 6mm; color: #374157; font-size: 14px; line-height: 1.45; }
+  .small { font-size: 11px; color: #5f6e87; line-height: 1.35; }
+  .wall { display: grid; grid-template-columns: 62% 38%; gap: 7mm; align-items: start; }
+  .mini-lifecycle { display: flex; gap: 2mm; flex-wrap: wrap; }
+  .pill { border: 1px solid #dde2ec; border-radius: 999px; padding: 2.5mm 3.5mm; font-size: 11px; font-family: "JetBrains Mono", Consolas, monospace; background: #f7f9fb; color: #013557; }
+</style>
+</head>
+<body>
+<section class="page cover">
+  <img class="logo" src="../../frontend/public/checkwise-logo.png" alt="CheckWise logo">
+  <h1>CheckWise<br>Mapa Final<br>del Flujo del Sistema</h1>
+  <p class="sub">Flujos, rutas, redirecciones, APIs, estados documentales y controles de seguridad.</p>
+  <div class="meta">
+    Preparado para alineación técnica y de producto<br>
+    Owner: Jose Pablo Samano<br>
+    Fecha: 19 de mayo de 2026
+  </div>
+  <div class="panel">
+    <h3>Alcance del documento</h3>
+    <p>Referencia técnica imprimible para entender cómo CheckWise mueve evidencia REPSE desde proveedor hasta revisión, reporte y auditoría.</p>
+    <p>Basado en archivos reales del repo: <code>frontend/app</code>, <code>backend/app</code>, <code>docs/API_CONTRACT_MAP.md</code>, <code>docs/DATA_MODEL.md</code>, auditorías de rutas y reportes.</p>
+    <p><strong>No es marketing.</strong> Cuando algo no está completo se etiqueta como parcial, planeado, faltante o por validar.</p>
+  </div>
+</section>
+
+<section class="page">
+  <div class="eyebrow">Sección 2</div>
+  <h2>Leyenda y guía de lectura</h2>
+  <p class="lead">Cada flecha representa una transición accionable: una navegación frontend, una llamada HTTP, un write en base de datos, una validación o un redirect. Los nombres técnicos se mantienen en su forma original.</p>
+  <div class="legend">
+    <div class="legend-item"><span class="swatch" style="background:#eef9f7;border-color:#09c1b0"></span><strong>Usuario / actor</strong></div>
+    <div class="legend-item"><span class="swatch" style="background:#eff6fb;border-color:#02558a"></span><strong>Frontend route/page</strong></div>
+    <div class="legend-item"><span class="swatch" style="background:#fff7e6;border-color:#b87500"></span><strong>Backend API / proceso</strong></div>
+    <div class="legend-item"><span class="swatch" style="background:#f7f9fb;border-color:#b8c0d0"></span><strong>DB / storage</strong></div>
+    <div class="legend-item"><span class="swatch" style="background:#fff0f0;border-color:#c32020"></span><strong>Seguridad / error</strong></div>
+    <div class="legend-item"><span class="swatch" style="background:#edf6ff;border-color:#2570e8"></span><strong>Reportes / IA</strong></div>
+    <div class="legend-item"><span class="swatch" style="background:#fff;border-color:#09c1b0"></span><strong>Decisión / estado</strong></div>
+    <div class="legend-item"><span class="swatch" style="background:repeating-linear-gradient(90deg,#fff,#fff 5px,#dde2ec 5px,#dde2ec 10px)"></span><strong>Futuro / excepción</strong></div>
+  </div>
+  <div class="grid cols-3" style="margin-top:9mm">
+    <div class="card"><h3>Etiquetas de madurez</h3><p><span class="badge" style="background:#e9f8f2;border-color:#b9e4cb;color:#176c3a">Implementado</span> existe en código y está conectado.</p><p><span class="badge" style="background:#fff7e6;border-color:#f1d49a;color:#9a5b00">Parcial</span> existe con limitaciones, mocks o casos no cerrados.</p><p><span class="badge" style="background:#edf6ff;border-color:#c9def5;color:#0b5e9f">Planeado</span> hay modelo, documento o esqueleto técnico, pero falta ejecución.</p></div>
+    <div class="card teal"><h3>Cómo leer rutas</h3><p><code>/portal/upload</code> es la ruta visible. <code>POST /api/v1/portal/workspaces/{id}/submissions</code> es el backend que procesa el upload. El PDF conserva los nombres exactos.</p></div>
+    <div class="card warn"><h3>Regla de honestidad</h3><p>Si algo aparece en documentación pero no en código, se marca como documentado/no completo. Si el código existe pero requiere staging, se marca por validar.</p></div>
+  </div>
+  <div class="footer"><span>CHECKWISE · SYSTEM WORKFLOW MAP</span><span>02</span></div>
+</section>
+
+<section class="page">
+  <div class="eyebrow">Sección 3</div><h2>Vista general completa del sistema</h2>
+  <p class="lead">El producto opera tres rutas principales: proveedor, cliente y equipo interno. El backend mantiene la verdad documental: estados, eventos, hashes, inspección PDF, auditoría y reportes.</p>
+  <img class="diagram-img" src="diagrams/01-system-overview.svg" alt="Vista general">
+  <div class="footer"><span>Fuente: ARCHITECTURE.md, DATA_MODEL.md, backend/app/models/entities.py</span><span>03</span></div>
+</section>
+
+<section class="page">
+  <div class="eyebrow">Sección 4</div><h2>Autenticación, entrada y redirecciones</h2>
+  <p class="lead">CheckWise centralizó login en <code>/login</code>. Staff y clientes usan JWT con roles; proveedor entra al portal mediante workspace propio y cookie httpOnly. El token legacy de workspace todavía existe como transición.</p>
+  <img class="diagram-img" src="diagrams/02-auth-and-entry-flow.svg" alt="Auth y redirects">
+  <div class="grid cols-2" style="margin-top:5mm">
+    <div class="note">Redirects confirmados: admin → <code>/admin/reviewer</code>, client_admin → <code>/client/dashboard</code>, provider → <code>/portal/entra-a-tu-espacio</code>, must_change_password → <code>/activate</code>.</div>
+    <div class="note" style="border-left-color:#c32020;background:#fff7f7">Riesgo vigente: <code>/activate</code> cancelar puede conservar JWT temporal; documentado como FAIL/P1 en <code>redirect_matrix.csv</code>.</div>
+  </div>
+  <div class="footer"><span>Fuente: app/login/page.tsx, auth.py, portal.py, redirect_matrix.csv</span><span>04</span></div>
+</section>
+
+<section class="page">
+  <div class="eyebrow">Sección 5</div><h2>Proveedor: onboarding y carga documental</h2>
+  <p class="lead">La ruta segura de upload deriva identidad desde <code>ProviderWorkspace</code>. El navegador no decide cliente/proveedor/contrato; el backend lo resuelve desde la sesión.</p>
+  <img class="diagram-img" src="diagrams/03-supplier-upload-flow.svg" alt="Supplier upload">
+  <div class="footer"><span>Fuente: portal.py, submission_service.py, storage.py, pdf_validation.py, prevalidation.py</span><span>05</span></div>
+</section>
+
+<section class="page">
+  <div class="eyebrow">Sección 6</div><h2>Revisión interna/legal y transición de estados</h2>
+  <p class="lead">La revisión crítica es humana. Las señales automáticas ayudan a priorizar, pero la aprobación no se automatiza. Cada decisión escribe estado, historial, evento y auditoría.</p>
+  <img class="diagram-img" src="diagrams/04-internal-review-flow.svg" alt="Internal review">
+  <div class="footer"><span>Fuente: reviewer.py, submission_workflow.py, constants/statuses.py</span><span>06</span></div>
+</section>
+
+<section class="page">
+  <div class="eyebrow">Sección 7</div><h2>Reportes: de datos operativos a insight ejecutivo</h2>
+  <p class="lead">Reportes no es solo exportar. El sistema crea reportes versionados desde scopes autorizados, snapshots de cumplimiento y bloques renderizados. La IA puede planear y redactar, pero el backend filtra datos y audiencias.</p>
+  <img class="diagram-img" src="diagrams/05-reporting-flow.svg" alt="Reporting flow">
+  <div class="grid cols-3" style="margin-top:5mm">
+    <div class="card"><h3>Implementado</h3><p>CRUD de reportes, presets, versiones, planner, generate SSE, conversation, explain/regenerate/refresh-data.</p></div>
+    <div class="card warn"><h3>Parcial</h3><p>Si no hay <code>ANTHROPIC_API_KEY</code>, usa <code>DeterministicMockLLMClient</code>. El editor muestra banner via <code>/_engine</code>.</p></div>
+    <div class="card err"><h3>Limitación</h3><p>Exports asíncronos existen en modelo, pero el worker de render todavía está planeado. Provider reports tiene bloqueo 403 en DB actual según auditoría.</p></div>
+  </div>
+  <div class="footer"><span>Fuente: REPORTS_ARCHITECTURE.md, REPORTS_AUDIT_2026-05-18.md, reports.py, executor.py</span><span>07</span></div>
+</section>
+
+<section class="page">
+  <div class="eyebrow">Sección 8</div><h2>Modelo de datos y ciclo de vida documental</h2>
+  <div class="grid cols-2">
+    <div>
+      <img class="diagram-img" src="diagrams/08-status-lifecycle.svg" alt="Status lifecycle">
+    </div>
+    <div class="card">
+      <h3>Entidades principales</h3>
+      <p><code>Client</code> → <code>Vendor</code> → <code>Contract</code> → <code>ProviderWorkspace</code> definen identidad y alcance.</p>
+      <p><code>Period</code>, <code>Institution</code>, <code>Requirement</code>, <code>RequirementVersion</code> definen el marco regulatorio versionado.</p>
+      <p><code>Submission</code> une cliente, proveedor, contrato, periodo, institución, requisito, estado y lineage.</p>
+      <p><code>Document</code> guarda metadata del archivo: <code>storage_key</code>, <code>sha256</code>, MIME, tamaño y <code>ocr_status</code>.</p>
+      <p><code>Validation</code>, <code>ValidationEvent</code>, <code>DocumentInspection</code>, <code>DocumentStatusHistory</code> y <code>AuditLog</code> dan trazabilidad.</p>
+      <p><code>Report</code>, <code>ReportVersion</code>, <code>ReportConversation</code>, <code>ComplianceSnapshot</code>, <code>ReportShare</code>, <code>ReportExport</code> soportan reporting versionado.</p>
+    </div>
+  </div>
+  <div class="footer"><span>Fuente: DATA_MODEL.md, entities.py, statuses.py</span><span>08</span></div>
+</section>
+
+<section class="page">
+  <div class="eyebrow">Sección 9</div><h2>Route-to-API map visual</h2>
+  <p class="lead">Mapa comprimido por superficie. La tabla completa de rutas aparece en la siguiente página para trazabilidad operativa.</p>
+  <img class="diagram-img" src="diagrams/07-route-api-map.svg" alt="Route API map">
+  <div class="footer"><span>Fuente: frontend/app inventory, backend/app/api/v1 inventory</span><span>09</span></div>
+</section>
+
+<section class="page">
+  <div class="eyebrow">Sección 9 · detalle</div><h2>Tabla route-to-API</h2>
+  <table class="route-table"><thead><tr><th>Ruta frontend</th><th>Propósito</th><th>Endpoint(s) backend</th><th>Auth/rol</th><th>Estado</th></tr></thead><tbody><tr><td>/</td><td>Marketing/home</td><td>Sin API crítica</td><td>public</td><td><span class="badge" style="background:#e9f8f2;border-color:#b9e4cb;color:#176c3a">Implementado</span></td></tr><tr><td>/login</td><td>Login único</td><td>POST /api/v1/auth/login</td><td>public</td><td><span class="badge" style="background:#e9f8f2;border-color:#b9e4cb;color:#176c3a">Implementado</span></td></tr><tr><td>/activate</td><td>Cambio forzado de password</td><td>POST /api/v1/auth/set-password</td><td>JWT temporal</td><td><span class="badge" style="background:#fff7e6;border-color:#f1d49a;color:#9a5b00">Parcial</span></td></tr><tr><td>/admin/login</td><td>Legacy redirect</td><td>redirect a /login</td><td>public</td><td><span class="badge" style="background:#fff7e6;border-color:#f1d49a;color:#9a5b00">Parcial</span></td></tr><tr><td>/portal/entra-a-tu-espacio</td><td>Confirmación de workspace</td><td>POST /api/v1/portal/enter; GET /portal/me</td><td>provider owner</td><td><span class="badge" style="background:#e9f8f2;border-color:#b9e4cb;color:#176c3a">Implementado</span></td></tr><tr><td>/portal/dashboard</td><td>Dashboard proveedor</td><td>GET /api/v1/portal/workspaces/{id}/dashboard</td><td>portal session</td><td><span class="badge" style="background:#e9f8f2;border-color:#b9e4cb;color:#176c3a">Implementado</span></td></tr><tr><td>/portal/onboarding</td><td>Checklist proveedor</td><td>GET /api/v1/portal/workspaces/{id}/onboarding; POST complete-onboarding</td><td>portal session</td><td><span class="badge" style="background:#e9f8f2;border-color:#b9e4cb;color:#176c3a">Implementado</span></td></tr><tr><td>/portal/upload</td><td>Carga guiada</td><td>GET /api/v1/compliance/catalog; GET /api/v1/portal/workspaces/{id}/duplicate-check; POST /api/v1/portal/workspaces/{id}/submissions</td><td>portal session</td><td><span class="badge" style="background:#e9f8f2;border-color:#b9e4cb;color:#176c3a">Implementado</span></td></tr><tr><td>/portal/submissions/[submission_id]</td><td>Detalle de entrega</td><td>GET /api/v1/portal/workspaces/{id}/submissions/{submission_id}</td><td>portal session</td><td><span class="badge" style="background:#e9f8f2;border-color:#b9e4cb;color:#176c3a">Implementado</span></td></tr><tr><td>/portal/calendar</td><td>Calendario proveedor</td><td>GET /api/v1/portal/workspaces/{id}/calendar</td><td>portal session</td><td><span class="badge" style="background:#e9f8f2;border-color:#b9e4cb;color:#176c3a">Implementado</span></td></tr><tr><td>/portal/reports</td><td>Reportes proveedor</td><td>GET /api/v1/reports; GET /api/v1/reports/_presets; POST /api/v1/reports/from-preset</td><td>vendor_facing</td><td><span class="badge" style="background:#fff7e6;border-color:#f1d49a;color:#9a5b00">Parcial</span></td></tr><tr><td>/portal/reports/[id]</td><td>Editor reporte proveedor</td><td>GET/PATCH/POST /api/v1/reports/*</td><td>vendor_facing</td><td><span class="badge" style="background:#fff7e6;border-color:#f1d49a;color:#9a5b00">Parcial</span></td></tr><tr><td>/portal/reports/[id]/print</td><td>Vista imprimible proveedor</td><td>GET /api/v1/reports/{report_id}</td><td>vendor_facing</td><td><span class="badge" style="background:#fff7e6;border-color:#f1d49a;color:#9a5b00">Parcial</span></td></tr><tr><td>/client</td><td>Redirect cliente</td><td>redirect a /client/dashboard</td><td>client_admin</td><td><span class="badge" style="background:#e9f8f2;border-color:#b9e4cb;color:#176c3a">Implementado</span></td></tr><tr><td>/client/dashboard</td><td>Dashboard cliente</td><td>GET /api/v1/client/overview</td><td>client_admin/internal_admin</td><td><span class="badge" style="background:#e9f8f2;border-color:#b9e4cb;color:#176c3a">Implementado</span></td></tr><tr><td>/client/vendors</td><td>Proveedores cliente</td><td>GET /api/v1/client/vendors</td><td>client_admin/internal_admin</td><td><span class="badge" style="background:#e9f8f2;border-color:#b9e4cb;color:#176c3a">Implementado</span></td></tr><tr><td>/client/vendors/[vendor_id]</td><td>Detalle proveedor</td><td>GET /api/v1/client/vendors/{vendor_id}</td><td>client_admin/internal_admin</td><td><span class="badge" style="background:#e9f8f2;border-color:#b9e4cb;color:#176c3a">Implementado</span></td></tr><tr><td>/client/submissions</td><td>Entregas cliente</td><td>GET /api/v1/client/submissions</td><td>client_admin/internal_admin</td><td><span class="badge" style="background:#e9f8f2;border-color:#b9e4cb;color:#176c3a">Implementado</span></td></tr><tr><td>/client/calendar</td><td>Calendario cliente</td><td>GET /api/v1/client/calendar</td><td>client_admin/internal_admin</td><td><span class="badge" style="background:#e9f8f2;border-color:#b9e4cb;color:#176c3a">Implementado</span></td></tr><tr><td>/client/activity</td><td>Actividad cliente</td><td>GET /api/v1/client/activity</td><td>client_admin/internal_admin</td><td><span class="badge" style="background:#e9f8f2;border-color:#b9e4cb;color:#176c3a">Implementado</span></td></tr><tr><td>/client/reports</td><td>Reportes cliente</td><td>GET /api/v1/reports; POST /api/v1/reports/from-preset</td><td>client_facing</td><td><span class="badge" style="background:#e9f8f2;border-color:#b9e4cb;color:#176c3a">Implementado</span></td></tr><tr><td>/client/reports/[id]</td><td>Editor reporte cliente</td><td>GET/PATCH/POST /api/v1/reports/*</td><td>client_facing</td><td><span class="badge" style="background:#e9f8f2;border-color:#b9e4cb;color:#176c3a">Implementado</span></td></tr></tbody></table>
+  <div class="footer"><span>Fuente: frontend/app/**/*.tsx, frontend/lib/api/*.ts, backend/app/api/v1/*.py</span><span>10</span></div>
+</section>
+
+<section class="page">
+  <div class="eyebrow">Sección 9 · detalle</div><h2>Tabla route-to-API · continuación</h2>
+  <table class="route-table"><thead><tr><th>Ruta frontend</th><th>Propósito</th><th>Endpoint(s) backend</th><th>Auth/rol</th><th>Estado</th></tr></thead><tbody><tr><td>/admin</td><td>Landing interna</td><td>GET /api/v1/auth/me; navegación admin</td><td>staff</td><td><span class="badge" style="background:#e9f8f2;border-color:#b9e4cb;color:#176c3a">Implementado</span></td></tr><tr><td>/admin/dashboard</td><td>Dashboard admin</td><td>GET /api/v1/admin/overview</td><td>internal_admin</td><td><span class="badge" style="background:#e9f8f2;border-color:#b9e4cb;color:#176c3a">Implementado</span></td></tr><tr><td>/admin/reviewer</td><td>Queue revisión</td><td>GET /api/v1/reviewer/queue</td><td>reviewer/internal_admin</td><td><span class="badge" style="background:#e9f8f2;border-color:#b9e4cb;color:#176c3a">Implementado</span></td></tr><tr><td>/admin/reviewer/[submission_id]</td><td>Detalle revisión</td><td>GET /api/v1/reviewer/submissions/{id}; POST /api/v1/reviewer/submissions/{id}/decision</td><td>reviewer/internal_admin</td><td><span class="badge" style="background:#e9f8f2;border-color:#b9e4cb;color:#176c3a">Implementado</span></td></tr><tr><td>/admin/clients</td><td>Clientes</td><td>GET/POST/PATCH /api/v1/admin/clients</td><td>internal_admin</td><td><span class="badge" style="background:#e9f8f2;border-color:#b9e4cb;color:#176c3a">Implementado</span></td></tr><tr><td>/admin/vendors</td><td>Proveedores</td><td>GET/POST/PATCH /api/v1/admin/vendors</td><td>internal_admin</td><td><span class="badge" style="background:#e9f8f2;border-color:#b9e4cb;color:#176c3a">Implementado</span></td></tr><tr><td>/admin/requirements</td><td>Catálogo requisitos</td><td>GET/POST/PATCH /api/v1/admin/requirements</td><td>internal_admin</td><td><span class="badge" style="background:#e9f8f2;border-color:#b9e4cb;color:#176c3a">Implementado</span></td></tr><tr><td>/admin/calendar</td><td>Calendario admin</td><td>GET /api/v1/admin/calendar; GET /api/v1/admin/periods</td><td>internal_admin</td><td><span class="badge" style="background:#e9f8f2;border-color:#b9e4cb;color:#176c3a">Implementado</span></td></tr><tr><td>/admin/audit-log</td><td>Bitácora</td><td>GET /api/v1/admin/audit-log</td><td>internal_admin</td><td><span class="badge" style="background:#e9f8f2;border-color:#b9e4cb;color:#176c3a">Implementado</span></td></tr><tr><td>/admin/reports</td><td>Reportes internos</td><td>GET /api/v1/reports; GET /api/v1/reports/_presets; POST /api/v1/reports/from-preset</td><td>internal/reviewer</td><td><span class="badge" style="background:#e9f8f2;border-color:#b9e4cb;color:#176c3a">Implementado</span></td></tr><tr><td>/admin/reports/[id]</td><td>Editor reporte interno</td><td>GET/PATCH/POST /api/v1/reports/*</td><td>internal/reviewer</td><td><span class="badge" style="background:#e9f8f2;border-color:#b9e4cb;color:#176c3a">Implementado</span></td></tr></tbody></table>
+  <div class="note" style="margin-top:8mm">La tabla distingue rutas implementadas de superficies parciales. En particular, las rutas de reportes para proveedor existen en frontend/backend, pero la auditoría actual documenta bloqueo 403 para creación/apertura con la base de datos vigente.</div>
+  <div class="footer"><span>Fuente: route_inventory.csv, redirect_matrix.csv, API_CONTRACT_MAP.md</span><span>11</span></div>
+</section>
+
+<section class="page">
+  <div class="eyebrow">Sección 10</div><h2>Controles de seguridad y ciberseguridad</h2>
+  <p class="lead">Los controles existen por capas: entrada, scope, archivo, storage, auditoría y reportes. Algunos ya son código operativo; otros requieren validación productiva.</p>
+  <img class="diagram-img" src="diagrams/06-data-security-flow.svg" alt="Security flow">
+  <div class="grid cols-3" style="margin-top:5mm">
+    <div class="card"><h3><span class="badge" style="background:#e9f8f2;border-color:#b9e4cb;color:#176c3a">Implementado</span> Código</h3><p>JWT HS256, bcrypt, roles/memberships, CORS configurable, PDF-only, size cap, SHA-256, AuditLog, ValidationEvent, tenant-safe workspace upload.</p></div>
+    <div class="card warn"><h3><span class="badge" style="background:#fff7e6;border-color:#f1d49a;color:#9a5b00">Parcial</span> Producción</h3><p>S3/R2 soportado por <code>storage.py</code>, pero necesita bucket, secrets, backup/restore y smoke tests reales.</p></div>
+    <div class="card err"><h3><span class="badge" style="background:#fff0f0;border-color:#efb7b7;color:#aa1f1f">Faltante recomendado</span> Hardening</h3><p>Pentest externo, observabilidad, descarga segura de documentos, membership editor, correcciones backend, notificaciones y DR.</p></div>
+  </div>
+  <div class="footer"><span>Fuente: auth.py, config.py, storage.py, API_CONTRACT_MAP.md, PROD_AUDIT_2026-05-18.md</span><span>12</span></div>
+</section>
+
+<section class="page">
+  <div class="eyebrow">Sección 11</div><h2>Estado actual de implementación</h2>
+  <table class="maturity"><thead><tr><th>Área</th><th>Estado</th><th>Evidencia del repo</th><th>Riesgo</th><th>Siguiente acción recomendada</th></tr></thead><tbody><tr><td>Frontend routes</td><td>Implementado</td><td>frontend/app/**/page.tsx; route_inventory.csv</td><td>Algunas rutas reportes proveedor bloqueadas por datos/DB</td><td>Cerrar provider reports y activar pruebas con ids propios</td></tr><tr><td>Backend APIs</td><td>Implementado</td><td>backend/app/api/v1/*.py; API_CONTRACT_MAP.md</td><td>Superficie amplia; no endpoint de descarga de documentos</td><td>Agregar descarga segura/presigned URL con RBAC</td></tr><tr><td>Upload workflow</td><td>Implementado</td><td>portal.py create_workspace_submission; submission_service.py</td><td>Legacy /submissions aún existe y confía identidad de formulario</td><td>Mantener solo para importer/dev; migrar wizard a catálogo workspace-scoped</td></tr><tr><td>Reports</td><td>Parcial</td><td>reports.py, report_service.py, executor.py, REPORTS_AUDIT_2026-05-18.md</td><td>Mock LLM si no hay ANTHROPIC_API_KEY; exports async pendientes</td><td>Configurar AI real, completar export worker y provider report creation</td></tr><tr><td>Auth/security</td><td>Parcial</td><td>auth.py, portal_session.py, config.py</td><td>Activation cancel bug; portal token legacy; producción no validada</td><td>Fix /activate cancel, retirar legacy token gradualmente, hardening prod</td></tr><tr><td>Database/migrations</td><td>Implementado</td><td>alembic/versions/0001-0009; models/entities.py</td><td>Faltan tablas futuras de sharing/export worker completas según docs</td><td>Aplicar/validar migraciones en staging</td></tr><tr><td>Document storage</td><td>Parcial</td><td>storage.py; .env.example</td><td>S3/R2 soportado en código, requiere credenciales y prueba de operación</td><td>Configurar bucket, TTL, backups y pruebas de restore</td></tr><tr><td>AI/LLM</td><td>Parcial</td><td>llm/factory.py; planner.py; executor.py</td><td>Asistente, no autoridad legal; fallback mock puede confundir si no se mira banner</td><td>Definir policy de uso, logs y evaluación de calidad</td></tr><tr><td>Deployment config</td><td>Requiere validación</td><td>render.yaml; .env.example; PROD_AUDIT_2026-05-18.md</td><td>Secrets, CORS, storage, observabilidad y backups requieren staging real</td><td>Checklist prod + smoke tests end-to-end</td></tr><tr><td>Design system</td><td>Implementado</td><td>globals.css; docs/DESIGN_SYSTEM.md; brand assets</td><td>Algunas pantallas aún pueden requerir pulido UX</td><td>Continuar redesign guiado por datos reales</td></tr><tr><td>Testing</td><td>Implementado</td><td>backend/tests; QA_RESULTS.md</td><td>No se corrieron tests en este build documental; frontend E2E limitado a auditorías previas</td><td>Añadir Playwright E2E para rutas críticas</td></tr></tbody></table>
+  <div class="footer"><span>Fuente: auditorías, tests, docs y código actual</span><span>13</span></div>
+</section>
+
+<section class="page">
+  <div class="eyebrow">Sección 12</div><h2>Wall map: flujo completo de oficina</h2>
+  <p class="lead">Referencia rápida para imprimir: usuario → ruta → API → dato → estado → reporte → seguridad.</p>
+  <div class="wall">
+    <div>
+      <img class="diagram-img" src="diagrams/01-system-overview.svg" alt="Wall overview">
+      <div style="margin-top:5mm"><img class="diagram-img" src="diagrams/03-supplier-upload-flow.svg" alt="Wall upload"></div>
+    </div>
+    <div class="grid">
+      <div class="card teal"><h3>Happy path</h3><p>Proveedor entra por <code>/login</code> → <code>/portal/entra-a-tu-espacio</code> → dashboard/onboarding → upload → backend guarda PDF y metadata → revisión humana → estado visible para portal/cliente/reportes.</p></div>
+      <div class="card"><h3>Estados clave</h3><div class="mini-lifecycle"><span class="pill">pendiente</span><span class="pill">pendiente_revision</span><span class="pill">prevalidado</span><span class="pill">posible_mismatch</span><span class="pill">aprobado</span><span class="pill">rechazado</span><span class="pill">requiere_aclaracion</span><span class="pill">excepcion_legal</span></div></div>
+      <div class="card warn"><h3>Checkpoints críticos</h3><ul><li>JWT/role o portal session antes de leer datos.</li><li>Tenant identity siempre desde workspace/membership.</li><li>PDF-only + size + SHA-256 antes de persistir metadata.</li><li>AuditLog y ValidationEvent en intake y decisiones.</li><li>IA como asistente; revisión humana conserva autoridad.</li></ul></div>
+      <div class="card err"><h3>Brechas prioritarias</h3><ul><li>Fix <code>/activate</code> cancel/JWT temporal.</li><li>Cerrar provider reports 403 en DB actual.</li><li>Agregar descarga segura de documentos.</li><li>Completar backend de correcciones/notificaciones.</li><li>Validar S3/R2, observabilidad, backups y CORS producción.</li></ul></div>
+    </div>
+  </div>
+  <div class="footer"><span>CHECKWISE · OFFICE WALL REFERENCE</span><span>14</span></div>
+</section>
+</body>
+</html>

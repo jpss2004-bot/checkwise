@@ -1,0 +1,51 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1400" height="700" viewBox="0 0 1400 700">
+  <defs>
+    <marker id="arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M 0 0 L 10 5 L 0 10 z" fill="#02558a"/>
+    </marker>
+    <filter id="shadow" x="-20%" y="-20%" width="140%" height="140%">
+      <feDropShadow dx="0" dy="8" stdDeviation="10" flood-color="#013557" flood-opacity=".10"/>
+    </filter>
+  </defs>
+  <rect width="1400" height="700" fill="#ffffff"/>
+  <text x="44" y="54" fill="#013557" font-family="Inter, Open Sans, Arial, sans-serif" font-size="26" font-weight="900">07 · Mapa de rutas frontend a APIs backend</text>
+  <line x1="44" y1="76" x2="1356" y2="76" stroke="#dde2ec" stroke-width="2"/>
+  
+  <style>.t{font-family:Inter,Arial,sans-serif;font-size:18px;font-weight:800;fill:#013557}.h{font-family:Inter,Arial,sans-serif;font-size:13px;font-weight:900;fill:#ffffff}.c{font-family:JetBrains Mono,Consolas,monospace;font-size:13px;fill:#1b2638}.m{font-family:Inter,Arial,sans-serif;font-size:12px;fill:#4a5670}</style>
+  <rect x="52" y="112" width="1296" height="520" rx="16" fill="#ffffff" stroke="#dde2ec"/>
+  <rect x="52" y="112" width="1296" height="42" rx="16" fill="#013557"/>
+  <text x="72" y="139" class="h">Superficie</text><text x="268" y="139" class="h">Rutas frontend</text><text x="635" y="139" class="h">Endpoints principales</text><text x="1040" y="139" class="h">Auth / estado</text>
+  <g><line x1="52" y1="152" x2="1348" y2="152" stroke="#eef1f6"/>
+      <text x="72" y="176" class="t">Public</text>
+      <text x="268" y="176" fill="#1b2638" font-family="Inter, Open Sans, Arial, sans-serif" font-size="13" font-weight="700" text-anchor="start"><tspan x="268" dy="0">/, /login, /activate, /admin/login</tspan></text>
+      <text x="635" y="176" fill="#374157" font-family="Inter, Open Sans, Arial, sans-serif" font-size="12" font-weight="650" text-anchor="start"><tspan x="635" dy="0">POST /api/v1/auth/login; POST /api/v1/auth/set-password</tspan></text>
+      <text x="1040" y="176" fill="#4a5670" font-family="Inter, Open Sans, Arial, sans-serif" font-size="12" font-weight="650" text-anchor="start"><tspan x="1040" dy="0">Public + JWT; /admin/login legacy</tspan><tspan x="1040" dy="15">redirect</tspan></text>
+    </g><g><line x1="52" y1="227" x2="1348" y2="227" stroke="#eef1f6"/>
+      <text x="72" y="251" class="t">Proveedor</text>
+      <text x="268" y="251" fill="#1b2638" font-family="Inter, Open Sans, Arial, sans-serif" font-size="13" font-weight="700" text-anchor="start"><tspan x="268" dy="0">/portal/entra-a-tu-espacio,</tspan><tspan x="268" dy="16">/portal/dashboard, /portal/onboarding,</tspan><tspan x="268" dy="16">/portal/upload, /portal/submissions/[id],</tspan><tspan x="268" dy="16">/portal/calendar</tspan></text>
+      <text x="635" y="251" fill="#374157" font-family="Inter, Open Sans, Arial, sans-serif" font-size="12" font-weight="650" text-anchor="start"><tspan x="635" dy="0">POST /portal/enter; GET /portal/me; GET</tspan><tspan x="635" dy="15">/portal/workspaces/{id}/onboarding|dashboard|calendar|submissions/{id};</tspan><tspan x="635" dy="15">POST /portal/workspaces/{id}/submissions</tspan></text>
+      <text x="1040" y="251" fill="#4a5670" font-family="Inter, Open Sans, Arial, sans-serif" font-size="12" font-weight="650" text-anchor="start"><tspan x="1040" dy="0">JWT owner, cookie httpOnly,</tspan><tspan x="1040" dy="15">X-Workspace-Token legacy</tspan></text>
+    </g><g><line x1="52" y1="302" x2="1348" y2="302" stroke="#eef1f6"/>
+      <text x="72" y="326" class="t">Cliente</text>
+      <text x="268" y="326" fill="#1b2638" font-family="Inter, Open Sans, Arial, sans-serif" font-size="13" font-weight="700" text-anchor="start"><tspan x="268" dy="0">/client, /client/dashboard, /client/vendors,</tspan><tspan x="268" dy="16">/client/vendors/[id], /client/submissions,</tspan><tspan x="268" dy="16">/client/calendar, /client/activity,</tspan><tspan x="268" dy="16">/client/reports</tspan></text>
+      <text x="635" y="326" fill="#374157" font-family="Inter, Open Sans, Arial, sans-serif" font-size="12" font-weight="650" text-anchor="start"><tspan x="635" dy="0">GET</tspan><tspan x="635" dy="15">/client/me|overview|vendors|vendors/{id}|submissions|calendar|activity;</tspan><tspan x="635" dy="15">/reports</tspan></text>
+      <text x="1040" y="326" fill="#4a5670" font-family="Inter, Open Sans, Arial, sans-serif" font-size="12" font-weight="650" text-anchor="start"><tspan x="1040" dy="0">client_admin o internal_admin</tspan></text>
+    </g><g><line x1="52" y1="377" x2="1348" y2="377" stroke="#eef1f6"/>
+      <text x="72" y="401" class="t">Revisor</text>
+      <text x="268" y="401" fill="#1b2638" font-family="Inter, Open Sans, Arial, sans-serif" font-size="13" font-weight="700" text-anchor="start"><tspan x="268" dy="0">/admin/reviewer,</tspan><tspan x="268" dy="16">/admin/reviewer/[submission_id]</tspan></text>
+      <text x="635" y="401" fill="#374157" font-family="Inter, Open Sans, Arial, sans-serif" font-size="12" font-weight="650" text-anchor="start"><tspan x="635" dy="0">GET /reviewer/queue; GET /reviewer/submissions/{id};</tspan><tspan x="635" dy="15">POST /reviewer/submissions/{id}/decision</tspan></text>
+      <text x="1040" y="401" fill="#4a5670" font-family="Inter, Open Sans, Arial, sans-serif" font-size="12" font-weight="650" text-anchor="start"><tspan x="1040" dy="0">reviewer o internal_admin</tspan></text>
+    </g><g><line x1="52" y1="452" x2="1348" y2="452" stroke="#eef1f6"/>
+      <text x="72" y="476" class="t">Admin</text>
+      <text x="268" y="476" fill="#1b2638" font-family="Inter, Open Sans, Arial, sans-serif" font-size="13" font-weight="700" text-anchor="start"><tspan x="268" dy="0">/admin, /admin/dashboard, /admin/clients,</tspan><tspan x="268" dy="16">/admin/vendors, /admin/requirements,</tspan><tspan x="268" dy="16">/admin/calendar, /admin/audit-log</tspan></text>
+      <text x="635" y="476" fill="#374157" font-family="Inter, Open Sans, Arial, sans-serif" font-size="12" font-weight="650" text-anchor="start"><tspan x="635" dy="0">GET/PATCH/POST</tspan><tspan x="635" dy="15">/admin/clients|vendors|workspaces|requirements; GET</tspan><tspan x="635" dy="15">/admin/overview|periods|calendar|audit-log</tspan></text>
+      <text x="1040" y="476" fill="#4a5670" font-family="Inter, Open Sans, Arial, sans-serif" font-size="12" font-weight="650" text-anchor="start"><tspan x="1040" dy="0">internal_admin</tspan></text>
+    </g><g><line x1="52" y1="527" x2="1348" y2="527" stroke="#eef1f6"/>
+      <text x="72" y="551" class="t">Reportes</text>
+      <text x="268" y="551" fill="#1b2638" font-family="Inter, Open Sans, Arial, sans-serif" font-size="13" font-weight="700" text-anchor="start"><tspan x="268" dy="0">/admin/reports, /client/reports,</tspan><tspan x="268" dy="16">/portal/reports, /reports/[id], /print</tspan></text>
+      <text x="635" y="551" fill="#374157" font-family="Inter, Open Sans, Arial, sans-serif" font-size="12" font-weight="650" text-anchor="start"><tspan x="635" dy="0">GET/POST/PATCH /reports; /_engine; /_presets;</tspan><tspan x="635" dy="15">/from-preset; /plan; /generate; /conversation;</tspan><tspan x="635" dy="15">/blocks/*</tspan></text>
+      <text x="1040" y="551" fill="#4a5670" font-family="Inter, Open Sans, Arial, sans-serif" font-size="12" font-weight="650" text-anchor="start"><tspan x="1040" dy="0">audience gates: internal_only,</tspan><tspan x="1040" dy="15">client_facing, vendor_facing</tspan></text>
+    </g>
+  <text x="72" y="660" class="m">Nota: todos los endpoints backend listados se sirven bajo el prefijo real /api/v1; el diagrama visual abrevia algunos nombres para legibilidad.</text>
+
+</svg>

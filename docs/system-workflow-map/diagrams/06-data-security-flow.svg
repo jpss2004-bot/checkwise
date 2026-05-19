@@ -1,0 +1,119 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1400" height="720" viewBox="0 0 1400 720">
+  <defs>
+    <marker id="arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M 0 0 L 10 5 L 0 10 z" fill="#02558a"/>
+    </marker>
+    <filter id="shadow" x="-20%" y="-20%" width="140%" height="140%">
+      <feDropShadow dx="0" dy="8" stdDeviation="10" flood-color="#013557" flood-opacity=".10"/>
+    </filter>
+  </defs>
+  <rect width="1400" height="720" fill="#ffffff"/>
+  <text x="44" y="54" fill="#013557" font-family="Inter, Open Sans, Arial, sans-serif" font-size="26" font-weight="900">06 · Flujo de datos y controles de seguridad</text>
+  <line x1="44" y1="76" x2="1356" y2="76" stroke="#dde2ec" stroke-width="2"/>
+  
+  <g>
+    <rect x="60" y="112" width="220" height="90" rx="14" fill="#fff0f0" stroke="#c32020" stroke-width="2"/>
+    <text x="78" y="142" fill="#013557" font-family="Inter, Open Sans, Arial, sans-serif" font-size="18" font-weight="800" text-anchor="start"><tspan x="78" dy="0">Entrada</tspan></text><text x="78" y="176" fill="#4a5670" font-family="Inter, Open Sans, Arial, sans-serif" font-size="13" font-weight="500" text-anchor="start"><tspan x="78" dy="0">JWT Bearer, cookie httpOnly o</tspan><tspan x="78" dy="16">workspace token legacy</tspan></text>
+  </g>
+  <g>
+    <rect x="328" y="112" width="220" height="90" rx="14" fill="#fff0f0" stroke="#c32020" stroke-width="2"/>
+    <text x="346" y="142" fill="#013557" font-family="Inter, Open Sans, Arial, sans-serif" font-size="18" font-weight="800" text-anchor="start"><tspan x="346" dy="0">Guards</tspan></text><text x="346" y="176" fill="#4a5670" font-family="Inter, Open Sans, Arial, sans-serif" font-size="13" font-weight="500" text-anchor="start"><tspan x="346" dy="0">get_current_user, require_role,</tspan><tspan x="346" dy="16">current_portal_workspace</tspan></text>
+  </g>
+  <g>
+    <rect x="596" y="112" width="220" height="90" rx="14" fill="#fff0f0" stroke="#c32020" stroke-width="2"/>
+    <text x="614" y="142" fill="#013557" font-family="Inter, Open Sans, Arial, sans-serif" font-size="18" font-weight="800" text-anchor="start"><tspan x="614" dy="0">Tenant scope</tspan></text><text x="614" y="176" fill="#4a5670" font-family="Inter, Open Sans, Arial, sans-serif" font-size="13" font-weight="500" text-anchor="start"><tspan x="614" dy="0">client_id/vendor_id desde</tspan><tspan x="614" dy="16">membership o workspace</tspan></text>
+  </g>
+  <g>
+    <rect x="864" y="112" width="220" height="90" rx="14" fill="#fff0f0" stroke="#c32020" stroke-width="2"/>
+    <text x="882" y="142" fill="#013557" font-family="Inter, Open Sans, Arial, sans-serif" font-size="18" font-weight="800" text-anchor="start"><tspan x="882" dy="0">CORS/env</tspan></text><text x="882" y="176" fill="#4a5670" font-family="Inter, Open Sans, Arial, sans-serif" font-size="13" font-weight="500" text-anchor="start"><tspan x="882" dy="0">Origins configurables;</tspan><tspan x="882" dy="16">Secure/SameSite por ambiente</tspan></text>
+  </g>
+  <g>
+    <rect x="1120" y="112" width="220" height="90" rx="14" fill="#fff0f0" stroke="#c32020" stroke-width="2"/>
+    <text x="1138" y="142" fill="#c32020" font-family="Inter, Open Sans, Arial, sans-serif" font-size="18" font-weight="800" text-anchor="start"><tspan x="1138" dy="0">Errores</tspan></text><text x="1138" y="176" fill="#4a5670" font-family="Inter, Open Sans, Arial, sans-serif" font-size="13" font-weight="500" text-anchor="start"><tspan x="1138" dy="0">401, 403, 404, 409, 422 sin</tspan><tspan x="1138" dy="16">exponer datos ajenos</tspan></text>
+  </g>
+  <g>
+    <rect x="60" y="324" width="220" height="90" rx="14" fill="#fff7e6" stroke="#b87500" stroke-width="2"/>
+    <text x="78" y="354" fill="#013557" font-family="Inter, Open Sans, Arial, sans-serif" font-size="18" font-weight="800" text-anchor="start"><tspan x="78" dy="0">Archivo</tspan></text><text x="78" y="388" fill="#4a5670" font-family="Inter, Open Sans, Arial, sans-serif" font-size="13" font-weight="500" text-anchor="start"><tspan x="78" dy="0">PDF-only, MIME, tamaño máximo</tspan></text>
+  </g>
+  <g>
+    <rect x="328" y="324" width="220" height="90" rx="14" fill="#f7f9fb" stroke="#b8c0d0" stroke-width="2"/>
+    <text x="346" y="354" fill="#013557" font-family="Inter, Open Sans, Arial, sans-serif" font-size="18" font-weight="800" text-anchor="start"><tspan x="346" dy="0">Hash</tspan></text><text x="346" y="388" fill="#4a5670" font-family="Inter, Open Sans, Arial, sans-serif" font-size="13" font-weight="500" text-anchor="start"><tspan x="346" dy="0">SHA-256, duplicate-check,</tspan><tspan x="346" dy="16">storage_key</tspan></text>
+  </g>
+  <g>
+    <rect x="596" y="324" width="220" height="90" rx="14" fill="#f7f9fb" stroke="#b8c0d0" stroke-width="2"/>
+    <text x="614" y="354" fill="#013557" font-family="Inter, Open Sans, Arial, sans-serif" font-size="18" font-weight="800" text-anchor="start"><tspan x="614" dy="0">Storage</tspan></text><text x="614" y="388" fill="#4a5670" font-family="Inter, Open Sans, Arial, sans-serif" font-size="13" font-weight="500" text-anchor="start"><tspan x="614" dy="0">DB guarda metadatos; bytes fuera</tspan><tspan x="614" dy="16">de DB</tspan></text>
+  </g>
+  <g>
+    <rect x="864" y="324" width="220" height="90" rx="14" fill="#fff7e6" stroke="#b87500" stroke-width="2"/>
+    <text x="882" y="354" fill="#013557" font-family="Inter, Open Sans, Arial, sans-serif" font-size="18" font-weight="800" text-anchor="start"><tspan x="882" dy="0">Prevalidación</tspan></text><text x="882" y="388" fill="#4a5670" font-family="Inter, Open Sans, Arial, sans-serif" font-size="13" font-weight="500" text-anchor="start"><tspan x="882" dy="0">pypdf, texto,</tspan><tspan x="882" dy="16">encrypted/corrupt/scanned</tspan></text>
+  </g>
+  <g>
+    <rect x="1120" y="324" width="220" height="90" rx="14" fill="#fff0f0" stroke="#c32020" stroke-width="2"/>
+    <text x="1138" y="354" fill="#013557" font-family="Inter, Open Sans, Arial, sans-serif" font-size="18" font-weight="800" text-anchor="start"><tspan x="1138" dy="0">Humano</tspan></text><text x="1138" y="388" fill="#4a5670" font-family="Inter, Open Sans, Arial, sans-serif" font-size="13" font-weight="500" text-anchor="start"><tspan x="1138" dy="0">IA/OCR asiste; aprobación crítica</tspan><tspan x="1138" dy="16">no automática</tspan></text>
+  </g>
+  <g>
+    <rect x="60" y="536" width="220" height="90" rx="14" fill="#f7f9fb" stroke="#b8c0d0" stroke-width="2"/>
+    <text x="78" y="566" fill="#013557" font-family="Inter, Open Sans, Arial, sans-serif" font-size="18" font-weight="800" text-anchor="start"><tspan x="78" dy="0">AuditLog</tspan></text><text x="78" y="600" fill="#4a5670" font-family="Inter, Open Sans, Arial, sans-serif" font-size="13" font-weight="500" text-anchor="start"><tspan x="78" dy="0">admin mutations, intake, reviewer</tspan><tspan x="78" dy="16">decisions</tspan></text>
+  </g>
+  <g>
+    <rect x="328" y="536" width="220" height="90" rx="14" fill="#f7f9fb" stroke="#b8c0d0" stroke-width="2"/>
+    <text x="346" y="566" fill="#013557" font-family="Inter, Open Sans, Arial, sans-serif" font-size="18" font-weight="800" text-anchor="start"><tspan x="346" dy="0">ValidationEvent</tspan></text><text x="346" y="600" fill="#4a5670" font-family="Inter, Open Sans, Arial, sans-serif" font-size="13" font-weight="500" text-anchor="start"><tspan x="346" dy="0">timeline granular por</tspan><tspan x="346" dy="16">submission/document</tspan></text>
+  </g>
+  <g>
+    <rect x="596" y="536" width="220" height="90" rx="14" fill="#edf6ff" stroke="#2570e8" stroke-width="2"/>
+    <text x="614" y="566" fill="#013557" font-family="Inter, Open Sans, Arial, sans-serif" font-size="18" font-weight="800" text-anchor="start"><tspan x="614" dy="0">Report safety</tspan></text><text x="614" y="600" fill="#4a5670" font-family="Inter, Open Sans, Arial, sans-serif" font-size="13" font-weight="500" text-anchor="start"><tspan x="614" dy="0">snapshots, PII sanitizer, audience</tspan><tspan x="614" dy="16">gates</tspan></text>
+  </g>
+  <g>
+    <rect x="864" y="536" width="220" height="90" rx="14" fill="#fff0f0" stroke="#c32020" stroke-width="2"/>
+    <text x="882" y="566" fill="#013557" font-family="Inter, Open Sans, Arial, sans-serif" font-size="18" font-weight="800" text-anchor="start"><tspan x="882" dy="0">Observabilidad</tspan></text><text x="882" y="600" fill="#4a5670" font-family="Inter, Open Sans, Arial, sans-serif" font-size="13" font-weight="500" text-anchor="start"><tspan x="882" dy="0">Sentry/logging/backups</tspan><tspan x="882" dy="16">documentados, no cableados</tspan></text><rect x="992" y="548" width="74" height="22" rx="11" fill="#edf6ff" stroke="#c9def5"/><text x="1029" y="563" text-anchor="middle" fill="#0b5e9f" font-family="Inter, Arial" font-size="9" font-weight="800">Planeado</text>
+  </g>
+  <g>
+    <rect x="1120" y="536" width="220" height="90" rx="14" fill="#fff0f0" stroke="#c32020" stroke-width="2"/>
+    <text x="1138" y="566" fill="#013557" font-family="Inter, Open Sans, Arial, sans-serif" font-size="18" font-weight="800" text-anchor="start"><tspan x="1138" dy="0">Pentest/DR</tspan></text><text x="1138" y="600" fill="#4a5670" font-family="Inter, Open Sans, Arial, sans-serif" font-size="13" font-weight="500" text-anchor="start"><tspan x="1138" dy="0">No confirmado en repo</tspan></text><rect x="1248" y="548" width="74" height="22" rx="11" fill="#fff3e9" stroke="#f0c9a4"/><text x="1285" y="563" text-anchor="middle" fill="#b85f00" font-family="Inter, Arial" font-size="9" font-weight="800">Requiere validación</text>
+  </g>
+  <g>
+    <line x1="280" y1="157" x2="328" y2="157" stroke="#02558a" stroke-width="2.4"  marker-end="url(#arrow)"/>
+    
+  </g>
+  <g>
+    <line x1="548" y1="157" x2="596" y2="157" stroke="#02558a" stroke-width="2.4"  marker-end="url(#arrow)"/>
+    
+  </g>
+  <g>
+    <line x1="816" y1="157" x2="864" y2="157" stroke="#02558a" stroke-width="2.4"  marker-end="url(#arrow)"/>
+    
+  </g>
+  <g>
+    <line x1="1084" y1="157" x2="1120" y2="157" stroke="#02558a" stroke-width="2.4"  marker-end="url(#arrow)"/>
+    
+  </g>
+  <g>
+    <line x1="280" y1="369" x2="328" y2="369" stroke="#02558a" stroke-width="2.4"  marker-end="url(#arrow)"/>
+    
+  </g>
+  <g>
+    <line x1="548" y1="369" x2="596" y2="369" stroke="#02558a" stroke-width="2.4"  marker-end="url(#arrow)"/>
+    
+  </g>
+  <g>
+    <line x1="816" y1="369" x2="864" y2="369" stroke="#02558a" stroke-width="2.4"  marker-end="url(#arrow)"/>
+    
+  </g>
+  <g>
+    <line x1="1084" y1="369" x2="1120" y2="369" stroke="#02558a" stroke-width="2.4"  marker-end="url(#arrow)"/>
+    
+  </g>
+  <g>
+    <line x1="170" y1="414" x2="170" y2="536" stroke="#02558a" stroke-width="2.4"  marker-end="url(#arrow)"/>
+    
+  </g>
+  <g>
+    <line x1="438" y1="414" x2="438" y2="536" stroke="#02558a" stroke-width="2.4"  marker-end="url(#arrow)"/>
+    
+  </g>
+  <g>
+    <line x1="706" y1="414" x2="706" y2="536" stroke="#02558a" stroke-width="2.4"  marker-end="url(#arrow)"/>
+    
+  </g>
+
+</svg>
