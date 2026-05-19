@@ -182,8 +182,18 @@ def generate_music(video_duration: float) -> Path:
 
 
 def composite(video: Path, voice: Path, music: Path) -> Path:
-    """Final mux: video + (voice at 0 dB + music ducked to -22 dB)."""
-    print("→ Compositing final MP4")
+    """Final mux: voice dominant, music as a quiet filler bed.
+
+    Mix design:
+      - Voice gets a gentle leveler + mild compression so the loud and
+        quiet syllables land at a uniform fullness, then a +2 dB boost.
+      - Music gets a low-pass at 1.4 kHz so the highs don't compete
+        with consonants, then loudnorm-targeted to a quiet, even
+        loudness, then sidechain-ducked HARD when voice is present
+        (ratio 20, threshold low, fast attack). Net effect: music sits
+        at ~-25 dB under voice and rises to ~-18 dB in narration gaps.
+    """
+    print("→ Compositing final MP4 (voice dominant)")
     cmd = [
         "ffmpeg", "-y",
         "-i", str(video),
@@ -191,17 +201,30 @@ def composite(video: Path, voice: Path, music: Path) -> Path:
         "-i", str(music),
         "-filter_complex",
         (
-            # Voice at full level, split into two copies — one for the
-            # final mix, one for the sidechain key. ffmpeg 8 disallows
-            # reusing the same labeled pad on two filter inputs.
-            "[1:a]volume=1.0,asplit=2[voiceMix][voiceKey];"
-            # Music significantly quieter
-            "[2:a]volume=0.22[bed];"
-            # Duck music under voice
+            # Voice processing chain:
+            #   loudnorm  — bring every clip to a uniform integrated
+            #               loudness so quiet and loud sentences match
+            #   acompressor — gentle peak-smoothing
+            #   volume +2dB — slight boost to sit above the music
+            "[1:a]"
+            "loudnorm=I=-14:TP=-1.5:LRA=9,"
+            "acompressor=threshold=-18dB:ratio=2.5:attack=8:release=180:makeup=2,"
+            "volume=2dB,"
+            "asplit=2[voiceMix][voiceKey];"
+            # Music processing chain:
+            #   lowpass — kill 1.4 kHz+ so it can't fight vowels
+            #   loudnorm — bring it down to a consistent quiet bed
+            #   volume — drop the bed to about -20 dBFS
+            "[2:a]"
+            "lowpass=f=1400,"
+            "loudnorm=I=-30:TP=-3:LRA=8,"
+            "volume=0.32[bed];"
+            # Sidechain ducking: when voice is present, music drops
+            # aggressively. ratio=20 + low threshold = audible duck.
             "[bed][voiceKey]sidechaincompress="
-            "threshold=0.05:ratio=8:attack=20:release=300:makeup=1[bedducked];"
-            # Final mix
-            "[voiceMix][bedducked]amix=inputs=2:duration=first:dropout_transition=0[a]"
+            "threshold=0.02:ratio=20:attack=8:release=400:makeup=1[bedducked];"
+            # Final mix — voice loud, music way below
+            "[voiceMix][bedducked]amix=inputs=2:duration=first:dropout_transition=0:weights=1.0 0.55[a]"
         ),
         "-map", "0:v",
         "-map", "[a]",

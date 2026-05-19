@@ -76,27 +76,72 @@ def load_durations() -> dict[str, float]:
 
 INJECT_JS = r"""
 (() => {
-  // Re-install on every navigation — DOM elements get torn down with
-  // the previous document, so we check for the actual element.
-  if (document.getElementById('__demo_cursor')) return;
+  // add_init_script runs at document_start, before <html> is parsed.
+  // Defer the actual install until DOM is ready so document.documentElement
+  // and document.head exist and our appendChild calls don't throw silently.
+  function install() {
+    // Re-install on every navigation — DOM elements get torn down with
+    // the previous document, so we check for the actual element.
+    if (document.getElementById('__demo_cursor')) return;
 
   const ROOT = document.documentElement;
 
-  // Cursor — larger, with persistent ring + a faint trail for motion
-  // legibility when the camera pans across the screen.
+  // Inject shared keyframes once
+  if (!document.getElementById('__demo_kf')) {
+    const style = document.createElement('style');
+    style.id = '__demo_kf';
+    style.textContent = `
+      @keyframes demoCursorPulse {
+        0%, 100% { transform: translate(-50%, -50%) scale(1);   opacity: 0.32; }
+        50%      { transform: translate(-50%, -50%) scale(1.4); opacity: 0.08; }
+      }
+      @keyframes demoBreathe {
+        0%, 100% { box-shadow: 0 0 0 8px rgba(13, 132, 117, 0.22), 0 0 36px rgba(13, 132, 117, 0.5); }
+        50%      { box-shadow: 0 0 0 14px rgba(13, 132, 117, 0.10), 0 0 52px rgba(13, 132, 117, 0.7); }
+      }
+      @keyframes demoBob {
+        0%, 100% { transform: translateY(0); }
+        50%      { transform: translateY(-3px); }
+      }
+    `;
+    document.head.appendChild(style);
+  }
+
+  // Cursor — bigger, always visible. Three layers:
+  //   1. Permanent pulse ring (always animating, even when idle)
+  //   2. Trailing ring (lags slightly behind for motion legibility)
+  //   3. Main cursor dot (sharp center)
+  const cursorPulse = document.createElement('div');
+  cursorPulse.id = '__demo_cursor_pulse';
+  Object.assign(cursorPulse.style, {
+    position: 'fixed',
+    left: '50%', top: '50%',
+    width: '64px', height: '64px',
+    background: 'rgba(13, 132, 117, 0.20)',
+    border: '2px solid rgba(13, 132, 117, 0.45)',
+    borderRadius: '50%',
+    pointerEvents: 'none',
+    zIndex: '2147483645',
+    transform: 'translate(-50%, -50%) scale(1)',
+    animation: 'demoCursorPulse 2.2s ease-in-out infinite',
+    opacity: '1',
+  });
+  ROOT.appendChild(cursorPulse);
+
   const cursorTrail = document.createElement('div');
   cursorTrail.id = '__demo_cursor_trail';
   Object.assign(cursorTrail.style, {
     position: 'fixed',
-    width: '48px', height: '48px',
-    background: 'rgba(13, 132, 117, 0.18)',
-    border: '2px solid rgba(13, 132, 117, 0.35)',
+    left: '50%', top: '50%',
+    width: '54px', height: '54px',
+    background: 'rgba(13, 132, 117, 0.20)',
+    border: '2px solid rgba(13, 132, 117, 0.40)',
     borderRadius: '50%',
     pointerEvents: 'none',
     zIndex: '2147483646',
     transform: 'translate(-50%, -50%)',
-    transition: 'left 0.18s ease-out, top 0.18s ease-out, opacity 0.2s ease',
-    opacity: '0',
+    transition: 'left 0.18s ease-out, top 0.18s ease-out',
+    opacity: '1',
   });
   ROOT.appendChild(cursorTrail);
 
@@ -104,26 +149,27 @@ INJECT_JS = r"""
   cursor.id = '__demo_cursor';
   Object.assign(cursor.style, {
     position: 'fixed',
-    width: '28px', height: '28px',
-    background: 'rgba(13, 132, 117, 0.95)',
-    border: '4px solid white',
+    left: '50%', top: '50%',
+    width: '32px', height: '32px',
+    background: 'rgba(13, 132, 117, 1)',
+    border: '5px solid white',
     borderRadius: '50%',
     pointerEvents: 'none',
     zIndex: '2147483647',
     transform: 'translate(-50%, -50%)',
-    boxShadow: '0 6px 20px rgba(13, 132, 117, 0.5), 0 0 0 1px rgba(0,0,0,0.2)',
+    boxShadow: '0 8px 28px rgba(13, 132, 117, 0.65), 0 0 0 1.5px rgba(0,0,0,0.25)',
     transition: 'transform 0.08s ease-out',
-    opacity: '0',
+    opacity: '1',
   });
   ROOT.appendChild(cursor);
 
   window.addEventListener('mousemove', e => {
     cursor.style.left = e.clientX + 'px';
     cursor.style.top = e.clientY + 'px';
-    cursor.style.opacity = '1';
     cursorTrail.style.left = e.clientX + 'px';
     cursorTrail.style.top = e.clientY + 'px';
-    cursorTrail.style.opacity = '1';
+    cursorPulse.style.left = e.clientX + 'px';
+    cursorPulse.style.top = e.clientY + 'px';
   });
 
   // Click ripple
@@ -205,124 +251,90 @@ INJECT_JS = r"""
     cap.style.transform = 'translateX(-50%) translateY(20px)';
   };
 
-  // ── Element highlight system ──
-  // Draws a 4px teal outline + soft glow over a target element, plus
-  // an optional label tooltip that points at the top-right corner.
-  // The overlay is absolutely positioned, never disturbs the DOM,
-  // and animates with a slow breathing pulse so it reads as
-  // "look here" without distracting.
-  let highlightObserver = null;
-
-  window.__highlight = (selector, labelText) => {
+  // ── Element highlight (rect-driven) ──
+  // Takes a rect {x, y, w, h} resolved Python-side via Playwright (which
+  // understands :has-text() and other engine selectors). Browser-side
+  // document.querySelector cannot parse those, so the previous version
+  // silently failed when the selector used :has-text. This version
+  // takes coordinates so it always lands.
+  window.__highlightRect = (rect, labelText) => {
     window.__unhighlight();
-    const target = document.querySelector(selector);
-    if (!target) return false;
+    if (!rect) return false;
     const box = document.createElement('div');
     box.id = '__demo_highlight';
+    const padX = 10, padY = 8;
     Object.assign(box.style, {
       position: 'fixed',
       pointerEvents: 'none',
       zIndex: '2147483640',
-      border: '3px solid rgba(13, 132, 117, 0.95)',
-      borderRadius: '10px',
-      boxShadow: '0 0 0 6px rgba(13, 132, 117, 0.18), 0 0 30px rgba(13, 132, 117, 0.35)',
-      transition: 'left 0.25s ease, top 0.25s ease, width 0.25s ease, height 0.25s ease, opacity 0.25s ease',
-      opacity: '0',
+      left: (rect.x - padX) + 'px',
+      top: (rect.y - padY) + 'px',
+      width: (rect.width + padX * 2) + 'px',
+      height: (rect.height + padY * 2) + 'px',
+      border: '4px solid rgba(13, 132, 117, 1)',
+      borderRadius: '12px',
+      boxShadow: '0 0 0 8px rgba(13, 132, 117, 0.22), 0 0 36px rgba(13, 132, 117, 0.5)',
       animation: 'demoBreathe 2.4s ease-in-out infinite',
+      opacity: '1',
+      transition: 'opacity 0.25s ease',
     });
-
-    // Inject keyframes once
-    if (!document.getElementById('__demo_kf')) {
-      const style = document.createElement('style');
-      style.id = '__demo_kf';
-      style.textContent = `@keyframes demoBreathe {
-        0%, 100% { box-shadow: 0 0 0 6px rgba(13, 132, 117, 0.18), 0 0 30px rgba(13, 132, 117, 0.35); }
-        50%      { box-shadow: 0 0 0 10px rgba(13, 132, 117, 0.10), 0 0 44px rgba(13, 132, 117, 0.55); }
-      }`;
-      document.head.appendChild(style);
-    }
-
     ROOT.appendChild(box);
 
-    // Optional label that sits above the highlight box, brand-colored
-    let label = null;
     if (labelText) {
-      label = document.createElement('div');
+      const label = document.createElement('div');
       label.id = '__demo_highlight_label';
       Object.assign(label.style, {
         position: 'fixed',
         pointerEvents: 'none',
         zIndex: '2147483641',
-        background: 'rgba(13, 132, 117, 0.96)',
+        background: 'rgba(13, 132, 117, 1)',
         color: 'white',
-        padding: '8px 14px',
+        padding: '10px 18px',
         borderRadius: '8px',
         fontFamily: '-apple-system, BlinkMacSystemFont, Inter, sans-serif',
-        fontSize: '14px',
-        fontWeight: '600',
-        boxShadow: '0 6px 18px rgba(13, 132, 117, 0.35)',
+        fontSize: '16px',
+        fontWeight: '700',
+        letterSpacing: '0.01em',
+        boxShadow: '0 10px 28px rgba(13, 132, 117, 0.5)',
+        maxWidth: '520px',
+        textAlign: 'center',
+        lineHeight: '1.3',
         opacity: '0',
         transition: 'opacity 0.3s ease, transform 0.3s ease',
         transform: 'translateY(6px)',
-        maxWidth: '420px',
-        textAlign: 'center',
-        lineHeight: '1.3',
+        animation: 'demoBob 3s ease-in-out infinite',
       });
       label.textContent = labelText;
       ROOT.appendChild(label);
-    }
-
-    function place() {
-      const r = target.getBoundingClientRect();
-      const padX = 8, padY = 6;
-      box.style.left = (r.left - padX) + 'px';
-      box.style.top = (r.top - padY) + 'px';
-      box.style.width = (r.width + padX * 2) + 'px';
-      box.style.height = (r.height + padY * 2) + 'px';
-      box.style.opacity = '1';
-      if (label) {
-        // Place label above the highlight if there's room, else below
-        const labelGap = 12;
+      requestAnimationFrame(() => {
+        const lr = label.getBoundingClientRect();
+        const padOut = 18;
+        let lx = rect.x + (rect.width / 2) - (lr.width / 2);
+        lx = Math.max(16, Math.min(window.innerWidth - lr.width - 16, lx));
+        let ly = rect.y - lr.height - padOut - padY;
+        if (ly < 28) ly = rect.y + rect.height + padOut + padY;
+        label.style.left = lx + 'px';
+        label.style.top = ly + 'px';
         label.style.opacity = '1';
         label.style.transform = 'translateY(0)';
-        // Measure label after it's visible
-        requestAnimationFrame(() => {
-          const lr = label.getBoundingClientRect();
-          let lx = r.left + (r.width / 2) - (lr.width / 2);
-          lx = Math.max(16, Math.min(window.innerWidth - lr.width - 16, lx));
-          let ly = r.top - lr.height - labelGap - padY;
-          if (ly < 24) ly = r.bottom + padY + labelGap;
-          label.style.left = lx + 'px';
-          label.style.top = ly + 'px';
-        });
-      }
+      });
     }
-
-    place();
-    highlightObserver = setInterval(place, 100);
     return true;
   };
 
   window.__unhighlight = () => {
-    if (highlightObserver) { clearInterval(highlightObserver); highlightObserver = null; }
-    const b = document.getElementById('__demo_highlight');
-    const l = document.getElementById('__demo_highlight_label');
-    const s = document.getElementById('__demo_spotlight');
-    if (b) b.remove();
-    if (l) l.remove();
-    if (s) s.remove();
+    const ids = ['__demo_highlight', '__demo_highlight_label', '__demo_spotlight'];
+    ids.forEach(id => { const el = document.getElementById(id); if (el) el.remove(); });
   };
 
-  // ── Spotlight mode ──
-  // Dims the entire screen except a rectangular cutout over the target
-  // element. Built from an SVG <mask>, so the cutout has a soft
-  // feathered edge. The narrator can talk over it without the rest of
-  // the screen competing for attention.
-  let spotlightObserver = null;
-  window.__spotlight = (selector, labelText) => {
+  // ── Spotlight mode (rect-driven, div-based) ──
+  // Dims the whole page using four absolutely-positioned divs that
+  // tile around the cutout rect. Adds a teal glow ring directly over
+  // the cutout. Pure DOM — no SVG namespace quirks, no innerHTML
+  // SVG-parsing surprises. Bulletproof across Chromium versions.
+  window.__spotlightRect = (rect, labelText) => {
     window.__unhighlight();
-    const target = document.querySelector(selector);
-    if (!target) return false;
+    if (!rect) return false;
 
     const layer = document.createElement('div');
     layer.id = '__demo_spotlight';
@@ -330,78 +342,85 @@ INJECT_JS = r"""
       position: 'fixed',
       inset: '0',
       pointerEvents: 'none',
-      zIndex: '2147483639',
-      opacity: '0',
-      transition: 'opacity 0.3s ease',
+      zIndex: '2147483642',
     });
-    layer.innerHTML = `
-      <svg width="100%" height="100%" viewBox="0 0 ${window.innerWidth} ${window.innerHeight}" preserveAspectRatio="none" xmlns="http://www.w3.org/2000/svg">
-        <defs>
-          <mask id="__demo_mask">
-            <rect width="100%" height="100%" fill="white"/>
-            <rect id="__demo_cutout" x="0" y="0" width="0" height="0" rx="14" ry="14" fill="black"/>
-          </mask>
-        </defs>
-        <rect width="100%" height="100%" fill="rgba(7, 18, 35, 0.72)" mask="url(#__demo_mask)"/>
-        <rect id="__demo_glow" x="0" y="0" width="0" height="0" rx="14" ry="14" fill="none" stroke="rgba(13, 132, 117, 0.95)" stroke-width="3"/>
-      </svg>`;
+    const pad = 14;
+    const x = Math.max(0, rect.x - pad);
+    const y = Math.max(0, rect.y - pad);
+    const w = rect.width + pad * 2;
+    const h = rect.height + pad * 2;
+    const dim = 'rgba(3, 10, 22, 0.82)';
+
+    const make = (style) => {
+      const d = document.createElement('div');
+      Object.assign(d.style, { position: 'fixed', background: dim, pointerEvents: 'none' }, style);
+      layer.appendChild(d);
+      return d;
+    };
+    // top, bottom, left, right tiles
+    make({ left: '0', top: '0', width: '100%', height: y + 'px' });
+    make({ left: '0', top: (y + h) + 'px', width: '100%', bottom: '0' });
+    make({ left: '0', top: y + 'px', width: x + 'px', height: h + 'px' });
+    make({ left: (x + w) + 'px', top: y + 'px', right: '0', height: h + 'px' });
+
+    // Teal glow ring around the cutout
+    const ring = document.createElement('div');
+    Object.assign(ring.style, {
+      position: 'fixed',
+      left: x + 'px',
+      top: y + 'px',
+      width: w + 'px',
+      height: h + 'px',
+      border: '4px solid rgba(13, 132, 117, 1)',
+      borderRadius: '16px',
+      boxShadow:
+        '0 0 0 2px rgba(255,255,255,0.05), 0 0 36px rgba(13, 132, 117, 0.8), inset 0 0 24px rgba(13, 132, 117, 0.25)',
+      pointerEvents: 'none',
+      animation: 'demoBreathe 2.6s ease-in-out infinite',
+    });
+    layer.appendChild(ring);
+
     ROOT.appendChild(layer);
 
-    let label = null;
     if (labelText) {
-      label = document.createElement('div');
+      const label = document.createElement('div');
       label.id = '__demo_highlight_label';
       Object.assign(label.style, {
         position: 'fixed',
         pointerEvents: 'none',
-        zIndex: '2147483641',
-        background: 'rgba(13, 132, 117, 0.96)',
+        zIndex: '2147483643',
+        background: 'rgba(13, 132, 117, 1)',
         color: 'white',
-        padding: '10px 16px',
-        borderRadius: '8px',
+        padding: '14px 22px',
+        borderRadius: '10px',
         fontFamily: '-apple-system, BlinkMacSystemFont, Inter, sans-serif',
-        fontSize: '15px',
-        fontWeight: '600',
-        boxShadow: '0 8px 22px rgba(13, 132, 117, 0.45)',
-        opacity: '0',
-        transition: 'opacity 0.3s ease',
-        maxWidth: '460px',
+        fontSize: '18px',
+        fontWeight: '700',
+        letterSpacing: '0.01em',
+        boxShadow: '0 14px 36px rgba(13, 132, 117, 0.55), 0 0 0 1px rgba(255,255,255,0.08)',
+        maxWidth: '620px',
         textAlign: 'center',
         lineHeight: '1.3',
+        opacity: '0',
+        transition: 'opacity 0.35s ease, transform 0.35s ease',
+        transform: 'translateY(8px)',
+        animation: 'demoBob 3s ease-in-out infinite',
       });
       label.textContent = labelText;
       ROOT.appendChild(label);
-    }
-
-    function place() {
-      const r = target.getBoundingClientRect();
-      const pad = 10;
-      const x = r.left - pad, y = r.top - pad;
-      const w = r.width + pad * 2, h = r.height + pad * 2;
-      const cutout = layer.querySelector('#__demo_cutout');
-      const glow = layer.querySelector('#__demo_glow');
-      if (cutout) {
-        cutout.setAttribute('x', x); cutout.setAttribute('y', y);
-        cutout.setAttribute('width', w); cutout.setAttribute('height', h);
-      }
-      if (glow) {
-        glow.setAttribute('x', x); glow.setAttribute('y', y);
-        glow.setAttribute('width', w); glow.setAttribute('height', h);
-      }
-      layer.style.opacity = '1';
-      if (label) {
-        label.style.opacity = '1';
+      requestAnimationFrame(() => {
         const lr = label.getBoundingClientRect();
-        let lx = r.left + (r.width / 2) - (lr.width / 2);
+        const gap = 26;
+        let lx = rect.x + (rect.width / 2) - (lr.width / 2);
         lx = Math.max(16, Math.min(window.innerWidth - lr.width - 16, lx));
-        let ly = r.bottom + 22;
-        if (ly + lr.height > window.innerHeight - 100) ly = r.top - lr.height - 22;
+        let ly = rect.y + rect.height + gap;
+        if (ly + lr.height > window.innerHeight - 120) ly = rect.y - lr.height - gap;
         label.style.left = lx + 'px';
         label.style.top = ly + 'px';
-      }
+        label.style.opacity = '1';
+        label.style.transform = 'translateY(0)';
+      });
     }
-    place();
-    spotlightObserver = setInterval(place, 120);
     return true;
   };
 
@@ -434,6 +453,12 @@ INJECT_JS = r"""
       });
     });
   };
+  } // ─── end install() ───
+  if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', install, { once: true });
+  } else {
+    install();
+  }
 })();
 """
 
@@ -547,53 +572,85 @@ def caption_clear(page: Page) -> None:
     page.evaluate("() => window.__caption_clear && window.__caption_clear()")
 
 
+def _resolve_rect(page: Page, selector: str) -> dict | None:
+    """Resolve a Playwright selector (supports :has-text() etc.) to a
+    viewport-coordinate rect. The browser's document.querySelector
+    can't parse Playwright pseudo-selectors, so we resolve in Python
+    and hand the JS overlay layer absolute coordinates."""
+    try:
+        loc = page.locator(selector).first
+        loc.wait_for(state="attached", timeout=1500)
+        box = loc.bounding_box()
+    except Exception:
+        return None
+    if not box:
+        return None
+    return {"x": box["x"], "y": box["y"], "width": box["width"], "height": box["height"]}
+
+
 def highlight(page: Page, selector: str, label: str | None = None) -> bool:
+    rect = _resolve_rect(page, selector)
+    if not rect:
+        print(f"    ! highlight selector not found: {selector}")
+        return False
     return bool(
         page.evaluate(
-            "([s, l]) => window.__highlight && window.__highlight(s, l)",
-            [selector, label],
+            "([r, l]) => window.__highlightRect && window.__highlightRect(r, l)",
+            [rect, label],
         )
     )
 
 
 def spotlight(page: Page, selector: str, label: str | None = None) -> bool:
-    return bool(
-        page.evaluate(
-            "([s, l]) => window.__spotlight && window.__spotlight(s, l)",
-            [selector, label],
-        )
+    rect = _resolve_rect(page, selector)
+    if not rect:
+        print(f"    ! spotlight selector not found: {selector}")
+        return False
+    diag = page.evaluate(
+        "([r, l]) => {"
+        " const fn = window.__spotlightRect;"
+        " if (typeof fn !== 'function') return {ok:false, why:'fn-missing', keys: Object.keys(window).filter(k=>k.startsWith('__')).join(',')};"
+        " try { const r2 = fn(r, l); return {ok:true, ret: r2, layer: !!document.getElementById('__demo_spotlight')}; }"
+        " catch(e) { return {ok:false, why:'threw', msg: String(e)}; }"
+        "}",
+        [rect, label],
     )
+    print(
+        f"    · spotlight {selector!r:45s} rect=({rect['x']:.0f},{rect['y']:.0f},{rect['width']:.0f}×{rect['height']:.0f}) "
+        f"diag={diag}"
+    )
+    return bool(diag.get("ok"))
 
 
 def unhighlight(page: Page) -> None:
     page.evaluate("() => window.__unhighlight && window.__unhighlight()")
 
 
-def fade_out(page: Page, duration_ms: int = 320) -> None:
+def fade_out(page: Page, duration_ms: int = 550) -> None:
     page.evaluate(
         "(d) => window.__fade && window.__fade(true, d)", duration_ms
     )
-    time.sleep(duration_ms / 1000 + 0.05)
+    time.sleep(duration_ms / 1000 + 0.1)
 
 
-def fade_in(page: Page, duration_ms: int = 320) -> None:
+def fade_in(page: Page, duration_ms: int = 550) -> None:
     page.evaluate(
         "(d) => window.__fade && window.__fade(false, d)", duration_ms
     )
-    time.sleep(duration_ms / 1000 + 0.05)
+    time.sleep(duration_ms / 1000 + 0.1)
 
 
-def transition(page: Page, duration_ms: int = 280) -> None:
-    """Quick fade-to-black-and-back at a scene boundary."""
+def transition(page: Page, duration_ms: int = 500) -> None:
+    """Fade-to-black-and-back at a scene boundary."""
     fade_out(page, duration_ms)
     fade_in(page, duration_ms)
 
 
-def hover_smooth(page: Page, x: float, y: float, steps: int = 42) -> None:
+def hover_smooth(page: Page, x: float, y: float, steps: int = 55) -> None:
     page.mouse.move(x, y, steps=steps)
 
 
-def hover_element(page: Page, selector: str, steps: int = 42) -> tuple[float, float] | None:
+def hover_element(page: Page, selector: str, steps: int = 55) -> tuple[float, float] | None:
     try:
         el = page.query_selector(selector)
     except Exception:
@@ -609,7 +666,7 @@ def hover_element(page: Page, selector: str, steps: int = 42) -> tuple[float, fl
     return cx, cy
 
 
-def click_element(page: Page, selector: str, steps: int = 42) -> None:
+def click_element(page: Page, selector: str, steps: int = 55) -> None:
     coords = hover_element(page, selector, steps=steps)
     if coords:
         page.mouse.down()
@@ -684,20 +741,26 @@ def scene_provider_login(page: Page, d: dict) -> None:
     t0 = time.time()
     goto(page, f"{APP}/login")
     caption(page, "Entramos como proveedor.", "ESCENA 2 · PROVEEDOR")
-    settle(page, 0.6)
-    # Highlight the subtitle the narrator references
+    settle(page, 0.5)
+    # Ensure the form is mounted before we try to highlight or type
+    try:
+        page.wait_for_selector("#login-email", state="visible", timeout=10000)
+    except Exception:
+        pass
+    settle(page, 0.3)
+    # Highlight the login form's helper subtitle the narrator references
     highlight(
         page,
-        "p:has-text('credenciales')",
-        "Si tu acceso es temporal, te pedimos rotar la contraseña",
+        "form >> p",
+        "Si tu acceso es temporal, rotamos la contraseña",
     )
-    settle(page, 3.5)
+    settle(page, 2.5)
     unhighlight(page)
-    type_into(page, "#login-email", "boss.demo@checkwise.mx", delay_ms=55)
-    type_into(page, "#login-password", "BossDemo!2026", delay_ms=55)
-    settle(page, 0.3)
+    type_into(page, "#login-email", "boss.demo@checkwise.mx", delay_ms=42)
+    type_into(page, "#login-password", "BossDemo!2026", delay_ms=42)
+    settle(page, 0.2)
     hover_element(page, "button[type='submit']")
-    settle(page, 0.3)
+    settle(page, 0.2)
     page.locator("button[type='submit']").click()
     page.wait_for_url("**/portal/entra-a-tu-espacio", timeout=15000)
     used = time.time() - t0
@@ -708,15 +771,15 @@ def scene_provider_login(page: Page, d: dict) -> None:
 def scene_workspace_entry(page: Page, d: dict) -> None:
     t0 = time.time()
     caption(page, "Confirmación de identidad antes del dashboard.", "ESCENA 2 · PROVEEDOR")
-    settle(page, 0.5)
+    settle(page, 0.4)
     highlight(page, "h2:has-text('Confirma')", "Onramp humano")
-    settle(page, 2.5)
+    settle(page, 2.2)
     unhighlight(page)
     page.fill("#ws-first-name", "Marina")
     page.fill("#ws-last-name", "Quintero")
-    settle(page, 0.6)
+    settle(page, 0.4)
     hover_element(page, "form button[type='submit']")
-    settle(page, 0.3)
+    settle(page, 0.2)
     page.locator("form button[type='submit']").click()
     try:
         page.wait_for_url("**/portal/dashboard", timeout=20000)
@@ -798,17 +861,17 @@ def scene_print_page(page: Page, d: dict, report_id: str) -> None:
 
 def scene_client_login(page: Page, d: dict) -> None:
     t0 = time.time()
-    fade_out(page, 320)
+    fade_out(page, 600)
     page.evaluate("() => window.localStorage.clear()")
     goto(page, f"{APP}/login")
-    fade_in(page, 320)
+    fade_in(page, 600)
     caption(page, "Cambio de rol: ahora como cliente.", "ESCENA 7 · CLIENTE")
-    settle(page, 0.6)
-    type_into(page, "#login-email", "cliente.demo@checkwise.mx", delay_ms=50)
-    type_into(page, "#login-password", "ClienteDemo!2026", delay_ms=50)
-    settle(page, 0.3)
+    settle(page, 0.4)
+    type_into(page, "#login-email", "cliente.demo@checkwise.mx", delay_ms=38)
+    type_into(page, "#login-password", "ClienteDemo!2026", delay_ms=38)
+    settle(page, 0.2)
     hover_element(page, "button[type='submit']")
-    settle(page, 0.3)
+    settle(page, 0.2)
     page.locator("button[type='submit']").click()
     page.wait_for_url("**/client/dashboard", timeout=15000)
     used = time.time() - t0
@@ -847,17 +910,17 @@ def scene_vendor_detail(page: Page, d: dict, vendor_id: str) -> None:
 
 def scene_admin_login(page: Page, d: dict) -> None:
     t0 = time.time()
-    fade_out(page, 320)
+    fade_out(page, 600)
     page.evaluate("() => window.localStorage.clear()")
     goto(page, f"{APP}/login")
-    fade_in(page, 320)
+    fade_in(page, 600)
     caption(page, "Tercer rol: revisor interno de Legal Shelf.", "ESCENA 10 · REVISOR")
-    settle(page, 0.6)
-    type_into(page, "#login-email", "ada@legalshelf.mx", delay_ms=55)
-    type_into(page, "#login-password", "demo1234", delay_ms=55)
-    settle(page, 0.3)
+    settle(page, 0.4)
+    type_into(page, "#login-email", "ada@legalshelf.mx", delay_ms=42)
+    type_into(page, "#login-password", "demo1234", delay_ms=42)
+    settle(page, 0.2)
     hover_element(page, "button[type='submit']")
-    settle(page, 0.3)
+    settle(page, 0.2)
     page.locator("button[type='submit']").click()
     page.wait_for_url("**/admin/reviewer", timeout=15000)
     used = time.time() - t0
