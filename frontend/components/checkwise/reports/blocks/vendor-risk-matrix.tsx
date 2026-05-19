@@ -140,7 +140,10 @@ export function VendorRiskMatrixBlock({
 
   if (rows.length === 0) {
     return (
-      <section className="space-y-2 py-2">
+      <section
+        className="space-y-2 py-2"
+        data-block-type="vendor_risk_matrix"
+      >
         <div className="rounded-sm border border-dashed border-[color:var(--border-subtle)] p-6 text-center">
           <Table
             className="mx-auto mb-2 h-5 w-5 text-[color:var(--text-tertiary)]"
@@ -159,7 +162,10 @@ export function VendorRiskMatrixBlock({
   }
 
   return (
-    <section className="space-y-2 py-2">
+    <section
+      className="space-y-2 py-2"
+      data-block-type="vendor_risk_matrix"
+    >
       <div className="overflow-x-auto border-t border-b border-[color:var(--border-default)]">
         <table className="min-w-full text-[13px]">
           <thead>

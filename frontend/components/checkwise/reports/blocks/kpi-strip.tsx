@@ -106,7 +106,10 @@ export function KpiStripBlock({
     resolved.find((r) => r.metric_key === key)?.value ?? null;
 
   return (
-    <section className="space-y-2 py-2">
+    <section
+      className="space-y-2 py-2 print:break-inside-avoid"
+      data-block-type="kpi_strip"
+    >
       <div className="border-t border-b border-[color:var(--border-subtle)] py-3">
         <div className="cw-metadata-strip">
           {metrics.map((m) => {
@@ -124,7 +127,7 @@ export function KpiStripBlock({
       </div>
 
       {editable && (
-        <div className="flex items-center justify-between text-[11px] text-[color:var(--text-tertiary)]">
+        <div className="flex items-center justify-between text-[11px] text-[color:var(--text-tertiary)] print:hidden">
           <span>
             {metrics.length} métrica{metrics.length === 1 ? "" : "s"}. Configurable
             desde el inspector.

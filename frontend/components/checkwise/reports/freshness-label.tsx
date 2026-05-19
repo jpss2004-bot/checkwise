@@ -108,7 +108,7 @@ export function FreshnessLabel({
           type="button"
           onClick={actions!.onRefreshData}
           disabled={actions!.refreshingData}
-          className="inline-flex items-center gap-1 rounded-sm border border-[color:var(--border-subtle)] px-1.5 py-0.5 normal-case tracking-normal text-[color:var(--text-secondary)] hover:bg-[color:var(--surface-hover)] hover:text-[color:var(--text-primary)] disabled:opacity-50"
+          className="inline-flex items-center gap-1 rounded-sm border border-[color:var(--border-subtle)] px-1.5 py-0.5 normal-case tracking-normal text-[color:var(--text-secondary)] hover:bg-[color:var(--surface-hover)] hover:text-[color:var(--text-primary)] disabled:opacity-50 print:hidden"
           aria-label="Actualizar con datos de hoy"
           title="Actualizar este bloque con datos de hoy (refresca todo el reporte)"
         >

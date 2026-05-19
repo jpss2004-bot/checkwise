@@ -88,7 +88,10 @@ export function ExecutiveSummaryBlock({
   ];
 
   return (
-    <section className="space-y-4 py-2">
+    <section
+      className="space-y-4 py-2 print:break-inside-avoid"
+      data-block-type="executive_summary"
+    >
       <div className="space-y-2">
         <div className="cw-metadata-strip">
           <div>
@@ -141,7 +144,7 @@ export function ExecutiveSummaryBlock({
       )}
 
       {editable && (
-        <div className="flex items-center gap-2 text-[11px] text-[color:var(--text-tertiary)]">
+        <div className="flex items-center gap-2 text-[11px] text-[color:var(--text-tertiary)] print:hidden">
           <ChartLineUp className="h-3 w-3" weight="regular" aria-hidden="true" />
           <span>
             En Phase 3.3 este resumen se generará automáticamente desde los datos

@@ -57,7 +57,7 @@ export function BlockHeader({
         )}
         <IconComponent className="h-3.5 w-3.5" weight="regular" aria-hidden="true" />
         <span className="cw-eyebrow">{label}</span>
-        <span className="font-mono text-[10px] text-[color:var(--text-tertiary)]">
+        <span className="cw-print-meta-code font-mono text-[10px] text-[color:var(--text-tertiary)] print:hidden">
           {type}
         </span>
       </div>
@@ -119,7 +119,11 @@ export function BlockHeader({
         </div>
       )}
       {!editable && (
-        <ArrowsOutSimple className="h-3.5 w-3.5" weight="regular" aria-hidden="true" />
+        <ArrowsOutSimple
+          className="h-3.5 w-3.5 print:hidden"
+          weight="regular"
+          aria-hidden="true"
+        />
       )}
     </div>
   );

@@ -1,5 +1,7 @@
 # Provider Reports — Session Handoff (2026-05-18)
 
+> Updated 2026-05-18 with P1.8 (PDF preview/export polish).
+
 Concise resume note. Companion to
 [PROVIDER_REPORTS_REDESIGN_PLAN.md](PROVIDER_REPORTS_REDESIGN_PLAN.md)
 (the full design plan) and
@@ -54,6 +56,70 @@ Reuses `GET /api/v1/portal/workspaces/{id}/dashboard` (same canonical
 `DashboardUpcomingDeadline` so the urgency bar can bucket without
 re-parsing `period_key` client-side.
 
+### P1.8 — PDF preview/export polish
+
+Browser-native save-as-PDF. No new dependency, no server-side renderer.
+
+**Toolbar (all three shells):** `ReportEditor` replaces the single
+`Imprimir` action with two explicit affordances that link to the
+shared `printHref` (the chrome-less `/portal/reports/[id]/print`
+route every shell already wires):
+
+- **Vista previa PDF** → opens the print route in a new tab.
+- **Descargar PDF** → opens the print route in a new tab with
+  `?autoprint=1`. The print page reads the query param and fires
+  `window.print()` ~350 ms after the canvas has mounted, so the
+  browser's native save-as-PDF dialog opens with fully-rendered
+  content.
+
+**Print page (`/portal/reports/[id]/print`):** rewritten print
+stylesheet with:
+
+- `@page` running header (report title + `audiencia · vN`) and
+  footer (`Página N de M` + brand line) so every printed sheet is
+  self-identifying.
+- `@page :first` empty-header override so the cover doesn't double
+  up on the running title.
+- Per-block-type page-break rules driven by `data-block-type`:
+  `executive_summary` (when first) breaks after itself so it acts as
+  a cover; `prioritized_actions` breaks before itself so decisions
+  open on a fresh page; `vendor_risk_matrix` allows long tables to
+  flow while keeping each `<tr>` together.
+- A **printed freshness seal** in the cover: `Datos al <fecha>` is
+  derived from the first block carrying `data.fetched_at`, with
+  fallback to `Generado el <now>` if the report has no data-bearing
+  block. This means a paper copy is always self-dated independent of
+  the print-time clock.
+- Card-tint backgrounds (`--surface-elevated`, `--surface-muted`,
+  `--status-ai-bg`) collapse to transparent in print so chips and
+  panels degrade safely to a white sheet without ghost rectangles.
+
+**Block hardening** (defense-in-depth, even though the print page
+mounts `Canvas` with `editable=false`):
+
+- `executive_summary`, `kpi_strip`, `vendor_risk_matrix`,
+  `ai_recommendation` now expose `data-block-type` on their `<section>`
+  wrapper (the four provider blocks already did).
+- Editable-only hints inside `executive_summary` and `kpi_strip` (the
+  "En Phase 3.3…" copy + "Cambiar formato" button) now carry
+  `print:hidden`.
+- `<FreshnessLabel />`'s inline `Actualizar` chip now carries
+  `print:hidden` — already dropped because the print page omits the
+  `ReportActionsContext.Provider`, but belt-and-suspenders.
+- `<BlockHeader />`'s internal type code (`executive_summary`,
+  `kpi_strip`, …) and the `ArrowsOutSimple` glyph that survives into
+  non-edit mode now carry `print:hidden`.
+
+**What didn't change** in P1.8:
+- No server-side PDF rendering (no Playwright, no WeasyPrint, no
+  headless Chrome).
+- No new npm dependency.
+- No DB schema, migrations, env vars, or settings changes.
+- `dashboard_compute.py` untouched.
+- The refresh-data endpoint and the existing print route (URL,
+  shell-less layout, `Canvas` mount without `ReportActionsContext`)
+  are unchanged in shape.
+
 ### P1.7 — `Actualizar con datos de hoy` + freshness labels
 - New `POST /api/v1/reports/{id}/refresh-data` re-runs every block's
   deterministic data fetcher without re-prompting the LLM. Persists
@@ -85,17 +151,14 @@ and client report use.
 
 ---
 
-## Verification gates (final, on full P1.7 state)
+## Verification gates (final, on full P1.8 state)
 
 - `ruff check app tests` → All checks passed.
-- `pytest tests/` (excluding e2e) → **427 passed**, 2 unrelated
-  deprecation warnings.
-- `python -c "import app.main"` → ok.
+- `pytest tests/test_reports*.py tests/test_portal_dashboard.py`
+  → **171 passed**, 2 unrelated deprecation warnings.
 - `npx tsc --noEmit` → exit 0.
-- `npx eslint .` → 0 errors, 3 pre-existing warnings unrelated to
-  this work.
-- `npm run build` → not run (tsc validated types; no dev server to
-  preserve).
+- `npx eslint . --max-warnings=999` → 0 errors, 3 pre-existing
+  warnings unrelated to this work.
 
 ---
 
@@ -135,20 +198,22 @@ and client report use.
 
 ## Recommended next slice
 
-**P1.8 — PDF preview/export polish**
+**P1.9 — Authenticated print-route smoke + visual regression**
 
-- Toolbar `Vista previa PDF` + `Descargar PDF` actions on the report
-  editor.
-- Print stylesheet pass: `<FreshnessLabel />` already prints cleanly
-  ("Datos al …" is plain text); the inline "Actualizar" chip
-  naturally drops because its button parent gets `print:hidden` in
-  P1.8.
-- Browser save-as-PDF workflow (no server-side PDF rendering unless
-  strictly necessary).
-- Make `data-block-type` attributes available on every block wrapper
-  so the print stylesheet can target specific blocks for page-break
-  rules.
+P1.8 was validated via type-check, lint, 171-test pytest gauntlet,
+and chunk-level inspection of the compiled bundle. Live in-browser
+print preview was blocked again by the same Postgres-not-running /
+auth wall caveat (see "Known caveats"). The smallest next slice
+that closes that gap:
 
-P1.7's freshness labels were intentionally built as static semantic
-HTML so the printed report carries data-as-of context without the
-interactive chrome.
+- Local seed-and-login docs (or an `npm run dev:demo` wrapper) so
+  the print route can be visited authenticated and the
+  `window.print()` dialog can be smoke-tested end-to-end.
+- A snapshot test for the print page (Playwright trace or a
+  `print-friendly` Storybook story) that asserts the page-break and
+  running-header rules without depending on the dev cluster.
+
+Optional companion: an export breadcrumb in `ReportVersion` (or a
+side-channel audit log) so when "Descargar PDF" fires we can attach
+an "exported by user X at time T" line to the version history. P1.8
+deliberately did not introduce one (no schema changes).

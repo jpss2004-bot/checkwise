@@ -56,7 +56,10 @@ export function AiRecommendationBlock({
   const upstream = block.data?.upstream_block_summaries ?? [];
 
   return (
-    <section className="space-y-3 py-2">
+    <section
+      className="space-y-3 py-2 print:break-inside-avoid"
+      data-block-type="ai_recommendation"
+    >
       <div className="cw-metadata-strip">
         <div>
           <span className="cw-eyebrow">Prioridades</span>

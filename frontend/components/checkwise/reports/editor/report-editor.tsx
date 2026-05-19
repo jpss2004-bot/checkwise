@@ -13,8 +13,9 @@ import {
   CheckCircle,
   ChatCircle,
   CircleNotch,
+  DownloadSimple,
+  Eye,
   FloppyDisk,
-  Printer,
   Sparkle,
   WarningCircle,
   X,
@@ -385,10 +386,34 @@ export function ReportEditor({
               )}
               {refreshingData ? "Actualizando…" : "Actualizar con datos de hoy"}
             </Button>
-            <Button asChild variant="ghost" size="sm" title="Vista de impresión">
+            <Button
+              asChild
+              variant="ghost"
+              size="sm"
+              title="Abrir vista previa imprimible en una pestaña nueva"
+            >
               <Link href={printHref} target="_blank" rel="noopener noreferrer">
-                <Printer className="h-4 w-4" weight="bold" aria-hidden="true" />
-                Imprimir
+                <Eye className="h-4 w-4" weight="bold" aria-hidden="true" />
+                Vista previa PDF
+              </Link>
+            </Button>
+            <Button
+              asChild
+              variant="ghost"
+              size="sm"
+              title="Abrir vista de impresión y disparar Guardar como PDF"
+            >
+              <Link
+                href={`${printHref}?autoprint=1`}
+                target="_blank"
+                rel="noopener noreferrer"
+              >
+                <DownloadSimple
+                  className="h-4 w-4"
+                  weight="bold"
+                  aria-hidden="true"
+                />
+                Descargar PDF
               </Link>
             </Button>
             <Button
