@@ -70,8 +70,13 @@ export function FreshnessLabel({
   const fetched = parseTimestamp(fetchedAt);
 
   if (!fetched) {
+    // F3 (2026-05-19 visual audit): the "Sin sello de actualización"
+    // warning is only useful to an author who can hit Actualizar. In
+    // print / read-only mode (no ReportActionsContext provider), it
+    // reads as dev chrome — hide it entirely.
+    if (actions === null) return null;
     return (
-      <div className="flex items-center gap-1.5 text-[10px] font-mono uppercase tracking-wide text-[color:var(--text-tertiary)]">
+      <div className="flex items-center gap-1.5 text-[10px] font-mono uppercase tracking-wide text-[color:var(--text-tertiary)] print:hidden">
         <Clock className="h-3 w-3" weight="regular" aria-hidden="true" />
         Sin sello de actualización
       </div>

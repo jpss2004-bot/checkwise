@@ -246,11 +246,15 @@ export function ReportsListView({
             Tu rol todavía no tiene plantillas asignadas.
           </div>
         ) : (
+          // F4 (2026-05-19 visual audit): first preset is the recommended
+          // starting point. Visually distinguishing it gives the user a
+          // clear "empieza aquí" without an explicit instruction.
           <div className="grid grid-cols-1 gap-3 md:grid-cols-3">
-            {presets.map((p) => (
+            {presets.map((p, i) => (
               <PresetCard
                 key={p.id}
                 preset={p}
+                featured={i === 0}
                 creating={creating === p.id}
                 disabled={creating !== null && creating !== p.id}
                 onUse={() => onUsePreset(p)}
@@ -453,17 +457,31 @@ function SelectField({
 
 function PresetCard({
   preset,
+  featured,
   creating,
   disabled,
   onUse,
 }: {
   preset: ReportPresetSummary;
+  featured?: boolean;
   creating: boolean;
   disabled: boolean;
   onUse: () => void;
 }) {
   return (
-    <article className="flex h-full flex-col gap-2 rounded-md border border-[color:var(--border-default)] bg-[color:var(--surface-raised)] p-4 shadow-[var(--shadow-sm)]">
+    <article
+      className={
+        featured
+          ? "relative flex h-full flex-col gap-2 rounded-md border-2 border-[color:var(--text-ai)] bg-[color:var(--surface-raised)] p-4 shadow-[var(--shadow-md)] ring-1 ring-[color:var(--text-ai)]/15"
+          : "flex h-full flex-col gap-2 rounded-md border border-[color:var(--border-default)] bg-[color:var(--surface-raised)] p-4 shadow-[var(--shadow-sm)]"
+      }
+    >
+      {featured ? (
+        <span className="absolute -top-2 left-3 inline-flex items-center gap-1 rounded-full bg-[color:var(--text-ai)] px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-white">
+          <Sparkle className="h-3 w-3" weight="fill" aria-hidden="true" />
+          Empieza aquí
+        </span>
+      ) : null}
       <div className="flex items-center gap-2 text-[color:var(--text-ai)]">
         <Sparkle className="h-3.5 w-3.5" weight="fill" aria-hidden="true" />
         <span className="cw-eyebrow text-[color:var(--text-ai)]">

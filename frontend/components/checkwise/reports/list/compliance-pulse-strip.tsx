@@ -230,8 +230,11 @@ function PulseSkeleton() {
       aria-busy="true"
       className="space-y-3"
     >
-      <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-4">
-        {[0, 1, 2, 3].map((i) => (
+      <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-5">
+        <div
+          className="h-[148px] animate-pulse rounded-lg border border-[color:var(--border-default)] bg-[color:var(--surface-raised)] xl:col-span-2"
+        />
+        {[0, 1, 2].map((i) => (
           <div
             key={i}
             className="h-[148px] animate-pulse rounded-lg border border-[color:var(--border-default)] bg-[color:var(--surface-raised)]"
@@ -292,14 +295,21 @@ function PulseContent({
         </span>
       </header>
 
-      <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-4">
-        <SemaphoreCard
-          level={semaphore.level}
-          compliancePct={semaphore.compliance_pct}
-          onTrack={semaphore.on_track}
-          totalTracked={semaphore.total_tracked}
-          label={semaphore.label}
-        />
+      {/* F7 (2026-05-19 visual audit): break the 4-up equal grid that
+          gave every card identical weight. SemaphoreCard owns the
+          headline metric (cumplimiento %), so it takes 2 columns at
+          xl+ while the three secondaries share the remaining 3. The
+          eye anchors on the score first; everything else trails. */}
+      <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-5">
+        <div className="xl:col-span-2">
+          <SemaphoreCard
+            level={semaphore.level}
+            compliancePct={semaphore.compliance_pct}
+            onTrack={semaphore.on_track}
+            totalTracked={semaphore.total_tracked}
+            label={semaphore.label}
+          />
+        </div>
         <AttentionCard
           totalAttention={attention_today.length}
           blockingCount={blockingCount}
@@ -411,6 +421,8 @@ function AttentionCard({
   const isEmpty = totalAttention === 0;
   const tone = blockingCount > 0 ? "error" : isEmpty ? "success" : "warning";
 
+  // F7 follow-on: align the skeleton with the new 5-col + col-span-2
+  // layout so the initial paint doesn't reflow.
   // Bucket the top items by institution for a compact chip row.
   const institutions = useMemo(() => {
     const seen = new Map<string, number>();

@@ -95,9 +95,16 @@ await check(FRESHNESS, [
 ]);
 
 console.log("\n→ BlockHeader contract");
+// Updated 2026-05-19 (visual audit F1+F6): the whole BlockHeader is now
+// hidden in read-only/print mode via an early `if (!editable) return null;`.
+// The old per-element `print:hidden` rules became unnecessary because the
+// component never renders for print. The contract is therefore stronger:
+// the source must contain the early-return guard, and the label span must
+// still carry `print:hidden` as belt-and-braces for any future surface
+// that mounts the editor in print context.
 await check(BLOCK_HEADER, [
-  ["type-code label print:hidden", /cw-print-meta-code[\s\S]{0,200}print:hidden/],
-  ["non-edit glyph print:hidden", /ArrowsOutSimple[\s\S]{0,300}print:hidden/],
+  ["early-return when !editable", /if\s*\(\s*!editable\s*\)\s*return\s+null/],
+  ["label belt-and-braces print:hidden", /cw-eyebrow[\s\S]{0,80}print:hidden/],
 ]);
 
 console.log("\n→ Block data-block-type contract");

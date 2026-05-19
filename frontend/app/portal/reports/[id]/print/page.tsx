@@ -5,7 +5,6 @@ import Link from "next/link";
 import { useParams, useSearchParams } from "next/navigation";
 import {
   ArrowLeft,
-  Clock,
   Printer,
   Sparkle,
   WarningCircle,
@@ -197,13 +196,18 @@ export default function PrintPage() {
                 {generatedAtLabel}
               </span>
             </div>
+            {sealLabel && sealLabel !== generatedAtLabel ? (
+              <div>
+                <span className="cw-eyebrow">Datos al</span>
+                <span className="font-mono text-[11px] text-[color:var(--text-tertiary)]">
+                  {sealLabel}
+                </span>
+              </div>
+            ) : null}
           </div>
-          <p className="cw-print-seal mt-3 inline-flex items-center gap-1.5 rounded-sm border border-[color:var(--border-subtle)] bg-[color:var(--surface-muted,transparent)] px-2 py-1 font-mono text-[10px] uppercase tracking-wide text-[color:var(--text-tertiary)]">
-            <Clock className="h-3 w-3" weight="regular" aria-hidden="true" />
-            {sealLabel
-              ? `Datos al ${sealLabel}`
-              : `Generado el ${generatedAtLabel}`}
-          </p>
+          {/* F5 (2026-05-19 visual audit): removed the boxed
+              `cw-print-seal` paragraph that duplicated the "Generado" /
+              "Datos al" cells already in the metadata strip above. */}
         </header>
 
         <Canvas

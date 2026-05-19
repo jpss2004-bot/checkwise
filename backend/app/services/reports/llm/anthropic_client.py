@@ -33,7 +33,7 @@ class AnthropicLLMClient:
     """Real-Anthropic client. Holds a single SDK instance."""
 
     name = "anthropic"
-    planner_model = "claude-sonnet-4-5-20250929"
+    planner_model = "claude-sonnet-4-6"
     content_model = "claude-haiku-4-5-20251001"
 
     def __init__(self, api_key: str | None = None) -> None:
@@ -120,11 +120,23 @@ class AnthropicLLMClient:
         model: str | None = None,
         max_tokens: int = 1024,
     ) -> Iterable[str]:
+        # Cache the system prompt across per-block streams. A single
+        # report generation fires this method once per AI-aware block
+        # (executive_summary, ai_recommendation, …); the system prompt
+        # is identical across those calls, so the ephemeral 5-minute
+        # cache pays for itself from the second block onward.
+        system_param: list[dict[str, Any]] = [
+            {
+                "type": "text",
+                "text": system,
+                "cache_control": {"type": "ephemeral"},
+            },
+        ]
         try:
             with self._client.messages.stream(
                 model=model or self.content_model,
                 max_tokens=max_tokens,
-                system=system,
+                system=system_param,
                 messages=[{"role": "user", "content": user_prompt}],
             ) as stream:
                 yield from stream.text_stream

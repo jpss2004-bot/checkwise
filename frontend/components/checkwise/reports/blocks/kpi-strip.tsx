@@ -95,6 +95,39 @@ function formatValue(
   }
 }
 
+/**
+ * F2 (2026-05-19 visual audit): semantic color token for a metric value.
+ * Lets the headline number convey "safe / at-risk / blocked" without
+ * forcing the author to pick a color. Conservative defaults: most
+ * metrics stay neutral; only compliance %, at-risk counts, and overdue
+ * counts trigger colored output. Returns a CSS var name (caller wraps
+ * it in `color:var(...)`).
+ */
+function semanticToneFor(
+  metricKey: MetricKey,
+  value: number | null,
+): string {
+  if (value === null) return "var(--text-primary)";
+  switch (metricKey) {
+    case "completion_pct":
+    case "approved_pct":
+      if (value >= 80) return "var(--status-success-text)";
+      if (value >= 60) return "var(--status-warning-text)";
+      return "var(--status-error-text)";
+    case "vendors_at_risk":
+    case "overdue_count":
+      if (value === 0) return "var(--status-success-text)";
+      if (value <= 2) return "var(--status-warning-text)";
+      return "var(--status-error-text)";
+    case "days_to_next_deadline":
+      if (value > 14) return "var(--text-primary)";
+      if (value > 7) return "var(--status-warning-text)";
+      return "var(--status-error-text)";
+    default:
+      return "var(--text-primary)";
+  }
+}
+
 export function KpiStripBlock({
   block,
   editable,
@@ -112,12 +145,26 @@ export function KpiStripBlock({
     >
       <div className="border-t border-b border-[color:var(--border-subtle)] py-3">
         <div className="cw-metadata-strip">
-          {metrics.map((m) => {
+          {/* F2 (2026-05-19 visual audit): first metric gets hero treatment
+              (larger type, optional color). Secondaries keep the strip
+              row pattern but values pick up a semantic color from the
+              metric_key so the eye anchors on what matters.
+              Same data, sharper hierarchy. */}
+          {metrics.map((m, i) => {
             const value = valueFor(m.metric_key);
+            const tone = semanticToneFor(m.metric_key, value);
+            const isPrimary = i === 0;
             return (
               <div key={`${m.metric_key}-${m.label}`}>
                 <span className="cw-eyebrow">{m.label}</span>
-                <span className="font-mono text-[14px] font-semibold tabular-nums text-[color:var(--text-primary)]">
+                <span
+                  className={
+                    isPrimary
+                      ? "font-mono text-[22px] font-semibold leading-none tabular-nums"
+                      : "font-mono text-[14px] font-semibold tabular-nums"
+                  }
+                  style={{ color: tone }}
+                >
                   {formatValue(value, m.format)}
                 </span>
               </div>
