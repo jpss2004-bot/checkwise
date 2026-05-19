@@ -185,7 +185,7 @@ cd backend
 # Frontend
 cd frontend
 node_modules/.bin/tsc --noEmit
-node_modules/.bin/next lint --quiet
+node_modules/.bin/eslint . --quiet
 node_modules/.bin/next build
 ```
 

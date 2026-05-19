@@ -1,95 +1,128 @@
 # CheckWise — Next Session Handoff
 
-> **Last updated:** 2026-05-18
-> **Last activity:** Full system UX audit + 3 safe polish fixes (no commits yet)
-> **Companion doc:** [SYSTEM_UX_AUDIT_REPORT.md](SYSTEM_UX_AUDIT_REPORT.md)
-> **Prior handoff:** [PROVIDER_REPORTS_SESSION_HANDOFF.md](PROVIDER_REPORTS_SESSION_HANDOFF.md) (P1.1–P1.9)
+> **Last updated:** 2026-05-19
+> **Last activity:** Full readiness audit + 3 safe edits (CI eslint migration, README, two API-URL fallbacks). No commits yet.
+> **Authoritative report for this session:** [AUDIT_NEXT_SESSION_READINESS.md](AUDIT_NEXT_SESSION_READINESS.md)
+> **Prior session notes (kept for history):** [SYSTEM_UX_AUDIT_REPORT.md](SYSTEM_UX_AUDIT_REPORT.md) · [PROVIDER_REPORTS_SESSION_HANDOFF.md](PROVIDER_REPORTS_SESSION_HANDOFF.md)
 
 ---
 
-## Repo status
+## TL;DR
 
-- **Branch:** `main`, up to date with `origin/main`.
-- **Working tree:** dirty — uncommitted work from P1.8, P1.9, and this audit pass.
-- **Untracked:** `dev_demo.sh`, `frontend/scripts/check-print-contract.mjs`, `frontend/app/not-found.tsx`, `docs/SYSTEM_UX_AUDIT_REPORT.md`, this file.
-- **Local stack:** Docker Postgres up via `docker compose`. `dev_demo.sh` boots the full stack in one command.
-
----
-
-## What was audited this session
-
-Full end-to-end audit, live in-browser, as three roles:
-
-1. **Anonymous / first-time visitor** — `/`, `/login`, wrong-password error state, 404 path.
-2. **Internal admin (`ada@legalshelf.mx`)** — every `/admin/*` route + reviewer drill-down + admin report editor.
-3. **Provider (`boss.demo@checkwise.mx`)** — every `/portal/*` route including the workspace-entry contact-confirmation step.
-4. **Client (`cliente.demo@checkwise.mx`)** — every `/client/*` route + vendor detail drill-down.
-
-Captured live snapshots for ~26 distinct page states. Probed the backend at `/openapi.json` (58 paths, all 7 prefix groups verified). Smoke-tested logout, role-based redirects, and direct-URL access to protected routes.
+- **Repo is green.** `main` is at `f06108c`, in sync with `origin/main`. Working tree was clean at audit start.
+- **All checks pass:** ruff · 427/427 pytest · tsc · eslint · 29/29 `next build` · print contract.
+- **This pass produced 8 file changes** (3 small consistency fixes + 3 unused-import cleanups + 2 new docs). No commits made yet — see §"How to commit" below.
+- **Pre-existing local edits** in the working tree from before this audit: `scripts/record_demo.py` (cursor/animation rewrite), `scripts/finalize_demo.py` (modified), and untracked folder `docs/audit-screenshots/2026-05-18-system-audit/_raw_demo/`. Not from this audit — left alone.
+- **Recommended next coding action:** delete the 9 orphan frontend files documented in `AUDIT_NEXT_SESSION_READINESS.md` §5.4 as a single focused commit, then verify the gauntlet stays green.
 
 ---
 
-## What was fixed this session (3 small, safe polish edits)
+## What is stable (do not regress)
 
-| ID    | What                                                                | File                                                    |
-|-------|---------------------------------------------------------------------|---------------------------------------------------------|
-| I-02  | Branded Spanish 404 page (replaces Next.js default English shell)   | `frontend/app/not-found.tsx` (new)                      |
-| I-03  | Print page toolbar button shortened to "Imprimir"                   | `frontend/app/portal/reports/[id]/print/page.tsx`       |
-| I-06  | Block type-code label (`text`, `kpi_strip`, …) hidden in read-only views | `frontend/components/checkwise/reports/block-header.tsx` |
+- **Backend** — every route under `/api/v1/{auth,admin,client,compliance,endpoints,metadata_dry_run,portal,reports,reviewer}` is tested. 427 pytest assertions, 9 Alembic migrations applied through `0009_reports_core`.
+- **Frontend** — every page in `app/{admin,client,portal}/**` compiles and renders. Print-contract test guarantees that all 8 reports block types expose their `data-block-type` attribute.
+- **Auth + RBAC** — JWT (HS256), bcrypt(12) for staff; httpOnly signed cookie for portal sessions; `withOnboardingGate` + `withPortalSession` HOCs gate every protected portal route.
+- **Storage** — local-FS in dev, S3-compatible (R2/S3) for prod. Streamed upload with hash + size cap (15 MB · `.pdf` only).
+- **Dev-seed prod guard** — `backend/scripts/dev_seed.py:1018` refuses to run against non-local hosts. Documented after the 2026-05-18 P0.
 
-Each verified in the browser; full gauntlet (ruff, 171-test pytest, tsc, eslint, `npm run check:print`) passes.
+## What is unstable / not yet wired
 
----
+Mock-backed surfaces marked with `TODO[backend-integration]` in `frontend/lib/mock/*`, `frontend/lib/workspace/*`, `frontend/lib/api/portal-adapters.ts`. None block any user flow; they are V2.0/V2.1 deferred work scheduled as V2.2.
 
-## What still needs work (documented, deferred)
+| Area | What's still mocked | Next step |
+|---|---|---|
+| `/portal/workspaces/{id}/onboarding` adapter | `portal-adapters.ts` synthesises `why` / `format` / `next_action` / `reviewer_note` fields | Backend enrichment lands → drop the adapter |
+| Client dashboard / admin dashboard tiles | `lib/mock/*` (calendar, contact-requests, corrections, expediente, invitations) | Wire to real `/api/v1/clients/*` payloads |
+| Provider portal auth | V1.2 opaque `X-Workspace-Token` still in use | Replace with the JWT/RBAC stack already used by `/admin/*` |
+| Welcome email | template only (`frontend/lib/email/welcome.ts`) | Pick provider, add backend service |
 
-| ID    | Page                                | Severity | Why deferred                                                                                         |
-|-------|-------------------------------------|----------|------------------------------------------------------------------------------------------------------|
-| I-04  | `/admin/reviewer` table             | Medium   | Truncation at tablet portrait width — wants a coordinated responsive pass with design.              |
-| I-05  | `/admin/reviewer` tab list          | Low      | Same as I-04 — overflow on narrow viewports.                                                         |
-| I-07  | `/admin/dashboard`                  | Polish   | Single-column at desktop wastes width — layout decision.                                             |
-| I-08  | `/portal/*` help chip               | Polish   | Help-affordance placement is a cross-shell design call.                                              |
-| I-09  | AI buttons when LLM is mocked       | Low      | Behavior change rather than a fix; current banner copy is accurate.                                  |
+## What should NOT be touched yet
 
-None of these block a demo or a customer engagement.
-
----
-
-## What should happen next
-
-**Recommended priority order:**
-
-1. **(Optional, ~30 min) Commit + push the four uncommitted phases** so the audit + polish are durable:
-   - P1.8 toolbar/print
-   - P1.9 dev_demo + contract test
-   - System UX audit + 3 polish fixes (this session)
-   Several existing handoffs already describe the changes; the commits should be small and well-described.
-2. **(Next session, ~1 hr) Responsive cleanup pass.** Fix I-04 + I-05 + I-07 in one coordinated edit. Touches a real product surface, so do it in a focused session.
-3. **(Then, ~2 hr) P2.0 — Provider-block fixtures in `dev_seed.py`** (the deferred slice from the P1.9 handoff). None of the four provider blocks (`compliance_state` / `attention_list` / `upcoming_deadlines` / `prioritized_actions`) appear in any seeded report, so the most demo-valuable surface can't be eyeballed without the LLM planner. Carving them into the seed unblocks live print smoke.
-
-**Do NOT start "P1.6" in the next session** unless the polish/seed gaps are deemed less important. The original `PROVIDER_REPORTS_SESSION_HANDOFF.md` already shipped P1.6. The next slice is P2.0, not P1.6.
+- The `lib/mock/*` modules — they are intentionally still mocked; replace them as part of V2.2, not piecemeal.
+- The `X-Workspace-Token` portal-session token — substitution is a V2.2 migration that also requires a backend change.
+- `docs/audit-screenshots/2026-05-18-system-audit/` (~26 MB of binaries) — decide on an asset-storage strategy before any rearrangement; don't just `git rm`.
+- `scripts/record_demo.py` — has a local uncommitted edit not made by this audit.
 
 ---
 
-## How to get the stack running locally
+## How to run the stack locally
+
+**Recommended (one command):**
 
 ```sh
 ./dev_demo.sh
 ```
 
-That handles Docker → Postgres → migrate → seed → uvicorn + Next.js in one command. Then:
+Brings up Docker Postgres → migrates → seeds → starts uvicorn (`:8000`) and Next.js (`:3000`) with linked logs.
 
+**Two terminals:**
+
+```sh
+# T1: backend
+bash backend/scripts/dev_start.sh           # http://127.0.0.1:8000/docs
+
+# T2: frontend
+cd frontend && npm run dev                  # http://localhost:3000/
 ```
-http://localhost:3000/login
+
+**First-time setup:**
+
+```sh
+docker compose up -d postgres
+bash backend/scripts/dev_setup.sh           # venv, deps, alembic upgrade, seed
+cd frontend && npm install
 ```
 
-Demo accounts (also printed by `dev_demo.sh` on exit):
+**Reset DB:**
 
-| Role     | Email                          | Password         |
-|----------|--------------------------------|------------------|
-| Admin    | ada@legalshelf.mx              | demo1234         |
-| Provider | boss.demo@checkwise.mx         | BossDemo!2026    |
-| Client   | cliente.demo@checkwise.mx      | ClienteDemo!2026 |
+```sh
+bash backend/scripts/dev_reset.sh           # drop → migrate → seed
+```
+
+---
+
+## Demo credentials (from `backend/scripts/dev_seed.py`)
+
+| Role | Email | Password | Reaches |
+|---|---|---|---|
+| internal_admin · reviewer | `ada@legalshelf.mx` | `demo1234` | `/admin/*` + `/portal/*` (gate bypass) |
+| provider (full expediente, boss demo) | `boss.demo@checkwise.mx` | `BossDemo!2026` | `/portal/*` |
+| provider (first login, expediente pending) | `proveedor.demo@checkwise.mx` | `CheckWiseDemo!2026` (temp) | `/activate` → `/portal/onboarding` |
+| client_admin (V2.1) | `cliente.demo@checkwise.mx` | `ClienteDemo!2026` | `/client/*` (3-vendor portfolio) |
+
+Demo provider workspace token: `demo-token` (workspace `ws-demo-0001`).
+
+---
+
+## Environment variables you need
+
+Template at root: [`.env.example`](../.env.example). Highlights:
+
+- **Backend** (`backend/.env`):
+  - `DATABASE_URL` — required. Local default points at `docker compose` postgres.
+  - `CORS_ORIGINS` — comma-separated origins for the deployed frontend(s).
+  - `AUTH_JWT_SECRET` — must be 32+ chars in any non-local env. Default value contains "change-me".
+  - `STORAGE_BACKEND` — `local` in dev, `s3` in prod. Pair with `STORAGE_BUCKET`, `AWS_*` keys.
+  - `ANTHROPIC_API_KEY` — optional. Empty falls back to the deterministic mock LLM (used in CI). `CHECKWISE_LLM_BACKEND=mock|anthropic|''` overrides auto-detection.
+  - `MAX_UPLOAD_SIZE_BYTES`, `ALLOWED_FILE_EXTENSIONS` — upload limits.
+
+- **Frontend** (`frontend/.env.local`):
+  - `NEXT_PUBLIC_API_BASE_URL` — defaults to `http://127.0.0.1:8000` if unset (kept consistent across the codebase as of this pass).
+  - `NEXT_PUBLIC_DEMO_MODE=true` — exposes the "Usar PDF demo" affordance.
+  - `NEXT_PUBLIC_WHATSAPP_SUPPORT_URL`, `NEXT_PUBLIC_SUPPORT_QR_PLACEHOLDER_URL` — display-only support links.
+
+---
+
+## Known deployment URLs
+
+| Surface | URL |
+|---|---|
+| Frontend (Vercel) | `https://checkwise-six.vercel.app` |
+| Backend (Render) | `https://checkwise-api.onrender.com` |
+| Health probe | `https://checkwise-api.onrender.com/health` |
+| OpenAPI docs | `https://checkwise-api.onrender.com/docs` |
+
+Backend deploys via `render.yaml` (Render Blueprint). Sensitive env vars (`DATABASE_URL`, `DIRECT_DATABASE_URL`, `CORS_ORIGINS`, `AUTH_JWT_SECRET`, `AWS_*`, `ANTHROPIC_API_KEY`, `SUPPORT_WHATSAPP_URL`) are `sync: false` so Render reads them from the dashboard.
 
 ---
 
@@ -97,21 +130,85 @@ Demo accounts (also printed by `dev_demo.sh` on exit):
 
 ```sh
 # Backend
-cd backend && .venv/bin/ruff check app tests
-cd backend && .venv/bin/pytest tests/test_reports*.py tests/test_portal_dashboard.py
-cd backend && .venv/bin/python -c "import app.main"
+cd backend
+.venv/bin/ruff check .
+.venv/bin/pytest -q
+.venv/bin/python -c "import app.main"
 
 # Frontend
-cd frontend && npx tsc --noEmit
-cd frontend && npx eslint . --max-warnings=999
-cd frontend && npm run check:print
+cd frontend
+node_modules/.bin/tsc --noEmit
+node_modules/.bin/eslint . --quiet
+node_modules/.bin/next build
+npm run check:print
 ```
 
-Expected on a clean checkout: all green, 171 backend tests pass, 32 print-contract assertions pass, 3 pre-existing eslint warnings unrelated to recent work.
+Expected on a clean checkout (as of `f06108c` + this pass's 3 edits): all green, 427 backend tests, 29 frontend route bundles, 32 print-contract assertions.
+
+Two upstream pytest warnings (`HTTP_422_UNPROCESSABLE_ENTITY` deprecation from `starlette`/`anyio`) are external and clear on dependency bump.
 
 ---
 
-## Open questions for the user
+## Recommended first task for the next coding session
 
-- Should the next session focus on the responsive cleanup (I-04/I-05/I-07) or jump straight to P2.0 (seed fixtures for the provider blocks)?
-- Should the polish set in this audit be committed as one commit, or as three separate commits (one per fix)? My recommendation: one commit, since the three fixes share the same audit context.
+**Delete the 9 confirmed orphan frontend files documented in `AUDIT_NEXT_SESSION_READINESS.md` §5.4.**
+
+```
+components/ui/stepper.tsx
+components/checkwise/support-card.tsx
+components/checkwise/confidence-badge.tsx
+components/checkwise/portal/provider-context-bar.tsx
+components/checkwise/portal/suggested-actions.tsx
+components/checkwise/workspace/correction-request-form.tsx
+components/checkwise/document-submission-form.tsx
+lib/demo-clients.ts
+lib/portal-client.ts
+```
+
+Before deleting each one, re-grep its exported symbol(s) against `app/`, `components/`, `lib/` to confirm zero importers. Then run the full gauntlet. Commit as one change. ~30 min, low risk.
+
+After that lands, the existing handoff items remain valid:
+
+1. Responsive cleanup pass (I-04 / I-05 / I-07 from `SYSTEM_UX_AUDIT_REPORT.md`).
+2. P2.0 — provider-block seed fixtures in `dev_seed.py`.
+3. V2.2 — mock→real backend wiring (multi-session).
+
+---
+
+## How to commit (if you decide to)
+
+```sh
+cd "/Users/josepablosamano/Desktop/Work — LegalShelf/checkwise/CheckWise"
+
+# 1) audit edits only (excluding the pre-existing record_demo.py change)
+git add .github/workflows/ci.yml \
+        README.md \
+        frontend/components/checkwise/document-submission-form.tsx \
+        frontend/components/checkwise/intake-wizard.tsx \
+        frontend/app/admin/dashboard/page.tsx \
+        frontend/app/admin/reviewer/page.tsx \
+        frontend/app/admin/vendors/page.tsx \
+        docs/AUDIT_NEXT_SESSION_READINESS.md \
+        docs/NEXT_SESSION_HANDOFF.md
+git commit -m "chore(audit): readiness audit 2026-05-19 + safe fixes
+
+- CI + README move off deprecated next lint to eslint . (Next 16 removal).
+- Normalize 2 API-URL fallbacks to 127.0.0.1:8000 (matches the other 9).
+- Drop 3 unused imports flagged by next build (EmptyState, Button,
+  DataTableColumn). Build now emits 0 warnings, 0 errors.
+- Add docs/AUDIT_NEXT_SESSION_READINESS.md.
+- Refresh docs/NEXT_SESSION_HANDOFF.md."
+
+# 2) (separate decision) the pre-existing edits to scripts/record_demo.py and
+# scripts/finalize_demo.py, plus the untracked _raw_demo/ folder, stay
+# untouched in the working tree until you decide what to do with them.
+```
+
+---
+
+## Open questions for the operator
+
+- Commit this audit pass now, or hold until the orphan-removal commit lands and ship them together?
+- What to do with the uncommitted edits to `scripts/record_demo.py` and `scripts/finalize_demo.py`, plus the untracked `docs/audit-screenshots/2026-05-18-system-audit/_raw_demo/` folder? (Keep · revert · commit as their own change.)
+- Is the prod `ada@legalshelf.mx` user confirmed deleted/rotated on the Render side? The code guard prevents recurrence but the historical seed needs operator confirmation. See `PROD_AUDIT_2026-05-18.md` and §9 of the audit report.
+- Should the heavy `docs/audit-screenshots/2026-05-18-system-audit/` (26 MB) move to release-asset storage / Git LFS, or stay tracked as-is?

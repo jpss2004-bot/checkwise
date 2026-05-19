@@ -56,7 +56,7 @@ jobs:
         run: npx tsc --noEmit
 
       - name: Lint
-        run: npx next lint --quiet
+        run: npx eslint . --quiet
 
       - name: Build
         env:
