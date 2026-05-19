@@ -82,19 +82,36 @@ INJECT_JS = r"""
 
   const ROOT = document.documentElement;
 
-  // Cursor
+  // Cursor — larger, with persistent ring + a faint trail for motion
+  // legibility when the camera pans across the screen.
+  const cursorTrail = document.createElement('div');
+  cursorTrail.id = '__demo_cursor_trail';
+  Object.assign(cursorTrail.style, {
+    position: 'fixed',
+    width: '48px', height: '48px',
+    background: 'rgba(13, 132, 117, 0.18)',
+    border: '2px solid rgba(13, 132, 117, 0.35)',
+    borderRadius: '50%',
+    pointerEvents: 'none',
+    zIndex: '2147483646',
+    transform: 'translate(-50%, -50%)',
+    transition: 'left 0.18s ease-out, top 0.18s ease-out, opacity 0.2s ease',
+    opacity: '0',
+  });
+  ROOT.appendChild(cursorTrail);
+
   const cursor = document.createElement('div');
   cursor.id = '__demo_cursor';
   Object.assign(cursor.style, {
     position: 'fixed',
-    width: '24px', height: '24px',
-    background: 'rgba(13, 132, 117, 0.85)',
-    border: '3px solid white',
+    width: '28px', height: '28px',
+    background: 'rgba(13, 132, 117, 0.95)',
+    border: '4px solid white',
     borderRadius: '50%',
     pointerEvents: 'none',
     zIndex: '2147483647',
     transform: 'translate(-50%, -50%)',
-    boxShadow: '0 4px 14px rgba(0,0,0,0.35)',
+    boxShadow: '0 6px 20px rgba(13, 132, 117, 0.5), 0 0 0 1px rgba(0,0,0,0.2)',
     transition: 'transform 0.08s ease-out',
     opacity: '0',
   });
@@ -104,6 +121,9 @@ INJECT_JS = r"""
     cursor.style.left = e.clientX + 'px';
     cursor.style.top = e.clientY + 'px';
     cursor.style.opacity = '1';
+    cursorTrail.style.left = e.clientX + 'px';
+    cursorTrail.style.top = e.clientY + 'px';
+    cursorTrail.style.opacity = '1';
   });
 
   // Click ripple
@@ -287,8 +307,132 @@ INJECT_JS = r"""
     if (highlightObserver) { clearInterval(highlightObserver); highlightObserver = null; }
     const b = document.getElementById('__demo_highlight');
     const l = document.getElementById('__demo_highlight_label');
+    const s = document.getElementById('__demo_spotlight');
     if (b) b.remove();
     if (l) l.remove();
+    if (s) s.remove();
+  };
+
+  // ── Spotlight mode ──
+  // Dims the entire screen except a rectangular cutout over the target
+  // element. Built from an SVG <mask>, so the cutout has a soft
+  // feathered edge. The narrator can talk over it without the rest of
+  // the screen competing for attention.
+  let spotlightObserver = null;
+  window.__spotlight = (selector, labelText) => {
+    window.__unhighlight();
+    const target = document.querySelector(selector);
+    if (!target) return false;
+
+    const layer = document.createElement('div');
+    layer.id = '__demo_spotlight';
+    Object.assign(layer.style, {
+      position: 'fixed',
+      inset: '0',
+      pointerEvents: 'none',
+      zIndex: '2147483639',
+      opacity: '0',
+      transition: 'opacity 0.3s ease',
+    });
+    layer.innerHTML = `
+      <svg width="100%" height="100%" viewBox="0 0 ${window.innerWidth} ${window.innerHeight}" preserveAspectRatio="none" xmlns="http://www.w3.org/2000/svg">
+        <defs>
+          <mask id="__demo_mask">
+            <rect width="100%" height="100%" fill="white"/>
+            <rect id="__demo_cutout" x="0" y="0" width="0" height="0" rx="14" ry="14" fill="black"/>
+          </mask>
+        </defs>
+        <rect width="100%" height="100%" fill="rgba(7, 18, 35, 0.72)" mask="url(#__demo_mask)"/>
+        <rect id="__demo_glow" x="0" y="0" width="0" height="0" rx="14" ry="14" fill="none" stroke="rgba(13, 132, 117, 0.95)" stroke-width="3"/>
+      </svg>`;
+    ROOT.appendChild(layer);
+
+    let label = null;
+    if (labelText) {
+      label = document.createElement('div');
+      label.id = '__demo_highlight_label';
+      Object.assign(label.style, {
+        position: 'fixed',
+        pointerEvents: 'none',
+        zIndex: '2147483641',
+        background: 'rgba(13, 132, 117, 0.96)',
+        color: 'white',
+        padding: '10px 16px',
+        borderRadius: '8px',
+        fontFamily: '-apple-system, BlinkMacSystemFont, Inter, sans-serif',
+        fontSize: '15px',
+        fontWeight: '600',
+        boxShadow: '0 8px 22px rgba(13, 132, 117, 0.45)',
+        opacity: '0',
+        transition: 'opacity 0.3s ease',
+        maxWidth: '460px',
+        textAlign: 'center',
+        lineHeight: '1.3',
+      });
+      label.textContent = labelText;
+      ROOT.appendChild(label);
+    }
+
+    function place() {
+      const r = target.getBoundingClientRect();
+      const pad = 10;
+      const x = r.left - pad, y = r.top - pad;
+      const w = r.width + pad * 2, h = r.height + pad * 2;
+      const cutout = layer.querySelector('#__demo_cutout');
+      const glow = layer.querySelector('#__demo_glow');
+      if (cutout) {
+        cutout.setAttribute('x', x); cutout.setAttribute('y', y);
+        cutout.setAttribute('width', w); cutout.setAttribute('height', h);
+      }
+      if (glow) {
+        glow.setAttribute('x', x); glow.setAttribute('y', y);
+        glow.setAttribute('width', w); glow.setAttribute('height', h);
+      }
+      layer.style.opacity = '1';
+      if (label) {
+        label.style.opacity = '1';
+        const lr = label.getBoundingClientRect();
+        let lx = r.left + (r.width / 2) - (lr.width / 2);
+        lx = Math.max(16, Math.min(window.innerWidth - lr.width - 16, lx));
+        let ly = r.bottom + 22;
+        if (ly + lr.height > window.innerHeight - 100) ly = r.top - lr.height - 22;
+        label.style.left = lx + 'px';
+        label.style.top = ly + 'px';
+      }
+    }
+    place();
+    spotlightObserver = setInterval(place, 120);
+    return true;
+  };
+
+  // ── Fade-to-black transition ──
+  // Returns a Promise so the recording script can await fade-in then
+  // do the navigation, then await fade-out. Used between scenes to
+  // smooth abrupt navigations into a deliberate cut.
+  window.__fade = (toBlack, durationMs) => {
+    let layer = document.getElementById('__demo_fade');
+    if (!layer) {
+      layer = document.createElement('div');
+      layer.id = '__demo_fade';
+      Object.assign(layer.style, {
+        position: 'fixed',
+        inset: '0',
+        background: '#0f172a',
+        pointerEvents: 'none',
+        zIndex: '2147483644',
+        opacity: '0',
+        transition: `opacity ${durationMs}ms ease`,
+      });
+      ROOT.appendChild(layer);
+    } else {
+      layer.style.transition = `opacity ${durationMs}ms ease`;
+    }
+    return new Promise(res => {
+      requestAnimationFrame(() => {
+        layer.style.opacity = toBlack ? '1' : '0';
+        setTimeout(res, durationMs + 30);
+      });
+    });
   };
 })();
 """
@@ -412,15 +556,44 @@ def highlight(page: Page, selector: str, label: str | None = None) -> bool:
     )
 
 
+def spotlight(page: Page, selector: str, label: str | None = None) -> bool:
+    return bool(
+        page.evaluate(
+            "([s, l]) => window.__spotlight && window.__spotlight(s, l)",
+            [selector, label],
+        )
+    )
+
+
 def unhighlight(page: Page) -> None:
     page.evaluate("() => window.__unhighlight && window.__unhighlight()")
 
 
-def hover_smooth(page: Page, x: float, y: float, steps: int = 30) -> None:
+def fade_out(page: Page, duration_ms: int = 320) -> None:
+    page.evaluate(
+        "(d) => window.__fade && window.__fade(true, d)", duration_ms
+    )
+    time.sleep(duration_ms / 1000 + 0.05)
+
+
+def fade_in(page: Page, duration_ms: int = 320) -> None:
+    page.evaluate(
+        "(d) => window.__fade && window.__fade(false, d)", duration_ms
+    )
+    time.sleep(duration_ms / 1000 + 0.05)
+
+
+def transition(page: Page, duration_ms: int = 280) -> None:
+    """Quick fade-to-black-and-back at a scene boundary."""
+    fade_out(page, duration_ms)
+    fade_in(page, duration_ms)
+
+
+def hover_smooth(page: Page, x: float, y: float, steps: int = 42) -> None:
     page.mouse.move(x, y, steps=steps)
 
 
-def hover_element(page: Page, selector: str, steps: int = 30) -> tuple[float, float] | None:
+def hover_element(page: Page, selector: str, steps: int = 42) -> tuple[float, float] | None:
     try:
         el = page.query_selector(selector)
     except Exception:
@@ -436,7 +609,7 @@ def hover_element(page: Page, selector: str, steps: int = 30) -> tuple[float, fl
     return cx, cy
 
 
-def click_element(page: Page, selector: str, steps: int = 30) -> None:
+def click_element(page: Page, selector: str, steps: int = 42) -> None:
     coords = hover_element(page, selector, steps=steps)
     if coords:
         page.mouse.down()
@@ -557,13 +730,18 @@ def scene_workspace_entry(page: Page, d: dict) -> None:
 def scene_provider_dashboard(page: Page, d: dict) -> None:
     t0 = time.time()
     caption(page, "El dashboard responde una sola pregunta: '¿qué sigue?'.", "ESCENA 3 · PROVEEDOR")
-    settle(page, 1.0)
-    highlight(page, "h2:has-text('TU SIGUIENTE')", "Centro de acción del proveedor")
-    settle(page, 3.5)
+    settle(page, 0.8)
+    # Spotlight 1: the next-action section header
+    spotlight(page, "h2:has-text('TU SIGUIENTE')", "Centro de acción del proveedor")
+    settle(page, 3.2)
     unhighlight(page)
-    # Scroll to show more cards
-    page.mouse.wheel(0, 220)
-    settle(page, 1.2)
+    settle(page, 0.4)
+    # Highlight 2: an individual action card to show the framing
+    highlight(page, "article:has(button:has-text('Subir documento')), section:has(button:has-text('Subir documento')) >> nth=0", "Una tarjeta = un documento por subir")
+    settle(page, 3.0)
+    unhighlight(page)
+    page.mouse.wheel(0, 240)
+    settle(page, 0.8)
     used = time.time() - t0
     dwell_to(page, d["provider_dashboard"], used=used)
     caption_clear(page)
@@ -573,10 +751,12 @@ def scene_compliance_pulse(page: Page, d: dict) -> None:
     t0 = time.time()
     goto(page, f"{APP}/portal/reports")
     caption(page, "Compliance Pulse: 4 indicadores ejecutivos.", "ESCENA 4 · PROVEEDOR")
-    settle(page, 0.6)
-    highlight(page, "h2:has-text('Pulso de cumplimiento')", "¿Cómo estoy hoy?")
-    settle(page, 5.0)
+    settle(page, 0.8)
+    # Spotlight the whole pulse section first
+    spotlight(page, "section:has(h2:has-text('Pulso de cumplimiento'))", "¿Cómo estoy hoy?")
+    settle(page, 5.5)
     unhighlight(page)
+    settle(page, 0.4)
     used = time.time() - t0
     dwell_to(page, d["compliance_pulse"], used=used)
     caption_clear(page)
@@ -600,10 +780,16 @@ def scene_report_editor(page: Page, d: dict, report_id: str) -> None:
 def scene_print_page(page: Page, d: dict, report_id: str) -> None:
     t0 = time.time()
     goto(page, f"{APP}/portal/reports/{report_id}/print")
-    caption(page, "Reporte imprimible con cabecera, paginación y sello de frescura.", "ESCENA 6 · PDF")
-    settle(page, 1.2)
-    highlight(page, ".cw-print-seal", "Sello 'Datos al…' visible en página 1")
-    settle(page, 5.0)
+    caption(page, "Reporte imprimible: cabecera, paginación, sello.", "ESCENA 6 · PDF")
+    settle(page, 1.0)
+    # Spotlight the freshness seal (most P1.8-distinctive feature)
+    spotlight(page, ".cw-print-seal", "Sello 'Datos al…' en cada copia impresa")
+    settle(page, 4.5)
+    unhighlight(page)
+    settle(page, 0.4)
+    # Then a quick highlight on the toolbar
+    highlight(page, ".cw-print-toolbar button", "Un clic → Guardar como PDF")
+    settle(page, 3.0)
     unhighlight(page)
     used = time.time() - t0
     dwell_to(page, d["print_page"], used=used)
@@ -612,8 +798,10 @@ def scene_print_page(page: Page, d: dict, report_id: str) -> None:
 
 def scene_client_login(page: Page, d: dict) -> None:
     t0 = time.time()
+    fade_out(page, 320)
     page.evaluate("() => window.localStorage.clear()")
     goto(page, f"{APP}/login")
+    fade_in(page, 320)
     caption(page, "Cambio de rol: ahora como cliente.", "ESCENA 7 · CLIENTE")
     settle(page, 0.6)
     type_into(page, "#login-email", "cliente.demo@checkwise.mx", delay_ms=50)
@@ -632,9 +820,10 @@ def scene_client_dashboard(page: Page, d: dict) -> None:
     t0 = time.time()
     caption(page, "Titular ejecutivo en una sola frase.", "ESCENA 8 · CLIENTE")
     settle(page, 0.8)
-    highlight(page, "h2:has-text('proveedores')", "Lectura de 3 segundos")
-    settle(page, 4.5)
+    spotlight(page, "h2:has-text('proveedores')", "Lectura ejecutiva de 3 segundos")
+    settle(page, 5.0)
     unhighlight(page)
+    settle(page, 0.4)
     used = time.time() - t0
     dwell_to(page, d["client_dashboard"], used=used)
     caption_clear(page)
@@ -658,8 +847,10 @@ def scene_vendor_detail(page: Page, d: dict, vendor_id: str) -> None:
 
 def scene_admin_login(page: Page, d: dict) -> None:
     t0 = time.time()
+    fade_out(page, 320)
     page.evaluate("() => window.localStorage.clear()")
     goto(page, f"{APP}/login")
+    fade_in(page, 320)
     caption(page, "Tercer rol: revisor interno de Legal Shelf.", "ESCENA 10 · REVISOR")
     settle(page, 0.6)
     type_into(page, "#login-email", "ada@legalshelf.mx", delay_ms=55)
@@ -678,8 +869,8 @@ def scene_reviewer_queue(page: Page, d: dict) -> None:
     t0 = time.time()
     caption(page, "Doctrina del producto: ningún documento auto-aprueba.", "ESCENA 11 · REVISOR")
     settle(page, 0.6)
-    highlight(page, "h1:has-text('Documentos por revisar') + p", "La automatización no firma")
-    settle(page, 5.0)
+    spotlight(page, "h1:has-text('Documentos por revisar') + p", "La automatización no firma. El revisor decide.")
+    settle(page, 5.5)
     unhighlight(page)
     used = time.time() - t0
     dwell_to(page, d["reviewer_queue"], used=used)
@@ -691,7 +882,7 @@ def scene_reviewer_detail(page: Page, d: dict, submission_id: str) -> None:
     goto(page, f"{APP}/admin/reviewer/{submission_id}")
     caption(page, "Cuatro acciones explícitas + bitácora de trazabilidad.", "ESCENA 12 · REVISOR")
     settle(page, 1.0)
-    highlight(page, "h2:has-text('Tu decisión'), h3:has-text('Tu decisión')", "Decisión humana")
+    spotlight(page, "h2:has-text('Tu decisión'), h3:has-text('Tu decisión'), h2:has-text('TU DECISIÓN'), h3:has-text('TU DECISIÓN')", "Aprobar · Rechazar · Aclarar · Excepción")
     settle(page, 5.5)
     unhighlight(page)
     used = time.time() - t0
@@ -700,8 +891,11 @@ def scene_reviewer_detail(page: Page, d: dict, submission_id: str) -> None:
 
 
 def scene_outro(page: Page, d: dict) -> None:
+    fade_out(page, 400)
     goto(page, OUTRO_URL)
+    fade_in(page, 400)
     dwell_to(page, d["outro"])
+    fade_out(page, 500)
 
 
 # ── Main ──────────────────────────────────────────────────────────
