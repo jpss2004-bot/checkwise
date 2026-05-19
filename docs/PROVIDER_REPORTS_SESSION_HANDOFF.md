@@ -1,6 +1,7 @@
 # Provider Reports — Session Handoff (2026-05-18)
 
-> Updated 2026-05-18 with P1.8 (PDF preview/export polish).
+> Updated 2026-05-18 with P1.8 (PDF preview/export polish) and
+> P1.9 (authenticated print-route smoke + zero-dep print-contract test).
 
 Concise resume note. Companion to
 [PROVIDER_REPORTS_REDESIGN_PLAN.md](PROVIDER_REPORTS_REDESIGN_PLAN.md)
@@ -55,6 +56,78 @@ Reuses `GET /api/v1/portal/workspaces/{id}/dashboard` (same canonical
 `dashboard_compute` logic). Adds `due_in_days` to
 `DashboardUpcomingDeadline` so the urgency bar can bucket without
 re-parsing `period_key` client-side.
+
+### P1.9 — Authenticated print-route smoke + print-contract test
+
+Closes the verification gap that had persisted since P1.6: live
+authenticated browser smoke of the print route + a zero-dep
+contract test that guards the P1.8 surface from silent regression.
+
+**1. `dev_demo.sh`** — single-command bootstrap from clean checkout:
+auto-starts Docker Desktop if needed, brings up Postgres via
+`docker compose up -d postgres`, waits for the healthcheck, applies
+Alembic migrations, runs `dev_seed.py`, and hands off to `dev.sh`.
+Prints the documented demo accounts before exiting to the dev
+process. Replaces the previously implicit "boot Postgres yourself"
+prerequisite that blocked P1.6/P1.7/P1.8 in-browser verification.
+
+**2. Live print smoke (verified this session):**
+- Postgres up via Docker (volume reset to clear stale FK violation
+  from a prior partial seed; see "Known caveats").
+- Backend `uvicorn app.main:app` boots cleanly, `/docs` 200.
+- `/api/v1/auth/login` accepts `ada@legalshelf.mx / demo1234`,
+  returns JWT.
+- `/api/v1/reports/` lists 3 seeded reports (1 internal_only,
+  1 client_facing, 1 vendor_facing draft).
+- `/portal/reports/<id>/print` renders authenticated: cover with
+  title, audience badge, version, and freshness seal chip
+  ("GENERADO EL 18 DE MAYO DE 2026, 5:48 P.M." — correct fallback
+  since seeded blocks carry no `fetched_at`).
+- The "Vista previa PDF" and "Descargar PDF" toolbar actions are
+  emitted as anchors with the right hrefs (`…/print` and
+  `…/print?autoprint=1`), both `target="_blank"`.
+- `?autoprint=1` actually fires `window.print()` exactly once
+  (verified by patching `window.print` and clicking the link
+  programmatically — `window.__printCount === 1` after the autoprint
+  effect ran). Also confirmed by the first attempt blocking the
+  renderer on the system print dialog.
+- All print-CSS rules parse in the browser: `@page` running header
+  (`@top-left`, `@top-right`), `@page :first` cover override,
+  `counter(page)` page numbers, `display: none` on
+  `cw-print-toolbar` and `cw-print-meta-code`, and the four
+  `data-block-type` page-break selectors for executive_summary
+  (first-of-type → break-after page), prioritized_actions
+  (break-before page), vendor_risk_matrix + upcoming_deadlines
+  (per-`<tr>` keep-together).
+
+**3. `frontend/scripts/check-print-contract.mjs` + `npm run check:print`** —
+zero-dep Node script (32 assertions, ~50 ms) that guards the P1.8
+contract directly against source files. Catches all the practical
+regressions a Playwright snapshot would catch for static CSS
+behavior, without adding a devDependency or a browser binary:
+- Print page exposes the named print classes
+  (`cw-print-toolbar`/`-cover`/`-footer`/`-seal`), the `?autoprint=1`
+  handler, `window.print()` invocation, all `@page` rules and the
+  `firstFreshness` helper plus both seal wordings.
+- Editor toolbar declares both "Vista previa PDF" and "Descargar PDF"
+  with `target="_blank"` and the `autoprint=1` query.
+- `FreshnessLabel`'s refresh chip + `BlockHeader`'s type-code label
+  and `ArrowsOutSimple` glyph all carry `print:hidden`.
+- Each of the 8 catalog blocks (4 provider + 4 admin/client) exposes
+  the correct `data-block-type="…"` on its section wrapper.
+
+Run it standalone (`npm run check:print` from `frontend/`) — no
+build, no dev server, no browser. Suitable for a pre-commit hook
+or the CI gauntlet.
+
+**What didn't change** in P1.9:
+- No new npm dependency (intentionally skipped Playwright; the
+  contract test catches the static-CSS class of regressions a print
+  snapshot would). If we later want true pixel regression on the
+  printed page, Playwright `page.emulateMedia({ media: 'print' })`
+  + screenshot diff would be the right tool.
+- No backend changes.
+- No print/editor source changes — only verification surfaces.
 
 ### P1.8 — PDF preview/export polish
 
@@ -151,7 +224,7 @@ and client report use.
 
 ---
 
-## Verification gates (final, on full P1.8 state)
+## Verification gates (final, on full P1.9 state)
 
 - `ruff check app tests` → All checks passed.
 - `pytest tests/test_reports*.py tests/test_portal_dashboard.py`
@@ -159,6 +232,12 @@ and client report use.
 - `npx tsc --noEmit` → exit 0.
 - `npx eslint . --max-warnings=999` → 0 errors, 3 pre-existing
   warnings unrelated to this work.
+- `npm run check:print` → **32 assertions passed** (P1.9, see below).
+- **Live authenticated browser smoke** (P1.9): full stack booted via
+  `dev_demo.sh` path (Docker → Postgres → Alembic → seed → uvicorn
+  + Next dev). Logged in as `ada@legalshelf.mx`, opened all three
+  seeded reports' print routes, verified the freshness seal, the
+  cover, and that `?autoprint=1` fires `window.print()` exactly once.
 
 ---
 
@@ -178,8 +257,31 @@ and client report use.
 
 ## Known caveats
 
+- **P1.9 fixed the auth-wall blocker** that had persisted since P1.6.
+  Bootstrap path: run `./dev_demo.sh` from the repo root — it
+  auto-starts Docker Desktop, brings up Postgres, migrates, seeds,
+  then chains to `dev.sh` for backend + frontend.
+- **Seeded reports do not exercise the four P1.x provider blocks**
+  (compliance_state, attention_list, upcoming_deadlines,
+  prioritized_actions) or the executive_summary / vendor_risk_matrix
+  / ai_recommendation admin blocks. They use text / kpi_strip /
+  divider only. To smoke-test print fidelity for those blocks
+  against live data, generate a `vendor_facing` report via the
+  planner endpoint or extend `dev_seed.py` with a richer fixture.
+  `npm run check:print` covers the static-CSS contract for all
+  8 blocks without needing them to render.
+- **One-time stale Postgres volume** was observed this session:
+  re-running `dev_seed.py` against a partially-seeded Postgres
+  triggered a FK violation
+  (`validations → documents`). Wiping the volume
+  (`docker compose down -v`) and re-creating fixed it. `dev_demo.sh`
+  does not auto-wipe the volume, by design — running it again on a
+  healthy DB is a no-op.
+
+### Pre-P1.9 caveat (now resolved, kept for context):
+
 - **Live authenticated browser verification was not completed** in
-  this session. The local dev stack expects Postgres at
+  the P1.6/P1.7/P1.8 sessions. The local dev stack expects Postgres at
   `localhost:5432` (per `backend/.env`), which wasn't running.
   `dev_seed.py`'s safety guard rejects SQLite URLs (host parses as
   `<unknown>`, the `CHECKWISE_ALLOW_SEED_AGAINST` substring check
@@ -198,22 +300,34 @@ and client report use.
 
 ## Recommended next slice
 
-**P1.9 — Authenticated print-route smoke + visual regression**
+**P2.0 — Provider-block fixtures in `dev_seed.py`**
 
-P1.8 was validated via type-check, lint, 171-test pytest gauntlet,
-and chunk-level inspection of the compiled bundle. Live in-browser
-print preview was blocked again by the same Postgres-not-running /
-auth wall caveat (see "Known caveats"). The smallest next slice
-that closes that gap:
+P1.9 closed the auth-wall verification gap, but exposed a related
+one: the seeded reports only use `text` / `kpi_strip` / `divider`
+blocks, so the four P1.x provider blocks
+(`compliance_state`, `attention_list`, `upcoming_deadlines`,
+`prioritized_actions`) and the admin blocks (`executive_summary`,
+`vendor_risk_matrix`, `ai_recommendation`) cannot be eyeballed in
+print mode without going through the planner endpoint by hand.
 
-- Local seed-and-login docs (or an `npm run dev:demo` wrapper) so
-  the print route can be visited authenticated and the
-  `window.print()` dialog can be smoke-tested end-to-end.
-- A snapshot test for the print page (Playwright trace or a
-  `print-friendly` Storybook story) that asserts the page-break and
-  running-header rules without depending on the dev cluster.
+The smallest next slice:
 
-Optional companion: an export breadcrumb in `ReportVersion` (or a
-side-channel audit log) so when "Descargar PDF" fires we can attach
-an "exported by user X at time T" line to the version history. P1.8
-deliberately did not introduce one (no schema changes).
+- Extend `backend/scripts/dev_seed.py` to create at least one
+  `vendor_facing` report with the canonical 4-block sequence
+  populated from `dashboard_compute` for `boss.demo`'s workspace.
+- Add a minimal admin/internal report that uses
+  `executive_summary` + `kpi_strip` + `vendor_risk_matrix` against
+  the existing seeded portfolio.
+
+This unblocks live-data smoke for the printed page-break rules
+(`prioritized_actions` break-before, `vendor_risk_matrix` row
+keep-together) without needing to run the LLM planner end-to-end.
+
+**Optional companions:**
+- Pixel-level print regression via Playwright + `emulateMedia({media:'print'})`.
+  Adds a devDependency; only justified once the report layout is
+  visually mature enough that small regressions matter.
+- An export breadcrumb in `ReportVersion` (or a side-channel audit
+  log) so when "Descargar PDF" fires we can attach an "exported by
+  user X at time T" line to the version history. Requires schema
+  work, deliberately skipped in P1.8/P1.9.

@@ -7,7 +7,8 @@
     "build": "next build",
     "start": "next start",
     "lint": "eslint .",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit",
+    "check:print": "node scripts/check-print-contract.mjs"
   },
   "dependencies": {
     "@blocknote/core": "^0.51.0",
