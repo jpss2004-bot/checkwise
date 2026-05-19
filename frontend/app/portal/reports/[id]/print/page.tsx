@@ -146,10 +146,10 @@ export default function PrintPage() {
           variant="default"
           size="sm"
           onClick={() => window.print()}
-          title="Imprimir / Guardar como PDF"
+          title="Imprimir o guardar como PDF"
         >
           <Printer className="h-4 w-4" weight="bold" aria-hidden="true" />
-          Imprimir / Guardar como PDF
+          Imprimir
         </Button>
       </div>
 

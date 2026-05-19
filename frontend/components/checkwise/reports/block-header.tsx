@@ -57,9 +57,11 @@ export function BlockHeader({
         )}
         <IconComponent className="h-3.5 w-3.5" weight="regular" aria-hidden="true" />
         <span className="cw-eyebrow">{label}</span>
-        <span className="cw-print-meta-code font-mono text-[10px] text-[color:var(--text-tertiary)] print:hidden">
-          {type}
-        </span>
+        {editable && (
+          <span className="cw-print-meta-code font-mono text-[10px] text-[color:var(--text-tertiary)] print:hidden">
+            {type}
+          </span>
+        )}
       </div>
       {editable && (
         <div className="flex items-center gap-1 opacity-0 transition-opacity group-hover/blockheader:opacity-100">
