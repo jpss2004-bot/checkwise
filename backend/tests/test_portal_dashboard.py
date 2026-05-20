@@ -433,7 +433,8 @@ def test_dashboard_empty_workspace_reports_pending_counts(
 ) -> None:
     """A brand-new workspace has zero uploads. All required slots roll
     up as either ``pending`` (catalog slots) and the semaphore is
-    yellow (nothing blocking, but plenty pending)."""
+    red — P1.1 (2026-05-20) flipped the 0-of-N branch from yellow to
+    red because 0% compliance shouldn't read as "in progress"."""
     ws = _setup_workspace(api_client)
     body = api_client.get(
         f"/api/v1/portal/workspaces/{ws['workspace_id']}/dashboard"
@@ -442,7 +443,7 @@ def test_dashboard_empty_workspace_reports_pending_counts(
     assert body["document_state_counts"]["pending"] > 0
     assert body["document_state_counts"]["approved"] == 0
     assert body["document_state_counts"]["rejected"] == 0
-    assert body["semaphore"]["level"] == "yellow"
+    assert body["semaphore"]["level"] == "red"
     assert body["onboarding_summary"]["total_required"] > 0
     assert body["onboarding_summary"]["completed"] == 0
 
@@ -455,8 +456,10 @@ def test_dashboard_counts_in_review_slot_correctly(api_client: TestClient) -> No
     ).json()
     # The freshly uploaded submission is in pendiente_revision → IN_REVIEW bucket.
     assert body["document_state_counts"]["in_review"] >= 1
-    # Semaphore stays yellow because plenty of slots are still missing.
-    assert body["semaphore"]["level"] == "yellow"
+    # Semaphore stays red because on_track is still 0 (P1.1, 2026-05-20):
+    # an in-review submission is not yet approved, so the workspace has
+    # not started accumulating compliance.
+    assert body["semaphore"]["level"] == "red"
 
 
 def test_dashboard_counts_approved_slot(api_client: TestClient) -> None:
@@ -509,10 +512,13 @@ def test_dashboard_uses_replacement_submission_as_current_not_superseded(
     # rejected — the superseded rejection no longer dominates the slot.
     counts = body["document_state_counts"]
     assert counts["in_review"] >= 1
-    # If anything were still counted as rejected for the SAME slot, the
-    # semaphore would still be red. After replacement, no required slot
-    # is rejected, so the semaphore drops back to yellow.
-    assert body["semaphore"]["level"] == "yellow"
+    # After replacement, no required slot is rejected. The semaphore
+    # remains red because on_track is still 0 (the replacement is
+    # in_review, not approved) — see P1.1 (2026-05-20). It is no
+    # longer red for the "blocking" reason; it's red for the
+    # "no avance" reason. The assertion below is intentionally only
+    # on the level — the *reason* string would distinguish them.
+    assert body["semaphore"]["level"] == "red"
 
 
 def test_dashboard_rejects_foreign_workspace(api_client: TestClient) -> None:

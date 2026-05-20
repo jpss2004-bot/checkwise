@@ -255,12 +255,12 @@ def test_build_for_vendor_resolves_workspace_and_returns_shape(db_factory) -> No
     assert result["workspace_id"] is not None
     assert result["persona_type"] == "moral"
     # A freshly-seeded workspace with no submissions yet has every
-    # required onboarding slot in MISSING — the builder rolls that up
-    # as yellow ("expediente en marcha, pendiente de subir") with
-    # compliance_pct == 0. Green only happens once every required slot
-    # is resolved; that needs richer fixtures than this unit test
-    # bothers with.
-    assert result["semaphore"]["level"] in ("yellow", "green")
+    # required onboarding slot in MISSING. P1.1 (2026-05-20): with
+    # on_track == 0 the semaphore now reads red ("Rojo · sin avance")
+    # instead of the older yellow ("expediente en marcha"). Green
+    # only happens once every required slot is resolved; that needs
+    # richer fixtures than this unit test bothers with.
+    assert result["semaphore"]["level"] in ("red", "green")
     assert result["semaphore"]["total_tracked"] >= 0
     assert result["semaphore"]["compliance_pct"] >= 0
     assert set(result["document_state_counts"].keys()) == set(
@@ -447,10 +447,14 @@ def _semaphore_to_dict(sem) -> dict:
         ([SlotState.APPROVED, SlotState.APPROVED], [], "green"),
         ([SlotState.APPROVED, SlotState.MISSING], [], "yellow"),
         ([SlotState.APPROVED, SlotState.REJECTED], [SlotState.IN_REVIEW], "red"),
-        ([SlotState.IN_REVIEW], [SlotState.UPLOADED], "yellow"),
+        # P1.1 (2026-05-20): 0/N on track → red (no_progress branch).
+        # Was yellow under the prior "in progress" reading.
+        ([SlotState.IN_REVIEW], [SlotState.UPLOADED], "red"),
         ([SlotState.NEEDS_CORRECTION], [], "red"),
         ([SlotState.POSSIBLE_MISMATCH], [], "red"),
-        ([SlotState.EXPIRED], [], "yellow"),
+        # EXPIRED counts as pending (not on_track). With on_track=0
+        # the no_progress branch fires before the has_pending branch.
+        ([SlotState.EXPIRED], [], "red"),
         ([], [], "green"),
     ],
 )

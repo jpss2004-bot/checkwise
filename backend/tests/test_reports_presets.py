@@ -610,7 +610,12 @@ def test_workspace_actor_from_preset_auto_resolves_vendor_and_client(
     )
     assert resp.status_code == 201, resp.text
     body = resp.json()
-    assert body["title"] == "Mi estado de cumplimiento"
+    # P1.8 (2026-05-20): workspace-owner from-preset titles are
+    # qualified with the workspace display name (or vendor name as
+    # fallback) so providers don't end up with multiple reports
+    # called "Mi estado de cumplimiento". Internal staff still get
+    # the bare preset title.
+    assert body["title"] == "Mi estado de cumplimiento · Vendor Auto"
     assert body["audience"] == "vendor_facing"
     assert body["vendor_id"] == vendor_id
     assert body["client_id"] == client_id

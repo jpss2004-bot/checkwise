@@ -552,14 +552,20 @@ def test_red_yellow_green_semantics_match_provider_dashboard(
     )
     token = _login(api_client, email, pw)
 
-    # Baseline: nothing uploaded → yellow (missing required slots).
+    # Baseline: nothing uploaded → red, "sin avance" branch
+    # (P1.1, 2026-05-20). A workspace with required obligations and 0
+    # on-track now reads as red rather than the older "yellow / in
+    # progress" — the prior behaviour misled providers about their
+    # actual state on day one. See compute_semaphore in
+    # services/dashboard_compute.py.
     base = api_client.get("/api/v1/client/overview", headers=_h(token)).json()
     # Validate via the per-vendor row.
     vendors = api_client.get("/api/v1/client/vendors", headers=_h(token)).json()
-    assert vendors["items"][0]["semaphore_level"] == "yellow"
-    assert base["yellow_count"] == 1
+    assert vendors["items"][0]["semaphore_level"] == "red"
+    assert base["red_count"] == 1
 
-    # Upload + then reject → red.
+    # Upload + then reject → still red (blocking-state branch takes
+    # precedence over the no-progress branch).
     sub_id = _seed_submission_for_workspace(api_client, db_factory, ws_id)
     db = db_factory()
     try:
