@@ -165,7 +165,7 @@ function DashboardInner({ session }: { session: PortalSession }) {
           actions={toNextActionItems(dashboard.suggested_actions)}
           emptyState={{
             title: "Estás al día",
-            description: "No hay acciones urgentes para tu workspace en este momento.",
+            description: "No hay acciones urgentes para tu expediente en este momento.",
           }}
         />
 
@@ -400,6 +400,11 @@ const ACTION_CTA_LABEL: Record<DashboardSuggestedAction["type"], string> = {
   verify_mismatch: "Verificar",
   complete_onboarding: "Subir documento",
   upcoming: "Subir documento",
+  // P1-c (2026-05-20): vencido slots emit a "regularize" action. CTA
+  // verb intentionally distinct from "Subir documento" so the
+  // provider sees this isn't a routine upload — coordination with
+  // their contador is part of the flow.
+  regularize: "Regularizar",
 };
 
 const ACTION_PRIORITY_MAP: Record<

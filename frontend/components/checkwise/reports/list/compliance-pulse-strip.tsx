@@ -338,7 +338,7 @@ function PulseContent({
           buckets={urgency}
           rows={upcoming_deadlines}
         />
-        <ActionsCard actions={topActions} />
+        <ActionsCard actions={topActions} totalActions={suggested_actions.length} />
       </div>
 
       <CtaPanel
@@ -688,10 +688,19 @@ function DeadlinesCard({
 
 function ActionsCard({
   actions,
+  totalActions,
 }: {
   actions: DashboardSuggestedAction[];
+  totalActions: number;
 }) {
-  const isEmpty = actions.length === 0;
+  // ``actions`` is the sliced-to-3 list rendered in the card; the
+  // header badge needs the unsliced count so a workspace with 4+
+  // actions doesn't read as "3" while the sibling Atención card
+  // shows the full total. Audit (2026-05-20) caught this when the
+  // P1-c regularize action surfaced as a 4th item that disappeared
+  // from the strip badge.
+  const isEmpty = totalActions === 0;
+  const overflow = Math.max(0, totalActions - actions.length);
   return (
     <article
       className="flex h-full flex-col gap-3 rounded-lg border border-[color:var(--border-default)] bg-[color:var(--surface-raised)] p-4 shadow-[var(--shadow-sm)]"
@@ -699,7 +708,7 @@ function ActionsCard({
     >
       <header className="flex items-center justify-between gap-2">
         <span className="cw-eyebrow">Acciones prioritarias</span>
-        <Badge variant="outline">{actions.length}</Badge>
+        <Badge variant="outline">{totalActions}</Badge>
       </header>
       {isEmpty ? (
         <p className="text-[12px] text-[color:var(--text-tertiary)]">
@@ -741,6 +750,15 @@ function ActionsCard({
           })}
         </ul>
       )}
+      {overflow > 0 ? (
+        <Link
+          href="/portal/dashboard#acciones"
+          className="mt-auto inline-flex items-center gap-1 text-[11px] font-medium text-[color:var(--text-brand)] hover:underline"
+        >
+          Ver {overflow} acción{overflow === 1 ? "" : "es"} más
+          <ArrowUpRight className="h-3 w-3" weight="bold" aria-hidden="true" />
+        </Link>
+      ) : null}
     </article>
   );
 }

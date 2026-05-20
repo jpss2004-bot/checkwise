@@ -272,12 +272,24 @@ POST /api/v1/reports/<id>/refresh-data
 - Tablet (~768): not screenshotted; CSS uses `md:grid-cols-3` and `xl:col-span-2` so collapse points are 768 + 1280. The 1440 capture shows the xl layout cleanly.
 - Mobile 390×844: above-the-fold shows Pulse semaphore + Atención. Below-fold reveals everything else. No horizontal overflow visible.
 
-## Provider demo-readiness score: **8 / 10**
+## Provider demo-readiness score: **9.5 / 10**
 
-What lowers it from 10:
-- –1 for the mock-engine banner: the producer-side AI output is "good enough to demo" but not production text.
-- –0.5 for the denominator confusion (5% Pulse vs 38% KPI).
-- –0.5 for incomplete `vencido` / `excepcion_legal` surfacing on the dashboard.
+Updated post-polish (P1-a denominator tooltip, P1-b excepcion_legal chip,
+P1-c regularize action, P2-a sort control, P2-b AbortController) and
+post-audit (B1 missing `regularize` CTA label, B2 truthful badge
+count, B3 overflow link). What lowers it from 10:
+
+- –0.5 because local has real Anthropic but production needs the
+  `ANTHROPIC_API_KEY` env var verified on Render before the live
+  prod surface generates real Claude content (vs the deterministic
+  mock fallback).
+
+Previously (pre-polish, pre-audit), this score was 8/10 due to:
+- the mock-engine banner being the only AI path,
+- Pulse/KPI denominator confusion,
+- vencido + excepcion_legal not surfacing on the dashboard.
+
+All three are now addressed.
 
 What it earns:
 - Every status the catalog supports is represented in the seed.
