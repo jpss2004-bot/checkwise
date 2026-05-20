@@ -184,7 +184,11 @@ export function ExpedienteCard({ requirement, onAction }: ExpedienteCardProps) {
         {requirement.why}
       </p>
 
-      <DocumentGuidanceDisclosure requirement={requirement} />
+      <DocumentGuidanceDisclosure
+        anatomy={requirement.anatomy}
+        where_to_obtain={requirement.where_to_obtain}
+        common_errors={requirement.common_errors}
+      />
 
       {requirement.filename ? (
         <div className="flex items-center gap-2 rounded-sm border border-[color:var(--doc-uploaded-border)] bg-[color:var(--doc-uploaded-bg)] p-3">
@@ -295,15 +299,31 @@ function ctaLabelForState(state: DocumentStateCode): string {
  * (what the document must contain), where to obtain it, and the most
  * common upload errors. Designed to be safe even if all three are
  * empty — the component returns `null` and the card looks unchanged.
+ *
+ * Stage 2.7 (T5 parity, 2026-05-20) — extracted to a shared exported
+ * surface so the calendar drawer's recurring-obligation view can
+ * reuse the same disclosure shape against the recurring catalog.
  */
-function DocumentGuidanceDisclosure({
-  requirement,
-}: {
-  requirement: ExpedienteCardItem;
-}) {
-  const hasAnatomy = requirement.anatomy.trim().length > 0;
-  const hasWhere = requirement.where_to_obtain.trim().length > 0;
-  const hasErrors = requirement.common_errors.length > 0;
+export interface DocumentGuidanceProps {
+  anatomy: string;
+  where_to_obtain: string;
+  common_errors: string[];
+  /** Optional override for the summary label. Defaults to
+   *  "Acerca de este documento" which is correct for onboarding;
+   *  callers may want a periodicity-aware label for recurring
+   *  obligations (e.g. "Acerca de este comprobante"). */
+  summary_label?: string;
+}
+
+export function DocumentGuidanceDisclosure({
+  anatomy,
+  where_to_obtain,
+  common_errors,
+  summary_label,
+}: DocumentGuidanceProps) {
+  const hasAnatomy = anatomy.trim().length > 0;
+  const hasWhere = where_to_obtain.trim().length > 0;
+  const hasErrors = common_errors.length > 0;
   if (!hasAnatomy && !hasWhere && !hasErrors) {
     return null;
   }
@@ -316,7 +336,7 @@ function DocumentGuidanceDisclosure({
             weight="bold"
             aria-hidden="true"
           />
-          Acerca de este documento
+          {summary_label ?? "Acerca de este documento"}
         </span>
         <CaretDown
           className="h-3 w-3 shrink-0 text-[color:var(--text-tertiary)] transition-transform group-open:rotate-180"
@@ -326,9 +346,7 @@ function DocumentGuidanceDisclosure({
       </summary>
       <div className="space-y-3 border-t border-[color:var(--border-subtle)] px-3 py-3 text-[12.5px] leading-5">
         {hasAnatomy ? (
-          <p className="text-[color:var(--text-secondary)]">
-            {requirement.anatomy}
-          </p>
+          <p className="text-[color:var(--text-secondary)]">{anatomy}</p>
         ) : null}
         {hasWhere ? (
           <p className="flex items-start gap-2 text-[color:var(--text-secondary)]">
@@ -341,7 +359,7 @@ function DocumentGuidanceDisclosure({
               <span className="font-semibold text-[color:var(--text-primary)]">
                 Dónde se obtiene:{" "}
               </span>
-              {requirement.where_to_obtain}
+              {where_to_obtain}
             </span>
           </p>
         ) : null}
@@ -356,7 +374,7 @@ function DocumentGuidanceDisclosure({
               Antes de subir
             </p>
             <ul className="mt-1.5 space-y-1.5">
-              {requirement.common_errors.map((err) => (
+              {common_errors.map((err) => (
                 <li
                   key={err}
                   className="flex items-start gap-2 text-[color:var(--text-secondary)]"

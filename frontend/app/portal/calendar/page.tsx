@@ -17,6 +17,7 @@ import {
 } from "@phosphor-icons/react";
 
 import { DocStateBadge, DOC_STATE_LABELS } from "@/components/checkwise/doc-state-badge";
+import { DocumentGuidanceDisclosure } from "@/components/checkwise/portal/expediente-card";
 import { PortalAppShell } from "@/components/checkwise/portal/portal-app-shell";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -74,6 +75,11 @@ type CalendarEntry = {
   href: string;
   /** Current submission id, when one exists. */
   submission_id: string | null;
+  /** Stage 2.7 (T5 parity, 2026-05-20) — first-upload guidance.
+   *  Surfaced in the drawer via DocumentGuidanceDisclosure. */
+  anatomy: string;
+  where_to_obtain: string;
+  common_errors: string[];
 };
 
 function flattenCalendarPayload(payload: CalendarPayload): CalendarEntry[] {
@@ -98,6 +104,9 @@ function flattenCalendarPayload(payload: CalendarPayload): CalendarEntry[] {
           frequency: item.frequency,
           href: item.href,
           submission_id: item.submission_id,
+          anatomy: item.anatomy ?? "",
+          where_to_obtain: item.where_to_obtain ?? "",
+          common_errors: item.common_errors ?? [],
         });
       }
     }
@@ -498,6 +507,19 @@ function EventDrawer({
               {event.suggested_action}
             </p>
           </div>
+
+          {/* Stage 2.7 (T5 parity, 2026-05-20) — first-upload guidance
+              for recurring obligations. Reuses the same component as
+              /portal/onboarding so the provider sees identical anatomy
+              + where-to-obtain + common-errors framing whether the
+              document lives on the expediente checklist or in the
+              calendar. */}
+          <DocumentGuidanceDisclosure
+            anatomy={event.anatomy}
+            where_to_obtain={event.where_to_obtain}
+            common_errors={event.common_errors}
+            summary_label="Acerca de este comprobante"
+          />
 
           {event.state !== "approved" && (
             <Button asChild className="w-full" size="lg">

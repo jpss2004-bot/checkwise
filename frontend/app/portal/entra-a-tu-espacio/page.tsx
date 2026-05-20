@@ -13,6 +13,7 @@ import {
   type Icon,
 } from "@phosphor-icons/react";
 
+import { CorrectionRequestForm } from "@/components/checkwise/workspace/correction-request-form";
 import { WorkspaceIdentityCard } from "@/components/checkwise/workspace/workspace-identity-card";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
@@ -237,6 +238,32 @@ function EntraATuEspacioInner({ session }: { session: PortalSession }) {
             salvaguarda contra accesos cruzados.
           </AlertDescription>
         </Alert>
+
+        {/* Stage 2.7-a — provider workspace correction-request entry point.
+            The form covers only the locked Tier B fields
+            (contact_email / contact_phone / contact_name). Everything
+            else routes to support per the locked decision in §18 of
+            the experience plan. */}
+        <section
+          className="cw-fade-up rounded-xl border border-[color:var(--border-default)] bg-[color:var(--surface-raised)] p-6 shadow-sm sm:p-8"
+          aria-label="Solicitar corrección de un dato de contacto"
+        >
+          <header className="mb-5">
+            <h2 className="text-base font-semibold text-[color:var(--text-primary)]">
+              Solicitar corrección de un dato de contacto
+            </h2>
+            <p className="mt-1 text-xs text-[color:var(--text-secondary)]">
+              Usa esta sección si necesitas que actualicemos tu correo,
+              teléfono o nombre de contacto. Cada solicitud entra a revisión
+              antes de aplicarse.
+            </p>
+          </header>
+          <CorrectionRequestForm
+            workspace_id={workspace.protected.workspace_id}
+            initialField="contact_email"
+            initialCurrentValue={workspace.protected.email ?? ""}
+          />
+        </section>
       </div>
     </main>
   );

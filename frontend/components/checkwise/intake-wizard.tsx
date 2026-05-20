@@ -93,6 +93,12 @@ type IntakeForm = {
 
 const steps = ["Contexto", "Requisito", "Upload", "Prevalidación", "Confirmación"];
 const maxUploadSizeBytes = 15 * 1024 * 1024;
+// Stage 2.7-b — multi-file caps. Must mirror the backend constants in
+// ``backend/app/api/v1/portal.py::MULTI_FILE_MAX_FILES`` and
+// ``MULTI_FILE_TOTAL_BYTES_CAP``.
+const MULTI_FILE_MAX_TOTAL_FILES = 5;
+const MULTI_FILE_MAX_ADDITIONAL = MULTI_FILE_MAX_TOTAL_FILES - 1; // primary + N annexes
+const MULTI_FILE_TOTAL_BYTES_CAP = 30 * 1024 * 1024;
 
 const initialForm: IntakeForm = {
   client_name: "",
@@ -169,10 +175,21 @@ export function IntakeWizard({
     [],
   );
   const demoModeEnabled = process.env.NEXT_PUBLIC_DEMO_MODE === "true";
+  // Stage 2.7-b — multi-file upload feature flag. Mirrors the backend
+  // ``settings.MULTI_FILE_UPLOAD_ENABLED`` setting. When false (default)
+  // the wizard behaves exactly as the legacy single-file path; when
+  // true, providers may attach up to ``MULTI_FILE_MAX_ADDITIONAL``
+  // additional files (annexes) alongside the primary PDF.
+  const multiFileEnabled = process.env.NEXT_PUBLIC_MULTI_FILE_UPLOAD_ENABLED === "true";
   const [step, setStep] = useState(0);
   const [form, setForm] = useState<IntakeForm>(() => ({ ...initialForm, ...(prefill ?? {}) }));
   const [file, setFile] = useState<File | null>(null);
   const [fileError, setFileError] = useState<string | null>(null);
+  // Stage 2.7-b — additional files (annexes). Empty by default; only
+  // populated when the multi-file flag is on AND the user opts to
+  // attach more than one document for the same requirement+period.
+  const [additionalFiles, setAdditionalFiles] = useState<File[]>([]);
+  const [additionalFilesError, setAdditionalFilesError] = useState<string | null>(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [result, setResult] = useState<SubmissionResponse | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -280,8 +297,77 @@ export function IntakeWizard({
       // Older browsers — preview unavailable but upload still works.
       setFilePreviewUrl(null);
     }
+    // Re-validate aggregate size now that the primary file changed.
+    validateMultiFileAggregate(nextFile, additionalFiles);
     // Fire-and-forget duplicate pre-check against the workspace.
     void runDuplicatePreCheck(nextFile);
+  }
+
+  function validateMultiFileAggregate(
+    primary: File | null,
+    annexes: File[],
+  ): boolean {
+    if (!multiFileEnabled) {
+      setAdditionalFilesError(null);
+      return true;
+    }
+    const total =
+      (primary?.size ?? 0) + annexes.reduce((acc, f) => acc + f.size, 0);
+    if (total > MULTI_FILE_TOTAL_BYTES_CAP) {
+      const cap = MULTI_FILE_TOTAL_BYTES_CAP / (1024 * 1024);
+      setAdditionalFilesError(
+        `Los archivos suman más de ${cap} MB en total. Reduce el tamaño o sube en varias entregas.`,
+      );
+      return false;
+    }
+    setAdditionalFilesError(null);
+    return true;
+  }
+
+  function addAdditionalFiles(picked: FileList | File[] | null) {
+    if (!picked || !multiFileEnabled) return;
+    const incoming = Array.from(picked);
+    const accepted: File[] = [];
+    let rejection: string | null = null;
+    for (const candidate of incoming) {
+      if (!candidate.name.toLowerCase().endsWith(".pdf")) {
+        rejection = "Solo se aceptan archivos PDF en esta fase.";
+        continue;
+      }
+      if (candidate.size === 0) {
+        rejection = "Uno de los archivos está vacío.";
+        continue;
+      }
+      if (candidate.size > maxUploadSizeBytes) {
+        rejection = "Algún archivo excede el máximo individual de 15 MB.";
+        continue;
+      }
+      accepted.push(candidate);
+    }
+    const merged = [...additionalFiles, ...accepted].slice(
+      0,
+      MULTI_FILE_MAX_ADDITIONAL,
+    );
+    if (
+      additionalFiles.length + accepted.length >
+      MULTI_FILE_MAX_ADDITIONAL
+    ) {
+      rejection = `Solo se permiten hasta ${MULTI_FILE_MAX_ADDITIONAL} archivos adicionales por entrega.`;
+    }
+    setAdditionalFiles(merged);
+    if (rejection) {
+      setAdditionalFilesError(rejection);
+      return;
+    }
+    validateMultiFileAggregate(file, merged);
+  }
+
+  function removeAdditionalFile(index: number) {
+    setAdditionalFiles((current) => {
+      const next = current.filter((_, idx) => idx !== index);
+      validateMultiFileAggregate(file, next);
+      return next;
+    });
   }
 
   async function runDuplicatePreCheck(target: File) {
@@ -406,7 +492,38 @@ export function IntakeWizard({
 
     const body = new FormData();
     let endpoint: string;
-    if (session) {
+    // Stage 2.7-b — multi-file batch path. Active only when the flag is
+    // on, the session is authenticated, and the user attached at least
+    // one annex. The legacy single-file path is preserved verbatim for
+    // every other case.
+    const useBatchEndpoint =
+      multiFileEnabled && session !== null && additionalFiles.length > 0;
+    if (useBatchEndpoint && session) {
+      if (!validateMultiFileAggregate(file, additionalFiles)) {
+        setError(
+          additionalFilesError ??
+            "Los archivos suman más de lo permitido. Reduce el tamaño o sube en varias entregas.",
+        );
+        setIsSubmitting(false);
+        return;
+      }
+      endpoint = `${apiBaseUrl}/api/v1/portal/workspaces/${session.workspace_id}/submissions/batch`;
+      body.set("period_code", normalizedForm.period_code);
+      body.set("period_key", normalizedForm.period_key);
+      body.set("load_type", normalizedForm.load_type);
+      body.set("institution_code", normalizedForm.institution_code);
+      body.set("requirement_name", normalizedForm.requirement_name);
+      body.set("requirement_code", normalizedForm.requirement_code);
+      body.set("comments", normalizedForm.comments);
+      body.set("initial_status", DocumentStatus.PENDIENTE_REVISION);
+      body.append("files", file as File);
+      for (const annex of additionalFiles) {
+        body.append("files", annex);
+      }
+      if (supersedesSubmissionId) {
+        body.set("supersedes_submission_id", supersedesSubmissionId);
+      }
+    } else if (session) {
       endpoint = `${apiBaseUrl}/api/v1/portal/workspaces/${session.workspace_id}/submissions`;
       body.set("period_code", normalizedForm.period_code);
       body.set("period_key", normalizedForm.period_key);
@@ -454,7 +571,55 @@ export function IntakeWizard({
         throw new Error(formatApiError(payload));
       }
 
-      setResult((await response.json()) as SubmissionResponse);
+      if (useBatchEndpoint) {
+        // The batch endpoint returns 1 Submission with N Documents.
+        // Map the first document into the SubmissionResponse shape the
+        // success view expects, so the existing step-4 confirmation
+        // works without a parallel branch. A small banner inside the
+        // confirmation view summarizes "+N annexes" so the provider
+        // sees that all attached files were accepted.
+        type DocumentBatchEntry = {
+          document_id: string;
+          original_filename: string;
+          sha256: string;
+          storage_key: string;
+          status: string;
+          inspection?: SubmissionResponse["inspection"];
+          document_signals?: SubmissionResponse["document_signals"];
+          validations: ValidationSignal[];
+          validation_events?: SubmissionResponse["validation_events"];
+        };
+        type MultiSubmissionResponse = {
+          submission_id: string;
+          status: string;
+          documents: DocumentBatchEntry[];
+          message: string;
+        };
+        const batch = (await response.json()) as MultiSubmissionResponse;
+        const primary = batch.documents[0];
+        const flattenedValidations = batch.documents.flatMap(
+          (doc) => doc.validations ?? [],
+        );
+        const flattenedEvents = batch.documents.flatMap(
+          (doc) => doc.validation_events ?? [],
+        );
+        setResult({
+          submission_id: batch.submission_id,
+          document_id: primary.document_id,
+          status: batch.status,
+          sha256: primary.sha256,
+          storage_key: primary.storage_key,
+          validations: flattenedValidations,
+          validation_events: flattenedEvents,
+          inspection: primary.inspection ?? null,
+          document_signals: primary.document_signals ?? null,
+          message:
+            batch.message ||
+            `Carga recibida con ${batch.documents.length} documentos.`,
+        });
+      } else {
+        setResult((await response.json()) as SubmissionResponse);
+      }
       setStep(4);
     } catch (submitError) {
       setError(submitError instanceof Error ? submitError.message : "Error inesperado.");
@@ -518,6 +683,13 @@ export function IntakeWizard({
               duplicateCheck={duplicateCheck}
               duplicateChecking={duplicateChecking}
               requirement={selectedRequirement}
+              multiFileEnabled={multiFileEnabled}
+              additionalFiles={additionalFiles}
+              additionalFilesError={additionalFilesError}
+              onAdditionalFilesAdded={addAdditionalFiles}
+              onAdditionalFileRemoved={removeAdditionalFile}
+              multiFileMaxAdditional={MULTI_FILE_MAX_ADDITIONAL}
+              multiFileTotalBytesCap={MULTI_FILE_TOTAL_BYTES_CAP}
             />
           ) : null}
           {step === 3 ? (
@@ -853,6 +1025,13 @@ function UploadStep({
   duplicateCheck,
   duplicateChecking,
   requirement,
+  multiFileEnabled,
+  additionalFiles,
+  additionalFilesError,
+  onAdditionalFilesAdded,
+  onAdditionalFileRemoved,
+  multiFileMaxAdditional,
+  multiFileTotalBytesCap,
 }: {
   file: File | null;
   fileError: string | null;
@@ -864,6 +1043,13 @@ function UploadStep({
   duplicateCheck: DuplicateCheck | null;
   duplicateChecking: boolean;
   requirement: (typeof requirementGuides)[number];
+  multiFileEnabled: boolean;
+  additionalFiles: File[];
+  additionalFilesError: string | null;
+  onAdditionalFilesAdded: (picked: FileList | File[] | null) => void;
+  onAdditionalFileRemoved: (index: number) => void;
+  multiFileMaxAdditional: number;
+  multiFileTotalBytesCap: number;
 }) {
   return (
     <section className="space-y-4">
@@ -963,6 +1149,84 @@ function UploadStep({
                 className="block h-[420px] w-full"
               />
             </div>
+          ) : null}
+
+          {/* Stage 2.7-b — additional-files (annex) picker. Flag-gated.
+              Sits below the primary dropzone so the single-file flow
+              stays the canonical happy path; providers who need to
+              attach contract+annex see this section as additive. */}
+          {multiFileEnabled ? (
+            <section
+              className="rounded-md border border-dashed border-border bg-muted/30 p-4"
+              aria-label="Archivos adicionales para esta entrega"
+            >
+              <header className="mb-3 flex flex-col gap-1">
+                <p className="text-sm font-semibold text-[color:var(--text-primary)]">
+                  ¿Necesitas adjuntar más archivos a esta misma entrega?
+                </p>
+                <p className="text-xs text-muted-foreground">
+                  Para casos como contrato + anexos, sube hasta{" "}
+                  {multiFileMaxAdditional} archivos adicionales en PDF. Todos
+                  juntos no pueden superar{" "}
+                  {Math.round(multiFileTotalBytesCap / (1024 * 1024))} MB.
+                </p>
+              </header>
+              <label
+                htmlFor="native-additional-files"
+                className="inline-flex cursor-pointer items-center gap-2 rounded-md border border-border bg-white px-3 py-2 text-sm font-medium text-[color:var(--text-primary)] hover:bg-muted/50"
+              >
+                <CloudArrowUp className="h-4 w-4" aria-hidden="true" />
+                Añadir archivos adicionales
+              </label>
+              <input
+                id="native-additional-files"
+                type="file"
+                accept=".pdf,application/pdf"
+                multiple
+                className="sr-only"
+                onChange={(event) => {
+                  onAdditionalFilesAdded(event.target.files);
+                  // Reset the input so re-picking the same file fires.
+                  event.target.value = "";
+                }}
+              />
+              {additionalFiles.length > 0 ? (
+                <ul className="mt-3 divide-y divide-border rounded-md border border-border bg-white">
+                  {additionalFiles.map((annex, idx) => (
+                    <li
+                      key={`${annex.name}-${idx}-${annex.size}`}
+                      className="flex items-center justify-between gap-3 px-3 py-2 text-sm"
+                    >
+                      <div className="flex min-w-0 items-center gap-2">
+                        <FileText
+                          className="h-4 w-4 shrink-0 text-primary"
+                          aria-hidden="true"
+                        />
+                        <span className="truncate" title={annex.name}>
+                          {annex.name}
+                        </span>
+                        <span className="shrink-0 text-xs text-muted-foreground">
+                          {Math.ceil(annex.size / 1024)} KB
+                        </span>
+                      </div>
+                      <button
+                        type="button"
+                        className="shrink-0 text-xs font-medium text-destructive underline"
+                        onClick={() => onAdditionalFileRemoved(idx)}
+                        aria-label={`Quitar ${annex.name}`}
+                      >
+                        Quitar
+                      </button>
+                    </li>
+                  ))}
+                </ul>
+              ) : null}
+              {additionalFilesError ? (
+                <p className="mt-3 text-sm text-destructive">
+                  {additionalFilesError}
+                </p>
+              ) : null}
+            </section>
           ) : null}
 
           {fileError ? (

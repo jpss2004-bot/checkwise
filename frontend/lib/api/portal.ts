@@ -97,6 +97,14 @@ export type CalendarItem = {
   suggested_action: string;
   /** Canonical upload URL ready to use as ``<Link href>``. */
   href: string;
+  /** Stage 2.7 (T5 parity, 2026-05-20) — first-upload guidance.
+   *  Populated by the backend with per-institution fallbacks and
+   *  per-doc-name overrides for the highest-volume recurring items.
+   *  Empty string / empty array means "no extra guidance," never
+   *  "missing data." */
+  anatomy: string;
+  where_to_obtain: string;
+  common_errors: string[];
 };
 
 export type CalendarInstitution = {
