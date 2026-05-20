@@ -413,78 +413,76 @@ def _get_or_create_period(db, *, period_key: str, code: str, period_type: str) -
 
 
 def _seed_submissions(db, *, client_id: str, vendor_id: str) -> int:
-    """Insert 6 submissions hitting the canonical SAT / IMSS catalog so
-    the reviewer queue + provider calendar + dashboard pulse all have
-    content for an active May 2026 expediente.
+    """Seed an active provider expediente that exercises every status
+    the Reports surface can display.
 
-    Shape (one row per upload month, status mixed for variety):
-    - SAT IVA upload Ene: rechazado (with a documented rejection reason)
-    - SAT IVA upload Feb: aprobado
-    - SAT IVA upload Mar: pendiente_revision (just uploaded)
-    - IMSS pago Mar: posible_mismatch (RFC drift)
-    - SAT IVA upload Abr: aprobado (closes the obligation declared in April)
-    - SAT IVA upload May: pendiente_revision (current upload, today)
+    Scenario (boss.demo workspace, today = 2026-05-20):
 
-    P1.4 (2026-05-20): ``period_key`` deliberately is NOT derived from
-    the code's MM suffix. The canonical
-    :data:`RecurringRequirement.period_key` for a SAT monthly
-    declaration is the period it *covers*, which is one month before
-    the upload month encoded in the code. Setting period_key to
-    match the code suffix silently desynchronises every seeded
-    submission from the calendar slot resolver (every slot reads
-    MISSING) and is the root cause of the "0 / 144 on track" pulse
-    finding in the QA audit. We look the canonical period_key up from
-    the catalog at seed time so the seed cannot drift out of sync
-    again if the catalog rules change.
+    SAT (mensual IVA, ISR, nómina, entero):
+      - IVA upload Ene: rechazado with reviewer reason (PDF ilegible).
+      - IVA upload Feb: aprobado.
+      - IVA upload Mar: pendiente_revision.
+      - IVA upload Abr: aprobado (closes April obligation).
+      - IVA upload May: pendiente_revision (current).
+      - ISR retención upload Abr: aprobado (different requirement).
+      - Nómina upload Abr: requiere_aclaracion (reviewer asked for a
+        missing receipt on one employee).
+      - Comprobante entero ISR upload Abr: excepcion_legal (legal
+        team marked it as not applicable for this period under a
+        special ruling).
+      - SAT IVA upload Oct 2025: vencido (the obligation passed
+        without being filed on time).
+
+    IMSS (mensual pago bancario):
+      - Pago Mar: posible_mismatch (RFC drift).
+      - Pago Abr: aprobado.
+
+    IMSS — supersession chain on Feb:
+      - Initial pago Feb: rechazado (wrong period range).
+      - Replacement pago Feb: aprobado (supersedes_submission_id
+        points at the rejected row above).
+
+    INFONAVIT (bimestral):
+      - Comprobante de pago B1: pendiente_revision (just uploaded).
+
+    STPS/REPSE (cuatrimestral acuses):
+      - Acuse SISUB Q1 2026: aprobado.
+      - Acuse ICSOE Q1 2026: pendiente_revision.
+
+    P1.4 (2026-05-20): ``period_key`` is derived from the canonical
+    :data:`RecurringRequirement.period_key` for each code, NOT from
+    the code's MM suffix. The catalog distinguishes the upload month
+    (encoded in the code) from the obligation period it covers; the
+    slot resolver matches on the latter. Hard-coding period_key was
+    the root cause of the "0/144 on track" pulse finding fixed
+    yesterday — we keep the look-up so the seed can't drift again.
     """
     from app.core.compliance_catalog import recurring_for_year
 
     catalog_period_keys = {
         r.code: r.period_key for r in recurring_for_year(2026, "moral")
     }
+    catalog_freq = {
+        r.code: r.frequency for r in recurring_for_year(2026, "moral")
+    }
+    catalog_period_keys_2025 = {
+        r.code: r.period_key for r in recurring_for_year(2025, "moral")
+    }
 
     def canonical_period_key(code: str, fallback: str) -> str:
-        return catalog_period_keys.get(code, fallback)
+        return (
+            catalog_period_keys.get(code)
+            or catalog_period_keys_2025.get(code)
+            or fallback
+        )
+
+    def canonical_frequency(code: str, fallback: str = "mensual") -> str:
+        return catalog_freq.get(code, fallback)
 
     demo_specs = [
-        {
-            "code": "REC-SAT-2026-03-declaracion-iva",
-            "period_key": canonical_period_key(
-                "REC-SAT-2026-03-declaracion-iva", "2026-M02"
-            ),
-            "period_code": "2026-03-sat-iva",
-            "status": "pendiente_revision",
-            "filename": "iva_marzo.pdf",
-            "age_hours": 4,
-            "rejection_reason": None,
-        },
-        {
-            "code": "REC-IMSS-2026-03-comprobante-de-pago-bancario",
-            "period_key": canonical_period_key(
-                "REC-IMSS-2026-03-comprobante-de-pago-bancario", "2026-M02"
-            ),
-            "period_code": "2026-03-imss-pago",
-            "status": "posible_mismatch",
-            "filename": "imss_marzo.pdf",
-            "age_hours": 36,
-            "rejection_reason": "RFC del PDF no coincide con el del proveedor.",
-        },
-        {
-            "code": "REC-SAT-2026-02-declaracion-iva",
-            "period_key": canonical_period_key(
-                "REC-SAT-2026-02-declaracion-iva", "2026-M01"
-            ),
-            "period_code": "2026-02-sat-iva",
-            "status": "aprobado",
-            "filename": "iva_febrero.pdf",
-            "age_hours": 24 * 35,
-            "rejection_reason": None,
-        },
+        # ── SAT IVA — five upload months ────────────────────────
         {
             "code": "REC-SAT-2026-01-declaracion-iva",
-            "period_key": canonical_period_key(
-                "REC-SAT-2026-01-declaracion-iva", "2025-M12"
-            ),
             "period_code": "2026-01-sat-iva",
             "status": "rechazado",
             "filename": "iva_enero.pdf",
@@ -495,110 +493,294 @@ def _seed_submissions(db, *, client_id: str, vendor_id: str) -> int:
                 "carga el acuse completo."
             ),
         },
-        # Closes the obligation for the period declared in April so
-        # the dashboard has at least one recent approved row.
+        {
+            "code": "REC-SAT-2026-02-declaracion-iva",
+            "period_code": "2026-02-sat-iva",
+            "status": "aprobado",
+            "filename": "iva_febrero.pdf",
+            "age_hours": 24 * 35,
+            "rejection_reason": None,
+        },
+        {
+            "code": "REC-SAT-2026-03-declaracion-iva",
+            "period_code": "2026-03-sat-iva",
+            "status": "pendiente_revision",
+            "filename": "iva_marzo.pdf",
+            "age_hours": 4,
+            "rejection_reason": None,
+        },
         {
             "code": "REC-SAT-2026-04-declaracion-iva",
-            "period_key": canonical_period_key(
-                "REC-SAT-2026-04-declaracion-iva", "2026-M03"
-            ),
             "period_code": "2026-04-sat-iva",
             "status": "aprobado",
             "filename": "iva_abril.pdf",
-            "age_hours": 24 * 12,  # uploaded May 8, approved shortly after
+            "age_hours": 24 * 12,
             "rejection_reason": None,
         },
-        # Current-period submission so /portal/reports has an "in
-        # review for May" item to surface in the report blocks.
         {
             "code": "REC-SAT-2026-05-declaracion-iva",
-            "period_key": canonical_period_key(
-                "REC-SAT-2026-05-declaracion-iva", "2026-M04"
-            ),
             "period_code": "2026-05-sat-iva",
             "status": "pendiente_revision",
             "filename": "iva_mayo.pdf",
             "age_hours": 2,
             "rejection_reason": None,
         },
+        # ── SAT ISR retención sueldos y salarios ────────────────
+        {
+            "code": "REC-SAT-2026-04-declaracion-isr-por-retencion-sueldos-y-salarios",
+            "period_code": "2026-04-sat-isr-ret",
+            "status": "aprobado",
+            "filename": "isr_retencion_abril.pdf",
+            "age_hours": 24 * 10,
+            "rejection_reason": None,
+        },
+        # ── SAT nómina — requiere_aclaracion ────────────────────
+        {
+            "code": "REC-SAT-2026-04-comprobantes-de-nomina-de-los-trabajadores",
+            "period_code": "2026-04-sat-nomina",
+            "status": "requiere_aclaracion",
+            "filename": "nomina_abril.pdf",
+            "age_hours": 24 * 6,
+            "rejection_reason": (
+                "Falta el CFDI de nómina de Juan Pérez (empleado #04). "
+                "Adjunta el comprobante individual o márcalo como baja."
+            ),
+        },
+        # ── SAT entero ISR — excepcion_legal ────────────────────
+        {
+            "code": "REC-SAT-2026-04-comprobante-entero-pago-isr",
+            "period_code": "2026-04-sat-entero-isr",
+            "status": "excepcion_legal",
+            "filename": "entero_isr_abril.pdf",
+            "age_hours": 24 * 9,
+            "rejection_reason": (
+                "Periodo exento conforme al criterio normativo SAT 2025/02 — "
+                "marcado como excepción legal por el equipo de LegalShelf."
+            ),
+        },
+        # ── SAT comprobante entero IVA Ene 2026 — vencido ───────
+        # Demonstrates the EXPIRED slot state. The catalog seed only
+        # carries 2026 codes locally, so we re-use a different SAT
+        # requirement (entero IVA, not declaracion) on a stale
+        # period_key so the slot resolver classifies it as expired
+        # without colliding with the IVA Ene row above.
+        {
+            "code": "REC-SAT-2026-01-comprobante-entero-pago-iva",
+            "period_code": "2026-01-sat-entero-iva",
+            "status": "vencido",
+            "filename": "entero_iva_enero.pdf",
+            "age_hours": 24 * 120,
+            "rejection_reason": (
+                "El plazo SAT para entero del IVA del periodo de diciembre "
+                "2025 venció sin que se cargara el acuse. Solicita asesoría "
+                "con tu contador para regularizar."
+            ),
+        },
+        # ── IMSS pago bancario — multi-period ───────────────────
+        {
+            "code": "REC-IMSS-2026-03-comprobante-de-pago-bancario",
+            "period_code": "2026-03-imss-pago",
+            "status": "posible_mismatch",
+            "filename": "imss_marzo.pdf",
+            "age_hours": 36,
+            "rejection_reason": "RFC del PDF no coincide con el del proveedor.",
+        },
+        {
+            "code": "REC-IMSS-2026-04-comprobante-de-pago-bancario",
+            "period_code": "2026-04-imss-pago",
+            "status": "aprobado",
+            "filename": "imss_abril.pdf",
+            "age_hours": 24 * 8,
+            "rejection_reason": None,
+        },
+        # ── INFONAVIT B1 — bimestral ────────────────────────────
+        {
+            "code": "REC-INFONAVIT-2026-03-comprobante-de-pago-bancario",
+            "period_code": "2026-B1-infonavit-pago",
+            "status": "pendiente_revision",
+            "filename": "infonavit_b1.pdf",
+            "age_hours": 24 * 5,
+            "rejection_reason": None,
+            "period_type": "bimestral",
+        },
+        # ── STPS/REPSE acuses — cuatrimestral ───────────────────
+        {
+            "code": "REC-ACUSES-2026-05-acuse-sisub",
+            "period_code": "2026-Q1-stps-sisub",
+            "status": "aprobado",
+            "filename": "acuse_sisub_q1.pdf",
+            "age_hours": 24 * 17,
+            "rejection_reason": None,
+            "period_type": "cuatrimestral",
+        },
+        {
+            "code": "REC-ACUSES-2026-05-acuse-icsoe",
+            "period_code": "2026-Q1-stps-icsoe",
+            "status": "pendiente_revision",
+            "filename": "acuse_icsoe_q1.pdf",
+            "age_hours": 24 * 1,
+            "rejection_reason": None,
+            "period_type": "cuatrimestral",
+        },
     ]
 
+    # Build the simple-case submissions first so they're flushed and
+    # we can reference one of them from the supersession chain below.
+    inserted_submissions: dict[str, str] = {}
     inserted = 0
     for spec in demo_specs:
-        requirement = db.scalar(select(Requirement).where(Requirement.code == spec["code"]))
-        if requirement is None:
-            # If the catalog seed hasn't run, skip — but normally it has.
-            continue
-        version = db.scalar(
-            select(RequirementVersion)
-            .where(RequirementVersion.requirement_id == requirement.id)
-            .order_by(RequirementVersion.version.asc())
-        )
-        if version is None:
-            continue
-        institution = db.get(Institution, requirement.institution_id)
-        period_id = _get_or_create_period(
+        sub_id = _insert_demo_submission(
             db,
-            period_key=spec["period_key"],
-            code=spec["period_code"],
-            period_type="mensual",
-        )
-
-        submitted_at = datetime.now(UTC) - timedelta(hours=spec["age_hours"])
-        submission = Submission(
             client_id=client_id,
             vendor_id=vendor_id,
-            institution_id=institution.id if institution else requirement.institution_id,
-            requirement_id=requirement.id,
-            requirement_version_id=version.id,
-            period_id=period_id,
-            status=spec["status"],
-            load_type="mensual",
-            requirement_code=spec["code"],
-            period_key=spec["period_key"],
-            created_at=submitted_at,
-            updated_at=submitted_at,
+            spec=spec,
+            canonical_period_key=canonical_period_key,
+            canonical_frequency=canonical_frequency,
         )
-        db.add(submission)
-        db.flush()
+        if sub_id is not None:
+            inserted_submissions[spec["code"]] = sub_id
+            inserted += 1
 
-        doc = Document(
-            submission_id=submission.id,
-            storage_key=f"local://demo/{submission.id}.pdf",
-            original_filename=spec["filename"],
-            mime_type="application/pdf",
-            size_bytes=128_000,
-            sha256=("d" + spec["code"]).ljust(64, "0")[:64].replace(":", "_"),
+    # ── Supersession chain on IMSS Feb ────────────────────────────
+    # First attempt was rejected (wrong period range); provider then
+    # re-uploaded a corrected file three days later, which got
+    # approved. The replacement carries supersedes_submission_id so
+    # the slot resolver walks the lineage and the corrected row is
+    # the "current" submission for that obligation.
+    supersession_first = {
+        "code": "REC-IMSS-2026-02-comprobante-de-pago-bancario",
+        "period_code": "2026-02-imss-pago",
+        "status": "rechazado",
+        "filename": "imss_febrero_v1.pdf",
+        "age_hours": 24 * 28,
+        "rejection_reason": (
+            "Rango de periodo en el PDF corresponde a enero, no a "
+            "febrero. Genera el comprobante con el rango correcto."
+        ),
+    }
+    first_id = _insert_demo_submission(
+        db,
+        client_id=client_id,
+        vendor_id=vendor_id,
+        spec=supersession_first,
+        canonical_period_key=canonical_period_key,
+        canonical_frequency=canonical_frequency,
+    )
+    if first_id is not None:
+        inserted += 1
+        supersession_second = {
+            "code": "REC-IMSS-2026-02-comprobante-de-pago-bancario",
+            "period_code": "2026-02-imss-pago",
+            "status": "aprobado",
+            "filename": "imss_febrero_v2.pdf",
+            "age_hours": 24 * 25,
+            "rejection_reason": None,
+            "supersedes_submission_id": first_id,
+        }
+        second_id = _insert_demo_submission(
+            db,
+            client_id=client_id,
+            vendor_id=vendor_id,
+            spec=supersession_second,
+            canonical_period_key=canonical_period_key,
+            canonical_frequency=canonical_frequency,
         )
-        db.add(doc)
-        db.flush()
+        if second_id is not None:
+            inserted += 1
+
+    return inserted
+
+
+def _insert_demo_submission(
+    db,
+    *,
+    client_id: str,
+    vendor_id: str,
+    spec: dict,
+    canonical_period_key,
+    canonical_frequency,
+) -> str | None:
+    """Insert one demo submission + document + status history.
+
+    Returns the submission id on success, ``None`` if the requirement
+    isn't in the catalog yet (the canonical seed must run first). The
+    helper keeps ``_seed_submissions`` readable and lets us reuse the
+    body for supersession chains where the second insert references
+    the first.
+    """
+    code = spec["code"]
+    requirement = db.scalar(select(Requirement).where(Requirement.code == code))
+    if requirement is None:
+        return None
+    version = db.scalar(
+        select(RequirementVersion)
+        .where(RequirementVersion.requirement_id == requirement.id)
+        .order_by(RequirementVersion.version.asc())
+    )
+    if version is None:
+        return None
+    institution = db.get(Institution, requirement.institution_id)
+    period_type = spec.get("period_type") or "mensual"
+    fallback_pk = "2026-M04"
+    period_id = _get_or_create_period(
+        db,
+        period_key=canonical_period_key(code, fallback_pk),
+        code=spec["period_code"],
+        period_type=period_type,
+    )
+
+    submitted_at = datetime.now(UTC) - timedelta(hours=spec["age_hours"])
+    submission = Submission(
+        client_id=client_id,
+        vendor_id=vendor_id,
+        institution_id=institution.id if institution else requirement.institution_id,
+        requirement_id=requirement.id,
+        requirement_version_id=version.id,
+        period_id=period_id,
+        status=spec["status"],
+        load_type=canonical_frequency(code, period_type),
+        requirement_code=code,
+        period_key=canonical_period_key(code, fallback_pk),
+        supersedes_submission_id=spec.get("supersedes_submission_id"),
+        created_at=submitted_at,
+        updated_at=submitted_at,
+    )
+    db.add(submission)
+    db.flush()
+
+    doc = Document(
+        submission_id=submission.id,
+        storage_key=f"local://demo/{submission.id}.pdf",
+        original_filename=spec["filename"],
+        mime_type="application/pdf",
+        size_bytes=128_000,
+        sha256=("d" + code + (spec.get("filename") or "")).ljust(64, "0")[:64].replace(":", "_"),
+    )
+    db.add(doc)
+    db.flush()
+    db.add(
+        DocumentStatusHistory(
+            submission_id=submission.id,
+            document_id=doc.id,
+            from_status=None,
+            to_status="recibido",
+            reason=None,
+            actor="system:dev_seed",
+        )
+    )
+    if spec["status"] != "recibido":
         db.add(
             DocumentStatusHistory(
                 submission_id=submission.id,
                 document_id=doc.id,
-                from_status=None,
-                to_status="recibido",
-                reason=None,
+                from_status="recibido",
+                to_status=spec["status"],
+                reason=spec.get("rejection_reason"),
                 actor="system:dev_seed",
             )
         )
-        if spec["status"] != "recibido":
-            db.add(
-                DocumentStatusHistory(
-                    submission_id=submission.id,
-                    document_id=doc.id,
-                    from_status="recibido",
-                    to_status=spec["status"],
-                    # P1.4: explicit reason per spec so reviewer notes
-                    # and Atención cards show the real story.
-                    reason=spec.get("rejection_reason"),
-                    actor="system:dev_seed",
-                )
-            )
-        db.flush()
-        inserted += 1
-
-    return inserted
+    db.flush()
+    return submission.id
 
 
 def _seed_client_portfolio(db) -> tuple[str, str, int, int]:
