@@ -50,6 +50,7 @@ from app.models import (
     AuditLog,
     Client,
     ContactRequest,
+    FeedbackReport,
     Institution,
     Period,
     ProviderWorkspace,
@@ -1001,6 +1002,223 @@ def update_contact_request_status(
     db.commit()
     db.refresh(row)
     return _contact_to_dict(row)
+
+
+# ---------------------------------------------------------------------------
+# Feedback reports (bug + improvement reports from the Reportar launcher)
+#
+# Two source modes share the same table — ``source='authenticated'`` for
+# JWT-backed staff submissions and ``source='public'`` for anonymous
+# landing-page reports. Status lifecycle:
+#     new → triaged → in_progress → resolved (or wont_fix)
+# Same shape as contact-requests triage; admin can correct mis-sets so
+# we don't enforce a strict transition graph.
+# ---------------------------------------------------------------------------
+
+
+class FeedbackReportAdminItem(BaseModel):
+    id: str
+    kind: str
+    description: str
+    source: str
+    is_public: bool
+    status: str
+    url: str | None
+    path: str | None
+    viewport: str | None
+    user_agent: str | None
+    console_logs: str | None
+    user_id: str | None
+    user_email: str | None
+    user_full_name: str | None
+    user_roles: str | None
+    contact_email: str | None
+    ip_hash: str | None
+    screenshot_storage_key: str | None
+    screenshot_size_bytes: int | None
+    screenshot_url: str | None
+    """Time-limited download URL when the storage backend supports
+    pre-signing (S3/R2). NULL on the local backend — the frontend
+    will hit a separate streaming endpoint instead."""
+    slack_message_ts: str | None
+    slack_delivery_status: str
+    slack_delivery_error: str | None
+    resolution_note: str | None
+    triaged_by_user_id: str | None
+    triaged_at: datetime | None
+    created_at: datetime
+    updated_at: datetime
+
+
+class FeedbackReportList(BaseModel):
+    items: list[FeedbackReportAdminItem]
+    total: int
+    limit: int
+    offset: int
+
+
+class FeedbackReportStatusUpdate(BaseModel):
+    status: Literal["new", "triaged", "in_progress", "resolved", "wont_fix"]
+    resolution_note: str | None = Field(default=None, max_length=4000)
+
+
+def _feedback_to_dict(
+    row: FeedbackReport, *, include_screenshot_url: bool = False
+) -> FeedbackReportAdminItem:
+    """Serialize a FeedbackReport for the admin queue.
+
+    When ``include_screenshot_url`` is True we ask the storage backend
+    for a presigned URL; the list endpoint skips this (one-pre-sign
+    per row × 50 rows is a needless cost) and only the detail endpoint
+    sets it.
+    """
+    screenshot_url: str | None = None
+    if include_screenshot_url and row.screenshot_storage_key:
+        try:
+            from app.services.storage import get_storage_service
+
+            screenshot_url = get_storage_service().presigned_download_url(
+                row.screenshot_storage_key
+            )
+        except Exception:  # noqa: BLE001 — list rendering must not fail
+            screenshot_url = None
+    return FeedbackReportAdminItem(
+        id=row.id,
+        kind=row.kind,
+        description=row.description,
+        source=row.source,
+        is_public=row.is_public,
+        status=row.status,
+        url=row.url,
+        path=row.path,
+        viewport=row.viewport,
+        user_agent=row.user_agent,
+        console_logs=row.console_logs,
+        user_id=row.user_id,
+        user_email=row.user_email,
+        user_full_name=row.user_full_name,
+        user_roles=row.user_roles,
+        contact_email=row.contact_email,
+        ip_hash=row.ip_hash,
+        screenshot_storage_key=row.screenshot_storage_key,
+        screenshot_size_bytes=row.screenshot_size_bytes,
+        screenshot_url=screenshot_url,
+        slack_message_ts=row.slack_message_ts,
+        slack_delivery_status=row.slack_delivery_status,
+        slack_delivery_error=row.slack_delivery_error,
+        resolution_note=row.resolution_note,
+        triaged_by_user_id=row.triaged_by_user_id,
+        triaged_at=row.triaged_at,
+        created_at=row.created_at,
+        updated_at=row.updated_at,
+    )
+
+
+@router.get("/feedback-reports", response_model=FeedbackReportList)
+def list_feedback_reports(
+    db: DbSession,
+    current: AdminUser,
+    status_filter: Annotated[
+        Literal["new", "triaged", "in_progress", "resolved", "wont_fix"] | None,
+        Query(alias="status"),
+    ] = None,
+    kind: Annotated[Literal["bug", "improvement"] | None, Query()] = None,
+    source: Annotated[Literal["authenticated", "public"] | None, Query()] = None,
+    limit: Annotated[int, Query(ge=1, le=200)] = 50,
+    offset: Annotated[int, Query(ge=0)] = 0,
+) -> FeedbackReportList:
+    """List feedback reports newest first.
+
+    Internal-admin only. Filters compose as AND on
+    ``status`` / ``kind`` / ``source``. Pagination via ``limit``
+    (hard-capped at 200) + ``offset``.
+    """
+    _ = current
+    stmt = select(FeedbackReport)
+    total_stmt = select(func.count()).select_from(FeedbackReport)
+    conditions = []
+    if status_filter:
+        conditions.append(FeedbackReport.status == status_filter)
+    if kind:
+        conditions.append(FeedbackReport.kind == kind)
+    if source:
+        conditions.append(FeedbackReport.source == source)
+    if conditions:
+        stmt = stmt.where(and_(*conditions))
+        total_stmt = total_stmt.where(and_(*conditions))
+    total = int(db.scalar(total_stmt) or 0)
+    stmt = stmt.order_by(FeedbackReport.created_at.desc()).limit(limit).offset(offset)
+    rows = list(db.scalars(stmt))
+    return FeedbackReportList(
+        items=[_feedback_to_dict(r) for r in rows],
+        total=total,
+        limit=limit,
+        offset=offset,
+    )
+
+
+@router.get(
+    "/feedback-reports/{report_id}", response_model=FeedbackReportAdminItem
+)
+def get_feedback_report(
+    report_id: str, db: DbSession, current: AdminUser
+) -> FeedbackReportAdminItem:
+    """Detail view, including a presigned screenshot URL when available."""
+    _ = current
+    row = db.get(FeedbackReport, report_id)
+    if row is None:
+        raise HTTPException(
+            status.HTTP_404_NOT_FOUND, detail="Reporte no encontrado."
+        )
+    return _feedback_to_dict(row, include_screenshot_url=True)
+
+
+@router.patch(
+    "/feedback-reports/{report_id}", response_model=FeedbackReportAdminItem
+)
+def update_feedback_report_status(
+    report_id: str,
+    payload: FeedbackReportStatusUpdate,
+    db: DbSession,
+    current: AdminUser,
+) -> FeedbackReportAdminItem:
+    """Move a feedback report through the triage lifecycle.
+
+    Setting ``status`` to anything other than ``new`` stamps
+    ``triaged_by_user_id`` + ``triaged_at`` with the admin's identity
+    and the current time on the first such transition. Subsequent
+    status changes leave those columns alone so the audit trail
+    records who first triaged the report (rerun the audit-log
+    explorer for the full history).
+    """
+    row = db.get(FeedbackReport, report_id)
+    if row is None:
+        raise HTTPException(
+            status.HTTP_404_NOT_FOUND, detail="Reporte no encontrado."
+        )
+    before = _feedback_to_dict(row).model_dump(mode="json")
+    row.status = payload.status
+    if payload.resolution_note is not None:
+        row.resolution_note = payload.resolution_note
+    if row.triaged_by_user_id is None and payload.status != "new":
+        row.triaged_by_user_id = current.user.id
+        from app.models.entities import utc_now
+
+        row.triaged_at = utc_now()
+    db.flush()
+    after = _feedback_to_dict(row).model_dump(mode="json")
+    _audit_admin(
+        db,
+        actor=current,
+        action="admin.feedback_report.status_changed",
+        entity_type="feedback_report",
+        entity_id=row.id,
+        before=before,
+        after=after,
+    )
+    db.commit()
+    db.refresh(row)
+    return _feedback_to_dict(row, include_screenshot_url=True)
 
 
 # ---------------------------------------------------------------------------
