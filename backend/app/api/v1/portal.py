@@ -30,10 +30,11 @@ from __future__ import annotations
 
 import secrets
 from datetime import date
-from typing import Annotated, Literal
+from typing import Annotated, Final, Literal
 
 from fastapi import (
     APIRouter,
+    BackgroundTasks,
     Depends,
     File,
     Form,
@@ -61,8 +62,11 @@ from app.core.compliance_catalog import (
     onboarding_format,
     onboarding_where_to_obtain,
     onboarding_why,
+    recurring_anatomy,
+    recurring_common_errors,
     recurring_for_year,
     recurring_required_document,
+    recurring_where_to_obtain,
 )
 from app.core.config import settings
 from app.core.period_validation import (
@@ -82,7 +86,22 @@ from app.models import (
     ValidationEvent,
 )
 from app.models.entities import utc_now
-from app.schemas.submissions import SubmissionResponse
+from app.schemas.submissions import MultiSubmissionResponse, SubmissionResponse
+from app.services.contact_service import hash_ip
+from app.services.correction_request_service import (
+    TIER_B_FIELD_LABEL_ES,
+    TIER_B_FIELDS,
+    create_correction_request,
+)
+from app.services.correction_request_service import (
+    deliver_to_slack as deliver_correction_to_slack,
+)
+from app.services.correction_request_service import (
+    record_and_check_rate as record_and_check_correction_rate,
+)
+from app.services.correction_request_service import (
+    slack_payload_snapshot as correction_slack_payload_snapshot,
+)
 from app.services.evidence_slots import (
     SlotState,
     SlotView,
@@ -100,6 +119,7 @@ from app.services.submission_service import (
     INTAKE_SOURCE_WORKSPACE_PORTAL,
     assert_pdf_upload,
     finalize_intake_submission,
+    finalize_multi_document_submission,
     get_or_create_institution,
 )
 
@@ -767,6 +787,172 @@ def get_workspace(
     )
 
 
+# ---------------------------------------------------------------------------
+# Stage 2.7-a — Provider correction requests
+# ---------------------------------------------------------------------------
+#
+# Tier B fields (contact_email / contact_phone / contact_name) are the
+# only fields a provider may request changes to from inside the portal.
+# RFC, razón social, contract reference, and every other tenant-locked
+# attribute stay support-only — those go through email/Slack to a
+# CheckWise admin who edits them in the database. The endpoint enforces
+# the Tier B list and returns 422 with a plain-Spanish "contact support"
+# message for anything outside it.
+#
+# Storage: a single ``audit_log`` row with action
+# ``correction_request.submitted`` and ``actor_type=provider``. The row
+# id IS the correction-request id surfaced to the provider as a folio.
+#
+# Delivery: best-effort Slack POST to ``SLACK_CORRECTION_WEBHOOK_URL`` as
+# a BackgroundTask. Webhook unset → audit_log persistence only, no error
+# (matches contact-form behavior).
+
+
+class CorrectionRequestCreate(BaseModel):
+    field: Literal["contact_email", "contact_phone", "contact_name", "other"] = Field(
+        ...,
+        description=(
+            "Tier B field key. ``other`` is reserved for the form's "
+            "free-text catch-all and is rejected here — providers must "
+            "route those through support."
+        ),
+    )
+    current_value: str = Field(default="", max_length=512)
+    proposed_value: str = Field(..., min_length=1, max_length=512)
+    reason: str = Field(..., min_length=4, max_length=2000)
+    message: str | None = Field(default=None, max_length=4000)
+
+
+class CorrectionRequestResponse(BaseModel):
+    id: str
+    field: str
+    status: Literal["pending"]
+    created_at_iso: str
+
+
+def _client_ip(request: Request) -> str | None:
+    """Resolve the calling client IP, preferring proxy headers."""
+    xff = request.headers.get("x-forwarded-for")
+    if xff:
+        first = xff.split(",")[0].strip()
+        if first:
+            return first
+    real = request.headers.get("x-real-ip")
+    if real:
+        return real.strip()
+    if request.client and request.client.host:
+        return request.client.host
+    return None
+
+
+@router.post(
+    "/workspaces/{workspace_id}/correction-requests",
+    response_model=CorrectionRequestResponse,
+    status_code=status.HTTP_202_ACCEPTED,
+    summary="Submit a Tier B correction request from the provider portal",
+)
+def post_correction_request(
+    workspace_id: str,
+    payload: CorrectionRequestCreate,
+    request: Request,
+    background: BackgroundTasks,
+    db: DbSession,
+    workspace: Annotated[ProviderWorkspace, Depends(current_portal_workspace)],
+) -> CorrectionRequestResponse:
+    _ = workspace_id  # tenant guard already enforced by dependency
+
+    # Tier B contract — anything outside the locked field list is
+    # support-only. The form ships an "other" option for catch-all
+    # cases; those must route through email so we explicitly reject
+    # them here.
+    if payload.field not in TIER_B_FIELDS:
+        labels = ", ".join(TIER_B_FIELD_LABEL_ES.values())
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail=(
+                "Solo aceptamos solicitudes de corrección para "
+                f"{labels}. Para otros datos (RFC, razón social, "
+                "contrato), escríbenos a soporte@checkwise.mx."
+            ),
+        )
+
+    proposed = payload.proposed_value.strip()
+    current = (payload.current_value or "").strip()
+    if not proposed or proposed == current:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail="Captura un valor distinto al actual.",
+        )
+
+    reason = payload.reason.strip()
+    if len(reason) < 4:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail="Captura una razón breve. Los cambios sensibles requieren contexto.",
+        )
+
+    user_id = workspace.owner_user_id
+    if user_id is None:
+        # ``current_portal_workspace`` accepts a legacy X-Workspace-Token
+        # path that does not carry a user identity. Correction requests
+        # need an actor; reject the legacy path explicitly.
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Inicia sesión para enviar una solicitud de corrección.",
+        )
+
+    if not record_and_check_correction_rate(user_id):
+        raise HTTPException(
+            status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+            detail=(
+                "Has enviado varias solicitudes recientemente. "
+                "Inténtalo de nuevo en una hora."
+            ),
+        )
+
+    user_email: str | None = None
+    user = db.get(User, user_id)
+    if user is not None:
+        user_email = user.email
+
+    ip_hash = hash_ip(_client_ip(request))
+    user_agent_raw = request.headers.get("user-agent")
+    user_agent = (user_agent_raw or "")[:512] or None
+
+    row = create_correction_request(
+        db,
+        workspace_id=workspace.id,
+        user_id=user_id,
+        user_email=user_email,
+        field=payload.field,
+        current_value=current,
+        proposed_value=proposed,
+        reason=reason,
+        message=(payload.message.strip() if payload.message else None),
+        ip_hash=ip_hash,
+        user_agent=user_agent,
+    )
+
+    snapshot = correction_slack_payload_snapshot(
+        workspace_id=workspace.id,
+        user_id=user_id,
+        user_email=user_email,
+        field=payload.field,
+        current_value=current,
+        proposed_value=proposed,
+        reason=reason,
+        message=(payload.message.strip() if payload.message else None),
+    )
+    background.add_task(deliver_correction_to_slack, row.id, snapshot)
+
+    return CorrectionRequestResponse(
+        id=row.id,
+        field=payload.field,
+        status="pending",
+        created_at_iso=row.created_at.isoformat(),
+    )
+
+
 @router.get("/workspaces/{workspace_id}/onboarding")
 def get_workspace_onboarding(
     workspace_id: str,
@@ -934,6 +1120,13 @@ def get_workspace_calendar(
                 "deadline_iso": deadline_iso,
                 "suggested_action": _calendar_suggested_action(item_status),
                 "href": href,
+                # Stage 2.7 (T5 parity, 2026-05-20) — first-upload
+                # guidance mirroring the onboarding shape. Calendar
+                # drawer surfaces these in the same DocumentGuidanceDisclosure
+                # pattern used on /portal/onboarding expediente cards.
+                "anatomy": recurring_anatomy(req),
+                "where_to_obtain": recurring_where_to_obtain(req),
+                "common_errors": list(recurring_common_errors(req)),
             }
         )
         inst["expected"] += 1
@@ -1589,6 +1782,220 @@ async def create_workspace_submission(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="No fue posible registrar la carga documental.",
         ) from exc
+
+
+# ---------------------------------------------------------------------------
+# Stage 2.7-b — Multi-document submission (flag-gated)
+# ---------------------------------------------------------------------------
+#
+# The data model has supported ``Submission`` → N ``Document`` rows
+# since Phase 2 (``backend/app/models/entities.py:222``). The provider
+# wizard at ``/portal/upload`` accepts only one file today; the
+# multi-file path lives behind ``settings.MULTI_FILE_UPLOAD_ENABLED``
+# so the new shape can be rolled back without a redeploy.
+#
+# Caps (locked decision, 2026-05-20):
+#   * ``MULTI_FILE_MAX_FILES``    — N ≤ 5 files per submission
+#   * ``MULTI_FILE_TOTAL_BYTES_CAP`` — ≤ 30 MB aggregate per submission
+#
+# Atomicity: storage saves run sequentially. If aggregate size cap is
+# breached or any file fails inspection downstream, the router rolls
+# back the DB transaction and removes the storage files written so far
+# — no half-persisted submissions, no orphaned PDFs.
+
+
+MULTI_FILE_MAX_FILES: Final[int] = 5
+MULTI_FILE_TOTAL_BYTES_CAP: Final[int] = 30 * 1024 * 1024  # 30 MB
+
+
+@router.post(
+    "/workspaces/{workspace_id}/submissions/batch",
+    response_model=MultiSubmissionResponse,
+    status_code=status.HTTP_202_ACCEPTED,
+    tags=["submissions"],
+    summary="Multi-document workspace-scoped provider upload (flag-gated)",
+)
+async def create_workspace_submission_batch(
+    workspace_id: str,
+    files: Annotated[list[UploadFile], File()],
+    period_code: Annotated[str, Form(min_length=4)],
+    load_type: Annotated[str, Form()],
+    institution_code: Annotated[str, Form()],
+    requirement_name: Annotated[str, Form(min_length=2)],
+    db: DbSession,
+    workspace: Annotated[ProviderWorkspace, Depends(current_portal_workspace)],
+    comments: Annotated[str | None, Form()] = None,
+    initial_status: Annotated[str, Form()] = DocumentStatus.PENDIENTE_REVISION.value,
+    requirement_code: Annotated[str | None, Form()] = None,
+    period_key: Annotated[str | None, Form()] = None,
+    supersedes_submission_id: Annotated[str | None, Form()] = None,
+) -> MultiSubmissionResponse:
+    """Create a single Submission with up to N Documents under it.
+
+    Behavior matches ``create_workspace_submission`` for tenant guard,
+    period validation, replacement-lineage resolution, and persistence
+    of the audit trail — only the document count differs. Returns the
+    Submission's worst-case status (matching the single-file
+    derivation) plus a per-document detail list.
+    """
+    _ = workspace_id  # tenant guard already enforced by dependency
+
+    if not settings.MULTI_FILE_UPLOAD_ENABLED:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=(
+                "La carga de varios archivos en una sola entrega aún no "
+                "está disponible. Sube un documento a la vez."
+            ),
+        )
+
+    if not files:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+            detail="Adjunta al menos un archivo.",
+        )
+    if len(files) > MULTI_FILE_MAX_FILES:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+            detail=(
+                f"Solo se permiten hasta {MULTI_FILE_MAX_FILES} archivos por entrega. "
+                f"Recibimos {len(files)}."
+            ),
+        )
+
+    for upload in files:
+        assert_pdf_upload(upload)
+
+    validate_period_key(period_key)
+
+    if initial_status != DocumentStatus.PENDIENTE_REVISION:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+            detail="La carga inicial debe comenzar en pendiente_revision.",
+        )
+    if initial_status not in _VALID_DOCUMENT_STATUSES:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+            detail="Estado inválido.",
+        )
+    if load_type not in _VALID_LOAD_TYPES:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+            detail="Tipo de carga inválido.",
+        )
+    if institution_code not in _VALID_INSTITUTION_CODES:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+            detail="Institución inválida.",
+        )
+
+    supersedes_submission = _resolve_supersedes_submission(
+        db,
+        workspace=workspace,
+        prior_id=(supersedes_submission_id or "").strip() or None,
+        new_requirement_code=(requirement_code or "").strip() or None,
+        new_period_key=(period_key or "").strip() or None,
+    )
+
+    storage = get_storage_service()
+    stored_files: list = []
+    aggregate_size = 0
+    try:
+        for upload in files:
+            try:
+                stored = await storage.save_upload(upload)
+            except ValueError as exc:
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail=str(exc),
+                ) from exc
+            stored_files.append(stored)
+            aggregate_size += stored.size_bytes
+            if aggregate_size > MULTI_FILE_TOTAL_BYTES_CAP:
+                cap_mb = MULTI_FILE_TOTAL_BYTES_CAP // (1024 * 1024)
+                raise HTTPException(
+                    status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE,
+                    detail=(
+                        f"Los archivos suman más de {cap_mb} MB en total. "
+                        "Reduce el tamaño o sube en varias entregas."
+                    ),
+                )
+
+        client = workspace.client
+        vendor = workspace.vendor
+        contract = workspace.contract
+
+        institution = get_or_create_institution(db, institution_code)
+        resolved_requirement = resolve_requirement(
+            db,
+            requirement_code=(requirement_code or "").strip() or None,
+            requirement_name=requirement_name.strip(),
+            institution_id=institution.id,
+            institution_code=institution.code,
+            load_type=load_type,
+        )
+        resolved_period = resolve_period(
+            db,
+            period_key=(period_key or "").strip() or None,
+            period_code=period_code.strip(),
+            load_type=load_type,
+        )
+
+        return finalize_multi_document_submission(
+            db,
+            stored_files=stored_files,
+            client=client,
+            vendor=vendor,
+            contract=contract,
+            institution=institution,
+            resolved_requirement=resolved_requirement,
+            resolved_period=resolved_period,
+            load_type=load_type,
+            period_code=period_code.strip(),
+            comments=comments,
+            submitted_by=f"workspace:{workspace.id}",
+            intake_source=INTAKE_SOURCE_WORKSPACE_PORTAL,
+            extra_audit_metadata={"workspace_id": workspace.id},
+            supersedes_submission=supersedes_submission,
+        )
+    except HTTPException:
+        # Roll back any DB writes that finalize_multi_document_submission
+        # might have started before the failure, and clean up storage
+        # writes so we don't leave orphaned PDFs.
+        db.rollback()
+        _cleanup_partial_storage(stored_files)
+        raise
+    except SQLAlchemyError as exc:
+        db.rollback()
+        _cleanup_partial_storage(stored_files)
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="No fue posible registrar la carga documental.",
+        ) from exc
+
+
+def _cleanup_partial_storage(stored_files: list) -> None:
+    """Best-effort deletion of storage entries written before a rollback.
+
+    The storage service exposes ``delete`` for the local backend; cloud
+    backends are no-ops on this helper because they are write-once and
+    operationally cleaned up by lifecycle policies. Failures here are
+    swallowed — the rollback is what matters for correctness; the
+    orphaned bytes are at most ``MULTI_FILE_TOTAL_BYTES_CAP``.
+    """
+    if not stored_files:
+        return
+    try:
+        storage = get_storage_service()
+    except Exception:  # noqa: BLE001
+        return
+    for stored in stored_files:
+        try:
+            delete = getattr(storage, "delete", None)
+            if callable(delete):
+                delete(stored.storage_key)
+        except Exception:  # noqa: BLE001
+            continue
 
 
 # ---------------------------------------------------------------------------

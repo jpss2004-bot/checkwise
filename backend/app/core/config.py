@@ -75,6 +75,24 @@ class Settings(BaseSettings):
     SLACK_BOT_TOKEN: str = ""
     SLACK_FEEDBACK_CHANNEL_ID: str = ""
 
+    # Stage 2.7 — Provider correction-request delivery.
+    # Optional Slack incoming-webhook URL that receives a Block Kit
+    # message each time a provider submits a Tier B correction request
+    # (contact_email / contact_phone / contact_name) via the workspace
+    # context bar. Empty (default) → persistence to audit_log only; the
+    # endpoint never fails because of a missing or broken webhook. Ops
+    # may point this at the same #checkwise-feedback channel that the
+    # feedback router uses, or at a dedicated channel for triage.
+    SLACK_CORRECTION_WEBHOOK_URL: str = ""
+
+    # Stage 2.7 — Multi-file upload feature flag.
+    # When True, the provider /submissions endpoint accepts up to 5
+    # files per submission (≤ 30 MB total) and the intake wizard shows
+    # the multi-file dropzone. When False (default), the legacy
+    # single-file path is the only one available. Flag-gated so the new
+    # path can be rolled back without redeploying.
+    MULTI_FILE_UPLOAD_ENABLED: bool = False
+
     model_config = SettingsConfigDict(env_file=".env", env_file_encoding="utf-8", extra="ignore")
 
     @property

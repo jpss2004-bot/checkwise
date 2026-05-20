@@ -28,8 +28,10 @@ from app.models import (
 )
 from app.models import Institution as InstitutionModel
 from app.schemas.submissions import (
+    DocumentBatchEntry,
     DocumentInspectionSummary,
     DocumentSignalsSummary,
+    MultiSubmissionResponse,
     SubmissionResponse,
     SupportInfo,
     ValidationEventSummary,
@@ -679,4 +681,380 @@ def finalize_intake_submission(
             message="Contacta soporte si no sabes qué documento subir o detectas una alerta.",
         ),
         message=submission_message(final_status),
+    )
+
+
+# ---------------------------------------------------------------------------
+# Stage 2.7-b — Multi-document submission orchestration
+# ---------------------------------------------------------------------------
+#
+# The data model already supports 1 Submission → N Documents
+# (``Submission.documents`` 1:N from ``backend/app/models/entities.py:222``).
+# The provider portal's batch endpoint at
+# ``POST /portal/workspaces/{id}/submissions/batch`` uses this helper to
+# persist a single Submission row with N Documents under it for cases
+# where a provider must attach a contract + annex, or a CFDI + its
+# acuse, as one logical entry against the same requirement+period slot.
+#
+# Atomic semantics: every Document is created inside the same DB
+# transaction. If any file fails PDF inspection or storage write, the
+# router rolls back and the entire submission is dropped — no partial
+# rows, no orphaned PDFs. The per-file derivation matches the single-
+# file path (``status_from_inspection``); the Submission's overall
+# status is the *worst* (most actionable) per-doc status.
+#
+# Status priority (worst → best):
+#   REQUIERE_ACLARACION  →  POSIBLE_MISMATCH  →  PENDIENTE_REVISION
+
+
+_SUBMISSION_STATUS_PRIORITY: dict[str, int] = {
+    DocumentStatus.REQUIERE_ACLARACION.value: 3,
+    DocumentStatus.POSIBLE_MISMATCH.value: 2,
+    DocumentStatus.PENDIENTE_REVISION.value: 1,
+}
+
+
+def _worst_status(statuses: list[DocumentStatus]) -> DocumentStatus:
+    """Return the most actionable (= highest priority) status from the batch."""
+    if not statuses:
+        return DocumentStatus.PENDIENTE_REVISION
+    return max(
+        statuses,
+        key=lambda s: _SUBMISSION_STATUS_PRIORITY.get(s.value, 0),
+    )
+
+
+def finalize_multi_document_submission(
+    db: Session,
+    *,
+    stored_files: list[StoredFile],
+    client: Client,
+    vendor: Vendor,
+    contract: Contract | None,
+    institution: InstitutionModel,
+    resolved_requirement: ResolvedRequirement,
+    resolved_period: ResolvedPeriod,
+    load_type: str,
+    period_code: str,
+    comments: str | None,
+    submitted_by: str,
+    intake_source: str,
+    extra_audit_metadata: dict | None = None,
+    supersedes_submission: Submission | None = None,
+) -> MultiSubmissionResponse:
+    """Persist 1 Submission with N Document children inside one transaction.
+
+    Mirrors the single-file ``finalize_intake_submission`` pipeline for
+    every per-document side effect (PDF inspection, classifier signals,
+    duplicate detection, Validation rows, DocumentStatusHistory, the
+    native-intake ValidationEvent timeline). The Submission row is
+    created once; its overall status is the worst-case across the
+    batch's per-document statuses.
+
+    Caller responsibilities (the router enforces):
+      * ``stored_files`` contains 1 ≤ N ≤ 5 entries.
+      * Aggregate ``size_bytes`` ≤ ``MULTI_FILE_TOTAL_BYTES_CAP`` (30 MB).
+      * Tenant identity has been resolved from the
+        ``ProviderWorkspace`` row.
+
+    Atomicity: a single ``db.commit()`` runs at the end. Any exception
+    raised inside the function leaves the transaction open and the
+    caller is expected to ``db.rollback()`` it.
+    """
+    if not stored_files:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+            detail="Adjunta al menos un archivo.",
+        )
+
+    # Pre-inspect every file so we can derive the Submission's overall
+    # status before persisting any rows. This also lets us short-circuit
+    # before writing to storage if a downstream invariant is going to
+    # reject the batch — but storage writes already happened in the
+    # router, so this is the last chance to catch a structural problem
+    # before we touch the DB.
+    inspections: list[tuple[StoredFile, PdfInspectionResult, DocumentSignals, DocumentStatus]] = []
+    duplicate_flags: list[bool] = []
+    for stored in stored_files:
+        duplicate = db.scalar(
+            select(Document).where(Document.sha256 == stored.sha256).limit(1)
+        )
+        pdf_inspection = inspect_pdf(stored.path)
+        document_signals = analyze_document_text(
+            pdf_inspection.text_sample,
+            expected_requirement=resolved_requirement.canonical_name,
+            expected_institution=institution.code,
+            expected_period=period_code,
+        )
+        per_file_status = status_from_inspection(pdf_inspection, document_signals)
+        inspections.append((stored, pdf_inspection, document_signals, per_file_status))
+        duplicate_flags.append(duplicate is not None)
+
+    overall_status = _worst_status([s for _, _, _, s in inspections])
+
+    submission = Submission(
+        client_id=client.id,
+        vendor_id=vendor.id,
+        contract_id=contract.id if contract else None,
+        period_id=resolved_period.period.id,
+        institution_id=institution.id,
+        requirement_id=resolved_requirement.requirement.id,
+        requirement_version_id=resolved_requirement.requirement_version.id,
+        requirement_code=resolved_requirement.canonical_code,
+        period_key=resolved_period.canonical_period_key,
+        load_type=load_type,
+        source="portal",
+        status=overall_status.value,
+        comments=comments,
+        submitted_by=submitted_by,
+        supersedes_submission_id=(
+            supersedes_submission.id if supersedes_submission is not None else None
+        ),
+    )
+    db.add(submission)
+    db.flush()
+
+    history_reason = _INTAKE_HISTORY_REASON.get(
+        intake_source, "Carga inicial desde flujo no clasificado."
+    )
+
+    documents_payload: list[DocumentBatchEntry] = []
+    aggregated_event_types: list[str] = []
+    for (stored, pdf_inspection, document_signals, per_file_status), duplicate_found in zip(
+        inspections, duplicate_flags, strict=True
+    ):
+        document = Document(
+            submission_id=submission.id,
+            storage_key=stored.storage_key,
+            original_filename=stored.original_filename,
+            mime_type=stored.mime_type,
+            size_bytes=stored.size_bytes,
+            sha256=stored.sha256,
+            status=per_file_status.value,
+        )
+        db.add(document)
+        db.flush()
+
+        inspection_row = DocumentInspection(
+            document_id=document.id,
+            is_pdf=pdf_inspection.is_pdf,
+            is_corrupt=pdf_inspection.is_corrupt,
+            is_encrypted=pdf_inspection.is_encrypted,
+            page_count=pdf_inspection.page_count,
+            text_char_count=pdf_inspection.text_char_count,
+            has_text=pdf_inspection.has_text,
+            is_probably_scanned=pdf_inspection.is_probably_scanned,
+            detected_institution=document_signals.detected_institution,
+            detected_document_type=document_signals.detected_document_type,
+            detected_rfcs=document_signals.detected_rfcs,
+            detected_dates=document_signals.detected_dates,
+            period_mentions=document_signals.period_mentions,
+            requirement_match_confidence=document_signals.requirement_match_confidence,
+            mismatch_reason=document_signals.mismatch_reason,
+            inspection_error=pdf_inspection.error,
+            raw_metadata=pdf_inspection.metadata,
+        )
+        db.add(inspection_row)
+
+        signals = build_initial_validations(
+            stored,
+            duplicate_found=duplicate_found,
+            pdf_inspection=pdf_inspection,
+            document_signals=document_signals,
+            human_review_required=resolved_requirement.requirement_version.human_review_required,
+        )
+        for signal in signals:
+            db.add(
+                Validation(
+                    submission_id=submission.id,
+                    document_id=document.id,
+                    rule_code=signal.rule_code,
+                    rule_type=signal.rule_type,
+                    result=signal.result,
+                    severity=signal.severity,
+                    message=signal.message,
+                    requires_human_review=signal.requires_human_review,
+                )
+            )
+
+        db.add(
+            DocumentStatusHistory(
+                document_id=document.id,
+                submission_id=submission.id,
+                from_status=None,
+                to_status=per_file_status.value,
+                reason=history_reason,
+                actor="system",
+            )
+        )
+
+        validation_events = add_native_intake_events(
+            db,
+            submission_id=submission.id,
+            document_id=document.id,
+            stored_file=stored,
+            duplicate_found=duplicate_found,
+            pdf_inspection=pdf_inspection,
+            document_signals=document_signals,
+            human_review_required=resolved_requirement.requirement_version.human_review_required,
+            requirement_used_legacy=resolved_requirement.used_legacy,
+            period_used_legacy=resolved_period.used_legacy,
+        )
+        aggregated_event_types.extend(event.event_type for event in validation_events)
+
+        documents_payload.append(
+            DocumentBatchEntry(
+                document_id=document.id,
+                original_filename=stored.original_filename,
+                sha256=stored.sha256,
+                storage_key=stored.storage_key,
+                status=per_file_status.value,
+                inspection=DocumentInspectionSummary(
+                    is_pdf=pdf_inspection.is_pdf,
+                    is_corrupt=pdf_inspection.is_corrupt,
+                    is_encrypted=pdf_inspection.is_encrypted,
+                    page_count=pdf_inspection.page_count,
+                    text_char_count=pdf_inspection.text_char_count,
+                    has_text=pdf_inspection.has_text,
+                    is_probably_scanned=pdf_inspection.is_probably_scanned,
+                ),
+                document_signals=DocumentSignalsSummary(
+                    detected_institution=document_signals.detected_institution,
+                    detected_document_type=document_signals.detected_document_type,
+                    detected_rfcs=document_signals.detected_rfcs,
+                    detected_dates=document_signals.detected_dates,
+                    period_mentions=document_signals.period_mentions,
+                    requirement_match_confidence=document_signals.requirement_match_confidence,
+                    mismatch_reason=document_signals.mismatch_reason,
+                    anomaly_codes=document_signals.anomaly_codes,
+                ),
+                validations=signals,
+                validation_events=[
+                    ValidationEventSummary(
+                        event_type=event.event_type,
+                        result=event.result,
+                        severity=event.severity,
+                        message=event.message,
+                        confidence=event.confidence,
+                    )
+                    for event in validation_events
+                ],
+            )
+        )
+
+    # Phase 3 replacement-lineage events fire once at the Submission
+    # level — the replaced prior is the entire submission, not one of
+    # the new documents. We attach the new event to the first document
+    # so the timeline has a canonical anchor.
+    if supersedes_submission is not None:
+        first_document_id = documents_payload[0].document_id
+        add_validation_event(
+            db,
+            submission_id=submission.id,
+            document_id=first_document_id,
+            event_type="submission_replacement_linked",
+            rule_code="submission_replacement",
+            result="pass",
+            severity="info",
+            message=(
+                "Esta carga reemplaza una entrega anterior del mismo requisito "
+                "para este proveedor y periodo."
+            ),
+            payload={
+                "previous_submission_id": supersedes_submission.id,
+                "previous_status": supersedes_submission.status,
+                "document_count": len(documents_payload),
+            },
+            actor_type="supplier",
+        )
+        add_validation_event(
+            db,
+            submission_id=supersedes_submission.id,
+            document_id=None,
+            event_type="submission_replaced",
+            rule_code="submission_replacement",
+            result="superseded",
+            severity="info",
+            message=(
+                "Esta entrega fue reemplazada por una nueva carga del mismo "
+                "requisito y periodo."
+            ),
+            payload={
+                "new_submission_id": submission.id,
+                "previous_status": supersedes_submission.status,
+            },
+            actor_type="system",
+        )
+
+    audit_metadata: dict = {
+        "source": "native_intake",
+        "intake_source": intake_source,
+        "document_count": len(documents_payload),
+        "total_size_bytes": sum(s.size_bytes for s, _, _, _ in inspections),
+        "storage_keys": [s.storage_key for s, _, _, _ in inspections],
+        "sha256_list": [s.sha256 for s, _, _, _ in inspections],
+        "requirement_intake": (
+            "legacy_free_text" if resolved_requirement.used_legacy else "canonical_code"
+        ),
+        "period_intake": (
+            "legacy_period_code" if resolved_period.used_legacy else "canonical_period_key"
+        ),
+        "validation_events": aggregated_event_types,
+        "multi_file_upload": True,
+    }
+    if supersedes_submission is not None:
+        audit_metadata["supersedes_submission_id"] = supersedes_submission.id
+    if extra_audit_metadata:
+        audit_metadata.update(extra_audit_metadata)
+
+    add_audit_event(
+        db,
+        action="submission.created",
+        entity_type="submission",
+        entity_id=submission.id,
+        after={
+            "client_id": client.id,
+            "vendor_id": vendor.id,
+            "period_id": resolved_period.period.id,
+            "requirement_id": resolved_requirement.requirement.id,
+            "requirement_code": resolved_requirement.canonical_code,
+            "period_key": resolved_period.canonical_period_key,
+            "status": overall_status.value,
+            "supersedes_submission_id": (
+                supersedes_submission.id if supersedes_submission is not None else None
+            ),
+            "document_count": len(documents_payload),
+        },
+        metadata=audit_metadata,
+    )
+
+    if supersedes_submission is not None:
+        add_audit_event(
+            db,
+            action="submission.replacement_linked",
+            entity_type="submission",
+            entity_id=submission.id,
+            metadata={
+                "previous_submission_id": supersedes_submission.id,
+                "new_submission_id": submission.id,
+                "requirement_code": resolved_requirement.canonical_code,
+                "period_key": resolved_period.canonical_period_key,
+                "workspace_id": (extra_audit_metadata or {}).get("workspace_id"),
+                "previous_status": supersedes_submission.status,
+                "document_count": len(documents_payload),
+            },
+        )
+
+    db.commit()
+
+    return MultiSubmissionResponse(
+        submission_id=submission.id,
+        status=overall_status.value,
+        documents=documents_payload,
+        support=SupportInfo(
+            whatsapp_url=settings.SUPPORT_WHATSAPP_URL or None,
+            qr_placeholder_url=settings.SUPPORT_QR_PLACEHOLDER_URL or None,
+            message="Contacta soporte si no sabes qué documento subir o detectas una alerta.",
+        ),
+        message=submission_message(overall_status),
     )

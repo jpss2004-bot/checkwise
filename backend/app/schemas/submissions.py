@@ -60,3 +60,41 @@ class SubmissionResponse(BaseModel):
     document_signals: DocumentSignalsSummary | None = None
     support: SupportInfo | None = None
     message: str
+
+
+# Stage 2.7-b — Multi-document submission response.
+#
+# The data model already supports 1 Submission → N Documents
+# (``Submission.documents`` 1:N). The multi-file endpoint at
+# ``POST /portal/workspaces/{id}/submissions/batch`` creates a single
+# Submission row with N Documents underneath; this response carries the
+# per-document detail back so the wizard can render a per-file status
+# list.
+
+
+class DocumentBatchEntry(BaseModel):
+    document_id: str
+    original_filename: str
+    sha256: str
+    storage_key: str
+    status: str
+    inspection: DocumentInspectionSummary | None = None
+    document_signals: DocumentSignalsSummary | None = None
+    validations: list[ValidationSignal]
+    validation_events: list[ValidationEventSummary] = []
+
+
+class MultiSubmissionResponse(BaseModel):
+    submission_id: str
+    status: str = Field(
+        examples=["pendiente_revision"],
+        description=(
+            "Worst-case status across the batch's documents. "
+            "Mirrors the single-file derivation: a REQUIERE_ACLARACION "
+            "doc beats a POSIBLE_MISMATCH doc, which beats a "
+            "PENDIENTE_REVISION doc."
+        ),
+    )
+    documents: list[DocumentBatchEntry]
+    support: SupportInfo | None = None
+    message: str

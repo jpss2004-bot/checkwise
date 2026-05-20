@@ -97,6 +97,17 @@ class RecurringRequirement:
     # annual override is set at build time below).
     required_document: str = ""
     due_day: int = 17
+    # Stage 2.7 (T5 parity, 2026-05-20) — recurring obligations need the
+    # same first-upload guidance shape as onboarding requirements: what
+    # the document contains, where to obtain it, and the recurring
+    # mistakes the calendar drawer should call out. All three default to
+    # empty; the calendar endpoint falls back to per-doc-name overrides
+    # (``_RECURRING_DOC_OVERRIDES``) and then to per-institution
+    # defaults so the catalog can be enriched per item without changing
+    # the API shape.
+    anatomy: str = ""
+    where_to_obtain: str = ""
+    common_errors: tuple[str, ...] = ()
 
 
 # ---------------------------------------------------------------------------
@@ -748,6 +759,371 @@ def recurring_required_document(req: RecurringRequirement) -> str:
     return req.required_document or req.name
 
 
+# ---------------------------------------------------------------------------
+# Stage 2.7 — Recurring requirement first-upload guidance
+# ---------------------------------------------------------------------------
+#
+# Onboarding requirements ship anatomy / where_to_obtain / common_errors
+# already (see the ``_ONBOARDING_DEFAULT_*`` dicts above). The transcript
+# T5 + handoff §2.7-c ask is to mirror the same shape on the recurring
+# calendar so the provider sees the same first-upload guidance when they
+# click into a monthly / bimestral / cuatrimestral / annual slot.
+#
+# Recurring obligations are *generated* per year by ``recurring_for_year``
+# from a small template set (4 IMSS docs, 4 INFONAVIT docs, 5 SAT docs,
+# 2 acuses STPS, 1 annual SAT acuse). The dataclass field stays on the
+# instance for parity, but the authored content lives here in two
+# fallback layers:
+#
+# 1. ``_RECURRING_DOC_OVERRIDES`` — keyed by ``(institution, doc_name)``.
+#    Highest priority. Used for the highest-volume documents the
+#    handoff calls out: IMSS opinion (cuotas / resumen), INFONAVIT
+#    certificate (cuotas / resumen), ISR mensual, SAT acuse anual,
+#    STPS cuatrimestral SISUB/ICSOE.
+# 2. ``_RECURRING_DEFAULT_*`` — keyed by institution. Used when no
+#    per-doc override exists. Framed around the periodicity, not around
+#    the document, so the same paragraph reads cleanly for every monthly
+#    or bimestral slot from that institution.
+
+
+_RECURRING_DEFAULT_ANATOMY: dict[InstitutionCode, str] = {
+    "imss": (
+        "Documento mensual emitido por el IMSS o el banco que comprueba "
+        "el pago de cuotas obrero patronales del periodo y el alta de tus "
+        "trabajadores. Debe corresponder al mes que pide el calendario."
+    ),
+    "infonavit": (
+        "Documento bimestral emitido por INFONAVIT o el banco que "
+        "comprueba el pago de las aportaciones de vivienda del bimestre "
+        "y el cumplimiento por trabajador. Debe corresponder al bimestre "
+        "que pide el calendario."
+    ),
+    "sat": (
+        "Documento mensual emitido por el SAT o el banco que comprueba "
+        "la declaración o el pago de impuestos del periodo. Debe "
+        "corresponder al mes que pide el calendario y estar emitido a "
+        "nombre del proveedor."
+    ),
+    "stps_repse": (
+        "Acuse cuatrimestral emitido por la STPS dentro del padrón "
+        "REPSE que reporta los contratos vigentes del cuatrimestre. "
+        "Debe corresponder al periodo Q1, Q2 o Q3 que pide el calendario."
+    ),
+    "interno_cliente": (
+        "Documento interno entre tu empresa y el cliente que respalda "
+        "el cumplimiento del periodo correspondiente del contrato."
+    ),
+}
+
+
+_RECURRING_DEFAULT_WHERE: dict[InstitutionCode, str] = {
+    "imss": (
+        "Descárgalo del portal IDSE del IMSS (idse.imss.gob.mx) con tu "
+        "usuario patronal, o pídeselo al banco si es un comprobante de "
+        "pago."
+    ),
+    "infonavit": (
+        "Descárgalo del portal empresarial de INFONAVIT con tu NRP y "
+        "contraseña, o pídeselo al banco si es un comprobante de pago."
+    ),
+    "sat": (
+        "Descárgalo del portal del SAT (sat.gob.mx) con tu RFC y "
+        "contraseña o e.firma. Los comprobantes de pago se descargan "
+        "desde el portal del banco."
+    ),
+    "stps_repse": (
+        "Descárgalo del portal SISUB o ICSOE de la STPS según "
+        "corresponda, usando tu usuario y contraseña REPSE."
+    ),
+    "interno_cliente": (
+        "Súbelo desde tu archivo interno o pídeselo al área legal del "
+        "cliente."
+    ),
+}
+
+
+_RECURRING_DEFAULT_COMMON_ERRORS: dict[InstitutionCode, tuple[str, ...]] = {
+    "imss": (
+        "Subir el comprobante del mes anterior cuando el cliente espera "
+        "el del mes en curso.",
+        "Subir un reporte interno en lugar del documento oficial del IMSS o del banco.",
+        "Subir una captura de pantalla en lugar del PDF oficial.",
+    ),
+    "infonavit": (
+        "Subir el bimestre anterior cuando el calendario pide el bimestre en curso.",
+        "Subir un reporte interno en lugar del documento oficial de INFONAVIT o del banco.",
+        "Subir una versión sin folio o sin la información del trabajador.",
+    ),
+    "sat": (
+        "Subir el comprobante del mes anterior cuando el calendario pide el actual.",
+        "Subir solo la declaración cuando también se requiere el comprobante de pago.",
+        "Subir un acuse de presentación pendiente en lugar del acuse aceptado.",
+    ),
+    "stps_repse": (
+        "Subir el acuse SISUB cuando el periodo pide ICSOE (o viceversa).",
+        "Subir el cuatrimestre anterior en lugar del cuatrimestre vigente.",
+        "Subir una captura de pantalla en lugar del PDF oficial con folio.",
+    ),
+    "interno_cliente": (
+        "Subir un documento sin firma o sin sello cuando el original sí los tiene.",
+        "Subir solo una parte del documento (faltan anexos o páginas).",
+    ),
+}
+
+
+_RECURRING_DOC_OVERRIDES: dict[tuple[InstitutionCode, str], dict[str, object]] = {
+    # IMSS — "opinión" / pago de cuotas mensual.
+    ("imss", "Cuotas obrero patronales"): {
+        "anatomy": (
+            "Resumen mensual del IMSS que detalla las cuotas obrero "
+            "patronales pagadas en el mes (cuotas obreras + cuotas "
+            "patronales) por cada trabajador. Es el documento que el "
+            "cliente cruza contra el listado de tu plantilla y contra "
+            "el comprobante de pago bancario para confirmar que "
+            "efectivamente pagaste lo que reportaste."
+        ),
+        "where_to_obtain": (
+            "Descárgalo del portal IDSE del IMSS "
+            "(idse.imss.gob.mx) en \"Reportes → Cédula de "
+            "determinación de cuotas\" usando tu usuario patronal."
+        ),
+        "common_errors": (
+            "Subir la cédula de un mes que no es el que pide el calendario.",
+            "Subir un cálculo manual en lugar del PDF oficial del IMSS.",
+            "Subir solo la cédula sin el comprobante de pago bancario asociado.",
+            "Subir una cédula provisional en lugar de la versión definitiva del mes.",
+            (
+                "Subir una cédula que no incluye a todos los "
+                "trabajadores que tienes dados de alta ante el IMSS."
+            ),
+        ),
+    },
+    ("imss", "Resumen de liquidación"): {
+        "anatomy": (
+            "Resumen mensual emitido por el IMSS que totaliza la "
+            "liquidación del mes — base salarial, días cotizados, "
+            "ramos de seguro y total a pagar. Acompaña a la cédula de "
+            "determinación y al comprobante bancario como evidencia "
+            "del cumplimiento de seguridad social del periodo."
+        ),
+        "where_to_obtain": (
+            "Descárgalo del SUA o del portal IDSE del IMSS junto con "
+            "la cédula del mes correspondiente."
+        ),
+        "common_errors": (
+            "Subir un resumen interno en lugar del oficial del IMSS o del SUA.",
+            "Subir el resumen de un mes distinto al que pide el calendario.",
+            "Subir un resumen sin total a pagar o sin folio de liquidación.",
+        ),
+    },
+    # INFONAVIT — certificado / pago bimestral.
+    ("infonavit", "Cuotas obrero patronales"): {
+        "anatomy": (
+            "Resumen bimestral de INFONAVIT que detalla las "
+            "aportaciones del 5 % de vivienda por trabajador del "
+            "bimestre. Es el equivalente a la cédula del IMSS para "
+            "vivienda y el documento que el cliente revisa contra el "
+            "comprobante de pago bancario del bimestre."
+        ),
+        "where_to_obtain": (
+            "Descárgalo del portal empresarial de INFONAVIT en "
+            "\"Pagos → Resumen de liquidación\" usando tu NRP y "
+            "contraseña."
+        ),
+        "common_errors": (
+            "Subir el bimestre anterior cuando el calendario pide el bimestre en curso.",
+            "Subir un cálculo manual en lugar del PDF oficial de INFONAVIT.",
+            "Subir solo la liquidación sin el comprobante de pago bancario asociado.",
+            (
+                "Subir un resumen que no incluye a todos los "
+                "trabajadores dados de alta en el periodo."
+            ),
+            (
+                "Subir un resumen con monto cero cuando sí hubo trabajadores activos."
+            ),
+        ),
+    },
+    ("infonavit", "Resumen de liquidación"): {
+        "anatomy": (
+            "Resumen bimestral oficial de INFONAVIT que totaliza la "
+            "liquidación del bimestre por trabajador y por concepto "
+            "(5 % vivienda + abono a créditos). Acompaña a la cédula "
+            "de cuotas y al comprobante bancario como evidencia "
+            "completa del bimestre."
+        ),
+        "where_to_obtain": (
+            "Descárgalo del portal empresarial de INFONAVIT junto con "
+            "la liquidación del bimestre."
+        ),
+        "common_errors": (
+            "Subir un resumen interno en lugar del oficial de INFONAVIT.",
+            "Subir el bimestre incorrecto.",
+            "Subir un resumen sin folio o sin total bimestral.",
+        ),
+    },
+    # SAT — ISR mensual.
+    ("sat", "Declaración ISR por retención sueldos y salarios"): {
+        "anatomy": (
+            "Declaración mensual del ISR por retenciones de sueldos y "
+            "salarios que presentaste ante el SAT. Incluye el periodo, "
+            "el ISR retenido a los trabajadores en el mes y el acuse "
+            "de presentación. Acompaña al comprobante de pago como "
+            "evidencia del cumplimiento mensual de retenciones."
+        ),
+        "where_to_obtain": (
+            "Descárgala del portal del SAT (sat.gob.mx) en "
+            "\"Declaraciones → Mensuales\" usando tu RFC y contraseña "
+            "o e.firma."
+        ),
+        "common_errors": (
+            "Subir la declaración de un mes distinto al que pide el calendario.",
+            "Subir solo el acuse en lugar del PDF completo de la declaración.",
+            "Subir una declaración con estatus 'pendiente de pago' sin el comprobante asociado.",
+            (
+                "Subir una declaración complementaria sin la declaración "
+                "normal correspondiente."
+            ),
+            "Subir una declaración cuyos importes no cuadran con los CFDI de nómina del mes.",
+        ),
+    },
+    ("sat", "Comprobante entero pago ISR"): {
+        "anatomy": (
+            "Comprobante bancario o línea de captura pagada del ISR "
+            "retenido por sueldos y salarios del mes. Debe coincidir "
+            "en monto, periodo y RFC con la declaración mensual del "
+            "ISR ya presentada ante el SAT."
+        ),
+        "where_to_obtain": (
+            "Descárgalo del portal del banco con el que pagaste la "
+            "línea de captura, o del SAT si pagaste por NetPay/SPEI."
+        ),
+        "common_errors": (
+            "Subir el comprobante de IVA en lugar del de ISR.",
+            "Subir un comprobante cuyo monto no coincide con la declaración.",
+            "Subir un comprobante de un mes distinto.",
+        ),
+    },
+    # SAT — acuse anual.
+    ("sat", "Acuse declaración anual de impuestos"): {
+        "anatomy": (
+            "Acuse oficial del SAT que confirma la presentación de tu "
+            "declaración anual de impuestos del ejercicio fiscal "
+            "anterior. Debe contener el RFC del proveedor, el "
+            "ejercicio declarado, el folio del acuse y la firma "
+            "electrónica del SAT. El plazo legal es el 30 de abril "
+            "de cada año."
+        ),
+        "where_to_obtain": (
+            "Descárgalo del portal del SAT (sat.gob.mx) en "
+            "\"Declaraciones → Anuales\" después de presentar la "
+            "declaración con tu e.firma."
+        ),
+        "common_errors": (
+            "Subir el acuse de un ejercicio distinto al que pide el calendario.",
+            "Subir solo la declaración sin el acuse de aceptación del SAT.",
+            "Subir un acuse con estatus 'pendiente' sin el folio definitivo.",
+            (
+                "Subir una declaración complementaria sin la declaración "
+                "anual normal correspondiente."
+            ),
+            (
+                "Subir un acuse cuyo RFC no corresponde al proveedor del "
+                "contrato."
+            ),
+        ),
+    },
+    # STPS — cuatrimestral SISUB.
+    ("stps_repse", "Acuse SISUB"): {
+        "anatomy": (
+            "Acuse oficial del Sistema de Información de Subcontratación "
+            "(SISUB) que reporta a la STPS los contratos y trabajadores "
+            "involucrados en servicios especializados durante el "
+            "cuatrimestre. Debe contener el folio SISUB, el "
+            "cuatrimestre reportado y la firma electrónica de la "
+            "STPS."
+        ),
+        "where_to_obtain": (
+            "Descárgalo del portal SISUB de la STPS "
+            "(sisub.stps.gob.mx) con tu usuario y contraseña REPSE, "
+            "después de cargar la información del cuatrimestre."
+        ),
+        "common_errors": (
+            "Subir el acuse del cuatrimestre anterior cuando el calendario pide el vigente.",
+            "Subir el acuse de carga en lugar del acuse de presentación con folio.",
+            "Subir una captura de pantalla en lugar del PDF oficial con firma de la STPS.",
+            (
+                "Subir un acuse cuyo número de trabajadores no cuadra con "
+                "tu plantilla del IMSS del periodo."
+            ),
+            (
+                "Subir un acuse SISUB de un proveedor distinto al que firma el contrato."
+            ),
+        ),
+    },
+    ("stps_repse", "Acuse ICSOE"): {
+        "anatomy": (
+            "Acuse oficial del Informe de Contratos de Servicios u "
+            "Obras Especializadas (ICSOE) que reporta al IMSS los "
+            "contratos vigentes del cuatrimestre. Es el complemento "
+            "del SISUB ante el IMSS. Debe contener el folio ICSOE, el "
+            "cuatrimestre y la firma electrónica del IMSS."
+        ),
+        "where_to_obtain": (
+            "Descárgalo del portal ICSOE del IMSS "
+            "(icsoe.imss.gob.mx) con tu usuario patronal después de "
+            "cargar la información del cuatrimestre."
+        ),
+        "common_errors": (
+            "Subir el ICSOE del cuatrimestre anterior cuando el calendario pide el vigente.",
+            "Subir el SISUB en lugar del ICSOE (son trámites distintos).",
+            "Subir el acuse de carga en lugar del acuse final con folio.",
+            (
+                "Subir un acuse cuyo número de trabajadores no cuadra con "
+                "tu plantilla del IMSS del periodo."
+            ),
+            "Subir una captura de pantalla en lugar del PDF oficial.",
+        ),
+    },
+}
+
+
+def recurring_anatomy(req: RecurringRequirement) -> str:
+    """Return per-item ``anatomy`` copy with override + institution fallback.
+
+    Resolution order:
+    1. Instance-level ``req.anatomy`` (rarely set — the generator does
+       not stamp anatomy at build time).
+    2. ``_RECURRING_DOC_OVERRIDES[(institution, name)]["anatomy"]``.
+    3. ``_RECURRING_DEFAULT_ANATOMY[institution]``.
+    """
+    if req.anatomy:
+        return req.anatomy
+    override = _RECURRING_DOC_OVERRIDES.get((req.institution, req.name))
+    if override and override.get("anatomy"):
+        return str(override["anatomy"])
+    return _RECURRING_DEFAULT_ANATOMY.get(req.institution, "")
+
+
+def recurring_where_to_obtain(req: RecurringRequirement) -> str:
+    """Return per-item ``where_to_obtain`` copy with override + institution fallback."""
+    if req.where_to_obtain:
+        return req.where_to_obtain
+    override = _RECURRING_DOC_OVERRIDES.get((req.institution, req.name))
+    if override and override.get("where_to_obtain"):
+        return str(override["where_to_obtain"])
+    return _RECURRING_DEFAULT_WHERE.get(req.institution, "")
+
+
+def recurring_common_errors(req: RecurringRequirement) -> tuple[str, ...]:
+    """Return per-item ``common_errors`` list with override + institution fallback."""
+    if req.common_errors:
+        return req.common_errors
+    override = _RECURRING_DOC_OVERRIDES.get((req.institution, req.name))
+    if override and override.get("common_errors"):
+        return tuple(override["common_errors"])  # type: ignore[arg-type]
+    return _RECURRING_DEFAULT_COMMON_ERRORS.get(req.institution, ())
+
+
 __all__ = [
     "onboarding_why",
     "onboarding_format",
@@ -755,6 +1131,9 @@ __all__ = [
     "onboarding_where_to_obtain",
     "onboarding_common_errors",
     "recurring_required_document",
+    "recurring_anatomy",
+    "recurring_where_to_obtain",
+    "recurring_common_errors",
     "CATALOG_SOURCE",
     "CATALOG_VERSION",
     "lookup_onboarding_by_code",

@@ -467,3 +467,177 @@ def test_onboarding_lineage_still_drives_current_state_after_phase5(
     assert repse["status"] == DocumentStatus.PENDIENTE_REVISION.value
     # ``next_action`` reflects in-review, never the rejection.
     assert "revisión" in repse["next_action"].lower()
+
+
+# ---------------------------------------------------------------------------
+# Stage 2.7 — Recurring requirement first-upload guidance
+# ---------------------------------------------------------------------------
+
+
+def test_calendar_items_carry_anatomy_where_to_obtain_common_errors(
+    api_client: TestClient,
+) -> None:
+    """Every calendar item must include the Stage 2.7 first-upload guidance
+    fields with non-empty institution fallbacks at minimum."""
+    ws = _setup_workspace(api_client)
+    body = api_client.get(
+        f"/api/v1/portal/workspaces/{ws['workspace_id']}/calendar?year=2026"
+    ).json()
+    items = [
+        item
+        for month in body["months"]
+        for inst in month["institutions"]
+        for item in inst["items"]
+    ]
+    assert items, "expected calendar catalog to yield items"
+    for item in items:
+        for key in ("anatomy", "where_to_obtain", "common_errors"):
+            assert key in item, f"missing field {key} on calendar item {item.get('code')}"
+        assert isinstance(item["anatomy"], str) and item["anatomy"], item["code"]
+        assert (
+            isinstance(item["where_to_obtain"], str) and item["where_to_obtain"]
+        ), item["code"]
+        assert isinstance(item["common_errors"], list) and item["common_errors"], item[
+            "code"
+        ]
+        # Every bullet is a non-empty string.
+        for bullet in item["common_errors"]:
+            assert isinstance(bullet, str) and bullet, item["code"]
+
+
+def test_calendar_priority_items_carry_authored_per_doc_overrides(
+    api_client: TestClient,
+) -> None:
+    """The five high-volume recurring items the handoff calls out
+    (IMSS opinion / INFONAVIT certificate / ISR mensual / SAT acuse
+    anual / STPS cuatrimestral) must carry per-doc overrides — not
+    the institution fallback."""
+    ws = _setup_workspace(api_client)
+    body = api_client.get(
+        f"/api/v1/portal/workspaces/{ws['workspace_id']}/calendar?year=2026"
+    ).json()
+    items = [
+        item
+        for month in body["months"]
+        for inst in month["institutions"]
+        for item in inst["items"]
+    ]
+
+    expected_overrides = [
+        ("imss", "Cuotas obrero patronales", "comprobante de pago bancario"),
+        ("infonavit", "Cuotas obrero patronales", "5 %"),
+        ("sat", "Declaración ISR por retención sueldos y salarios", "ISR retenido"),
+        ("sat", "Acuse declaración anual de impuestos", "ejercicio fiscal anterior"),
+        ("stps_repse", "Acuse SISUB", "SISUB"),
+        ("stps_repse", "Acuse ICSOE", "ICSOE"),
+    ]
+    for institution, name, marker in expected_overrides:
+        match = next(
+            (
+                item
+                for item in items
+                if item["name"] == name
+                and any(
+                    inst["institution"] == institution
+                    and any(i["code"] == item["code"] for i in inst["items"])
+                    for month in body["months"]
+                    for inst in month["institutions"]
+                )
+            ),
+            None,
+        )
+        assert match is not None, f"missing {institution}/{name} in calendar items"
+        assert marker.lower() in match["anatomy"].lower(), (
+            f"{institution}/{name} anatomy missing override marker '{marker}': "
+            f"{match['anatomy']}"
+        )
+        # Per-doc overrides ship 5 bullets; institution fallbacks ship 2-3.
+        assert len(match["common_errors"]) >= 5, (
+            f"{institution}/{name} expected per-doc common_errors (>=5), "
+            f"got {len(match['common_errors'])}"
+        )
+
+
+def test_calendar_guidance_no_engineer_dialect_leaks(
+    api_client: TestClient,
+) -> None:
+    """The first-upload guidance copy must never carry the engineer
+    dialect the transcript T9 + Stage 2.6 pass swept out of the
+    validation summary."""
+    ws = _setup_workspace(api_client)
+    body = api_client.get(
+        f"/api/v1/portal/workspaces/{ws['workspace_id']}/calendar?year=2026"
+    ).json()
+    items = [
+        item
+        for month in body["months"]
+        for inst in month["institutions"]
+        for item in inst["items"]
+    ]
+    banned = ("SHA-256", "hash", "OCR", "anomaly", "pipeline", "parser")
+    for item in items:
+        haystack = " ".join(
+            [
+                item["anatomy"],
+                item["where_to_obtain"],
+                " ".join(item["common_errors"]),
+            ]
+        ).lower()
+        for term in banned:
+            assert term.lower() not in haystack, (
+                f"engineer dialect '{term}' leaked into calendar item {item['code']}"
+            )
+
+
+def test_recurring_catalog_helpers_resolve_in_priority_order() -> None:
+    """The accessor functions resolve instance value → per-doc override →
+    institution default. The instance value always wins when present."""
+    from app.core.compliance_catalog import (
+        RecurringRequirement,
+        recurring_anatomy,
+        recurring_common_errors,
+        recurring_where_to_obtain,
+    )
+
+    # Instance value beats everything else.
+    explicit = RecurringRequirement(
+        code="REC-IMSS-TEST",
+        name="Cuotas obrero patronales",
+        institution="imss",
+        frequency="mensual",
+        due_month=1,
+        period_label="IMSS Test",
+        period_key="2026-M01",
+        anatomy="Override desde la instancia.",
+        where_to_obtain="Súbelo desde la prueba.",
+        common_errors=("Solo un bullet de prueba.",),
+    )
+    assert recurring_anatomy(explicit) == "Override desde la instancia."
+    assert recurring_where_to_obtain(explicit) == "Súbelo desde la prueba."
+    assert recurring_common_errors(explicit) == ("Solo un bullet de prueba.",)
+
+    # No instance value → per-doc override applies.
+    generated = next(
+        r
+        for r in recurring_for_year(2026)
+        if r.institution == "imss" and r.name == "Cuotas obrero patronales"
+    )
+    assert recurring_anatomy(generated)  # non-empty
+    # Per-doc override talks about "comprobante de pago bancario"; the
+    # institution default does not.
+    assert "comprobante de pago bancario" in recurring_anatomy(generated).lower()
+    # The "cédula" wording lives in the override's common_errors.
+    assert any(
+        "cédula" in bullet.lower() for bullet in recurring_common_errors(generated)
+    )
+    assert len(recurring_common_errors(generated)) >= 5
+
+    # No instance, no per-doc override → institution default applies.
+    generated_fallback = next(
+        r
+        for r in recurring_for_year(2026)
+        if r.institution == "sat" and r.name == "Declaración IVA"
+    )
+    assert recurring_anatomy(generated_fallback)  # institution default is non-empty
+    # Institution defaults are shorter than per-doc overrides.
+    assert 2 <= len(recurring_common_errors(generated_fallback)) <= 4
