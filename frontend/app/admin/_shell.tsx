@@ -5,6 +5,7 @@ import Link from "next/link";
 import { useRouter, usePathname } from "next/navigation";
 import {
   Books,
+  Bug,
   CalendarBlank,
   ChartLineUp,
   ClipboardText,
@@ -48,6 +49,7 @@ const NAV: { href: string; label: string; icon: Icon }[] = [
   { href: "/admin/reviewer", label: "Bandeja", icon: ClipboardText },
   { href: "/admin/reports", label: "Reportes", icon: ChartLineUp },
   { href: "/admin/contact-requests", label: "Solicitudes", icon: EnvelopeSimple },
+  { href: "/admin/feedback-reports", label: "Feedback", icon: Bug },
   { href: "/admin/audit-log", label: "Audit log", icon: ListMagnifyingGlass },
 ];
 

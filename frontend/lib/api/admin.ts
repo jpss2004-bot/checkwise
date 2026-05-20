@@ -467,3 +467,95 @@ export async function updateContactRequestStatus(
     body: JSON.stringify({ status }),
   });
 }
+
+// ---------------------------------------------------------------------------
+// Feedback reports (bug + improvement reports from the Reportar launcher)
+// ---------------------------------------------------------------------------
+
+export type FeedbackKind = "bug" | "improvement";
+export type FeedbackSource = "authenticated" | "public";
+export type FeedbackStatus =
+  | "new"
+  | "triaged"
+  | "in_progress"
+  | "resolved"
+  | "wont_fix";
+export type FeedbackSlackDeliveryStatus =
+  | "pending"
+  | "sent"
+  | "failed"
+  | "skipped";
+
+export interface AdminFeedbackReport {
+  id: string;
+  kind: FeedbackKind;
+  description: string;
+  source: FeedbackSource;
+  is_public: boolean;
+  status: FeedbackStatus;
+  url: string | null;
+  path: string | null;
+  viewport: string | null;
+  user_agent: string | null;
+  console_logs: string | null;
+  user_id: string | null;
+  user_email: string | null;
+  user_full_name: string | null;
+  user_roles: string | null;
+  contact_email: string | null;
+  ip_hash: string | null;
+  screenshot_storage_key: string | null;
+  screenshot_size_bytes: number | null;
+  /** Presigned download URL — populated on detail responses when the
+   *  storage backend supports pre-signing (S3/R2). Null on local. */
+  screenshot_url: string | null;
+  slack_message_ts: string | null;
+  slack_delivery_status: FeedbackSlackDeliveryStatus;
+  slack_delivery_error: string | null;
+  resolution_note: string | null;
+  triaged_by_user_id: string | null;
+  triaged_at: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface AdminFeedbackReportList {
+  items: AdminFeedbackReport[];
+  total: number;
+  limit: number;
+  offset: number;
+}
+
+export async function listFeedbackReports(params?: {
+  status?: FeedbackStatus;
+  kind?: FeedbackKind;
+  source?: FeedbackSource;
+  limit?: number;
+  offset?: number;
+}): Promise<AdminFeedbackReportList> {
+  const qs = new URLSearchParams();
+  for (const [key, value] of Object.entries(params ?? {})) {
+    if (value === undefined || value === null) continue;
+    const asString = String(value);
+    if (!asString) continue;
+    qs.set(key, asString);
+  }
+  const suffix = qs.toString() ? `?${qs.toString()}` : "";
+  return fetchJson(`/api/v1/admin/feedback-reports${suffix}`);
+}
+
+export async function getFeedbackReport(
+  id: string,
+): Promise<AdminFeedbackReport> {
+  return fetchJson(`/api/v1/admin/feedback-reports/${id}`);
+}
+
+export async function updateFeedbackReportStatus(
+  id: string,
+  payload: { status: FeedbackStatus; resolution_note?: string | null },
+): Promise<AdminFeedbackReport> {
+  return fetchJson(`/api/v1/admin/feedback-reports/${id}`, {
+    method: "PATCH",
+    body: JSON.stringify(payload),
+  });
+}
