@@ -760,4 +760,48 @@ Same total work, two cleanly reviewable surfaces.
 
 ---
 
+## 21. Stage 2.7 — Shipped (2026-05-20)
+
+Stage 2.7 landed as a single phase per Jose Pablo's direction, covering all three streams (correction request, multi-file upload, recurring requirement parity) together. Full implementation detail lives in [STAGE_2_7_SHIP_NOTES.md](./STAGE_2_7_SHIP_NOTES.md); below is the §20-level digest.
+
+### 21.1 Locked decisions consumed by Stage 2.7
+
+| Topic | Locked value |
+|---|---|
+| Multi-file caps | N ≤ 5 files, ≤ 30 MB aggregate, atomic all-or-nothing per submission. |
+| Multi-file feature flag | `MULTI_FILE_UPLOAD_ENABLED` (backend) + `NEXT_PUBLIC_MULTI_FILE_UPLOAD_ENABLED` (frontend). Both default `false`. |
+| Tier B correction-request fields | `contact_email`, `contact_phone`, `contact_name` only. RFC / razón social / contract reference stay support-only. |
+| Slack delivery channel | New `SLACK_CORRECTION_WEBHOOK_URL` setting. Empty default → audit-log persistence only; no error when ops hasn't configured the webhook. |
+| Recurring requirement parity | Three new fields on `RecurringRequirement` (`anatomy`, `where_to_obtain`, `common_errors`). Per-institution defaults + per-doc-name overrides for IMSS opinion, INFONAVIT certificate, ISR mensual, SAT acuse anual, STPS SISUB/ICSOE. |
+
+### 21.2 Surfaces touched
+
+| Layer | Files |
+|---|---|
+| Backend catalog | `backend/app/core/compliance_catalog.py` |
+| Backend API | `backend/app/api/v1/portal.py` (correction-request endpoint, multi-file batch endpoint, calendar guidance fields) |
+| Backend services | `backend/app/services/correction_request_service.py` (new), `backend/app/services/submission_service.py` (`finalize_multi_document_submission`) |
+| Backend schemas | `backend/app/schemas/submissions.py` (`MultiSubmissionResponse`, `DocumentBatchEntry`) |
+| Backend config | `backend/app/core/config.py` (`SLACK_CORRECTION_WEBHOOK_URL`, `MULTI_FILE_UPLOAD_ENABLED`) |
+| Backend tests | `backend/tests/test_portal_correction_requests.py` (new), `backend/tests/test_portal_multi_file_upload.py` (new), `backend/tests/test_portal_canonical_enrichment.py` (extended) |
+| Frontend API | `frontend/lib/api/corrections.ts` (new), `frontend/lib/api/portal.ts` (`CalendarItem` guidance fields) |
+| Frontend components | `frontend/components/checkwise/workspace/correction-request-form.tsx` (real API + Tier B restriction), `frontend/components/checkwise/portal/expediente-card.tsx` (`DocumentGuidanceDisclosure` exported), `frontend/components/checkwise/intake-wizard.tsx` (additional-files block, flag-gated) |
+| Frontend pages | `frontend/app/portal/entra-a-tu-espacio/page.tsx` (correction-request mount), `frontend/app/portal/calendar/page.tsx` (drawer disclosure) |
+
+### 21.3 Stage 2.8 unblocks?
+
+No. Stage 2.8 is still gated on the privacy-notice copy from Paco / Beko / legal. The correction-request **endpoint** that Stage 2.7 shipped is independent of the privacy-notice **modal** that Stage 2.8 will ship; both can coexist without coupling.
+
+### 21.4 What changed in the recommended sequence
+
+After Stage 2.7, the next defensible work order is:
+
+1. Land the existing Stage 2.7 commits on `main` (direct-to-main per the workflow).
+2. Wait for Paco / Beko legal copy → Stage 2.8 (privacy notice).
+3. Begin Stage 3 (dashboard data-viz rework) once trust + language + correction baseline are committed.
+
+The Stages 4–6 sequencing in §15 stays as-is.
+
+---
+
 *End of provider experience improvement plan.*
