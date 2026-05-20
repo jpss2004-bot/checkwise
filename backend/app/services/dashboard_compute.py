@@ -748,6 +748,30 @@ def compute_suggested_actions(
                     "period_key": None,
                 }
             )
+    # 2.5. Expired (vencido) calendar slots — high priority.
+    # P1-c (2026-05-20): the catalog window already closed without an
+    # acuse. Surface a "regularize" CTA so the provider sees the
+    # missed obligation in their action list instead of it sitting
+    # silently as EXPIRED only on the dashboard slot resolver.
+    for view in calendar_slots:
+        if not view.required or view.state is not SlotState.EXPIRED:
+            continue
+        actions.append(
+            {
+                "id": f"act-{view.requirement_code}-{view.period_key}-expired",
+                "type": "regularize",
+                "title": f"Regulariza el documento vencido: {view.requirement_name}",
+                "body": (
+                    "El plazo de esta obligación pasó sin que se subiera "
+                    "el acuse. Trabaja con tu contador para regularizarla "
+                    "y carga el comprobante aquí."
+                ),
+                "priority": "high",
+                "href": calendar_reupload_href(view),
+                "requirement_code": view.requirement_code,
+                "period_key": view.period_key,
+            }
+        )
     # 3. Upcoming calendar (within 14 days).
     for view in calendar_slots:
         if not view.required or view.state is not SlotState.MISSING:

@@ -112,18 +112,19 @@ export function ReportEditor({
   // text with real AI output.
   const [engine, setEngine] = useState<ReportsEngineInfo | null>(null);
   useEffect(() => {
-    let cancelled = false;
-    getReportsEngine()
-      .then((info) => {
-        if (!cancelled) setEngine(info);
-      })
-      .catch(() => {
-        // Non-fatal: a stale or unauthenticated probe just hides the
-        // banner; it never blocks the editor.
+    // P2-b (2026-05-20): wrap in AbortController so React StrictMode's
+    // double-mount doesn't fire two requests where the first is
+    // visibly cancelled in DevTools. Swallow AbortError silently;
+    // any other failure just hides the mock banner — never blocks
+    // the editor.
+    const ctrl = new AbortController();
+    getReportsEngine({ signal: ctrl.signal })
+      .then(setEngine)
+      .catch((e) => {
+        if (e?.name === "AbortError") return;
+        // intentional silent fallthrough — banner stays hidden.
       });
-    return () => {
-      cancelled = true;
-    };
+    return () => ctrl.abort();
   }, []);
 
   // ─── Copilot chat (right rail) ─────────────────────────────

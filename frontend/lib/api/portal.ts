@@ -329,7 +329,10 @@ export type DashboardActionType =
   | "reupload"
   | "verify_mismatch"
   | "clarify"
-  | "upcoming";
+  | "upcoming"
+  // P1-c (2026-05-20): EXPIRED required slots emit "regularize"
+  // so the provider sees the missed obligation in their action list.
+  | "regularize";
 
 export type DashboardOnboardingSummary = {
   total_required: number;

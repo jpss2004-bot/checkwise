@@ -1604,7 +1604,18 @@ class DashboardSemaphore(BaseModel):
 
 class DashboardSuggestedAction(BaseModel):
     id: str
-    type: Literal["complete_onboarding", "reupload", "verify_mismatch", "clarify", "upcoming"]
+    type: Literal[
+        "complete_onboarding",
+        "reupload",
+        "verify_mismatch",
+        "clarify",
+        "upcoming",
+        # P1-c (2026-05-20): EXPIRED required slots emit a "regularize"
+        # action so the provider sees the missed obligation as a real
+        # next step instead of it sitting silently as VENCIDO only on
+        # the slot resolver.
+        "regularize",
+    ]
     title: str
     body: str
     priority: Literal["low", "medium", "high"]
@@ -1886,6 +1897,32 @@ def _compute_suggested_actions(
                     period_key=None,
                 )
             )
+    # 2.5. Expired (vencido) calendar slots — high priority
+    # "regularización" prompt. P1-c (2026-05-20): the catalog deadline
+    # already passed, so this is more urgent than an upcoming-deadline
+    # warning but distinct from a rejection (the provider didn't fail
+    # a reviewer call — they simply missed the SAT/IMSS window). The
+    # CTA still routes to the upload page so the provider can attach
+    # a late acuse + work with their contador on regularización.
+    for view in calendar_slots:
+        if not view.required or view.state is not SlotState.EXPIRED:
+            continue
+        actions.append(
+            DashboardSuggestedAction(
+                id=f"act-{view.requirement_code}-{view.period_key}-expired",
+                type="regularize",
+                title=f"Regulariza el documento vencido: {view.requirement_name}",
+                body=(
+                    "El plazo de esta obligación pasó sin que se subiera "
+                    "el acuse. Trabaja con tu contador para regularizarla "
+                    "y carga el comprobante aquí."
+                ),
+                priority="high",
+                href=_calendar_reupload_href(view),
+                requirement_code=view.requirement_code,
+                period_key=view.period_key,
+            )
+        )
     # 3. Calendar slots due within 14 days — low/medium depending on urgency.
     for view in calendar_slots:
         if not view.required or view.state is not SlotState.MISSING:

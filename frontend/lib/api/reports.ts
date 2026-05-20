@@ -322,8 +322,10 @@ export interface ReportsEngineInfo {
   content_model: string;
 }
 
-export function getReportsEngine(): Promise<ReportsEngineInfo> {
-  return fetchJson<ReportsEngineInfo>(`/api/v1/reports/_engine`);
+export function getReportsEngine(
+  init?: { signal?: AbortSignal },
+): Promise<ReportsEngineInfo> {
+  return fetchJson<ReportsEngineInfo>(`/api/v1/reports/_engine`, init);
 }
 
 // ─── Presets (R1.0) ──────────────────────────────────────────────

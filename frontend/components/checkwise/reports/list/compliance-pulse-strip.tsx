@@ -10,6 +10,8 @@ import {
   CheckCircle,
   CircleNotch,
   CloudArrowUp,
+  Info,
+  Shield,
   Sparkle,
   Warning,
   WarningOctagon,
@@ -19,6 +21,7 @@ import {
 import { RadialGauge } from "@/components/checkwise/charts";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import { Tooltip } from "@/components/ui/tooltip";
 import {
   getDashboard,
   type DashboardAttentionItem,
@@ -261,8 +264,18 @@ function PulseContent({
   onGenerate: () => void;
   generating: boolean;
 }) {
-  const { semaphore, attention_today, upcoming_deadlines, suggested_actions } =
-    dashboard;
+  const {
+    semaphore,
+    attention_today,
+    upcoming_deadlines,
+    suggested_actions,
+    document_state_counts,
+  } = dashboard;
+  // P1-b (2026-05-20): excepcion_legal slots are NOT actionable for
+  // the provider, but they're also not missing — they're legally
+  // closed by LegalShelf. Surface the count so providers don't
+  // misread them as gaps in their expediente.
+  const exceptionCount = document_state_counts?.exception ?? 0;
 
   const blockingCount = useMemo(
     () =>
@@ -312,6 +325,7 @@ function PulseContent({
             onTrack={semaphore.on_track}
             totalTracked={semaphore.total_tracked}
             label={semaphore.label}
+            exceptionCount={exceptionCount}
           />
         </div>
         <AttentionCard
@@ -344,12 +358,14 @@ function SemaphoreCard({
   onTrack,
   totalTracked,
   label,
+  exceptionCount,
 }: {
   level: DashboardSemaphoreLevel;
   compliancePct: number;
   onTrack: number;
   totalTracked: number;
   label: string;
+  exceptionCount: number;
 }) {
   const tone = SEMAPHORE_TONE[level];
   const IconComponent = SEMAPHORE_ICON[level];
@@ -360,7 +376,37 @@ function SemaphoreCard({
       aria-label="Estado general de cumplimiento"
     >
       <header className="flex items-center justify-between gap-2">
-        <span className="cw-eyebrow">Estado general</span>
+        <span className="cw-eyebrow inline-flex items-center gap-1">
+          Estado general
+          {/* P1-a (2026-05-20): the "X de N obligaciones" denominator
+              reads against the full annual REPSE calendar, while the
+              per-report KPI block counts only the report period.
+              Tooltip explains the difference so providers don't read
+              the two numbers as conflicting. */}
+          <Tooltip
+            side="top"
+            content={
+              <span className="block max-w-[260px] text-[11px] leading-snug">
+                <strong className="block font-semibold">
+                  ¿Cómo se calcula?
+                </strong>
+                Cumplimiento = obligaciones requeridas aprobadas ÷ total
+                de obligaciones del calendario REPSE del año en curso.
+                Incluye periodos futuros, por eso el porcentaje sube
+                gradualmente a lo largo del año. Los KPIs dentro de un
+                reporte cuentan solo el periodo del reporte.
+              </span>
+            }
+          >
+            <button
+              type="button"
+              aria-label="¿Cómo se calcula el cumplimiento?"
+              className="inline-flex h-4 w-4 items-center justify-center rounded-full text-[color:var(--text-tertiary)] hover:text-[color:var(--text-primary)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[color:var(--border-focus)]"
+            >
+              <Info className="h-3.5 w-3.5" weight="regular" aria-hidden="true" />
+            </button>
+          </Tooltip>
+        </span>
         <Badge
           variant={
             tone === "success"
@@ -405,6 +451,33 @@ function SemaphoreCard({
               aria-hidden="true"
             />
           </div>
+          {exceptionCount > 0 ? (
+            <Tooltip
+              side="bottom"
+              content={
+                <span className="block max-w-[240px] text-[11px] leading-snug">
+                  Documentos marcados como excepción legal por
+                  LegalShelf (criterio normativo, no requeridos para
+                  el periodo). No cuentan como pendientes ni como
+                  faltantes.
+                </span>
+              }
+            >
+              <button
+                type="button"
+                aria-label={`${exceptionCount} documentos marcados como excepción legal`}
+                className="inline-flex items-center gap-1 self-start rounded-full border border-[color:var(--border-subtle)] bg-[color:var(--surface-page)] px-2 py-0.5 font-mono text-[10px] uppercase tracking-wide text-[color:var(--text-secondary)] hover:border-[color:var(--border-default)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[color:var(--border-focus)]"
+              >
+                <Shield className="h-3 w-3" weight="bold" aria-hidden="true" />
+                <span className="font-semibold text-[color:var(--text-primary)]">
+                  {exceptionCount}
+                </span>
+                <span className="normal-case tracking-normal">
+                  excepción legal
+                </span>
+              </button>
+            </Tooltip>
+          ) : null}
         </div>
       </div>
     </article>

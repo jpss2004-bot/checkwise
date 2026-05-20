@@ -101,6 +101,13 @@ export function ReportsListView({
     "all",
   );
   const [search, setSearch] = useState("");
+  // P2-a (2026-05-20): sort control. The shared list view sorts
+  // updated_at desc server-side; we offer client-side reordering on
+  // top of that so a provider with several drafts can switch between
+  // "newest first" and "A→Z" without paging.
+  const [sortBy, setSortBy] = useState<
+    "updated_desc" | "updated_asc" | "title_asc"
+  >("updated_desc");
 
   // ─── Preset gallery — loaded once ──────────────────────────
   useEffect(() => {
@@ -151,13 +158,27 @@ export function ReportsListView({
     };
   }, [statusFilter, audienceFilter]);
 
-  // ─── Client-side title search ──────────────────────────────
+  // ─── Client-side title search + sort ───────────────────────
   const filteredReports = useMemo(() => {
     if (!reports) return null;
     const q = search.trim().toLowerCase();
-    if (!q) return reports;
-    return reports.filter((r) => r.title.toLowerCase().includes(q));
-  }, [reports, search]);
+    const matched = q
+      ? reports.filter((r) => r.title.toLowerCase().includes(q))
+      : reports;
+    if (sortBy === "updated_desc") return matched;
+    const sorted = [...matched];
+    if (sortBy === "updated_asc") {
+      sorted.sort(
+        (a, b) =>
+          new Date(a.updated_at).getTime() - new Date(b.updated_at).getTime(),
+      );
+    } else if (sortBy === "title_asc") {
+      sorted.sort((a, b) =>
+        a.title.localeCompare(b.title, "es-MX", { sensitivity: "base" }),
+      );
+    }
+    return sorted;
+  }, [reports, search, sortBy]);
 
   const onUsePreset = useCallback(
     async (preset: ReportPresetSummary) => {
@@ -182,10 +203,14 @@ export function ReportsListView({
     setStatusFilter("all");
     setAudienceFilter("all");
     setSearch("");
+    setSortBy("updated_desc");
   }, []);
 
   const hasActiveFilter =
-    statusFilter !== "all" || audienceFilter !== "all" || search.trim() !== "";
+    statusFilter !== "all" ||
+    audienceFilter !== "all" ||
+    search.trim() !== "" ||
+    sortBy !== "updated_desc";
 
   // ─── Render ────────────────────────────────────────────────
   return (
@@ -286,6 +311,8 @@ export function ReportsListView({
           audienceFilter={audienceFilter}
           onAudienceChange={setAudienceFilter}
           showAudienceFilter={showAudienceFilter}
+          sortBy={sortBy}
+          onSortChange={setSortBy}
           hasActive={hasActiveFilter}
           onClear={clearFilters}
         />
@@ -340,6 +367,8 @@ function FilterBar({
   audienceFilter,
   onAudienceChange,
   showAudienceFilter,
+  sortBy,
+  onSortChange,
   hasActive,
   onClear,
 }: {
@@ -350,6 +379,8 @@ function FilterBar({
   audienceFilter: ReportAudience | "all";
   onAudienceChange: (v: ReportAudience | "all") => void;
   showAudienceFilter: boolean;
+  sortBy: "updated_desc" | "updated_asc" | "title_asc";
+  onSortChange: (v: "updated_desc" | "updated_asc" | "title_asc") => void;
   hasActive: boolean;
   onClear: () => void;
 }) {
@@ -409,6 +440,23 @@ function FilterBar({
           ]}
         />
       )}
+
+      {/* Sort — P2-a (2026-05-20). Replaces the slot left by the
+          provider-hidden Audiencia filter; for admins it sits to the
+          right of the audience dropdown. Pure client-side reorder
+          on top of the server's updated_at desc default. */}
+      <SelectField
+        label="Orden"
+        value={sortBy}
+        onChange={(v) =>
+          onSortChange(v as "updated_desc" | "updated_asc" | "title_asc")
+        }
+        options={[
+          { value: "updated_desc", label: "Recientes" },
+          { value: "updated_asc", label: "Antiguos" },
+          { value: "title_asc", label: "Título A→Z" },
+        ]}
+      />
 
       {hasActive && (
         <Button
