@@ -696,3 +696,102 @@ class ContactRequest(TimestampMixin, Base):
     status: Mapped[str] = mapped_column(String(40), default="new", nullable=False)
     ip_hash: Mapped[str | None] = mapped_column(String(64))
     user_agent: Mapped[str | None] = mapped_column(String(512))
+
+
+class FeedbackReport(TimestampMixin, Base):
+    """Bug report or improvement suggestion from the in-app Reportar launcher.
+
+    Persistence is canonical. Slack delivery is a side-effect notifier
+    fired by ``feedback_service.deliver_to_slack`` as a BackgroundTask —
+    if it fails or stub-mode is active, the row still exists and can be
+    re-pushed.
+
+    Two source modes share this table:
+
+    * ``source='authenticated'`` — submitted via ``POST /api/v1/feedback``.
+      ``user_id`` / ``user_email`` / ``user_full_name`` / ``user_roles``
+      are populated from the JWT.
+    * ``source='public'`` — submitted via ``POST /api/v1/feedback/public``
+      from the marketing landing. User identity columns are NULL;
+      ``contact_email`` (optional, supplier-provided) and ``ip_hash``
+      (peppered SHA-256, same algorithm as ``ContactRequest``) carry the
+      only attribution we have.
+
+    Status lifecycle: ``new`` → ``triaged`` → ``in_progress`` →
+    ``resolved`` (or ``wont_fix``). Admins move rows through this
+    workflow from the ``/admin/feedback-reports`` triage queue.
+
+    ``screenshot_storage_key`` points at the PNG persisted via the
+    standard ``StorageService`` (S3/R2 in prod, local on dev). Storing
+    the bytes ourselves means the screenshot survives Slack channel
+    retention/deletion and we can render it inside the admin UI without
+    needing Slack scopes on the browser session.
+
+    ``slack_message_ts`` and ``slack_delivery_status`` are written back
+    by the BackgroundTask. ``slack_delivery_error`` captures the last
+    error string when delivery fails so triagers can see *why* without
+    digging through Render logs.
+    """
+
+    __tablename__ = "feedback_reports"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=new_id)
+    kind: Mapped[str] = mapped_column(String(20), nullable=False)
+    """``bug`` | ``improvement`` — validated at the API boundary."""
+
+    description: Mapped[str] = mapped_column(Text, nullable=False)
+
+    # Source + visibility
+    source: Mapped[str] = mapped_column(
+        String(20), default="authenticated", nullable=False
+    )
+    """``authenticated`` | ``public``."""
+    is_public: Mapped[bool] = mapped_column(
+        Boolean, default=False, nullable=False
+    )
+
+    # Page context (captured by the launcher).
+    url: Mapped[str | None] = mapped_column(String(2048))
+    path: Mapped[str | None] = mapped_column(String(512))
+    viewport: Mapped[str | None] = mapped_column(String(32))
+    user_agent: Mapped[str | None] = mapped_column(String(512))
+    console_logs: Mapped[str | None] = mapped_column(Text)
+
+    # Authenticated submitter (NULL on public reports).
+    user_id: Mapped[str | None] = mapped_column(
+        String(36), ForeignKey("users.id"), nullable=True
+    )
+    user_email: Mapped[str | None] = mapped_column(String(254))
+    user_full_name: Mapped[str | None] = mapped_column(String(200))
+    user_roles: Mapped[str | None] = mapped_column(String(500))
+    """Comma-separated active roles at submission time (denormalized snapshot)."""
+
+    # Anonymous submitter (NULL on authenticated reports).
+    contact_email: Mapped[str | None] = mapped_column(String(254))
+    ip_hash: Mapped[str | None] = mapped_column(String(64))
+
+    # Screenshot — bytes live in the storage backend; the row carries
+    # the key + metadata. ``screenshot_size_bytes`` is duplicated from
+    # the storage layer so list views can render "PNG · 184 KB" without
+    # a HEAD call to S3.
+    screenshot_storage_key: Mapped[str | None] = mapped_column(String(512))
+    screenshot_size_bytes: Mapped[int | None] = mapped_column(Integer)
+
+    # Slack side-effect status (written back by the BackgroundTask).
+    slack_message_ts: Mapped[str | None] = mapped_column(String(64))
+    slack_delivery_status: Mapped[str] = mapped_column(
+        String(20), default="pending", nullable=False
+    )
+    """``pending`` (queued) | ``sent`` | ``failed`` | ``skipped`` (no token configured)."""
+    slack_delivery_error: Mapped[str | None] = mapped_column(Text)
+
+    # Triage workflow.
+    status: Mapped[str] = mapped_column(
+        String(20), default="new", nullable=False
+    )
+    """``new`` | ``triaged`` | ``in_progress`` | ``resolved`` | ``wont_fix``."""
+    resolution_note: Mapped[str | None] = mapped_column(Text)
+    triaged_by_user_id: Mapped[str | None] = mapped_column(
+        String(36), ForeignKey("users.id"), nullable=True
+    )
+    triaged_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
