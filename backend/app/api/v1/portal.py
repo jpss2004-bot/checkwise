@@ -55,7 +55,10 @@ from app.core.catalogs import DOCUMENT_STATUSES, INSTITUTIONS, LOAD_TYPES
 from app.core.compliance_catalog import (
     catalog_metadata,
     expediente_for_persona,
+    onboarding_anatomy,
+    onboarding_common_errors,
     onboarding_format,
+    onboarding_where_to_obtain,
     onboarding_why,
     recurring_for_year,
     recurring_required_document,
@@ -832,6 +835,13 @@ def get_workspace_onboarding(
             # by way of the slot view).
             "why": onboarding_why(req),
             "format": onboarding_format(req),
+            # Stage 2 (BL-002, 2026-05-20) — first-upload guidance.
+            # Anatomy describes what the document contains, where_to_obtain
+            # explains where to get it, common_errors lists the pitfalls
+            # the tester (jluna@legalshelf.mx) called out on F1/F2.
+            "anatomy": onboarding_anatomy(req),
+            "where_to_obtain": onboarding_where_to_obtain(req),
+            "common_errors": list(onboarding_common_errors(req)),
             "next_action": _onboarding_next_action(item_status, req.required),
             "reviewer_note": _latest_reviewer_note(db, current_submission_id),
         }

@@ -54,11 +54,21 @@ class OnboardingRequirement:
     required: bool = True
     note: str | None = None
     # Phase 5 — UX enrichment that used to live in frontend mocks.
-    # Both default to empty; the portal endpoint falls back to an
+    # All default to empty; the portal endpoint falls back to an
     # institution-based default copy when blank, so the catalog can be
     # enriched per-item later without breaking the API shape.
     why: str = ""
     format: str = ""
+    # Stage 2 (BL-002, 2026-05-20) — first-upload guidance copy. A
+    # provider who has never seen a CSF or REPSE registration before
+    # needs to know what the document actually contains, where to get
+    # it, and what mistakes are common before they upload. All three
+    # are optional and fall back to per-institution defaults — see
+    # ``onboarding_anatomy`` / ``onboarding_where_to_obtain`` /
+    # ``onboarding_common_errors`` below.
+    anatomy: str = ""
+    where_to_obtain: str = ""
+    common_errors: tuple[str, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -101,6 +111,23 @@ _ONBOARDING_MORAL: tuple[OnboardingRequirement, ...] = (
         section="Contrato",
         institution="interno_cliente",
         persona_types=("moral", "fisica"),
+        anatomy=(
+            "El contrato de servicios especializados firmado entre tu "
+            "empresa y el cliente, incluyendo cualquier anexo técnico, "
+            "comercial o tabulador que forme parte del acuerdo. Debe "
+            "estar firmado por ambas partes y contener objeto, vigencia, "
+            "alcance del servicio especializado y el desglose económico."
+        ),
+        where_to_obtain=(
+            "Pídeselo al área legal o comercial del cliente, o súbelo "
+            "desde tu propio archivo si tu empresa custodia el original "
+            "firmado."
+        ),
+        common_errors=(
+            "Subir solo una propuesta o cotización en lugar del contrato firmado.",
+            "Omitir los anexos cuando el contrato hace referencia a ellos.",
+            "Subir una copia sin firma de alguna de las dos partes.",
+        ),
     ),
     OnboardingRequirement(
         code="ONB-CONT-002",
@@ -127,6 +154,26 @@ _ONBOARDING_MORAL: tuple[OnboardingRequirement, ...] = (
         section="Documentación Corporativa",
         institution="interno_cliente",
         persona_types=("moral",),
+        anatomy=(
+            "El acta constitutiva original protocolizada ante notario y "
+            "todas las reformas posteriores que modifiquen el objeto "
+            "social, capital, representación legal o domicilio. El "
+            "objeto social que aparece en el acta vigente debe incluir "
+            "los servicios especializados que prestas; ese es el dato "
+            "que el cliente revisa primero."
+        ),
+        where_to_obtain=(
+            "Pide el archivo PDF a la notaría que protocolizó el acta, "
+            "o usa la copia certificada que ya tengas en custodia legal."
+        ),
+        common_errors=(
+            "Subir solo el acta original sin las reformas posteriores cuando ya existen.",
+            "Subir una versión sin sello del notario o sin protocolización.",
+            (
+                "Falta de coincidencia entre el objeto social y los "
+                "servicios que prestas en el contrato."
+            ),
+        ),
     ),
     OnboardingRequirement(
         code="ONB-CORP-M-002",
@@ -134,6 +181,24 @@ _ONBOARDING_MORAL: tuple[OnboardingRequirement, ...] = (
         section="Documentación Corporativa",
         institution="sat",
         persona_types=("moral",),
+        anatomy=(
+            "La Constancia de Situación Fiscal vigente emitida por el "
+            "SAT. Debe estar a nombre de la empresa proveedora y mostrar "
+            "el RFC, la razón social, el régimen fiscal y el domicilio "
+            "fiscal actualizado. Aceptamos únicamente la versión emitida "
+            "en los últimos 90 días para confirmar que los datos están "
+            "al corriente."
+        ),
+        where_to_obtain=(
+            "Descárgala desde el portal del SAT (sat.gob.mx) entrando "
+            "con la e.firma o RFC y contraseña, en \"Otros trámites y "
+            "servicios → Constancia de Situación Fiscal\"."
+        ),
+        common_errors=(
+            "Subir una CSF de más de 90 días de emisión.",
+            "Subir la CSF del representante legal en lugar de la de la empresa.",
+            "Subir una captura de pantalla en lugar del PDF oficial del SAT.",
+        ),
     ),
     # Documentación Corporativa (Física)
     OnboardingRequirement(
@@ -149,6 +214,25 @@ _ONBOARDING_MORAL: tuple[OnboardingRequirement, ...] = (
         section="Documentación Corporativa",
         institution="sat",
         persona_types=("fisica",),
+        anatomy=(
+            "La Constancia de Situación Fiscal vigente emitida por el "
+            "SAT a tu nombre como persona física. Debe mostrar tu RFC, "
+            "tu nombre completo tal como aparece en tu identificación, "
+            "el régimen fiscal y el domicilio fiscal actualizado. "
+            "Aceptamos únicamente la versión emitida en los últimos 90 "
+            "días. Si has tenido actualizaciones recientes, sube también "
+            "la versión actualizada."
+        ),
+        where_to_obtain=(
+            "Descárgala desde el portal del SAT (sat.gob.mx) entrando "
+            "con tu RFC y contraseña o con e.firma, en \"Otros trámites "
+            "y servicios → Constancia de Situación Fiscal\"."
+        ),
+        common_errors=(
+            "Subir una CSF de más de 90 días de emisión.",
+            "Subir una captura de pantalla en lugar del PDF oficial del SAT.",
+            "Subir una versión vieja cuando ya tienes una actualización reciente.",
+        ),
     ),
     # Registro REPSE
     OnboardingRequirement(
@@ -157,6 +241,25 @@ _ONBOARDING_MORAL: tuple[OnboardingRequirement, ...] = (
         section="Registro REPSE",
         institution="stps_repse",
         persona_types=("moral", "fisica"),
+        anatomy=(
+            "El acuse oficial del Registro de Prestadoras de Servicios "
+            "Especializados u Obras Especializadas (REPSE) emitido por "
+            "la STPS. Debe mostrar el folio REPSE, la razón social o "
+            "nombre del proveedor, la fecha de registro y la lista de "
+            "actividades autorizadas. Este es el documento ancla del "
+            "expediente: sin REPSE vigente, tu cliente no puede "
+            "contratarte para servicios especializados."
+        ),
+        where_to_obtain=(
+            "Descárgalo desde el portal REPSE de la STPS "
+            "(repse.stps.gob.mx) entrando con tu usuario y contraseña, "
+            "en la sección \"Mi registro\" o \"Constancia\"."
+        ),
+        common_errors=(
+            "Subir solo el acuse de solicitud en lugar del acuse de registro autorizado.",
+            "Subir una versión con folio que ya no corresponde porque hubo renovación posterior.",
+            "Falta de coincidencia entre las actividades autorizadas y los servicios del contrato.",
+        ),
     ),
     OnboardingRequirement(
         code="ONB-REPSE-002",
@@ -500,6 +603,72 @@ _ONBOARDING_DEFAULT_FORMAT: dict[InstitutionCode, str] = {
 }
 
 
+# Stage 2 (BL-002, 2026-05-20) — first-upload guidance copy.
+# Per-institution fallbacks for requirements that don't carry an
+# explicit anatomy / where-to-obtain / common-errors override. Keep
+# the language non-technical: every string should make sense to a
+# provider who has never seen a REPSE expediente before.
+_ONBOARDING_DEFAULT_ANATOMY: dict[InstitutionCode, str] = {
+    "sat": (
+        "Documento oficial emitido por el SAT que respalda tu situación "
+        "fiscal o tributaria. Debe contener tu RFC, razón social o "
+        "nombre, y los datos vigentes en el padrón del SAT."
+    ),
+    "stps_repse": (
+        "Acuse oficial emitido por la STPS dentro del padrón de "
+        "Prestadoras de Servicios Especializados (REPSE). Debe "
+        "contener el folio REPSE, la razón social y las actividades "
+        "autorizadas."
+    ),
+    "imss": (
+        "Documento oficial del IMSS que comprueba tu relación patronal "
+        "y el cumplimiento de tus obligaciones de seguridad social."
+    ),
+    "infonavit": (
+        "Documento oficial de INFONAVIT que acredita el cumplimiento de "
+        "tus obligaciones de vivienda con los trabajadores."
+    ),
+    "interno_cliente": (
+        "Documento interno entre tu empresa y el cliente que respalda "
+        "la prestación del servicio especializado."
+    ),
+}
+
+_ONBOARDING_DEFAULT_WHERE: dict[InstitutionCode, str] = {
+    "sat": "Descárgalo del portal del SAT (sat.gob.mx) con tu RFC y contraseña o e.firma.",
+    "stps_repse": (
+        "Descárgalo del portal REPSE de la STPS (repse.stps.gob.mx) "
+        "con tu usuario y contraseña."
+    ),
+    "imss": "Descárgalo del portal IDSE del IMSS (idse.imss.gob.mx) con tu usuario patronal.",
+    "infonavit": "Descárgalo del portal empresarial de INFONAVIT con tu NRP y contraseña.",
+    "interno_cliente": "Súbelo desde tu archivo legal, o pídelo al área legal del cliente.",
+}
+
+_ONBOARDING_DEFAULT_COMMON_ERRORS: dict[InstitutionCode, tuple[str, ...]] = {
+    "sat": (
+        "Subir capturas de pantalla en lugar del PDF oficial del SAT.",
+        "Subir una versión vencida o de más de 90 días de emisión.",
+    ),
+    "stps_repse": (
+        "Subir el acuse de solicitud en lugar del acuse de registro autorizado.",
+        "Subir una versión sin folio o sin la firma electrónica de la STPS.",
+    ),
+    "imss": (
+        "Subir reportes internos en lugar de documentos emitidos por el IMSS.",
+        "Subir versiones del mes anterior cuando ya tienes la del periodo en curso.",
+    ),
+    "infonavit": (
+        "Subir reportes internos en lugar del documento oficial de INFONAVIT.",
+        "Subir el bimestre anterior cuando el cliente espera el bimestre en curso.",
+    ),
+    "interno_cliente": (
+        "Subir el archivo sin firma o sin sello cuando el original sí los tiene.",
+        "Subir solo una parte del documento (faltan anexos o páginas).",
+    ),
+}
+
+
 def onboarding_why(req: OnboardingRequirement) -> str:
     """Return per-item ``why`` copy with an institution-based fallback."""
     return req.why or _ONBOARDING_DEFAULT_WHY.get(req.institution, "")
@@ -508,6 +677,23 @@ def onboarding_why(req: OnboardingRequirement) -> str:
 def onboarding_format(req: OnboardingRequirement) -> str:
     """Return per-item ``format`` copy with an institution-based fallback."""
     return req.format or _ONBOARDING_DEFAULT_FORMAT.get(req.institution, "PDF.")
+
+
+def onboarding_anatomy(req: OnboardingRequirement) -> str:
+    """Return per-item ``anatomy`` copy with an institution-based fallback."""
+    return req.anatomy or _ONBOARDING_DEFAULT_ANATOMY.get(req.institution, "")
+
+
+def onboarding_where_to_obtain(req: OnboardingRequirement) -> str:
+    """Return per-item ``where_to_obtain`` copy with an institution-based fallback."""
+    return req.where_to_obtain or _ONBOARDING_DEFAULT_WHERE.get(req.institution, "")
+
+
+def onboarding_common_errors(req: OnboardingRequirement) -> tuple[str, ...]:
+    """Return per-item ``common_errors`` list with an institution-based fallback."""
+    return req.common_errors or _ONBOARDING_DEFAULT_COMMON_ERRORS.get(
+        req.institution, ()
+    )
 
 
 def recurring_required_document(req: RecurringRequirement) -> str:
@@ -523,6 +709,9 @@ def recurring_required_document(req: RecurringRequirement) -> str:
 __all__ = [
     "onboarding_why",
     "onboarding_format",
+    "onboarding_anatomy",
+    "onboarding_where_to_obtain",
+    "onboarding_common_errors",
     "recurring_required_document",
     "CATALOG_SOURCE",
     "CATALOG_VERSION",
