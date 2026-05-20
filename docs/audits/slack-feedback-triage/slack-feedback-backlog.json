@@ -1,0 +1,369 @@
+{
+  "$schema": "https://example.invalid/checkwise/slack-feedback-backlog/v1",
+  "source": {
+    "channel": "#checkwise-feedback",
+    "workspace": "LegalShelf-SPD",
+    "tester": "jluna@legalshelf.mx",
+    "review_date": "2026-05-20",
+    "messages_reviewed": 7,
+    "session_window_local": "10:56 AM – 12:46 PM",
+    "production_target": "https://checkwise-six.vercel.app"
+  },
+  "items": [
+    {
+      "id": "BL-001",
+      "title": "Provider preset gallery empty on /portal/reports",
+      "original_feedback_summary": "F6 (12:43 PM): 'En esta parte no deja ver las plantillas de los reportes.' Tester sees no Plantillas cards on /portal/reports.",
+      "product_area": "provider_reports",
+      "page_or_route": "/portal/reports",
+      "user_role": "provider (workspace owner)",
+      "type": "bug",
+      "severity": "critical",
+      "priority": "P0",
+      "confidence": "needs_reproduction",
+      "suggested_fix": "Reproduce on staging as jluna; capture the /api/v1/reports/_presets response. If 200 with items=[], inspect ReportActor.is_workspace_owner construction (backend/app/services/report_service.py:121) and the actor builder in backend/app/api/v1/reports.py — workspace owners with any non-empty roles tuple are excluded by the current property. Fix in seed data OR loosen the property. If non-200, lean on BL-008 to surface the failure.",
+      "likely_files": [
+        "backend/app/services/report_service.py",
+        "backend/app/api/v1/reports.py",
+        "backend/app/services/reports/templates.py",
+        "frontend/components/checkwise/reports/list/reports-list-view.tsx"
+      ],
+      "acceptance_criteria": [
+        "Logged in as jluna on staging, /portal/reports renders the three vendor_facing preset cards",
+        "The first preset is visually featured (existing F4 behavior preserved)",
+        "Unit test asserts presets_for_roles for jluna's actor shape returns three presets"
+      ],
+      "test_plan": [
+        "Backend: extend tests/test_reports_presets.py with jluna's seed shape",
+        "Frontend: integration test that mocks listPresets() success and asserts three cards"
+      ],
+      "estimated_risk": "low",
+      "status": "ready_for_repro"
+    },
+    {
+      "id": "BL-002",
+      "title": "Add document anatomy + visual reference on /portal/upload",
+      "original_feedback_summary": "F1 (10:56 AM) + F2 (11:12 AM): tester asks twice for per-document descriptions and a visual/image reference so non-technical providers know what to upload.",
+      "product_area": "provider_uploads",
+      "page_or_route": "/portal/upload",
+      "user_role": "provider",
+      "type": "ux",
+      "severity": "high",
+      "priority": "P1",
+      "confidence": "confirmed",
+      "suggested_fix": "Extend the requirement catalog with optional anatomy_es and sample_image fields. Surface both on the upload card and intake wizard. Ship sample images for the five highest-volume requirements first under frontend/public/marketing/requirement-samples/.",
+      "likely_files": [
+        "backend/app/core/catalogs.py",
+        "backend/app/schemas/portal.py",
+        "frontend/components/checkwise/document-submission-form.tsx",
+        "frontend/components/checkwise/intake-wizard.tsx",
+        "frontend/public/marketing/requirement-samples/"
+      ],
+      "acceptance_criteria": [
+        "Five priority requirements show an anatomy paragraph in Spanish",
+        "Each of those five shows a sample image (or 'sample coming soon' note) with redaction confirmed",
+        "Layout holds at 1802x862 (tester viewport) plus the recently QA'd 360 / 768 / 1440 viewports"
+      ],
+      "test_plan": [
+        "Visual QA on five seeded requirements in both intake-wizard and standalone upload",
+        "Confirm Image lazy-loading does not regress LCP"
+      ],
+      "estimated_risk": "medium",
+      "status": "needs_content"
+    },
+    {
+      "id": "BL-003",
+      "title": "Translate validation rule_code labels to plain Spanish",
+      "original_feedback_summary": "F3 (11:28 AM): tester asks that 'file_exists / allowed_file_type' style labels be converted to human language.",
+      "product_area": "document_validation",
+      "page_or_route": "/portal/upload, /portal/submissions/[id], /admin/reviewer/[id]",
+      "user_role": "provider + internal reviewer",
+      "type": "copy_ux",
+      "severity": "high",
+      "priority": "P1",
+      "confidence": "confirmed",
+      "suggested_fix": "Add frontend/lib/constants/validation.ts with RULE_CODE_LABELS_ES mapping every code defined in backend/app/services/prevalidation.py. Render the friendly label as primary in components/checkwise/validation-summary.tsx (line 29). Keep the raw rule_code in a small mono tag or title attribute for QA.",
+      "likely_files": [
+        "frontend/lib/constants/validation.ts (new)",
+        "frontend/components/checkwise/validation-summary.tsx",
+        "frontend/components/checkwise/document-submission-form.tsx"
+      ],
+      "acceptance_criteria": [
+        "No raw rule_code strings render on any user-facing surface",
+        "Every code emitted by prevalidation.py has a corresponding Spanish label",
+        "Tooltip / title still exposes the original code for QA reproducibility"
+      ],
+      "test_plan": [
+        "Unit test asserts the label map covers every value emitted by prevalidation.py (export a code-list fixture)",
+        "Visual regression on submissions detail page"
+      ],
+      "estimated_risk": "low",
+      "status": "ready"
+    },
+    {
+      "id": "BL-004",
+      "title": "Submitted-documents history + gauge clarity on /portal/dashboard",
+      "original_feedback_summary": "F4 (12:14 PM): tester asks for a view-only list of uploaded documents grouped by Institución × Mes × Año, plus a clearer gauge that explains what is missing.",
+      "product_area": "provider_dashboard",
+      "page_or_route": "/portal/dashboard",
+      "user_role": "provider",
+      "type": "feature_gap + ux",
+      "severity": "high",
+      "priority": "P1",
+      "confidence": "likely",
+      "suggested_fix": "Build a read-only ProviderHistoryList grouped by institution → year → month and place it under the existing 'Tu siguiente acción' strip. Extend the existing dashboard payload to include grouped submissions, or call the submissions list endpoint client-side. Add a 'Te faltan N documentos' subtitle to the compliance gauge with a chip listing the top missing requirement.",
+      "likely_files": [
+        "frontend/app/portal/dashboard/page.tsx",
+        "frontend/components/checkwise/portal/* (gauge)",
+        "frontend/components/checkwise/portal/provider-history-list.tsx (new)",
+        "backend/app/api/v1/portal.py",
+        "backend/app/services/submission_service.py"
+      ],
+      "acceptance_criteria": [
+        "History list groups submissions by Institución then Año then Mes",
+        "No edit/delete affordance on history rows (read-only)",
+        "Gauge subtitle shows missing count and at least one specific blocker when % < 100",
+        "Hero of the dashboard does not get pushed below the fold; history sits behind a 'Ver historial' expand if necessary"
+      ],
+      "test_plan": [
+        "Seed a workspace with 5 mixed submissions across 3 months and 4 institutions",
+        "Assert grouping order in the DOM",
+        "Snapshot at 1440x900, 768x1024, 390x844"
+      ],
+      "estimated_risk": "medium",
+      "status": "ready_after_BL-001"
+    },
+    {
+      "id": "BL-005",
+      "title": "Eliminate stale RSC chunk errors after Vercel deploys",
+      "original_feedback_summary": "RX-1 (console attachments under F1, F2, F3): repeated 'Failed to fetch RSC payload … Cannot read properties of undefined (reading call)' on portal/entra-a-tu-espacio, portal/upload, portal/onboarding, portal/dashboard.",
+      "product_area": "production_runtime",
+      "page_or_route": "/portal/* (production-wide on Vercel)",
+      "user_role": "all visitors with a tab spanning a deploy",
+      "type": "bug",
+      "severity": "high",
+      "priority": "P1",
+      "confidence": "confirmed",
+      "suggested_fix": "(a) Verify the new distDir override is inert on Vercel (Vercel cwd is ASCII so resolver returns .next). (b) Add a ChunkLoadError boundary at /portal/layout.tsx or /portal/error.tsx that triggers a soft reload on chunk failures. (c) Audit Vercel project settings for assetPrefix / outputFileTracingRoot. (d) Smoke a Vercel preview deploy.",
+      "likely_files": [
+        "frontend/next.config.ts",
+        "frontend/app/portal/layout.tsx",
+        "frontend/app/portal/error.tsx (new)"
+      ],
+      "acceptance_criteria": [
+        "After a Vercel deploy, navigating between portal routes from a tab opened before the deploy does not produce the chunk error in the console",
+        "Any unavoidable hard reload happens silently (no flash, no error banner)"
+      ],
+      "test_plan": [
+        "Deploy no-op to Vercel preview",
+        "Open /portal/dashboard, then deploy again",
+        "Navigate to /portal/upload — confirm no console error"
+      ],
+      "estimated_risk": "medium",
+      "status": "ready"
+    },
+    {
+      "id": "BL-006",
+      "title": "Calendar cell-level upload date + filename on /portal/calendar",
+      "original_feedback_summary": "F7 (12:46 PM): tester asks the calendar surface day of upload + filename per cell, not only inside the drawer.",
+      "product_area": "provider_calendar",
+      "page_or_route": "/portal/calendar",
+      "user_role": "provider",
+      "type": "ux",
+      "severity": "medium",
+      "priority": "P2",
+      "confidence": "likely",
+      "suggested_fix": "Extend the CalendarItem schema (frontend + backend) with uploaded_at and filename for the latest submission of each slot. Render under the status badge on the desktop cell; mobile keeps the drawer pattern.",
+      "likely_files": [
+        "frontend/app/portal/calendar/page.tsx",
+        "frontend/lib/api/portal.ts",
+        "backend/app/api/v1/portal.py",
+        "backend/app/schemas/portal.py"
+      ],
+      "acceptance_criteria": [
+        "Every populated cell shows the upload date (DD/MM/YYYY) and the filename truncated with ellipsis",
+        "Empty cells stay empty",
+        "Drawer still shows the full detail"
+      ],
+      "test_plan": [
+        "Seed workspace with at least one filled and one empty cell",
+        "Snapshot the cell at 1802x862 and 768"
+      ],
+      "estimated_risk": "low",
+      "status": "ready"
+    },
+    {
+      "id": "BL-007",
+      "title": "Explain 'why am I not at 100%' on /portal/reports Compliance Pulse",
+      "original_feedback_summary": "F5 (12:42 PM): tester praises stats clarity but asks for detail on what is keeping the expediente below 100%.",
+      "product_area": "provider_reports",
+      "page_or_route": "/portal/reports",
+      "user_role": "provider",
+      "type": "ux",
+      "severity": "medium",
+      "priority": "P2",
+      "confidence": "likely",
+      "suggested_fix": "Add a top-blocker chip to compliance-pulse-strip.tsx (e.g. '3 documentos pendientes en IMSS'). Source the chip text from the existing provider_current_state block executor.",
+      "likely_files": [
+        "frontend/components/checkwise/reports/list/compliance-pulse-strip.tsx",
+        "backend/app/services/reports/blocks/* (provider-state block)"
+      ],
+      "acceptance_criteria": [
+        "When compliance % < 100, the strip shows at least one specific blocker",
+        "When compliance % = 100, no chip renders"
+      ],
+      "test_plan": [
+        "Seed a 70% provider — assert the chip text matches the top blocker",
+        "Seed a 100% provider — assert no chip"
+      ],
+      "estimated_risk": "low",
+      "status": "ready"
+    },
+    {
+      "id": "BL-008",
+      "title": "Surface listPresets() failures in reports-list-view instead of silently empty",
+      "original_feedback_summary": "F6 root-cause amplifier: the current silent catch in reports-list-view.tsx hides backend failures behind 'Tu rol todavía no tiene plantillas asignadas.'",
+      "product_area": "provider_reports + admin_reports + client_reports",
+      "page_or_route": "/portal/reports, /admin/reports, /client/reports",
+      "user_role": "all roles",
+      "type": "bug",
+      "severity": "high (testing visibility)",
+      "priority": "P1",
+      "confidence": "confirmed",
+      "suggested_fix": "Add a presetsError state to reports-list-view.tsx. On non-401/403 errors, render an Alert above the preset gallery. Keep the existing role-empty message for legitimately empty preset sets.",
+      "likely_files": [
+        "frontend/components/checkwise/reports/list/reports-list-view.tsx"
+      ],
+      "acceptance_criteria": [
+        "Mock listPresets() throwing a 500 renders a visible Alert",
+        "Mock listPresets() throwing a 403 renders the existing access-denied message",
+        "Mock listPresets() returning [] renders the existing 'tu rol todavía no tiene plantillas' empty state"
+      ],
+      "test_plan": [
+        "Unit test the three branches with mocked fetch"
+      ],
+      "estimated_risk": "low",
+      "status": "ready"
+    },
+    {
+      "id": "BL-009",
+      "title": "Collapse three vendor_facing presets into one configurable provider report",
+      "original_feedback_summary": "F5 (12:42 PM, second half): tester suggests merging the three reports into one, with individual downloads configurable at export time.",
+      "product_area": "provider_reports",
+      "page_or_route": "/portal/reports + /portal/reports/[id]",
+      "user_role": "provider",
+      "type": "strategic",
+      "severity": "low",
+      "priority": "P3",
+      "confidence": "unclear (single-tester signal)",
+      "suggested_fix": "Behind a feature flag, define a new combined preset that includes the three current sections. Add per-section export in the report editor. Keep the legacy three presets for backward compatibility.",
+      "likely_files": [
+        "backend/app/services/reports/templates.py",
+        "frontend/components/checkwise/reports/editor/report-editor.tsx",
+        "frontend/components/checkwise/reports/canvas.tsx"
+      ],
+      "acceptance_criteria": [
+        "One new preset card creates a report whose three sub-sections match the legacy three presets",
+        "Per-section export downloads only that section",
+        "Feature flag default OFF until validated"
+      ],
+      "test_plan": [
+        "Generate the combined report on staging; verify each section",
+        "Export one section; verify the file"
+      ],
+      "estimated_risk": "high",
+      "status": "needs_more_signal"
+    }
+  ],
+  "raw_feedback": [
+    {
+      "ref": "F1",
+      "ts": "10:56 AM",
+      "type": "improvement",
+      "route": "/portal/upload",
+      "description": "Considero que en esta parte se podrían poner las partes de cada documento, es decir, lo que debe de llevar un poco más a detalle y si es posible, una imagen o referencia visual sobre como es el documento, para guiar a quien va a cargarlo y que pueda tener idea de cual documento subir.",
+      "from": "jluna@legalshelf.mx",
+      "roles": null,
+      "viewport": "1803x862",
+      "maps_to": ["BL-002", "RX-1"]
+    },
+    {
+      "ref": "F2",
+      "ts": "11:12 AM",
+      "type": "improvement",
+      "route": "/portal/upload",
+      "description": "Esta parte está bien por que permite justificar mediante los comentarios el documento que se está cargando, la vista previa del documento puede servir para asegurarse de que el documento elegido es el correcto a cargar. De igual manera es buena idea si se pudieran tener las referencias de los documentos.",
+      "from": "jluna@legalshelf.mx",
+      "roles": null,
+      "viewport": "1803x862",
+      "maps_to": ["BL-002", "RX-1"]
+    },
+    {
+      "ref": "F3",
+      "ts": "11:28 AM",
+      "type": "improvement",
+      "route": "/portal/upload",
+      "description": "En esta parte, considero que lo está como file_exists o allowed_file_type y ese tipo de detalles, se conviertan el lenguaje humano, ya que, quien va a realizar la carga no podrá entenderlo del todo y probablemente tenga confusiones al momento de navegar en esta parte de la plataforma.",
+      "from": "jluna@legalshelf.mx",
+      "roles": null,
+      "viewport": "1802x862",
+      "maps_to": ["BL-003", "RX-1"]
+    },
+    {
+      "ref": "F4",
+      "ts": "12:14 PM",
+      "type": "improvement",
+      "route": "/portal/dashboard",
+      "description": "En este apartado puede que sea buena idea ver los documentos que se llevan cargados y que vayan ordenados ya sea por Institución, Mes y Año y que se puedan consultar, posiblemente editarlos pero se puede correr el riesgo de que estos puedan ser alterados o cambiados por otro documento que no sea respectivo de la institución, mes o año. Por ende, solo se sugiere que se visualicen el/los documento(s) que se han cargado mediante ese orden. Lo demás está bien, los estatus y avisos de la plataforma, aunque también es necesario ajustar la gráfica para que el cliente pueda entender mejor que le hace falta para completar su expediente.",
+      "from": "jluna@legalshelf.mx",
+      "roles": null,
+      "viewport": "1802x862",
+      "maps_to": ["BL-004"]
+    },
+    {
+      "ref": "F5",
+      "ts": "12:42 PM",
+      "type": "improvement",
+      "route": "/portal/reports",
+      "description": "En este apartado, la muestra de las estadísticas de los documentos es muy clara y logra el cometido del estatus del expediente, por ende, esto puede dar una retroalimentación mas justificada al cliente. Aunque también es buena idea si pudieran ver detalles sobre su expediente, en caso de que haga falta o motivos sobre el por que aún no se ha completado al 100% su progreso. En la parte de los reportes, considero que se pueden juntar los 3 en uno solo, y que si se quieren descargar individuales, estos se puedan configurar de mejor manera al momento de poderlos descargar.",
+      "from": "jluna@legalshelf.mx",
+      "roles": null,
+      "viewport": "1802x862",
+      "maps_to": ["BL-007", "BL-009"]
+    },
+    {
+      "ref": "F6",
+      "ts": "12:43 PM",
+      "type": "bug",
+      "route": "/portal/reports",
+      "description": "En esta parte no deja ver las plantillas de los reportes.",
+      "from": "jluna@legalshelf.mx",
+      "roles": null,
+      "viewport": "1802x862",
+      "maps_to": ["BL-001", "BL-008"]
+    },
+    {
+      "ref": "F7",
+      "ts": "12:46 PM",
+      "type": "improvement",
+      "route": "/portal/calendar",
+      "description": "Para este apartado, sugiero que se pueda visualizar de mejor manera el calendario, con detalle sobre el día en el que se hizo la carga y el nombre del documento que se cargó a la plataforma, para así tener una mejor pista y seguimiento de los documentos y el expediente en general. Para que cuando pase algo por X o Y situación, se pueda tomar como guia esta parte y aclarar un poco mejor las situaciones que puedan acontecer.",
+      "from": "jluna@legalshelf.mx",
+      "roles": null,
+      "viewport": "1802x862",
+      "maps_to": ["BL-006"]
+    },
+    {
+      "ref": "RX-1",
+      "ts": "16:31:51 – 16:57:58 (browser console)",
+      "type": "runtime_error",
+      "route": "/portal/entra-a-tu-espacio, /portal/upload, /portal/onboarding, /portal/dashboard",
+      "description": "Failed to fetch RSC payload — TypeError: Cannot read properties of undefined (reading 'call') at webpack-9513878bb031f797.js. Repeated across four portal routes within a single session, indicating stale webpack chunk references after a Vercel deploy.",
+      "from": "jluna@legalshelf.mx (console attachment under F1/F2/F3)",
+      "roles": null,
+      "viewport": "1802x862",
+      "maps_to": ["BL-005"]
+    }
+  ],
+  "recommended_first_batch": ["BL-008", "BL-001"]
+}
