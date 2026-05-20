@@ -183,7 +183,11 @@ export function CompliancePulseStrip({ session }: CompliancePulseStripProps) {
     setGenerating(true);
     try {
       const r = await createReportFromPreset(PROVIDER_CURRENT_STATE_PRESET);
-      router.push(`/portal/reports/${r.id}`);
+      // P1.7 (2026-05-20): the CTA copy promises a generated report,
+      // so we route to the editor with ?autogenerate=1 — the editor
+      // fires /generate on mount instead of dropping the user on an
+      // empty canvas with a "describe what you need" prompt.
+      router.push(`/portal/reports/${r.id}?autogenerate=1`);
     } catch (e) {
       setGenerating(false);
       setLoadError(
@@ -352,7 +356,7 @@ function SemaphoreCard({
   const isEmpty = totalTracked === 0;
   return (
     <article
-      className={`flex flex-col gap-3 rounded-lg border bg-[color:var(--surface-raised)] p-4 shadow-[var(--shadow-sm)] ${SEMAPHORE_BORDER[level]}`}
+      className={`flex h-full flex-col gap-3 rounded-lg border bg-[color:var(--surface-raised)] p-4 shadow-[var(--shadow-sm)] ${SEMAPHORE_BORDER[level]}`}
       aria-label="Estado general de cumplimiento"
     >
       <header className="flex items-center justify-between gap-2">
@@ -435,7 +439,7 @@ function AttentionCard({
 
   return (
     <article
-      className={`flex flex-col gap-3 rounded-lg border bg-[color:var(--surface-raised)] p-4 shadow-[var(--shadow-sm)] ${
+      className={`flex h-full flex-col gap-3 rounded-lg border bg-[color:var(--surface-raised)] p-4 shadow-[var(--shadow-sm)] ${
         tone === "error"
           ? "border-[color:var(--status-error-border)]"
           : tone === "warning"
@@ -523,7 +527,7 @@ function DeadlinesCard({
 
   return (
     <article
-      className="flex flex-col gap-3 rounded-lg border border-[color:var(--border-default)] bg-[color:var(--surface-raised)] p-4 shadow-[var(--shadow-sm)]"
+      className="flex h-full flex-col gap-3 rounded-lg border border-[color:var(--border-default)] bg-[color:var(--surface-raised)] p-4 shadow-[var(--shadow-sm)]"
       aria-label="Próximos vencimientos"
     >
       <header className="flex items-center justify-between gap-2">
@@ -617,7 +621,7 @@ function ActionsCard({
   const isEmpty = actions.length === 0;
   return (
     <article
-      className="flex flex-col gap-3 rounded-lg border border-[color:var(--border-default)] bg-[color:var(--surface-raised)] p-4 shadow-[var(--shadow-sm)]"
+      className="flex h-full flex-col gap-3 rounded-lg border border-[color:var(--border-default)] bg-[color:var(--surface-raised)] p-4 shadow-[var(--shadow-sm)]"
       aria-label="Acciones prioritarias"
     >
       <header className="flex items-center justify-between gap-2">

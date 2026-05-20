@@ -3,10 +3,12 @@
 import {
   useCallback,
   useEffect,
+  useRef,
   useState,
   type FormEvent,
 } from "react";
 import Link from "next/link";
+import { useSearchParams } from "next/navigation";
 import {
   ArrowLeft,
   ArrowsClockwise,
@@ -27,6 +29,7 @@ import { ReportActionsContext } from "@/components/checkwise/reports/freshness-l
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import { toast } from "@/components/ui/toast";
 import { PageHeader } from "@/components/ui/page-header";
 import {
   REPORT_AUDIENCE_LABEL,
@@ -92,6 +95,16 @@ export function ReportEditor({
   const [aiPrompt, setAiPrompt] = useState("");
   const gen = useReportGeneration(reportId);
 
+  // P1.7 (2026-05-20): when a CTA navigates here with ?autogenerate=1
+  // (provider Compliance-Pulse "Generar reporte actualizado"), fire
+  // the generation pipeline once after the recommended prompt loads,
+  // so the user lands on a populated canvas rather than an empty
+  // editor. The ref guards against React StrictMode double-mount and
+  // against re-firing on every render.
+  const searchParams = useSearchParams();
+  const autogenerate = searchParams?.get("autogenerate") === "1";
+  const autogenFiredRef = useRef(false);
+
   // ─── LLM backend probe ─────────────────────────────────────
   // Honest signal: if the backend has no ANTHROPIC_API_KEY the
   // factory falls back to the deterministic mock and `name` is
@@ -139,7 +152,10 @@ export function ReportEditor({
       } catch (e) {
         const msg =
           e instanceof ReportsApiError ? e.message : "Error al regenerar.";
-        setError(msg);
+        // P0.4 (2026-05-20): recoverable per-block failure → toast,
+        // not page-replace. The editor stays mounted so the user can
+        // try a different block, save manually, or just retry.
+        toast.error(`No pudimos regenerar el bloque: ${msg}`);
       } finally {
         setRegeneratingBlockId(null);
       }
@@ -170,11 +186,13 @@ export function ReportEditor({
       }
       setLastRefreshAt(new Date(resp.fetched_at));
     } catch (e) {
-      setError(
-        e instanceof ReportsApiError
-          ? `No pudimos actualizar los datos: ${e.message}`
-          : "No pudimos actualizar los datos.",
-      );
+      // P0.4: refresh-data is a one-shot action; a transient 5xx
+      // shouldn't replace the entire editor with "Reporte no
+      // disponible" (the report IS available — only the refresh
+      // call failed). Show a toast and let the user retry.
+      const msg =
+        e instanceof ReportsApiError ? e.message : "Error desconocido.";
+      toast.error(`No pudimos actualizar los datos: ${msg}`);
     } finally {
       setRefreshingData(false);
     }
@@ -237,13 +255,35 @@ export function ReportEditor({
         // panel so "Use template" → Enter is one click.
         const rec = (loaded as { global?: { recommended_prompt?: unknown } })
           .global?.recommended_prompt;
+        const promptText =
+          typeof rec === "string" && rec.trim() ? rec : "";
+        if (promptText && (loaded.blocks?.length ?? 0) === 0) {
+          setAiPrompt(promptText);
+          setAiOpen(true);
+        }
+        // P1.7: ?autogenerate=1 from a CTA → fire generation now so
+        // the canvas is populated by the time the user reads the
+        // header. Guarded by a ref so StrictMode's double-mount
+        // doesn't double-fire and the editor doesn't re-fire on
+        // every re-render of this effect.
         if (
-          typeof rec === "string" &&
-          rec.trim() &&
+          autogenerate &&
+          !autogenFiredRef.current &&
+          promptText &&
           (loaded.blocks?.length ?? 0) === 0
         ) {
-          setAiPrompt(rec);
-          setAiOpen(true);
+          autogenFiredRef.current = true;
+          // Schedule outside the effect's setState chain so the AI
+          // panel is mounted before startGeneration subscribes to
+          // its state.
+          queueMicrotask(() => {
+            gen.startGeneration(promptText).catch(() => {
+              // Surfacing is delegated to the existing gen.state
+              // error UI; we just unlock the ref so a manual retry
+              // from the user's click still works.
+              autogenFiredRef.current = false;
+            });
+          });
         }
         setLoading(false);
       })
@@ -259,6 +299,11 @@ export function ReportEditor({
     return () => {
       cancelled = true;
     };
+    // ``gen`` and ``autogenerate`` are intentionally read but not
+    // listed as deps — the effect must run exactly once per
+    // reportId; the autogenFiredRef guards re-entry. Adding them
+    // would re-fetch the report whenever the AI hook re-renders.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [reportId]);
 
   const onCanvasChange = useCallback((next: ReportContent) => {
@@ -286,7 +331,9 @@ export function ReportEditor({
       setSaving(false);
       const msg =
         e instanceof ReportsApiError ? e.message : "Error guardando versión.";
-      setError(msg);
+      // P0.4: save failure is recoverable — keep the user's draft
+      // in state so they can fix permissions or retry.
+      toast.error(`No pudimos guardar la versión: ${msg}`);
     }
   }, [content, reportId, isDirty]);
 
@@ -384,7 +431,7 @@ export function ReportEditor({
                   aria-hidden="true"
                 />
               )}
-              {refreshingData ? "Actualizando…" : "Actualizar con datos de hoy"}
+              {refreshingData ? "Actualizando…" : "Refrescar datos"}
             </Button>
             <Button
               asChild
