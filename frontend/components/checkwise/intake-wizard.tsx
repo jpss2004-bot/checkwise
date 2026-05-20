@@ -1101,8 +1101,9 @@ function PrevalidationStep({
               aria-hidden="true"
             />
             <span>
-              Calculamos hash SHA-256, inspeccionamos la estructura PDF y leemos
-              señales determinísticas. Nada se aprueba automáticamente.
+              Validamos que el archivo se haya recibido completo, que sea
+              un PDF que se pueda leer y que no esté duplicado. Nada se
+              aprueba automáticamente.
             </span>
           </li>
           <li className="flex items-start gap-2">
@@ -1227,10 +1228,11 @@ function ConfirmationStep({
               1
             </span>
             <div>
-              <p className="font-medium">Prevalidaciones automáticas</p>
+              <p className="font-medium">Validaciones iniciales</p>
               <p className="text-xs text-muted-foreground">
-                Hash SHA-256, estructura PDF, texto legible, señales documentales.
-                Ya corrieron al recibir tu archivo.
+                Revisamos que el archivo sea un PDF legible, no esté
+                duplicado y no esté protegido con contraseña. Ya
+                corrieron al recibir tu archivo.
               </p>
             </div>
           </li>
