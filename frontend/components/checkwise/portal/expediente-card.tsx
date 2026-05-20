@@ -3,13 +3,17 @@
 import {
   ArrowRight,
   Buildings,
+  CaretDown,
   CheckCircle,
   CloudArrowUp,
   FilePdf,
   Files,
+  Info,
+  MapPin,
   Scales,
   ShieldCheck,
   Stamp,
+  WarningCircle,
   type Icon,
 } from "@phosphor-icons/react";
 
@@ -36,6 +40,13 @@ export interface ExpedienteCardItem {
   institution: string;
   why: string;
   format: string;
+  /** Stage 2 (BL-002, 2026-05-20) — first-upload guidance. All three
+   *  are populated by the backend with per-institution fallbacks, so
+   *  empty string / empty array means "no extra guidance," never
+   *  "missing data." */
+  anatomy: string;
+  where_to_obtain: string;
+  common_errors: string[];
   state: DocumentStateCode;
   next_action: string;
   reviewer_note: string | null;
@@ -74,6 +85,9 @@ export function expedienteCardItemFromOnboarding(
     institution: item.institution,
     why: item.why,
     format: item.format,
+    anatomy: item.anatomy,
+    where_to_obtain: item.where_to_obtain,
+    common_errors: item.common_errors,
     state: statusToDocumentStateCode(item.status),
     next_action: item.next_action,
     reviewer_note: item.reviewer_note,
@@ -169,6 +183,8 @@ export function ExpedienteCard({ requirement, onAction }: ExpedienteCardProps) {
       <p className="text-[13px] leading-5 text-[color:var(--text-secondary)]">
         {requirement.why}
       </p>
+
+      <DocumentGuidanceDisclosure requirement={requirement} />
 
       {requirement.filename ? (
         <div className="flex items-center gap-2 rounded-sm border border-[color:var(--doc-uploaded-border)] bg-[color:var(--doc-uploaded-bg)] p-3">
@@ -268,6 +284,96 @@ function ctaLabelForState(state: DocumentStateCode): string {
   if (state === "needs_review") return "Revisar y confirmar";
   if (state === "uploaded") return "Ver lo que enviaste";
   return "Subir documento";
+}
+
+/**
+ * Stage 2 (BL-002, 2026-05-20) — "Acerca de este documento" disclosure.
+ *
+ * Renders, behind a `<details>` so it stays collapsed by default and
+ * doesn't crowd the card, the three guidance fields the backend ships
+ * for every requirement (with per-institution fallbacks): anatomy
+ * (what the document must contain), where to obtain it, and the most
+ * common upload errors. Designed to be safe even if all three are
+ * empty — the component returns `null` and the card looks unchanged.
+ */
+function DocumentGuidanceDisclosure({
+  requirement,
+}: {
+  requirement: ExpedienteCardItem;
+}) {
+  const hasAnatomy = requirement.anatomy.trim().length > 0;
+  const hasWhere = requirement.where_to_obtain.trim().length > 0;
+  const hasErrors = requirement.common_errors.length > 0;
+  if (!hasAnatomy && !hasWhere && !hasErrors) {
+    return null;
+  }
+  return (
+    <details className="group rounded-md border border-[color:var(--border-subtle)] bg-[color:var(--surface-page)] open:bg-[color:var(--surface-raised)]">
+      <summary className="flex cursor-pointer items-center justify-between gap-2 px-3 py-2 text-[12px] font-semibold text-[color:var(--text-primary)] [&::-webkit-details-marker]:hidden">
+        <span className="inline-flex items-center gap-1.5">
+          <Info
+            className="h-3.5 w-3.5 text-[color:var(--text-secondary)]"
+            weight="bold"
+            aria-hidden="true"
+          />
+          Acerca de este documento
+        </span>
+        <CaretDown
+          className="h-3 w-3 shrink-0 text-[color:var(--text-tertiary)] transition-transform group-open:rotate-180"
+          weight="bold"
+          aria-hidden="true"
+        />
+      </summary>
+      <div className="space-y-3 border-t border-[color:var(--border-subtle)] px-3 py-3 text-[12.5px] leading-5">
+        {hasAnatomy ? (
+          <p className="text-[color:var(--text-secondary)]">
+            {requirement.anatomy}
+          </p>
+        ) : null}
+        {hasWhere ? (
+          <p className="flex items-start gap-2 text-[color:var(--text-secondary)]">
+            <MapPin
+              className="mt-0.5 h-3.5 w-3.5 shrink-0 text-[color:var(--text-tertiary)]"
+              weight="bold"
+              aria-hidden="true"
+            />
+            <span>
+              <span className="font-semibold text-[color:var(--text-primary)]">
+                Dónde se obtiene:{" "}
+              </span>
+              {requirement.where_to_obtain}
+            </span>
+          </p>
+        ) : null}
+        {hasErrors ? (
+          <div>
+            <p className="flex items-center gap-1.5 font-mono text-[10px] uppercase tracking-wide text-[color:var(--text-tertiary)]">
+              <WarningCircle
+                className="h-3.5 w-3.5 text-[color:var(--status-warning-text)]"
+                weight="bold"
+                aria-hidden="true"
+              />
+              Antes de subir
+            </p>
+            <ul className="mt-1.5 space-y-1.5">
+              {requirement.common_errors.map((err) => (
+                <li
+                  key={err}
+                  className="flex items-start gap-2 text-[color:var(--text-secondary)]"
+                >
+                  <span
+                    aria-hidden="true"
+                    className="mt-1 inline-block h-1 w-1 shrink-0 rounded-full bg-[color:var(--text-tertiary)]"
+                  />
+                  <span>{err}</span>
+                </li>
+              ))}
+            </ul>
+          </div>
+        ) : null}
+      </div>
+    </details>
+  );
 }
 
 interface InlineUploadingStateProps {

@@ -45,6 +45,16 @@ export type OnboardingItem = {
    *  computed against the slot's current submission (lineage-aware). */
   why: string;
   format: string;
+  /** Stage 2 (BL-002, 2026-05-20) — first-upload guidance copy.
+   *  ``anatomy`` is the 2–4 sentence description of what the document
+   *  must contain; ``where_to_obtain`` explains how to get it;
+   *  ``common_errors`` is a short list of pitfalls. All three default
+   *  to per-institution fallbacks on the backend so the field is never
+   *  null — an empty string / empty array means "no extra guidance for
+   *  this institution," not "missing." */
+  anatomy: string;
+  where_to_obtain: string;
+  common_errors: string[];
   next_action: string;
   reviewer_note: string | null;
 };
