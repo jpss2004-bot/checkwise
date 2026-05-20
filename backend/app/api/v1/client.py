@@ -764,7 +764,10 @@ def client_vendor_detail(
         document_state_counts=counts,
         semaphore=_compute_semaphore(onboarding_slots, calendar_slots),
         suggested_actions=_compute_suggested_actions(
-            onboarding_slots, calendar_slots, today
+            onboarding_slots,
+            calendar_slots,
+            today,
+            onboarding_completed=workspace.onboarding_completed_at is not None,
         ),
         attention_today=_compute_attention_today(
             onboarding_slots, calendar_slots, today

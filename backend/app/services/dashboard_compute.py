@@ -111,6 +111,9 @@ def compute_semaphore(
 
     - Any required slot in ``rejected`` / ``needs_correction`` /
       ``possible_mismatch`` → red.
+    - No blocking slot AND no on-track slots → red (P1.1, 2026-05-20):
+      a provider with 0/N on track shouldn't read as "in progress";
+      that misleads about the actual state.
     - No blocking slot, but any required ``missing`` / ``uploaded`` /
       ``in_review`` / ``expired`` → yellow.
     - Every required slot resolved → green.
@@ -134,12 +137,20 @@ def compute_semaphore(
         )
         for s in required
     )
+    no_progress = total_tracked > 0 and on_track == 0
     if has_blocking:
         level: SemaphoreLevel = "red"
         label = "Rojo · obligaciones críticas"
         reason = (
             "Hay documentos rechazados o con observaciones que necesitas atender "
             "antes de seguir avanzando."
+        )
+    elif no_progress:
+        level = "red"
+        label = "Rojo · sin avance"
+        reason = (
+            "Tu expediente tiene obligaciones pendientes y ninguna aprobada "
+            "todavía. Sube el primer documento para arrancar el conteo."
         )
     elif has_pending:
         level = "yellow"
@@ -665,6 +676,8 @@ def compute_suggested_actions(
     onboarding_slots: list[SlotView],
     calendar_slots: list[SlotView],
     today: date,
+    *,
+    onboarding_completed: bool = False,
 ) -> list[dict]:
     """Plain-dict suggested-actions list — mirrors
     ``portal._compute_suggested_actions``.
@@ -674,7 +687,11 @@ def compute_suggested_actions(
     1. Required actionable slots (rejected / needs_correction /
        possible_mismatch) → ``priority="high"``, type matches state.
     2. Missing required onboarding slots → ``complete_onboarding`` /
-       ``priority="medium"``.
+       ``priority="medium"``. **Skipped when the workspace's
+       ``onboarding_completed_at`` is set (P1.3, 2026-05-20):** once
+       the operator marks the initial expediente complete, surfacing
+       onboarding docs as "next steps" misleads the provider into
+       thinking their workspace regressed.
     3. Required calendar slots due within 14 days, still missing →
        ``upcoming`` / ``medium`` if ≤ 5 days, ``low`` otherwise.
 
@@ -711,25 +728,26 @@ def compute_suggested_actions(
                 "period_key": view.period_key,
             }
         )
-    # 2. Missing onboarding.
-    for view in onboarding_slots:
-        if not view.required or view.state is not SlotState.MISSING:
-            continue
-        actions.append(
-            {
-                "id": f"act-{view.requirement_code}-missing",
-                "type": "complete_onboarding",
-                "title": f"Sube tu documento: {view.requirement_name}",
-                "body": (
-                    "Este documento es obligatorio para terminar tu expediente "
-                    "inicial."
-                ),
-                "priority": "medium",
-                "href": onboarding_reupload_href(view),
-                "requirement_code": view.requirement_code,
-                "period_key": None,
-            }
-        )
+    # 2. Missing onboarding — suppressed once onboarding is complete.
+    if not onboarding_completed:
+        for view in onboarding_slots:
+            if not view.required or view.state is not SlotState.MISSING:
+                continue
+            actions.append(
+                {
+                    "id": f"act-{view.requirement_code}-missing",
+                    "type": "complete_onboarding",
+                    "title": f"Sube tu documento: {view.requirement_name}",
+                    "body": (
+                        "Este documento es obligatorio para terminar tu expediente "
+                        "inicial."
+                    ),
+                    "priority": "medium",
+                    "href": onboarding_reupload_href(view),
+                    "requirement_code": view.requirement_code,
+                    "period_key": None,
+                }
+            )
     # 3. Upcoming calendar (within 14 days).
     for view in calendar_slots:
         if not view.required or view.state is not SlotState.MISSING:
@@ -791,7 +809,12 @@ def build_suggested_actions_for_vendor(
         db, workspace, target_today.year
     )
 
-    items = compute_suggested_actions(onboarding_slots, calendar_slots, target_today)
+    items = compute_suggested_actions(
+        onboarding_slots,
+        calendar_slots,
+        target_today,
+        onboarding_completed=workspace.onboarding_completed_at is not None,
+    )
     return {
         "items": items,
         "workspace_id": workspace.id,

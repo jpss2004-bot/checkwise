@@ -1760,12 +1760,21 @@ def _compute_semaphore(
         s.state in (SlotState.MISSING, SlotState.IN_REVIEW, SlotState.UPLOADED, SlotState.EXPIRED)
         for s in required
     )
+    no_progress = total_tracked > 0 and on_track == 0
     if has_blocking:
         level: Literal["green", "yellow", "red"] = "red"
         label = "Rojo · obligaciones críticas"
         reason = (
             "Hay documentos rechazados o con observaciones que necesitas atender "
             "antes de seguir avanzando."
+        )
+    elif no_progress:
+        # P1.1 (2026-05-20): 0/N on track shouldn't read "in progress".
+        level = "red"
+        label = "Rojo · sin avance"
+        reason = (
+            "Tu expediente tiene obligaciones pendientes y ninguna aprobada "
+            "todavía. Sube el primer documento para arrancar el conteo."
         )
     elif has_pending:
         level = "yellow"
@@ -1813,7 +1822,19 @@ def _compute_suggested_actions(
     onboarding_slots: list[SlotView],
     calendar_slots: list[SlotView],
     today: date,
+    *,
+    onboarding_completed: bool = False,
 ) -> list[DashboardSuggestedAction]:
+    """Build the dashboard's prioritized-action list.
+
+    P1.3 (2026-05-20): once a workspace's ``onboarding_completed_at``
+    is set, suppress the "complete onboarding" suggestions. Surfacing
+    onboarding docs on a workspace whose initial expediente is already
+    closed misleads providers into thinking they regressed. Actionable
+    states (rejected / needs_correction / possible_mismatch) on
+    onboarding slots still surface in pass 1 — that's a real problem,
+    not a "next step".
+    """
     actions: list[DashboardSuggestedAction] = []
     # 1. Rejected / clarification / mismatch — high priority.
     for view in onboarding_slots + calendar_slots:
@@ -1845,24 +1866,26 @@ def _compute_suggested_actions(
             )
         )
     # 2. Missing required onboarding slots — medium priority.
-    for view in onboarding_slots:
-        if not view.required or view.state is not SlotState.MISSING:
-            continue
-        actions.append(
-            DashboardSuggestedAction(
-                id=f"act-{view.requirement_code}-missing",
-                type="complete_onboarding",
-                title=f"Sube tu documento: {view.requirement_name}",
-                body=(
-                    "Este documento es obligatorio para terminar tu expediente "
-                    "inicial."
-                ),
-                priority="medium",
-                href=_onboarding_reupload_href(view),
-                requirement_code=view.requirement_code,
-                period_key=None,
+    #    Suppressed when the workspace's onboarding is already complete.
+    if not onboarding_completed:
+        for view in onboarding_slots:
+            if not view.required or view.state is not SlotState.MISSING:
+                continue
+            actions.append(
+                DashboardSuggestedAction(
+                    id=f"act-{view.requirement_code}-missing",
+                    type="complete_onboarding",
+                    title=f"Sube tu documento: {view.requirement_name}",
+                    body=(
+                        "Este documento es obligatorio para terminar tu expediente "
+                        "inicial."
+                    ),
+                    priority="medium",
+                    href=_onboarding_reupload_href(view),
+                    requirement_code=view.requirement_code,
+                    period_key=None,
+                )
             )
-        )
     # 3. Calendar slots due within 14 days — low/medium depending on urgency.
     for view in calendar_slots:
         if not view.required or view.state is not SlotState.MISSING:
@@ -2098,7 +2121,10 @@ def get_workspace_dashboard(
         document_state_counts=counts,
         semaphore=_compute_semaphore(onboarding_slots, calendar_slots),
         suggested_actions=_compute_suggested_actions(
-            onboarding_slots, calendar_slots, today
+            onboarding_slots,
+            calendar_slots,
+            today,
+            onboarding_completed=workspace.onboarding_completed_at is not None,
         ),
         attention_today=_compute_attention_today(
             onboarding_slots, calendar_slots, today
