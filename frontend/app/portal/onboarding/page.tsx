@@ -183,8 +183,8 @@ function OnboardingInner({ session }: { session: PortalSession }) {
           <Alert>
             <AlertTitle>Tu expediente está vacío</AlertTitle>
             <AlertDescription>
-              No tenemos requisitos cargados para tu workspace. Si crees que es
-              un error, contacta a tu administrador de cumplimiento.
+              No tenemos requisitos cargados para tu expediente. Si crees que
+              es un error, contacta a tu administrador de cumplimiento.
             </AlertDescription>
           </Alert>
         )}

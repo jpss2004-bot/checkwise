@@ -105,7 +105,7 @@ function PortalUploadInner() {
     <PortalAppShell session={session}>
       <main className="mx-auto max-w-7xl space-y-5 px-5 py-6">
         <PageHeader
-          eyebrow="Guided upload resolver"
+          eyebrow="Carga guiada"
           title="Carga documental"
           description={
             periodLabel
@@ -120,8 +120,12 @@ function PortalUploadInner() {
                   Expediente
                 </Link>
               </Button>
+              {/* Stage 1 (BL-Stage1, 2026-05-20): this back-link button
+                  was labeled "Calendario" but routed to /portal/dashboard.
+                  Re-targeted to the actual calendar so the label and the
+                  destination agree. */}
               <Button asChild variant="outline" size="sm">
-                <Link href="/portal/dashboard">
+                <Link href="/portal/calendar">
                   <ArrowLeft className="h-4 w-4" aria-hidden="true" />
                   Calendario
                 </Link>

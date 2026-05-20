@@ -127,7 +127,7 @@ export default function SubmissionDetailPage({ params }: PageProps) {
         ) : errorKind === "not_found" ? (
           <NotFoundState
             title="No encontramos este documento"
-            description="El enlace puede haber expirado, o el documento pertenece a otro workspace. Regresa al calendario para verlo desde ahí."
+            description="El enlace puede haber expirado, o el documento pertenece a otro expediente. Regresa al calendario para verlo desde ahí."
             action={
               <Button asChild>
                 <Link href="/portal/dashboard">
