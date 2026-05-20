@@ -40,10 +40,15 @@ const HEADLINE = {
 
 type Feature = { icon: Icon; title: string; body: string };
 
+// Stage 2.5 (BL-T3, 2026-05-20) — the year used to be a static
+// "Calendario REPSE 2026" literal. Computed at render time so the
+// marketing copy reads correctly on any deploy after 2026.
+const CURRENT_YEAR = new Date().getFullYear();
+
 const FEATURES: Feature[] = [
   {
     icon: CalendarBlank,
-    title: "Calendario REPSE 2026",
+    title: `Calendario REPSE ${CURRENT_YEAR}`,
     body:
       "12 meses × 4 instituciones en una sola vista. Cada celda abre la obligación y su evidencia.",
   },

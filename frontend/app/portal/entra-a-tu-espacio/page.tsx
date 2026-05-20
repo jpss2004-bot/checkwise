@@ -264,7 +264,11 @@ function NextStepPreview({ workspace }: { workspace: WorkspaceContext }) {
       icon: CalendarBlank,
       title: "Ver próximos vencimientos",
       body:
-        "Calendario REPSE 2026: SAT mensual, IMSS bimestral, INFONAVIT, acuses STPS.",
+        // Stage 2.5 (BL-T3, 2026-05-20) — the year used to be a
+        // hardcoded "REPSE 2026" literal that aged badly. Now derives
+        // from the current year so the copy reads correctly on any
+        // calendar load.
+        `Calendario REPSE ${new Date().getFullYear()}: SAT mensual, IMSS bimestral, INFONAVIT, acuses STPS.`,
     },
     {
       icon: ChartLineUp,

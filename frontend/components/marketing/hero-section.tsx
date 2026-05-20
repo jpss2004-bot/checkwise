@@ -58,7 +58,7 @@ export function HeroSection() {
               className="hidden h-px w-8 bg-[color:var(--border-default)] sm:block"
             />
             <span className="hidden font-mono text-[10px] uppercase tracking-[0.2em] text-[color:var(--text-tertiary)] sm:inline">
-              México · 2026
+              {`México · ${new Date().getFullYear()}`}
             </span>
           </motion.div>
 
@@ -148,7 +148,7 @@ export function HeroSection() {
             {[
               {
                 icon: ShieldCheck,
-                label: "REPSE 2026",
+                label: `REPSE ${new Date().getFullYear()}`,
                 value: "SAT · IMSS · INFONAVIT · STPS",
               },
               {

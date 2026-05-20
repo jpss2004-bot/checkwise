@@ -16,9 +16,15 @@ import { Button } from "@/components/ui/button";
 import { EASE_ENTER, Reveal } from "./motion-helpers";
 import { useMotionPreference } from "./motion-preference";
 
+// Stage 2.5 (BL-T3, 2026-05-20) — TRUST_POINTS is now a function so
+// the "Estándar REPSE <year>" label reads the current year at render
+// time instead of carrying a stale "2026" literal.
 const TRUST_POINTS = [
   { icon: Gavel, label: "Revisión legal humana" },
-  { icon: ShieldCheck, label: "Estándar REPSE 2026" },
+  {
+    icon: ShieldCheck,
+    label: `Estándar REPSE ${new Date().getFullYear()}`,
+  },
   { icon: Stamp, label: "Auditable extremo a extremo" },
   { icon: CheckCircle, label: "Excepciones legales registradas" },
 ] as const;
