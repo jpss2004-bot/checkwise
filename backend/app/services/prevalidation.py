@@ -7,6 +7,17 @@ from app.services.pdf_validation import PdfInspectionResult
 from app.services.storage import StoredFile
 
 
+def _format_megabytes(size_bytes: int) -> str:
+    """Render a byte count as a provider-friendly MB string.
+
+    Stage 2.6 (BL-T9) — providers should not see raw byte counts.
+    ``2400123`` becomes ``"2.4 MB"``; small files round to one
+    decimal so the helper text reads naturally on a 500-KB PDF.
+    """
+    mb = size_bytes / 1_048_576  # 1024 * 1024
+    return f"{mb:.1f} MB"
+
+
 def build_initial_validations(
     stored_file: StoredFile,
     *,
@@ -15,8 +26,24 @@ def build_initial_validations(
     document_signals: DocumentSignals | None = None,
     human_review_required: bool = True,
 ) -> list[ValidationSignal]:
+    """Build the provider-facing validation summary for an upload.
+
+    Stage 2.6 (BL-T9, 2026-05-20) — the ``message`` strings are
+    written for a non-technical compliance officer. Engineer dialect
+    (hash, OCR, extraction, anomaly codes, byte counts) lives in the
+    Document / DocumentInspection / DocumentSignals rows for QA and
+    reviewer surfaces; this list never leaks it through the API.
+    """
     allowed_type = stored_file.extension in settings.allowed_extensions_set
     max_size_ok = stored_file.size_bytes <= settings.MAX_UPLOAD_SIZE_BYTES
+    file_extension = stored_file.extension or "sin extensión"
+    max_size_mb = _format_megabytes(settings.MAX_UPLOAD_SIZE_BYTES)
+    file_size_mb = _format_megabytes(stored_file.size_bytes)
+    anomaly_count = (
+        len(document_signals.anomaly_codes)
+        if document_signals and document_signals.anomaly_codes
+        else 0
+    )
 
     return [
         ValidationSignal(
@@ -24,7 +51,11 @@ def build_initial_validations(
             rule_type="tecnica",
             result="pass" if stored_file.size_bytes > 0 else "fail",
             severity="info" if stored_file.size_bytes > 0 else "error",
-            message="Archivo recibido y almacenado fuera de la base de datos.",
+            message=(
+                "Archivo recibido y guardado correctamente."
+                if stored_file.size_bytes > 0
+                else "El archivo no se recibió. Vuelve a intentarlo."
+            ),
         ),
         ValidationSignal(
             rule_code="allowed_file_type",
@@ -32,8 +63,12 @@ def build_initial_validations(
             result="pass" if allowed_type else "fail",
             severity="info" if allowed_type else "error",
             message=(
-                f"Extensión detectada: {stored_file.extension or 'sin extensión'}. "
-                "En V1.1 solo se aceptan PDFs."
+                "El archivo es un PDF, que es el formato aceptado."
+                if allowed_type
+                else (
+                    f"El archivo {file_extension} no es un PDF. "
+                    "Por ahora solo aceptamos PDFs."
+                )
             ),
         ),
         ValidationSignal(
@@ -42,9 +77,12 @@ def build_initial_validations(
             result="pass" if pdf_inspection and pdf_inspection.is_pdf else "fail",
             severity="info" if pdf_inspection and pdf_inspection.is_pdf else "error",
             message=(
-                "El archivo tiene cabecera PDF válida."
+                "El archivo es un PDF válido."
                 if pdf_inspection and pdf_inspection.is_pdf
-                else "El archivo no tiene estructura PDF válida."
+                else (
+                    "El archivo no parece ser un PDF válido. "
+                    "Revisa el documento e inténtalo de nuevo."
+                )
             ),
         ),
         ValidationSignal(
@@ -53,9 +91,10 @@ def build_initial_validations(
             result="fail" if pdf_inspection and pdf_inspection.is_encrypted else "pass",
             severity="error" if pdf_inspection and pdf_inspection.is_encrypted else "info",
             message=(
-                "El PDF parece estar protegido con contraseña o cifrado."
+                "El PDF tiene contraseña. Pide la versión sin contraseña "
+                "antes de subirlo."
                 if pdf_inspection and pdf_inspection.is_encrypted
-                else "No se detectó bloqueo por contraseña."
+                else "El PDF se abre sin contraseña."
             ),
             requires_human_review=bool(pdf_inspection and pdf_inspection.is_encrypted),
         ),
@@ -65,9 +104,12 @@ def build_initial_validations(
             result="pass" if pdf_inspection and pdf_inspection.has_text else "warning",
             severity="info" if pdf_inspection and pdf_inspection.has_text else "warning",
             message=(
-                "Se detectó texto legible para análisis posterior."
+                "El documento tiene texto legible."
                 if pdf_inspection and pdf_inspection.has_text
-                else "No se detectó texto suficiente; podría ser un PDF escaneado."
+                else (
+                    "No detectamos texto en el documento. Si es un escaneo, "
+                    "asegúrate de que se lea con claridad."
+                )
             ),
             requires_human_review=not bool(pdf_inspection and pdf_inspection.has_text),
         ),
@@ -76,14 +118,24 @@ def build_initial_validations(
             rule_type="tecnica",
             result="pass" if max_size_ok else "fail",
             severity="info" if max_size_ok else "error",
-            message=f"Tamaño registrado: {stored_file.size_bytes} bytes.",
+            message=(
+                f"Tamaño del archivo: {file_size_mb}."
+                if max_size_ok
+                else (
+                    f"El archivo pesa {file_size_mb}. El límite máximo es "
+                    f"{max_size_mb}. Comprime el documento o sepáralo en "
+                    "varias partes."
+                )
+            ),
         ),
         ValidationSignal(
             rule_code="sha256_hash",
             rule_type="tecnica",
             result="pass",
             severity="info",
-            message=f"Hash SHA-256 calculado: {stored_file.sha256}.",
+            message=(
+                "Guardamos una huella única del archivo para evitar duplicados."
+            ),
         ),
         ValidationSignal(
             rule_code="duplicate_hash",
@@ -91,10 +143,10 @@ def build_initial_validations(
             result="warning" if duplicate_found else "pass",
             severity="warning" if duplicate_found else "info",
             message=(
-                "Ya existe un documento con el mismo hash; revisar si corresponde al mismo "
-                "proveedor/periodo/requisito."
+                "Detectamos que este archivo ya se subió antes. Verifica si "
+                "corresponde al mismo proveedor, periodo y requisito."
                 if duplicate_found
-                else "No se detectó duplicado por hash en la base actual."
+                else "Este archivo no se ha subido antes."
             ),
             requires_human_review=duplicate_found,
         ),
@@ -103,7 +155,10 @@ def build_initial_validations(
             rule_type="fiscal",
             result="pending",
             severity="warning",
-            message="Pendiente de extracción/OCR para confirmar RFC y razón social del proveedor.",
+            message=(
+                "Pendiente: un revisor confirmará que el RFC y la razón "
+                "social coincidan con el proveedor."
+            ),
             requires_human_review=True,
         ),
         ValidationSignal(
@@ -112,8 +167,8 @@ def build_initial_validations(
             result="pending",
             severity="warning",
             message=(
-                "Pendiente de extracción/OCR para confirmar que el documento corresponde al "
-                "periodo."
+                "Pendiente: un revisor confirmará que el documento "
+                "corresponde al periodo."
             ),
             requires_human_review=True,
         ),
@@ -125,9 +180,17 @@ def build_initial_validations(
             ),
             severity="warning",
             message=(
+                # ``mismatch_reason`` is already plain Spanish — phrased
+                # as "El documento parece 'X', pero el requisito sugiere
+                # 'Y'." (see document_intelligence.py). The frontend
+                # wraps it with a "Posible discrepancia detectada"
+                # heading; we don't double-prefix it here.
                 document_signals.mismatch_reason
                 if document_signals and document_signals.mismatch_reason
-                else "Pendiente de revisión para confirmar que el archivo satisface el requisito."
+                else (
+                    "Pendiente de revisión para confirmar que el archivo "
+                    "satisface el requisito."
+                )
             ),
             requires_human_review=True,
             confidence=(
@@ -137,15 +200,21 @@ def build_initial_validations(
         ValidationSignal(
             rule_code="document_intelligence",
             rule_type="inteligencia",
-            result="warning" if document_signals and document_signals.anomaly_codes else "pass",
-            severity="warning" if document_signals and document_signals.anomaly_codes else "info",
+            result="warning" if anomaly_count else "pass",
+            severity="warning" if anomaly_count else "info",
             message=(
-                "Se detectaron señales que requieren revisión: "
-                + ", ".join(document_signals.anomaly_codes)
-                if document_signals and document_signals.anomaly_codes
-                else "No se detectaron anomalías determinísticas en esta fase."
+                # Provider-facing message stays count-based — the raw
+                # anomaly codes (engineer dialect like
+                # "possible_document_type_mismatch") are preserved in
+                # ``DocumentSignalsSummary.anomaly_codes`` for the
+                # reviewer surface. Providers see what they need to
+                # act on: "necesita revisión".
+                "Detectamos señales que necesitan que un revisor "
+                "las valide antes de aprobar el documento."
+                if anomaly_count
+                else "No detectamos señales que necesiten revisión adicional."
             ),
-            requires_human_review=bool(document_signals and document_signals.anomaly_codes),
+            requires_human_review=bool(anomaly_count),
             confidence=(
                 document_signals.requirement_match_confidence if document_signals else None
             ),
@@ -155,7 +224,12 @@ def build_initial_validations(
             rule_type="legal",
             result="required" if human_review_required else "not_required",
             severity="warning" if human_review_required else "info",
-            message="La aprobación crítica requiere revisión humana autorizada.",
+            message=(
+                "Este documento necesita la revisión de un especialista "
+                "antes de aprobarse."
+                if human_review_required
+                else "No requiere revisión humana adicional."
+            ),
             requires_human_review=human_review_required,
         ),
     ]
