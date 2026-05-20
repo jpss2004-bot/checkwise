@@ -463,6 +463,36 @@ def patch_report(
             "User cannot write reports in this organization."
         )
 
+    # L1 (2026-05-20): tenant-lock for workspace owners.
+    #
+    # ``can_write_report`` grants providers write access to any report
+    # whose ``vendor_id`` matches their workspace. That's the right
+    # rule for refreshing data and saving versions, but it leaves the
+    # scope-mutation fields (``vendor_id`` / ``client_id`` /
+    # ``audience``) unguarded — a workspace owner could PATCH their
+    # own report's vendor_id to another vendor and corrupt the
+    # report's tenancy metadata. The UI doesn't expose this, but the
+    # API used to accept it. Internal staff still cross-mutate at
+    # will (that's part of their role); client_admins are already
+    # constrained by their Membership matrix at the audience check.
+    if actor.is_workspace_owner and not actor.is_internal:
+        if vendor_id is not None and vendor_id != actor.workspace_vendor_id:
+            raise ReportPermissionError(
+                "Workspace owners cannot reassign reports to a different vendor."
+            )
+        if (
+            client_id is not None
+            and actor.workspace_client_id is not None
+            and client_id != actor.workspace_client_id
+        ):
+            raise ReportPermissionError(
+                "Workspace owners cannot reassign reports to a different client."
+            )
+        if audience is not None and audience != ReportAudience.VENDOR_FACING:
+            raise ReportPermissionError(
+                "Workspace owners cannot change report audience."
+            )
+
     if title is not None:
         report.title = title.strip()
     if description is not None:

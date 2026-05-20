@@ -1007,3 +1007,206 @@ def test_workspace_actor_from_preset_rejects_foreign_vendor_id(
     assert listed.status_code == 200
     vendor_ids_visible = {r.get("vendor_id") for r in listed.json()["items"]}
     assert other_vendor_id not in vendor_ids_visible
+
+
+# ─── L1: patch_report tenant-lock for workspace owners ──────────
+#
+# can_write_report grants providers write access to any report whose
+# vendor_id matches their workspace. That's correct for refresh /
+# version / regenerate. patch_report previously left vendor_id /
+# client_id / audience unguarded, so a workspace owner could PATCH
+# their own report's tenancy metadata to point at another vendor.
+# The UI never exposes this, but the API used to accept it. These
+# tests pin the L1 (2026-05-20) tightening: each of the three
+# mutation paths now returns 403, internal staff still bypass.
+
+
+def test_workspace_owner_cannot_patch_vendor_id_to_foreign_vendor(
+    api_client, db_factory
+) -> None:
+    """L1: provider PATCHing vendor_id away from their workspace's
+    vendor is rejected, even though can_write_report grants the
+    initial write on their own report."""
+    tok, vendor_id, _client_id = _provider_workspace_user(
+        api_client,
+        db_factory,
+        email="patch_l1_v@presets.test",
+        client_name="Cliente L1 V",
+        vendor_name="Vendor L1 V",
+    )
+    # Create a vendor_facing report owned by this provider.
+    created = api_client.post(
+        "/api/v1/reports/from-preset",
+        headers=_h(tok),
+        json={"preset_id": "provider-current-state"},
+    )
+    assert created.status_code == 201, created.text
+    report_id = created.json()["id"]
+
+    # Seed a different vendor the provider has no claim to.
+    db = db_factory()
+    try:
+        foreign_client = Client(name="Cliente Foreign Vendor Patch")
+        db.add(foreign_client)
+        db.flush()
+        foreign_vendor = Vendor(
+            client_id=foreign_client.id,
+            name="Vendor Foreign Patch",
+            rfc="VFGPATCH1234X",
+            persona_type="moral",
+        )
+        db.add(foreign_vendor)
+        db.commit()
+        foreign_vendor_id = foreign_vendor.id
+    finally:
+        db.close()
+
+    # Provider attempts to reassign the report to the foreign vendor.
+    resp = api_client.patch(
+        f"/api/v1/reports/{report_id}",
+        headers=_h(tok),
+        json={"vendor_id": foreign_vendor_id},
+    )
+    assert resp.status_code == 403, resp.text
+    assert "vendor" in resp.text.lower()
+
+    # State unchanged: read it back and confirm vendor_id still matches
+    # the provider's own workspace vendor.
+    after = api_client.get(f"/api/v1/reports/{report_id}", headers=_h(tok))
+    assert after.status_code == 200
+    assert after.json()["vendor_id"] == vendor_id
+
+
+def test_workspace_owner_cannot_patch_client_id_to_foreign_client(
+    api_client, db_factory
+) -> None:
+    """L1: same shape as vendor_id but for client_id. Even if the
+    workspace owner could write the report, they cannot move it to a
+    different client's scope."""
+    tok, _vendor_id, client_id = _provider_workspace_user(
+        api_client,
+        db_factory,
+        email="patch_l1_c@presets.test",
+        client_name="Cliente L1 C",
+        vendor_name="Vendor L1 C",
+    )
+    created = api_client.post(
+        "/api/v1/reports/from-preset",
+        headers=_h(tok),
+        json={"preset_id": "provider-current-state"},
+    )
+    assert created.status_code == 201, created.text
+    report_id = created.json()["id"]
+
+    db = db_factory()
+    try:
+        foreign_client = Client(name="Cliente Foreign Client Patch")
+        db.add(foreign_client)
+        db.commit()
+        foreign_client_id = foreign_client.id
+    finally:
+        db.close()
+
+    resp = api_client.patch(
+        f"/api/v1/reports/{report_id}",
+        headers=_h(tok),
+        json={"client_id": foreign_client_id},
+    )
+    assert resp.status_code == 403, resp.text
+    assert "client" in resp.text.lower()
+
+    after = api_client.get(f"/api/v1/reports/{report_id}", headers=_h(tok))
+    assert after.status_code == 200
+    assert after.json()["client_id"] == client_id
+
+
+def test_workspace_owner_cannot_patch_audience_away_from_vendor_facing(
+    api_client, db_factory
+) -> None:
+    """L1: audience is part of the tenant lock. Workspace owners
+    cannot promote a vendor_facing report into client_facing or
+    internal_only, even if writable_audiences() would otherwise
+    permit it."""
+    tok, _vendor_id, _client_id = _provider_workspace_user(
+        api_client,
+        db_factory,
+        email="patch_l1_a@presets.test",
+        client_name="Cliente L1 A",
+        vendor_name="Vendor L1 A",
+    )
+    created = api_client.post(
+        "/api/v1/reports/from-preset",
+        headers=_h(tok),
+        json={"preset_id": "provider-current-state"},
+    )
+    assert created.status_code == 201, created.text
+    report_id = created.json()["id"]
+
+    # Try every non-vendor_facing audience.
+    for audience in ("internal_only", "client_facing", "external_signed"):
+        resp = api_client.patch(
+            f"/api/v1/reports/{report_id}",
+            headers=_h(tok),
+            json={"audience": audience},
+        )
+        assert resp.status_code == 403, f"{audience}: {resp.text}"
+
+    after = api_client.get(f"/api/v1/reports/{report_id}", headers=_h(tok))
+    assert after.status_code == 200
+    assert after.json()["audience"] == "vendor_facing"
+
+
+def test_internal_admin_can_still_reassign_report_vendor(
+    api_client, db_factory
+) -> None:
+    """L1 negative case: the tenant lock is workspace-owner only.
+    Internal staff retain cross-tenant mutation rights — they
+    operate across the platform and need to be able to correct a
+    misattributed vendor_id during reviewer workflows."""
+    admin_tok = _admin_token(api_client, db_factory)
+    # Seed two vendors.
+    db = db_factory()
+    try:
+        client_a = Client(name="Cliente Internal A")
+        db.add(client_a)
+        db.flush()
+        vendor_a = Vendor(
+            client_id=client_a.id,
+            name="Vendor Internal A",
+            rfc="VINT0001111A",
+            persona_type="moral",
+        )
+        db.add(vendor_a)
+        vendor_b = Vendor(
+            client_id=client_a.id,
+            name="Vendor Internal B",
+            rfc="VINT0002222B",
+            persona_type="moral",
+        )
+        db.add(vendor_b)
+        db.commit()
+        vendor_a_id, vendor_b_id, client_a_id = vendor_a.id, vendor_b.id, client_a.id
+    finally:
+        db.close()
+
+    created = api_client.post(
+        "/api/v1/reports",
+        headers=_h(admin_tok),
+        json={
+            "title": "Internal admin vendor swap",
+            "audience": "vendor_facing",
+            "client_id": client_a_id,
+            "vendor_id": vendor_a_id,
+        },
+    )
+    assert created.status_code == 201, created.text
+    report_id = created.json()["id"]
+
+    # Internal admin reassigns to vendor B — must succeed.
+    resp = api_client.patch(
+        f"/api/v1/reports/{report_id}",
+        headers=_h(admin_tok),
+        json={"vendor_id": vendor_b_id},
+    )
+    assert resp.status_code == 200, resp.text
+    assert resp.json()["vendor_id"] == vendor_b_id
