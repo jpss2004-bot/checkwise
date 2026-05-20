@@ -361,11 +361,35 @@ def post_from_preset(
                 "Cannot create a report for a vendor outside your workspace.",
             )
 
+    # P1.8 (2026-05-20): qualify the from-preset title with the
+    # workspace's display name when the actor is a workspace owner
+    # so a provider doesn't end up with multiple identically-titled
+    # reports the moment they click "Generar reporte actualizado"
+    # twice. Mirrors the manually-seeded "<Preset> · <Vendor>"
+    # pattern. Internal staff keep the bare preset title because they
+    # operate across many workspaces and rename per-report.
+    qualified_title = preset.title
+    if actor.is_workspace_owner and actor.workspace_vendor_id:
+        from app.models.entities import ProviderWorkspace, Vendor  # local import
+
+        ws_name = db.scalar(
+            select(ProviderWorkspace.display_name).where(
+                ProviderWorkspace.vendor_id == actor.workspace_vendor_id,
+                ProviderWorkspace.status == "active",
+            )
+        )
+        if not ws_name:
+            ws_name = db.scalar(
+                select(Vendor.name).where(Vendor.id == actor.workspace_vendor_id)
+            )
+        if ws_name:
+            qualified_title = f"{preset.title} · {ws_name}"
+
     try:
         report, version = create_report(
             db,
             actor=actor,
-            title=preset.title,
+            title=qualified_title,
             description=preset.description,
             audience=preset.audience,
             organization_id=organization_id,
