@@ -209,6 +209,33 @@ def _user_can_write_in_org(
     return db.scalar(stmt) > 0
 
 
+def can_write_report(db: Session, actor: ReportActor, report: Report) -> bool:
+    """Write gate for a specific report.
+
+    Read paths use the dedicated ``is_workspace_owner`` branch in
+    ``list_reports`` / ``get_report``; write paths historically only
+    checked ``Membership``, which silently locks provider workspace
+    owners out of refreshing or saving their own vendor_facing
+    reports (providers never hold a Membership — their workspace IS
+    the tenant). This helper unifies both rules:
+
+    - internal staff always pass.
+    - any active Membership in the report's organization passes.
+    - workspace owners pass when the report targets THEIR vendor.
+
+    Callers stay responsible for ``writable_audiences`` checks on
+    audience transitions; this only governs "can the actor mutate
+    this report at all".
+    """
+    if actor.is_internal:
+        return True
+    if _user_can_write_in_org(db, actor.user_id, report.organization_id):
+        return True
+    if actor.is_workspace_owner and report.vendor_id == actor.workspace_vendor_id:
+        return True
+    return False
+
+
 def _pick_owning_org(actor: ReportActor) -> str:
     """Pick the actor's single org id for new-report creation.
 
@@ -423,9 +450,7 @@ def patch_report(
     """Partial update. Re-validates scope when audience changes."""
     report, _ = get_report(db, actor=actor, report_id=report_id)
 
-    if not actor.is_internal and not _user_can_write_in_org(
-        db, actor.user_id, report.organization_id
-    ):
+    if not can_write_report(db, actor, report):
         raise ReportPermissionError(
             "User cannot write reports in this organization."
         )
@@ -475,9 +500,7 @@ def create_version(
     """Manual save: append a new version, advance current_version_id."""
     report, _ = get_report(db, actor=actor, report_id=report_id)
 
-    if not actor.is_internal and not _user_can_write_in_org(
-        db, actor.user_id, report.organization_id
-    ):
+    if not can_write_report(db, actor, report):
         raise ReportPermissionError(
             "User cannot write reports in this organization."
         )
