@@ -40,6 +40,7 @@ import {
   submitDecision,
 } from "@/lib/api/reviewer";
 import { DocumentStatus } from "@/lib/constants/statuses";
+import { validationLabel } from "@/lib/constants/validation";
 
 type PageProps = {
   params: Promise<{ submission_id: string }>;
@@ -348,8 +349,9 @@ function ReasonsCard({ detail }: { detail: SubmissionDetail }) {
           <SignalRow
             key={r.rule_code}
             severity={r.severity}
-            title={r.rule_code}
+            title={validationLabel(r.rule_code)}
             message={r.message ?? "Sin detalle adicional."}
+            ruleCode={r.rule_code}
           />
         ))}
       </CardContent>
@@ -361,10 +363,12 @@ function SignalRow({
   severity,
   title,
   message,
+  ruleCode,
 }: {
   severity: string;
   title: string;
   message: string;
+  ruleCode?: string;
 }) {
   const Icon =
     severity === "error" ? WarningCircle : severity === "warning" ? Warning : ShieldCheck;
@@ -374,8 +378,16 @@ function SignalRow({
       : severity === "warning"
         ? "text-[color:var(--status-warning-text)]"
         : "text-[color:var(--text-brand)]";
+  // Raw rule_code stays in the title attribute + aria-label so QA and
+  // engineers can still map a row to a backend assertion without
+  // surfacing snake_case identifiers as the primary label.
+  const diagnosticHint = ruleCode ? `${title} (${ruleCode})` : title;
   return (
-    <div className="flex items-start gap-3 rounded-md border border-[color:var(--border-default)] bg-[color:var(--surface-raised)] p-3">
+    <div
+      className="flex items-start gap-3 rounded-md border border-[color:var(--border-default)] bg-[color:var(--surface-raised)] p-3"
+      title={diagnosticHint}
+      aria-label={diagnosticHint}
+    >
       <Icon
         className={`mt-0.5 h-4 w-4 shrink-0 ${iconColor}`}
         weight="fill"

@@ -105,7 +105,11 @@ export default function ClientCalendarPage() {
           </span>
           <Input
             type="number"
-            min={2024}
+            // REPSE compliance starts in 2021. Match backend MIN_YEAR=2021
+            // (backend/app/core/period_validation.py) instead of the prior
+            // 2024 floor which silently blocked 2021-2023 historical
+            // periods that the API otherwise serves.
+            min={2021}
             max={2030}
             value={year}
             onChange={(e) => setYear(Number(e.target.value))}
