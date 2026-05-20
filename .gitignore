@@ -41,6 +41,7 @@ dist/
 coverage/
 frontend/node_modules/
 frontend/.next/
+frontend/.cw-next-*/
 frontend/out/
 frontend/.turbo/
 *.tsbuildinfo
