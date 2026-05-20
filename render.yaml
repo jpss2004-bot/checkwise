@@ -105,3 +105,26 @@ services:
       # happens regardless; empty value = persistence-only.
       - key: SLACK_CONTACT_WEBHOOK_URL
         sync: false
+
+      # ---- Internal feedback delivery (Reportar launcher) ----
+      # Both must be set for the in-app Reportar button (and its public
+      # landing-page variant at /api/v1/feedback/public) to deliver to
+      # Slack. Persistence to the `feedback_reports` table happens
+      # regardless — when these are empty the row is created and
+      # `slack_delivery_status` is set to 'skipped' so the triage UI at
+      # /admin/feedback-reports doesn't show it stuck on 'pending'.
+      #
+      # Why a bot token here vs the webhook above: feedback reports
+      # attach an optional PNG screenshot as a thread reply via
+      # files.upload_v2, which incoming webhooks don't support. The
+      # bot token must carry chat:write + files:write scopes, and the
+      # bot must be /invited into the #checkwise-feedback channel
+      # before the first delivery will succeed.
+      #
+      # SLACK_FEEDBACK_CHANNEL_ID is the channel ID (Cxxxxxxxxxx),
+      # NOT the channel name — fetch it from Slack via "View channel
+      # details" → bottom of the About tab.
+      - key: SLACK_BOT_TOKEN
+        sync: false
+      - key: SLACK_FEEDBACK_CHANNEL_ID
+        sync: false
