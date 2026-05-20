@@ -191,6 +191,16 @@ def _wipe_demo(db) -> None:
             vendor_ids_to_drop.add(v.id)
 
     if vendor_ids_to_drop:
+        # P1.4 (2026-05-20): ComplianceSnapshot rows FK back to
+        # Vendor. Re-running the seed after a /generate or report
+        # refresh leaves snapshots pinned to the demo vendors;
+        # deleting the vendors raises a FK violation. Wipe the
+        # snapshots first so the seed stays idempotent.
+        from app.models import ComplianceSnapshot
+
+        db.query(ComplianceSnapshot).filter(
+            ComplianceSnapshot.vendor_id.in_(vendor_ids_to_drop)
+        ).delete(synchronize_session=False)
         db.query(Vendor).filter(Vendor.id.in_(vendor_ids_to_drop)).delete(synchronize_session=False)
         db.flush()
 
@@ -403,41 +413,113 @@ def _get_or_create_period(db, *, period_key: str, code: str, period_type: str) -
 
 
 def _seed_submissions(db, *, client_id: str, vendor_id: str) -> int:
-    """Insert 4 submissions hitting the canonical SAT / IMSS catalog so
-    the reviewer queue + provider calendar both have content."""
+    """Insert 6 submissions hitting the canonical SAT / IMSS catalog so
+    the reviewer queue + provider calendar + dashboard pulse all have
+    content for an active May 2026 expediente.
+
+    Shape (one row per upload month, status mixed for variety):
+    - SAT IVA upload Ene: rechazado (with a documented rejection reason)
+    - SAT IVA upload Feb: aprobado
+    - SAT IVA upload Mar: pendiente_revision (just uploaded)
+    - IMSS pago Mar: posible_mismatch (RFC drift)
+    - SAT IVA upload Abr: aprobado (closes the obligation declared in April)
+    - SAT IVA upload May: pendiente_revision (current upload, today)
+
+    P1.4 (2026-05-20): ``period_key`` deliberately is NOT derived from
+    the code's MM suffix. The canonical
+    :data:`RecurringRequirement.period_key` for a SAT monthly
+    declaration is the period it *covers*, which is one month before
+    the upload month encoded in the code. Setting period_key to
+    match the code suffix silently desynchronises every seeded
+    submission from the calendar slot resolver (every slot reads
+    MISSING) and is the root cause of the "0 / 144 on track" pulse
+    finding in the QA audit. We look the canonical period_key up from
+    the catalog at seed time so the seed cannot drift out of sync
+    again if the catalog rules change.
+    """
+    from app.core.compliance_catalog import recurring_for_year
+
+    catalog_period_keys = {
+        r.code: r.period_key for r in recurring_for_year(2026, "moral")
+    }
+
+    def canonical_period_key(code: str, fallback: str) -> str:
+        return catalog_period_keys.get(code, fallback)
 
     demo_specs = [
         {
             "code": "REC-SAT-2026-03-declaracion-iva",
-            "period_key": "2026-M03",
+            "period_key": canonical_period_key(
+                "REC-SAT-2026-03-declaracion-iva", "2026-M02"
+            ),
             "period_code": "2026-03-sat-iva",
             "status": "pendiente_revision",
             "filename": "iva_marzo.pdf",
             "age_hours": 4,
+            "rejection_reason": None,
         },
         {
             "code": "REC-IMSS-2026-03-comprobante-de-pago-bancario",
-            "period_key": "2026-M03",
+            "period_key": canonical_period_key(
+                "REC-IMSS-2026-03-comprobante-de-pago-bancario", "2026-M02"
+            ),
             "period_code": "2026-03-imss-pago",
             "status": "posible_mismatch",
             "filename": "imss_marzo.pdf",
             "age_hours": 36,
+            "rejection_reason": "RFC del PDF no coincide con el del proveedor.",
         },
         {
             "code": "REC-SAT-2026-02-declaracion-iva",
-            "period_key": "2026-M02",
+            "period_key": canonical_period_key(
+                "REC-SAT-2026-02-declaracion-iva", "2026-M01"
+            ),
             "period_code": "2026-02-sat-iva",
             "status": "aprobado",
             "filename": "iva_febrero.pdf",
             "age_hours": 24 * 35,
+            "rejection_reason": None,
         },
         {
             "code": "REC-SAT-2026-01-declaracion-iva",
-            "period_key": "2026-M01",
+            "period_key": canonical_period_key(
+                "REC-SAT-2026-01-declaracion-iva", "2025-M12"
+            ),
             "period_code": "2026-01-sat-iva",
             "status": "rechazado",
             "filename": "iva_enero.pdf",
             "age_hours": 24 * 60,
+            "rejection_reason": (
+                "PDF ilegible: la última página del acuse está cortada. "
+                "Vuelve a generar la declaración desde el portal del SAT y "
+                "carga el acuse completo."
+            ),
+        },
+        # Closes the obligation for the period declared in April so
+        # the dashboard has at least one recent approved row.
+        {
+            "code": "REC-SAT-2026-04-declaracion-iva",
+            "period_key": canonical_period_key(
+                "REC-SAT-2026-04-declaracion-iva", "2026-M03"
+            ),
+            "period_code": "2026-04-sat-iva",
+            "status": "aprobado",
+            "filename": "iva_abril.pdf",
+            "age_hours": 24 * 12,  # uploaded May 8, approved shortly after
+            "rejection_reason": None,
+        },
+        # Current-period submission so /portal/reports has an "in
+        # review for May" item to surface in the report blocks.
+        {
+            "code": "REC-SAT-2026-05-declaracion-iva",
+            "period_key": canonical_period_key(
+                "REC-SAT-2026-05-declaracion-iva", "2026-M04"
+            ),
+            "period_code": "2026-05-sat-iva",
+            "status": "pendiente_revision",
+            "filename": "iva_mayo.pdf",
+            "age_hours": 2,
+            "rejection_reason": None,
         },
     ]
 
@@ -507,11 +589,9 @@ def _seed_submissions(db, *, client_id: str, vendor_id: str) -> int:
                     document_id=doc.id,
                     from_status="recibido",
                     to_status=spec["status"],
-                    reason=(
-                        "RFC del PDF no coincide con el del proveedor."
-                        if spec["status"] == "posible_mismatch"
-                        else None
-                    ),
+                    # P1.4: explicit reason per spec so reviewer notes
+                    # and Atención cards show the real story.
+                    reason=spec.get("rejection_reason"),
                     actor="system:dev_seed",
                 )
             )
