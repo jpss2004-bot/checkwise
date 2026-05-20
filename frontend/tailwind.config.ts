@@ -132,6 +132,9 @@ const config: Config = {
         exit:     "cubic-bezier(0.4, 0, 1, 1)",
         standard: "cubic-bezier(0.4, 0, 0.2, 1)",
         bounce:   "cubic-bezier(0.34, 1.56, 0.64, 1)",
+        // Material-style strong-out used for affordance nudges
+        // (e.g. arrow icon translating on button hover).
+        nudge:    "cubic-bezier(0.32, 0.72, 0, 1)",
       },
     },
   },
