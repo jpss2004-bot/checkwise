@@ -3,13 +3,20 @@
 /**
  * FeedbackLauncher — floating "Report bug / Suggest improvement" button.
  *
- * Mounted inside the three post-login shells (AdminShell, ClientShell,
- * PortalAppShell). Hides itself when there is no admin JWT in storage,
- * so logged-out and portal-only users never see it.
+ * Mounted in two contexts:
  *
- * Reports go to ``POST /api/v1/feedback`` which posts a Block Kit
- * message to the configured Slack channel, optionally with a PNG
- * screenshot attached as a thread reply.
+ *   1. Inside the post-login shells (AdminShell, ClientShell,
+ *      PortalAppShell). Default mode. Hides itself when there is no
+ *      admin JWT — logged-out and portal-only users never see it.
+ *
+ *   2. On the public landing page (`/`) via `allowPublic`. Renders
+ *      regardless of session and submits to the unauthenticated
+ *      `/api/v1/feedback/public` endpoint. Adds an optional
+ *      reply-back email field since there's no signed-in identity.
+ *
+ * Reports go to ``POST /api/v1/feedback{,/public}`` which posts a
+ * Block Kit message to the configured Slack channel, optionally with
+ * a PNG screenshot attached as a thread reply.
  *
  * Screenshot inputs:
  *   - File picker (PNG only)
@@ -46,11 +53,16 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import { Field } from "@/components/ui/field";
+import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import { toast } from "@/components/ui/toast";
 import { cn } from "@/lib/utils";
 import { readAdminSession } from "@/lib/session/admin";
-import { submitFeedback, type FeedbackKind } from "@/lib/api/feedback";
+import {
+  submitFeedback,
+  submitPublicFeedback,
+  type FeedbackKind,
+} from "@/lib/api/feedback";
 import {
   snapshotConsoleLog,
   startConsoleCapture,
@@ -59,14 +71,34 @@ import {
 const MIN_DESCRIPTION = 10;
 const MAX_DESCRIPTION = 4000;
 const MAX_SCREENSHOT_BYTES = 5 * 1024 * 1024;
+const MAX_CONTACT_EMAIL = 256;
 const PNG_MAGIC = [0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a];
 
-export function FeedbackLauncher() {
+export interface FeedbackLauncherProps {
+  /**
+   * When ``true``, the launcher renders even without a signed-in
+   * session and submits via the unauthenticated public endpoint.
+   * Used on the marketing landing page.
+   *
+   * When the user IS signed in, the launcher still prefers the
+   * authenticated endpoint so the Slack message includes their
+   * identity and roles.
+   *
+   * Default: ``false`` — preserves the original behavior of hiding
+   * for logged-out visitors.
+   */
+  allowPublic?: boolean;
+}
+
+export function FeedbackLauncher({
+  allowPublic = false,
+}: FeedbackLauncherProps = {}) {
   const pathname = usePathname();
   const [hasSession, setHasSession] = useState(false);
   const [open, setOpen] = useState(false);
   const [kind, setKind] = useState<FeedbackKind>("bug");
   const [description, setDescription] = useState("");
+  const [contactEmail, setContactEmail] = useState("");
   const [screenshot, setScreenshot] = useState<Blob | null>(null);
   const [screenshotUrl, setScreenshotUrl] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
@@ -98,6 +130,7 @@ export function FeedbackLauncher() {
   const resetForm = useCallback(() => {
     setKind("bug");
     setDescription("");
+    setContactEmail("");
     setScreenshot(null);
     setError(null);
     if (fileInputRef.current) fileInputRef.current.value = "";
@@ -194,13 +227,16 @@ export function FeedbackLauncher() {
         return;
       }
       const session = readAdminSession();
-      if (!session) {
+      // No session + not allowed to fall back → tell the user. This
+      // shouldn't normally happen because the !hasSession-and-not-public
+      // path doesn't render the launcher at all, but a session can
+      // expire while the dialog is open.
+      if (!session && !allowPublic) {
         toast.error("Tu sesión expiró. Vuelve a iniciar sesión.");
         return;
       }
-      setSubmitting(true);
-      setError(null);
-      const result = await submitFeedback(session.access_token, {
+
+      const commonPayload = {
         kind,
         description: trimmed,
         url: typeof window !== "undefined" ? window.location.href : "",
@@ -212,7 +248,16 @@ export function FeedbackLauncher() {
         userAgent: typeof navigator !== "undefined" ? navigator.userAgent : "",
         consoleLogs: snapshotConsoleLog(),
         screenshot,
-      });
+      };
+
+      setSubmitting(true);
+      setError(null);
+      const result = session
+        ? await submitFeedback(session.access_token, commonPayload)
+        : await submitPublicFeedback({
+            ...commonPayload,
+            contactEmail: contactEmail.trim() || undefined,
+          });
       setSubmitting(false);
       if (!result.ok) {
         setError(result.error);
@@ -220,13 +265,13 @@ export function FeedbackLauncher() {
       }
       toast.success(
         result.delivered
-          ? "¡Gracias! Tu reporte se envió a Slack."
-          : "Reporte registrado (Slack aún sin configurar).",
+          ? "¡Gracias! Tu reporte se envió al equipo CheckWise."
+          : "Reporte recibido (entrega a Slack aún sin configurar).",
       );
       setOpen(false);
       resetForm();
     },
-    [description, kind, screenshot, resetForm],
+    [description, kind, screenshot, contactEmail, allowPublic, resetForm],
   );
 
   const charCount = description.trim().length;
@@ -239,7 +284,12 @@ export function FeedbackLauncher() {
     [kind],
   );
 
-  if (!hasSession) return null;
+  // Render rules:
+  //   - Authenticated shells (allowPublic=false): only when a JWT exists.
+  //   - Landing page (allowPublic=true): always render; anonymous
+  //     submissions go through the public endpoint.
+  const isAnonymous = !hasSession;
+  if (isAnonymous && !allowPublic) return null;
 
   return (
     <div data-feedback-launcher="true">
@@ -280,14 +330,33 @@ export function FeedbackLauncher() {
           <DialogHeader>
             <DialogTitle>Reportar a CheckWise</DialogTitle>
             <DialogDescription>
-              Describe lo que viste o lo que se puede mejorar. Adjunta una
-              captura si ayuda — pega con Cmd+V, súbela, o captura la
-              página actual.
+              {isAnonymous
+                ? "Cuéntanos qué viste o qué se puede mejorar. Es anónimo — opcionalmente déjanos un email para responderte."
+                : "Describe lo que viste o lo que se puede mejorar. Adjunta una captura si ayuda — pega con Cmd+V, súbela, o captura la página actual."}
             </DialogDescription>
           </DialogHeader>
 
           <form className="flex flex-col gap-4" onSubmit={onSubmit}>
             <KindToggle value={kind} onChange={setKind} />
+
+            {isAnonymous ? (
+              <Field
+                label="Tu email (opcional)"
+                htmlFor="feedback-contact-email"
+                helper="Sólo si quieres que te respondamos."
+              >
+                <Input
+                  id="feedback-contact-email"
+                  type="email"
+                  inputMode="email"
+                  autoComplete="email"
+                  placeholder="tu@correo.com"
+                  value={contactEmail}
+                  onChange={(e) => setContactEmail(e.target.value)}
+                  maxLength={MAX_CONTACT_EMAIL}
+                />
+              </Field>
+            ) : null}
 
             <Field
               label="¿Qué pasó?"
@@ -341,7 +410,7 @@ export function FeedbackLauncher() {
               onChange={onFilePicked}
             />
 
-            <ContextStrip />
+            <ContextStrip anonymous={isAnonymous} />
 
             <DialogFooter>
               <Button
@@ -513,7 +582,7 @@ function ScreenshotPanel({
   );
 }
 
-function ContextStrip() {
+function ContextStrip({ anonymous }: { anonymous: boolean }) {
   const [path, setPath] = useState("");
   const [viewport, setViewport] = useState("");
   useEffect(() => {
@@ -521,12 +590,16 @@ function ContextStrip() {
     setPath(window.location.pathname);
     setViewport(`${window.innerWidth}×${window.innerHeight}`);
   }, []);
+  // Public visitors don't have a "usuario" to attach; show the same
+  // strip with that token replaced by a hashed source fingerprint so
+  // the consent disclosure stays honest.
+  const identityToken = anonymous ? "huella IP (anónima)" : "usuario";
   return (
     <div className="rounded-md border border-dashed border-[color:var(--border-subtle)] bg-[color:var(--surface-sunken)]/40 px-3 py-2 font-mono text-[11px] text-[color:var(--text-tertiary)]">
       <span className="text-[color:var(--text-secondary)]">Se enviará:</span>{" "}
       ruta <span className="text-[color:var(--text-primary)]">{path || "—"}</span>{" "}
       · viewport <span className="text-[color:var(--text-primary)]">{viewport}</span>{" "}
-      · navegador · usuario · últimos errores de consola
+      · navegador · {identityToken} · últimos errores de consola
     </div>
   );
 }

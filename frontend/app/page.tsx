@@ -26,6 +26,7 @@ import type { DocumentStateCode } from "@/lib/types";
 
 import { BrandLogo } from "@/components/checkwise/brand-logo";
 import { DocStateBadge } from "@/components/checkwise/doc-state-badge";
+import { FeedbackLauncher } from "@/components/feedback/feedback-launcher";
 import { ContactForm } from "@/components/marketing/contact-form";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -142,6 +143,12 @@ export default function PublicHome() {
       <LegalShelfBlock />
       <RequestInformation />
       <MarketingFooter />
+      {/* Public bug-report / improvement launcher. Renders on the
+          landing only — the rest of the marketing surfaces (login,
+          activate) stay clean. Submits anonymously to
+          POST /api/v1/feedback/public, with an optional reply-back
+          email so non-tester visitors can also flag issues. */}
+      <FeedbackLauncher allowPublic />
     </main>
   );
 }
