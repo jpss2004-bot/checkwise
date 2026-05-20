@@ -90,6 +90,7 @@ export function ReportsListView({
 }: ReportsListViewProps) {
   const router = useRouter();
   const [presets, setPresets] = useState<ReportPresetSummary[] | null>(null);
+  const [presetsError, setPresetsError] = useState<string | null>(null);
   const [reports, setReports] = useState<ReportSummary[] | null>(null);
   const [total, setTotal] = useState(0);
   const [error, setError] = useState<string | null>(null);
@@ -112,16 +113,27 @@ export function ReportsListView({
   // ─── Preset gallery — loaded once ──────────────────────────
   useEffect(() => {
     let cancelled = false;
+    setPresetsError(null);
     listPresets()
       .then((p) => {
-        if (!cancelled) setPresets(p.items);
+        if (cancelled) return;
+        setPresets(p.items);
+        setPresetsError(null);
       })
       .catch((e: ReportsApiError) => {
         if (cancelled) return;
-        // Presets-only failure doesn't block the report list. Show
-        // the catch-all banner only if both calls fail (see below).
+        // Stage 1 (BL-008): a 401/403 means the user genuinely has no
+        // access — we surface that in the page-level access banner.
+        // Any other failure (5xx, network, parse) is a real fault that
+        // used to be silently swallowed into "tu rol todavía no tiene
+        // plantillas asignadas." We now flag it inline so testers can
+        // tell broken from intentionally empty.
         if (e.status === 401 || e.status === 403) {
           setError("No tienes acceso al motor de reportes.");
+        } else {
+          setPresetsError(
+            "No pudimos cargar las plantillas. Vuelve a intentarlo en unos segundos.",
+          );
         }
         setPresets([]);
       });
@@ -257,6 +269,44 @@ export function ReportsListView({
           </span>
         </header>
 
+        {presetsError ? (
+          <Alert variant="warning">
+            <AlertTitle className="flex items-center gap-2">
+              <Warning className="h-4 w-4" weight="bold" aria-hidden="true" />
+              No pudimos cargar las plantillas
+            </AlertTitle>
+            <AlertDescription className="flex flex-wrap items-center justify-between gap-3">
+              <span>{presetsError}</span>
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                onClick={() => {
+                  setPresets(null);
+                  setPresetsError(null);
+                  listPresets()
+                    .then((p) => {
+                      setPresets(p.items);
+                      setPresetsError(null);
+                    })
+                    .catch((e: ReportsApiError) => {
+                      if (e.status === 401 || e.status === 403) {
+                        setError("No tienes acceso al motor de reportes.");
+                      } else {
+                        setPresetsError(
+                          "No pudimos cargar las plantillas. Vuelve a intentarlo en unos segundos.",
+                        );
+                      }
+                      setPresets([]);
+                    });
+                }}
+              >
+                Reintentar
+              </Button>
+            </AlertDescription>
+          </Alert>
+        ) : null}
+
         {presets === null ? (
           <div className="flex items-center gap-2 py-6 text-[12px] text-[color:var(--text-tertiary)]">
             <CircleNotch
@@ -268,7 +318,8 @@ export function ReportsListView({
           </div>
         ) : presets.length === 0 ? (
           <div className="rounded-md border border-dashed border-[color:var(--border-subtle)] px-4 py-6 text-[12px] text-[color:var(--text-tertiary)]">
-            Tu rol todavía no tiene plantillas asignadas.
+            Aún no hay reportes disponibles para tu cuenta. Si crees que es un
+            error, contáctanos.
           </div>
         ) : (
           // F4 (2026-05-19 visual audit): first preset is the recommended

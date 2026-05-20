@@ -93,12 +93,20 @@ DbSession = Annotated[Session, Depends(get_db)]
 def _actor_from(current: CurrentUser, db: Session | None = None) -> ReportActor:
     """Build a tenant-scoping ReportActor from the request principal.
 
-    For role-less users, P1 adds a workspace lookup: if the caller
-    owns a ``ProviderWorkspace`` (the provider portal binding), pick
-    up its ``vendor_id`` / ``client_id`` and inject them into the
-    actor. If an ``Organization`` exists with the same ``client_id``,
-    the actor also gains that org in ``organization_ids`` so
-    ``create_report``'s owning-org resolution still works.
+    The workspace lookup fires whenever a DB session is provided —
+    regardless of whether the caller also carries internal roles. The
+    earlier gate (``not current.roles``) was a perf shortcut that
+    caused BL-001: a provider whose JWT happens to carry any
+    non-internal role (e.g. a seed-time ``provider`` Membership) lost
+    access to their own vendor-facing presets because
+    ``workspace_vendor_id`` was never populated, leaving
+    ``is_workspace_owner`` permanently False. The cost is one extra
+    indexed query per reports request; the benefit is a truthful actor
+    for every code path.
+
+    If an ``Organization`` exists with the same ``client_id`` as the
+    workspace, the actor also gains that org in ``organization_ids``
+    so ``create_report``'s owning-org resolution still works.
 
     ``db`` is optional for back-compat — callers that don't need the
     workspace branch (e.g. lightweight reads in the AI pipeline that
@@ -108,7 +116,7 @@ def _actor_from(current: CurrentUser, db: Session | None = None) -> ReportActor:
     workspace_client_id: str | None = None
     org_ids: list[str] = list(current.organization_ids)
 
-    if db is not None and not current.roles:
+    if db is not None:
         from app.models.entities import (  # local import to avoid cycle
             Organization,
             ProviderWorkspace,
@@ -143,13 +151,20 @@ def _actor_from(current: CurrentUser, db: Session | None = None) -> ReportActor:
             if ws_org_id and ws_org_id not in org_ids:
                 org_ids.append(ws_org_id)
 
-    return ReportActor(
+    actor = ReportActor(
         user_id=current.user.id,
         organization_ids=tuple(org_ids),
         roles=tuple(current.roles),
         workspace_vendor_id=workspace_vendor_id,
         workspace_client_id=workspace_client_id,
     )
+    logger.debug(
+        "report-actor built user_id=%s roles=%s workspace_vendor_id=%s",
+        actor.user_id,
+        actor.roles,
+        actor.workspace_vendor_id,
+    )
+    return actor
 
 
 def _summary(report: Report) -> ReportSummary:

@@ -119,14 +119,22 @@ class ReportActor:
 
     @property
     def is_workspace_owner(self) -> bool:
-        """True for role-less providers bound to a ``ProviderWorkspace``.
+        """True for any actor bound to an active ``ProviderWorkspace``.
 
-        Used to gate the vendor_facing visibility branch. A user who is
-        BOTH an internal_admin AND a workspace owner is treated as
-        internal staff — workspace-owner status only matters when the
-        user has no other path to Reports visibility.
+        Used to gate the vendor_facing visibility branch. BL-001
+        (2026-05-20) loosened this from the previous "roles-must-be-
+        empty" rule because real-world provider seeds carry a
+        ``provider`` Membership row, which silently locked them out of
+        their own vendor-facing presets. A user actively browsing the
+        provider portal owns a workspace, period — internal_admin
+        status no longer overrides workspace ownership.
+
+        Internal staff who also happen to own a provider workspace
+        (rare) now see vendor_facing presets in addition to internal
+        ones — acceptable because those presets target the workspace
+        owner's own data anyway.
         """
-        return not self.roles and self.workspace_vendor_id is not None
+        return self.workspace_vendor_id is not None
 
 
 # ─── Audience visibility (R1.0) ─────────────────────────────────
