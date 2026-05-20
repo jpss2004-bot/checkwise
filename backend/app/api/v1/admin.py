@@ -45,6 +45,7 @@ from app.core.compliance_catalog import (
     catalog_metadata,
     recurring_for_year,
 )
+from app.core.period_validation import MAX_YEAR, MIN_YEAR
 from app.db.session import get_db
 from app.models import (
     AuditLog,
@@ -814,7 +815,7 @@ def update_requirement(
 def list_periods(
     db: DbSession,
     current: AdminUser,
-    year: int | None = None,
+    year: Annotated[int | None, Query(ge=MIN_YEAR, le=MAX_YEAR)] = None,
     period_type: str | None = None,
     limit: Annotated[int, Query(ge=1, le=500)] = 100,
 ) -> dict:
@@ -837,7 +838,7 @@ def list_periods(
 def get_admin_calendar(
     db: DbSession,
     current: AdminUser,
-    year: int = 2026,
+    year: Annotated[int, Query(ge=MIN_YEAR, le=MAX_YEAR)] = 2026,
     persona_type: Literal["moral", "fisica"] = "moral",
 ) -> dict:
     """Aggregated recurring catalog snapshot for the requested year.

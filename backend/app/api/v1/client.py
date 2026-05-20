@@ -63,6 +63,7 @@ from app.core.compliance_catalog import (
     recurring_for_year,
     recurring_required_document,
 )
+from app.core.period_validation import MAX_YEAR, MIN_YEAR, validate_period_key
 from app.db.session import get_db
 from app.models import (
     Client,
@@ -468,7 +469,7 @@ def client_overview(
     db: DbSession,
     current: ClientUser,
     client_id: str | None = None,
-    year: int | None = None,
+    year: Annotated[int | None, Query(ge=MIN_YEAR, le=MAX_YEAR)] = None,
 ) -> ClientOverview:
     target_id = _resolve_client_id(db, current, requested=client_id)
     target_client = db.get(Client, target_id)
@@ -722,7 +723,7 @@ def client_vendor_detail(
     db: DbSession,
     current: ClientUser,
     client_id: str | None = None,
-    year: int | None = None,
+    year: Annotated[int | None, Query(ge=MIN_YEAR, le=MAX_YEAR)] = None,
 ) -> ClientVendorDetail:
     target_id = _resolve_client_id(db, current, requested=client_id)
     vendor = db.get(Vendor, vendor_id)
@@ -808,7 +809,7 @@ def client_calendar(
     db: DbSession,
     current: ClientUser,
     client_id: str | None = None,
-    year: int = 2026,
+    year: Annotated[int, Query(ge=MIN_YEAR, le=MAX_YEAR)] = 2026,
 ) -> ClientCalendarResponse:
     """Aggregated client calendar.
 
@@ -954,6 +955,11 @@ def client_submissions(
     period_key: str | None = None,
     limit: Annotated[int, Query(ge=1, le=500)] = 100,
 ) -> ClientSubmissionsResponse:
+    # Stage 2.5 (BL-T7) — reject impossible periods at the wire. Same
+    # rationale as the portal/admin variants: a stale or hostile
+    # ``?period_key=1945-M01`` returns empty silently and looks like a
+    # legitimate "no submissions" result. Validate up front.
+    validate_period_key(period_key)
     target_id = _resolve_client_id(db, current, requested=client_id)
     if vendor_id:
         # Validate the vendor belongs to this client BEFORE leaking.

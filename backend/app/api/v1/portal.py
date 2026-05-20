@@ -39,6 +39,7 @@ from fastapi import (
     Form,
     Header,
     HTTPException,
+    Query,
     Request,
     Response,
     UploadFile,
@@ -64,6 +65,11 @@ from app.core.compliance_catalog import (
     recurring_required_document,
 )
 from app.core.config import settings
+from app.core.period_validation import (
+    MAX_YEAR,
+    MIN_YEAR,
+    validate_period_key,
+)
 from app.db.session import get_db
 from app.models import (
     Document,
@@ -880,7 +886,7 @@ def get_workspace_calendar(
     workspace_id: str,
     db: DbSession,
     workspace: Annotated[ProviderWorkspace, Depends(current_portal_workspace)],
-    year: int = 2026,
+    year: Annotated[int, Query(ge=MIN_YEAR, le=MAX_YEAR)] = 2026,
 ) -> dict:
     """Workspace calendar view (Phase 4 — consumes evidence_slots).
 
@@ -1486,6 +1492,14 @@ async def create_workspace_submission(
     _ = workspace_id  # tenant guard already enforced by dependency
 
     assert_pdf_upload(file)
+
+    # Stage 2.5 (BL-T7) — reject impossible periods at the wire. A
+    # ``period_key`` like "1945-M01" is structurally invalid for REPSE
+    # (which began in 2021); accepting it lets stale or malicious
+    # writes succeed and pollute the audit trail. ``validate_period_key``
+    # is a no-op when the caller did not supply one — the existing
+    # downstream logic still drives the canonical resolution.
+    validate_period_key(period_key)
 
     if initial_status != DocumentStatus.PENDIENTE_REVISION:
         raise HTTPException(
@@ -2146,7 +2160,7 @@ def get_workspace_dashboard(
     workspace_id: str,
     db: DbSession,
     workspace: Annotated[ProviderWorkspace, Depends(current_portal_workspace)],
-    year: int | None = None,
+    year: Annotated[int | None, Query(ge=MIN_YEAR, le=MAX_YEAR)] = None,
 ) -> DashboardResponse:
     """Provider dashboard composed from the canonical evidence-slot service."""
     _ = workspace_id  # tenant guard already enforced by dependency
