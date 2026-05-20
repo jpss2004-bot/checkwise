@@ -1975,27 +1975,25 @@ async def create_workspace_submission_batch(
 
 
 def _cleanup_partial_storage(stored_files: list) -> None:
-    """Best-effort deletion of storage entries written before a rollback.
+    """Delete storage entries written before a rollback.
 
-    The storage service exposes ``delete`` for the local backend; cloud
-    backends are no-ops on this helper because they are write-once and
-    operationally cleaned up by lifecycle policies. Failures here are
-    swallowed — the rollback is what matters for correctness; the
-    orphaned bytes are at most ``MULTI_FILE_TOTAL_BYTES_CAP``.
+    Called from the multi-file batch endpoint's exception handlers
+    (HTTPException + SQLAlchemyError) so a partial batch never leaves
+    orphan bytes in storage. ``StorageService.delete`` is itself
+    idempotent and best-effort — it never raises — so this loop is a
+    thin orchestration layer over it. The outer try/except guards
+    against the unlikely case where the backend factory itself fails
+    (e.g. S3 credentials revoked mid-request); we still want the
+    original rollback exception to surface in that case.
     """
     if not stored_files:
         return
     try:
         storage = get_storage_service()
-    except Exception:  # noqa: BLE001
+    except Exception:  # noqa: BLE001 — keep the original rollback error in view
         return
     for stored in stored_files:
-        try:
-            delete = getattr(storage, "delete", None)
-            if callable(delete):
-                delete(stored.storage_key)
-        except Exception:  # noqa: BLE001
-            continue
+        storage.delete(stored.storage_key)
 
 
 # ---------------------------------------------------------------------------

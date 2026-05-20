@@ -337,6 +337,53 @@ def test_aggregate_size_over_cap_returns_413(
         db.close()
 
 
+def test_rollback_cleans_up_storage_writes(
+    api_client: TestClient,
+) -> None:
+    """Stage 2.7-b storage cleanup gap fix (2026-05-20).
+
+    The aggregate-size cap fires mid-loop after the first N files have
+    already been written to storage. The rollback path must remove
+    those orphan bytes — otherwise every failed batch upload leaks up
+    to ``MULTI_FILE_TOTAL_BYTES_CAP`` of PDF data forever.
+
+    Setup: 5 × 7 MB files. The first 4 reach storage (28 MB cumulative);
+    the 5th pushes aggregate to 35 MB and triggers the 413 path which
+    calls ``_cleanup_partial_storage``. After the request returns, the
+    test storage tree must be empty under ``documents/``.
+    """
+    from pathlib import Path
+
+    settings.MULTI_FILE_UPLOAD_ENABLED = True
+    ws = _setup_workspace(api_client)
+
+    big = b"%PDF-1.4\n" + (b"0" * (7 * 1024 * 1024))
+    big_files = [(f"big-{i}.pdf", big, "application/pdf") for i in range(5)]
+    storage_root = Path(settings.LOCAL_STORAGE_PATH)
+
+    resp = _post_batch(api_client, ws["workspace_id"], files=big_files)
+    assert resp.status_code == 413, resp.text
+
+    # No Submission row (already asserted in the sister test; reasserted
+    # here for self-contained debugging).
+    factory = api_client.app.state.testing_session  # type: ignore[attr-defined]
+    db: Session = factory()
+    try:
+        assert db.scalars(select(Submission)).first() is None
+    finally:
+        db.close()
+
+    # No orphan PDFs left behind. Walk the storage tree and confirm
+    # every file under documents/ is gone — pre-cleanup-fix this
+    # directory would contain 4 × 7 MB PDFs that never get reaped.
+    documents_dir = storage_root / "documents"
+    if documents_dir.exists():
+        leftover = [p for p in documents_dir.rglob("*") if p.is_file()]
+        assert not leftover, (
+            f"rollback should have cleaned storage, but found: {[str(p) for p in leftover]}"
+        )
+
+
 def test_empty_files_list_returns_422(api_client: TestClient) -> None:
     settings.MULTI_FILE_UPLOAD_ENABLED = True
     ws = _setup_workspace(api_client)

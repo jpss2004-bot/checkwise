@@ -70,6 +70,15 @@ class StorageService(Protocol):
         """Return a time-limited download URL, or None when the backend serves files directly."""
         ...
 
+    def delete(self, storage_key: str) -> None:  # pragma: no cover - protocol stub
+        """Best-effort delete of ``storage_key``.
+
+        Used by rollback paths (Stage 2.7-b multi-file submissions) to
+        clean up bytes written before a downstream failure. Idempotent:
+        deleting a missing key is a no-op, not an error.
+        """
+        ...
+
 
 def _safe_filename(filename: str) -> str:
     cleaned = re.sub(r"[^A-Za-z0-9._-]+", "-", filename.strip()).strip("-")
@@ -160,6 +169,22 @@ class LocalStorageService:
     ) -> str | None:
         # Local backend serves files via the application directly, not via signed URLs.
         return None
+
+    def delete(self, storage_key: str) -> None:
+        """Delete the file at ``storage_key``. Idempotent.
+
+        Missing files are treated as a no-op so rollback callers don't
+        need to guard against double-cleanup. Unexpected OSErrors
+        (permission denied, IO error) are swallowed — this method runs
+        on the rollback path and must never raise, or the original
+        error gets masked.
+        """
+        target = self.base_path / storage_key
+        try:
+            target.unlink(missing_ok=True)
+        except OSError:
+            # Best-effort cleanup; never propagate.
+            pass
 
 
 class S3StorageService:
@@ -266,6 +291,19 @@ class S3StorageService:
             Params={"Bucket": self.bucket, "Key": storage_key},
             ExpiresIn=ttl,
         )
+
+    def delete(self, storage_key: str) -> None:
+        """Delete the object at ``storage_key``. Idempotent.
+
+        S3 ``DeleteObject`` is already idempotent — it returns 204 for
+        missing keys — so this is just a thin wrapper that swallows
+        ClientError so rollback callers never see a storage exception
+        mask the original failure.
+        """
+        try:
+            self._client.delete_object(Bucket=self.bucket, Key=storage_key)
+        except Exception:  # noqa: BLE001 — best-effort cleanup; never propagate
+            pass
 
 
 def _build_s3_client(

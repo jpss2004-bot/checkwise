@@ -160,3 +160,78 @@ def test_factory_rejects_unknown_backend(monkeypatch: pytest.MonkeyPatch) -> Non
     monkeypatch.setattr(storage_mod.settings, "STORAGE_BACKEND", "azure-blob")
     with pytest.raises(ValueError, match="STORAGE_BACKEND"):
         get_storage_service()
+
+
+# ---------------------------------------------------------------------------
+# Stage 2.7-b — delete() for rollback cleanup
+# ---------------------------------------------------------------------------
+
+
+def test_local_storage_delete_removes_the_file(tmp_path: Path) -> None:
+    svc = LocalStorageService(base_path=tmp_path)
+    stored = asyncio.run(svc.save_upload(_fake_upload("doc.pdf", b"%PDF-1.4 a")))
+    full_path = tmp_path / stored.storage_key
+    assert full_path.exists()
+
+    svc.delete(stored.storage_key)
+
+    assert not full_path.exists()
+
+
+def test_local_storage_delete_missing_key_is_idempotent(tmp_path: Path) -> None:
+    """Rollback paths may call delete twice — neither call should raise."""
+    svc = LocalStorageService(base_path=tmp_path)
+    stored = asyncio.run(svc.save_upload(_fake_upload("doc.pdf", b"%PDF-1.4 a")))
+    svc.delete(stored.storage_key)
+    # Second call against a now-missing key must be a no-op.
+    svc.delete(stored.storage_key)
+    # Deleting a key that never existed must also no-op.
+    svc.delete("documents/zz/" + "0" * 64 + "/never-here.pdf")
+
+
+def test_local_storage_delete_never_raises_on_io_error(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """If the FS hands back an unexpected OSError (permission denied,
+    EIO, etc.) delete must swallow it. The rollback path can't afford
+    to mask the original exception with a cleanup error."""
+    svc = LocalStorageService(base_path=tmp_path)
+    stored = asyncio.run(svc.save_upload(_fake_upload("doc.pdf", b"%PDF-1.4 a")))
+
+    def _boom(*args, **kwargs):  # noqa: ANN001, ANN002, ANN003, ANN202
+        raise OSError("simulated EIO")
+
+    monkeypatch.setattr(Path, "unlink", _boom)
+    # Must not raise.
+    svc.delete(stored.storage_key)
+
+
+@mock_aws
+def test_s3_storage_delete_removes_the_object() -> None:
+    client = boto3.client("s3", region_name="us-east-1")
+    client.create_bucket(Bucket="checkwise-test")
+    svc = S3StorageService(bucket="checkwise-test", client=client)
+    stored = asyncio.run(svc.save_upload(_fake_upload("a.pdf", b"%PDF-1.4 a")))
+
+    # Sanity: object exists pre-delete.
+    client.head_object(Bucket="checkwise-test", Key=stored.storage_key)
+
+    svc.delete(stored.storage_key)
+
+    # head_object on a missing key raises ClientError (404).
+    from botocore.exceptions import ClientError
+
+    with pytest.raises(ClientError):
+        client.head_object(Bucket="checkwise-test", Key=stored.storage_key)
+
+
+@mock_aws
+def test_s3_storage_delete_missing_key_is_idempotent() -> None:
+    """S3 DeleteObject is natively idempotent — confirm the wrapper
+    surfaces that behavior and never raises."""
+    client = boto3.client("s3", region_name="us-east-1")
+    client.create_bucket(Bucket="checkwise-test")
+    svc = S3StorageService(bucket="checkwise-test", client=client)
+
+    # Delete a key that was never uploaded — must not raise.
+    svc.delete("documents/zz/" + "0" * 64 + "/never-here.pdf")
