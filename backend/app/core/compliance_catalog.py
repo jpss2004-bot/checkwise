@@ -25,6 +25,12 @@ CATALOG_VERSION = "2026.06.0"
 PersonaType = Literal["moral", "fisica"]
 Frequency = Literal["mensual", "bimestral", "cuatrimestral", "anual", "alta_inicial"]
 InstitutionCode = Literal["sat", "imss", "infonavit", "stps_repse", "interno_cliente"]
+# Catalog v2 — how many of the ``accepts_documents`` must be submitted
+# for a row to be considered satisfied. ``"one"`` matches the
+# "either / or / both" semantics Jose Pablo described on 2026-05-20:
+# a single acceptable doc is enough. ``"all"`` is the stricter
+# all-of-N package mode (e.g. bank receipt + CFDI + cédula together).
+MinimumDocuments = Literal["one", "all"]
 
 MONTHS_ES: tuple[str, ...] = (
     "Enero",
@@ -108,6 +114,17 @@ class RecurringRequirement:
     anatomy: str = ""
     where_to_obtain: str = ""
     common_errors: tuple[str, ...] = ()
+    # Catalog v2 (2026-05-20) — accepted-document alternatives. On v1
+    # rows these stay empty (the row is its own single doc). On v2
+    # rows ``accepts_documents`` lists every doc type that can satisfy
+    # the obligation (e.g. comprobante de pago bancario / CFDI / cédula
+    # / resumen all evidence the same IMSS monthly payment), and
+    # ``minimum_documents`` decides whether the provider needs to
+    # submit one of them (default) or all of them. v2 is gated by
+    # ``settings.RECURRING_CATALOG_V2``; existing v1 callers see no
+    # behavior change while the flag stays off.
+    accepts_documents: tuple[str, ...] = ()
+    minimum_documents: MinimumDocuments = "one"
 
 
 # ---------------------------------------------------------------------------
@@ -549,6 +566,189 @@ def recurring_for_year(
             )
 
     return [r for r in result if persona_type in r.persona_types]
+
+
+# ---------------------------------------------------------------------------
+# Catalog v2 — collapsed recurring obligations (Session 1, 2026-05-20)
+# ---------------------------------------------------------------------------
+#
+# Jose Pablo confirmed on 2026-05-20 that some recurring obligations are
+# satisfied by *any* of several acceptable doc types. The classic
+# example: IMSS monthly compliance is fully evidenced by a comprobante
+# de pago bancario OR the CFDI de pago OR the cédula obrero patronal
+# OR the resumen de liquidación — or any combination. The v1 catalog
+# generates one row per doc type, which forces providers to navigate
+# to 4 separate calendar cells and upload each separately.
+#
+# The v2 generator collapses those alternatives into one row per
+# (institution, period). Each v2 row carries:
+#
+#   - ``accepts_documents``: the list of doc names the provider may
+#     submit. The existing ``_RECURRING_DOC_OVERRIDES`` map keys per
+#     (institution, doc_name) so the per-accepted-doc anatomy /
+#     where_to_obtain / common_errors are reused verbatim — no second
+#     copy of authored content.
+#   - ``minimum_documents``: ``"one"`` by default (any one satisfies)
+#     or ``"all"`` for the stricter all-of-N package mode. Per-row
+#     override so we can mark, e.g., IMSS monthly as "one" but a future
+#     "complete payment package" requirement as "all".
+#
+# This module exposes both shapes side by side. Session 1 (this commit)
+# is foundation-only: the v2 generator + the accessor return a clean
+# data shape; nothing in evidence_slots, the API endpoints, or the
+# frontend consumes them yet. Session 2 wires the slot resolver under
+# ``settings.RECURRING_CATALOG_V2``. Until that flag flips, v1 remains
+# authoritative.
+
+
+# v2 row labels by institution+frequency. Kept here (not inlined into
+# the generator) so they can be tuned in one place when product / copy
+# changes the obligation phrasing.
+_V2_ROW_LABELS: dict[tuple[InstitutionCode, Frequency], str] = {
+    ("imss", "mensual"): "Pago mensual de cuotas IMSS",
+    ("sat", "mensual"): "Declaración y pago mensual SAT",
+    ("infonavit", "bimestral"): "Pago bimestral de aportaciones INFONAVIT",
+    ("stps_repse", "cuatrimestral"): "Reporte cuatrimestral SISUB / ICSOE",
+    ("sat", "anual"): "Declaración anual SAT",
+}
+
+
+def _v2_row(
+    *,
+    code: str,
+    institution: InstitutionCode,
+    frequency: Frequency,
+    due_month: int,
+    period_label: str,
+    period_key: str,
+    accepts_documents: tuple[str, ...],
+    due_day: int = 17,
+    minimum_documents: MinimumDocuments = "one",
+) -> RecurringRequirement:
+    name = _V2_ROW_LABELS.get(
+        (institution, frequency),
+        f"Obligación {institution} {period_label}",
+    )
+    return RecurringRequirement(
+        code=code,
+        name=name,
+        institution=institution,
+        frequency=frequency,
+        due_month=due_month,
+        period_label=period_label,
+        period_key=period_key,
+        persona_types=("moral", "fisica"),
+        due_day=due_day,
+        accepts_documents=accepts_documents,
+        minimum_documents=minimum_documents,
+    )
+
+
+def recurring_for_year_v2(
+    year: int, persona_type: PersonaType = "moral"
+) -> list[RecurringRequirement]:
+    """Return the collapsed v2 recurring catalog for a given year.
+
+    One row per (institution, period). Each row's ``accepts_documents``
+    enumerates the doc names that satisfy the obligation; the existing
+    Stage 2.7 ``_RECURRING_DOC_OVERRIDES`` map already covers
+    per-doc-name anatomy / where_to_obtain / common_errors, so v2 reuses
+    that authored content without a second copy.
+
+    Row code shape: ``REC-<INSTITUTION>-<YEAR>-<DUE_MONTH:02d>``, with a
+    ``-anual`` suffix for the SAT annual row. This is distinct from v1
+    codes (which carry a per-doc suffix), so v1 and v2 coexist in the
+    database without collision.
+
+    Row counts (2026, persona moral):
+      * IMSS monthly:        12
+      * SAT monthly:         12
+      * INFONAVIT bimestral:  6
+      * STPS cuatrimestral:   3
+      * SAT anual:            1
+      * Total:               34   (vs ~139 in v1)
+    """
+    rows: list[RecurringRequirement] = []
+
+    for due_month in range(1, 13):
+        # IMSS monthly — accepts any combination of the 4 evidence docs.
+        rows.append(
+            _v2_row(
+                code=f"REC-IMSS-{year}-{due_month:02d}",
+                institution="imss",
+                frequency="mensual",
+                due_month=due_month,
+                period_label=f"IMSS {_previous_month_label(due_month, year=year)}",
+                period_key=_monthly_period_key(due_month, year=year),
+                accepts_documents=_IMSS_DOCS,
+            )
+        )
+
+        # SAT monthly — declaración + comprobante + CFDI nómina, any
+        # combination satisfies the obligation.
+        rows.append(
+            _v2_row(
+                code=f"REC-SAT-{year}-{due_month:02d}",
+                institution="sat",
+                frequency="mensual",
+                due_month=due_month,
+                period_label=f"SAT {_previous_month_label(due_month, year=year)}",
+                period_key=_monthly_period_key(due_month, year=year),
+                accepts_documents=_SAT_DOCS,
+            )
+        )
+
+        # INFONAVIT bimestral — 6 bimesters per year.
+        if due_month in _INFONAVIT_DUE_MONTH_TO_PERIOD:
+            rows.append(
+                _v2_row(
+                    code=f"REC-INFONAVIT-{year}-{due_month:02d}",
+                    institution="infonavit",
+                    frequency="bimestral",
+                    due_month=due_month,
+                    period_label=(
+                        f"INFONAVIT {_INFONAVIT_DUE_MONTH_TO_PERIOD[due_month]}"
+                    ),
+                    period_key=_bimonthly_period_key(due_month, year=year),
+                    accepts_documents=_INFONAVIT_DOCS,
+                )
+            )
+
+        # STPS cuatrimestral — SISUB and ICSOE. The classic "either /
+        # or / both" obligation: some providers only file one, others
+        # file both. ``minimum_documents="one"`` is correct here.
+        if due_month in _ACUSES_DUE_MONTH_TO_PERIOD:
+            rows.append(
+                _v2_row(
+                    code=f"REC-STPS-{year}-{due_month:02d}",
+                    institution="stps_repse",
+                    frequency="cuatrimestral",
+                    due_month=due_month,
+                    period_label=(
+                        f"STPS {_ACUSES_DUE_MONTH_TO_PERIOD[due_month]}"
+                    ),
+                    period_key=_quarter_period_key(due_month, year=year),
+                    accepts_documents=_ACUSES_DOCS,
+                )
+            )
+
+        # SAT anual — single doc (acuse declaración anual). Day 30
+        # deadline matches the v1 catalog override.
+        if due_month == 4:
+            rows.append(
+                _v2_row(
+                    code=f"REC-SAT-{year}-04-anual",
+                    institution="sat",
+                    frequency="anual",
+                    due_month=4,
+                    period_label=f"SAT Anual {year - 1}",
+                    period_key=_annual_period_key(year=year),
+                    accepts_documents=("Acuse declaración anual de impuestos",),
+                    due_day=30,
+                )
+            )
+
+    return [r for r in rows if persona_type in r.persona_types]
 
 
 def catalog_metadata() -> dict[str, str]:
@@ -1124,6 +1324,48 @@ def recurring_common_errors(req: RecurringRequirement) -> tuple[str, ...]:
     return _RECURRING_DEFAULT_COMMON_ERRORS.get(req.institution, ())
 
 
+def recurring_accepted_documents(
+    req: RecurringRequirement,
+) -> list[dict[str, object]]:
+    """Return the per-accepted-doc detail list for a v2 catalog row.
+
+    Each entry has the shape ``{"name": str, "anatomy": str,
+    "where_to_obtain": str, "common_errors": list[str]}`` so the frontend
+    drawer can render one disclosure per acceptable doc type without
+    re-fetching the override map. Reuses the Stage 2.7
+    ``_RECURRING_DOC_OVERRIDES`` map (per-doc-name authored content)
+    with the per-institution defaults as the final fallback.
+
+    Returns an empty list when ``accepts_documents`` is empty (a v1
+    row), so legacy callers see ``[]`` and don't have to branch on the
+    flag.
+    """
+    if not req.accepts_documents:
+        return []
+
+    institution_anatomy = _RECURRING_DEFAULT_ANATOMY.get(req.institution, "")
+    institution_where = _RECURRING_DEFAULT_WHERE.get(req.institution, "")
+    institution_errors = _RECURRING_DEFAULT_COMMON_ERRORS.get(req.institution, ())
+
+    entries: list[dict[str, object]] = []
+    for doc_name in req.accepts_documents:
+        override = _RECURRING_DOC_OVERRIDES.get((req.institution, doc_name)) or {}
+        entries.append(
+            {
+                "name": doc_name,
+                "anatomy": str(override.get("anatomy") or institution_anatomy),
+                "where_to_obtain": str(
+                    override.get("where_to_obtain") or institution_where
+                ),
+                "common_errors": list(
+                    override.get("common_errors")  # type: ignore[arg-type]
+                    or institution_errors
+                ),
+            }
+        )
+    return entries
+
+
 __all__ = [
     "onboarding_why",
     "onboarding_format",
@@ -1134,8 +1376,11 @@ __all__ = [
     "recurring_anatomy",
     "recurring_where_to_obtain",
     "recurring_common_errors",
+    "recurring_accepted_documents",
+    "recurring_for_year_v2",
     "CATALOG_SOURCE",
     "CATALOG_VERSION",
+    "MinimumDocuments",
     "lookup_onboarding_by_code",
     "lookup_recurring_by_code",
     "MONTHS_ES",

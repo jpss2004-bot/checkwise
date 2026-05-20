@@ -93,6 +93,19 @@ class Settings(BaseSettings):
     # path can be rolled back without redeploying.
     MULTI_FILE_UPLOAD_ENABLED: bool = False
 
+    # Catalog v2 (2026-05-20) — collapsed recurring catalog feature flag.
+    # When True, ``recurring_for_year_v2`` is the authoritative
+    # generator: each (institution, period) pair becomes ONE
+    # ``RecurringRequirement`` row carrying an ``accepts_documents``
+    # list naming the alternative doc types the provider may submit
+    # (Comprobante de pago bancario / CFDI / Cédula / Resumen for IMSS
+    # monthly, etc.). When False (default), the legacy v1 catalog
+    # remains authoritative — one row per (institution, period, doc
+    # name). The flag lets v2 cohabit with v1 in production while the
+    # slot resolver + endpoints + frontend land in follow-up sessions;
+    # rollback is a flag flip rather than a code revert.
+    RECURRING_CATALOG_V2: bool = False
+
     model_config = SettingsConfigDict(env_file=".env", env_file_encoding="utf-8", extra="ignore")
 
     @property
