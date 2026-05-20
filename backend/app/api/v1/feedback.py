@@ -1,17 +1,28 @@
-"""Internal feedback endpoint — bug reports and improvement suggestions.
+"""Internal feedback endpoints — bug reports and improvement suggestions.
 
-Used by signed-in CheckWise testers via the floating "Report" button
-mounted on the post-login layouts. Posts a structured message to the
-configured Slack channel with the tester's text, the page they were
-on, and (optionally) a PNG screenshot attached as a thread reply.
+Two surfaces:
 
-Auth: ``get_current_user`` — the launcher only renders after login.
+* ``POST /api/v1/feedback`` — authenticated. Used by signed-in
+  CheckWise testers via the floating "Report" button on the post-login
+  layouts. Identifies the submitter by JWT and includes their roles in
+  the Slack message.
 
-Defense in depth:
+* ``POST /api/v1/feedback/public`` — anonymous. Used by the same
+  launcher when mounted on the public landing page. No JWT required;
+  the submitter is identified only by a peppered IP-hash fingerprint
+  and an *optional* reply-back email field they can fill in.
+
+Both endpoints post a structured Block Kit message to the configured
+Slack channel with the description, the page the submitter was on,
+and (optionally) a PNG screenshot attached as a thread reply.
+
+Defense in depth (both surfaces):
 - PNG magic-byte check on the screenshot (browser Content-Type is
   trivially spoofed).
 - ``MAX_SCREENSHOT_BYTES`` cap, returned as 413 if exceeded.
-- In-memory rate limit, 10 reports per user per minute (429 on excess).
+- In-memory rate limit. Authenticated: 10 reports per user per
+  minute. Public: 5 reports per IP-hash per hour — tighter because
+  the landing page is publicly indexable.
 - Slack delivery runs in a ``BackgroundTask`` so the user's response
   is not gated on Slack latency or downtime.
 
@@ -32,6 +43,7 @@ from fastapi import (
     File,
     Form,
     HTTPException,
+    Request,
     UploadFile,
     status,
 )
@@ -43,6 +55,9 @@ from app.services.feedback_service import (
     PNG_MAGIC,
     deliver_to_slack,
     feedback_snapshot,
+    hash_ip,
+    public_feedback_snapshot,
+    record_and_check_public_rate,
     record_and_check_rate,
 )
 
@@ -152,3 +167,112 @@ async def _read_and_validate_screenshot(file: UploadFile) -> bytes:
             detail="Screenshot must be a PNG image",
         )
     return raw
+
+
+# ─── Public (unauthenticated) endpoint ──────────────────────────
+
+
+MAX_CONTACT_EMAIL_CHARS = 256
+
+
+def _client_ip(request: Request) -> str | None:
+    """Resolve the client IP, preferring proxy headers where present.
+
+    Render places its load balancer in front of the uvicorn process,
+    so ``request.client.host`` is the LB. Mirrors the same helper in
+    ``contact.py``.
+    """
+    xff = request.headers.get("x-forwarded-for")
+    if xff:
+        first = xff.split(",")[0].strip()
+        if first:
+            return first
+    real = request.headers.get("x-real-ip")
+    if real:
+        return real.strip()
+    if request.client and request.client.host:
+        return request.client.host
+    return None
+
+
+@router.post(
+    "/public",
+    response_model=FeedbackResponse,
+    status_code=status.HTTP_202_ACCEPTED,
+    summary="Submit a bug report or improvement suggestion from the public landing",
+)
+async def post_public_feedback(
+    request: Request,
+    background: BackgroundTasks,
+    kind: Annotated[Literal["bug", "improvement"], Form(alias="type")],
+    description: Annotated[
+        str,
+        Form(min_length=MIN_DESCRIPTION_CHARS, max_length=MAX_DESCRIPTION_CHARS),
+    ],
+    url: Annotated[str, Form(max_length=2048)],
+    path: Annotated[str, Form(max_length=512)],
+    viewport: Annotated[str, Form(max_length=32)] = "",
+    user_agent: Annotated[str, Form(max_length=512)] = "",
+    console_logs: Annotated[str, Form(max_length=MAX_CONSOLE_LOGS_CHARS)] = "",
+    contact_email: Annotated[str, Form(max_length=MAX_CONTACT_EMAIL_CHARS)] = "",
+    screenshot: Annotated[UploadFile | None, File()] = None,
+) -> FeedbackResponse:
+    description_clean = description.strip()
+    if len(description_clean) < MIN_DESCRIPTION_CHARS:
+        raise HTTPException(
+            status_code=422,
+            detail=(
+                f"description must contain at least {MIN_DESCRIPTION_CHARS} "
+                "non-whitespace characters"
+            ),
+        )
+
+    # The browser-supplied user_agent field is best-effort; fall back to
+    # the request header when missing so the Slack message always has
+    # something useful.
+    ua = user_agent or (request.headers.get("user-agent") or "")[:512]
+
+    ip = _client_ip(request)
+    ip_h = hash_ip(ip)
+
+    if not record_and_check_public_rate(ip_h):
+        raise HTTPException(
+            status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+            detail=(
+                "Demasiados reportes desde esta dirección. "
+                "Inténtalo de nuevo en una hora."
+            ),
+        )
+
+    screenshot_bytes: bytes | None = None
+    if screenshot is not None:
+        screenshot_bytes = await _read_and_validate_screenshot(screenshot)
+
+    email_clean = contact_email.strip() or None
+
+    snapshot = public_feedback_snapshot(
+        kind=kind,
+        description=description_clean,
+        url=url,
+        path=path,
+        viewport=viewport,
+        user_agent=ua,
+        console_logs=console_logs,
+        contact_email=email_clean,
+        ip_hash=ip_h,
+    )
+
+    configured = bool(
+        (settings.SLACK_BOT_TOKEN or "").strip()
+        and (settings.SLACK_FEEDBACK_CHANNEL_ID or "").strip()
+    )
+    if configured:
+        background.add_task(deliver_to_slack, snapshot, screenshot_bytes)
+    else:
+        logger.info(
+            "feedback(public): slack not configured; skipping delivery ip_hash=%s path=%s",
+            ip_h or "—",
+            path,
+        )
+
+    return FeedbackResponse(ok=True, delivered=configured)

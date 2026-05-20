@@ -14,10 +14,18 @@ it never raises. Slack failures are logged at WARNING and discarded so
 the caller's HTTP response is independent of Slack health. It is meant
 to be called from a FastAPI ``BackgroundTask``.
 
-Rate limit. ``record_and_check_rate`` is an in-memory sliding-window
-limiter keyed by user id — 10 reports per minute per user. Resets on
-process restart; that's acceptable because this surface only runs for
-authenticated internal testers, not the public.
+Rate limits.
+  * ``record_and_check_rate`` — authenticated submitters. Keyed by user
+    id, 10 reports per minute per user. Generous because logged-in
+    testers are trusted.
+  * ``record_and_check_public_rate`` — anonymous landing-page
+    submitters. Keyed by peppered IP hash, 5 reports per hour per IP.
+    Tighter because the landing page is publicly indexable and the
+    only signal we have to cluster abuse is the source IP.
+
+Both limiters reset on process restart; that's acceptable for V1 of a
+public form. Redis-backed limiting is the V2 follow-up if/when the
+backend scales beyond one Render instance.
 """
 
 from __future__ import annotations
@@ -32,6 +40,7 @@ from collections import deque
 from threading import Lock
 
 from app.core.config import settings
+from app.services.contact_service import hash_ip  # peppered SHA-256 IP hash
 
 logger = logging.getLogger(__name__)
 
@@ -69,10 +78,47 @@ def record_and_check_rate(user_id: str) -> bool:
         return True
 
 
+# Public landing-page submissions get a separate, tighter bucket — they
+# come from anonymous traffic and the only ID we have is the source IP.
+_PUBLIC_RATE_WINDOW_SECONDS = 60 * 60  # 1 hour
+_PUBLIC_RATE_MAX_PER_WINDOW = 5
+
+_public_rate_buckets: dict[str, deque[float]] = {}
+_public_rate_lock = Lock()
+
+
+def record_and_check_public_rate(ip_hash: str | None) -> bool:
+    """Record an anonymous submission and report whether it is within quota.
+
+    ``ip_hash`` is the peppered SHA-256 fingerprint from
+    ``contact_service.hash_ip``. ``None`` (unknown IP — should be rare,
+    means the proxy headers are misconfigured) bypasses the limiter so
+    a single broken header doesn't lock everyone out; we'd rather get
+    the report and triage by hand.
+
+    Returns ``True`` when the submission is allowed (and recorded),
+    ``False`` when the caller has exceeded the per-hour cap.
+    """
+    if ip_hash is None:
+        return True
+    now = time.monotonic()
+    cutoff = now - _PUBLIC_RATE_WINDOW_SECONDS
+    with _public_rate_lock:
+        bucket = _public_rate_buckets.setdefault(ip_hash, deque())
+        while bucket and bucket[0] < cutoff:
+            bucket.popleft()
+        if len(bucket) >= _PUBLIC_RATE_MAX_PER_WINDOW:
+            return False
+        bucket.append(now)
+        return True
+
+
 def _reset_rate_limiter_for_tests() -> None:
-    """Test-only hook to clear the in-process rate-limit store."""
+    """Test-only hook to clear both in-process rate-limit stores."""
     with _rate_lock:
         _rate_buckets.clear()
+    with _public_rate_lock:
+        _public_rate_buckets.clear()
 
 
 # ─── Slack delivery (background) ────────────────────────────────
@@ -201,22 +247,44 @@ def _upload_screenshot(
 
 def _fallback_text(s: dict) -> str:
     label = "🐛 Bug" if s.get("type") == "bug" else "💡 Improvement"
+    if s.get("is_public"):
+        who = s.get("contact_email") or f"anon:{s.get('ip_hash') or '—'}"
+        return f"CheckWise · {label} (público) · {who} · {s.get('path') or ''}"
     return f"CheckWise · {label} · {s.get('user_email') or ''} · {s.get('path') or ''}"
 
 
 def _format_blocks(s: dict) -> list[dict]:
     kind = s.get("type", "bug")
     header = "🐛 Bug report" if kind == "bug" else "💡 Improvement"
+    is_public = bool(s.get("is_public"))
+    if is_public:
+        header = f"{header} (público)"
 
     description = (s.get("description") or "").strip()
     if len(description) > 2800:
         description = description[:2800].rstrip() + "…"
 
-    roles = s.get("user_roles") or []
-    roles_text = ", ".join(roles) if roles else "—"
-
     url = s.get("url") or "#"
     user_agent = (s.get("user_agent") or "")[:120]
+
+    # Authenticated submissions show user identity + roles. Public
+    # submissions instead show contact email (optional) and the
+    # peppered IP-hash fingerprint so the same anonymous reporter can
+    # be clustered across multiple reports without leaking PII.
+    if is_public:
+        contact_email = s.get("contact_email") or "—"
+        ip_hash = s.get("ip_hash") or "—"
+        identity_fields = [
+            {"type": "mrkdwn", "text": f"*Email (opcional)*\n{contact_email}"},
+            {"type": "mrkdwn", "text": f"*IP hash*\n`{ip_hash}`"},
+        ]
+    else:
+        roles = s.get("user_roles") or []
+        roles_text = ", ".join(roles) if roles else "—"
+        identity_fields = [
+            {"type": "mrkdwn", "text": f"*From*\n{s.get('user_email') or '—'}"},
+            {"type": "mrkdwn", "text": f"*Roles*\n{roles_text}"},
+        ]
 
     blocks: list[dict] = [
         {
@@ -229,9 +297,8 @@ def _format_blocks(s: dict) -> list[dict]:
         },
         {
             "type": "section",
-            "fields": [
-                {"type": "mrkdwn", "text": f"*From*\n{s.get('user_email') or '—'}"},
-                {"type": "mrkdwn", "text": f"*Roles*\n{roles_text}"},
+            "fields": identity_fields
+            + [
                 {"type": "mrkdwn", "text": f"*Page*\n`{s.get('path') or '—'}`"},
                 {"type": "mrkdwn", "text": f"*Viewport*\n{s.get('viewport') or '—'}"},
             ],
@@ -274,7 +341,7 @@ def feedback_snapshot(
     user_full_name: str,
     user_roles: list[str],
 ) -> dict:
-    """Build the small dict the background task closes over."""
+    """Build the snapshot for an *authenticated* feedback submission."""
     return {
         "type": kind,
         "description": description,
@@ -286,4 +353,48 @@ def feedback_snapshot(
         "user_email": user_email,
         "user_full_name": user_full_name,
         "user_roles": user_roles,
+        "is_public": False,
     }
+
+
+def public_feedback_snapshot(
+    *,
+    kind: str,
+    description: str,
+    url: str,
+    path: str,
+    viewport: str,
+    user_agent: str,
+    console_logs: str,
+    contact_email: str | None,
+    ip_hash: str | None,
+) -> dict:
+    """Build the snapshot for an *anonymous* landing-page submission.
+
+    Same shape as ``feedback_snapshot`` but with ``is_public=True``,
+    no user identity, and a peppered IP hash so the receiving channel
+    can cluster repeat reporters without storing the raw IP.
+    """
+    return {
+        "type": kind,
+        "description": description,
+        "url": url,
+        "path": path,
+        "viewport": viewport,
+        "user_agent": user_agent,
+        "console_logs": console_logs,
+        "contact_email": contact_email,
+        "ip_hash": ip_hash,
+        "is_public": True,
+    }
+
+
+__all__ = [
+    "PNG_MAGIC",
+    "deliver_to_slack",
+    "feedback_snapshot",
+    "hash_ip",
+    "public_feedback_snapshot",
+    "record_and_check_public_rate",
+    "record_and_check_rate",
+]

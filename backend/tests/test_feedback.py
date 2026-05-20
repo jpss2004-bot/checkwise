@@ -246,3 +246,101 @@ def test_rate_limit_kicks_in_after_ten_reports(
         "/api/v1/feedback", data=_form(), headers=_auth(token)
     )
     assert blocked.status_code == 429
+
+
+# ─── Public (unauthenticated) endpoint ───────────────────────────
+
+
+def _public_form(**overrides: str) -> dict[str, str]:
+    """Form payload for the public endpoint — same shape minus auth."""
+    base = {
+        "type": "improvement",
+        "description": "Sería útil mostrar el RFC en la lista de proveedores.",
+        "url": "https://checkwise.mx/",
+        "path": "/",
+        "viewport": "1440x900",
+        "user_agent": "pytest-public",
+        "console_logs": "",
+        "contact_email": "",
+    }
+    base.update(overrides)
+    return base
+
+
+def test_public_happy_path_returns_202_no_auth_required(
+    api_client: TestClient,
+) -> None:
+    # No Authorization header — the public route MUST accept it.
+    resp = api_client.post("/api/v1/feedback/public", data=_public_form())
+    assert resp.status_code == 202
+    assert resp.json() == {"ok": True, "delivered": False}
+
+
+def test_public_short_description_returns_422(api_client: TestClient) -> None:
+    resp = api_client.post(
+        "/api/v1/feedback/public", data=_public_form(description="short")
+    )
+    assert resp.status_code == 422
+
+
+def test_public_whitespace_only_description_returns_422(
+    api_client: TestClient,
+) -> None:
+    resp = api_client.post(
+        "/api/v1/feedback/public",
+        data=_public_form(description="            "),
+    )
+    assert resp.status_code == 422
+
+
+def test_public_bad_type_returns_422(api_client: TestClient) -> None:
+    resp = api_client.post(
+        "/api/v1/feedback/public", data=_public_form(type="flame")
+    )
+    assert resp.status_code == 422
+
+
+def test_public_non_png_screenshot_returns_415(api_client: TestClient) -> None:
+    resp = api_client.post(
+        "/api/v1/feedback/public",
+        data=_public_form(),
+        files={"screenshot": ("not-a-png.png", NOT_A_PNG, "image/png")},
+    )
+    assert resp.status_code == 415
+
+
+def test_public_oversized_screenshot_returns_413(api_client: TestClient) -> None:
+    payload = PNG_HEADER + b"\x00" * (5 * 1024 * 1024 + 1 - len(PNG_HEADER))
+    resp = api_client.post(
+        "/api/v1/feedback/public",
+        data=_public_form(),
+        files={"screenshot": ("big.png", payload, "image/png")},
+    )
+    assert resp.status_code == 413
+
+
+def test_public_rate_limit_kicks_in_after_five_reports(
+    api_client: TestClient,
+) -> None:
+    # Pin a stable client IP so the IP-hash bucket is shared across
+    # the loop (TestClient defaults to 127.0.0.1, but be explicit so
+    # the test is resistant to env changes).
+    headers = {"x-forwarded-for": "203.0.113.42"}
+    for _ in range(5):
+        resp = api_client.post(
+            "/api/v1/feedback/public", data=_public_form(), headers=headers
+        )
+        assert resp.status_code == 202
+    blocked = api_client.post(
+        "/api/v1/feedback/public", data=_public_form(), headers=headers
+    )
+    assert blocked.status_code == 429
+
+
+def test_public_accepts_optional_contact_email(api_client: TestClient) -> None:
+    resp = api_client.post(
+        "/api/v1/feedback/public",
+        data=_public_form(contact_email="visitor@example.com"),
+    )
+    assert resp.status_code == 202
+    assert resp.json() == {"ok": True, "delivered": False}
