@@ -29,7 +29,7 @@ explorer itself answers "what did this admin do."
 
 from __future__ import annotations
 
-from datetime import datetime
+from datetime import date, datetime
 from typing import Annotated, Literal
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
@@ -838,7 +838,7 @@ def list_periods(
 def get_admin_calendar(
     db: DbSession,
     current: AdminUser,
-    year: Annotated[int, Query(ge=MIN_YEAR, le=MAX_YEAR)] = 2026,
+    year: Annotated[int | None, Query(ge=MIN_YEAR, le=MAX_YEAR)] = None,
     persona_type: Literal["moral", "fisica"] = "moral",
 ) -> dict:
     """Aggregated recurring catalog snapshot for the requested year.
@@ -847,9 +847,14 @@ def get_admin_calendar(
     calendar, summarised by institution × month. The admin surface
     can use this to confirm a year is correctly seeded without
     drilling into per-provider workspaces.
+
+    When ``year`` is omitted, defaults to the current calendar year so
+    the snapshot keeps tracking the operator's "now" without a stale
+    hardcoded fallback (mirrors the BL-T3 spirit on the frontend).
     """
     _ = current
-    catalog = recurring_for_year(year, persona_type)
+    target_year = year if year is not None else date.today().year
+    catalog = recurring_for_year(target_year, persona_type)
     months: dict[int, dict] = {
         m: {"month": m, "institutions": {}, "expected_total": 0} for m in range(1, 13)
     }
@@ -862,7 +867,7 @@ def get_admin_calendar(
         months[req.due_month]["expected_total"] += 1
     return {
         "metadata": catalog_metadata(),
-        "year": year,
+        "year": target_year,
         "persona_type": persona_type,
         "months": [
             {
