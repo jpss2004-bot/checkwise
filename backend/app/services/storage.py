@@ -45,6 +45,21 @@ class StoredFile:
 class StorageService(Protocol):
     async def save_upload(self, upload: UploadFile) -> StoredFile: ...
 
+    def save_bytes(
+        self,
+        *,
+        storage_key: str,
+        data: bytes,
+        content_type: str | None = None,
+    ) -> None:  # pragma: no cover - protocol stub
+        """Write raw bytes at a caller-chosen key.
+
+        Used when the caller already holds the payload in memory (e.g.
+        feedback screenshots which the API handler must read into bytes
+        to magic-byte-validate). Overwrites if the key already exists.
+        """
+        ...
+
     def open_for_read(self, storage_key: str) -> Path:  # pragma: no cover - protocol stub
         """Return a local path the caller can read for the duration of the request."""
         ...
@@ -121,6 +136,22 @@ class LocalStorageService:
             extension=Path(safe_name).suffix.lower(),
         )
 
+    def save_bytes(
+        self,
+        *,
+        storage_key: str,
+        data: bytes,
+        content_type: str | None = None,
+    ) -> None:
+        # content_type is unused on the local backend — extensions in
+        # storage_key carry the type. Kept in the signature so callers
+        # don't have to branch on backend.
+        _ = content_type
+        final_path = self.base_path / storage_key
+        final_path.parent.mkdir(parents=True, exist_ok=True)
+        with final_path.open("wb") as fh:
+            fh.write(data)
+
     def open_for_read(self, storage_key: str) -> Path:
         return self.base_path / storage_key
 
@@ -190,6 +221,22 @@ class S3StorageService:
             sha256=digest,
             extension=Path(safe_name).suffix.lower(),
         )
+
+    def save_bytes(
+        self,
+        *,
+        storage_key: str,
+        data: bytes,
+        content_type: str | None = None,
+    ) -> None:
+        kwargs: dict[str, str | bytes] = {
+            "Bucket": self.bucket,
+            "Key": storage_key,
+            "Body": data,
+        }
+        if content_type:
+            kwargs["ContentType"] = content_type
+        self._client.put_object(**kwargs)
 
     def open_for_read(self, storage_key: str) -> Path:
         """Materialize an object back to a local temp file and return its path.

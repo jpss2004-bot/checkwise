@@ -39,8 +39,13 @@ import urllib.request
 from collections import deque
 from threading import Lock
 
+from sqlalchemy.orm import Session
+
 from app.core.config import settings
+from app.db.session import SessionLocal
+from app.models.entities import FeedbackReport, new_id, utc_now
 from app.services.contact_service import hash_ip  # peppered SHA-256 IP hash
+from app.services.storage import get_storage_service
 
 logger = logging.getLogger(__name__)
 
@@ -121,42 +126,183 @@ def _reset_rate_limiter_for_tests() -> None:
         _public_rate_buckets.clear()
 
 
+# ─── Persistence ────────────────────────────────────────────────
+
+
+SCREENSHOT_CONTENT_TYPE = "image/png"
+
+
+def screenshot_storage_key(report_id: str) -> str:
+    """Stable storage key for a report's screenshot.
+
+    One screenshot per report — overwriting is fine (and we never
+    overwrite in practice because the report id is freshly generated).
+    """
+    return f"feedback/{report_id}/screenshot.png"
+
+
+def save_screenshot_to_storage(report_id: str, png: bytes) -> str:
+    """Persist a PNG to the configured storage backend; return the key."""
+    key = screenshot_storage_key(report_id)
+    get_storage_service().save_bytes(
+        storage_key=key, data=png, content_type=SCREENSHOT_CONTENT_TYPE
+    )
+    return key
+
+
+def create_feedback_report(
+    db: Session,
+    *,
+    snapshot: dict,
+    storage_key: str | None,
+    screenshot_size_bytes: int | None,
+) -> FeedbackReport:
+    """Insert and return the persisted ``FeedbackReport`` row.
+
+    ``snapshot`` is the dict produced by ``feedback_snapshot`` /
+    ``public_feedback_snapshot``. We split fields by ``is_public`` so
+    authenticated columns stay NULL on anonymous rows and vice-versa.
+
+    ``slack_delivery_status`` starts at ``'pending'`` and is updated
+    by ``deliver_to_slack`` to ``'sent'`` | ``'failed'`` | ``'skipped'``.
+    """
+    is_public = bool(snapshot.get("is_public"))
+    now = utc_now()
+    row = FeedbackReport(
+        id=snapshot.get("report_id") or new_id(),
+        kind=snapshot.get("type", "bug"),
+        description=snapshot.get("description", ""),
+        source="public" if is_public else "authenticated",
+        is_public=is_public,
+        url=snapshot.get("url"),
+        path=snapshot.get("path"),
+        viewport=snapshot.get("viewport"),
+        user_agent=snapshot.get("user_agent"),
+        console_logs=snapshot.get("console_logs") or None,
+        user_id=snapshot.get("user_id"),
+        user_email=None if is_public else snapshot.get("user_email"),
+        user_full_name=None if is_public else snapshot.get("user_full_name"),
+        user_roles=(
+            None
+            if is_public
+            else ",".join(snapshot.get("user_roles") or []) or None
+        ),
+        contact_email=snapshot.get("contact_email") if is_public else None,
+        ip_hash=snapshot.get("ip_hash") if is_public else None,
+        screenshot_storage_key=storage_key,
+        screenshot_size_bytes=screenshot_size_bytes,
+        slack_delivery_status="pending",
+        status="new",
+        created_at=now,
+        updated_at=now,
+    )
+    db.add(row)
+    db.commit()
+    db.refresh(row)
+    return row
+
+
 # ─── Slack delivery (background) ────────────────────────────────
 
 
-def deliver_to_slack(snapshot: dict, screenshot_bytes: bytes | None) -> None:
+def deliver_to_slack(
+    snapshot: dict, screenshot_bytes: bytes | None, report_id: str | None = None
+) -> None:
     """Best-effort delivery of a feedback report to the Slack channel.
 
     Never raises. ``snapshot`` is a small plain dict captured at request
     time (see ``app.api.v1.feedback``); the background task closes over
     it instead of re-reading the request.
+
+    When ``report_id`` is provided, the function opens a fresh DB
+    session at the end and writes back ``slack_message_ts`` plus a
+    final ``slack_delivery_status`` of ``'sent'`` | ``'failed'`` |
+    ``'skipped'`` (and ``slack_delivery_error`` on failure) so the
+    admin triage UI can show delivery state without scraping logs.
     """
     token = (settings.SLACK_BOT_TOKEN or "").strip()
     channel = (settings.SLACK_FEEDBACK_CHANNEL_ID or "").strip()
     if not token or not channel:
         logger.debug("feedback: slack not configured; skip")
+        _write_slack_status(report_id, status_="skipped")
         return
 
     try:
         thread_ts = _post_main_message(token=token, channel=channel, snapshot=snapshot)
     except Exception as exc:  # noqa: BLE001 — defensive; never propagate
         logger.warning("feedback: chat.postMessage failed err=%s", exc)
+        _write_slack_status(report_id, status_="failed", error=str(exc))
         return
 
-    if not screenshot_bytes:
-        return
+    if screenshot_bytes:
+        try:
+            _upload_screenshot(
+                token=token,
+                channel=channel,
+                thread_ts=thread_ts,
+                png=screenshot_bytes,
+                filename=f"feedback-{int(time.time())}.png",
+                title=f"Screenshot — {snapshot.get('path') or '/'}",
+            )
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("feedback: screenshot upload failed err=%s", exc)
+            # Main message went through; record success but stash the
+            # screenshot-upload error so triage can see it without
+            # marking the whole delivery failed.
+            _write_slack_status(
+                report_id,
+                status_="sent",
+                ts=thread_ts,
+                error=f"screenshot: {exc}",
+            )
+            return
 
+    _write_slack_status(report_id, status_="sent", ts=thread_ts)
+
+
+def _write_slack_status(
+    report_id: str | None,
+    *,
+    status_: str,
+    ts: str | None = None,
+    error: str | None = None,
+) -> None:
+    """Patch ``slack_*`` columns on a FeedbackReport row.
+
+    No-op when ``report_id`` is None (legacy callers / tests that
+    don't care about the writeback). Opens its own session because the
+    background task runs after the request-scoped session has closed.
+    Never raises — DB-side issues here must not bubble up and kill the
+    BackgroundTask thread.
+    """
+    if not report_id:
+        return
     try:
-        _upload_screenshot(
-            token=token,
-            channel=channel,
-            thread_ts=thread_ts,
-            png=screenshot_bytes,
-            filename=f"feedback-{int(time.time())}.png",
-            title=f"Screenshot — {snapshot.get('path') or '/'}",
+        db = SessionLocal()
+        try:
+            row = db.get(FeedbackReport, report_id)
+            if row is None:
+                logger.warning(
+                    "feedback: status writeback for unknown report_id=%s",
+                    report_id,
+                )
+                return
+            row.slack_delivery_status = status_
+            if ts is not None:
+                row.slack_message_ts = ts
+            if error is not None:
+                # Truncate so a giant boto/Slack trace doesn't bloat the row.
+                row.slack_delivery_error = error[:1000]
+            row.updated_at = utc_now()
+            db.commit()
+        finally:
+            db.close()
+    except Exception as exc:  # noqa: BLE001 — defensive
+        logger.warning(
+            "feedback: slack status writeback failed report_id=%s err=%s",
+            report_id,
+            exc,
         )
-    except Exception as exc:  # noqa: BLE001
-        logger.warning("feedback: screenshot upload failed err=%s", exc)
 
 
 # ─── Slack helpers ──────────────────────────────────────────────
@@ -337,6 +483,7 @@ def feedback_snapshot(
     viewport: str,
     user_agent: str,
     console_logs: str,
+    user_id: str,
     user_email: str,
     user_full_name: str,
     user_roles: list[str],
@@ -350,6 +497,7 @@ def feedback_snapshot(
         "viewport": viewport,
         "user_agent": user_agent,
         "console_logs": console_logs,
+        "user_id": user_id,
         "user_email": user_email,
         "user_full_name": user_full_name,
         "user_roles": user_roles,
@@ -391,10 +539,13 @@ def public_feedback_snapshot(
 
 __all__ = [
     "PNG_MAGIC",
+    "create_feedback_report",
     "deliver_to_slack",
     "feedback_snapshot",
     "hash_ip",
     "public_feedback_snapshot",
     "record_and_check_public_rate",
     "record_and_check_rate",
+    "save_screenshot_to_storage",
+    "screenshot_storage_key",
 ]

@@ -48,17 +48,21 @@ from fastapi import (
     status,
 )
 from pydantic import BaseModel
+from sqlalchemy.orm import Session
 
 from app.api.v1.auth import CurrentUser, get_current_user
 from app.core.config import settings
+from app.db.session import get_db
 from app.services.feedback_service import (
     PNG_MAGIC,
+    create_feedback_report,
     deliver_to_slack,
     feedback_snapshot,
     hash_ip,
     public_feedback_snapshot,
     record_and_check_public_rate,
     record_and_check_rate,
+    save_screenshot_to_storage,
 )
 
 router = APIRouter(prefix="/feedback", tags=["feedback"])
@@ -75,6 +79,11 @@ MAX_CONSOLE_LOGS_CHARS = 16 * 1024  # 16 KB
 class FeedbackResponse(BaseModel):
     ok: bool
     delivered: bool
+    """``True`` when a Slack BackgroundTask was scheduled (token + channel
+    configured), ``False`` when stub-mode skipped delivery. Persistence
+    happens unconditionally; check ``report_id`` for the row."""
+    report_id: str
+    """ID of the persisted ``FeedbackReport`` row. Always present."""
 
 
 @router.post(
@@ -85,6 +94,7 @@ class FeedbackResponse(BaseModel):
 )
 async def post_feedback(
     background: BackgroundTasks,
+    db: Annotated[Session, Depends(get_db)],
     current: Annotated[CurrentUser, Depends(get_current_user)],
     kind: Annotated[Literal["bug", "improvement"], Form(alias="type")],
     description: Annotated[
@@ -128,25 +138,52 @@ async def post_feedback(
         viewport=viewport,
         user_agent=user_agent,
         console_logs=console_logs,
+        user_id=current.user.id,
         user_email=current.user.email,
         user_full_name=current.user.full_name,
         user_roles=list(current.roles),
     )
+
+    # Persist FIRST. The HTTP response means "row exists, Slack
+    # delivery scheduled (or stubbed)" — never "Slack delivered".
+    row = create_feedback_report(
+        db,
+        snapshot=snapshot,
+        storage_key=None,  # filled in below once we have a row id
+        screenshot_size_bytes=len(screenshot_bytes) if screenshot_bytes else None,
+    )
+    if screenshot_bytes is not None:
+        try:
+            key = save_screenshot_to_storage(row.id, screenshot_bytes)
+            row.screenshot_storage_key = key
+            db.commit()
+        except Exception as exc:  # noqa: BLE001 — defensive
+            # Storage backend is misconfigured / unreachable. Row stays
+            # without a key; Slack still gets the screenshot inline.
+            logger.warning(
+                "feedback: screenshot storage failed report_id=%s err=%s",
+                row.id,
+                exc,
+            )
 
     configured = bool(
         (settings.SLACK_BOT_TOKEN or "").strip()
         and (settings.SLACK_FEEDBACK_CHANNEL_ID or "").strip()
     )
     if configured:
-        background.add_task(deliver_to_slack, snapshot, screenshot_bytes)
+        background.add_task(deliver_to_slack, snapshot, screenshot_bytes, row.id)
     else:
         logger.info(
             "feedback: slack not configured; skipping delivery user=%s path=%s",
             current.user.email,
             path,
         )
+        # Mark the row's delivery status as skipped so the triage UI
+        # doesn't show it stuck on 'pending' forever.
+        row.slack_delivery_status = "skipped"
+        db.commit()
 
-    return FeedbackResponse(ok=True, delivered=configured)
+    return FeedbackResponse(ok=True, delivered=configured, report_id=row.id)
 
 
 async def _read_and_validate_screenshot(file: UploadFile) -> bytes:
@@ -204,6 +241,7 @@ def _client_ip(request: Request) -> str | None:
 async def post_public_feedback(
     request: Request,
     background: BackgroundTasks,
+    db: Annotated[Session, Depends(get_db)],
     kind: Annotated[Literal["bug", "improvement"], Form(alias="type")],
     description: Annotated[
         str,
@@ -262,17 +300,37 @@ async def post_public_feedback(
         ip_hash=ip_h,
     )
 
+    row = create_feedback_report(
+        db,
+        snapshot=snapshot,
+        storage_key=None,
+        screenshot_size_bytes=len(screenshot_bytes) if screenshot_bytes else None,
+    )
+    if screenshot_bytes is not None:
+        try:
+            key = save_screenshot_to_storage(row.id, screenshot_bytes)
+            row.screenshot_storage_key = key
+            db.commit()
+        except Exception as exc:  # noqa: BLE001 — defensive
+            logger.warning(
+                "feedback(public): screenshot storage failed report_id=%s err=%s",
+                row.id,
+                exc,
+            )
+
     configured = bool(
         (settings.SLACK_BOT_TOKEN or "").strip()
         and (settings.SLACK_FEEDBACK_CHANNEL_ID or "").strip()
     )
     if configured:
-        background.add_task(deliver_to_slack, snapshot, screenshot_bytes)
+        background.add_task(deliver_to_slack, snapshot, screenshot_bytes, row.id)
     else:
         logger.info(
             "feedback(public): slack not configured; skipping delivery ip_hash=%s path=%s",
             ip_h or "—",
             path,
         )
+        row.slack_delivery_status = "skipped"
+        db.commit()
 
-    return FeedbackResponse(ok=True, delivered=configured)
+    return FeedbackResponse(ok=True, delivered=configured, report_id=row.id)
