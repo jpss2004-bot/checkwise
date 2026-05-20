@@ -127,6 +127,14 @@ _ONBOARDING_MORAL: tuple[OnboardingRequirement, ...] = (
             "Subir solo una propuesta o cotización en lugar del contrato firmado.",
             "Omitir los anexos cuando el contrato hace referencia a ellos.",
             "Subir una copia sin firma de alguna de las dos partes.",
+            (
+                "Subir una versión vencida del contrato cuando ya existe una "
+                "renovación o adenda."
+            ),
+            (
+                "Subir un archivo en cualquier formato distinto a PDF "
+                "(Word, imagen, foto del documento)."
+            ),
         ),
     ),
     OnboardingRequirement(
@@ -173,6 +181,14 @@ _ONBOARDING_MORAL: tuple[OnboardingRequirement, ...] = (
                 "Falta de coincidencia entre el objeto social y los "
                 "servicios que prestas en el contrato."
             ),
+            (
+                "Subir una versión escaneada borrosa o ilegible en lugar "
+                "del PDF protocolizado por el notario."
+            ),
+            (
+                "Subir el acta de otra empresa del grupo en lugar de la "
+                "del proveedor que firma el contrato."
+            ),
         ),
     ),
     OnboardingRequirement(
@@ -198,6 +214,15 @@ _ONBOARDING_MORAL: tuple[OnboardingRequirement, ...] = (
             "Subir una CSF de más de 90 días de emisión.",
             "Subir la CSF del representante legal en lugar de la de la empresa.",
             "Subir una captura de pantalla en lugar del PDF oficial del SAT.",
+            (
+                "Subir una CSF cuyo domicilio fiscal ya no coincide con "
+                "el domicilio actualizado del proveedor."
+            ),
+            (
+                "Subir una CSF en estado 'no localizado' o 'cancelado': "
+                "el cliente no puede contratarte mientras estés en ese "
+                "estado ante el SAT."
+            ),
         ),
     ),
     # Documentación Corporativa (Física)
@@ -232,6 +257,14 @@ _ONBOARDING_MORAL: tuple[OnboardingRequirement, ...] = (
             "Subir una CSF de más de 90 días de emisión.",
             "Subir una captura de pantalla en lugar del PDF oficial del SAT.",
             "Subir una versión vieja cuando ya tienes una actualización reciente.",
+            (
+                "Subir la CSF de una persona moral relacionada en lugar "
+                "de la tuya como persona física."
+            ),
+            (
+                "Subir una CSF cuyo nombre no coincide con la "
+                "identificación oficial que también está en el expediente."
+            ),
         ),
     ),
     # Registro REPSE
@@ -259,6 +292,15 @@ _ONBOARDING_MORAL: tuple[OnboardingRequirement, ...] = (
             "Subir solo el acuse de solicitud en lugar del acuse de registro autorizado.",
             "Subir una versión con folio que ya no corresponde porque hubo renovación posterior.",
             "Falta de coincidencia entre las actividades autorizadas y los servicios del contrato.",
+            (
+                "Subir una imagen o captura del portal REPSE en lugar "
+                "del PDF oficial con folio y firma electrónica de la "
+                "STPS."
+            ),
+            (
+                "Subir una versión cuyo registro está suspendido o "
+                "cancelado en el padrón REPSE."
+            ),
         ),
     ),
     OnboardingRequirement(
