@@ -629,4 +629,135 @@ Every recommendation here keeps the existing CheckWise architecture, the existin
 
 ---
 
+## 20. Transcript-Based Provider Feedback Update (2026-05-20)
+
+After Stages 1 and 2 shipped, a longer-form transcript review surfaced ten provider-side themes that re-order the roadmap. The themes are catalogued in detail in [../provider-feedback-transcript/PROVIDER_TRANSCRIPT_FEEDBACK_MAP.md](../provider-feedback-transcript/PROVIDER_TRANSCRIPT_FEEDBACK_MAP.md); this section is the part that affects the staged plan.
+
+### 20.1 What the transcript changes
+
+- **Priority shift.** Four items become P0 (one already-mitigated, three actionable): privacy notice (T1, gated on legal), XML decision (T6, document-only), period filter validation (T7), and confirmation that the compliance-% safety net (T8) already structurally prevents "upload anything → 100 %". This bumps the dashboard data-viz rework (former Stage 3) **behind** trust/safety/language polish.
+- **Existing assets discovered.** The `CorrectionRequestForm` component is already built (`frontend/components/checkwise/workspace/correction-request-form.tsx`) but unmounted; T2's lift is mostly wiring + a real backend endpoint, not a green-field build. Stage 2.5/2.7 can land it quickly.
+- **Multi-file is a UI/API problem, not a schema problem.** `Submission` already has `documents: list[Document]`. T4 becomes a Stage 2.7 implementation question, not an architectural one.
+- **Stage 1 BL-003 was the labels only.** The transcript exposes that the *messages* (the second sentence under each rule_code) still carry "Hash SHA-256", "extracción/OCR", "anomaly_codes". Stage 2.6 finishes that work.
+
+### 20.2 Revised staged roadmap
+
+The roadmap below supersedes the §15 sequence for anything not already shipped. Stages already on `main` (1 + 2) stay as-is.
+
+#### **Stage 2.5 — Provider trust and safety corrections** (NEW, P0 batch)
+
+- **Objective:** Close the safety/correctness gaps the transcript flagged before any new visual work begins.
+- **Why it matters:** Period filters today accept impossible inputs (e.g. `?year=1945`). REPSE 2026 is hardcoded on the provider-facing `entra-a-tu-espacio` route. XML acceptance is not documented as a decision. Each is small to fix; together they harden the trust baseline.
+- **Affected pages:** `/portal/calendar`, `/portal/dashboard`, `/portal/reports`, `/portal/upload`, `/portal/entra-a-tu-espacio`. Backend `portal.py` calendar + period endpoints.
+- **Likely files:**
+  - `backend/app/api/v1/portal.py` (add `Query(ge=2021, le=...)` on every `year` param; helper `validate_period_key`)
+  - `frontend/app/portal/calendar/page.tsx` (cap year selector)
+  - `frontend/app/portal/entra-a-tu-espacio/page.tsx` (replace literal "REPSE 2026")
+  - `frontend/components/marketing/*-section.tsx` (replace marketing literals — non-blocking)
+  - `docs/security/XML_UPLOAD_SECURITY_RECOMMENDATION.md` (new — documents the "block by default" decision)
+- **Backend impact:** Add a min/max `Query` constraint on every year-bearing endpoint + a `validate_period_key` helper called wherever a `period_key` arrives from user input. Add backend tests for the boundary cases (`?year=2020`, `?year=2021`, `?year=current+1`, `?year=current+2`).
+- **Frontend impact:** Year selectors cap at `[2021, currentYear + 1]`. Marketing + activation strings derive from `new Date().getFullYear()` or a `CHECKWISE_DEFAULT_YEAR` constant.
+- **Legal/security dependencies:** None code-side. The XML doc records a decision that needs Jose Pablo's go.
+- **Acceptance criteria:**
+  - Every period-bearing endpoint rejects `year < 2021` and `year > currentYear + 1` with a 422 + plain Spanish detail.
+  - No string `"REPSE 2026"` or `"2026"` literal remains in `/portal/*` user-facing copy.
+  - `XML_UPLOAD_SECURITY_RECOMMENDATION.md` lands in `docs/security/` recording the current PDF-only stance + the conditions under which XML would be reconsidered.
+  - Compliance-% safety net (T8) is verified with a regression test: a slot in `POSSIBLE_MISMATCH` is excluded from `RESOLVED_SLOT_STATES`; `compliance_pct` cannot reach 100 while any required slot is in an actionable-blocking state.
+- **Test plan:** Backend pytest on the period validators (4 boundary cases × N endpoints). Frontend snapshot of the year selector at the new lower bound. Manual verification that the activation route no longer shows a hardcoded year.
+- **Implementation risk:** Low. Each item is a bounded change with a clear test.
+
+#### **Stage 2.6 — Provider language simplification** (NEW, P1 batch)
+
+- **Objective:** Finish the BL-003 work by removing engineer dialect from the *messages* (not just the labels) and tightening the UI honesty around the classifier.
+- **Why it matters:** Providers still read "Hash SHA-256", "extracción/OCR", "anomaly_codes" inside the validation summary's second sentence and inside the intake wizard's helper text. The transcript also asks for explicit "el documento parece…" / "no podemos confirmar que sea el documento solicitado" framing when the classifier flags a possible mismatch.
+- **Affected pages:** `/portal/upload` (intake wizard + validation summary), `/portal/submissions/[id]` (timeline), admin/reviewer detail.
+- **Likely files:**
+  - `backend/app/services/prevalidation.py` (rewrite the `message` strings; surface a separate `technical_detail` field for admin-only consumption)
+  - `frontend/components/checkwise/validation-summary.tsx` (render the friendly message; hide the technical detail behind an admin-visible / QA-visible `<details>`)
+  - `frontend/components/checkwise/intake-wizard.tsx:1100-1240` (rewrite the "Calculamos hash SHA-256…" helper lines)
+  - `frontend/components/checkwise/confidence-badge.tsx` (audit copy)
+  - Possibly expand `frontend/lib/constants/validation.ts` with a `message_es` override map keyed by `rule_code`.
+- **Backend impact:** Modify validation message strings; optionally add a `technical_detail: str | None` field on `ValidationSignal` that frontend admin paths render and provider paths skip. Or keep the technical bits under a backend-only logger and just send the friendly version to the API.
+- **Frontend impact:** Update the validation summary to render `messageFor(ruleCode, signal)` (a small helper) and tuck the SHA-256 / anomaly-code details under an admin-only or reviewer-only disclosure. Rewrite the wizard helper text in plain Spanish.
+- **Legal/security dependencies:** None.
+- **Acceptance criteria:**
+  - The strings `"SHA-256"`, `"hash"`, `"OCR"`, `"extracción"`, `"pipeline"`, `"parser"`, `"anomaly"` never appear on the provider portal viewport.
+  - When the classifier flags `document_signals.mismatch_reason`, the provider UI surfaces "Posible discrepancia detectada · el documento parece…" with the mismatch reason as supporting copy.
+  - The reviewer / admin surfaces retain the technical detail (under a disclosure) so QA reproducibility is not lost.
+- **Test plan:** Frontend unit test asserts no banned string in the rendered validation summary. Backend snapshot of `prevalidate(...).message` for each rule. Visual QA on a seeded mismatched-document submission.
+- **Implementation risk:** Low (copy + a small `<details>` reorganization).
+
+#### **Stage 2.7 — Provider upload usability** (NEW, P1 batch — independent of Stage 2.5/2.6)
+
+- **Objective:** Cover the "multi-file per requirement" and "Solicitar corrección entry point" asks. Also expand `common_errors` to 5 bullets per priority requirement.
+- **Why it matters:** Today the wizard accepts one file; contract + annex requires two separate submissions. The existing `CorrectionRequestForm` is unmounted, so providers have no way to ask for an RFC / razón social fix without leaving the product.
+- **Affected pages:** `/portal/upload`, `/portal/entra-a-tu-espacio`, provider context bar (sitewide).
+- **Likely files (multi-file):**
+  - `backend/app/api/v1/portal.py:1453` (endpoint `files: list[UploadFile]` instead of `file: UploadFile`; loop storage + prevalidation per document)
+  - `backend/app/services/submission_service.py` (multi-doc submission write path)
+  - `frontend/components/checkwise/intake-wizard.tsx` (multi-file dropzone, per-file progress + status)
+- **Likely files (correction request):**
+  - Existing `frontend/components/checkwise/workspace/correction-request-form.tsx` mounted on the workspace identity card / provider profile area
+  - `frontend/lib/mock/corrections.ts` → real `frontend/lib/api/corrections.ts` + `POST /api/v1/portal/workspaces/{id}/correction-requests` backend endpoint
+  - New `correction_requests` table or `audit_events` row with admin notification
+- **Likely files (expanded rejection causes):**
+  - `backend/app/core/compliance_catalog.py` (expand each priority requirement's `common_errors` from 3 to 5)
+- **Backend impact:** New endpoint for correction requests; multi-file endpoint changes; multi-doc transaction discipline (atomic vs partial submit semantics — recommend atomic: all-or-nothing per submission).
+- **Frontend impact:** Multi-file UI redesign; small profile / context bar surface for the correction-request entry point.
+- **Legal/security dependencies:** Multi-file aggregate size limit must be enforced. Correction-request workflow needs an admin path to act on the request — confirm whether admin notification goes via Slack (existing pattern, see Stage 1 BL-008) or via a new admin tray.
+- **Acceptance criteria:**
+  - One requirement upload can include `[1, N]` files where N is bounded (recommend N ≤ 5) and total ≤ a per-submission cap (recommend 30 MB).
+  - A failed file fails the entire submission (atomic) and surfaces a per-file error list.
+  - The `CorrectionRequestForm` is reachable from the provider context bar with one click; a real submission persists to `audit_events` and produces an admin notification.
+  - The 5 priority onboarding requirements each show ≥ 5 plain-Spanish rejection-cause bullets in their "Antes de subir" list.
+- **Test plan:** Backend pytest for the multi-doc submission write path (success, partial-fail rollback, size limit). Frontend integration test mocking the multi-file dropzone. Visual QA on the correction-request flow.
+- **Implementation risk:** Medium. Multi-file changes the API contract; ship behind a `multi_file_upload` feature flag so we can roll back if needed.
+
+#### **Stage 2.8 — Privacy notice + correction-request backend (parallel track, gated on legal)**
+
+- **Objective:** Land the privacy notice acceptance UI + the real correction-request endpoint once Paco/Beko return the legal copy.
+- **Why it matters:** Privacy notice is a regulatory requirement before sharing provider/client info. Cannot ship without final copy.
+- **Affected pages:** `/activate`, `/login`, `/portal/entra-a-tu-espacio`, possibly `/`.
+- **Likely files:** New `frontend/components/marketing/privacy-notice-modal.tsx`; new `backend/app/api/v1/auth.py` accept-privacy endpoint; `accepted_privacy_notice_at` column on `users` or `provider_workspaces`.
+- **Legal/security dependency:** **Blocking** — Paco/Beko/legal copy.
+- **Acceptance criteria:** The user cannot proceed past activation without explicit acceptance; the acceptance is timestamped and audited.
+- **Implementation risk:** Low code-wise; high process-wise (legal copy).
+
+#### **Stage 3 — Dashboard clarity and data-viz rework** (unchanged in scope; reordered later)
+
+- **Objective:** F4 holistic data-viz redesign using the design-skill stack. (See §14 of this plan, untouched.)
+- **Why it matters:** The dashboard gauge does not explain *why* the user isn't at 100 %.
+- **Stage discipline:** Stage 3 begins only after Stages 2.5 + 2.6 are on `main`. The dashboard redesign benefits from a clean trust/language baseline.
+
+#### **Stage 4 — Reports simplification** (unchanged)
+
+#### **Stage 5 — Interactive calendar** (unchanged; thin slice first per the locked decision)
+
+#### **Stage 6 — Professional guided progress / gamification** (unchanged)
+
+### 20.3 Recommended first implementation batch after this update
+
+**Option A — Stage 2.5 first.** Pure safety/correctness/documentation work, no legal blockers, no design pass needed. Closes the four P0 items and produces a written security decision on XML. Highest trust gain per unit of effort.
+
+**Option B — Continue with Stage 3 dashboard.** Defensible only if you decide that the verified compliance-% safety net (T8) plus the existing dynamic-year frontend on the calendar already meet "safe enough." Even then, the period validation gap and the REPSE 2026 leak on `entra-a-tu-espacio` argue against jumping to Stage 3.
+
+**Option C — Split Stage 2.5 + Stage 2.6 into two PRs.**  
+- PR 1: period validation + REPSE 2026 cleanup + XML security doc (Stage 2.5).  
+- PR 2: timeline language rewrite + "el documento parece…" honesty pass (Stage 2.6).  
+Same total work, two cleanly reviewable surfaces.
+
+**Recommendation:** Option C. The two stages are conceptually independent (safety vs language), each PR is short enough to review in one sitting, and Option C lets us deploy Stage 2.5 immediately while Stage 2.6 is in review.
+
+### 20.4 What still needs your sign-off before any of this codes
+
+| Item | Decision needed |
+|---|---|
+| T1 — privacy notice | Final copy from Paco / Beko / legal. Plumbing can wait. |
+| T6 — XML | Confirm "block by default; reopen only with a specific need" — Stage 2.5 ships the doc recording your decision. |
+| T4 — multi-file UX | Confirm: contrato + anexo arrives as one Submission with N Documents, OR as N separate submissions? Recommendation: 1 Submission → N Documents. |
+| T5 — expanded rejection-cause copy | Optional: have Legal Shelf review the 5-bullet lists for the priority items before they ship. |
+| T8a — classifier accuracy | Confirm whether the manual-vs-CFDI misclassification warrants a dedicated track now, or stays strategic backlog. |
+
+---
+
 *End of provider experience improvement plan.*
