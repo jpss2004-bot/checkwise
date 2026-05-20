@@ -16,6 +16,8 @@ Decisions:
 
 from __future__ import annotations
 
+import hashlib
+import secrets
 import time
 from dataclasses import dataclass
 
@@ -47,6 +49,27 @@ def verify_password(plaintext: str, hashed: str | None) -> bool:
         # Malformed hash. Treat as a mismatch; the caller will return a
         # generic 401 so we don't leak hash corruption to the client.
         return False
+
+
+# ---------------------------------------------------------------------------
+# Password-reset tokens
+# ---------------------------------------------------------------------------
+
+
+def generate_password_reset_token() -> str:
+    """Create a high-entropy URL-safe token for one password reset."""
+    return secrets.token_urlsafe(32)
+
+
+def hash_password_reset_token(token: str) -> str:
+    """Hash reset tokens before persistence.
+
+    The raw token only lives in the emailed link. A database leak should
+    not give an attacker usable reset URLs.
+    """
+    if not token:
+        raise ValueError("reset token is empty")
+    return hashlib.sha256(token.encode("utf-8")).hexdigest()
 
 
 # ---------------------------------------------------------------------------

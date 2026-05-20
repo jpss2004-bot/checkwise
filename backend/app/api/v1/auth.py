@@ -26,25 +26,31 @@ The provider portal (``X-Workspace-Token``) is intentionally untouched
 from __future__ import annotations
 
 from collections.abc import Callable
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from typing import Annotated
+from urllib.parse import quote
 
 from fastapi import APIRouter, Depends, Header, HTTPException, status
 from pydantic import BaseModel, Field, field_validator
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
+from app.core.config import settings
 from app.db.session import get_db
-from app.models import Membership, User
+from app.models import Membership, PasswordResetToken, User
 from app.models.entities import utc_now
+from app.services.audit_log import add_audit_event
 from app.services.auth import (
     TokenClaims,
     TokenError,
     decode_access_token,
+    generate_password_reset_token,
     hash_password,
+    hash_password_reset_token,
     issue_access_token,
     verify_password,
 )
+from app.services.email_delivery import send_password_reset_email
 
 router = APIRouter(prefix="/auth", tags=["auth"])
 DbSession = Annotated[Session, Depends(get_db)]
@@ -101,6 +107,28 @@ class SetPasswordResponse(BaseModel):
     must_change_password: bool
 
 
+class ForgotPasswordRequest(BaseModel):
+    email: str = Field(..., min_length=3, max_length=255)
+
+    @field_validator("email")
+    @classmethod
+    def _norm_email(cls, value: str) -> str:
+        return _normalize_email(value)
+
+
+class ForgotPasswordResponse(BaseModel):
+    message: str
+
+
+class ResetPasswordRequest(BaseModel):
+    token: str = Field(..., min_length=20, max_length=256)
+    new_password: str = Field(..., min_length=12, max_length=128)
+
+
+class ResetPasswordResponse(BaseModel):
+    message: str
+
+
 class CurrentUser(BaseModel):
     """Hydrated request principal — what every protected endpoint sees."""
 
@@ -140,6 +168,12 @@ def _claims_from_header(authorization: str | None) -> TokenClaims:
         return decode_access_token(token)
     except TokenError as exc:
         raise HTTPException(status.HTTP_401_UNAUTHORIZED, detail=str(exc)) from exc
+
+
+def _as_utc(value: datetime) -> datetime:
+    if value.tzinfo is None:
+        return value.replace(tzinfo=UTC)
+    return value.astimezone(UTC)
 
 
 def get_current_user(
@@ -294,6 +328,143 @@ def login(payload: LoginRequest, db: DbSession) -> LoginResponse:
         organization_ids=org_ids,
         must_change_password=user.must_change_password,
     )
+
+
+@router.post(
+    "/forgot-password",
+    response_model=ForgotPasswordResponse,
+    status_code=status.HTTP_202_ACCEPTED,
+)
+def forgot_password(
+    payload: ForgotPasswordRequest,
+    db: DbSession,
+) -> ForgotPasswordResponse:
+    """Create a one-time reset link and email it when the account exists.
+
+    The response is intentionally generic for both known and unknown
+    emails so the endpoint cannot be used to enumerate users.
+    """
+    generic = ForgotPasswordResponse(
+        message=(
+            "Si el correo existe en CheckWise, enviaremos instrucciones "
+            "para restablecer la contraseña."
+        )
+    )
+
+    user = db.execute(
+        select(User).where(User.email == payload.email, User.status == "active")
+    ).scalar_one_or_none()
+    if user is None:
+        return generic
+
+    now = utc_now()
+    existing_tokens = (
+        db.execute(
+            select(PasswordResetToken).where(
+                PasswordResetToken.user_id == user.id,
+                PasswordResetToken.used_at.is_(None),
+            )
+        )
+        .scalars()
+        .all()
+    )
+    for token in existing_tokens:
+        token.used_at = now
+
+    raw_token = generate_password_reset_token()
+    reset_token = PasswordResetToken(
+        user_id=user.id,
+        email=user.email,
+        token_hash=hash_password_reset_token(raw_token),
+        expires_at=now + timedelta(minutes=settings.PASSWORD_RESET_EXPIRES_MINUTES),
+        delivery_status="pending",
+    )
+    db.add(reset_token)
+    db.flush()
+
+    reset_url = (
+        f"{settings.FRONTEND_BASE_URL.rstrip('/')}/reset-password"
+        f"?token={quote(raw_token, safe='')}"
+    )
+    delivery = send_password_reset_email(to_email=user.email, reset_url=reset_url)
+    reset_token.delivery_status = delivery.status
+    reset_token.delivery_error = delivery.error
+    add_audit_event(
+        db,
+        action="auth.password_reset_requested",
+        entity_type="user",
+        entity_id=user.id,
+        actor_type="system",
+        after={
+            "email": user.email,
+            "reset_token_id": reset_token.id,
+            "expires_at": reset_token.expires_at.isoformat(),
+            "delivery_status": delivery.status,
+        },
+    )
+    db.commit()
+
+    return generic
+
+
+@router.post("/reset-password", response_model=ResetPasswordResponse)
+def reset_password(
+    payload: ResetPasswordRequest,
+    db: DbSession,
+) -> ResetPasswordResponse:
+    token_hash = hash_password_reset_token(payload.token)
+    reset_token = db.execute(
+        select(PasswordResetToken).where(PasswordResetToken.token_hash == token_hash)
+    ).scalar_one_or_none()
+
+    if reset_token is None or reset_token.used_at is not None:
+        raise HTTPException(
+            status.HTTP_400_BAD_REQUEST,
+            detail="El enlace para restablecer la contraseña no es válido.",
+        )
+    if _as_utc(reset_token.expires_at) <= utc_now():
+        raise HTTPException(
+            status.HTTP_400_BAD_REQUEST,
+            detail="El enlace para restablecer la contraseña ya venció.",
+        )
+
+    user = db.get(User, reset_token.user_id)
+    if user is None or user.status != "active":
+        raise HTTPException(
+            status.HTTP_400_BAD_REQUEST,
+            detail="El enlace para restablecer la contraseña no es válido.",
+        )
+
+    now = utc_now()
+    user.password_hash = hash_password(payload.new_password)
+    user.must_change_password = False
+    reset_token.used_at = now
+
+    sibling_tokens = (
+        db.execute(
+            select(PasswordResetToken).where(
+                PasswordResetToken.user_id == user.id,
+                PasswordResetToken.used_at.is_(None),
+                PasswordResetToken.id != reset_token.id,
+            )
+        )
+        .scalars()
+        .all()
+    )
+    for sibling in sibling_tokens:
+        sibling.used_at = now
+
+    add_audit_event(
+        db,
+        action="auth.password_reset_completed",
+        entity_type="user",
+        entity_id=user.id,
+        actor_type="user",
+        actor_id=user.id,
+        after={"email": user.email, "reset_token_id": reset_token.id},
+    )
+    db.commit()
+    return ResetPasswordResponse(message="Contraseña restablecida correctamente.")
 
 
 @router.get("/me", response_model=CurrentUser)

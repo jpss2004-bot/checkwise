@@ -159,6 +159,14 @@ export default function LoginPage() {
                   autoComplete="current-password"
                 />
               </Field>
+              <div className="-mt-2 flex justify-end">
+                <Link
+                  href="/forgot-password"
+                  className="text-xs font-medium text-[color:var(--text-link)] hover:underline"
+                >
+                  Olvidé mi contraseña
+                </Link>
+              </div>
             </div>
 
             <Button

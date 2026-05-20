@@ -405,6 +405,33 @@ class User(TimestampMixin, Base):
     memberships: Mapped[list[Membership]] = relationship(
         back_populates="user", cascade="all, delete-orphan"
     )
+    password_reset_tokens: Mapped[list[PasswordResetToken]] = relationship(
+        back_populates="user", cascade="all, delete-orphan"
+    )
+
+
+class PasswordResetToken(TimestampMixin, Base):
+    """Single-use password reset token.
+
+    ``token_hash`` stores SHA-256(raw_token), never the raw emailed
+    token. ``email`` is denormalized so support/audit can understand
+    the request even if the user's email changes later.
+    """
+
+    __tablename__ = "password_reset_tokens"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=new_id)
+    user_id: Mapped[str] = mapped_column(ForeignKey("users.id"), nullable=False, index=True)
+    email: Mapped[str] = mapped_column(String(255), nullable=False, index=True)
+    token_hash: Mapped[str] = mapped_column(String(64), unique=True, nullable=False, index=True)
+    expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    used_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), index=True)
+    delivery_status: Mapped[str] = mapped_column(
+        String(20), default="pending", nullable=False
+    )
+    delivery_error: Mapped[str | None] = mapped_column(Text)
+
+    user: Mapped[User] = relationship(back_populates="password_reset_tokens")
 
 
 class Membership(TimestampMixin, Base):

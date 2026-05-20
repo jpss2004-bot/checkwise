@@ -44,6 +44,19 @@ class Settings(BaseSettings):
     AUTH_JWT_ALGORITHM: str = "HS256"
     AUTH_JWT_EXPIRES_MINUTES: int = 60 * 24
     AUTH_BCRYPT_ROUNDS: int = 12
+    FRONTEND_BASE_URL: str = "http://localhost:3000"
+    PASSWORD_RESET_EXPIRES_MINUTES: int = 60
+
+    # Password-reset email delivery. Configure these with the SMTP
+    # credentials for the mailbox that should send reset messages.
+    SMTP_HOST: str = ""
+    SMTP_PORT: int = 587
+    SMTP_USERNAME: str = ""
+    SMTP_PASSWORD: str = ""
+    SMTP_FROM_EMAIL: str = ""
+    SMTP_FROM_NAME: str = "CheckWise"
+    SMTP_USE_TLS: bool = True
+    SMTP_USE_SSL: bool = False
 
     # Portal session cookie (CheckWise 1.7). Provider portal moves off
     # localStorage and onto an httpOnly signed cookie. Cookie is

@@ -119,7 +119,7 @@ export function inferFromEmail(email: string): EmailInference {
  * Validate a password against the design system's rules.
  *
  * Rules:
- *   - At least 10 characters
+ *   - At least 12 characters
  *   - At least one uppercase letter
  *   - At least one lowercase letter
  *   - At least one number
@@ -132,7 +132,7 @@ export interface PasswordRule {
 }
 
 export const PASSWORD_RULES: PasswordRule[] = [
-  { label: "Mínimo 10 caracteres", test: (v) => v.length >= 10 },
+  { label: "Mínimo 12 caracteres", test: (v) => v.length >= 12 },
   { label: "Una letra mayúscula", test: (v) => /[A-Z]/.test(v) },
   { label: "Una letra minúscula", test: (v) => /[a-z]/.test(v) },
   { label: "Al menos un número", test: (v) => /\d/.test(v) },

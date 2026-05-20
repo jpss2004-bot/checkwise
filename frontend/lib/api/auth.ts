@@ -95,6 +95,29 @@ export async function setPassword(
   });
 }
 
+type AuthMessageResponse = {
+  message: string;
+};
+
+export async function requestPasswordReset(
+  email: string,
+): Promise<AuthMessageResponse> {
+  return await fetchJson<AuthMessageResponse>("/api/v1/auth/forgot-password", {
+    method: "POST",
+    body: JSON.stringify({ email }),
+  });
+}
+
+export async function resetPassword(
+  token: string,
+  newPassword: string,
+): Promise<AuthMessageResponse> {
+  return await fetchJson<AuthMessageResponse>("/api/v1/auth/reset-password", {
+    method: "POST",
+    body: JSON.stringify({ token, new_password: newPassword }),
+  });
+}
+
 type EnterResponse = {
   workspace_id: string;
   persona_type: string;

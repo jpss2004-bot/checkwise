@@ -2,12 +2,14 @@ from __future__ import annotations
 
 import time
 from collections.abc import Generator
+from datetime import timedelta
+from types import SimpleNamespace
 from typing import Annotated
 
 import pytest
 from fastapi import Depends, FastAPI
 from fastapi.testclient import TestClient
-from sqlalchemy import create_engine
+from sqlalchemy import create_engine, select
 from sqlalchemy.orm import Session, sessionmaker
 from sqlalchemy.pool import StaticPool
 
@@ -24,12 +26,15 @@ from app.main import app
 from app.models import (
     Membership,
     Organization,
+    PasswordResetToken,
     User,
     entities,  # noqa: F401
 )
+from app.models.entities import utc_now
 from app.services.auth import (
     decode_access_token,
     hash_password,
+    hash_password_reset_token,
     issue_access_token,
     verify_password,
 )
@@ -482,3 +487,159 @@ def test_set_password_rejects_short_password(
         headers={"Authorization": f"Bearer {token}"},
     )
     assert response.status_code == 422
+
+
+# ---------------------------------------------------------------------------
+# Forgot password + reset link flow
+# ---------------------------------------------------------------------------
+
+
+def test_forgot_password_creates_token_and_sends_generic_response(
+    api_client: TestClient, db_factory, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    user_id, _, _ = _seed_user(db_factory, email="reset@legalshelf.mx")
+    sent: list[dict[str, str]] = []
+
+    def fake_send_password_reset_email(*, to_email: str, reset_url: str):
+        sent.append({"to_email": to_email, "reset_url": reset_url})
+        return SimpleNamespace(status="sent", error=None)
+
+    monkeypatch.setattr(
+        "app.api.v1.auth.send_password_reset_email", fake_send_password_reset_email
+    )
+
+    response = api_client.post(
+        "/api/v1/auth/forgot-password", json={"email": "RESET@LegalShelf.MX"}
+    )
+    assert response.status_code == 202, response.text
+    assert "Si el correo existe" in response.json()["message"]
+    assert sent and sent[0]["to_email"] == "reset@legalshelf.mx"
+    assert "/reset-password?token=" in sent[0]["reset_url"]
+
+    db = db_factory()
+    try:
+        token = db.execute(
+            select(PasswordResetToken).where(PasswordResetToken.user_id == user_id)
+        ).scalar_one()
+        assert token.email == "reset@legalshelf.mx"
+        assert token.token_hash not in sent[0]["reset_url"]
+        assert token.delivery_status == "sent"
+        assert token.used_at is None
+    finally:
+        db.close()
+
+
+def test_forgot_password_unknown_email_is_generic_and_creates_no_token(
+    api_client: TestClient, db_factory, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    sent: list[dict[str, str]] = []
+
+    def fake_send_password_reset_email(*, to_email: str, reset_url: str):
+        sent.append({"to_email": to_email, "reset_url": reset_url})
+        return SimpleNamespace(status="sent", error=None)
+
+    monkeypatch.setattr(
+        "app.api.v1.auth.send_password_reset_email", fake_send_password_reset_email
+    )
+
+    response = api_client.post(
+        "/api/v1/auth/forgot-password", json={"email": "ghost@legalshelf.mx"}
+    )
+    assert response.status_code == 202, response.text
+    assert "Si el correo existe" in response.json()["message"]
+    assert sent == []
+
+    db = db_factory()
+    try:
+        total = db.scalar(select(__import__("sqlalchemy").func.count(PasswordResetToken.id)))
+        assert total == 0
+    finally:
+        db.close()
+
+
+def test_reset_password_updates_password_and_consumes_token(
+    api_client: TestClient, db_factory
+) -> None:
+    user_id, _, old_password = _seed_user(
+        db_factory,
+        email="consume@legalshelf.mx",
+        password="OldPassword!2026",
+        status="active",
+    )
+    raw_token = "reset-token-for-test-1234567890"
+    db = db_factory()
+    try:
+        token = PasswordResetToken(
+            user_id=user_id,
+            email="consume@legalshelf.mx",
+            token_hash=hash_password_reset_token(raw_token),
+            expires_at=utc_now() + timedelta(minutes=30),
+            delivery_status="sent",
+        )
+        db.add(token)
+        db.commit()
+    finally:
+        db.close()
+
+    new_password = "NewPassword!2026"
+    response = api_client.post(
+        "/api/v1/auth/reset-password",
+        json={"token": raw_token, "new_password": new_password},
+    )
+    assert response.status_code == 200, response.text
+
+    old_login = api_client.post(
+        "/api/v1/auth/login",
+        json={"email": "consume@legalshelf.mx", "password": old_password},
+    )
+    assert old_login.status_code == 401
+    new_login = api_client.post(
+        "/api/v1/auth/login",
+        json={"email": "consume@legalshelf.mx", "password": new_password},
+    )
+    assert new_login.status_code == 200, new_login.text
+
+    reuse = api_client.post(
+        "/api/v1/auth/reset-password",
+        json={"token": raw_token, "new_password": "AnotherPassword!2026"},
+    )
+    assert reuse.status_code == 400
+
+    db = db_factory()
+    try:
+        token = db.execute(
+            select(PasswordResetToken).where(
+                PasswordResetToken.token_hash == hash_password_reset_token(raw_token)
+            )
+        ).scalar_one()
+        assert token.used_at is not None
+    finally:
+        db.close()
+
+
+def test_reset_password_rejects_expired_token(
+    api_client: TestClient, db_factory
+) -> None:
+    user_id, _, _ = _seed_user(db_factory, email="expired@legalshelf.mx")
+    raw_token = "expired-reset-token-for-test-123456"
+    db = db_factory()
+    try:
+        db.add(
+            PasswordResetToken(
+                user_id=user_id,
+                email="expired@legalshelf.mx",
+                token_hash=hash_password_reset_token(raw_token),
+                expires_at=utc_now() - timedelta(minutes=1),
+                delivery_status="sent",
+            )
+        )
+        db.commit()
+    finally:
+        db.close()
+
+    response = api_client.post(
+        "/api/v1/auth/reset-password",
+        json={"token": raw_token, "new_password": "NewPassword!2026"},
+    )
+    assert response.status_code == 400
+    assert "venció" in response.json()["detail"]
