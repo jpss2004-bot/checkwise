@@ -128,7 +128,88 @@ from app.services.submission_service import (
     get_or_create_institution,
 )
 
-router = APIRouter(prefix="/portal", tags=["portal"])
+_MUTATING_METHODS: Final[frozenset[str]] = frozenset(
+    {"POST", "PUT", "PATCH", "DELETE"}
+)
+
+
+def enforce_portal_csrf(request: Request) -> None:
+    """CSRF guard for cookie-authenticated mutating portal requests.
+
+    Production cookies are issued with ``SameSite=None; Secure`` because
+    the frontend (Vercel) and the API (Render) live on different eTLD+1
+    origins. That gives the browser the green light to attach the
+    portal cookie to cross-site form POSTs unless we reject them at the
+    server. This dependency does that:
+
+      * Only mutating methods are checked. Safe methods (GET, HEAD,
+        OPTIONS) are no-ops.
+      * Bearer-token authenticated requests bypass the check — they do
+        not rely on ambient cookie auth, so CSRF is not in scope.
+      * Requests that don't carry the portal cookie also bypass the
+        check; they will be rejected later by the workspace resolver
+        with 401 if they were trying to authenticate.
+      * For cookie-authenticated mutating requests, the ``Origin``
+        header (or ``Referer`` as fallback) must be in the
+        configured allowlist
+        (``settings.allowed_csrf_origins``).
+
+    Fail-closed in non-local: a missing Origin/Referer is rejected.
+    In local, a missing Origin/Referer is permitted so test clients and
+    curl one-shots stay ergonomic.
+    """
+    if request.method.upper() not in _MUTATING_METHODS:
+        return
+
+    # Bearer-token requests are not cookie-authenticated; CSRF is moot.
+    authorization = request.headers.get("authorization", "")
+    if authorization.lower().startswith("bearer "):
+        return
+
+    cookie_token = request.cookies.get(settings.PORTAL_SESSION_COOKIE_NAME, "")
+    if not cookie_token:
+        return  # not relying on portal cookie → resolver will 401
+
+    origin = request.headers.get("origin")
+    referer = request.headers.get("referer")
+    allowed = settings.allowed_csrf_origins
+
+    if origin:
+        if origin.rstrip("/") in allowed:
+            return
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Origin no permitido para esta sesión.",
+        )
+
+    if referer:
+        # Compare scheme://host[:port] only.
+        from urllib.parse import urlparse
+
+        parsed = urlparse(referer)
+        if parsed.scheme and parsed.netloc:
+            referer_origin = f"{parsed.scheme}://{parsed.netloc}".rstrip("/")
+            if referer_origin in allowed:
+                return
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Referer no permitido para esta sesión.",
+        )
+
+    # No Origin and no Referer.
+    if settings.is_local_env:
+        return
+    raise HTTPException(
+        status_code=status.HTTP_403_FORBIDDEN,
+        detail="Falta cabecera Origin/Referer para esta sesión.",
+    )
+
+
+router = APIRouter(
+    prefix="/portal",
+    tags=["portal"],
+    dependencies=[Depends(enforce_portal_csrf)],
+)
 DbSession = Annotated[Session, Depends(get_db)]
 
 

@@ -14,16 +14,25 @@ import tempfile
 from pathlib import Path
 from typing import Annotated, Any
 
-from fastapi import APIRouter, File, Form, HTTPException, UploadFile
+from fastapi import APIRouter, Depends, File, Form, HTTPException, Request, UploadFile
 
+from app.core.config import settings
 from app.core.metadata_rules import UnknownDocumentTypeError
+from app.core.security_gates import require_local_or_internal_admin
 from tools.test_pdf_metadata_dry_run import build_pdf_metadata_dry_run_payload
 
-router = APIRouter(prefix="/metadata-dry-run", tags=["metadata-dry-run"])
+# Trust boundary: this router is gated at the prefix. Anonymous in local
+# only; outside local the caller must present an internal_admin JWT.
+router = APIRouter(
+    prefix="/metadata-dry-run",
+    tags=["metadata-dry-run"],
+    dependencies=[Depends(require_local_or_internal_admin)],
+)
 
 
 @router.post("/pdf")
 async def create_pdf_metadata_dry_run(
+    request: Request,
     file: Annotated[UploadFile, File()],
     document_type_code: Annotated[str, Form(min_length=1)],
     context_json: Annotated[str | None, Form()] = None,
@@ -43,7 +52,22 @@ async def create_pdf_metadata_dry_run(
     context.setdefault("uploaded_filename", original_filename)
     context.setdefault("upload_content_type", file.content_type)
 
-    content = await file.read()
+    # Bound memory before reading the upload. If the client advertised a
+    # Content-Length larger than MAX_UPLOAD_SIZE_BYTES, refuse immediately;
+    # otherwise read with the same cap and reject mid-stream.
+    max_bytes = settings.MAX_UPLOAD_SIZE_BYTES
+    advertised = request.headers.get("content-length")
+    if advertised and advertised.isdigit() and int(advertised) > max_bytes:
+        raise HTTPException(
+            status_code=413,
+            detail=f"Upload exceeds {max_bytes} bytes.",
+        )
+    content = await file.read(max_bytes + 1)
+    if len(content) > max_bytes:
+        raise HTTPException(
+            status_code=413,
+            detail=f"Upload exceeds {max_bytes} bytes.",
+        )
     if not content:
         raise HTTPException(
             status_code=422,

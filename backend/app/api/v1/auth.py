@@ -32,12 +32,17 @@ from datetime import UTC, datetime, timedelta
 from typing import Annotated
 from urllib.parse import quote
 
-from fastapi import APIRouter, Depends, Header, HTTPException, status
+from fastapi import APIRouter, Depends, Header, HTTPException, Request, status
 from pydantic import BaseModel, Field, field_validator
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.core.config import settings
+from app.core.rate_limit import (
+    forgot_password_limiter,
+    hash_identifier,
+    login_limiter,
+)
 from app.db.session import get_db
 from app.models import Membership, PasswordResetToken, User
 from app.models.entities import utc_now
@@ -183,6 +188,76 @@ def _email_log_hash(email: str) -> str:
     return hashlib.sha256(email.encode("utf-8")).hexdigest()[:12]
 
 
+def _client_ip(request: Request) -> str:
+    """Best-effort IP. Trusts the first hop of `X-Forwarded-For` because
+    Render terminates TLS in front of uvicorn. Falls back to the direct
+    socket peer. Used for rate-limit bucketing only — never authoritative
+    for authorization."""
+    xff = request.headers.get("x-forwarded-for")
+    if xff:
+        first = xff.split(",")[0].strip()
+        if first:
+            return first
+    real = request.headers.get("x-real-ip")
+    if real:
+        return real.strip()
+    if request.client and request.client.host:
+        return request.client.host
+    return "0.0.0.0"
+
+
+_RATE_LIMITED_DETAIL = (
+    "Demasiados intentos. Espera unos minutos antes de volver a intentar."
+)
+
+
+def _enforce_login_rate_limit(request: Request, email: str) -> None:
+    """Sliding-window cap on /auth/login. Buckets are (ip, email) so a
+    legitimate user typing a typo at a busy IP cannot lock another user
+    out, but a credential-stuffing run from one IP across many emails
+    still trips the IP-only bucket below."""
+    limit = settings.AUTH_LOGIN_RATE_LIMIT_PER_MINUTE
+    if limit <= 0:
+        return
+    ip = _client_ip(request)
+    ip_bucket = f"login:ip:{hash_identifier(ip)}"
+    email_bucket = f"login:email:{hash_identifier(email)}"
+    # Per-IP limit is more permissive (corporate NATs share IPs); the
+    # per-(ip,email) pair gets the tighter cap.
+    ok_ip = login_limiter.check(ip_bucket, limit=limit * 3, window_seconds=60)
+    ok_email = login_limiter.check(
+        f"login:ip-email:{hash_identifier(ip)}:{hash_identifier(email)}",
+        limit=limit,
+        window_seconds=60,
+    )
+    _ = email_bucket  # reserved for a future cross-IP per-email cap
+    if not ok_ip or not ok_email:
+        raise HTTPException(
+            status.HTTP_429_TOO_MANY_REQUESTS, detail=_RATE_LIMITED_DETAIL
+        )
+
+
+def _enforce_forgot_password_rate_limit(request: Request, email: str) -> None:
+    """Tight cap on /auth/forgot-password to avoid reset-link enumeration
+    + mail-bombing. Lower volume than login because resets are rarer."""
+    limit = settings.AUTH_FORGOT_PASSWORD_RATE_LIMIT_PER_HOUR
+    if limit <= 0:
+        return
+    ip = _client_ip(request)
+    ip_bucket = f"forgot:ip:{hash_identifier(ip)}"
+    email_bucket = f"forgot:email:{hash_identifier(email)}"
+    ok_ip = forgot_password_limiter.check(
+        ip_bucket, limit=limit * 2, window_seconds=3600
+    )
+    ok_email = forgot_password_limiter.check(
+        email_bucket, limit=limit, window_seconds=3600
+    )
+    if not ok_ip or not ok_email:
+        raise HTTPException(
+            status.HTTP_429_TOO_MANY_REQUESTS, detail=_RATE_LIMITED_DETAIL
+        )
+
+
 def get_current_user(
     db: DbSession,
     authorization: Annotated[str | None, Header()] = None,
@@ -286,7 +361,10 @@ def require_org_role(role: str) -> Callable[..., CurrentUser]:
 
 
 @router.post("/login", response_model=LoginResponse)
-def login(payload: LoginRequest, db: DbSession) -> LoginResponse:
+def login(payload: LoginRequest, request: Request, db: DbSession) -> LoginResponse:
+    # Throttle before doing any DB work so a brute-force flood can't
+    # ramp bcrypt CPU into the ground.
+    _enforce_login_rate_limit(request, payload.email)
     user = db.execute(
         select(User).where(User.email == payload.email)
     ).scalar_one_or_none()
@@ -344,6 +422,7 @@ def login(payload: LoginRequest, db: DbSession) -> LoginResponse:
 )
 def forgot_password(
     payload: ForgotPasswordRequest,
+    request: Request,
     db: DbSession,
 ) -> ForgotPasswordResponse:
     """Create a one-time reset link and email it when the account exists.
@@ -351,6 +430,10 @@ def forgot_password(
     The response is intentionally generic for both known and unknown
     emails so the endpoint cannot be used to enumerate users.
     """
+    # Cap reset-link generation per IP + per email to make mass
+    # enumeration and inbox-bombing impractical without blocking
+    # legitimate single-account recovery.
+    _enforce_forgot_password_rate_limit(request, payload.email)
     generic = ForgotPasswordResponse(
         message=(
             "Si el correo existe en CheckWise, enviaremos instrucciones "

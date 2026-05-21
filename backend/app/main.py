@@ -14,13 +14,17 @@ log = logging.getLogger("checkwise.unhandled")
 
 
 def create_app() -> FastAPI:
+    # /docs, /redoc, /openapi.json leak the entire API surface to
+    # anonymous callers. Off by default outside `CHECKWISE_ENV=local`;
+    # ENABLE_API_DOCS=true is the explicit opt-in for any other tier.
+    docs_on = settings.api_docs_enabled
     app = FastAPI(
         title=settings.PROJECT_NAME,
         version=settings.API_VERSION,
         description="API base para cumplimiento documental REPSE de CheckWise.",
-        openapi_url="/openapi.json",
-        docs_url="/docs",
-        redoc_url="/redoc",
+        openapi_url="/openapi.json" if docs_on else None,
+        docs_url="/docs" if docs_on else None,
+        redoc_url="/redoc" if docs_on else None,
     )
 
     allowed_origins = settings.cors_origins_list
@@ -62,7 +66,9 @@ def create_app() -> FastAPI:
 
     @app.api_route("/", methods=["GET", "HEAD"], include_in_schema=False)
     def root() -> RedirectResponse:
-        return RedirectResponse(url="/docs")
+        # When docs are disabled (prod default) point the bare-host hit
+        # at /health instead of a 404'd /docs.
+        return RedirectResponse(url="/docs" if docs_on else "/health")
 
     @app.get("/health", tags=["system"])
     def health() -> dict[str, str]:

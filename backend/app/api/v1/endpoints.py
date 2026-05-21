@@ -30,6 +30,7 @@ from app.core.catalogs import (
     REQUIREMENT_EXAMPLES,
     VALIDATION_RULES,
 )
+from app.core.security_gates import require_local_or_internal_admin
 from app.db.session import get_db
 from app.schemas.catalogs import CatalogResponse
 from app.schemas.submissions import SubmissionResponse
@@ -82,14 +83,19 @@ def get_catalogs() -> CatalogResponse:
     status_code=status.HTTP_202_ACCEPTED,
     tags=["submissions"],
     deprecated=True,
-    summary="Legacy native-intake submission (deprecated)",
+    summary="Legacy native-intake submission (deprecated, gated)",
     description=(
         "DEPRECATED. Trusts browser-posted tenant identity (client / vendor / "
         "contract / RFC). Kept for the importer, dev workflows, and existing "
         "test coverage. For tenant-safe provider uploads use "
         "`POST /api/v1/portal/workspaces/{workspace_id}/submissions`, which "
-        "derives tenant identity from the authenticated workspace."
+        "derives tenant identity from the authenticated workspace. "
+        "Outside `CHECKWISE_ENV=local` this endpoint requires the "
+        "`internal_admin` role on a bearer JWT — it is never anonymous "
+        "in production."
     ),
+    # Trust boundary: anonymous in local only; internal_admin everywhere else.
+    dependencies=[Depends(require_local_or_internal_admin)],
 )
 async def create_submission(
     client_name: Annotated[str, Form(min_length=2)],

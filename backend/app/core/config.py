@@ -125,6 +125,27 @@ class Settings(BaseSettings):
     # rollback is a flag flip rather than a code revert.
     RECURRING_CATALOG_V2: bool = False
 
+    # Security hardening (2026-05-21).
+    # ENABLE_API_DOCS: opt-in switch for /docs, /redoc, /openapi.json.
+    #   * unset (None) → enabled in local, disabled everywhere else.
+    #   * "true"  → forced ON (any environment).
+    #   * "false" → forced OFF (any environment).
+    # EXPOSE_LEGACY_SUBMISSIONS / EXPOSE_METADATA_DRY_RUN: hard kill switches
+    # that turn the legacy unauthenticated upload endpoints off entirely.
+    # When False (default outside local), the endpoints still mount but require
+    # `internal_admin` — set these to False to remove them from the schema
+    # completely (the routers do not register the route).
+    ENABLE_API_DOCS: str = ""
+    EXPOSE_LEGACY_SUBMISSIONS: bool = True
+    EXPOSE_METADATA_DRY_RUN: bool = True
+
+    # Auth rate-limit (in-memory sliding window). Conservative defaults
+    # — protect against credential-stuffing and reset-link abuse without
+    # locking out legitimate users. Move to Redis before scaling
+    # horizontally (state would be per-worker today).
+    AUTH_LOGIN_RATE_LIMIT_PER_MINUTE: int = 10
+    AUTH_FORGOT_PASSWORD_RATE_LIMIT_PER_HOUR: int = 5
+
     model_config = SettingsConfigDict(env_file=".env", env_file_encoding="utf-8", extra="ignore")
 
     @property
@@ -136,6 +157,44 @@ class Settings(BaseSettings):
         return {
             ext.strip().lower() for ext in self.ALLOWED_FILE_EXTENSIONS.split(",") if ext.strip()
         }
+
+    @property
+    def is_local_env(self) -> bool:
+        """True iff the deploy is the local-dev environment.
+
+        The single source of truth for "is this production-grade?".
+        Used by the security middleware, the API-doc gate, and the
+        upload-endpoint gates.
+        """
+        return self.CHECKWISE_ENV == "local"
+
+    @property
+    def api_docs_enabled(self) -> bool:
+        """Whether FastAPI's /docs, /redoc, /openapi.json should be served.
+
+        Default: enabled only in local. Set ``ENABLE_API_DOCS=true`` to
+        opt in (e.g. a temporary staging tier); ``ENABLE_API_DOCS=false``
+        forces off even in local.
+        """
+        flag = (self.ENABLE_API_DOCS or "").strip().lower()
+        if flag in {"1", "true", "yes", "on"}:
+            return True
+        if flag in {"0", "false", "no", "off"}:
+            return False
+        return self.is_local_env
+
+    @property
+    def allowed_csrf_origins(self) -> set[str]:
+        """Origins permitted to issue cookie-authenticated mutating requests.
+
+        Sourced from ``CORS_ORIGINS`` plus ``FRONTEND_BASE_URL`` so the
+        portal's own UI is always in the set. Bearer-token requests
+        bypass this check (see ``portal.enforce_portal_csrf``).
+        """
+        origins = {o.rstrip("/") for o in self.cors_origins_list if o}
+        if self.FRONTEND_BASE_URL:
+            origins.add(self.FRONTEND_BASE_URL.rstrip("/"))
+        return origins
 
     @property
     def cookie_secure(self) -> bool:
