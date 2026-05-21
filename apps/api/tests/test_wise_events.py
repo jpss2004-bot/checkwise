@@ -203,6 +203,7 @@ def test_wise_event_accepts_all_known_event_types(api_client: TestClient) -> Non
         "wise.collapsed",
         "wise.suggestion_clicked",
         "wise.suggestion_dismissed",
+        "wise.question_asked",
     }
     for event_type in expected:
         response = api_client.post(

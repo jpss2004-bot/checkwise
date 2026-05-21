@@ -2994,6 +2994,12 @@ _WISE_ALLOWED_EVENT_TYPES: Final[frozenset[str]] = frozenset(
         "wise.collapsed",
         "wise.suggestion_clicked",
         "wise.suggestion_dismissed",
+        # Phase 2.a (2026-05-21): the chat composer fires
+        # ``wise.question_asked`` every time the user submits a
+        # free-text prompt or a quick-question chip. ``payload``
+        # carries ``{audience, intent, prompt}`` so we can compute
+        # which intents earn the most engagement.
+        "wise.question_asked",
     }
 )
 
