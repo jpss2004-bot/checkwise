@@ -78,10 +78,6 @@ function flattenCalendarPayload(payload: CalendarPayload): CalendarEntry[] {
           anatomy: item.anatomy ?? "",
           where_to_obtain: item.where_to_obtain ?? "",
           common_errors: item.common_errors ?? [],
-          // Session 3 (2026-05-21) — catalog v2 alternatives.
-          // ``?? []`` keeps v1 callers safe when the backend hasn't
-          // rolled out yet (e.g. testing against a stale staging).
-          accepts_documents: item.accepts_documents ?? [],
         });
       }
     }
@@ -505,42 +501,12 @@ function EventDrawer({
             </p>
           </div>
 
-          {/* Session 3 (2026-05-21) — catalog v2 fan-out. A v2 row
-              carries one ``accepts_documents`` entry per alternative
-              doc type (e.g. comprobante bancario / CFDI / cédula /
-              resumen for IMSS monthly). Render one disclosure per
-              entry so the provider sees first-upload guidance for
-              every accepted alternative independently. v1 rows have
-              ``accepts_documents=[]`` and keep the legacy single
-              disclosure unchanged. */}
-          {event.accepts_documents.length > 0 ? (
-            <div className="space-y-2">
-              <p className="font-mono text-[10px] uppercase tracking-wide text-[color:var(--text-tertiary)]">
-                Documentos aceptados
-              </p>
-              <p className="text-[12px] text-[color:var(--text-secondary)]">
-                Esta obligación se satisface con cualquiera de los siguientes
-                comprobantes. Sube el que tengas a la mano — el calendario
-                marca la entrega como recibida en cuanto llega uno.
-              </p>
-              {event.accepts_documents.map((doc) => (
-                <DocumentGuidanceDisclosure
-                  key={doc.name}
-                  anatomy={doc.anatomy}
-                  where_to_obtain={doc.where_to_obtain}
-                  common_errors={doc.common_errors}
-                  summary_label={`Acerca de ${doc.name}`}
-                />
-              ))}
-            </div>
-          ) : (
-            <DocumentGuidanceDisclosure
-              anatomy={event.anatomy}
-              where_to_obtain={event.where_to_obtain}
-              common_errors={event.common_errors}
-              summary_label="Acerca de este comprobante"
-            />
-          )}
+          <DocumentGuidanceDisclosure
+            anatomy={event.anatomy}
+            where_to_obtain={event.where_to_obtain}
+            common_errors={event.common_errors}
+            summary_label="Acerca de este comprobante"
+          />
 
           {event.submission_id && (
             <div className="flex items-start gap-2 rounded-md border border-[color:var(--border-subtle)] bg-[color:var(--surface-sunken)] px-3 py-2">
