@@ -4,6 +4,7 @@ import { useEffect, useState } from "react";
 import Link from "next/link";
 import {
   ArrowRight,
+  Bell,
   Buildings,
   CalendarBlank,
   CheckCircle,
@@ -31,10 +32,12 @@ import { ClientShell } from "../_shell";
 import {
   getClientMe,
   getClientOverview,
+  listClientNotifications,
   listClientActivity,
   listClientSubmissions,
   type ClientActivityItem,
   type ClientMe,
+  type ClientNotificationItem,
   type ClientOverview,
   type ClientSubmissionItem,
 } from "@/lib/api/client";
@@ -53,6 +56,8 @@ export default function ClientDashboardPage() {
   const [overview, setOverview] = useState<ClientOverview | null>(null);
   const [submissions, setSubmissions] = useState<ClientSubmissionItem[]>([]);
   const [activity, setActivity] = useState<ClientActivityItem[]>([]);
+  const [notifications, setNotifications] = useState<ClientNotificationItem[]>([]);
+  const [unreadCount, setUnreadCount] = useState(0);
   const [clientId, setClientId] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
 
@@ -82,12 +87,15 @@ export default function ClientDashboardPage() {
       getClientOverview(params),
       listClientSubmissions({ ...(params ?? {}), limit: 6 }),
       listClientActivity({ ...(params ?? {}), limit: 8 }),
+      listClientNotifications({ ...(params ?? {}), limit: 5 }),
     ])
-      .then(([ov, subs, act]) => {
+      .then(([ov, subs, act, notes]) => {
         if (cancelled) return;
         setOverview(ov);
         setSubmissions(subs.items);
         setActivity(act.items);
+        setNotifications(notes.items);
+        setUnreadCount(notes.unread_count);
       })
       .catch((err: unknown) => {
         if (cancelled) return;
@@ -128,6 +136,7 @@ export default function ClientDashboardPage() {
               <RecentSubmissionsCard rows={submissions} />
             </div>
             <div className="space-y-5">
+              <NotificationCard rows={notifications} unreadCount={unreadCount} />
               <QuickLinks />
               <RecentActivityCard rows={activity} />
             </div>
@@ -517,6 +526,67 @@ function StatusPill({ status }: { status: string }) {
 
 // ─── Quick links ─────────────────────────────────────────────────
 
+function NotificationCard({
+  rows,
+  unreadCount,
+}: {
+  rows: ClientNotificationItem[];
+  unreadCount: number;
+}) {
+  return (
+    <Surface
+      title="Novedades"
+      icon={Bell}
+      actions={
+        <Link
+          href="/client/notifications"
+          className="text-[11px] font-medium text-[color:var(--text-link)] hover:underline"
+        >
+          Ver todas
+        </Link>
+      }
+    >
+      {rows.length === 0 ? (
+        <EmptyState
+          icon={Bell}
+          title="Sin novedades"
+          description="Cuando un proveedor suba documentos o haya avances, apareceran aqui."
+        />
+      ) : (
+        <ul className="space-y-3">
+          {rows.slice(0, 5).map((row) => (
+            <li key={row.id} className="flex items-start gap-3">
+              <span
+                aria-hidden="true"
+                className={
+                  "mt-1.5 h-2 w-2 shrink-0 rounded-full " +
+                  (row.read_at ? "bg-[color:var(--border-subtle)]" : "bg-[color:var(--text-teal)]")
+                }
+              />
+              <div className="min-w-0 flex-1">
+                <p className="truncate text-[12px] font-medium text-[color:var(--text-primary)]">
+                  {row.title}
+                </p>
+                <p className="mt-0.5 line-clamp-2 text-[11px] text-[color:var(--text-secondary)]">
+                  {row.body}
+                </p>
+                <p className="mt-1 font-mono text-[10px] text-[color:var(--text-tertiary)]">
+                  {row.vendor_name ?? "Cliente"} · {timeAgo(row.created_at)}
+                </p>
+              </div>
+            </li>
+          ))}
+        </ul>
+      )}
+      {unreadCount > 0 ? (
+        <p className="mt-3 rounded-md bg-[color:var(--surface-teal-muted)] px-2 py-1.5 text-[11px] font-medium text-[color:var(--text-teal)]">
+          {unreadCount} sin leer
+        </p>
+      ) : null}
+    </Surface>
+  );
+}
+
 function QuickLinks() {
   const items: { href: string; label: string; helper: string }[] = [
     {
@@ -533,6 +603,11 @@ function QuickLinks() {
       href: "/client/submissions",
       label: "Entregas",
       helper: "Búsqueda + filtros de cargas.",
+    },
+    {
+      href: "/client/metadata",
+      label: "Metadata",
+      helper: "Excel maestro documental.",
     },
     {
       href: "/client/activity",

@@ -55,6 +55,7 @@ from app.constants.statuses import (
 from app.models import Document, DocumentStatusHistory, Submission
 from app.models.entities import utc_now
 from app.services.audit_log import add_audit_event
+from app.services.client_notifications import notify_reviewer_decision
 from app.services.validation_events import add_validation_event
 
 # Reviewer actions that demand a free-text reason from the user. Approve
@@ -282,6 +283,13 @@ def apply_reviewer_decision(
             "reason": cleaned_reason,
             "document_id": document_id,
         },
+    )
+
+    notify_reviewer_decision(
+        db,
+        submission=submission,
+        action=action_enum,
+        reason=cleaned_reason,
     )
 
     db.commit()

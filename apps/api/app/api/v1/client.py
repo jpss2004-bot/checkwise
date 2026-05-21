@@ -30,6 +30,7 @@ from datetime import UTC, date, datetime
 from typing import Annotated, Literal
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
+from fastapi.responses import FileResponse
 from pydantic import BaseModel
 from sqlalchemy import and_, func, select
 from sqlalchemy.orm import Session
@@ -68,6 +69,7 @@ from app.core.period_validation import MAX_YEAR, MIN_YEAR, validate_period_key
 from app.db.session import get_db
 from app.models import (
     Client,
+    ClientNotification,
     Document,
     Membership,
     Organization,
@@ -75,6 +77,11 @@ from app.models import (
     Submission,
     ValidationEvent,
     Vendor,
+)
+from app.services.client_metadata import (
+    client_master_file_path,
+    display_export_path,
+    read_xlsx_preview,
 )
 from app.services.evidence_slots import (
     SlotState,
@@ -388,6 +395,57 @@ class ClientActivityResponse(BaseModel):
     items: list[ClientActivityItem]
     total: int
     limit: int
+
+
+class ClientNotificationItem(BaseModel):
+    id: str
+    notification_type: str
+    title: str
+    body: str
+    action_url: str | None
+    vendor_id: str | None
+    vendor_name: str | None
+    submission_id: str | None
+    payload: dict | None
+    read_at: datetime | None
+    created_at: datetime
+
+
+class ClientNotificationsResponse(BaseModel):
+    client_id: str
+    items: list[ClientNotificationItem]
+    total: int
+    unread_count: int
+    limit: int
+
+
+class ClientNotificationSummary(BaseModel):
+    client_id: str
+    unread_count: int
+
+
+class ClientMetadataDocument(BaseModel):
+    cliente: str
+    proveedor: str
+    periodo: str
+    nombre_documento: str
+    tipo_documento: str
+    subtipo: str
+    institucion: str
+    fecha_principal: str
+    participantes: str
+    descripcion: str
+    anexos: str
+    etiquetas: str
+    archivo_pdf: str
+
+
+class ClientMetadataResponse(BaseModel):
+    client_id: str
+    client_name: str
+    master_available: bool
+    master_path: str | None
+    documents: list[ClientMetadataDocument]
 
 
 class ClientCalendarItem(BaseModel):
@@ -1054,7 +1112,12 @@ def client_submissions(
 # the noisy intake/inspection events — the client doesn't need every
 # upload_started / pdf_inspected step, just human decisions.
 _CLIENT_VISIBLE_EVENTS: frozenset[str] = frozenset(
-    {"reviewer_decision", "submission_replacement_linked", "submission_replaced"}
+    {
+        "reviewer_decision",
+        "submission_replacement_linked",
+        "submission_replaced",
+        "metadata_table_exported",
+    }
 )
 
 
@@ -1143,6 +1206,12 @@ def client_activity(
                 f" de {sub.requirement_code or 'un documento'}"
             )
             action = "submission.replacement_linked"
+        elif ev.event_type == "metadata_table_exported":
+            summary = (
+                f"Metadata actualizada para {sub.requirement_code or 'un documento'}"
+                f" de {v.name if v else 'Proveedor'}"
+            )
+            action = "metadata.ready" if ev.result == "completed" else "metadata.pending"
         else:
             summary = (
                 f"La entrega previa de {sub.requirement_code or 'un documento'} de"
@@ -1170,6 +1239,215 @@ def client_activity(
     return ClientActivityResponse(
         client_id=target_id, items=items, total=len(items), limit=limit
     )
+
+
+# ---------------------------------------------------------------------------
+# /notifications
+# ---------------------------------------------------------------------------
+
+
+@router.get("/notifications/summary", response_model=ClientNotificationSummary)
+def client_notification_summary(
+    db: DbSession,
+    current: ClientUser,
+    client_id: str | None = None,
+) -> ClientNotificationSummary:
+    target_id = _resolve_client_id(db, current, requested=client_id)
+    unread_count = int(
+        db.scalar(
+            select(func.count(ClientNotification.id)).where(
+                ClientNotification.client_id == target_id,
+                ClientNotification.read_at.is_(None),
+            )
+        )
+        or 0
+    )
+    return ClientNotificationSummary(client_id=target_id, unread_count=unread_count)
+
+
+@router.get("/notifications", response_model=ClientNotificationsResponse)
+def client_notifications(
+    db: DbSession,
+    current: ClientUser,
+    client_id: str | None = None,
+    unread_only: bool = False,
+    limit: Annotated[int, Query(ge=1, le=200)] = 50,
+) -> ClientNotificationsResponse:
+    target_id = _resolve_client_id(db, current, requested=client_id)
+    filters = [ClientNotification.client_id == target_id]
+    if unread_only:
+        filters.append(ClientNotification.read_at.is_(None))
+    rows = list(
+        db.scalars(
+            select(ClientNotification)
+            .where(and_(*filters))
+            .order_by(ClientNotification.created_at.desc())
+            .limit(limit)
+        )
+    )
+    vendor_lookup = _vendors_by_id(db, [row.vendor_id for row in rows if row.vendor_id])
+    unread_count = int(
+        db.scalar(
+            select(func.count(ClientNotification.id)).where(
+                ClientNotification.client_id == target_id,
+                ClientNotification.read_at.is_(None),
+            )
+        )
+        or 0
+    )
+    return ClientNotificationsResponse(
+        client_id=target_id,
+        items=[
+            _notification_item(row, vendor_lookup.get(row.vendor_id or ""))
+            for row in rows
+        ],
+        total=len(rows),
+        unread_count=unread_count,
+        limit=limit,
+    )
+
+
+@router.post("/notifications/{notification_id}/read", response_model=ClientNotificationItem)
+def mark_client_notification_read(
+    notification_id: str,
+    db: DbSession,
+    current: ClientUser,
+    client_id: str | None = None,
+) -> ClientNotificationItem:
+    target_id = _resolve_client_id(db, current, requested=client_id)
+    row = db.get(ClientNotification, notification_id)
+    if row is None or row.client_id != target_id:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, detail="Notificacion no encontrada.")
+    if row.read_at is None:
+        row.read_at = datetime.now(UTC)
+        db.commit()
+        db.refresh(row)
+    vendor = db.get(Vendor, row.vendor_id) if row.vendor_id else None
+    return _notification_item(row, vendor)
+
+
+@router.post("/notifications/read-all", response_model=ClientNotificationSummary)
+def mark_all_client_notifications_read(
+    db: DbSession,
+    current: ClientUser,
+    client_id: str | None = None,
+) -> ClientNotificationSummary:
+    target_id = _resolve_client_id(db, current, requested=client_id)
+    rows = list(
+        db.scalars(
+            select(ClientNotification).where(
+                ClientNotification.client_id == target_id,
+                ClientNotification.read_at.is_(None),
+            )
+        )
+    )
+    now = datetime.now(UTC)
+    for row in rows:
+        row.read_at = now
+    db.commit()
+    return ClientNotificationSummary(client_id=target_id, unread_count=0)
+
+
+def _notification_item(
+    row: ClientNotification, vendor: Vendor | None
+) -> ClientNotificationItem:
+    return ClientNotificationItem(
+        id=row.id,
+        notification_type=row.notification_type,
+        title=row.title,
+        body=row.body,
+        action_url=row.action_url,
+        vendor_id=row.vendor_id,
+        vendor_name=vendor.name if vendor else None,
+        submission_id=row.submission_id,
+        payload=row.payload,
+        read_at=row.read_at,
+        created_at=row.created_at,
+    )
+
+
+# ---------------------------------------------------------------------------
+# /metadata
+# ---------------------------------------------------------------------------
+
+
+@router.get("/metadata", response_model=ClientMetadataResponse)
+def client_metadata(
+    db: DbSession,
+    current: ClientUser,
+    client_id: str | None = None,
+) -> ClientMetadataResponse:
+    target_id = _resolve_client_id(db, current, requested=client_id)
+    client = db.get(Client, target_id)
+    if client is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, detail="Cliente no encontrado.")
+    path = client_master_file_path(client)
+    documents: list[ClientMetadataDocument] = []
+    if path.exists():
+        sheets = read_xlsx_preview(path, max_rows_per_sheet=500, max_columns=20)
+        metadata_sheet = next((sheet for sheet in sheets if sheet.name == "01 Metadata"), None)
+        if metadata_sheet and metadata_sheet.rows:
+            documents = _client_metadata_documents_from_sheet(metadata_sheet.rows)
+    return ClientMetadataResponse(
+        client_id=client.id,
+        client_name=client.name,
+        master_available=path.exists(),
+        master_path=display_export_path(str(path)) if path.exists() else None,
+        documents=documents,
+    )
+
+
+@router.get("/metadata/download")
+def download_client_metadata(
+    db: DbSession,
+    current: ClientUser,
+    client_id: str | None = None,
+) -> FileResponse:
+    target_id = _resolve_client_id(db, current, requested=client_id)
+    client = db.get(Client, target_id)
+    if client is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, detail="Cliente no encontrado.")
+    path = client_master_file_path(client)
+    if not path.exists():
+        raise HTTPException(
+            status.HTTP_404_NOT_FOUND,
+            detail="Master de metadata no encontrado para este cliente.",
+        )
+    return FileResponse(
+        path,
+        media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        filename=f"{client.name}_metadata_master.xlsx",
+    )
+
+
+def _client_metadata_documents_from_sheet(
+    rows: list[list[str]],
+) -> list[ClientMetadataDocument]:
+    headers = rows[0]
+    items: list[ClientMetadataDocument] = []
+    for values in rows[1:]:
+        item = {
+            header: values[index] if index < len(values) else ""
+            for index, header in enumerate(headers)
+        }
+        items.append(
+            ClientMetadataDocument(
+                cliente=item.get("Cliente", ""),
+                proveedor=item.get("Proveedor", ""),
+                periodo=item.get("Periodo", ""),
+                nombre_documento=item.get("Nombre del documento", ""),
+                tipo_documento=item.get("Tipo de documento", ""),
+                subtipo=item.get("Subtipo", ""),
+                institucion=item.get("Institucion", ""),
+                fecha_principal=item.get("Fecha principal", ""),
+                participantes=item.get("Participantes", ""),
+                descripcion=item.get("Descripcion", ""),
+                anexos=item.get("Anexos", ""),
+                etiquetas=item.get("Etiquetas", ""),
+                archivo_pdf=item.get("Archivo PDF", ""),
+            )
+        )
+    return items
 
 
 def _aware(dt: datetime) -> datetime:

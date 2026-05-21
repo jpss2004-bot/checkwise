@@ -261,6 +261,57 @@ export type ClientActivityResponse = {
   limit: number;
 };
 
+export type ClientNotificationItem = {
+  id: string;
+  notification_type: string;
+  title: string;
+  body: string;
+  action_url: string | null;
+  vendor_id: string | null;
+  vendor_name: string | null;
+  submission_id: string | null;
+  payload: Record<string, unknown> | null;
+  read_at: string | null;
+  created_at: string;
+};
+
+export type ClientNotificationsResponse = {
+  client_id: string;
+  items: ClientNotificationItem[];
+  total: number;
+  unread_count: number;
+  limit: number;
+};
+
+export type ClientNotificationSummary = {
+  client_id: string;
+  unread_count: number;
+};
+
+export type ClientMetadataDocument = {
+  cliente: string;
+  proveedor: string;
+  periodo: string;
+  nombre_documento: string;
+  tipo_documento: string;
+  subtipo: string;
+  institucion: string;
+  fecha_principal: string;
+  participantes: string;
+  descripcion: string;
+  anexos: string;
+  etiquetas: string;
+  archivo_pdf: string;
+};
+
+export type ClientMetadataResponse = {
+  client_id: string;
+  client_name: string;
+  master_available: boolean;
+  master_path: string | null;
+  documents: ClientMetadataDocument[];
+};
+
 // ---------------------------------------------------------------------------
 // Calls
 // ---------------------------------------------------------------------------
@@ -320,4 +371,69 @@ export async function listClientActivity(params?: {
   limit?: number;
 }): Promise<ClientActivityResponse> {
   return fetchJson<ClientActivityResponse>(`/api/v1/client/activity${qs(params)}`);
+}
+
+export async function getClientNotificationSummary(params?: {
+  client_id?: string;
+}): Promise<ClientNotificationSummary> {
+  return fetchJson<ClientNotificationSummary>(
+    `/api/v1/client/notifications/summary${qs(params)}`,
+  );
+}
+
+export async function listClientNotifications(params?: {
+  client_id?: string;
+  unread_only?: boolean;
+  limit?: number;
+}): Promise<ClientNotificationsResponse> {
+  return fetchJson<ClientNotificationsResponse>(
+    `/api/v1/client/notifications${qs(params)}`,
+  );
+}
+
+export async function markClientNotificationRead(
+  notificationId: string,
+  params?: { client_id?: string },
+): Promise<ClientNotificationItem> {
+  return fetchJson<ClientNotificationItem>(
+    `/api/v1/client/notifications/${notificationId}/read${qs(params)}`,
+    { method: "POST" },
+  );
+}
+
+export async function markAllClientNotificationsRead(params?: {
+  client_id?: string;
+}): Promise<ClientNotificationSummary> {
+  return fetchJson<ClientNotificationSummary>(
+    `/api/v1/client/notifications/read-all${qs(params)}`,
+    { method: "POST" },
+  );
+}
+
+export async function getClientMetadata(params?: {
+  client_id?: string;
+}): Promise<ClientMetadataResponse> {
+  return fetchJson<ClientMetadataResponse>(`/api/v1/client/metadata${qs(params)}`);
+}
+
+export async function downloadClientMetadata(params?: {
+  client_id?: string;
+}): Promise<Blob> {
+  const session = readAdminSession();
+  if (!session?.access_token) {
+    throw new ClientApiError(401, "No active staff session.");
+  }
+  const response = await fetch(
+    `${API_BASE_URL}/api/v1/client/metadata/download${qs(params)}`,
+    {
+      headers: {
+        Authorization: `Bearer ${session.access_token}`,
+      },
+    },
+  );
+  if (!response.ok) {
+    const detail = await response.text().catch(() => "");
+    throw new ClientApiError(response.status, detail || response.statusText);
+  }
+  return response.blob();
 }

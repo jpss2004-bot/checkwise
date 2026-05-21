@@ -37,6 +37,10 @@ from app.schemas.submissions import (
     ValidationEventSummary,
 )
 from app.services.audit_log import add_audit_event
+from app.services.client_notifications import (
+    notify_metadata_ready,
+    notify_provider_uploaded,
+)
 from app.services.document_intelligence import DocumentSignals, analyze_document_text
 from app.services.metadata_export import export_metadata_table_after_upload
 from app.services.pdf_validation import PdfInspectionResult, inspect_pdf
@@ -611,6 +615,15 @@ def finalize_intake_submission(
     )
     validation_events.append(metadata_export_event)
 
+    notify_provider_uploaded(db, submission=submission, vendor=vendor)
+    if metadata_export.status == "completed":
+        notify_metadata_ready(
+            db,
+            submission=submission,
+            vendor=vendor,
+            master_path=metadata_export.master_path,
+        )
+
     audit_metadata: dict = {
         # Kept for backward compatibility with existing audit consumers.
         "source": "native_intake",
@@ -1087,6 +1100,13 @@ def finalize_multi_document_submission(
                 "document_count": len(documents_payload),
             },
         )
+
+    notify_provider_uploaded(
+        db,
+        submission=submission,
+        vendor=vendor,
+        document_count=len(documents_payload),
+    )
 
     db.commit()
 

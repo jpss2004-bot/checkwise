@@ -1,6 +1,7 @@
 from app.models.entities import (
     AuditLog,
     Client,
+    ClientNotification,
     ComplianceSnapshot,
     ContactRequest,
     Contract,
@@ -32,6 +33,7 @@ from app.models.entities import (
 __all__ = [
     "AuditLog",
     "Client",
+    "ClientNotification",
     "ComplianceSnapshot",
     "ContactRequest",
     "Contract",

@@ -4,10 +4,12 @@ import { useEffect, useState } from "react";
 import Link from "next/link";
 import { useRouter, usePathname } from "next/navigation";
 import {
+  Bell,
   CalendarBlank,
   ChartLineUp,
   ClockClockwise,
   Files,
+  FileXls,
   Gauge,
   List,
   SignOut,
@@ -21,6 +23,7 @@ import { FeedbackLauncher } from "@/components/feedback/feedback-launcher";
 import { Button } from "@/components/ui/button";
 import { MetadataStrip } from "@/components/ui/metadata-strip";
 import { cn } from "@/lib/utils";
+import { getClientNotificationSummary } from "@/lib/api/client";
 import {
   type AdminSession,
   clearAdminSession,
@@ -40,6 +43,8 @@ const NAV: { href: string; label: string; icon: Icon }[] = [
   { href: "/client/vendors", label: "Proveedores", icon: Storefront },
   { href: "/client/calendar", label: "Calendario", icon: CalendarBlank },
   { href: "/client/submissions", label: "Entregas", icon: Files },
+  { href: "/client/notifications", label: "Notificaciones", icon: Bell },
+  { href: "/client/metadata", label: "Metadata", icon: FileXls },
   { href: "/client/reports", label: "Reportes", icon: ChartLineUp },
   { href: "/client/activity", label: "Actividad", icon: ClockClockwise },
 ];
@@ -68,6 +73,7 @@ export function ClientShell({
   const [session, setSession] = useState<AdminSession | null>(null);
   const [ready, setReady] = useState(false);
   const [drawerOpen, setDrawerOpen] = useState(false);
+  const [unreadCount, setUnreadCount] = useState(0);
 
   useEffect(() => {
     const current = readAdminSession();
@@ -84,6 +90,9 @@ export function ClientShell({
     }
     setSession(current);
     setReady(true);
+    getClientNotificationSummary()
+      .then((summary) => setUnreadCount(summary.unread_count))
+      .catch(() => setUnreadCount(0));
   }, [router]);
 
   useEffect(() => {
@@ -115,6 +124,22 @@ export function ClientShell({
             <span className="hidden font-mono text-[11px] text-[color:var(--text-tertiary)] md:inline">
               {session.user.email}
             </span>
+            <Link
+              href="/client/notifications"
+              aria-label={
+                unreadCount > 0
+                  ? `${unreadCount} notificaciones sin leer`
+                  : "Notificaciones"
+              }
+              className="relative inline-flex h-8 w-8 items-center justify-center rounded-md border border-[color:var(--border-subtle)] text-[color:var(--text-secondary)] transition-colors hover:bg-[color:var(--surface-hover)] hover:text-[color:var(--text-primary)]"
+            >
+              <Bell className="h-4 w-4" weight={unreadCount > 0 ? "fill" : "bold"} />
+              {unreadCount > 0 ? (
+                <span className="absolute -right-1 -top-1 min-w-4 rounded-full bg-[color:var(--status-error-bg)] px-1 text-center font-mono text-[10px] font-semibold leading-4 text-[color:var(--status-error-text)]">
+                  {unreadCount > 9 ? "9+" : unreadCount}
+                </span>
+              ) : null}
+            </Link>
             <Button
               type="button"
               variant="outline"

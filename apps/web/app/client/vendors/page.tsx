@@ -21,6 +21,7 @@ import { Progress } from "@/components/ui/progress";
 
 import { ClientShell } from "../_shell";
 import {
+  listClientNotifications,
   listClientVendors,
   type ClientVendorRow,
 } from "@/lib/api/client";
@@ -40,16 +41,26 @@ export default function ClientVendorsPage() {
   const [error, setError] = useState<string | null>(null);
   const [search, setSearch] = useState("");
   const [level, setLevel] = useState<SemaphoreLevel | "">("");
+  const [unreadByVendor, setUnreadByVendor] = useState<Record<string, number>>({});
 
   async function refresh() {
     setLoading(true);
     setError(null);
     try {
-      const data = await listClientVendors({
-        search: search || undefined,
-        semaphore_level: level || undefined,
-      });
+      const [data, notifications] = await Promise.all([
+        listClientVendors({
+          search: search || undefined,
+          semaphore_level: level || undefined,
+        }),
+        listClientNotifications({ unread_only: true, limit: 200 }),
+      ]);
+      const counts: Record<string, number> = {};
+      for (const item of notifications.items) {
+        if (!item.vendor_id) continue;
+        counts[item.vendor_id] = (counts[item.vendor_id] ?? 0) + 1;
+      }
       setRows(data.items);
+      setUnreadByVendor(counts);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Error al cargar proveedores.");
       setRows(null);
@@ -87,6 +98,10 @@ export default function ClientVendorsPage() {
     { label: "Amarillo", value: counts.yellow, tone: "warning" },
     { label: "Rojo", value: counts.red, tone: "error" },
   ];
+  const columns = useMemo(
+    () => buildVendorColumns(unreadByVendor),
+    [unreadByVendor],
+  );
 
   return (
     <ClientShell
@@ -175,7 +190,7 @@ export default function ClientVendorsPage() {
           loading={loading}
           error={error}
           onRetry={refresh}
-          columns={vendorColumns}
+          columns={columns}
           rowKey={(row) => row.vendor_id}
           ariaLabel="Proveedores del portafolio"
           emptyTitle="Sin proveedores con esos filtros"
@@ -204,7 +219,10 @@ function MetricCell({ value, warn }: { value: number; warn?: boolean }) {
   );
 }
 
-const vendorColumns: DataTableColumn<ClientVendorRow>[] = [
+function buildVendorColumns(
+  unreadByVendor: Record<string, number>,
+): DataTableColumn<ClientVendorRow>[] {
+  return [
   {
     id: "vendor",
     header: "Proveedor",
@@ -287,6 +305,22 @@ const vendorColumns: DataTableColumn<ClientVendorRow>[] = [
     ),
   },
   {
+    id: "notifications",
+    header: "Novedades",
+    width: "100px",
+    align: "right",
+    cell: (row) => {
+      const count = unreadByVendor?.[row.vendor_id] ?? 0;
+      return count > 0 ? (
+        <span className="inline-flex min-w-6 justify-center rounded-full bg-[color:var(--surface-teal-muted)] px-2 py-0.5 font-mono text-[11px] font-semibold text-[color:var(--text-teal)]">
+          {count}
+        </span>
+      ) : (
+        <span className="text-[color:var(--text-tertiary)]">—</span>
+      );
+    },
+  },
+  {
     id: "action",
     header: "",
     width: "80px",
@@ -303,7 +337,8 @@ const vendorColumns: DataTableColumn<ClientVendorRow>[] = [
       </Button>
     ),
   },
-];
+  ];
+}
 
 const SEMAPHORE_META: Record<
   SemaphoreLevel,

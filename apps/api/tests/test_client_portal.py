@@ -619,5 +619,77 @@ def test_client_activity_returns_sanitised_events(
     # is never in the feed.
     assert "submission.uploaded" in actions
     assert "reviewer.decision" in actions
+    assert "metadata.ready" in actions
     assert "admin.client.created" not in actions
     assert all("admin" not in item["action"] for item in body["items"])
+
+
+def test_client_notifications_are_created_and_readable(
+    api_client: TestClient, db_factory
+) -> None:
+    client_id = _seed_client(db_factory)
+    _, ws_id = _seed_vendor_with_workspace(db_factory, client_id=client_id)
+    sub_id = _seed_submission_for_workspace(api_client, db_factory, ws_id)
+
+    db = db_factory()
+    try:
+        sub = db.get(Submission, sub_id)
+        assert sub is not None
+        apply_reviewer_decision(
+            db,
+            submission=sub,
+            action=ReviewerAction.APPROVE,
+            reason=None,
+            reviewer_user_id="rev-user-1",
+        )
+    finally:
+        db.close()
+
+    _, email, pw = _seed_user_with_role(
+        db_factory, role="client_admin", client_id=client_id, email_prefix="ca"
+    )
+    token = _login(api_client, email, pw)
+    resp = api_client.get("/api/v1/client/notifications", headers=_h(token))
+    assert resp.status_code == 200, resp.text
+    body = resp.json()
+    types = {item["notification_type"] for item in body["items"]}
+    assert "provider_uploaded" in types
+    assert "metadata_ready" in types
+    assert "document_approve" in types
+    assert body["unread_count"] >= 3
+
+    first_id = body["items"][0]["id"]
+    mark_one = api_client.post(
+        f"/api/v1/client/notifications/{first_id}/read", headers=_h(token)
+    )
+    assert mark_one.status_code == 200, mark_one.text
+    assert mark_one.json()["read_at"] is not None
+
+    mark_all = api_client.post("/api/v1/client/notifications/read-all", headers=_h(token))
+    assert mark_all.status_code == 200, mark_all.text
+    assert mark_all.json()["unread_count"] == 0
+
+
+def test_client_metadata_endpoint_exposes_master_download_state(
+    api_client: TestClient, db_factory
+) -> None:
+    client_id = _seed_client(db_factory)
+    _, ws_id = _seed_vendor_with_workspace(db_factory, client_id=client_id)
+    _seed_submission_for_workspace(api_client, db_factory, ws_id)
+    _, email, pw = _seed_user_with_role(
+        db_factory, role="client_admin", client_id=client_id, email_prefix="ca"
+    )
+    token = _login(api_client, email, pw)
+
+    resp = api_client.get("/api/v1/client/metadata", headers=_h(token))
+    assert resp.status_code == 200, resp.text
+    body = resp.json()
+    assert body["client_id"] == client_id
+    assert body["master_available"] is True
+    assert body["documents"]
+
+    download = api_client.get("/api/v1/client/metadata/download", headers=_h(token))
+    assert download.status_code == 200, download.text
+    assert download.headers["content-type"].startswith(
+        "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+    )
