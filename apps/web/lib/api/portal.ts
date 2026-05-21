@@ -438,6 +438,22 @@ export type DashboardUpcomingDeadline = {
   due_in_days?: number | null;
 };
 
+export type DashboardRecentUpload = {
+  submission_id: string;
+  requirement_code: string | null;
+  requirement_name: string;
+  institution: string;
+  period_key: string | null;
+  /** Canonical RequirementStatus value from the backend (e.g.
+   *  ``aprobado``, ``pendiente_revision``). Mapped to a UI state
+   *  via ``statusToDocumentStateCode``. */
+  status: string;
+  /** ISO timestamp — when the provider uploaded this submission. */
+  submitted_at: string;
+  filename: string | null;
+  href: string;
+};
+
 export type DashboardPayload = {
   workspace_id: string;
   persona_type: string;
@@ -447,6 +463,9 @@ export type DashboardPayload = {
   suggested_actions: DashboardSuggestedAction[];
   attention_today: DashboardAttentionItem[];
   upcoming_deadlines: DashboardUpcomingDeadline[];
+  /** Session 4 (2026-05-21) — 5 most recent submissions, newest
+   *  first. Older payloads may omit; default to ``[]`` defensively. */
+  recent_uploads?: DashboardRecentUpload[];
 };
 
 export async function getDashboard(
