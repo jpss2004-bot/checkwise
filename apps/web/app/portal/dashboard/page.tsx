@@ -231,6 +231,8 @@ function DashboardInner({ session }: { session: PortalSession }) {
           session={session}
           audience={wise.audience}
           messages={wise.messages}
+          dashboard={dashboard}
+          onboarding={onboardingPayload}
         />
       </PortalAppShell>
     );
@@ -326,6 +328,8 @@ function DashboardInner({ session }: { session: PortalSession }) {
         session={session}
         audience={wise.audience}
         messages={wise.messages}
+        dashboard={dashboard}
+        onboarding={onboardingPayload}
       />
     </PortalAppShell>
   );

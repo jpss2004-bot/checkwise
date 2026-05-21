@@ -5,6 +5,7 @@ import Link from "next/link";
 import {
   ArrowRight,
   CaretDown,
+  PaperPlaneTilt,
   Quotes,
   Sparkle,
   Warning,
@@ -13,8 +14,17 @@ import {
 
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
-import { postWiseEvent } from "@/lib/api/portal";
+import {
+  postWiseEvent,
+  type DashboardPayload,
+  type OnboardingSummary,
+} from "@/lib/api/portal";
 import type { PortalSession } from "@/lib/session/portal";
+import {
+  WISE_QUICK_QUESTIONS,
+  answerIntent,
+  classifyIntent,
+} from "@/lib/wise/intents";
 import type { WiseAudience, WiseMessage } from "@/lib/wise/messages";
 
 /**
@@ -22,7 +32,8 @@ import type { WiseAudience, WiseMessage } from "@/lib/wise/messages";
  *
  * Floating brand-navy chat dock that surfaces a small ordered list of
  * deterministic Spanish suggestions about the user's current state.
- * Lives in the bottom-right on desktop and slides up as a sheet from
+ * Lives in the bottom-LEFT on desktop (so it doesn't fight the
+ * FeedbackLauncher's bottom-right FAB) and slides up as a sheet from
  * the bottom on mobile. State persists per-browser via localStorage.
  *
  * Composition:
@@ -69,14 +80,82 @@ const TONE_TEXT: Record<NonNullable<WiseMessage["tone"]>, string> = {
 interface WiseDockProps {
   session: PortalSession;
   audience: WiseAudience;
+  /** Initial messages — the welcome line + suggestions surfaced
+   *  when the dock first opens, before any conversation. */
   messages: WiseMessage[];
+  /** Live dashboard + onboarding payloads so the chat-layer
+   *  intent matcher can answer questions against the current
+   *  state (next-action, deadline, rejection, status). */
+  dashboard: DashboardPayload;
+  onboarding: OnboardingSummary | null;
   className?: string;
 }
 
-export function WiseDock({ session, audience, messages, className }: WiseDockProps) {
+type ChatTurn =
+  | { kind: "wise"; message: WiseMessage }
+  | { kind: "user"; id: string; text: string };
+
+export function WiseDock({
+  session,
+  audience,
+  messages,
+  dashboard,
+  onboarding,
+  className,
+}: WiseDockProps) {
   const [collapsed, setCollapsed] = React.useState<boolean>(true);
   const [hydrated, setHydrated] = React.useState(false);
+  const [turns, setTurns] = React.useState<ChatTurn[]>([]);
+  const [inputValue, setInputValue] = React.useState("");
   const firedFirstRender = React.useRef(false);
+  const scrollRef = React.useRef<HTMLDivElement | null>(null);
+
+  // Seed the conversation with the initial wise messages so the
+  // chat-style scrollback shows the welcome + suggestions first.
+  // Re-seeds when the upstream messages array changes (e.g. a
+  // dashboard refetch surfaces a new action).
+  React.useEffect(() => {
+    setTurns(messages.map((message) => ({ kind: "wise", message })));
+  }, [messages]);
+
+  // Auto-scroll to the bottom whenever a new turn lands so the most
+  // recent message is always in view inside the panel.
+  React.useEffect(() => {
+    const el = scrollRef.current;
+    if (!el) return;
+    el.scrollTop = el.scrollHeight;
+  }, [turns, collapsed]);
+
+  // Submit a prompt through the deterministic intent pipeline. Used
+  // by both the free-text input and the quick-question chips so
+  // there's only one codepath.
+  const submitPrompt = React.useCallback(
+    (prompt: string) => {
+      const trimmed = prompt.trim();
+      if (!trimmed) return;
+      const userTurn: ChatTurn = {
+        kind: "user",
+        id: `user-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+        text: trimmed,
+      };
+      const intent = classifyIntent(trimmed);
+      const reply = answerIntent({ intent, session, dashboard, onboarding });
+      // Give the reply a stable id keyed off the user-turn id so React
+      // doesn't collide when the same intent fires twice (e.g. user
+      // asks "qué sigue" twice in a row).
+      const replyTurn: ChatTurn = {
+        kind: "wise",
+        message: { ...reply, id: `${reply.id}-${userTurn.id}` },
+      };
+      setTurns((prev) => [...prev, userTurn, replyTurn]);
+      void postWiseEvent(session, "wise.question_asked", {
+        audience,
+        intent,
+        prompt: trimmed.slice(0, 200),
+      });
+    },
+    [audience, dashboard, onboarding, session],
+  );
 
   // Hydrate from localStorage on mount. First-ever visit:
   // default to EXPANDED so onboarding gets help loud. After the
@@ -147,7 +226,11 @@ export function WiseDock({ session, audience, messages, className }: WiseDockPro
           "group fixed z-40 inline-flex h-14 w-14 items-center justify-center rounded-full shadow-lg transition-all duration-fast",
           "bg-[color:var(--surface-brand)] text-white",
           "hover:scale-105 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[color:var(--text-teal)]/60 focus-visible:ring-offset-2",
-          "bottom-5 right-5 sm:bottom-6 sm:right-6",
+          // Bottom-LEFT on desktop. FeedbackLauncher owns bottom-right
+          // at z-50; we mirror to the opposite corner at z-40 so the
+          // two never overlap. On mobile the FAB still sits in the
+          // bottom-left so users can swipe it open from the same side.
+          "bottom-5 left-5 sm:bottom-6 sm:left-6",
           collapsed
             ? "pointer-events-auto scale-100 opacity-100"
             : "pointer-events-none scale-90 opacity-0",
@@ -184,16 +267,31 @@ export function WiseDock({ session, audience, messages, className }: WiseDockPro
               "fixed z-50 flex flex-col overflow-hidden bg-[color:var(--surface-brand)] text-white shadow-2xl",
               // Mobile: bottom sheet — full width, rounded top corners, ~70vh.
               "inset-x-0 bottom-0 max-h-[78vh] rounded-t-2xl",
-              // Desktop: floating card pinned bottom-right, ~360px wide.
-              "sm:inset-x-auto sm:bottom-6 sm:right-6 sm:max-h-[min(620px,calc(100vh-6rem))] sm:w-[380px] sm:rounded-2xl",
+              // Desktop: floating card pinned bottom-LEFT, ~380px wide.
+              // Mirrors the FAB so the panel opens out from where the
+              // launcher was sitting, keeping bottom-right free for the
+              // FeedbackLauncher.
+              "sm:inset-x-auto sm:bottom-6 sm:left-6 sm:max-h-[min(620px,calc(100vh-6rem))] sm:w-[380px] sm:rounded-2xl",
             )}
           >
             <DockHeader
               audience={audience}
               onClose={() => setCollapsedAndPersist(true)}
             />
-            <DockBody messages={messages} session={session} audience={audience} />
-            <DockFooter />
+            <DockBody
+              turns={turns}
+              session={session}
+              audience={audience}
+              scrollRef={scrollRef}
+            />
+            <DockComposer
+              inputValue={inputValue}
+              onInputChange={setInputValue}
+              onSubmit={(prompt) => {
+                submitPrompt(prompt);
+                setInputValue("");
+              }}
+            />
           </section>
         </>
       ) : null}
@@ -256,15 +354,17 @@ function DockHeader({
 // ─── Body ──────────────────────────────────────────────────────────
 
 function DockBody({
-  messages,
+  turns,
   session,
   audience,
+  scrollRef,
 }: {
-  messages: WiseMessage[];
+  turns: ChatTurn[];
   session: PortalSession;
   audience: WiseAudience;
+  scrollRef: React.RefObject<HTMLDivElement | null>;
 }) {
-  if (messages.length === 0) {
+  if (turns.length === 0) {
     return (
       <div className="flex flex-1 flex-col items-center justify-center gap-2 px-5 py-10 text-center text-white/80">
         <Sparkle className="h-6 w-6 text-[color:var(--text-teal)]" weight="fill" aria-hidden="true" />
@@ -273,22 +373,30 @@ function DockBody({
     );
   }
   return (
-    <div className="flex-1 overflow-y-auto px-5 py-4">
-      <ul className="space-y-3">
-        {messages.map((message) => (
-          <li key={message.id}>
-            <MessageBubble
-              message={message}
-              onCtaClick={() => {
-                void postWiseEvent(session, "wise.suggestion_clicked", {
-                  audience,
-                  message_id: message.id,
-                  href: message.ctaHref,
-                });
-              }}
-            />
-          </li>
-        ))}
+    <div ref={scrollRef} className="flex-1 overflow-y-auto px-5 py-4">
+      <ul className="space-y-3" aria-live="polite">
+        {turns.map((turn) =>
+          turn.kind === "wise" ? (
+            <li key={turn.message.id}>
+              <MessageBubble
+                message={turn.message}
+                onCtaClick={() => {
+                  void postWiseEvent(session, "wise.suggestion_clicked", {
+                    audience,
+                    message_id: turn.message.id,
+                    href: turn.message.ctaHref,
+                  });
+                }}
+              />
+            </li>
+          ) : (
+            <li key={turn.id} className="flex justify-end">
+              <p className="max-w-[78%] rounded-2xl rounded-br-md bg-[color:var(--text-teal)] px-3.5 py-2 text-[13px] leading-snug text-[color:var(--surface-brand)]">
+                {turn.text}
+              </p>
+            </li>
+          ),
+        )}
       </ul>
     </div>
   );
@@ -352,14 +460,57 @@ function MessageBubble({
   );
 }
 
-// ─── Footer ────────────────────────────────────────────────────────
+// ─── Composer (quick chips + text input) ──────────────────────────
 
-function DockFooter() {
+function DockComposer({
+  inputValue,
+  onInputChange,
+  onSubmit,
+}: {
+  inputValue: string;
+  onInputChange: (value: string) => void;
+  onSubmit: (prompt: string) => void;
+}) {
+  const handleSubmit = (event: React.FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    onSubmit(inputValue);
+  };
   return (
-    <footer className="border-t border-white/10 px-5 py-2.5">
-      <p className="font-mono text-[10px] uppercase tracking-wide text-white/45">
-        Wise · copiloto CheckWise
-      </p>
+    <footer className="border-t border-white/10 bg-[color:var(--surface-brand)]/95 px-4 py-3">
+      <div className="mb-2 flex flex-wrap gap-1.5">
+        {WISE_QUICK_QUESTIONS.map((q) => (
+          <button
+            key={q.id}
+            type="button"
+            onClick={() => onSubmit(q.prompt)}
+            className="inline-flex items-center rounded-full border border-white/15 bg-white/[0.04] px-2.5 py-1 text-[11px] text-white/80 transition-colors hover:border-[color:var(--text-teal)]/60 hover:bg-[color:var(--text-teal)]/15 hover:text-white focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[color:var(--text-teal)]/60"
+          >
+            {q.label}
+          </button>
+        ))}
+      </div>
+      <form onSubmit={handleSubmit} className="flex items-center gap-2">
+        <label htmlFor="wise-input" className="sr-only">
+          Pregúntale a Wise
+        </label>
+        <input
+          id="wise-input"
+          type="text"
+          autoComplete="off"
+          value={inputValue}
+          onChange={(event) => onInputChange(event.target.value)}
+          placeholder="Pregúntale a Wise…"
+          className="flex-1 rounded-full border border-white/15 bg-white/[0.06] px-3.5 py-1.5 text-[13px] text-white placeholder:text-white/40 focus:border-[color:var(--text-teal)]/60 focus:outline-none focus:ring-2 focus:ring-[color:var(--text-teal)]/40"
+        />
+        <button
+          type="submit"
+          aria-label="Enviar"
+          disabled={inputValue.trim().length === 0}
+          className="inline-flex h-9 w-9 items-center justify-center rounded-full bg-[color:var(--text-teal)] text-[color:var(--surface-brand)] transition-all hover:bg-[color:var(--text-teal)]/90 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[color:var(--text-teal)]/40 disabled:cursor-not-allowed disabled:opacity-40"
+        >
+          <PaperPlaneTilt className="h-4 w-4" weight="fill" aria-hidden="true" />
+        </button>
+      </form>
     </footer>
   );
 }
