@@ -51,7 +51,8 @@ The event payload includes:
 ## What It Does
 
 - Uses `app/core/metadata_rules.py` as the source of truth.
-- Writes one row per metadata field.
+- Writes a guided XLSX workbook for admin/client review.
+- Keeps the raw one-row-per-field data available in the final workbook tab.
 - Includes every field bucket from the selected rule: required, conditional, optional, and blank.
 - Includes deterministic file metadata: filename, SHA-256, page count, validation status.
 - Includes PDF text signals when enabled: detected institution, detected document type, RFCs, dates, period mentions, mismatch reason.
@@ -140,7 +141,16 @@ Useful context keys include:
 
 ## Output Shape
 
-The output is a long table: one row per document field.
+The automatic XLSX is organized as a LegalShelf review workbook:
+
+- `00 Guia`: plain-language summary for the admin, including client, provider, expected document, expected institution, period/file context, overall status, and mismatch warning.
+- `01 Revision`: the practical review tab. Each row is a metadata field with the LegalShelf rule, extracted/proposed value, confidence, current status, source/method, and suggested action.
+- `02 Senales`: document-level comparison signals: expected vs detected document, expected vs detected institution, RFCs, dates, periods, match confidence, anomaly codes, and OCR status.
+- `03 Datos`: the complete raw export table for auditing, filtering, integrations, or future database import.
+
+The workbook uses visual status colors so LegalShelf can immediately separate fields that are ready, prefilled but needing review, pending, or possible mismatch/more urgent review.
+
+The CSV output remains a long table: one row per document field.
 
 Core columns:
 
@@ -166,6 +176,16 @@ Core columns:
 - `human_review_required`
 
 This long-table shape is intentional. It handles documents with different rulebook fields without creating unstable spreadsheet columns.
+
+## Where Admins Find It
+
+For an upload in May, the admin does not need to click anything extra. When the provider upload completes, CheckWise writes:
+
+```text
+metadata_exports/{client}/{provider}/{period}/{document_type}/latest_metadata.xlsx
+```
+
+Use `latest_metadata.xlsx` for the newest upload in that client/provider/period/document folder. Use the `{submission_id}_{document_id}_metadata.xlsx` file when you need the exact historical export for a specific upload.
 
 ## Verification
 

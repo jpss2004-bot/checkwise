@@ -98,7 +98,7 @@ def test_export_pdf_metadata_table_writes_csv(tmp_path: Path) -> None:
     assert "field_key" in loaded[0]
 
 
-def test_export_pdf_metadata_table_writes_minimal_xlsx(tmp_path: Path) -> None:
+def test_export_pdf_metadata_table_writes_guided_xlsx(tmp_path: Path) -> None:
     pdf_path = tmp_path / "acuse.pdf"
     output_path = tmp_path / "metadata.xlsx"
     _write_blank_pdf(pdf_path)
@@ -115,16 +115,36 @@ def test_export_pdf_metadata_table_writes_minimal_xlsx(tmp_path: Path) -> None:
     assert rows
     with zipfile.ZipFile(output_path, "r") as archive:
         names = set(archive.namelist())
-        sheet_xml = archive.read("xl/worksheets/sheet1.xml").decode("utf-8")
+        workbook_xml = archive.read("xl/workbook.xml").decode("utf-8")
+        guide_xml = archive.read("xl/worksheets/sheet1.xml").decode("utf-8")
+        review_xml = archive.read("xl/worksheets/sheet2.xml").decode("utf-8")
+        signals_xml = archive.read("xl/worksheets/sheet3.xml").decode("utf-8")
+        raw_xml = archive.read("xl/worksheets/sheet4.xml").decode("utf-8")
 
     assert "[Content_Types].xml" in names
     assert "xl/workbook.xml" in names
+    assert "xl/styles.xml" in names
     assert "xl/worksheets/sheet1.xml" in names
-    assert "metadata_fields" in zipfile.ZipFile(output_path, "r").read(
-        "xl/workbook.xml"
-    ).decode("utf-8")
-    assert "document_type_code" in sheet_xml
-    assert "acuse_sisub" in sheet_xml
+    assert "xl/worksheets/sheet2.xml" in names
+    assert "xl/worksheets/sheet3.xml" in names
+    assert "xl/worksheets/sheet4.xml" in names
+
+    for sheet_name in ("00 Guia", "01 Revision", "02 Senales", "03 Datos"):
+        assert sheet_name in workbook_xml
+
+    assert "CheckWise Metadata Review" in guide_xml
+    assert "Documento esperado" in guide_xml
+    assert "SEGURIDAD PRI" in guide_xml
+
+    assert "Regla LegalShelf" in review_xml
+    assert "Accion sugerida" in review_xml
+    assert "SEGURIDAD PRI Acuse SISUB Mayo" in review_xml
+
+    assert "Documento esperado" in signals_xml
+    assert "Institucion esperada" in signals_xml
+
+    assert "document_type_code" in raw_xml
+    assert "acuse_sisub" in raw_xml
 
 
 def test_cli_writes_csv_file(tmp_path: Path) -> None:
