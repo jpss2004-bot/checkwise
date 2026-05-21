@@ -26,6 +26,7 @@ from app.models.entities import (
     Validation,
     ValidationEvent,
     Vendor,
+    WiseEvent,
 )
 
 __all__ = [
@@ -56,4 +57,5 @@ __all__ = [
     "Validation",
     "ValidationEvent",
     "Vendor",
+    "WiseEvent",
 ]

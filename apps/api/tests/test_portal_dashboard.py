@@ -575,6 +575,74 @@ def test_dashboard_recent_uploads_returns_latest_submissions(
     datetime.fromisoformat(row["submitted_at"])
 
 
+def test_dashboard_suggested_action_quotes_reviewer_note_when_rejected(
+    api_client: TestClient,
+) -> None:
+    """Wise Phase 1 (2026-05-21): suggested_actions for rejected /
+    needs_correction / possible_mismatch slots must carry the
+    reviewer's most recent decision message in ``reviewer_note`` so
+    the Wise copilot can quote it inline. Slots with no reviewer
+    decision yet (or in other states) leave the field null.
+    """
+    from app.models import ValidationEvent
+
+    ws = _setup_workspace(api_client)
+    first = _upload(api_client, ws["workspace_id"], data=_canonical_b1_payload())
+    submission_id = first.json()["submission_id"]
+    _set_status(api_client, submission_id, DocumentStatus.RECHAZADO.value)
+
+    # Persist a reviewer_decision event the way the workflow service does.
+    factory = api_client.app.state.testing_session  # type: ignore[attr-defined]
+    db: Session = factory()
+    try:
+        db.add(
+            ValidationEvent(
+                submission_id=submission_id,
+                event_type="reviewer_decision",
+                result="rechazado",
+                severity="error",
+                message="El RFC en la imagen no coincide con el RFC del proveedor.",
+                actor_type="reviewer",
+            )
+        )
+        db.commit()
+    finally:
+        db.close()
+
+    body = api_client.get(
+        f"/api/v1/portal/workspaces/{ws['workspace_id']}/dashboard"
+    ).json()
+    high = [a for a in body["suggested_actions"] if a["priority"] == "high"]
+    assert high, "expected at least one high-priority action for the rejected slot"
+    # The rejected slot is the INFONAVIT B1 we uploaded. The catalog
+    # code includes the period and document type — look it up via the
+    # same recurring_for_year() the test helper uses so the test
+    # doesn't bake in a brittle string.
+    from app.core.compliance_catalog import recurring_for_year
+
+    canonical_code = next(
+        item.code
+        for item in recurring_for_year(2026)
+        if item.institution == "infonavit" and item.period_key == "2026-B1"
+    )
+    rejected_action = next(
+        (a for a in high if a["requirement_code"] == canonical_code),
+        None,
+    )
+    assert rejected_action is not None, (
+        f"expected suggested action for {canonical_code} in {high}"
+    )
+    assert (
+        rejected_action["reviewer_note"]
+        == "El RFC en la imagen no coincide con el RFC del proveedor."
+    )
+    # Non-actionable suggestions (e.g. missing required onboarding doc)
+    # carry null because no reviewer has touched them yet.
+    pending = [a for a in body["suggested_actions"] if a["priority"] == "medium"]
+    for action in pending:
+        assert action["reviewer_note"] is None
+
+
 def test_dashboard_rejects_foreign_workspace(api_client: TestClient) -> None:
     """User B cannot read user A's dashboard."""
     ws_a = _setup_workspace(api_client)

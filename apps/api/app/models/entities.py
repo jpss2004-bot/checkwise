@@ -845,3 +845,37 @@ class FeedbackReport(TimestampMixin, Base):
         String(36), ForeignKey("users.id"), nullable=True
     )
     triaged_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+
+
+class WiseEvent(Base):
+    """Provider-side analytics event for the Wise copilot dock.
+
+    Captures every meaningful dock interaction (mount, expand,
+    collapse, suggestion click) so we can answer "did the empty-state
+    hero + Wise dock actually move the time-to-first-upload needle?"
+    Tiny by design — one row per event, FK-scoped to workspace so
+    cross-tenant rollups stay safe.
+
+    Conventions match the rest of the schema: 36-char id, timezone-
+    aware timestamps, JSON payload for optional structured context
+    (e.g. ``{"suggestion_id": "act-..."}`` for ``wise.suggestion_clicked``).
+    """
+
+    __tablename__ = "wise_events"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=new_id)
+    workspace_id: Mapped[str] = mapped_column(
+        ForeignKey("provider_workspaces.id"), nullable=False, index=True
+    )
+    user_id: Mapped[str | None] = mapped_column(
+        String(36), ForeignKey("users.id"), nullable=True, index=True
+    )
+    # Free-form event identifier — ``wise.first_render``, ``wise.opened``,
+    # ``wise.collapsed``, ``wise.suggestion_clicked``, etc. We don't
+    # constrain to an enum at the DB layer so the frontend can ship
+    # new event types without a schema migration.
+    event_type: Mapped[str] = mapped_column(String(80), nullable=False, index=True)
+    payload: Mapped[dict | None] = mapped_column(JSON)
+    occurred_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=utc_now, nullable=False, index=True
+    )

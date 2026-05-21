@@ -89,6 +89,7 @@ from app.models import (
     User,
     Validation,
     ValidationEvent,
+    WiseEvent,
 )
 from app.models.entities import utc_now
 from app.schemas.submissions import MultiSubmissionResponse, SubmissionResponse
@@ -2199,6 +2200,14 @@ class DashboardSuggestedAction(BaseModel):
     href: str
     requirement_code: str | None = None
     period_key: str | None = None
+    # Wise Phase 1 (2026-05-21): the reviewer's most recent decision
+    # message for rejected / needs_correction / possible_mismatch
+    # slots. Populated only when a current submission exists and a
+    # ``reviewer_decision`` event has been recorded against it; null
+    # otherwise. Surfaces inline in the Wise copilot so providers see
+    # the literal reviewer instruction without having to navigate to
+    # the submission detail page.
+    reviewer_note: str | None = None
 
 
 class DashboardAttentionItem(BaseModel):
@@ -2462,6 +2471,7 @@ def _compute_suggested_actions(
     today: date,
     *,
     onboarding_completed: bool = False,
+    db: Session | None = None,
 ) -> list[DashboardSuggestedAction]:
     """Build the dashboard's prioritized-action list.
 
@@ -2481,6 +2491,13 @@ def _compute_suggested_actions(
         if view.state not in _ACTIONABLE_SLOT_STATES:
             continue
         is_onboarding = view.slot_key.period_key is None
+        # Wise Phase 1 — quote the reviewer's most recent decision so
+        # the copilot can render the literal instruction inline.
+        reviewer_note = (
+            _latest_reviewer_note(db, view.current_submission_id)
+            if db is not None
+            else None
+        )
         actions.append(
             DashboardSuggestedAction(
                 id=f"act-{view.requirement_code}-{view.period_key or 'onb'}",
@@ -2501,6 +2518,7 @@ def _compute_suggested_actions(
                 ),
                 requirement_code=view.requirement_code,
                 period_key=view.period_key,
+                reviewer_note=reviewer_note,
             )
         )
     # 2. Missing required onboarding slots — medium priority.
@@ -2947,6 +2965,7 @@ def get_workspace_dashboard(
             calendar_slots,
             today,
             onboarding_completed=workspace.onboarding_completed_at is not None,
+            db=db,
         ),
         attention_today=_compute_attention_today(
             onboarding_slots, calendar_slots, today
@@ -2956,4 +2975,97 @@ def get_workspace_dashboard(
         institution_breakdown=_compute_institution_breakdown(
             onboarding_slots, calendar_slots
         ),
+    )
+
+
+# ---------------------------------------------------------------------------
+# Wise copilot — analytics events (Phase 1, 2026-05-21)
+# ---------------------------------------------------------------------------
+
+
+# Allowed event types. Kept as a frozenset rather than an enum so the
+# frontend can ship new event names without a backend deploy, but the
+# endpoint will reject unknown values today so we don't accidentally
+# pollute the table with typos.
+_WISE_ALLOWED_EVENT_TYPES: Final[frozenset[str]] = frozenset(
+    {
+        "wise.first_render",
+        "wise.opened",
+        "wise.collapsed",
+        "wise.suggestion_clicked",
+        "wise.suggestion_dismissed",
+    }
+)
+
+
+class WiseEventCreate(BaseModel):
+    event_type: str = Field(..., max_length=80)
+    payload: dict | None = None
+
+
+class WiseEventResponse(BaseModel):
+    id: str
+    event_type: str
+    occurred_at: str
+
+
+@router.post(
+    "/workspaces/{workspace_id}/wise/events",
+    response_model=WiseEventResponse,
+    status_code=status.HTTP_201_CREATED,
+    summary="Record a Wise copilot interaction event",
+    description=(
+        "Append a row to ``wise_events`` for the dock's open / collapse "
+        "/ suggestion-click telemetry. Tenant-guarded by the same "
+        "``current_portal_workspace`` dependency every other portal "
+        "endpoint uses, so a caller can only record events against "
+        "their own workspace."
+    ),
+)
+def record_wise_event(
+    workspace_id: str,
+    payload: WiseEventCreate,
+    db: DbSession,
+    workspace: Annotated[ProviderWorkspace, Depends(current_portal_workspace)],
+    request: Request,
+) -> WiseEventResponse:
+    _ = workspace_id  # tenant guard already enforced by dependency
+    if payload.event_type not in _WISE_ALLOWED_EVENT_TYPES:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=(
+                f"Unknown event_type '{payload.event_type}'. "
+                f"Allowed: {sorted(_WISE_ALLOWED_EVENT_TYPES)}"
+            ),
+        )
+
+    # Resolve the user id from the same JWT chain that powers
+    # ``current_portal_workspace``. When the caller is on the
+    # cookie-only session path (no Authorization header), fall back
+    # to the workspace's owner_user_id — we've already verified the
+    # caller has access via the dependency, and the owner is the
+    # canonical anchor for per-vendor analytics rollups.
+    user_id: str | None = None
+    try:
+        claims = _claims_from_header(request)
+        if claims is not None:
+            user_id = claims.get("sub")
+    except Exception:
+        user_id = None
+    if user_id is None:
+        user_id = workspace.owner_user_id
+
+    event = WiseEvent(
+        workspace_id=workspace.id,
+        user_id=user_id,
+        event_type=payload.event_type,
+        payload=payload.payload,
+    )
+    db.add(event)
+    db.commit()
+    db.refresh(event)
+    return WiseEventResponse(
+        id=event.id,
+        event_type=event.event_type,
+        occurred_at=event.occurred_at.isoformat(),
     )
