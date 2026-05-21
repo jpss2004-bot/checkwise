@@ -29,7 +29,9 @@ import {
   type ChartTone,
 } from "@/components/checkwise/charts";
 import { DocStateBadge } from "@/components/checkwise/doc-state-badge";
+import { EmptyExpedienteHero } from "@/components/checkwise/portal/empty-expediente-hero";
 import { PortalAppShell } from "@/components/checkwise/portal/portal-app-shell";
+import { WiseDock } from "@/components/checkwise/portal/wise-dock";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -38,6 +40,7 @@ import { PageHeader } from "@/components/ui/page-header";
 import { cn } from "@/lib/utils";
 import {
   getDashboard,
+  getOnboarding,
   statusToDocumentStateCode,
   type DashboardInstitutionBreakdown,
   type DashboardOnboardingSummary,
@@ -47,11 +50,13 @@ import {
   type DashboardSemaphoreLevel,
   type DashboardSuggestedAction,
   type DashboardUpcomingDeadline,
+  type OnboardingSummary,
   type RequirementStatus,
 } from "@/lib/api/portal";
 import { withOnboardingGate } from "@/lib/session/with-onboarding-gate";
 import type { PortalSession } from "@/lib/session/portal";
 import type { DocumentStateCode } from "@/lib/types";
+import { buildWiseMessages } from "@/lib/wise/messages";
 
 /**
  * Provider dashboard — visual REPSE compliance command center.
@@ -80,14 +85,25 @@ import type { DocumentStateCode } from "@/lib/types";
  */
 function DashboardInner({ session }: { session: PortalSession }) {
   const [dashboard, setDashboard] = useState<DashboardPayload | null>(null);
+  const [onboardingPayload, setOnboardingPayload] = useState<OnboardingSummary | null>(
+    null,
+  );
   const [loadError, setLoadError] = useState(false);
 
   useEffect(() => {
     let cancelled = false;
-    getDashboard(session)
-      .then((payload) => {
+    // Fetch dashboard + onboarding in parallel. The onboarding payload
+    // powers the empty-state hero's "first 5 documents" checklist and
+    // the Wise dock's net-new welcome line. Failing onboarding is
+    // non-fatal — the dashboard still renders without the checklist.
+    Promise.all([
+      getDashboard(session),
+      getOnboarding(session).catch(() => null),
+    ])
+      .then(([dash, onboarding]) => {
         if (cancelled) return;
-        setDashboard(payload);
+        setDashboard(dash);
+        setOnboardingPayload(onboarding);
         setLoadError(false);
       })
       .catch(() => {
@@ -153,33 +169,78 @@ function DashboardInner({ session }: { session: PortalSession }) {
   const primaryAction = dashboard.suggested_actions[0] ?? null;
   const secondaryActions = dashboard.suggested_actions.slice(1, 4);
 
+  // Wise Phase 1 (2026-05-21) — until the provider has completed the
+  // initial expediente, replace the chart-rich layout with the
+  // guided checklist hero. Charts of mostly-zero data read as broken
+  // to a brand-new vendor; the checklist gives them a concrete
+  // first move. The Wise dock mounts in both branches so the
+  // copilot is available whether they are in the empty-state or
+  // chart-rich world.
+  const wise = buildWiseMessages({
+    session,
+    dashboard,
+    onboarding: onboardingPayload,
+    limit: 4,
+  });
+
+  const header = (
+    <PageHeader
+      eyebrow="Centro de cumplimiento"
+      title={session.vendor_name}
+      description="Lo que falta, lo que está en revisión y la próxima acción concreta para mantener tu cumplimiento al día."
+      actions={
+        <Button asChild size="sm">
+          <Link href="/portal/upload">
+            <CloudArrowUp className="h-4 w-4" weight="bold" aria-hidden="true" />
+            Subir documento
+          </Link>
+        </Button>
+      }
+    />
+  );
+
+  const metadata = (
+    <MetadataStrip
+      items={buildMetadataItems({
+        rfc: session.vendor_rfc,
+        personaType: session.persona_type,
+        summary: onboarding,
+        counts,
+        semaphore: dashboard.semaphore,
+        nextDeadline: dashboard.upcoming_deadlines[0] ?? null,
+      })}
+    />
+  );
+
+  if (!initialOnboardingDone) {
+    return (
+      <PortalAppShell session={session} onboardingPct={onboardingPct}>
+        <main className="mx-auto max-w-5xl space-y-5 px-5 py-6 md:px-7">
+          {header}
+          {metadata}
+          {gateBlocked ? <LockedDashboardBanner summary={onboarding} /> : null}
+          {provisional ? <ProvisionalAccessBanner /> : null}
+          <EmptyExpedienteHero
+            vendorName={session.vendor_name}
+            summary={onboarding}
+            semaphore={dashboard.semaphore}
+            onboarding={onboardingPayload}
+          />
+        </main>
+        <WiseDock
+          session={session}
+          audience={wise.audience}
+          messages={wise.messages}
+        />
+      </PortalAppShell>
+    );
+  }
+
   return (
     <PortalAppShell session={session} onboardingPct={onboardingPct}>
       <main className="mx-auto max-w-7xl space-y-5 px-5 py-6 md:px-7">
-        <PageHeader
-          eyebrow="Centro de cumplimiento"
-          title={session.vendor_name}
-          description="Lo que falta, lo que está en revisión y la próxima acción concreta para mantener tu cumplimiento al día."
-          actions={
-            <Button asChild size="sm">
-              <Link href="/portal/upload">
-                <CloudArrowUp className="h-4 w-4" weight="bold" aria-hidden="true" />
-                Subir documento
-              </Link>
-            </Button>
-          }
-        />
-
-        <MetadataStrip
-          items={buildMetadataItems({
-            rfc: session.vendor_rfc,
-            personaType: session.persona_type,
-            summary: onboarding,
-            counts,
-            semaphore: dashboard.semaphore,
-            nextDeadline: dashboard.upcoming_deadlines[0] ?? null,
-          })}
-        />
+        {header}
+        {metadata}
 
         {gateBlocked ? <LockedDashboardBanner summary={onboarding} /> : null}
         {provisional ? <ProvisionalAccessBanner /> : null}
@@ -261,6 +322,11 @@ function DashboardInner({ session }: { session: PortalSession }) {
           </div>
         </section>
       </main>
+      <WiseDock
+        session={session}
+        audience={wise.audience}
+        messages={wise.messages}
+      />
     </PortalAppShell>
   );
 }
