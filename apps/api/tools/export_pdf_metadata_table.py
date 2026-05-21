@@ -97,28 +97,16 @@ CLIENT_MASTER_COLUMNS = [
     "Cliente",
     "Proveedor",
     "Periodo",
-    "Documento",
+    "Nombre del documento",
+    "Tipo de documento",
+    "Subtipo",
     "Institucion",
-    "Campo",
-    "Regla LegalShelf",
-    "Valor metadata",
-    "Confianza",
-    "Estado",
-    "Accion LegalShelf",
-    "Archivo fuente",
-]
-
-CLIENT_DOCUMENT_COLUMNS = [
-    "Cliente",
-    "Proveedor",
-    "Periodo",
-    "Documento",
-    "Institucion esperada",
-    "Documento detectado",
-    "Institucion detectada",
-    "Confianza match",
-    "Mismatch",
-    "Archivo fuente",
+    "Fecha principal",
+    "Participantes",
+    "Descripcion",
+    "Anexos",
+    "Etiquetas",
+    "Archivo PDF",
 ]
 
 
@@ -462,33 +450,22 @@ def _build_workbook_sheets(rows: list[dict[str, str]]) -> list[dict[str, Any]]:
 def _build_client_master_sheets(
     rows: list[dict[str, str]], *, client_name: str | None
 ) -> list[dict[str, Any]]:
-    visible_rows = [
-        row
-        for row in rows
-        if row.get("requirement_level") != "blank"
-        and row.get("field_key") not in {"related_documents"}
-    ]
+    documents = _client_document_summary_rows(rows)
     return [
-        _client_master_guide_sheet(visible_rows, client_name=client_name),
-        _client_metadata_sheet(visible_rows),
-        _client_documents_sheet(rows),
+        _client_master_guide_sheet(documents, client_name=client_name),
+        _client_metadata_sheet(documents),
     ]
 
 
 def _client_master_guide_sheet(
     rows: list[dict[str, str]], *, client_name: str | None
 ) -> dict[str, Any]:
-    documents = _unique_document_rows(rows)
-    pending = sum(1 for row in rows if row.get("review_status") == "pending")
-    mismatch = sum(1 for row in documents if row.get("mismatch_reason"))
     first = rows[0] if rows else {}
     guide_rows = [
-        ["LegalShelf Client Metadata Master", "", "", ""],
-        ["Cliente", client_name or first.get("client_legal_name", ""), "Documentos", str(len(documents))],
-        ["Que contiene", "Metadata documental parametrizada segun la guia LegalShelf. No incluye rutas internas, hashes ni datos tecnicos del backend.", "", ""],
-        ["Como usarlo", "Compartir esta version cuando LegalShelf haya revisado pendientes y posibles mismatch.", "", ""],
-        ["Campos de metadata", str(len(rows)), "Campos pendientes", str(pending)],
-        ["Posibles mismatch", str(mismatch), "Fuente", "CW & LS- PROPUESTA MD SIMPLIFICADA"],
+        ["Metadata documental del cliente", "", "", ""],
+        ["Cliente", client_name or first.get("Cliente", ""), "Documentos", str(len(rows))],
+        ["Contenido", "Resumen de metadatos de los documentos cargados por sus proveedores.", "", ""],
+        ["Formato", "Una fila por documento cargado.", "Fuente", "CheckWise"],
     ]
     return {
         "name": "00 Guia",
@@ -504,96 +481,102 @@ def _client_metadata_sheet(rows: list[dict[str, str]]) -> dict[str, Any]:
     sorted_rows = sorted(
         rows,
         key=lambda row: (
-            row.get("provider_nomenclature", ""),
-            row.get("period_key", "") or row.get("period_mentions", "") or row.get("document_frequency", ""),
-            row.get("document_type_name", ""),
-            row.get("field_label", ""),
+            row.get("Proveedor", ""),
+            row.get("Periodo", ""),
+            row.get("Nombre del documento", ""),
         ),
     )
     metadata_rows = [CLIENT_MASTER_COLUMNS]
     styles = [[3] * len(CLIENT_MASTER_COLUMNS)]
     for row in sorted_rows:
-        status = row.get("review_status", "")
-        value = row.get("normalized_value") or row.get("raw_value") or "(pendiente)"
-        metadata_rows.append(
-            [
-                row.get("client_legal_name", ""),
-                row.get("provider_nomenclature", ""),
-                row.get("period_key", "") or row.get("period_mentions", "") or row.get("document_frequency", ""),
-                row.get("document_type_name", ""),
-                row.get("institution", ""),
-                row.get("field_label", ""),
-                row.get("field_description", ""),
-                value,
-                row.get("confidence", ""),
-                status,
-                _action_for_status(status),
-                row.get("original_filename", ""),
-            ]
-        )
-        styles.append([_style_for_status(status)] * len(CLIENT_MASTER_COLUMNS))
+        metadata_rows.append([row.get(column, "") for column in CLIENT_MASTER_COLUMNS])
+        styles.append([10] * len(CLIENT_MASTER_COLUMNS))
     return {
-        "name": "01 Metadata Cliente",
+        "name": "01 Metadata",
         "rows": metadata_rows,
         "styles": styles,
-        "widths": [30, 30, 22, 34, 18, 30, 62, 42, 12, 24, 52, 34],
+        "widths": [30, 30, 18, 40, 24, 26, 20, 24, 44, 52, 36, 44, 34],
         "freeze": True,
         "autofilter": True,
     }
 
 
-def _client_documents_sheet(rows: list[dict[str, str]]) -> dict[str, Any]:
-    document_rows = [CLIENT_DOCUMENT_COLUMNS]
-    styles = [[3] * len(CLIENT_DOCUMENT_COLUMNS)]
-    for row in _unique_document_rows(rows):
-        has_mismatch = bool(row.get("mismatch_reason"))
-        document_rows.append(
-            [
-                row.get("client_legal_name", ""),
-                row.get("provider_nomenclature", ""),
-                row.get("period_key", "") or row.get("period_mentions", "") or row.get("document_frequency", ""),
-                row.get("document_type_name", ""),
-                row.get("institution", ""),
-                row.get("detected_document_type", ""),
-                row.get("detected_institution", ""),
-                row.get("requirement_match_confidence", ""),
-                row.get("mismatch_reason", "") or "Sin mismatch automatico detectado",
-                row.get("original_filename", ""),
-            ]
-        )
-        styles.append([7 if has_mismatch else 10] * len(CLIENT_DOCUMENT_COLUMNS))
-    return {
-        "name": "02 Documentos",
-        "rows": document_rows,
-        "styles": styles,
-        "widths": [30, 30, 22, 34, 20, 28, 24, 16, 56, 34],
-        "freeze": True,
-        "autofilter": True,
-    }
-
-
-def _unique_document_rows(rows: list[dict[str, str]]) -> list[dict[str, str]]:
-    seen: set[tuple[str, str, str]] = set()
-    unique: list[dict[str, str]] = []
+def _client_document_summary_rows(rows: list[dict[str, str]]) -> list[dict[str, str]]:
+    grouped: dict[tuple[str, str, str], list[dict[str, str]]] = {}
     for row in rows:
         key = (
             row.get("submission_id", ""),
             row.get("document_id", ""),
             row.get("document_type_code", ""),
         )
-        if key in seen:
-            continue
-        seen.add(key)
-        unique.append(row)
+        grouped.setdefault(key, []).append(row)
+    summaries = [_client_document_summary(group_rows) for group_rows in grouped.values()]
     return sorted(
-        unique,
+        summaries,
         key=lambda row: (
-            row.get("client_legal_name", ""),
-            row.get("provider_nomenclature", ""),
-            row.get("period_key", "") or row.get("period_mentions", "") or row.get("document_frequency", ""),
-            row.get("document_type_name", ""),
+            row.get("Cliente", ""),
+            row.get("Proveedor", ""),
+            row.get("Periodo", ""),
+            row.get("Nombre del documento", ""),
         ),
     )
+
+
+def _client_document_summary(rows: list[dict[str, str]]) -> dict[str, str]:
+    first = rows[0] if rows else {}
+    by_key = {row.get("field_key", ""): row for row in rows}
+    return {
+        "Cliente": first.get("client_legal_name", ""),
+        "Proveedor": first.get("provider_nomenclature", ""),
+        "Periodo": first.get("period_key", "") or _clean_field_value(by_key.get("reported_period")) or first.get("document_frequency", ""),
+        "Nombre del documento": _clean_field_value(by_key.get("document_name")) or first.get("document_type_name", ""),
+        "Tipo de documento": _clean_field_value(by_key.get("document_category")) or first.get("document_category", ""),
+        "Subtipo": _clean_field_value(by_key.get("document_subtype")) or first.get("document_subtype", ""),
+        "Institucion": _clean_field_value(by_key.get("document_institution_name")) or first.get("institution", ""),
+        "Fecha principal": (
+            _clean_field_value(by_key.get("main_date"))
+            or _clean_field_value(by_key.get("full_date_label"))
+            or _clean_field_value(by_key.get("issue_date"))
+            or _clean_field_value(by_key.get("expedition_date"))
+            or _clean_field_value(by_key.get("deed_date"))
+            or _clean_field_value(by_key.get("start_date"))
+        ),
+        "Participantes": (
+            _clean_field_value(by_key.get("participants"))
+            or _clean_field_value(by_key.get("provider_participant"))
+            or _clean_field_value(by_key.get("client_participant"))
+            or _clean_field_value(by_key.get("taxpayer_name"))
+        ),
+        "Descripcion": _clean_field_value(by_key.get("description")),
+        "Anexos": _clean_field_value(by_key.get("annexes")),
+        "Etiquetas": _clean_field_value(by_key.get("tags")),
+        "Archivo PDF": _clean_field_value(by_key.get("pdf_file_name")) or first.get("original_filename", ""),
+    }
+
+
+def _clean_field_value(row: dict[str, str] | None) -> str:
+    if not row:
+        return ""
+    if row.get("review_status") == "pending":
+        return ""
+    value = row.get("normalized_value") or row.get("raw_value") or ""
+    if value in {"(pendiente)", "null", "None"}:
+        return ""
+    return _human_readable_cell(value)
+
+
+def _human_readable_cell(value: str) -> str:
+    try:
+        parsed = json.loads(value)
+    except (json.JSONDecodeError, TypeError):
+        return value
+    if isinstance(parsed, list):
+        return "; ".join(str(item) for item in parsed if item not in (None, ""))
+    if isinstance(parsed, dict):
+        return "; ".join(f"{key}: {val}" for key, val in parsed.items() if val not in (None, ""))
+    if parsed is None:
+        return ""
+    return str(parsed)
 
 
 def _guide_sheet(rows: list[dict[str, str]]) -> dict[str, Any]:

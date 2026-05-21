@@ -381,6 +381,34 @@ def _write_metadata_preview_xlsx(path) -> None:
         archive.writestr("xl/worksheets/sheet2.xml", sheet2)
 
 
+def _write_client_master_xlsx(path) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    workbook = """<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<workbook xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships">
+  <sheets>
+    <sheet name="00 Guia" sheetId="1" r:id="rId1"/>
+    <sheet name="01 Metadata" sheetId="2" r:id="rId2"/>
+  </sheets>
+</workbook>"""
+    sheet1 = """<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">
+  <sheetData>
+    <row r="1"><c r="A1" t="inlineStr"><is><t>Metadata documental del cliente</t></is></c></row>
+  </sheetData>
+</worksheet>"""
+    sheet2 = """<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">
+  <sheetData>
+    <row r="1"><c r="A1" t="inlineStr"><is><t>Cliente</t></is></c><c r="B1" t="inlineStr"><is><t>Proveedor</t></is></c><c r="C1" t="inlineStr"><is><t>Periodo</t></is></c><c r="D1" t="inlineStr"><is><t>Nombre del documento</t></is></c><c r="E1" t="inlineStr"><is><t>Tipo de documento</t></is></c><c r="F1" t="inlineStr"><is><t>Subtipo</t></is></c><c r="G1" t="inlineStr"><is><t>Institucion</t></is></c><c r="H1" t="inlineStr"><is><t>Fecha principal</t></is></c><c r="I1" t="inlineStr"><is><t>Participantes</t></is></c><c r="J1" t="inlineStr"><is><t>Descripcion</t></is></c><c r="K1" t="inlineStr"><is><t>Anexos</t></is></c><c r="L1" t="inlineStr"><is><t>Etiquetas</t></is></c><c r="M1" t="inlineStr"><is><t>Archivo PDF</t></is></c></row>
+    <row r="2"><c r="A2" t="inlineStr"><is><t>Cliente Metadata</t></is></c><c r="B2" t="inlineStr"><is><t>Proveedor Metadata</t></is></c><c r="C2" t="inlineStr"><is><t>2026-M05</t></is></c><c r="D2" t="inlineStr"><is><t>Proveedor Metadata Acuse SISUB Mayo</t></is></c><c r="E2" t="inlineStr"><is><t>Formatos</t></is></c><c r="F2" t="inlineStr"><is><t>Acuse SISUB</t></is></c><c r="G2" t="inlineStr"><is><t>stps_repse</t></is></c><c r="M2" t="inlineStr"><is><t>acuse_sisub.pdf</t></is></c></row>
+  </sheetData>
+</worksheet>"""
+    with zipfile.ZipFile(path, "w") as archive:
+        archive.writestr("xl/workbook.xml", workbook)
+        archive.writestr("xl/worksheets/sheet1.xml", sheet1)
+        archive.writestr("xl/worksheets/sheet2.xml", sheet2)
+
+
 def _seed_metadata_export(db_factory, export_root) -> str:
     db = db_factory()
     try:
@@ -443,7 +471,7 @@ def _seed_metadata_export(db_factory, export_root) -> str:
         output_path = export_root / "cliente-metadata" / "proveedor-metadata" / "2026-m05" / "acuse_sisub" / "latest_metadata.xlsx"
         master_path = export_root / "cliente-metadata" / "client_master_metadata.xlsx"
         _write_metadata_preview_xlsx(output_path)
-        _write_metadata_preview_xlsx(master_path)
+        _write_client_master_xlsx(master_path)
         event = ValidationEvent(
             submission_id=submission.id,
             document_id=document.id,
@@ -541,6 +569,18 @@ def test_admin_can_list_preview_and_download_metadata_exports(
         )
         assert master.status_code == 200, master.text
         assert master.json()["master_path"].endswith("client_master_metadata.xlsx")
+        assert master.json()["sheets"][1]["name"] == "01 Metadata"
+
+        client_metadata = api_client.get(
+            f"/api/v1/admin/clients/{item['client_id']}/metadata",
+            headers=_h(token),
+        )
+        assert client_metadata.status_code == 200, client_metadata.text
+        client_body = client_metadata.json()
+        assert client_body["client"]["name"] == "Cliente Metadata"
+        assert client_body["master_available"] is True
+        assert client_body["documents"][0]["proveedor"] == "Proveedor Metadata"
+        assert client_body["documents"][0]["nombre_documento"] == "Proveedor Metadata Acuse SISUB Mayo"
 
         download = api_client.get(
             f"/api/v1/admin/metadata-exports/{event_id}/download",

@@ -28,9 +28,10 @@ import {
  * here. Routing happens after the response based on:
  *
  *   1. ``must_change_password`` → /activate (forced first-login)
- *   2. role contains internal_admin or reviewer → /admin/reviewer
- *   3. role contains client_admin → /client/dashboard
- *   4. otherwise → /portal/entra-a-tu-espacio
+ *   2. role contains internal_admin → /admin/dashboard
+ *   3. role contains reviewer → /admin/reviewer
+ *   4. role contains client_admin → /client/dashboard
+ *   5. otherwise → /portal/entra-a-tu-espacio
  */
 export default function LoginPage() {
   const router = useRouter();
@@ -227,10 +228,10 @@ function decideDestination(
   mustChangePassword: boolean,
 ): string {
   if (mustChangePassword) return "/activate";
-  if (
-    session.roles.includes("internal_admin") ||
-    session.roles.includes("reviewer")
-  ) {
+  if (session.roles.includes("internal_admin")) {
+    return "/admin/dashboard";
+  }
+  if (session.roles.includes("reviewer")) {
     return "/admin/reviewer";
   }
   if (session.roles.includes("client_admin")) {

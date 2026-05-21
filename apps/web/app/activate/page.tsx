@@ -127,10 +127,11 @@ function ActivateInner() {
           },
         });
         setSuccess(true);
-        const dest = stored.roles.includes("internal_admin") ||
-          stored.roles.includes("reviewer")
-          ? "/admin/reviewer"
-          : "/portal/entra-a-tu-espacio";
+        const dest = stored.roles.includes("internal_admin")
+          ? "/admin/dashboard"
+          : stored.roles.includes("reviewer")
+            ? "/admin/reviewer"
+            : "/portal/entra-a-tu-espacio";
         setTimeout(() => router.replace(dest), 1200);
       } catch (err) {
         if (err instanceof AuthApiError && err.status === 401) {

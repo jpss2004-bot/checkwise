@@ -35,6 +35,7 @@ def _context() -> dict[str, str]:
         "provider_nomenclature": "SEGURIDAD PRI",
         "expected_institution": "infonavit",
         "upload_form_month": "Mayo",
+        "period_key": "2026-M05",
         "reported_period": "Cuatrimestre inmediato anterior",
         "proposed_document_name": "SEGURIDAD PRI Acuse SISUB Mayo",
     }
@@ -171,16 +172,18 @@ def test_client_master_xlsx_keeps_shareable_metadata_only(tmp_path: Path) -> Non
         workbook_xml = archive.read("xl/workbook.xml").decode("utf-8")
         guide_xml = archive.read("xl/worksheets/sheet1.xml").decode("utf-8")
         metadata_xml = archive.read("xl/worksheets/sheet2.xml").decode("utf-8")
-        documents_xml = archive.read("xl/worksheets/sheet3.xml").decode("utf-8")
 
     assert "00 Guia" in workbook_xml
-    assert "01 Metadata Cliente" in workbook_xml
-    assert "02 Documentos" in workbook_xml
-    assert "LegalShelf Client Metadata Master" in guide_xml
-    assert "Valor metadata" in metadata_xml
-    assert "Regla LegalShelf" in metadata_xml
+    assert "01 Metadata" in workbook_xml
+    assert "Metadata documental del cliente" in guide_xml
+    assert "Nombre del documento" in metadata_xml
+    assert "Tipo de documento" in metadata_xml
+    assert "SEGURIDAD PRI Acuse SISUB Mayo" in metadata_xml
+    assert "2026-M05" in metadata_xml
     assert "sha256" not in metadata_xml
-    assert "Mismatch" in documents_xml
+    assert "Confianza" not in metadata_xml
+    assert "Mismatch" not in metadata_xml
+    assert "Estado" not in metadata_xml
 
 
 def test_cli_writes_csv_file(tmp_path: Path) -> None:

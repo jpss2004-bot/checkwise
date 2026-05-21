@@ -1297,6 +1297,29 @@ class ClientMasterMetadataPreviewResponse(BaseModel):
     sheets: list[MetadataExportSheetPreview]
 
 
+class ClientMetadataDocument(BaseModel):
+    cliente: str
+    proveedor: str
+    periodo: str
+    nombre_documento: str
+    tipo_documento: str
+    subtipo: str
+    institucion: str
+    fecha_principal: str
+    participantes: str
+    descripcion: str
+    anexos: str
+    etiquetas: str
+    archivo_pdf: str
+
+
+class ClientMetadataResponse(BaseModel):
+    client: dict
+    master_available: bool
+    master_path: str | None
+    documents: list[ClientMetadataDocument]
+
+
 @router.get("/metadata-exports", response_model=MetadataExportListResponse)
 def list_metadata_exports(
     db: DbSession,
@@ -1386,6 +1409,30 @@ def preview_client_master_metadata_export(
         client_name=client.name,
         master_path=_display_export_path(str(path)) or path.name,
         sheets=_read_xlsx_preview(path, max_rows_per_sheet=80, max_columns=12),
+    )
+
+
+@router.get("/clients/{client_id}/metadata", response_model=ClientMetadataResponse)
+def get_client_metadata(
+    client_id: str, db: DbSession, current: AdminUser
+) -> ClientMetadataResponse:
+    """Client-facing metadata summary for the admin client page."""
+    _ = current
+    client = db.get(Client, client_id)
+    if client is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, detail="Cliente no encontrado.")
+    path = _client_master_file_path(client)
+    documents: list[ClientMetadataDocument] = []
+    if path.exists():
+        sheets = _read_xlsx_preview(path, max_rows_per_sheet=500, max_columns=20)
+        metadata_sheet = next((sheet for sheet in sheets if sheet.name == "01 Metadata"), None)
+        if metadata_sheet and metadata_sheet.rows:
+            documents = _client_metadata_documents_from_sheet(metadata_sheet.rows)
+    return ClientMetadataResponse(
+        client=_client_to_dict(client),
+        master_available=path.exists(),
+        master_path=_display_export_path(str(path)) if path.exists() else None,
+        documents=documents,
     )
 
 
@@ -1572,6 +1619,36 @@ def _xlsx_cell_text(cell: ET.Element, namespace: dict[str, str]) -> str:
         return "".join(node.text or "" for node in inline.findall(".//x:t", namespace))
     value = cell.find("x:v", namespace)
     return value.text if value is not None and value.text is not None else ""
+
+
+def _client_metadata_documents_from_sheet(
+    rows: list[list[str]],
+) -> list[ClientMetadataDocument]:
+    headers = rows[0]
+    items: list[ClientMetadataDocument] = []
+    for values in rows[1:]:
+        item = {
+            header: values[index] if index < len(values) else ""
+            for index, header in enumerate(headers)
+        }
+        items.append(
+            ClientMetadataDocument(
+                cliente=item.get("Cliente", ""),
+                proveedor=item.get("Proveedor", ""),
+                periodo=item.get("Periodo", ""),
+                nombre_documento=item.get("Nombre del documento", ""),
+                tipo_documento=item.get("Tipo de documento", ""),
+                subtipo=item.get("Subtipo", ""),
+                institucion=item.get("Institucion", ""),
+                fecha_principal=item.get("Fecha principal", ""),
+                participantes=item.get("Participantes", ""),
+                descripcion=item.get("Descripcion", ""),
+                anexos=item.get("Anexos", ""),
+                etiquetas=item.get("Etiquetas", ""),
+                archivo_pdf=item.get("Archivo PDF", ""),
+            )
+        )
+    return items
 
 
 # ---------------------------------------------------------------------------

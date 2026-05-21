@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
+import Link from "next/link";
 import { IdentificationCard, MagnifyingGlass, Plus, X } from "@phosphor-icons/react";
 
 import { Surface } from "@/components/checkwise/dashboard/stat-card";
@@ -165,19 +166,26 @@ export default function AdminClientsPage() {
             {
               id: "action",
               header: "",
-              width: "100px",
+              width: "190px",
               align: "right",
               cell: (row) => (
-                <Button
-                  size="sm"
-                  variant="outline"
-                  onClick={() => {
-                    setCreateOpen(false);
-                    setEditing(row);
-                  }}
-                >
-                  Editar
-                </Button>
+                <div className="flex justify-end gap-2">
+                  <Button asChild size="sm" variant="outline">
+                    <Link href={`/admin/clients/${row.id}/metadata`}>
+                      Metadata
+                    </Link>
+                  </Button>
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    onClick={() => {
+                      setCreateOpen(false);
+                      setEditing(row);
+                    }}
+                  >
+                    Editar
+                  </Button>
+                </div>
               ),
             },
           ]}

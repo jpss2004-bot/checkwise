@@ -271,6 +271,29 @@ export type ClientMasterMetadataPreview = {
   sheets: MetadataExportSheetPreview[];
 };
 
+export type ClientMetadataDocument = {
+  cliente: string;
+  proveedor: string;
+  periodo: string;
+  nombre_documento: string;
+  tipo_documento: string;
+  subtipo: string;
+  institucion: string;
+  fecha_principal: string;
+  participantes: string;
+  descripcion: string;
+  anexos: string;
+  etiquetas: string;
+  archivo_pdf: string;
+};
+
+export type ClientMetadataResponse = {
+  client: AdminClient;
+  master_available: boolean;
+  master_path: string | null;
+  documents: ClientMetadataDocument[];
+};
+
 export async function listMetadataExports(params?: {
   result?: "completed" | "skipped" | "failed";
   limit?: number;
@@ -326,6 +349,12 @@ export async function downloadClientMasterMetadata(
     throw new AdminApiError(response.status, detail || response.statusText);
   }
   return response.blob();
+}
+
+export async function getClientMetadata(
+  clientId: string,
+): Promise<ClientMetadataResponse> {
+  return fetchJson(`/api/v1/admin/clients/${clientId}/metadata`);
 }
 
 // ---------------------------------------------------------------------------

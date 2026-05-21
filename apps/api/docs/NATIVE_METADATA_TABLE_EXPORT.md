@@ -147,22 +147,19 @@ Useful context keys include:
 
 ## Output Shape
 
-The automatic XLSX is organized as a LegalShelf review workbook:
+Each uploaded document still gets a detailed operational workbook:
 
 - `00 Guia`: plain-language summary for the admin, including client, provider, expected document, expected institution, period/file context, overall status, and mismatch warning.
 - `01 Revision`: the practical review tab. Each row is a metadata field with the LegalShelf rule, extracted/proposed value, confidence, current status, source/method, and suggested action.
 - `02 Senales`: document-level comparison signals: expected vs detected document, expected vs detected institution, RFCs, dates, periods, match confidence, anomaly codes, and OCR status.
 - `03 Datos`: the complete raw export table for auditing, filtering, integrations, or future database import.
 
-The workbook uses visual status colors so LegalShelf can immediately separate fields that are ready, prefilled but needing review, pending, or possible mismatch/more urgent review.
-
-The client master workbook is intentionally cleaner and shareable:
+The client master workbook is the client-facing deliverable:
 
 - `00 Guia`: client-level summary.
-- `01 Metadata Cliente`: the LegalShelf parameters per provider/document/field.
-- `02 Documentos`: document-level expected-vs-detected signals.
+- `01 Metadata`: one row per uploaded document, with clean LegalShelf metadata columns.
 
-It does not include backend paths, hashes, database ids, or raw technical dump tabs.
+It does not include backend paths, hashes, database ids, confidence, mismatch, review status, or raw technical dump tabs.
 
 The CSV output remains a long table: one row per document field.
 
@@ -202,9 +199,9 @@ metadata_exports/{client}/{provider}/{period}/{document_type}/latest_metadata.xl
 
 Use `latest_metadata.xlsx` for the newest upload in that client/provider/period/document folder. Use the `{submission_id}_{document_id}_metadata.xlsx` file when you need the exact historical export for a specific upload.
 
-Use `metadata_exports/{client}/client_master_metadata.xlsx` when LegalShelf needs the current client-level file to review or share.
+Use `metadata_exports/{client}/client_master_metadata.xlsx` when LegalShelf needs the current client-level file to share.
 
-Admins can access the same files inside the MVP at `/admin/metadata`. The page supports document-level preview/download and client master preview/download.
+Admins can access the client-facing file inside the MVP at `/admin/clients/{client_id}/metadata`.
 
 ## Verification
 
