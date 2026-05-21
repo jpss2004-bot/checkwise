@@ -2,21 +2,33 @@
 
 import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
+import { useRouter, useSearchParams } from "next/navigation";
 import {
   ArrowLeft,
   ArrowRight,
+  ArrowsClockwise,
   Buildings,
   CalendarBlank,
   CloudArrowUp,
+  Eye,
   Files,
+  Funnel,
   Scales,
   ShieldCheck,
   Stamp,
+  Tray,
   X,
   type Icon,
 } from "@phosphor-icons/react";
 
-import { DocStateBadge, DOC_STATE_LABELS } from "@/components/checkwise/doc-state-badge";
+import { InstitutionRowHeader } from "@/components/checkwise/calendar/institution-row-header";
+import { MonthCell } from "@/components/checkwise/calendar/month-cell";
+import {
+  CALENDAR_INSTITUTIONS,
+  type CalendarEntry,
+  type CalendarInstitutionCode,
+} from "@/components/checkwise/calendar/types";
+import { DocStateBadge } from "@/components/checkwise/doc-state-badge";
 import { DocumentGuidanceDisclosure } from "@/components/checkwise/portal/expediente-card";
 import { PortalAppShell } from "@/components/checkwise/portal/portal-app-shell";
 import { Badge } from "@/components/ui/badge";
@@ -29,25 +41,10 @@ import {
   MONTH_LABELS_ES,
   MONTH_LABELS_SHORT_ES,
   statusToDocumentStateCode,
-  type CalendarItem,
   type CalendarPayload,
 } from "@/lib/api/portal";
-import type { DocumentStateCode } from "@/lib/types";
 import { withOnboardingGate } from "@/lib/session/with-onboarding-gate";
 import type { PortalSession } from "@/lib/session/portal";
-
-/**
- * Calendar surface (Phase 5 — canonical backend reads).
- *
- * Consumes ``GET /api/v1/portal/workspaces/{id}/calendar`` directly.
- * No adapter, no MOCK_CALENDAR_2026. The backend response now ships
- * the four enrichment fields the drawer needs (``required_document``,
- * ``deadline_iso``, ``suggested_action``, ``href``) per item.
- */
-
-type CalendarInstitutionCode = "sat" | "imss" | "infonavit" | "stps_repse";
-
-const INSTITUTIONS: CalendarInstitutionCode[] = ["sat", "imss", "infonavit", "stps_repse"];
 
 const INSTITUTION_ICON: Record<CalendarInstitutionCode, Icon> = {
   sat: Scales,
@@ -56,37 +53,11 @@ const INSTITUTION_ICON: Record<CalendarInstitutionCode, Icon> = {
   stps_repse: ShieldCheck,
 };
 
-/**
- * Flat, drawer-ready view of one calendar slot. Phase 5 — built
- * inline from the backend payload (no adapter, no mock fallback).
- */
-type CalendarEntry = {
-  id: string;
-  year: number;
-  month: number;
-  institution: CalendarInstitutionCode;
-  obligation: string;
-  required_document: string;
-  deadline_iso: string;
-  state: DocumentStateCode;
-  suggested_action: string;
-  frequency: CalendarItem["frequency"];
-  /** Canonical upload URL provided by the backend. */
-  href: string;
-  /** Current submission id, when one exists. */
-  submission_id: string | null;
-  /** Stage 2.7 (T5 parity, 2026-05-20) — first-upload guidance.
-   *  Surfaced in the drawer via DocumentGuidanceDisclosure. */
-  anatomy: string;
-  where_to_obtain: string;
-  common_errors: string[];
-};
-
 function flattenCalendarPayload(payload: CalendarPayload): CalendarEntry[] {
   const entries: CalendarEntry[] = [];
   for (const month of payload.months) {
     for (const inst of month.institutions) {
-      if (!INSTITUTIONS.includes(inst.institution as CalendarInstitutionCode)) {
+      if (!CALENDAR_INSTITUTIONS.includes(inst.institution as CalendarInstitutionCode)) {
         continue;
       }
       const institution = inst.institution as CalendarInstitutionCode;
@@ -107,6 +78,10 @@ function flattenCalendarPayload(payload: CalendarPayload): CalendarEntry[] {
           anatomy: item.anatomy ?? "",
           where_to_obtain: item.where_to_obtain ?? "",
           common_errors: item.common_errors ?? [],
+          // Session 3 (2026-05-21) — catalog v2 alternatives.
+          // ``?? []`` keeps v1 callers safe when the backend hasn't
+          // rolled out yet (e.g. testing against a stale staging).
+          accepts_documents: item.accepts_documents ?? [],
         });
       }
     }
@@ -114,12 +89,41 @@ function flattenCalendarPayload(payload: CalendarPayload): CalendarEntry[] {
   return entries;
 }
 
-function CalendarInner({ session }: { session: PortalSession }) {
-  const [year] = useState(new Date().getFullYear() || 2026);
-  const [selectedId, setSelectedId] = useState<string | null>(null);
-  const [filterInstitution, setFilterInstitution] =
-    useState<CalendarInstitutionCode | "all">("all");
+const VALID_INSTITUTIONS: ReadonlySet<string> = new Set([
+  "sat",
+  "imss",
+  "infonavit",
+  "stps_repse",
+]);
 
+function CalendarInner({ session }: { session: PortalSession }) {
+  const router = useRouter();
+  const searchParams = useSearchParams();
+  const now = new Date();
+  const [year] = useState(now.getFullYear() || 2026);
+  const currentMonth = now.getMonth() + 1;
+  const viewingCurrentYear = year === now.getFullYear();
+
+  const filterParam = searchParams.get("inst");
+  const filterInstitution: CalendarInstitutionCode | "all" =
+    filterParam && VALID_INSTITUTIONS.has(filterParam)
+      ? (filterParam as CalendarInstitutionCode)
+      : "all";
+
+  const setFilterInstitution = (v: CalendarInstitutionCode | "all") => {
+    const params = new URLSearchParams(searchParams.toString());
+    if (v === "all") {
+      params.delete("inst");
+    } else {
+      params.set("inst", v);
+    }
+    const qs = params.toString();
+    router.replace(qs ? `/portal/calendar?${qs}` : "/portal/calendar", {
+      scroll: false,
+    });
+  };
+
+  const [selectedId, setSelectedId] = useState<string | null>(null);
   const [events, setEvents] = useState<CalendarEntry[] | null>(null);
   const [loadError, setLoadError] = useState(false);
 
@@ -147,7 +151,6 @@ function CalendarInner({ session }: { session: PortalSession }) {
     return events.filter((e) => e.institution === filterInstitution);
   }, [filterInstitution, events]);
 
-  // Index events by (institution, month) for fast lookup.
   const eventsByCell = useMemo(() => {
     const map = new Map<string, CalendarEntry[]>();
     for (const e of filteredEvents) {
@@ -155,6 +158,17 @@ function CalendarInner({ session }: { session: PortalSession }) {
       const list = map.get(key) ?? [];
       list.push(e);
       map.set(key, list);
+    }
+    return map;
+  }, [filteredEvents]);
+
+  const eventsByInstitution = useMemo(() => {
+    const map = new Map<CalendarInstitutionCode, CalendarEntry[]>();
+    for (const inst of CALENDAR_INSTITUTIONS) {
+      map.set(inst, []);
+    }
+    for (const e of filteredEvents) {
+      map.get(e.institution)?.push(e);
     }
     return map;
   }, [filteredEvents]);
@@ -167,7 +181,7 @@ function CalendarInner({ session }: { session: PortalSession }) {
   if (!events) {
     return (
       <PortalAppShell session={session}>
-        <main className="mx-auto max-w-7xl space-y-6 px-5 py-8">
+        <main className="mx-auto w-full max-w-screen-2xl space-y-6 px-5 py-8 sm:px-6 lg:px-8 2xl:px-10">
           <Skeleton className="h-24 w-1/2 rounded-xl" />
           <Skeleton className="h-[420px] w-full rounded-xl" />
         </main>
@@ -175,13 +189,21 @@ function CalendarInner({ session }: { session: PortalSession }) {
     );
   }
 
+  const visibleInstitutions =
+    filterInstitution === "all"
+      ? CALENDAR_INSTITUTIONS
+      : CALENDAR_INSTITUTIONS.filter((i) => i === filterInstitution);
+
+  const totalCount = events.length;
+  const filteredCount = filteredEvents.length;
+
   return (
     <PortalAppShell session={session}>
-      <main className="mx-auto max-w-7xl space-y-6 px-5 py-8">
+      <main className="mx-auto w-full max-w-screen-2xl space-y-6 px-5 py-8 sm:px-6 lg:px-8 2xl:px-10">
         <PageHeader
           eyebrow={`Calendario REPSE · ${year}`}
           title="Tu año de cumplimiento de un vistazo"
-          description="Cada celda representa una obligación. Toca cualquier mes para ver detalle, requisito y siguiente acción."
+          description="Cada celda muestra las obligaciones de ese mes; pasa el cursor para ver el detalle o toca para abrir la siguiente acción."
           actions={
             <Button asChild variant="outline" size="sm">
               <Link href="/portal/dashboard">
@@ -196,7 +218,7 @@ function CalendarInner({ session }: { session: PortalSession }) {
           value={filterInstitution}
           onChange={setFilterInstitution}
           counts={{
-            all: events.length,
+            all: totalCount,
             sat: events.filter((e) => e.institution === "sat").length,
             imss: events.filter((e) => e.institution === "imss").length,
             infonavit: events.filter((e) => e.institution === "infonavit").length,
@@ -211,81 +233,94 @@ function CalendarInner({ session }: { session: PortalSession }) {
           </p>
         )}
 
-        <section
-          className="cw-fade-up overflow-x-auto rounded-lg border border-[color:var(--border-default)] bg-[color:var(--surface-raised)] shadow-xs"
-          aria-label="Cuadrícula del calendario"
-        >
-          <table className="w-full min-w-[760px] border-collapse text-sm">
-            <thead>
-              <tr className="border-b border-[color:var(--border-subtle)] bg-[color:var(--surface-page)] text-left">
-                <th
-                  scope="col"
-                  className="px-4 py-3 text-[10px] font-mono uppercase tracking-wide text-[color:var(--text-tertiary)]"
-                >
-                  Institución
-                </th>
-                {MONTH_LABELS_SHORT_ES.map((m, idx) => (
+        {filteredCount === 0 && !loadError ? (
+          <FilteredEmpty
+            label={
+              filterInstitution === "all"
+                ? "este año"
+                : INSTITUTION_LABELS[filterInstitution]
+            }
+            onReset={() => setFilterInstitution("all")}
+            canReset={filterInstitution !== "all"}
+          />
+        ) : (
+          <section
+            className="cw-fade-up overflow-x-auto rounded-lg border border-[color:var(--border-default)] bg-[color:var(--surface-raised)] shadow-xs"
+            aria-label="Cuadrícula del calendario"
+          >
+            <table className="w-full min-w-[860px] border-collapse text-sm">
+              <thead>
+                <tr className="border-b border-[color:var(--border-subtle)] bg-[color:var(--surface-page)] text-left">
                   <th
-                    key={m}
                     scope="col"
-                    className={
-                      "px-2 py-3 text-center text-[10px] font-mono uppercase tracking-wide " +
-                      (idx === 4
-                        ? "text-[color:var(--text-brand)]"
-                        : "text-[color:var(--text-tertiary)]")
-                    }
+                    className="sticky left-0 z-20 border-r border-[color:var(--border-subtle)] bg-[color:var(--surface-page)] px-4 py-3 text-[10px] font-mono uppercase tracking-wide text-[color:var(--text-tertiary)]"
                   >
-                    {m}
+                    Institución
                   </th>
-                ))}
-              </tr>
-            </thead>
-            <tbody>
-              {INSTITUTIONS.map((inst) => {
-                if (
-                  filterInstitution !== "all" &&
-                  filterInstitution !== inst
-                ) {
-                  return null;
-                }
-                const IconComponent = INSTITUTION_ICON[inst];
-                return (
-                  <tr
-                    key={inst}
-                    className="border-b border-[color:var(--border-subtle)] last:border-0"
-                  >
-                    <th
-                      scope="row"
-                      className="border-r border-[color:var(--border-subtle)] bg-[color:var(--surface-page)] px-4 py-3 text-left align-middle"
+                  {MONTH_LABELS_SHORT_ES.map((m, idx) => {
+                    const monthNum = idx + 1;
+                    const isCurrent = viewingCurrentYear && monthNum === currentMonth;
+                    return (
+                      <th
+                        key={m}
+                        scope="col"
+                        aria-current={isCurrent ? "true" : undefined}
+                        className={
+                          "relative px-2 py-3 text-center text-[10px] font-mono uppercase tracking-wide " +
+                          (isCurrent
+                            ? "text-[color:var(--text-brand)]"
+                            : "text-[color:var(--text-tertiary)]")
+                        }
+                      >
+                        {m}
+                      </th>
+                    );
+                  })}
+                </tr>
+              </thead>
+              <tbody>
+                {visibleInstitutions.map((inst) => {
+                  const IconComponent = INSTITUTION_ICON[inst];
+                  const rowEvents = eventsByInstitution.get(inst) ?? [];
+                  return (
+                    <tr
+                      key={inst}
+                      className="border-b border-[color:var(--border-subtle)] last:border-0"
                     >
-                      <span className="flex items-center gap-2 text-[13px] font-semibold text-[color:var(--text-primary)]">
-                        <IconComponent
-                          className="h-4 w-4 text-[color:var(--text-brand)]"
-                          weight="duotone"
-                          aria-hidden="true"
+                      <th
+                        scope="row"
+                        className="sticky left-0 z-10 min-w-[240px] border-r border-[color:var(--border-subtle)] bg-[color:var(--surface-page)] px-4 py-3 text-left align-middle"
+                      >
+                        <InstitutionRowHeader
+                          icon={IconComponent}
+                          label={INSTITUTION_LABELS[inst]}
+                          events={rowEvents}
                         />
-                        {INSTITUTION_LABELS[inst]}
-                      </span>
-                    </th>
-                    {Array.from({ length: 12 }, (_, monthIdx) => {
-                      const month = monthIdx + 1;
-                      const cellEvents = eventsByCell.get(`${inst}-${month}`) ?? [];
-                      return (
-                        <td key={month} className="p-1 text-center align-middle">
-                          <MonthCell
-                            events={cellEvents}
-                            isCurrent={month === 5}
-                            onSelect={setSelectedId}
-                          />
-                        </td>
-                      );
-                    })}
-                  </tr>
-                );
-              })}
-            </tbody>
-          </table>
-        </section>
+                      </th>
+                      {Array.from({ length: 12 }, (_, monthIdx) => {
+                        const month = monthIdx + 1;
+                        const cellEvents = eventsByCell.get(`${inst}-${month}`) ?? [];
+                        const isCurrent = viewingCurrentYear && month === currentMonth;
+                        const isPast = viewingCurrentYear && month < currentMonth;
+                        return (
+                          <td key={month} className="p-1 align-middle">
+                            <MonthCell
+                              events={cellEvents}
+                              month={month}
+                              isCurrent={isCurrent}
+                              isPast={isPast}
+                              onSelect={setSelectedId}
+                            />
+                          </td>
+                        );
+                      })}
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </section>
+        )}
 
         <Legend />
       </main>
@@ -318,7 +353,12 @@ function FilterChips({
     { value: "stps_repse", label: "STPS / REPSE" },
   ];
   return (
-    <div role="tablist" className="flex flex-wrap gap-2">
+    <div role="tablist" className="flex flex-wrap items-center gap-2">
+      <Funnel
+        className="h-3.5 w-3.5 text-[color:var(--text-tertiary)]"
+        weight="bold"
+        aria-hidden="true"
+      />
       {options.map((opt) => {
         const active = value === opt.value;
         return (
@@ -351,80 +391,37 @@ function FilterChips({
   );
 }
 
-// ─── Cell ───────────────────────────────────────────────────────
+// ─── Filtered empty state ───────────────────────────────────────
 
-const CELL_BG = {
-  approved: "bg-[color:var(--doc-approved-bg)] text-[color:var(--doc-approved-text)] border-[color:var(--doc-approved-border)]",
-  in_review: "bg-[color:var(--doc-in-review-bg)] text-[color:var(--doc-in-review-text)] border-[color:var(--doc-in-review-border)]",
-  uploaded: "bg-[color:var(--doc-uploaded-bg)] text-[color:var(--doc-uploaded-text)] border-[color:var(--doc-uploaded-border)]",
-  rejected: "bg-[color:var(--doc-rejected-bg)] text-[color:var(--doc-rejected-text)] border-[color:var(--doc-rejected-border)]",
-  expired: "bg-[color:var(--doc-expired-bg)] text-[color:var(--doc-expired-text)] border-[color:var(--doc-expired-border)]",
-  needs_review: "bg-[color:var(--doc-needs-review-bg)] text-[color:var(--doc-needs-review-text)] border-[color:var(--doc-needs-review-border)]",
-  pending: "bg-[color:var(--doc-pending-bg)] text-[color:var(--doc-pending-text)] border-[color:var(--doc-pending-border)]",
-  empty: "bg-[color:var(--doc-empty-bg)] text-[color:var(--doc-empty-text)] border-[color:var(--doc-empty-border)]",
-} as const;
-
-function MonthCell({
-  events,
-  isCurrent,
-  onSelect,
+function FilteredEmpty({
+  label,
+  onReset,
+  canReset,
 }: {
-  events: CalendarEntry[];
-  isCurrent: boolean;
-  onSelect: (id: string) => void;
+  label: string;
+  onReset: () => void;
+  canReset: boolean;
 }) {
-  if (events.length === 0) {
-    return (
-      <div
-        className={
-          "h-10 w-full rounded-sm border " +
-          (isCurrent
-            ? "border-[color:var(--border-focus)]/40 bg-[color:var(--surface-brand-muted)]/40"
-            : "border-[color:var(--border-subtle)] bg-[color:var(--surface-page)]")
-        }
-        aria-hidden="true"
-      />
-    );
-  }
-  const event = events[0];
-  const tone = CELL_BG[event.state];
   return (
-    <button
-      type="button"
-      onClick={() => onSelect(event.id)}
-      className={
-        "group relative flex h-10 w-full items-center justify-center gap-1 rounded-sm border font-mono text-[10px] font-semibold uppercase transition-all hover:scale-[1.04] focus:outline-none focus-visible:ring-2 focus-visible:ring-[color:var(--border-focus)]/40 " +
-        tone +
-        (isCurrent ? " ring-2 ring-[color:var(--border-focus)]/40" : "")
-      }
-      aria-label={`${event.obligation} en ${MONTH_LABELS_ES[event.month]}: ${DOC_STATE_LABELS[event.state]}`}
-    >
-      <StateDot state={event.state} />
-      {events.length > 1 && (
-        <span className="rounded-full bg-current/10 px-1 text-[8px]">
-          +{events.length - 1}
-        </span>
+    <section className="rounded-lg border border-dashed border-[color:var(--border-default)] bg-[color:var(--surface-raised)] px-6 py-10 text-center">
+      <p className="font-mono text-[10px] uppercase tracking-wide text-[color:var(--text-tertiary)]">
+        Sin obligaciones
+      </p>
+      <p className="mt-2 text-sm text-[color:var(--text-primary)]">
+        No hay obligaciones para {label}.
+      </p>
+      {canReset && (
+        <Button
+          variant="ghost"
+          size="sm"
+          onClick={onReset}
+          className="mt-3"
+        >
+          Quitar filtro
+        </Button>
       )}
-    </button>
+    </section>
   );
-}
-
-function StateDot({ state }: { state: CalendarEntry["state"] }) {
-  const symbol =
-    state === "approved"
-      ? "✓"
-      : state === "in_review" || state === "uploaded"
-        ? "·"
-        : state === "rejected"
-          ? "✕"
-          : state === "expired"
-            ? "!"
-            : state === "needs_review"
-              ? "?"
-              : state === "pending"
-                ? "○"
-                : "";
-  return <span aria-hidden="true">{symbol}</span>;
 }
 
 // ─── Detail drawer ──────────────────────────────────────────────
@@ -508,34 +505,136 @@ function EventDrawer({
             </p>
           </div>
 
-          {/* Stage 2.7 (T5 parity, 2026-05-20) — first-upload guidance
-              for recurring obligations. Reuses the same component as
-              /portal/onboarding so the provider sees identical anatomy
-              + where-to-obtain + common-errors framing whether the
-              document lives on the expediente checklist or in the
-              calendar. */}
-          <DocumentGuidanceDisclosure
-            anatomy={event.anatomy}
-            where_to_obtain={event.where_to_obtain}
-            common_errors={event.common_errors}
-            summary_label="Acerca de este comprobante"
-          />
-
-          {event.state !== "approved" && (
-            <Button asChild className="w-full" size="lg">
-              <Link
-                href={event.href}
-              >
-                <CloudArrowUp className="h-4 w-4" weight="bold" aria-hidden="true" />
-                <span>Subir documento</span>
-                <ArrowRight className="h-4 w-4" weight="bold" aria-hidden="true" />
-              </Link>
-            </Button>
+          {/* Session 3 (2026-05-21) — catalog v2 fan-out. A v2 row
+              carries one ``accepts_documents`` entry per alternative
+              doc type (e.g. comprobante bancario / CFDI / cédula /
+              resumen for IMSS monthly). Render one disclosure per
+              entry so the provider sees first-upload guidance for
+              every accepted alternative independently. v1 rows have
+              ``accepts_documents=[]`` and keep the legacy single
+              disclosure unchanged. */}
+          {event.accepts_documents.length > 0 ? (
+            <div className="space-y-2">
+              <p className="font-mono text-[10px] uppercase tracking-wide text-[color:var(--text-tertiary)]">
+                Documentos aceptados
+              </p>
+              <p className="text-[12px] text-[color:var(--text-secondary)]">
+                Esta obligación se satisface con cualquiera de los siguientes
+                comprobantes. Sube el que tengas a la mano — el calendario
+                marca la entrega como recibida en cuanto llega uno.
+              </p>
+              {event.accepts_documents.map((doc) => (
+                <DocumentGuidanceDisclosure
+                  key={doc.name}
+                  anatomy={doc.anatomy}
+                  where_to_obtain={doc.where_to_obtain}
+                  common_errors={doc.common_errors}
+                  summary_label={`Acerca de ${doc.name}`}
+                />
+              ))}
+            </div>
+          ) : (
+            <DocumentGuidanceDisclosure
+              anatomy={event.anatomy}
+              where_to_obtain={event.where_to_obtain}
+              common_errors={event.common_errors}
+              summary_label="Acerca de este comprobante"
+            />
           )}
+
+          {event.submission_id && (
+            <div className="flex items-start gap-2 rounded-md border border-[color:var(--border-subtle)] bg-[color:var(--surface-sunken)] px-3 py-2">
+              <Tray
+                className="mt-0.5 h-3.5 w-3.5 shrink-0 text-[color:var(--text-secondary)]"
+                weight="bold"
+                aria-hidden="true"
+              />
+              <p className="text-[12px] leading-5 text-[color:var(--text-secondary)]">
+                Ya enviaste un documento para este requisito. Toca abajo para revisarlo.
+              </p>
+            </div>
+          )}
+
+          {(() => {
+            const action = drawerAction(event);
+            const ActionIcon = action.icon;
+            return (
+              <Button
+                asChild
+                className="w-full"
+                size="lg"
+                variant={action.tone === "primary" ? "default" : "outline"}
+              >
+                <Link href={action.href}>
+                  <ActionIcon className="h-4 w-4" weight="bold" aria-hidden="true" />
+                  <span>{action.label}</span>
+                  <ArrowRight className="h-4 w-4" weight="bold" aria-hidden="true" />
+                </Link>
+              </Button>
+            );
+          })()}
         </div>
       </aside>
     </div>
   );
+}
+
+function drawerAction(event: CalendarEntry): {
+  label: string;
+  href: string;
+  icon: Icon;
+  tone: "primary" | "secondary";
+} {
+  const submissionHref = event.submission_id
+    ? `/portal/submissions/${event.submission_id}`
+    : event.href;
+  switch (event.state) {
+    case "approved":
+      return {
+        label: "Ver documento aprobado",
+        href: submissionHref,
+        icon: Eye,
+        tone: "secondary",
+      };
+    case "in_review":
+    case "uploaded":
+      return {
+        label: "Ver envío",
+        href: submissionHref,
+        icon: Eye,
+        tone: "secondary",
+      };
+    case "rejected":
+      return {
+        label: "Revisar rechazo y corregir",
+        href: submissionHref,
+        icon: ArrowsClockwise,
+        tone: "primary",
+      };
+    case "needs_review":
+      return {
+        label: "Revisar y corregir",
+        href: submissionHref,
+        icon: ArrowsClockwise,
+        tone: "primary",
+      };
+    case "expired":
+      return {
+        label: "Subir documento actualizado",
+        href: event.href,
+        icon: CloudArrowUp,
+        tone: "primary",
+      };
+    case "pending":
+    case "empty":
+    default:
+      return {
+        label: "Subir documento",
+        href: event.href,
+        icon: CloudArrowUp,
+        tone: "primary",
+      };
+  }
 }
 
 function DetailRow({
@@ -607,17 +706,20 @@ const LEGEND_STATES: CalendarEntry["state"][] = [
 
 function Legend() {
   return (
-    <section className="rounded-lg border border-[color:var(--border-subtle)] bg-[color:var(--surface-raised)] p-4">
-      <p className="mb-3 font-mono text-[10px] uppercase tracking-wide text-[color:var(--text-tertiary)]">
-        Leyenda
-      </p>
-      <ul className="flex flex-wrap gap-2">
-        {LEGEND_STATES.map((state) => (
-          <li key={state}>
-            <DocStateBadge state={state} />
-          </li>
-        ))}
-      </ul>
+    <section className="rounded-lg border border-[color:var(--border-subtle)] bg-[color:var(--surface-raised)] px-4 py-3">
+      <div className="flex flex-wrap items-center gap-x-3 gap-y-2">
+        <p className="font-mono text-[10px] uppercase tracking-wide text-[color:var(--text-tertiary)]">
+          Leyenda
+        </p>
+        <ul className="flex flex-wrap gap-1.5">
+          {LEGEND_STATES.map((state) => (
+            <li key={state}>
+              <DocStateBadge state={state} />
+            </li>
+          ))}
+        </ul>
+      </div>
     </section>
   );
 }
+
