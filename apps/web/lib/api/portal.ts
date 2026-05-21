@@ -412,6 +412,11 @@ export type DashboardSuggestedAction = {
   href: string;
   requirement_code: string | null;
   period_key: string | null;
+  /** Wise Phase 1 (2026-05-21) — the reviewer's most recent
+   *  decision message for rejected / needs_correction /
+   *  possible_mismatch slots. Null otherwise. Surfaces inline in
+   *  the Wise dock so providers see the literal instruction. */
+  reviewer_note?: string | null;
 };
 
 export type DashboardAttentionItem = {
@@ -583,5 +588,54 @@ export function statusToDocumentStateCode(
       return "approved";
     default:
       return "empty";
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Wise copilot — analytics events (Phase 1, 2026-05-21)
+// ---------------------------------------------------------------------------
+
+/** Allowed Wise event types — mirrors the backend's
+ *  ``_WISE_ALLOWED_EVENT_TYPES`` frozenset. Kept as a union here so
+ *  callers get autocompletion and a typo-proof emission API. */
+export type WiseEventType =
+  | "wise.first_render"
+  | "wise.opened"
+  | "wise.collapsed"
+  | "wise.suggestion_clicked"
+  | "wise.suggestion_dismissed";
+
+export type WiseEventPayload = Record<string, unknown>;
+
+export type WiseEventResponse = {
+  id: string;
+  event_type: WiseEventType;
+  occurred_at: string;
+};
+
+/**
+ * Fire-and-forget telemetry for the Wise copilot dock.
+ *
+ * Swallows network/auth errors silently — analytics is best-effort
+ * and must never block the UI thread or surface a toast to the
+ * vendor. Backend rejects unknown event_type strings with a 400;
+ * that's fine to drop too.
+ */
+export async function postWiseEvent(
+  session: PortalSession,
+  event_type: WiseEventType,
+  payload?: WiseEventPayload,
+): Promise<void> {
+  try {
+    await fetchJson<WiseEventResponse>(
+      `/api/v1/portal/workspaces/${session.workspace_id}/wise/events`,
+      {
+        method: "POST",
+        body: JSON.stringify({ event_type, payload: payload ?? null }),
+      },
+      session,
+    );
+  } catch {
+    // Analytics is best-effort. Stay quiet.
   }
 }
