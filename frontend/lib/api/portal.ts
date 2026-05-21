@@ -105,6 +105,27 @@ export type CalendarItem = {
   anatomy: string;
   where_to_obtain: string;
   common_errors: string[];
+  /** Catalog v2 (Session 2, 2026-05-21) — accepted-document
+   *  alternatives. Empty list on v1 rows (default backend behavior).
+   *  Non-empty on v2 rows, one entry per acceptable doc type. The
+   *  wizard's alternatives-mode UX renders these as a radio picker;
+   *  the calendar drawer renders one DocumentGuidanceDisclosure per
+   *  entry. */
+  accepts_documents: CalendarAcceptedDocument[];
+  /** Catalog v2 — how many of accepts_documents must be submitted
+   *  to satisfy the obligation. ``"one"`` is the production default
+   *  for every v2 row today (either-or-both semantics). ``"all"`` is
+   *  reserved for future obligations that need a complete package. */
+  minimum_documents: "one" | "all";
+};
+
+/** A single entry inside CalendarItem.accepts_documents — the rich
+ *  per-doc detail the frontend renders for v2 rows. */
+export type CalendarAcceptedDocument = {
+  name: string;
+  anatomy: string;
+  where_to_obtain: string;
+  common_errors: string[];
 };
 
 export type CalendarInstitution = {

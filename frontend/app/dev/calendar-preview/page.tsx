@@ -60,6 +60,7 @@ function makeEntry(
     anatomy: "",
     where_to_obtain: "",
     common_errors: [],
+    accepts_documents: [],
   };
 }
 

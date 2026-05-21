@@ -14,6 +14,10 @@ import { PortalAppShell } from "@/components/checkwise/portal/portal-app-shell";
 import { UploadWizardSkeleton } from "@/components/checkwise/portal/state-surfaces";
 import { Button } from "@/components/ui/button";
 import { PageHeader } from "@/components/ui/page-header";
+import {
+  getCalendar,
+  type CalendarAcceptedDocument,
+} from "@/lib/api/portal";
 import { fetchCurrentSession, type PortalSession } from "@/lib/session/portal";
 
 function PortalUploadInner() {
@@ -42,6 +46,12 @@ function PortalUploadInner() {
   const loadType = params.get("load_type") ?? undefined;
   const periodLabel = params.get("period_label") ?? undefined;
   const periodKey = params.get("period_key") ?? undefined;
+  // Session 3 (2026-05-21) — catalog v2 signal. The calendar's
+  // _calendar_upload_href appends ``&v2=1`` when the row carries
+  // alternatives. Reading the URL avoids the cost of an extra catalog
+  // fetch in v1 mode and gives the wizard a deterministic mode
+  // switch.
+  const isV2Mode = params.get("v2") === "1";
   // Phase 3 — replacement lineage. The submission-detail page sets
   // ``replaces=<prior_submission_id>`` when the user clicks the
   // "corregir / volver a cargar" CTA. Thread it through to the wizard
@@ -61,6 +71,63 @@ function PortalUploadInner() {
           "Vuelve al expediente inicial y sigue con el siguiente documento obligatorio.",
       }
     : undefined;
+
+  // Session 3 — when in v2 mode, fetch the calendar to find the
+  // matching row's ``accepts_documents`` list. The wizard then renders
+  // an alternatives radio picker so the provider can declare which
+  // doc type they're submitting (e.g. CFDI vs cédula vs comprobante
+  // bancario). v1 mode skips the fetch entirely.
+  const [acceptedDocuments, setAcceptedDocuments] = useState<
+    CalendarAcceptedDocument[] | null
+  >(null);
+
+  useEffect(() => {
+    if (!session || !isV2Mode || !requirementCode || !periodKey) {
+      setAcceptedDocuments(null);
+      return;
+    }
+    let cancelled = false;
+    // Self-audit fix (2026-05-21) — parse the year from the row's
+    // ``requirement_code``, NOT from ``period_key``. v2 codes have
+    // shape ``REC-<INST>-<YYYY>-<MM>`` (or ``REC-SAT-<YYYY>-04-anual``)
+    // where YYYY is the calendar year that contains the slot. The
+    // period_key carries the COVERED period — which for January
+    // carryover slots (IMSS Jan covers Dec prior year) points to the
+    // prior year. Fetching the prior year's catalog would miss the
+    // row entirely → empty alternatives list → broken picker.
+    const codeParts = requirementCode.split("-");
+    const yearFromCode = Number.parseInt(codeParts[2] ?? "", 10);
+    const yearFromLabel = periodLabel
+      ? Number.parseInt(periodLabel.slice(0, 4), 10)
+      : NaN;
+    const year =
+      Number.isFinite(yearFromCode) && yearFromCode >= 2021
+        ? yearFromCode
+        : Number.isFinite(yearFromLabel) && yearFromLabel >= 2021
+          ? yearFromLabel
+          : new Date().getFullYear();
+    getCalendar(session, year)
+      .then((payload) => {
+        if (cancelled) return;
+        const row = payload.months
+          .flatMap((m) => m.institutions.flatMap((inst) => inst.items))
+          .find((item) => item.code === requirementCode);
+        // Empty array if the row is missing (e.g. provider hand-edited
+        // the URL with an unknown code) — the wizard renders a clear
+        // "no alternatives loaded" message rather than half-state.
+        setAcceptedDocuments(row?.accepts_documents ?? []);
+      })
+      .catch(() => {
+        // Fetch failure → still show the wizard in v2 mode but with
+        // an empty alternatives list. The wizard's render branch
+        // surfaces the failure state to the provider.
+        if (cancelled) return;
+        setAcceptedDocuments([]);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [session, isV2Mode, requirementCode, periodKey, periodLabel]);
 
   const prefill = useMemo<IntakeWizardPrefill | undefined>(() => {
     if (!session) return undefined;
@@ -90,12 +157,15 @@ function PortalUploadInner() {
     if (!session) return [];
     const fields: IntakeLockedField[] = ["client_name", "vendor_name", "vendor_rfc"];
     if (session.contract_reference) fields.push("contract_reference");
-    if (requirementName) fields.push("requirement_name");
+    // In v2 mode the wizard's alternatives picker drives
+    // ``requirement_name``, so don't lock it from the URL — the URL
+    // doesn't carry the picked alternative.
+    if (requirementName && !isV2Mode) fields.push("requirement_name");
     if (institutionCode) fields.push("institution_code");
     if (loadType) fields.push("load_type");
     if (periodLabel) fields.push("period_code");
     return fields;
-  }, [session, requirementName, institutionCode, loadType, periodLabel]);
+  }, [session, requirementName, institutionCode, loadType, periodLabel, isV2Mode]);
 
   if (!session) {
     return null;
@@ -138,6 +208,7 @@ function PortalUploadInner() {
           lockedFields={lockedFields}
           successContinue={successContinue}
           supersedesSubmissionId={supersedesSubmissionId}
+          acceptedDocuments={isV2Mode ? acceptedDocuments : undefined}
         />
       </main>
     </PortalAppShell>

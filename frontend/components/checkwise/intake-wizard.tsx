@@ -28,7 +28,11 @@ import { Label } from "@/components/ui/label";
 import { Select } from "@/components/ui/select";
 import { Textarea } from "@/components/ui/textarea";
 import { ValidationSignal, ValidationSummary } from "@/components/checkwise/validation-summary";
-import { checkDuplicateBySha256, type DuplicateCheck } from "@/lib/api/portal";
+import {
+  checkDuplicateBySha256,
+  type CalendarAcceptedDocument,
+  type DuplicateCheck,
+} from "@/lib/api/portal";
 import { DocumentStatus } from "@/lib/constants/statuses";
 import { readAdminSession } from "@/lib/session/admin";
 import {
@@ -158,6 +162,7 @@ export function IntakeWizard({
   lockedFields,
   successContinue,
   supersedesSubmissionId,
+  acceptedDocuments,
 }: {
   prefill?: IntakeWizardPrefill;
   lockedFields?: IntakeLockedField[];
@@ -169,6 +174,15 @@ export function IntakeWizard({
    *  + tenancy and writes the replacement audit trail. Ignored on the
    *  legacy /api/v1/submissions path. */
   supersedesSubmissionId?: string;
+  /** Session 3 (2026-05-21) — catalog v2 alternatives. Non-undefined
+   *  enables alternatives mode: the wizard renders a radio picker
+   *  for the provider to declare which acceptable doc type they're
+   *  submitting. ``requirement_name`` then flows from the picker, not
+   *  from URL/prefill. ``null`` means "still loading"; ``[]`` means
+   *  "v2 mode but the catalog fetch failed or the row is unknown" —
+   *  the wizard surfaces that explicitly. ``undefined`` (default)
+   *  means v1 / legacy behavior. */
+  acceptedDocuments?: CalendarAcceptedDocument[] | null;
 } = {}) {
   const apiBaseUrl = useMemo(
     () => process.env.NEXT_PUBLIC_API_BASE_URL ?? "http://127.0.0.1:8000",
@@ -180,9 +194,31 @@ export function IntakeWizard({
   // the wizard behaves exactly as the legacy single-file path; when
   // true, providers may attach up to ``MULTI_FILE_MAX_ADDITIONAL``
   // additional files (annexes) alongside the primary PDF.
-  const multiFileEnabled = process.env.NEXT_PUBLIC_MULTI_FILE_UPLOAD_ENABLED === "true";
+  const multiFileEnabledRaw = process.env.NEXT_PUBLIC_MULTI_FILE_UPLOAD_ENABLED === "true";
+  // Session 3 (2026-05-21) — catalog v2 alternatives mode hides the
+  // multi-file annex picker. The Stage 2.7-b "primary + annexes"
+  // framing implies a hierarchy that doesn't fit v2's peer-evidence
+  // semantics (alternatives are independent ways to satisfy the same
+  // obligation). A provider who wants to upload "both" simply
+  // submits twice — the slot accumulates the alternatives through
+  // the compatibility join on the backend.
+  const multiFileEnabled = multiFileEnabledRaw && acceptedDocuments === undefined;
+  // Session 3 self-audit fix (2026-05-21) — when the wizard mounts
+  // in v2 alternatives mode, clear ``requirement_name`` so the v1
+  // default ("Opinión de cumplimiento SAT positiva", from
+  // ``initialForm``) can't silently carry through to submit. The
+  // alternatives radio picker drives the field; until the provider
+  // picks, the form holds an empty string and the submit guard below
+  // refuses to advance.
+  const v2Mode = acceptedDocuments !== undefined;
   const [step, setStep] = useState(0);
-  const [form, setForm] = useState<IntakeForm>(() => ({ ...initialForm, ...(prefill ?? {}) }));
+  const [form, setForm] = useState<IntakeForm>(() => {
+    const base = { ...initialForm, ...(prefill ?? {}) };
+    if (v2Mode) {
+      base.requirement_name = "";
+    }
+    return base;
+  });
   const [file, setFile] = useState<File | null>(null);
   const [fileError, setFileError] = useState<string | null>(null);
   // Stage 2.7-b — additional files (annexes). Empty by default; only
@@ -436,6 +472,23 @@ export function IntakeWizard({
       if (form.period_code.trim().length < 4) {
         return "Captura el periodo que debe cubrir el documento.";
       }
+      // Session 3 self-audit fix (2026-05-21) — block advance in v2
+      // alternatives mode until the provider picks a radio. Without
+      // this guard, the form's empty ``requirement_name`` (cleared at
+      // mount when v2Mode is true) would flow into submit and the
+      // backend would receive a blank doc-type label. The picker's
+      // own UX surfaces the available alternatives; this is just the
+      // structural floor.
+      if (v2Mode && acceptedDocuments && acceptedDocuments.length > 0) {
+        const picked = form.requirement_name.trim();
+        if (!picked) {
+          return "Elige qué documento estás subiendo antes de continuar.";
+        }
+        const validNames = new Set(acceptedDocuments.map((doc) => doc.name));
+        if (!validNames.has(picked)) {
+          return "Selecciona uno de los documentos aceptados para esta obligación.";
+        }
+      }
     }
 
     if (targetStep === 2 && !file) {
@@ -668,6 +721,7 @@ export function IntakeWizard({
               canUnlock={(lockedFields?.length ?? 0) > 0}
               unlocked={unlockedOverride}
               onToggleUnlock={() => setUnlockedOverride((current) => !current)}
+              acceptedDocuments={acceptedDocuments}
             />
           ) : null}
           {step === 1 ? <RequirementStep requirement={selectedRequirement} /> : null}
@@ -798,6 +852,7 @@ function ContextStep({
   canUnlock,
   unlocked,
   onToggleUnlock,
+  acceptedDocuments,
 }: {
   form: IntakeForm;
   updateField: (field: keyof IntakeForm, value: string) => void;
@@ -805,7 +860,16 @@ function ContextStep({
   canUnlock: boolean;
   unlocked: boolean;
   onToggleUnlock: () => void;
+  /** Session 3 (2026-05-21) — catalog v2 alternatives. ``undefined``
+   *  means the wizard is in legacy v1 mode (show the free-form
+   *  requirement dropdown). ``null`` means v2 mode but the calendar
+   *  fetch is still in flight (show a small loading state). ``[]``
+   *  means v2 mode but the fetch failed or the URL points at an
+   *  unknown row (surface an explicit error). A non-empty array
+   *  drives the alternatives radio picker. */
+  acceptedDocuments?: CalendarAcceptedDocument[] | null;
 }) {
+  const v2Mode = acceptedDocuments !== undefined;
   const lockedItems = Array.from(lockedSet);
   const lockedItemDisplay = (field: IntakeLockedField): string => {
     if (field === "load_type") {
@@ -963,7 +1027,20 @@ function ContextStep({
             </Select>
           </Field>
         ) : null}
-        {!lockedSet.has("requirement_name") ? (
+        {/* Session 3 (2026-05-21) — alternatives picker for catalog
+            v2 rows. Replaces the free-form requirement dropdown when
+            the wizard is opened from a v2 calendar row (?v2=1). The
+            provider declares which acceptable doc type they're
+            uploading; that becomes ``form.requirement_name`` and
+            flows into the submission write path verbatim, so the
+            backend records exactly which alternative was satisfied. */}
+        {v2Mode ? (
+          <AlternativesPicker
+            acceptedDocuments={acceptedDocuments ?? null}
+            value={form.requirement_name}
+            onChange={(name) => updateField("requirement_name", name)}
+          />
+        ) : !lockedSet.has("requirement_name") ? (
           <Field label="Requisito / documento" htmlFor="requirement_name">
             <Select
               id="requirement_name"
@@ -980,6 +1057,117 @@ function ContextStep({
         ) : null}
       </div>
     </section>
+  );
+}
+
+
+/**
+ * Session 3 (2026-05-21) — catalog v2 alternatives radio picker.
+ *
+ * Renders one radio button per accepted doc type for a v2 row. The
+ * provider picks which doc type they're submitting; that choice
+ * becomes the submission's ``requirement_name``. The slot's
+ * ``requirement_code`` stays the v2 collapsed code (e.g.
+ * ``REC-IMSS-2026-01``); the alternative name disambiguates within
+ * that slot at reviewer time.
+ *
+ * Three states:
+ *   - ``null``  → still loading (catalog fetch in flight). Show a
+ *     small "Cargando..." block instead of an empty picker.
+ *   - ``[]``    → v2 mode but the fetch failed or the URL references
+ *     an unknown row. Show an explicit error pointing the provider
+ *     back to the calendar.
+ *   - ``[...]`` → render the radio picker.
+ */
+function AlternativesPicker({
+  acceptedDocuments,
+  value,
+  onChange,
+}: {
+  acceptedDocuments: CalendarAcceptedDocument[] | null;
+  value: string;
+  onChange: (name: string) => void;
+}) {
+  if (acceptedDocuments === null) {
+    return (
+      <div
+        className="rounded-md border border-border bg-muted/40 p-4 text-sm text-muted-foreground"
+        aria-busy="true"
+      >
+        Cargando los documentos aceptados para esta obligación…
+      </div>
+    );
+  }
+  if (acceptedDocuments.length === 0) {
+    return (
+      <div
+        className="rounded-md border border-destructive/40 bg-destructive/5 p-4 text-sm"
+        role="alert"
+      >
+        <p className="font-medium text-destructive">
+          No pudimos cargar los documentos aceptados.
+        </p>
+        <p className="mt-1 text-muted-foreground">
+          Vuelve al{" "}
+          <Link
+            href="/portal/calendar"
+            className="font-medium text-destructive underline"
+          >
+            calendario
+          </Link>{" "}
+          y abre esta obligación nuevamente.
+        </p>
+      </div>
+    );
+  }
+  return (
+    <fieldset className="space-y-3">
+      <legend className="text-sm font-medium text-[color:var(--text-primary)]">
+        ¿Qué documento estás subiendo?
+      </legend>
+      <p className="text-xs text-muted-foreground">
+        Esta obligación se satisface con cualquiera de los siguientes
+        comprobantes. Elige el que corresponde al archivo que vas a subir;
+        si tienes más de uno, súbelos en entregas separadas.
+      </p>
+      <div className="space-y-2">
+        {acceptedDocuments.map((doc) => {
+          const fieldId = `requirement-${doc.name.replace(/[^a-z0-9]+/gi, "-").toLowerCase()}`;
+          const isSelected = value === doc.name;
+          return (
+            <label
+              key={doc.name}
+              htmlFor={fieldId}
+              className={`flex cursor-pointer items-start gap-3 rounded-md border p-3 transition-colors ${
+                isSelected
+                  ? "border-primary bg-primary/5"
+                  : "border-border bg-white hover:bg-muted/40"
+              }`}
+            >
+              <input
+                id={fieldId}
+                type="radio"
+                name="requirement-alternative"
+                value={doc.name}
+                checked={isSelected}
+                onChange={() => onChange(doc.name)}
+                className="mt-1"
+              />
+              <span className="flex-1">
+                <span className="block text-sm font-medium text-[color:var(--text-primary)]">
+                  {doc.name}
+                </span>
+                {doc.anatomy ? (
+                  <span className="mt-1 block text-xs text-muted-foreground">
+                    {doc.anatomy}
+                  </span>
+                ) : null}
+              </span>
+            </label>
+          );
+        })}
+      </div>
+    </fieldset>
   );
 }
 

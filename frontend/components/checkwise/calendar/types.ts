@@ -1,4 +1,4 @@
-import type { CalendarItem } from "@/lib/api/portal";
+import type { CalendarAcceptedDocument, CalendarItem } from "@/lib/api/portal";
 import type { DocumentStateCode } from "@/lib/types";
 
 export type CalendarInstitutionCode = "sat" | "imss" | "infonavit" | "stps_repse";
@@ -26,6 +26,11 @@ export type CalendarEntry = {
   anatomy: string;
   where_to_obtain: string;
   common_errors: string[];
+  /** Session 3 (2026-05-21) — catalog v2 alternatives. Empty array
+   *  on v1 rows; the drawer renders the legacy single disclosure
+   *  when this is empty and N stacked disclosures (one per accepted
+   *  doc) when populated. */
+  accepts_documents: CalendarAcceptedDocument[];
 };
 
 export const URGENT_STATES: ReadonlySet<DocumentStateCode> = new Set([
