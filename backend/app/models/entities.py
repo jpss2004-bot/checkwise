@@ -6,6 +6,7 @@ from datetime import UTC, date, datetime
 from sqlalchemy import (
     JSON,
     Boolean,
+    CheckConstraint,
     Date,
     DateTime,
     Float,
@@ -52,9 +53,23 @@ class Client(TimestampMixin, Base):
     submissions: Mapped[list[Submission]] = relationship(back_populates="client")
 
 
+_PERSONA_TYPE_CHECK = "persona_type IN ('moral', 'fisica')"
+
+
 class Vendor(TimestampMixin, Base):
     __tablename__ = "vendors"
-    __table_args__ = (UniqueConstraint("client_id", "rfc", name="uq_vendors_client_rfc"),)
+    # Bugfix (2026-05-21) — Jay Luna empty-calendar root cause.
+    # CheckConstraint mirrors the migration-level CHECK so SQLite
+    # test fixtures (which run ``Base.metadata.create_all`` rather
+    # than Alembic) reject bad persona_type values consistently with
+    # production Postgres. The runtime ``normalize_persona_type``
+    # helper is still the read-time safety net for any legacy value
+    # that somehow survives the constraint (e.g. on a DB ahead of
+    # migration 0013).
+    __table_args__ = (
+        UniqueConstraint("client_id", "rfc", name="uq_vendors_client_rfc"),
+        CheckConstraint(_PERSONA_TYPE_CHECK, name="ck_vendors_persona_type"),
+    )
 
     id: Mapped[str] = mapped_column(String(36), primary_key=True, default=new_id)
     client_id: Mapped[str] = mapped_column(ForeignKey("clients.id"), nullable=False)
@@ -336,7 +351,15 @@ class ProviderWorkspace(TimestampMixin, Base):
     """
 
     __tablename__ = "provider_workspaces"
-    __table_args__ = (UniqueConstraint("access_token", name="uq_provider_workspaces_token"),)
+    # Bugfix (2026-05-21) — mirror migration 0013_canonicalize_persona_type
+    # at the model layer so SQLite test fixtures get the same
+    # constraint enforcement as production Postgres.
+    __table_args__ = (
+        UniqueConstraint("access_token", name="uq_provider_workspaces_token"),
+        CheckConstraint(
+            _PERSONA_TYPE_CHECK, name="ck_provider_workspaces_persona_type"
+        ),
+    )
 
     id: Mapped[str] = mapped_column(String(36), primary_key=True, default=new_id)
     client_id: Mapped[str] = mapped_column(ForeignKey("clients.id"), nullable=False)
