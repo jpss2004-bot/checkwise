@@ -39,6 +39,7 @@ from app.core.compliance_catalog import (
     OnboardingRequirement,
     RecurringRequirement,
     expediente_for_persona,
+    normalize_persona_type,
     recurring_for_year,
     recurring_for_year_v2,
 )
@@ -286,7 +287,9 @@ def build_workspace_onboarding_slots(
     ``state=SlotState.MISSING``; slots with submissions follow the
     supersession lineage to pick the current one.
     """
-    catalog = expediente_for_persona(workspace.persona_type)  # type: ignore[arg-type]
+    # Bugfix (2026-05-21) — defensive normalize. See compliance_catalog.
+    # normalize_persona_type for context.
+    catalog = expediente_for_persona(normalize_persona_type(workspace.persona_type))
     # Pull every submission for the workspace once, then bucket per slot
     # in Python. This avoids N+1 lookups for catalogs in the dozens.
     all_for_workspace = list(
@@ -359,8 +362,10 @@ def build_workspace_calendar_slots(
     if settings.RECURRING_CATALOG_V2:
         return _build_workspace_calendar_slots_v2(db, workspace, year)
 
+    # Bugfix (2026-05-21) — defensive normalize.
+    persona = normalize_persona_type(workspace.persona_type)
     catalog: list[RecurringRequirement] = list(
-        recurring_for_year(year, workspace.persona_type)  # type: ignore[arg-type]
+        recurring_for_year(year, persona)
     )
     all_for_workspace = list(
         db.scalars(
@@ -411,8 +416,10 @@ def _build_workspace_calendar_slots_v2(
     (``REC-IMSS-2026-01-comprobante-de-pago-bancario``) sharing the
     same institution + period both contribute candidates.
     """
+    # Bugfix (2026-05-21) — defensive normalize.
+    persona = normalize_persona_type(workspace.persona_type)
     catalog: list[RecurringRequirement] = list(
-        recurring_for_year_v2(year, workspace.persona_type)  # type: ignore[arg-type]
+        recurring_for_year_v2(year, persona)
     )
 
     # One-shot id → code map for the institutions referenced by this

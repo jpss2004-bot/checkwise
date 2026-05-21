@@ -59,6 +59,7 @@ from app.core.compliance_catalog import (
     catalog_metadata,
     expediente_for_persona,
     is_v2_recurring_code,
+    normalize_persona_type,
     onboarding_anatomy,
     onboarding_common_errors,
     onboarding_format,
@@ -1014,7 +1015,12 @@ def get_workspace_onboarding(
         for sub_id, fname in rows:
             filename_by_submission[sub_id] = fname
 
-    expediente = expediente_for_persona(workspace.persona_type)  # type: ignore[arg-type]
+    # Bugfix (2026-05-21) — defensive normalize. Some legacy workspaces
+    # store ``"persona_moral"`` / ``"persona_fisica"`` instead of the
+    # canonical ``"moral"`` / ``"fisica"`` tokens the catalog expects;
+    # the normalizer maps both to the canonical form so the expediente
+    # never silently empties.
+    expediente = expediente_for_persona(normalize_persona_type(workspace.persona_type))
     sections: dict[str, dict] = {}
     received_required = 0
     total_required = 0
@@ -1114,10 +1120,14 @@ def get_workspace_calendar(
     # used. Keeping them in lockstep matters: the resolver iterates v2
     # rows when the flag is on, so the endpoint must too, or the row
     # → slot lookup misses for every row.
+    # Bugfix (2026-05-21) — defensive normalize so non-canonical
+    # persona_type values stored on legacy workspaces still resolve to
+    # the right catalog rather than silently returning an empty list.
+    persona = normalize_persona_type(workspace.persona_type)
     recurring: list[RecurringRequirement] = (
-        list(recurring_for_year_v2(year, workspace.persona_type))  # type: ignore[arg-type]
+        list(recurring_for_year_v2(year, persona))
         if settings.RECURRING_CATALOG_V2
-        else list(recurring_for_year(year, workspace.persona_type))  # type: ignore[arg-type]
+        else list(recurring_for_year(year, persona))
     )
     months: dict[int, dict] = {
         m: {"month": m, "institutions": {}, "received": 0, "expected": 0}

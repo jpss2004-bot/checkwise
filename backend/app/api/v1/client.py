@@ -60,6 +60,7 @@ from app.constants.roles import MembershipRole
 from app.constants.statuses import DocumentStatus
 from app.core.compliance_catalog import (
     catalog_metadata,
+    normalize_persona_type,
     recurring_for_year,
     recurring_required_document,
 )
@@ -839,7 +840,10 @@ def client_calendar(
         view_by_key: dict[tuple[str | None, str | None], SlotView] = {
             (v.slot_key.requirement_code, v.slot_key.period_key): v for v in slot_views
         }
-        catalog = recurring_for_year(year, ws.persona_type)  # type: ignore[arg-type]
+        # Bugfix (2026-05-21) — defensive normalize so legacy
+        # workspaces with non-canonical ``persona_type`` values still
+        # produce a non-empty client calendar.
+        catalog = recurring_for_year(year, normalize_persona_type(ws.persona_type))
         for req in catalog:
             view = view_by_key.get((req.code, req.period_key))
             item_status = (

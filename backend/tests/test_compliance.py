@@ -174,3 +174,88 @@ def test_catalog_lookup_recurring_by_code_returns_known_item() -> None:
 
     assert lookup_recurring_by_code("REC-NOT-A-REAL-CODE") is None
     assert lookup_recurring_by_code("not even REC shaped") is None
+
+
+# ---------------------------------------------------------------------------
+# Bugfix (2026-05-21) — Jay Luna empty-calendar bug
+# ---------------------------------------------------------------------------
+#
+# Workspaces created via legacy / CLI paths sometimes stored
+# ``persona_type`` as ``"persona_moral"`` / ``"persona_fisica"``
+# (full label) instead of the canonical ``"moral"`` / ``"fisica"``
+# tokens. The catalog filter does strict membership on
+# ``r.persona_types`` so any non-canonical value returned 0 items and
+# the provider calendar rendered as "Sin obligaciones". The
+# ``normalize_persona_type`` helper maps the variants to the
+# canonical form and the read endpoints call it at the boundary.
+
+
+def test_normalize_persona_type_handles_canonical_tokens() -> None:
+    from app.core.compliance_catalog import normalize_persona_type
+
+    assert normalize_persona_type("moral") == "moral"
+    assert normalize_persona_type("fisica") == "fisica"
+
+
+def test_normalize_persona_type_handles_full_label_variants() -> None:
+    """Maps every full-label variant a legacy path might have stored
+    back to the canonical token."""
+    from app.core.compliance_catalog import normalize_persona_type
+
+    # Full-label variants.
+    assert normalize_persona_type("persona_moral") == "moral"
+    assert normalize_persona_type("persona_fisica") == "fisica"
+    assert normalize_persona_type("persona moral") == "moral"
+    assert normalize_persona_type("persona fisica") == "fisica"
+    # Accented + diacritic variants.
+    assert normalize_persona_type("persona_física") == "fisica"
+    assert normalize_persona_type("física") == "fisica"
+    # Case variants.
+    assert normalize_persona_type("MORAL") == "moral"
+    assert normalize_persona_type("Fisica") == "fisica"
+    assert normalize_persona_type("FISICA") == "fisica"
+    # Short codes.
+    assert normalize_persona_type("PM") == "moral"
+    assert normalize_persona_type("pf") == "fisica"
+
+
+def test_normalize_persona_type_falls_back_to_moral_for_unknown() -> None:
+    """Unknown / empty / None values fall back to 'moral' so the
+    calendar never silently empties. Empty is the worst outcome —
+    a wrong-but-visible default at least lets the provider see
+    SOMETHING and lets ops notice via the WARNING log."""
+    from app.core.compliance_catalog import normalize_persona_type
+
+    assert normalize_persona_type("") == "moral"
+    assert normalize_persona_type(None) == "moral"
+    assert normalize_persona_type("not_a_real_value") == "moral"
+    # Whitespace handling.
+    assert normalize_persona_type("  moral  ") == "moral"
+
+
+def test_recurring_for_year_with_normalize_bridges_legacy_workspaces() -> None:
+    """End-to-end: passing a normalized legacy value through the
+    catalog returns the same 139 items as the canonical token. Pins
+    the property that the bugfix actually closes the empty-calendar
+    hole at the catalog boundary."""
+    from app.core.compliance_catalog import (
+        normalize_persona_type,
+        recurring_for_year,
+    )
+
+    canonical = recurring_for_year(2026, "fisica")
+    # Legacy workspace stored "persona_fisica" — the bug. Normalize
+    # at the boundary then call the catalog; the row count must match
+    # the canonical-input count exactly.
+    legacy_value = "persona_fisica"
+    via_normalizer = recurring_for_year(
+        2026, normalize_persona_type(legacy_value)
+    )
+    assert len(via_normalizer) == len(canonical) > 0
+
+    # Sanity: the raw legacy value DOES return zero. This is the bug
+    # that motivated normalize_persona_type — if this assertion ever
+    # starts failing, the catalog filter changed and the
+    # normalization layer may no longer be necessary.
+    raw = recurring_for_year(2026, legacy_value)  # type: ignore[arg-type]
+    assert len(raw) == 0

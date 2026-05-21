@@ -16,10 +16,13 @@ Source: ``C.Árbol Plataforma Proveedores REPSE VF`` (sheet "Árbol Plataforma")
 
 from __future__ import annotations
 
+import logging
 from dataclasses import asdict, dataclass, field
 from typing import Literal
 
 from app.core.config import settings
+
+logger = logging.getLogger(__name__)
 
 CATALOG_SOURCE = "C.Árbol Plataforma Proveedores REPSE VF"
 CATALOG_VERSION = "2026.06.0"
@@ -27,6 +30,70 @@ CATALOG_VERSION = "2026.06.0"
 PersonaType = Literal["moral", "fisica"]
 Frequency = Literal["mensual", "bimestral", "cuatrimestral", "anual", "alta_inicial"]
 InstitutionCode = Literal["sat", "imss", "infonavit", "stps_repse", "interno_cliente"]
+
+
+# Bugfix (2026-05-21) — Jay Luna calendar empty-grid bug.
+#
+# ``recurring_for_year``/``expediente_for_persona`` filter strictly on
+# ``persona_type in r.persona_types`` where the row's persona_types
+# tuple uses canonical tokens ``"moral"`` / ``"fisica"``. Several data
+# entry paths in the wild stored full-label variants instead
+# (``"persona_moral"``, ``"persona_fisica"``, etc.) — the catalog
+# silently returned ``[]`` for those workspaces and the provider
+# calendar rendered as "Sin obligaciones".
+#
+# This normalizer is the single source of truth for resolving any
+# stored persona_type into the canonical token. Call it at every
+# boundary that reads ``workspace.persona_type`` /
+# ``vendor.persona_type`` before passing to the catalog. Unknown
+# values fall back to ``"moral"`` with a WARNING log so the calendar
+# never silently empties — preferring a wrong-but-visible default
+# over a silent zero. Operators can grep the log for
+# ``compliance_catalog: unrecognized persona_type`` to find the bad
+# rows and clean them up.
+
+
+_PERSONA_TYPE_ALIASES: dict[str, PersonaType] = {
+    "moral": "moral",
+    "fisica": "fisica",
+    "física": "fisica",
+    "persona_moral": "moral",
+    "persona_fisica": "fisica",
+    "persona_física": "fisica",
+    "persona moral": "moral",
+    "persona fisica": "fisica",
+    "persona física": "fisica",
+    "pm": "moral",
+    "pf": "fisica",
+}
+
+
+def normalize_persona_type(value: str | None) -> PersonaType:
+    """Resolve any stored persona_type string into a canonical token.
+
+    Accepts the canonical ``"moral"`` / ``"fisica"`` as well as the
+    full-label variants (``"persona_moral"``, ``"persona física"``,
+    case-insensitive, with or without underscores), and a handful of
+    short codes (``"PM"`` / ``"PF"``).
+
+    Unknown values fall back to ``"moral"`` and emit a WARNING. The
+    fallback is deliberate: an empty calendar is the worst possible
+    outcome (Jay Luna bug). A wrong-but-visible calendar lets the
+    provider see SOMETHING and lets ops notice the bad row in the log.
+    """
+    if value is None:
+        logger.warning(
+            "compliance_catalog: persona_type is None; defaulting to 'moral'"
+        )
+        return "moral"
+    key = value.strip().lower()
+    if key in _PERSONA_TYPE_ALIASES:
+        return _PERSONA_TYPE_ALIASES[key]
+    logger.warning(
+        "compliance_catalog: unrecognized persona_type=%r; defaulting to 'moral'",
+        value,
+    )
+    return "moral"
 # Catalog v2 — how many of the ``accepts_documents`` must be submitted
 # for a row to be considered satisfied. ``"one"`` matches the
 # "either / or / both" semantics Jose Pablo described on 2026-05-20:
@@ -1449,6 +1516,7 @@ __all__ = [
     "recurring_common_errors",
     "recurring_accepted_documents",
     "recurring_for_year_v2",
+    "normalize_persona_type",
     "CATALOG_SOURCE",
     "CATALOG_VERSION",
     "MinimumDocuments",
@@ -1456,6 +1524,7 @@ __all__ = [
     "lookup_recurring_by_code",
     "MONTHS_ES",
     "OnboardingRequirement",
+    "PersonaType",
     "RecurringRequirement",
     "catalog_metadata",
     "expediente_as_dicts",
