@@ -15,9 +15,12 @@ import {
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 import {
+  postWiseAsk,
   postWiseEvent,
   type DashboardPayload,
   type OnboardingSummary,
+  type WiseAskCta,
+  type WiseStateDigest,
 } from "@/lib/api/portal";
 import type { PortalSession } from "@/lib/session/portal";
 import {
@@ -126,33 +129,89 @@ export function WiseDock({
     el.scrollTop = el.scrollHeight;
   }, [turns, collapsed]);
 
-  // Submit a prompt through the deterministic intent pipeline. Used
-  // by both the free-text input and the quick-question chips so
-  // there's only one codepath.
+  // Submit a prompt through the hybrid pipeline:
+  //   1. Classify the intent locally. Known intents
+  //      (next_action, deadline, rejection, status, help) reply
+  //      synchronously from the deterministic answerIntent — instant,
+  //      free, on-brand.
+  //   2. ``unknown`` intents fall back to the LLM-backed
+  //      /portal/wise/ask endpoint. We push a placeholder "pensando…"
+  //      bubble first so the dock feels responsive, then swap it in
+  //      place when the reply arrives. Network/auth errors degrade
+  //      to a deterministic apology bubble so the dock never freezes.
   const submitPrompt = React.useCallback(
     (prompt: string) => {
       const trimmed = prompt.trim();
       if (!trimmed) return;
-      const userTurn: ChatTurn = {
-        kind: "user",
-        id: `user-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
-        text: trimmed,
-      };
+      const userTurnId = `user-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+      const userTurn: ChatTurn = { kind: "user", id: userTurnId, text: trimmed };
       const intent = classifyIntent(trimmed);
-      const reply = answerIntent({ intent, session, dashboard, onboarding });
-      // Give the reply a stable id keyed off the user-turn id so React
-      // doesn't collide when the same intent fires twice (e.g. user
-      // asks "qué sigue" twice in a row).
-      const replyTurn: ChatTurn = {
-        kind: "wise",
-        message: { ...reply, id: `${reply.id}-${userTurn.id}` },
-      };
-      setTurns((prev) => [...prev, userTurn, replyTurn]);
+
       void postWiseEvent(session, "wise.question_asked", {
         audience,
         intent,
         prompt: trimmed.slice(0, 200),
       });
+
+      if (intent !== "unknown") {
+        const reply = answerIntent({ intent, session, dashboard, onboarding });
+        const replyTurn: ChatTurn = {
+          kind: "wise",
+          message: { ...reply, id: `${reply.id}-${userTurnId}` },
+        };
+        setTurns((prev) => [...prev, userTurn, replyTurn]);
+        return;
+      }
+
+      // Unknown intent → LLM fallback. Show a placeholder while we wait.
+      const placeholderId = `wise-pending-${userTurnId}`;
+      const placeholder: ChatTurn = {
+        kind: "wise",
+        message: {
+          id: placeholderId,
+          tone: "info",
+          body: "Pensando…",
+        },
+      };
+      setTurns((prev) => [...prev, userTurn, placeholder]);
+
+      const digest = buildStateDigest({ session, dashboard, onboarding });
+      const ctas = buildAllowedCtas(dashboard);
+      postWiseAsk(session, trimmed, digest, ctas)
+        .then((response) => {
+          setTurns((prev) =>
+            prev.map((turn) =>
+              turn.kind === "wise" && turn.message.id === placeholderId
+                ? {
+                    kind: "wise",
+                    message: {
+                      id: `wise-llm-${userTurnId}`,
+                      tone: response.source === "llm" ? "brand" : "info",
+                      body: response.body,
+                      ctaLabel: response.cta_label ?? undefined,
+                      ctaHref: response.cta_href ?? undefined,
+                    },
+                  }
+                : turn,
+            ),
+          );
+        })
+        .catch(() => {
+          setTurns((prev) =>
+            prev.map((turn) =>
+              turn.kind === "wise" && turn.message.id === placeholderId
+                ? {
+                    kind: "wise",
+                    message: {
+                      id: `wise-error-${userTurnId}`,
+                      tone: "warning",
+                      body: "Tuve un problema al responder. Intenta de nuevo en un momento.",
+                    },
+                  }
+                : turn,
+            ),
+          );
+        });
     },
     [audience, dashboard, onboarding, session],
   );
@@ -513,4 +572,100 @@ function DockComposer({
       </form>
     </footer>
   );
+}
+
+// ─── Helpers: state digest + allowed CTAs for the LLM ─────────────
+
+/**
+ * Build the curated state digest the backend expects. Mirrors the
+ * server-side ``WiseStateDigestIn`` schema field-for-field.
+ *
+ * We only ship counts + 3 representative titles per category — no
+ * submission ids, no filenames, no raw status strings. Just enough
+ * for the model to answer "cómo voy?" / "qué documentos me faltan?"
+ * accurately without exposing PII or paying for a big context.
+ */
+function buildStateDigest({
+  session,
+  dashboard,
+  onboarding,
+}: {
+  session: PortalSession;
+  dashboard: DashboardPayload;
+  onboarding: OnboardingSummary | null;
+}): WiseStateDigest {
+  const counts = dashboard.document_state_counts;
+  const summary = dashboard.onboarding_summary;
+  const persona: "moral" | "fisica" =
+    session.persona_type === "moral" ? "moral" : "fisica";
+  return {
+    vendor_name: session.vendor_name,
+    persona_type: persona,
+    onboarding_completed: session.onboarding_completed_at !== null,
+    compliance_pct: dashboard.semaphore.compliance_pct,
+    on_track: dashboard.semaphore.on_track,
+    total_tracked: dashboard.semaphore.total_tracked,
+    needs_action: summary.needs_action,
+    in_review: summary.in_review,
+    completed_required:
+      onboarding?.summary.received_required ?? summary.completed,
+    total_required:
+      onboarding?.summary.total_required ?? summary.total_required,
+    approved_count: counts.approved,
+    pending_count: counts.pending,
+    rejected_count: counts.rejected,
+    expired_count: counts.expired,
+    next_action_titles: dashboard.suggested_actions
+      .slice(0, 3)
+      .map((a) => a.title),
+    upcoming_deadline_titles: dashboard.upcoming_deadlines
+      .slice(0, 3)
+      .map((d) => d.title),
+  };
+}
+
+/**
+ * Compose the allowed-CTA list the model can pick from. Drawn from
+ * the same backend payloads the deterministic intent matcher uses,
+ * so the model can never link to anything the user didn't already
+ * have access to. ``id`` is the canonical matcher; the backend
+ * validates against this exact list before echoing label+href.
+ */
+function buildAllowedCtas(dashboard: DashboardPayload): WiseAskCta[] {
+  const ctas: WiseAskCta[] = [];
+  for (const action of dashboard.suggested_actions.slice(0, 5)) {
+    ctas.push({
+      id: action.id,
+      label: ctaLabelForAction(action.type),
+      href: action.href,
+      description: action.title,
+    });
+  }
+  for (const deadline of dashboard.upcoming_deadlines.slice(0, 3)) {
+    ctas.push({
+      id: deadline.id,
+      label: "Ver obligación",
+      href: deadline.href,
+      description: deadline.title,
+    });
+  }
+  return ctas;
+}
+
+const ACTION_CTA_LABEL_LOCAL: Record<
+  DashboardPayload["suggested_actions"][number]["type"],
+  string
+> = {
+  reupload: "Corregir carga",
+  clarify: "Responder observación",
+  verify_mismatch: "Verificar documento",
+  complete_onboarding: "Subir documento",
+  upcoming: "Subir documento",
+  regularize: "Regularizar",
+};
+
+function ctaLabelForAction(
+  type: DashboardPayload["suggested_actions"][number]["type"],
+): string {
+  return ACTION_CTA_LABEL_LOCAL[type] ?? "Abrir";
 }

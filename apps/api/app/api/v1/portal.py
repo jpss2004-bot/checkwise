@@ -3091,3 +3091,125 @@ def record_wise_event(
         event_type=event.event_type,
         occurred_at=event.occurred_at.isoformat(),
     )
+
+
+# ---------------------------------------------------------------------------
+# Wise copilot — LLM-backed free-text replies (Phase 2.b, 2026-05-21)
+# ---------------------------------------------------------------------------
+#
+# Deterministic intents (next_action, deadline, rejection, status) are
+# handled in the frontend. When the keyword router classifies a prompt
+# as ``unknown``, the dock calls ``POST /wise/ask`` so the LLM can
+# answer questions like "¿cómo voy con mis uploads del expediente
+# inicial?" that the rules-based engine can't classify. Architecture:
+#
+#   * Frontend supplies the prompt + a curated state digest + the list
+#     of allowed CTAs (id/label/href). The backend never recomputes
+#     the digest from scratch (cheaper + simpler), but does enforce
+#     length + tenant + CTA-validation so a malicious caller can't
+#     either bill the workspace for arbitrary LLM cost or trick Wise
+#     into returning an attacker-controlled href.
+#   * Service module ``app.services.wise.ai`` calls Claude Haiku 4.5
+#     with a single ``respond_to_provider`` tool. Output is always
+#     ``{body, cta_id?}``. The endpoint maps cta_id back to the
+#     {label, href} from the request's allowed list.
+#   * Missing API key, SDK errors, malformed responses → deterministic
+#     fallback copy. The dock never sees a 500.
+
+
+class WiseAskCtaIn(BaseModel):
+    id: str = Field(..., max_length=200)
+    label: str = Field(..., max_length=120)
+    href: str = Field(..., max_length=500)
+    description: str = Field(default="", max_length=240)
+
+
+class WiseStateDigestIn(BaseModel):
+    """Caller-supplied snapshot of the dashboard. The dock already
+    has all of this in memory after its initial fetch, so shipping
+    it server-side is cheaper than a redundant DB round-trip."""
+
+    vendor_name: str = Field(..., max_length=200)
+    persona_type: Literal["moral", "fisica"]
+    onboarding_completed: bool
+    compliance_pct: int = Field(..., ge=0, le=100)
+    on_track: int = Field(..., ge=0)
+    total_tracked: int = Field(..., ge=0)
+    needs_action: int = Field(..., ge=0)
+    in_review: int = Field(..., ge=0)
+    completed_required: int = Field(..., ge=0)
+    total_required: int = Field(..., ge=0)
+    approved_count: int = Field(..., ge=0)
+    pending_count: int = Field(..., ge=0)
+    rejected_count: int = Field(..., ge=0)
+    expired_count: int = Field(..., ge=0)
+    next_action_titles: list[str] = Field(default_factory=list, max_length=10)
+    upcoming_deadline_titles: list[str] = Field(default_factory=list, max_length=10)
+
+
+class WiseAskRequest(BaseModel):
+    prompt: str = Field(..., max_length=500)
+    digest: WiseStateDigestIn
+    ctas: list[WiseAskCtaIn] = Field(default_factory=list, max_length=20)
+
+
+class WiseAskResponse(BaseModel):
+    body: str
+    cta_label: str | None = None
+    cta_href: str | None = None
+    source: Literal["llm", "fallback"]
+
+
+@router.post(
+    "/workspaces/{workspace_id}/wise/ask",
+    response_model=WiseAskResponse,
+    summary="Ask Wise — LLM-backed free-text reply for the copilot dock",
+    description=(
+        "Routes a free-text prompt through Claude Haiku with the "
+        "provider's curated state digest and a list of allowed CTAs. "
+        "Tenant-guarded by ``current_portal_workspace``. Returns a "
+        "structured reply (``body``, optional ``cta_label`` + "
+        "``cta_href``). On missing API key or model error, returns a "
+        "deterministic fallback rather than a 500 so the dock stays "
+        "responsive."
+    ),
+)
+def ask_wise_endpoint(
+    workspace_id: str,
+    payload: WiseAskRequest,
+    workspace: Annotated[ProviderWorkspace, Depends(current_portal_workspace)],
+) -> WiseAskResponse:
+    _ = workspace_id  # tenant guard already enforced by dependency
+    _ = workspace  # auth side effect — body has its own state digest
+
+    from app.services.wise.ai import WiseCta, WiseStateDigest, ask_wise
+
+    digest = WiseStateDigest(
+        vendor_name=payload.digest.vendor_name,
+        persona_type=payload.digest.persona_type,
+        onboarding_completed=payload.digest.onboarding_completed,
+        compliance_pct=payload.digest.compliance_pct,
+        on_track=payload.digest.on_track,
+        total_tracked=payload.digest.total_tracked,
+        needs_action=payload.digest.needs_action,
+        in_review=payload.digest.in_review,
+        completed_required=payload.digest.completed_required,
+        total_required=payload.digest.total_required,
+        approved_count=payload.digest.approved_count,
+        pending_count=payload.digest.pending_count,
+        rejected_count=payload.digest.rejected_count,
+        expired_count=payload.digest.expired_count,
+        next_action_titles=tuple(payload.digest.next_action_titles[:3]),
+        upcoming_deadline_titles=tuple(payload.digest.upcoming_deadline_titles[:3]),
+    )
+    ctas = [
+        WiseCta(id=c.id, label=c.label, href=c.href, description=c.description)
+        for c in payload.ctas
+    ]
+    result = ask_wise(prompt=payload.prompt, digest=digest, ctas=ctas)
+    return WiseAskResponse(
+        body=result.body,
+        cta_label=result.cta_label,
+        cta_href=result.cta_href,
+        source=result.source,
+    )
