@@ -846,8 +846,15 @@ def client_calendar(
                 view.current_status if view and view.current_status else "pendiente"
             )
             deadline_iso = _calendar_deadline_iso(year, req.due_month, req.due_day)
+            # Session 3 audit fix (2026-05-21) — surface v2 mode on
+            # client-side calendar hrefs too, so a client/admin who
+            # clicks through to /portal/upload gets the alternatives
+            # picker like the provider would.
             href = _calendar_upload_href(
-                year=year, code=req.code, period_key=req.period_key
+                year=year,
+                code=req.code,
+                period_key=req.period_key,
+                v2_mode=bool(req.accepts_documents),
             )
             months[req.due_month].append(
                 ClientCalendarItem(

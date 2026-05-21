@@ -25,6 +25,7 @@ from typing import Literal
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
+from app.core.compliance_catalog import is_v2_recurring_code
 from app.models.entities import ProviderWorkspace
 from app.services.evidence_slots import (
     SlotState,
@@ -274,6 +275,12 @@ def calendar_reupload_href(view: SlotView) -> str:
     Carries ``requirement_code`` + ``period_key`` + ``period_label`` so
     the upload wizard preselects the right slot. ``replaces=`` is
     appended when the slot is actionable and has a submission.
+
+    Session 3 (2026-05-21) — when ``requirement_code`` matches the v2
+    shape, appends ``&v2=1`` so the wizard switches to the
+    alternatives radio picker. Without this, dashboard suggested-
+    action CTAs that route v2 slots through this builder would mount
+    the wizard in v1 mode against a collapsed code → broken submit.
     """
     parts: list[str] = []
     if view.requirement_code:
@@ -283,6 +290,8 @@ def calendar_reupload_href(view: SlotView) -> str:
         parts.append(f"period_label={view.period_key}")
     if view.current_submission_id and view.state in ACTIONABLE_SLOT_STATES:
         parts.append(f"replaces={view.current_submission_id}")
+    if view.requirement_code and is_v2_recurring_code(view.requirement_code):
+        parts.append("v2=1")
     qs = "&".join(parts)
     return f"/portal/upload?{qs}" if qs else "/portal/upload"
 

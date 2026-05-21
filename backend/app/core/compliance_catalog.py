@@ -765,6 +765,47 @@ def recurring_as_dicts(year: int, persona_type: PersonaType) -> list[dict]:
     return [asdict(r) for r in recurring_for_year(year, persona_type)]
 
 
+def is_v2_recurring_code(code: str) -> bool:
+    """True iff ``code`` matches one of the catalog v2 row shapes.
+
+    v2 shapes (Session 1):
+      * ``REC-<INST>-<YYYY>-<MM>``       — monthly / bimestral / cuatrimestral
+      * ``REC-SAT-<YYYY>-04-anual``      — annual
+
+    v1 codes always carry a per-doc-name slug (multi-token, hyphenated),
+    so they never collide with either shape above. The check is
+    structural — no catalog iteration needed — so it's cheap enough
+    for hot paths (URL builders run once per calendar item per
+    request).
+
+    Used by the calendar / dashboard URL builders to decide whether
+    to append ``?v2=1`` so the frontend wizard switches to the
+    alternatives radio picker. Session 3 audit found four href
+    surfaces that needed this and only one was wired through.
+    """
+    parts = code.split("-")
+    if not parts or parts[0] != "REC":
+        return False
+    if len(parts) == 4:
+        # REC-INST-YYYY-MM
+        return (
+            parts[2].isdigit()
+            and len(parts[2]) == 4
+            and parts[3].isdigit()
+            and len(parts[3]) == 2
+        )
+    if len(parts) == 5:
+        # REC-SAT-YYYY-04-anual
+        return (
+            parts[1] == "SAT"
+            and parts[2].isdigit()
+            and len(parts[2]) == 4
+            and parts[3] == "04"
+            and parts[4] == "anual"
+        )
+    return False
+
+
 def lookup_onboarding_by_code(code: str) -> OnboardingRequirement | None:
     """Lookup an onboarding requirement by canonical ``ONB-*`` code."""
     for req in _ONBOARDING_MORAL:

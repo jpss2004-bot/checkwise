@@ -358,3 +358,177 @@ def test_v2_calendar_respects_persona_type(api_client: TestClient) -> None:
         for item in inst["items"]
     ]
     assert len(items) == 34
+
+
+# ---------------------------------------------------------------------------
+# Session 3 — upload URL carries the v2 signal
+# ---------------------------------------------------------------------------
+
+
+def test_v2_calendar_items_have_v2_in_upload_href(api_client: TestClient) -> None:
+    """The wizard needs an explicit URL signal to know it should
+    render the alternatives radio picker. Pin the ?v2=1 marker on
+    every v2 row's href."""
+    settings.RECURRING_CATALOG_V2 = True
+    ws = _setup_workspace(api_client)
+    body = api_client.get(
+        f"/api/v1/portal/workspaces/{ws['workspace_id']}/calendar?year=2026"
+    ).json()
+    items = [
+        item
+        for month in body["months"]
+        for inst in month["institutions"]
+        for item in inst["items"]
+    ]
+    assert items, "expected v2 calendar to yield items"
+    for item in items:
+        assert "v2=1" in item["href"], (
+            f"v2 row {item['code']} missing v2 signal in href: {item['href']}"
+        )
+
+
+def test_v1_calendar_items_do_not_carry_v2_marker(api_client: TestClient) -> None:
+    """Flag off → v1 rows have no accepts_documents → no v2 URL marker.
+    Wizard stays in single-doc mode for v1 callers."""
+    settings.RECURRING_CATALOG_V2 = False
+    ws = _setup_workspace(api_client)
+    body = api_client.get(
+        f"/api/v1/portal/workspaces/{ws['workspace_id']}/calendar?year=2026"
+    ).json()
+    items = [
+        item
+        for month in body["months"]
+        for inst in month["institutions"]
+        for item in inst["items"]
+    ]
+    for item in items:
+        assert "v2=1" not in item["href"], (
+            f"v1 row {item['code']} should not advertise v2 mode: {item['href']}"
+        )
+
+
+# ---------------------------------------------------------------------------
+# Session 3 self-audit fixes — v2 marker on every href surface
+# ---------------------------------------------------------------------------
+
+
+def test_is_v2_recurring_code_handles_every_v2_shape() -> None:
+    """The structural code-shape detector underpins every dashboard /
+    reupload href builder. Pin its behavior so a future code-shape
+    change can't silently regress v2 detection on non-portal surfaces."""
+    from app.core.compliance_catalog import is_v2_recurring_code
+
+    # v2 shapes are detected.
+    assert is_v2_recurring_code("REC-IMSS-2026-01") is True
+    assert is_v2_recurring_code("REC-INFONAVIT-2026-03") is True
+    assert is_v2_recurring_code("REC-ACUSES-2026-05") is True
+    assert is_v2_recurring_code("REC-SAT-2026-04-anual") is True
+
+    # v1 shapes (per-doc-name slug appended) are NOT detected.
+    assert is_v2_recurring_code(
+        "REC-IMSS-2026-01-comprobante-de-pago-bancario"
+    ) is False
+    assert is_v2_recurring_code(
+        "REC-SAT-2026-01-declaracion-isr-por-retencion-sueldos-y-salarios"
+    ) is False
+    assert is_v2_recurring_code("REC-ACUSES-2026-05-acuse-sisub") is False
+    # Garbage / onboarding codes return False (no false positives).
+    assert is_v2_recurring_code("ONB-CORP-M-001") is False
+    assert is_v2_recurring_code("not-a-code") is False
+    assert is_v2_recurring_code("") is False
+
+
+def test_client_calendar_call_site_threads_v2_mode_flag() -> None:
+    """The client-side calendar endpoint at ``backend/app/api/v1/client.py``
+    also threads ``v2_mode=bool(req.accepts_documents)`` into
+    ``_calendar_upload_href`` — without this a staff/admin click on the
+    client-side surface would mount the wizard in v1 mode against a v2
+    row. Pin the call shape via source inspection so a refactor can't
+    silently drop the keyword argument."""
+    from pathlib import Path
+
+    client_py = Path(__file__).resolve().parent.parent / "app" / "api" / "v1" / "client.py"
+    source = client_py.read_text(encoding="utf-8")
+    assert "_calendar_upload_href(" in source, (
+        "client.py no longer imports _calendar_upload_href — refactor needs review"
+    )
+    # The call must thread v2_mode from the catalog row, not hardcode False.
+    assert "v2_mode=bool(req.accepts_documents)" in source, (
+        "client.py _calendar_upload_href call dropped v2_mode "
+        "— v2 rows on client surface will mount wizard in v1 mode"
+    )
+
+
+def test_dashboard_calendar_reupload_href_marks_v2_codes() -> None:
+    """The dashboard's suggested-action CTA routes through
+    ``calendar_reupload_href`` for periodic slots. Without the v2
+    marker it would mount the wizard in v1 mode against a v2 collapsed
+    code. Pin the contract."""
+    from app.services.dashboard_compute import calendar_reupload_href
+    from app.services.evidence_slots import SlotKey, SlotState, SlotView
+
+    def _view(code: str) -> SlotView:
+        return SlotView(
+            slot_key=SlotKey(
+                workspace_id="ws-1",
+                client_id="c-1",
+                vendor_id="v-1",
+                requirement_code=code,
+                period_key="2026-M01",
+            ),
+            state=SlotState.REJECTED,
+            requirement_code=code,
+            period_key="2026-M01",
+            requirement_name="Test",
+            institution="imss",
+            required=True,
+            current_submission_id="sub-1",
+            current_status="rechazado",
+            submitted_at_iso=None,
+            superseded_count=0,
+        )
+
+    v2_href = calendar_reupload_href(_view("REC-IMSS-2026-01"))
+    assert "v2=1" in v2_href, v2_href
+
+    v1_href = calendar_reupload_href(
+        _view("REC-IMSS-2026-01-comprobante-de-pago-bancario")
+    )
+    assert "v2=1" not in v1_href, v1_href
+
+
+def test_portal_calendar_reupload_href_marks_v2_codes() -> None:
+    """Same contract for the portal-local helper that lives inside
+    portal.py (used by the dashboard build-payload path inside the
+    HTTP handler)."""
+    from app.api.v1.portal import _calendar_reupload_href
+    from app.services.evidence_slots import SlotKey, SlotState, SlotView
+
+    def _view(code: str) -> SlotView:
+        return SlotView(
+            slot_key=SlotKey(
+                workspace_id="ws-1",
+                client_id="c-1",
+                vendor_id="v-1",
+                requirement_code=code,
+                period_key="2026-M01",
+            ),
+            state=SlotState.REJECTED,
+            requirement_code=code,
+            period_key="2026-M01",
+            requirement_name="Test",
+            institution="imss",
+            required=True,
+            current_submission_id="sub-1",
+            current_status="rechazado",
+            submitted_at_iso=None,
+            superseded_count=0,
+        )
+
+    v2_href = _calendar_reupload_href(_view("REC-IMSS-2026-01"))
+    assert "v2=1" in v2_href, v2_href
+
+    v1_href = _calendar_reupload_href(
+        _view("REC-IMSS-2026-01-comprobante-de-pago-bancario")
+    )
+    assert "v2=1" not in v1_href, v1_href

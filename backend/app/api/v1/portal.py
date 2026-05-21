@@ -58,6 +58,7 @@ from app.core.compliance_catalog import (
     RecurringRequirement,
     catalog_metadata,
     expediente_for_persona,
+    is_v2_recurring_code,
     onboarding_anatomy,
     onboarding_common_errors,
     onboarding_format,
@@ -375,17 +376,33 @@ def _calendar_deadline_iso(year: int, due_month: int, due_day: int) -> str:
     return f"{year:04d}-{due_month:02d}-{due_day:02d}"
 
 
-def _calendar_upload_href(*, year: int, code: str, period_key: str) -> str:
+def _calendar_upload_href(
+    *,
+    year: int,
+    code: str,
+    period_key: str,
+    v2_mode: bool = False,
+) -> str:
     """Build the canonical upload URL for a calendar item.
 
     Keeps the frontend stable: every calendar entry can offer a
     "Subir" link without inventing a URL convention per surface.
+
+    Session 3 (2026-05-21) — when ``v2_mode`` is True (the catalog
+    row carries an ``accepts_documents`` list), the URL appends
+    ``&v2=1`` so the wizard knows to render the alternatives radio
+    picker instead of the legacy single-doc flow. The signal lives
+    in the URL rather than in a fetch-on-mount roundtrip so v1
+    behavior stays a zero-fetch path.
     """
-    return (
+    href = (
         f"/portal/upload?requirement_code={code}"
         f"&period_key={period_key}"
         f"&period_label={year}-{period_key.split('-', 1)[-1] if '-' in period_key else period_key}"
     )
+    if v2_mode:
+        href = f"{href}&v2=1"
+    return href
 
 
 # Phase 4 — the legacy ``_match_submission`` fuzzy matcher was removed
@@ -1116,7 +1133,18 @@ def get_workspace_calendar(
         item_status = view.current_status if (view and view.current_status) else "pendiente"
         # Phase 5 — UX enrichment that used to live in the calendar mock.
         deadline_iso = _calendar_deadline_iso(year, req.due_month, req.due_day)
-        href = _calendar_upload_href(year=year, code=req.code, period_key=req.period_key)
+        # Session 3 (2026-05-21) — flag the upload URL as v2-mode when
+        # the row carries alternatives so the wizard knows to render
+        # the radio picker. ``bool(req.accepts_documents)`` is True
+        # exactly when this is a v2 row regardless of the global flag
+        # state (a v2 generator only emits rows with non-empty
+        # accepts_documents).
+        href = _calendar_upload_href(
+            year=year,
+            code=req.code,
+            period_key=req.period_key,
+            v2_mode=bool(req.accepts_documents),
+        )
         # Session 2 — when this is a v2 row, surface the rich
         # per-accepted-doc list AND keep the legacy single-doc
         # guidance fields populated with placeholders so the frontend
@@ -2283,6 +2311,14 @@ def _calendar_reupload_href(view: SlotView) -> str:
         parts.append(f"period_label={view.period_key}")
     if view.current_submission_id and view.state in _ACTIONABLE_SLOT_STATES:
         parts.append(f"replaces={view.current_submission_id}")
+    # Session 3 audit fix (2026-05-21) — dashboard suggested-action
+    # CTAs route through this builder. Without ``v2=1`` the wizard
+    # would mount in v1 mode against a v2 row's collapsed code and
+    # the alternatives picker wouldn't render. Detect from the code
+    # shape; SlotView doesn't carry accepts_documents so we can't ask
+    # the row directly.
+    if view.requirement_code and is_v2_recurring_code(view.requirement_code):
+        parts.append("v2=1")
     qs = "&".join(parts)
     return f"/portal/upload?{qs}" if qs else "/portal/upload"
 
