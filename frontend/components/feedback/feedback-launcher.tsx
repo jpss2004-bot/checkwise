@@ -29,6 +29,21 @@
  * Also attaches the last ~20 console errors/warns via
  * ``snapshotConsoleLog()``, captured by ``startConsoleCapture()``
  * which is installed idempotently on mount.
+ *
+ * Capture sequence (bugfix, 2026-05-21)
+ * -------------------------------------
+ * Clicking the floating "Reportar" button now snaps the current page
+ * BEFORE the dialog opens (``openWithCapture``), and the original
+ * pathname / URL / viewport are locked into ``originalContextRef`` at
+ * the same moment. Submission reads from that ref rather than live
+ * ``window.location.*`` so the screenshot, the Slack route label, and
+ * the recorded URL all describe the page the user was on at the
+ * instant they clicked — never the dialog itself, never a route the
+ * user navigated to afterwards. The in-dialog "Capturar página"
+ * button stays as an explicit re-capture (e.g. for users who want to
+ * scroll first) but now waits long enough for the Radix exit
+ * animation, and html2canvas excludes any ``[data-screenshot-exclude]``
+ * node so a portal-rendered dialog overlay can't bleed in.
  */
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
@@ -106,6 +121,18 @@ export function FeedbackLauncher({
   const [error, setError] = useState<string | null>(null);
 
   const fileInputRef = useRef<HTMLInputElement>(null);
+  // Bugfix (2026-05-21) — original page context captured at the
+  // moment the floating button is clicked. ``null`` until the user
+  // clicks; reset when the dialog closes. Submit prefers this over
+  // live window.location so a navigation between click and submit
+  // (or the dialog itself) can't desync the screenshot from the
+  // reported route.
+  const originalContextRef = useRef<{
+    url: string;
+    path: string;
+    viewport: string;
+    capturedAt: string;
+  } | null>(null);
 
   // Install the console capture once and re-check session whenever the
   // route changes (covers logout-then-login in the same tab).
@@ -186,11 +213,45 @@ export function FeedbackLauncher({
     [attachBlob],
   );
 
-  const capturePage = useCallback(async () => {
+  // ``html2canvas`` ignore predicate. Excludes the floating launcher
+  // wrapper AND anything carrying ``data-screenshot-exclude`` (any
+  // open Radix Dialog overlay/content carries it via the local
+  // ui/dialog wrapper). Belt-and-suspenders: even if a portal hasn't
+  // fully unmounted during the recapture flow, html2canvas walks past
+  // it.
+  const shouldIgnoreForScreenshot = useCallback((el: Element): boolean => {
+    if (!(el instanceof HTMLElement)) return false;
+    if (el.dataset.feedbackLauncher === "true") return true;
+    if (el.dataset.screenshotExclude === "true") return true;
+    return false;
+  }, []);
+
+  /**
+   * Bugfix (2026-05-21) — primary capture path.
+   *
+   * Runs synchronously when the floating "Reportar" button is
+   * clicked, BEFORE the dialog opens. Locks the original route
+   * metadata into ``originalContextRef`` and produces a screenshot of
+   * the page the user was actually looking at. The dialog opens only
+   * after the snap is in hand (or fails gracefully).
+   */
+  const openWithCapture = useCallback(async () => {
+    if (capturing || open) return;
+    // 1. Snapshot route metadata FIRST so even an html2canvas crash
+    //    can't drop the original context.
+    if (typeof window !== "undefined") {
+      originalContextRef.current = {
+        url: window.location.href,
+        path: window.location.pathname,
+        viewport: `${window.innerWidth}x${window.innerHeight}`,
+        capturedAt: new Date().toISOString(),
+      };
+    }
+    // 2. Run html2canvas on the current page. The dialog is not yet
+    //    mounted so there's nothing to exclude beyond the launcher
+    //    chip itself. Spinner on the chip tells the user something
+    //    is happening (capture is typically 200-500ms).
     setCapturing(true);
-    setOpen(false);
-    // Wait one frame so the dialog actually leaves the DOM before we snap.
-    await new Promise((r) => setTimeout(r, 80));
     try {
       const mod = await import("html2canvas");
       const html2canvas = mod.default;
@@ -198,8 +259,53 @@ export function FeedbackLauncher({
         backgroundColor: null,
         useCORS: true,
         logging: false,
-        ignoreElements: (el) =>
-          el instanceof HTMLElement && el.dataset.feedbackLauncher === "true",
+        ignoreElements: shouldIgnoreForScreenshot,
+      });
+      const blob: Blob | null = await new Promise((resolve) =>
+        canvas.toBlob((b) => resolve(b), "image/png"),
+      );
+      if (blob) {
+        await attachBlob(blob);
+      } else {
+        // Capture succeeded but blob conversion failed — open the
+        // dialog anyway so the user can describe the issue and
+        // attach an image manually.
+        toast.error("No se pudo generar la captura automática. Adjunta una imagen.");
+      }
+    } catch (err) {
+      console.error("feedback: auto-capture failed", err);
+      toast.error("No pudimos capturar la página. Adjunta una imagen.");
+    } finally {
+      setCapturing(false);
+      setOpen(true);
+    }
+  }, [attachBlob, capturing, open, shouldIgnoreForScreenshot]);
+
+  /**
+   * Re-capture from inside the dialog (the "Capturar página" button
+   * in the screenshot panel). Kept for users who scrolled or
+   * dismissed an overlay after opening the dialog and want a fresh
+   * snap. Waits long enough for the Radix exit animation to settle
+   * (~200ms per the dialog primitive CSS) and excludes any node
+   * carrying ``data-screenshot-exclude`` belt-and-suspenders.
+   */
+  const capturePage = useCallback(async () => {
+    setCapturing(true);
+    setOpen(false);
+    // Animation buffer — the Radix Dialog exit (data-[state=closed]
+    // fade-out + zoom-out + slide-out) typically runs 150-200ms. The
+    // legacy 80ms wait was racing it. 280ms gives the portal time to
+    // be removed from the DOM AND the overlay's opacity to reach 0
+    // before html2canvas paints.
+    await new Promise((r) => setTimeout(r, 280));
+    try {
+      const mod = await import("html2canvas");
+      const html2canvas = mod.default;
+      const canvas = await html2canvas(document.documentElement, {
+        backgroundColor: null,
+        useCORS: true,
+        logging: false,
+        ignoreElements: shouldIgnoreForScreenshot,
       });
       const blob: Blob | null = await new Promise((resolve) =>
         canvas.toBlob((b) => resolve(b), "image/png"),
@@ -216,7 +322,7 @@ export function FeedbackLauncher({
       setCapturing(false);
       setOpen(true);
     }
-  }, [attachBlob]);
+  }, [attachBlob, shouldIgnoreForScreenshot]);
 
   const onSubmit = useCallback(
     async (event: React.FormEvent) => {
@@ -236,15 +342,28 @@ export function FeedbackLauncher({
         return;
       }
 
+      // Bugfix (2026-05-21) — prefer ``originalContextRef.current``
+      // (locked at the moment the floating button was clicked) over
+      // live ``window.location.*``. Falls back to live values only
+      // when the launcher was opened by a programmatic path that
+      // didn't go through ``openWithCapture`` (which shouldn't happen
+      // in practice; the fallback is defensive only). This keeps the
+      // route the user sees in Slack identical to the route in the
+      // attached screenshot.
+      const liveUrl = typeof window !== "undefined" ? window.location.href : "";
+      const livePath =
+        typeof window !== "undefined" ? window.location.pathname : "";
+      const liveViewport =
+        typeof window !== "undefined"
+          ? `${window.innerWidth}x${window.innerHeight}`
+          : "";
+      const originalContext = originalContextRef.current;
       const commonPayload = {
         kind,
         description: trimmed,
-        url: typeof window !== "undefined" ? window.location.href : "",
-        path: typeof window !== "undefined" ? window.location.pathname : "",
-        viewport:
-          typeof window !== "undefined"
-            ? `${window.innerWidth}x${window.innerHeight}`
-            : "",
+        url: originalContext?.url ?? liveUrl,
+        path: originalContext?.path ?? livePath,
+        viewport: originalContext?.viewport ?? liveViewport,
         userAgent: typeof navigator !== "undefined" ? navigator.userAgent : "",
         consoleLogs: snapshotConsoleLog(),
         screenshot,
@@ -269,6 +388,9 @@ export function FeedbackLauncher({
           : "Reporte recibido (entrega a Slack aún sin configurar).",
       );
       setOpen(false);
+      // Clear the locked original-context — the next click starts a
+      // fresh capture from wherever the user is then.
+      originalContextRef.current = null;
       resetForm();
     },
     [description, kind, screenshot, contactEmail, allowPublic, resetForm],
@@ -295,10 +417,16 @@ export function FeedbackLauncher({
     <div data-feedback-launcher="true">
       <button
         type="button"
-        aria-label="Reportar bug o sugerir mejora"
+        aria-label={
+          capturing
+            ? "Capturando la página actual…"
+            : "Reportar bug o sugerir mejora"
+        }
         aria-haspopup="dialog"
         aria-expanded={open}
-        onClick={() => setOpen(true)}
+        aria-busy={capturing}
+        disabled={capturing}
+        onClick={openWithCapture}
         className={cn(
           "fixed bottom-4 right-4 z-50",
           "inline-flex items-center gap-2 rounded-full",
@@ -309,10 +437,20 @@ export function FeedbackLauncher({
           "hover:bg-[color:var(--surface-hover)] hover:shadow-lg",
           "active:scale-[0.97]",
           "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[color:var(--border-focus)]/40 focus-visible:ring-offset-2 focus-visible:ring-offset-[color:var(--surface-page)]",
+          "disabled:cursor-progress disabled:opacity-80",
         )}
       >
-        <ChatCenteredDots className="h-3.5 w-3.5" weight="bold" aria-hidden="true" />
-        <span className="hidden sm:inline">Reportar</span>
+        <ChatCenteredDots
+          className={cn(
+            "h-3.5 w-3.5",
+            capturing && "animate-pulse",
+          )}
+          weight="bold"
+          aria-hidden="true"
+        />
+        <span className="hidden sm:inline">
+          {capturing ? "Capturando…" : "Reportar"}
+        </span>
       </button>
 
       <Dialog
@@ -320,7 +458,13 @@ export function FeedbackLauncher({
         onOpenChange={(next) => {
           if (capturing) return;
           setOpen(next);
-          if (!next) setError(null);
+          if (!next) {
+            setError(null);
+            // Bugfix (2026-05-21) — clear the locked context when the
+            // user dismisses without submitting. The next click starts
+            // a fresh capture from wherever they are then.
+            originalContextRef.current = null;
+          }
         }}
       >
         <DialogContent
@@ -410,7 +554,10 @@ export function FeedbackLauncher({
               onChange={onFilePicked}
             />
 
-            <ContextStrip anonymous={isAnonymous} />
+            <ContextStrip
+              anonymous={isAnonymous}
+              originalContext={originalContextRef.current}
+            />
 
             <DialogFooter>
               <Button
@@ -582,14 +729,32 @@ function ScreenshotPanel({
   );
 }
 
-function ContextStrip({ anonymous }: { anonymous: boolean }) {
-  const [path, setPath] = useState("");
-  const [viewport, setViewport] = useState("");
+function ContextStrip({
+  anonymous,
+  originalContext,
+}: {
+  anonymous: boolean;
+  // Bugfix (2026-05-21) — prefer the locked context so the disclosed
+  // route matches what the screenshot shows and what the backend
+  // receives. Falls back to live values if (defensively) no locked
+  // context is present.
+  originalContext: {
+    url: string;
+    path: string;
+    viewport: string;
+    capturedAt: string;
+  } | null;
+}) {
+  const [livePath, setLivePath] = useState("");
+  const [liveViewport, setLiveViewport] = useState("");
   useEffect(() => {
     if (typeof window === "undefined") return;
-    setPath(window.location.pathname);
-    setViewport(`${window.innerWidth}×${window.innerHeight}`);
+    setLivePath(window.location.pathname);
+    setLiveViewport(`${window.innerWidth}×${window.innerHeight}`);
   }, []);
+  const path = originalContext?.path || livePath;
+  const viewport =
+    originalContext?.viewport.replace("x", "×") || liveViewport;
   // Public visitors don't have a "usuario" to attach; show the same
   // strip with that token replaced by a hashed source fingerprint so
   // the consent disclosure stays honest.

@@ -39,6 +39,14 @@ const DialogOverlay = React.forwardRef<
 >(({ className, ...props }, ref) => (
   <DialogPrimitive.Overlay
     ref={ref}
+    // ``data-screenshot-exclude`` — generic opt-out for any in-page
+    // screenshot tool (feedback launcher today; any future capture
+    // surface tomorrow). Radix renders the overlay inside a portal
+    // attached to ``document.body``, so consumers that filter by a
+    // wrapper class can't reach it. The attribute is harmless on
+    // every other Dialog in the app and gives screenshot consumers a
+    // single, semantic selector to honor.
+    data-screenshot-exclude="true"
     className={cn(
       "fixed inset-0 z-50 bg-black/50 backdrop-blur-[2px]",
       "data-[state=open]:animate-in data-[state=closed]:animate-out",
@@ -61,6 +69,11 @@ const DialogContent = React.forwardRef<
     <DialogOverlay />
     <DialogPrimitive.Content
       ref={ref}
+      // Same ``data-screenshot-exclude`` opt-out as the overlay.
+      // Marking the content node means in-dialog "capture page"
+      // flows can ignore any in-flight dialog content even when the
+      // exit animation hasn't finished by the time html2canvas runs.
+      data-screenshot-exclude="true"
       className={cn(
         "fixed left-[50%] top-[50%] z-50 grid w-full max-w-lg translate-x-[-50%] translate-y-[-50%] gap-4",
         "rounded-xl border p-6",
