@@ -4,22 +4,34 @@ import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import {
   ArrowRight,
+  Bank,
   CalendarBlank,
   CheckCircle,
   CloudArrowUp,
   FileMagnifyingGlass,
   HourglassHigh,
+  Lightning,
   LockKey,
   Tray,
+  TrendUp,
   Warning,
   WarningOctagon,
   type Icon,
 } from "@phosphor-icons/react";
 
+import {
+  Donut,
+  MiniBars,
+  RadialGauge,
+  Sparkline,
+  StackedBars,
+  type ChartSegment,
+  type ChartTone,
+} from "@/components/checkwise/charts";
 import { DocStateBadge } from "@/components/checkwise/doc-state-badge";
-import { NextActionRail } from "@/components/checkwise/portal/next-action-rail";
 import { PortalAppShell } from "@/components/checkwise/portal/portal-app-shell";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
+import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { MetadataStrip, type MetadataItem } from "@/components/ui/metadata-strip";
 import { PageHeader } from "@/components/ui/page-header";
@@ -27,7 +39,7 @@ import { cn } from "@/lib/utils";
 import {
   getDashboard,
   statusToDocumentStateCode,
-  type DashboardAttentionItem,
+  type DashboardInstitutionBreakdown,
   type DashboardOnboardingSummary,
   type DashboardPayload,
   type DashboardRecentUpload,
@@ -42,28 +54,29 @@ import type { PortalSession } from "@/lib/session/portal";
 import type { DocumentStateCode } from "@/lib/types";
 
 /**
- * Provider dashboard — operational REPSE compliance control panel.
+ * Provider dashboard — visual REPSE compliance command center.
  *
- * Session 4 redesign (2026-05-21): the dashboard was rebuilt around
- * the four questions an active vendor actually asks when they open
- * the surface:
+ * Session 5 (2026-05-21) doubled-down on at-a-glance visuals after
+ * Session 4's compact rewrite read as "operational but joyless." The
+ * surface now layers:
  *
- *   1. "What is my current compliance status?" — thin status banner
- *      at the top of the page, semaphore tone + one-line reason.
- *   2. "What should I do next?" — single primary action in the
- *      left column, with a compact secondary list under it.
- *   3. "What is missing / in review / what did I upload?" — three
- *      side-by-side compact lists, each grouped by lifecycle stage
- *      and rendered as scannable rows instead of decorative cards.
- *   4. "What is coming up?" — right-rail "Próximos vencimientos"
- *      list, sorted by urgency.
+ *   1. A hero block — large radial gauge on the left (compliance %
+ *      with stacked-distribution bar underneath), single dominant
+ *      next-action card on the right. The two answer "where am I"
+ *      and "what do I do" before the user scrolls.
+ *   2. A 4-up KPI strip with mini sparklines derived from the
+ *      14-day upload window — "Por atender", "En revisión",
+ *      "Aprobados", "Próximo vencimiento".
+ *   3. A graph row — 14-day upload-activity MiniBars chart on the
+ *      left, per-institution stacked-bar breakdown on the right.
+ *   4. The operational queues from Session 4 (Por atender / Vence
+ *      pronto / En revisión / Cargas recientes) plus the right-rail
+ *      upcoming-deadlines + state donut.
  *
- * All four are backed by ``GET /api/v1/portal/workspaces/{id}/dashboard``;
- * no frontend-only mock suggestions remain. The donut + radial gauge
- * + 12-month calendar teaser from the previous iteration were removed
- * because they duplicated data the metadata strip + status banner +
- * /portal/calendar already surface — they made the dashboard read as
- * a marketing page rather than an operations console.
+ * Every chart is bound to the existing backend payload (semaphore,
+ * document_state_counts, recent_uploads, institution_breakdown,
+ * upcoming_deadlines) plus the new derived 14-day per-day series
+ * computed from recent_uploads. No invented metrics.
  */
 function DashboardInner({ session }: { session: PortalSession }) {
   const [dashboard, setDashboard] = useState<DashboardPayload | null>(null);
@@ -115,16 +128,15 @@ function DashboardInner({ session }: { session: PortalSession }) {
   }
 
   const onboarding = dashboard.onboarding_summary;
-  // Only treat the dashboard as "initial-expediente locked" when the
-  // provider has not yet completed onboarding. Once onboarding_completed_at
-  // is set, any remaining ``needs_action`` documents are recurring
-  // monthly obligations, not blockers on the initial expediente.
   const initialOnboardingDone = session.onboarding_completed_at !== null;
   const gateBlocked = !initialOnboardingDone && onboarding.needs_action > 0;
-  const provisional = !gateBlocked && onboarding.in_review > 0 && !initialOnboardingDone;
+  const provisional =
+    !gateBlocked && onboarding.in_review > 0 && !initialOnboardingDone;
 
   const counts = dashboard.document_state_counts;
   const recent = dashboard.recent_uploads ?? [];
+  const institutionBreakdown = dashboard.institution_breakdown ?? [];
+  const uploadActivity = useMemo14DayActivity(recent);
 
   const attentionRows = splitAttentionItems(dashboard.attention_today);
   const inReviewRows = recent
@@ -145,7 +157,7 @@ function DashboardInner({ session }: { session: PortalSession }) {
           title={session.vendor_name}
           description="Lo que falta, lo que está en revisión y la próxima acción concreta para mantener tu cumplimiento al día."
           actions={
-            <Button asChild size="sm" variant="outline">
+            <Button asChild size="sm">
               <Link href="/portal/upload">
                 <CloudArrowUp className="h-4 w-4" weight="bold" aria-hidden="true" />
                 Subir documento
@@ -165,19 +177,73 @@ function DashboardInner({ session }: { session: PortalSession }) {
           })}
         />
 
-        <StatusBanner semaphore={dashboard.semaphore} />
-
         {gateBlocked ? <LockedDashboardBanner summary={onboarding} /> : null}
         {provisional ? <ProvisionalAccessBanner /> : null}
 
-        <div className="cw-stagger grid gap-5 lg:grid-cols-3">
-          <div className="space-y-5 lg:col-span-2">
-            <PrimaryActionPanel
-              primary={primaryAction}
-              secondary={secondaryActions}
-              totalActions={dashboard.suggested_actions.length}
-            />
+        {/* ── Hero block: gauge + primary action ── */}
+        <section className="cw-stagger grid gap-5 lg:grid-cols-12">
+          <ComplianceHeroCard
+            semaphore={dashboard.semaphore}
+            counts={counts}
+            summary={onboarding}
+            className="lg:col-span-8"
+          />
+          <NextActionHero
+            primary={primaryAction}
+            secondary={secondaryActions}
+            totalActions={dashboard.suggested_actions.length}
+            className="lg:col-span-4"
+          />
+        </section>
 
+        {/* ── KPI strip: 4 cards with sparklines ── */}
+        <section
+          aria-label="Indicadores clave"
+          className="cw-stagger grid gap-4 sm:grid-cols-2 lg:grid-cols-4"
+        >
+          <KpiCard
+            label="Por atender"
+            value={onboarding.needs_action + counts.expired}
+            tone={onboarding.needs_action + counts.expired > 0 ? "warning" : "success"}
+            icon={Warning}
+            sparkData={uploadActivity.byBucketAttention}
+            caption={
+              onboarding.needs_action + counts.expired > 0
+                ? "Documentos que necesitan tu acción"
+                : "Sin pendientes críticos"
+            }
+          />
+          <KpiCard
+            label="En revisión"
+            value={onboarding.in_review}
+            tone="info"
+            icon={HourglassHigh}
+            sparkData={uploadActivity.byBucketReview}
+            caption="Esperando revisión legal"
+          />
+          <KpiCard
+            label="Aprobados"
+            value={counts.approved}
+            tone="success"
+            icon={CheckCircle}
+            sparkData={uploadActivity.byBucketApproved}
+            caption="Obligaciones al día"
+          />
+          <KpiDeadlineCard deadline={dashboard.upcoming_deadlines[0] ?? null} />
+        </section>
+
+        {/* ── Graph row: activity + institution ── */}
+        <section className="cw-stagger grid gap-5 lg:grid-cols-12">
+          <UploadActivityCard activity={uploadActivity} className="lg:col-span-8" />
+          <InstitutionBreakdownCard
+            rows={institutionBreakdown}
+            className="lg:col-span-4"
+          />
+        </section>
+
+        {/* ── Operational queues + right rail ── */}
+        <section className="cw-stagger grid gap-5 lg:grid-cols-12">
+          <div className="space-y-5 lg:col-span-8">
             <OperationalQueues
               attention={attentionRows.actionable}
               dueSoon={attentionRows.dueSoon}
@@ -185,12 +251,11 @@ function DashboardInner({ session }: { session: PortalSession }) {
               recent={recent}
             />
           </div>
-
-          <div className="space-y-5">
+          <div className="space-y-5 lg:col-span-4">
             <UpcomingDeadlinesPanel rows={dashboard.upcoming_deadlines} />
-            <ComplianceLedger counts={counts} />
+            <ComplianceDonut counts={counts} />
           </div>
-        </div>
+        </section>
       </main>
     </PortalAppShell>
   );
@@ -205,21 +270,27 @@ function DashboardSkeleton() {
     <div className="space-y-5">
       <div className="h-24 animate-pulse rounded-lg border border-[color:var(--border-default)] bg-[color:var(--surface-raised)]" />
       <div className="h-14 animate-pulse rounded-lg border border-[color:var(--border-default)] bg-[color:var(--surface-raised)]" />
-      <div className="grid gap-5 lg:grid-cols-3">
-        <div className="space-y-5 lg:col-span-2">
-          <div className="h-40 animate-pulse rounded-lg border border-[color:var(--border-default)] bg-[color:var(--surface-raised)]" />
-          <div className="h-72 animate-pulse rounded-lg border border-[color:var(--border-default)] bg-[color:var(--surface-raised)]" />
-        </div>
-        <div className="space-y-5">
-          <div className="h-48 animate-pulse rounded-lg border border-[color:var(--border-default)] bg-[color:var(--surface-raised)]" />
-          <div className="h-48 animate-pulse rounded-lg border border-[color:var(--border-default)] bg-[color:var(--surface-raised)]" />
-        </div>
+      <div className="grid gap-5 lg:grid-cols-12">
+        <div className="h-64 animate-pulse rounded-lg border border-[color:var(--border-default)] bg-[color:var(--surface-raised)] lg:col-span-8" />
+        <div className="h-64 animate-pulse rounded-lg border border-[color:var(--border-default)] bg-[color:var(--surface-raised)] lg:col-span-4" />
+      </div>
+      <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
+        {[0, 1, 2, 3].map((i) => (
+          <div
+            key={i}
+            className="h-28 animate-pulse rounded-lg border border-[color:var(--border-default)] bg-[color:var(--surface-raised)]"
+          />
+        ))}
+      </div>
+      <div className="grid gap-5 lg:grid-cols-12">
+        <div className="h-64 animate-pulse rounded-lg border border-[color:var(--border-default)] bg-[color:var(--surface-raised)] lg:col-span-8" />
+        <div className="h-64 animate-pulse rounded-lg border border-[color:var(--border-default)] bg-[color:var(--surface-raised)] lg:col-span-4" />
       </div>
     </div>
   );
 }
 
-// ─── Metadata strip ───────────────────────────────────────────────
+// ─── Constants / helpers ──────────────────────────────────────────
 
 const INSTITUTION_LABEL: Record<string, string> = {
   sat: "SAT",
@@ -228,6 +299,47 @@ const INSTITUTION_LABEL: Record<string, string> = {
   stps_repse: "STPS / REPSE",
   interno_cliente: "Interno",
 };
+
+const TONE_TO_ICON: Record<DashboardSemaphoreLevel, Icon> = {
+  green: CheckCircle,
+  yellow: Warning,
+  red: WarningOctagon,
+};
+
+const TONE_TO_HERO_GRADIENT: Record<DashboardSemaphoreLevel, string> = {
+  green:
+    "from-[color:var(--status-success-bg)] via-transparent to-[color:var(--surface-teal-muted)]",
+  yellow:
+    "from-[color:var(--status-warning-bg)] via-transparent to-[color:var(--surface-brand-muted)]",
+  red:
+    "from-[color:var(--status-error-bg)] via-transparent to-[color:var(--surface-brand-muted)]",
+};
+
+const TONE_TO_BORDER: Record<DashboardSemaphoreLevel, string> = {
+  green: "border-[color:var(--status-success-border)]",
+  yellow: "border-[color:var(--status-warning-border)]",
+  red: "border-[color:var(--status-error-border)]",
+};
+
+const TONE_TO_TEXT: Record<DashboardSemaphoreLevel, string> = {
+  green: "text-[color:var(--status-success-text)]",
+  yellow: "text-[color:var(--status-warning-text)]",
+  red: "text-[color:var(--status-error-text)]",
+};
+
+const TONE_TO_GAUGE: Record<DashboardSemaphoreLevel, ChartTone> = {
+  green: "success",
+  yellow: "warning",
+  red: "error",
+};
+
+const TONE_TO_BADGE: Record<DashboardSemaphoreLevel, "success" | "warning" | "destructive"> = {
+  green: "success",
+  yellow: "warning",
+  red: "destructive",
+};
+
+// ─── Metadata strip items ─────────────────────────────────────────
 
 function buildMetadataItems(args: {
   rfc: string;
@@ -254,12 +366,7 @@ function buildMetadataItems(args: {
       label: "Cumplimiento",
       value: `${semaphore.compliance_pct}%`,
       mono: true,
-      tone:
-        semaphore.level === "green"
-          ? "default"
-          : semaphore.level === "yellow"
-            ? "warning"
-            : "warning",
+      tone: semaphore.level === "green" ? "default" : "warning",
     },
     {
       label: "Por atender",
@@ -273,81 +380,183 @@ function buildMetadataItems(args: {
   ];
 }
 
-// ─── Status banner (replaces giant semaphore hero) ────────────────
+// ─── Hero: compliance gauge + distribution ────────────────────────
 
-const TONE_TO_ICON: Record<DashboardSemaphoreLevel, Icon> = {
-  green: CheckCircle,
-  yellow: Warning,
-  red: WarningOctagon,
-};
-
-const TONE_TO_BAR: Record<DashboardSemaphoreLevel, string> = {
-  green: "bg-[color:var(--status-success-text)]",
-  yellow: "bg-[color:var(--status-warning-text)]",
-  red: "bg-[color:var(--status-error-text)]",
-};
-
-const TONE_TO_BORDER: Record<DashboardSemaphoreLevel, string> = {
-  green: "border-[color:var(--status-success-border)]",
-  yellow: "border-[color:var(--status-warning-border)]",
-  red: "border-[color:var(--status-error-border)]",
-};
-
-const TONE_TO_TEXT: Record<DashboardSemaphoreLevel, string> = {
-  green: "text-[color:var(--status-success-text)]",
-  yellow: "text-[color:var(--status-warning-text)]",
-  red: "text-[color:var(--status-error-text)]",
-};
-
-function StatusBanner({ semaphore }: { semaphore: DashboardSemaphore }) {
+function ComplianceHeroCard({
+  semaphore,
+  counts,
+  summary,
+  className,
+}: {
+  semaphore: DashboardSemaphore;
+  counts: DashboardPayload["document_state_counts"];
+  summary: DashboardOnboardingSummary;
+  className?: string;
+}) {
   const IconComponent = TONE_TO_ICON[semaphore.level];
+  const segments: ChartSegment[] = [
+    { label: "Aprobados", value: counts.approved, tone: "success" },
+    { label: "En revisión", value: counts.in_review + counts.uploaded, tone: "info" },
+    {
+      label: "Necesitan acción",
+      value: counts.needs_review + counts.rejected + counts.expired,
+      tone: "warning",
+    },
+    { label: "Pendientes", value: counts.pending, tone: "neutral" },
+  ];
   return (
     <section
-      aria-label="Estado de cumplimiento"
       className={cn(
-        "cw-fade-up flex items-stretch overflow-hidden rounded-lg border bg-[color:var(--surface-raised)] shadow-xs",
+        "cw-fade-up relative overflow-hidden rounded-lg border bg-[color:var(--surface-raised)] shadow-sm",
         TONE_TO_BORDER[semaphore.level],
+        className,
       )}
+      aria-label="Estado de cumplimiento"
     >
-      <span
+      {/* Decorative gradient + grid ornament. Visual only — keeps the
+          hero from reading as a flat card without introducing data
+          the user has to parse. */}
+      <div
         aria-hidden="true"
-        className={cn("w-1.5 shrink-0", TONE_TO_BAR[semaphore.level])}
+        className={cn(
+          "pointer-events-none absolute inset-0 bg-gradient-to-br opacity-60",
+          TONE_TO_HERO_GRADIENT[semaphore.level],
+        )}
       />
-      <div className="flex flex-1 flex-wrap items-center justify-between gap-3 px-4 py-3 sm:gap-5">
-        <div className="flex min-w-0 items-center gap-3">
-          <IconComponent
-            className={cn("h-5 w-5 shrink-0", TONE_TO_TEXT[semaphore.level])}
-            weight="fill"
-            aria-hidden="true"
+      <div
+        aria-hidden="true"
+        className="pointer-events-none absolute -right-16 -top-16 h-56 w-56 rounded-full bg-[color:var(--surface-teal-muted)] opacity-40 blur-3xl"
+      />
+      <div className="pointer-events-none absolute inset-0 cw-grid-pattern opacity-30" aria-hidden="true" />
+
+      <div className="relative grid gap-6 p-6 md:grid-cols-[auto,1fr] md:items-center md:p-8">
+        <div className="flex flex-col items-center gap-3 md:items-start">
+          <RadialGauge
+            value={semaphore.compliance_pct}
+            tone={TONE_TO_GAUGE[semaphore.level]}
+            size={172}
+            thickness={14}
+            label={`${Math.round(semaphore.compliance_pct)}%`}
+            caption="cumplimiento"
           />
-          <div className="min-w-0">
-            <p className="text-[13px] font-semibold leading-tight text-[color:var(--text-primary)]">
-              {semaphore.label}
-            </p>
-            <p className="mt-0.5 line-clamp-2 text-xs leading-[1.45] text-[color:var(--text-secondary)]">
-              {semaphore.reason}
-            </p>
+          <div className="flex items-center gap-2 font-mono text-[11px] text-[color:var(--text-tertiary)]">
+            <span className="tabular-nums text-[color:var(--text-primary)]">
+              {semaphore.on_track}
+            </span>
+            <span>/</span>
+            <span className="tabular-nums">{semaphore.total_tracked}</span>
+            <span className="uppercase tracking-wide">obligaciones al día</span>
           </div>
         </div>
-        <div className="flex shrink-0 items-baseline gap-2">
-          <span
-            className={cn(
-              "font-mono text-xl font-semibold tabular-nums leading-none",
-              TONE_TO_TEXT[semaphore.level],
-            )}
-          >
-            {semaphore.compliance_pct}%
-          </span>
-          <span className="font-mono text-[10px] uppercase tracking-wide text-[color:var(--text-tertiary)]">
-            {semaphore.on_track}/{semaphore.total_tracked}
-          </span>
+
+        <div className="min-w-0 space-y-4">
+          <div className="flex flex-wrap items-center gap-2">
+            <Badge variant={TONE_TO_BADGE[semaphore.level]} className="inline-flex items-center gap-1">
+              <IconComponent className="h-3 w-3" weight="fill" aria-hidden="true" />
+              {semaphore.label}
+            </Badge>
+            <span className="font-mono text-[10px] uppercase tracking-wide text-[color:var(--text-tertiary)]">
+              Periodo {new Date().getFullYear()}
+            </span>
+          </div>
+          <p className={cn("text-[15px] leading-relaxed text-[color:var(--text-primary)]")}>
+            {semaphore.reason}
+          </p>
+
+          <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
+            <MiniStat
+              label="Obligatorios"
+              value={summary.total_required}
+              tone="neutral"
+            />
+            <MiniStat
+              label="Completados"
+              value={summary.completed}
+              tone="success"
+            />
+            <MiniStat
+              label="En revisión"
+              value={summary.in_review}
+              tone="info"
+            />
+            <MiniStat
+              label="Por atender"
+              value={summary.needs_action}
+              tone={summary.needs_action > 0 ? "warning" : "neutral"}
+            />
+          </div>
+
+          <div>
+            <StackedBars segments={segments} height={10} showLegend={false} />
+            <ul className="mt-2 flex flex-wrap gap-x-4 gap-y-1 font-mono text-[10px] uppercase tracking-wide text-[color:var(--text-tertiary)]">
+              {segments.map((seg) => (
+                <li key={seg.label} className="flex items-center gap-1.5">
+                  <span
+                    aria-hidden="true"
+                    className="h-2 w-2 rounded-full"
+                    style={{ background: toneToCssVar(seg.tone) }}
+                  />
+                  <span>{seg.label}</span>
+                  <span className="text-[color:var(--text-primary)]">{seg.value}</span>
+                </li>
+              ))}
+            </ul>
+          </div>
         </div>
       </div>
     </section>
   );
 }
 
-// ─── Primary + secondary actions ──────────────────────────────────
+function MiniStat({
+  label,
+  value,
+  tone,
+}: {
+  label: string;
+  value: number;
+  tone: "neutral" | "success" | "info" | "warning";
+}) {
+  const accent =
+    tone === "success"
+      ? "text-[color:var(--status-success-text)]"
+      : tone === "info"
+        ? "text-[color:var(--status-info-text)]"
+        : tone === "warning"
+          ? "text-[color:var(--status-warning-text)]"
+          : "text-[color:var(--text-primary)]";
+  return (
+    <div className="rounded-md border border-[color:var(--border-subtle)] bg-[color:var(--surface-raised)]/70 px-3 py-2 backdrop-blur-sm">
+      <p className="font-mono text-[9px] uppercase tracking-wide text-[color:var(--text-tertiary)]">
+        {label}
+      </p>
+      <p className={cn("mt-0.5 font-mono text-xl font-semibold tabular-nums leading-none", accent)}>
+        {value}
+      </p>
+    </div>
+  );
+}
+
+function toneToCssVar(tone: ChartSegment["tone"]): string {
+  switch (tone) {
+    case "success":
+      return "var(--status-success-text)";
+    case "warning":
+      return "var(--status-warning-text)";
+    case "error":
+      return "var(--status-error-text)";
+    case "info":
+      return "var(--status-info-text)";
+    case "teal":
+      return "var(--text-teal)";
+    case "brand":
+      return "var(--text-brand)";
+    default:
+      return "var(--text-tertiary)";
+  }
+}
+
+// ─── Hero: next action ────────────────────────────────────────────
 
 const ACTION_CTA_LABEL: Record<DashboardSuggestedAction["type"], string> = {
   reupload: "Corregir carga",
@@ -358,25 +567,43 @@ const ACTION_CTA_LABEL: Record<DashboardSuggestedAction["type"], string> = {
   regularize: "Regularizar",
 };
 
-function PrimaryActionPanel({
+function NextActionHero({
   primary,
   secondary,
   totalActions,
+  className,
 }: {
   primary: DashboardSuggestedAction | null;
   secondary: DashboardSuggestedAction[];
   totalActions: number;
+  className?: string;
 }) {
   if (!primary) {
     return (
-      <NextActionRail
-        actions={[]}
-        emptyState={{
-          title: "Estás al día",
-          description:
-            "No hay acciones urgentes para tu expediente en este momento.",
-        }}
-      />
+      <section
+        aria-label="Sin acciones pendientes"
+        className={cn(
+          "cw-fade-up relative flex flex-col items-center justify-center overflow-hidden rounded-lg border border-[color:var(--status-success-border)] bg-[color:var(--surface-raised)] p-6 text-center shadow-sm",
+          className,
+        )}
+      >
+        <div
+          aria-hidden="true"
+          className="pointer-events-none absolute inset-0 bg-gradient-to-br from-[color:var(--status-success-bg)] to-transparent opacity-50"
+        />
+        <span
+          className="relative inline-flex h-12 w-12 items-center justify-center rounded-full bg-[color:var(--status-success-bg)] text-[color:var(--status-success-text)]"
+          aria-hidden="true"
+        >
+          <Lightning className="h-6 w-6" weight="fill" />
+        </span>
+        <h2 className="relative mt-3 text-[15px] font-semibold text-[color:var(--text-primary)]">
+          Estás al día
+        </h2>
+        <p className="relative mt-1 max-w-xs text-xs text-[color:var(--text-secondary)]">
+          No hay acciones urgentes para tu expediente en este momento.
+        </p>
+      </section>
     );
   }
 
@@ -387,72 +614,86 @@ function PrimaryActionPanel({
         ? "bg-[color:var(--status-warning-text)]"
         : "bg-[color:var(--status-info-text)]";
 
-  const priorityLabel =
-    primary.priority === "high"
-      ? "Prioridad alta"
-      : primary.priority === "medium"
-        ? "Prioridad media"
-        : "Prioridad baja";
-
   return (
     <section
       aria-label="Próxima acción"
-      className="cw-fade-up rounded-lg border border-[color:var(--border-default)] bg-[color:var(--surface-raised)] shadow-xs"
+      className={cn(
+        "cw-fade-up relative flex flex-col overflow-hidden rounded-lg border border-[color:var(--border-default)] bg-[color:var(--surface-brand)] text-[color:var(--surface-raised)] shadow-md",
+        className,
+      )}
     >
-      <header className="flex items-center justify-between gap-3 border-b border-[color:var(--border-subtle)] px-5 py-3">
-        <h2 className="text-[13px] font-semibold uppercase tracking-wide text-[color:var(--text-primary)]">
-          Tu siguiente acción
-        </h2>
-        <span className="font-mono text-[10px] tabular-nums text-[color:var(--text-tertiary)]">
+      {/* Decorative blur disc + teal accent so the hero CTA reads as
+          the brand "Wise" moment rather than a generic dark card. */}
+      <div
+        aria-hidden="true"
+        className="pointer-events-none absolute -right-12 -top-12 h-48 w-48 rounded-full bg-[color:var(--brand-teal-light,#5eead4)] opacity-20 blur-3xl"
+      />
+      <div
+        aria-hidden="true"
+        className="pointer-events-none absolute -bottom-16 -left-12 h-40 w-40 rounded-full bg-[color:var(--text-teal)] opacity-10 blur-3xl"
+      />
+
+      <header className="relative flex items-center justify-between gap-2 border-b border-white/10 px-5 py-3">
+        <div className="flex items-center gap-2">
+          <Lightning className="h-4 w-4 text-[color:var(--text-teal)]" weight="fill" aria-hidden="true" />
+          <h2 className="text-[12px] font-semibold uppercase tracking-wide text-white/90">
+            Tu siguiente acción
+          </h2>
+        </div>
+        <span className="font-mono text-[10px] tabular-nums text-white/60">
           {totalActions} {totalActions === 1 ? "tarea" : "tareas"}
         </span>
       </header>
 
-      <div className="space-y-3 p-5">
-        <article className="flex flex-col gap-3 rounded-md border border-[color:var(--border-default)] bg-[color:var(--surface-page)] p-4 sm:flex-row sm:items-start sm:justify-between sm:gap-4">
-          <div className="min-w-0 flex-1 space-y-1.5">
-            <div className="flex items-center gap-2">
-              <span aria-hidden="true" className={cn("h-2 w-2 rounded-full", priorityDot)} />
-              <span className="font-mono text-[10px] uppercase tracking-wide text-[color:var(--text-tertiary)]">
-                {primary.requirement_code ?? primary.period_key ?? priorityLabel}
-              </span>
-            </div>
-            <h3 className="text-[14px] font-semibold leading-snug text-[color:var(--text-primary)]">
-              {primary.title}
-            </h3>
-            <p className="text-xs leading-[1.55] text-[color:var(--text-secondary)]">
-              {primary.body}
-            </p>
+      <div className="relative flex flex-1 flex-col gap-3 p-5">
+        <div className="space-y-2">
+          <div className="flex items-center gap-2">
+            <span aria-hidden="true" className={cn("h-2 w-2 rounded-full", priorityDot)} />
+            <span className="font-mono text-[10px] uppercase tracking-wide text-white/60">
+              {primary.requirement_code ?? primary.period_key ?? "Prioridad"}
+            </span>
           </div>
-          <Button asChild size="sm" className="shrink-0 self-start sm:self-center">
-            <Link href={primary.href}>
-              <span>{ACTION_CTA_LABEL[primary.type] ?? "Abrir"}</span>
-              <ArrowRight className="h-3.5 w-3.5" weight="bold" aria-hidden="true" />
-            </Link>
-          </Button>
-        </article>
+          <h3 className="text-[15px] font-semibold leading-snug text-white">
+            {primary.title}
+          </h3>
+          <p className="line-clamp-3 text-xs leading-[1.55] text-white/75">
+            {primary.body}
+          </p>
+        </div>
+
+        <Button
+          asChild
+          size="sm"
+          className="self-start bg-[color:var(--text-teal)] text-[color:var(--surface-brand)] hover:bg-[color:var(--text-teal)]/90"
+        >
+          <Link href={primary.href}>
+            <span>{ACTION_CTA_LABEL[primary.type] ?? "Abrir"}</span>
+            <ArrowRight className="h-3.5 w-3.5" weight="bold" aria-hidden="true" />
+          </Link>
+        </Button>
 
         {secondary.length > 0 ? (
-          <ul className="divide-y divide-[color:var(--border-subtle)] rounded-md border border-[color:var(--border-subtle)]">
+          <ul className="mt-2 space-y-1.5 border-t border-white/10 pt-3">
             {secondary.map((action) => (
-              <li
-                key={action.id}
-                className="flex flex-wrap items-center justify-between gap-3 px-3.5 py-2.5"
-              >
-                <div className="min-w-0 flex-1 space-y-0.5">
-                  <p className="line-clamp-1 text-[13px] font-medium text-[color:var(--text-primary)]">
-                    {action.title}
-                  </p>
-                  <p className="font-mono text-[10px] uppercase tracking-wide text-[color:var(--text-tertiary)]">
-                    {action.requirement_code ?? action.period_key ?? "—"}
-                  </p>
-                </div>
-                <Button asChild size="sm" variant="outline">
-                  <Link href={action.href}>
-                    <span>{ACTION_CTA_LABEL[action.type] ?? "Abrir"}</span>
-                    <ArrowRight className="h-3.5 w-3.5" weight="bold" aria-hidden="true" />
-                  </Link>
-                </Button>
+              <li key={action.id}>
+                <Link
+                  href={action.href}
+                  className="group flex items-start justify-between gap-3 rounded-md px-2 py-1.5 transition-colors hover:bg-white/5"
+                >
+                  <div className="min-w-0 flex-1 space-y-0.5">
+                    <p className="line-clamp-1 text-[12px] font-medium text-white/90">
+                      {action.title}
+                    </p>
+                    <p className="font-mono text-[10px] uppercase tracking-wide text-white/50">
+                      {action.requirement_code ?? action.period_key ?? "—"}
+                    </p>
+                  </div>
+                  <ArrowRight
+                    className="mt-1 h-3.5 w-3.5 shrink-0 text-white/50 transition-transform group-hover:translate-x-0.5 group-hover:text-[color:var(--text-teal)]"
+                    weight="bold"
+                    aria-hidden="true"
+                  />
+                </Link>
               </li>
             ))}
           </ul>
@@ -462,7 +703,395 @@ function PrimaryActionPanel({
   );
 }
 
-// ─── Operational queues (Por atender / Vence pronto / Recibidos / Recientes) ──
+// ─── KPI strip ────────────────────────────────────────────────────
+
+const KPI_TONE_TEXT: Record<"success" | "info" | "warning" | "neutral", string> = {
+  success: "text-[color:var(--status-success-text)]",
+  info: "text-[color:var(--status-info-text)]",
+  warning: "text-[color:var(--status-warning-text)]",
+  neutral: "text-[color:var(--text-primary)]",
+};
+
+const KPI_TONE_BORDER: Record<"success" | "info" | "warning" | "neutral", string> = {
+  success: "border-[color:var(--status-success-border)]",
+  info: "border-[color:var(--status-info-border)]",
+  warning: "border-[color:var(--status-warning-border)]",
+  neutral: "border-[color:var(--border-default)]",
+};
+
+const KPI_TONE_ICON_BG: Record<"success" | "info" | "warning" | "neutral", string> = {
+  success: "bg-[color:var(--status-success-bg)] text-[color:var(--status-success-text)]",
+  info: "bg-[color:var(--status-info-bg)] text-[color:var(--status-info-text)]",
+  warning: "bg-[color:var(--status-warning-bg)] text-[color:var(--status-warning-text)]",
+  neutral: "bg-[color:var(--surface-sunken)] text-[color:var(--text-secondary)]",
+};
+
+const KPI_TONE_SPARK: Record<"success" | "info" | "warning" | "neutral", ChartTone> = {
+  success: "success",
+  info: "info",
+  warning: "warning",
+  neutral: "neutral",
+};
+
+function KpiCard({
+  label,
+  value,
+  tone,
+  icon: IconComponent,
+  sparkData,
+  caption,
+}: {
+  label: string;
+  value: number;
+  tone: "success" | "info" | "warning" | "neutral";
+  icon: Icon;
+  sparkData: number[];
+  caption?: string;
+}) {
+  return (
+    <article
+      className={cn(
+        "cw-hover-lift relative overflow-hidden rounded-lg border bg-[color:var(--surface-raised)] p-4 shadow-xs",
+        KPI_TONE_BORDER[tone],
+      )}
+    >
+      <div className="flex items-start justify-between gap-3">
+        <div className="flex items-center gap-2.5">
+          <span
+            aria-hidden="true"
+            className={cn(
+              "flex h-9 w-9 shrink-0 items-center justify-center rounded-md",
+              KPI_TONE_ICON_BG[tone],
+            )}
+          >
+            <IconComponent className="h-4 w-4" weight="duotone" />
+          </span>
+          <p className="font-mono text-[11px] uppercase tracking-wide text-[color:var(--text-tertiary)]">
+            {label}
+          </p>
+        </div>
+      </div>
+      <div className="mt-3 flex items-end justify-between gap-3">
+        <p
+          className={cn(
+            "font-mono text-3xl font-semibold tabular-nums leading-none",
+            KPI_TONE_TEXT[tone],
+          )}
+        >
+          {value}
+        </p>
+        {sparkData.length >= 2 ? (
+          <Sparkline
+            data={sparkData}
+            width={88}
+            height={28}
+            tone={KPI_TONE_SPARK[tone]}
+            filled
+          />
+        ) : null}
+      </div>
+      {caption ? (
+        <p className="mt-2 text-[12px] leading-snug text-[color:var(--text-secondary)]">
+          {caption}
+        </p>
+      ) : null}
+    </article>
+  );
+}
+
+function KpiDeadlineCard({ deadline }: { deadline: DashboardUpcomingDeadline | null }) {
+  const days = deadline?.due_in_days ?? null;
+  const tone: "success" | "info" | "warning" | "neutral" = !deadline
+    ? "success"
+    : days != null && days <= 3
+      ? "warning"
+      : days != null && days <= 7
+        ? "info"
+        : "neutral";
+  return (
+    <article
+      className={cn(
+        "cw-hover-lift relative overflow-hidden rounded-lg border bg-[color:var(--surface-raised)] p-4 shadow-xs",
+        KPI_TONE_BORDER[tone],
+      )}
+    >
+      <div className="flex items-start justify-between gap-3">
+        <div className="flex items-center gap-2.5">
+          <span
+            aria-hidden="true"
+            className={cn(
+              "flex h-9 w-9 shrink-0 items-center justify-center rounded-md",
+              KPI_TONE_ICON_BG[tone],
+            )}
+          >
+            <CalendarBlank className="h-4 w-4" weight="duotone" />
+          </span>
+          <p className="font-mono text-[11px] uppercase tracking-wide text-[color:var(--text-tertiary)]">
+            Próximo vencimiento
+          </p>
+        </div>
+      </div>
+      {deadline ? (
+        <div className="mt-3 space-y-2">
+          <p className="flex items-baseline gap-2">
+            <span
+              className={cn(
+                "font-mono text-3xl font-semibold tabular-nums leading-none",
+                KPI_TONE_TEXT[tone],
+              )}
+            >
+              {days == null ? "—" : days === 0 ? "Hoy" : `${days}d`}
+            </span>
+            <span className="font-mono text-[10px] uppercase tracking-wide text-[color:var(--text-tertiary)]">
+              {INSTITUTION_LABEL[deadline.institution] ?? deadline.institution}
+            </span>
+          </p>
+          <Link
+            href={deadline.href}
+            className="line-clamp-2 text-[12px] leading-snug text-[color:var(--text-secondary)] hover:text-[color:var(--text-link)] hover:underline"
+          >
+            {deadline.title}
+          </Link>
+        </div>
+      ) : (
+        <div className="mt-3 space-y-1.5">
+          <p
+            className={cn(
+              "font-mono text-3xl font-semibold tabular-nums leading-none",
+              KPI_TONE_TEXT[tone],
+            )}
+          >
+            —
+          </p>
+          <p className="text-[12px] leading-snug text-[color:var(--text-secondary)]">
+            Sin vencimientos próximos
+          </p>
+        </div>
+      )}
+    </article>
+  );
+}
+
+// ─── 14-day upload activity (derived) ─────────────────────────────
+
+type ActivityWindow = {
+  /** Per-day total upload count for the last 14 days, oldest first. */
+  perDay: number[];
+  /** Date label (e.g. ``"03/05"``) per slot in `perDay`. */
+  dayLabels: string[];
+  /** Per-day count of uploads whose CURRENT status maps to attention. */
+  byBucketAttention: number[];
+  /** Per-day count of uploads whose CURRENT status maps to in_review/uploaded. */
+  byBucketReview: number[];
+  /** Per-day count of uploads whose CURRENT status maps to approved. */
+  byBucketApproved: number[];
+  /** Total uploads in the 14-day window. */
+  total: number;
+};
+
+function useMemo14DayActivity(rows: DashboardRecentUpload[]): ActivityWindow {
+  return useMemo(() => derive14DayActivity(rows), [rows]);
+}
+
+function derive14DayActivity(rows: DashboardRecentUpload[]): ActivityWindow {
+  const days = 14;
+  const today = new Date();
+  today.setHours(0, 0, 0, 0);
+  const start = new Date(today);
+  start.setDate(start.getDate() - (days - 1));
+
+  const perDay = new Array<number>(days).fill(0);
+  const byBucketAttention = new Array<number>(days).fill(0);
+  const byBucketReview = new Array<number>(days).fill(0);
+  const byBucketApproved = new Array<number>(days).fill(0);
+  const dayLabels: string[] = [];
+  for (let i = 0; i < days; i += 1) {
+    const d = new Date(start);
+    d.setDate(start.getDate() + i);
+    dayLabels.push(
+      `${String(d.getDate()).padStart(2, "0")}/${String(d.getMonth() + 1).padStart(2, "0")}`,
+    );
+  }
+
+  for (const row of rows) {
+    const submitted = new Date(row.submitted_at);
+    if (Number.isNaN(submitted.getTime())) continue;
+    submitted.setHours(0, 0, 0, 0);
+    const diffDays = Math.floor(
+      (submitted.getTime() - start.getTime()) / (1000 * 60 * 60 * 24),
+    );
+    if (diffDays < 0 || diffDays >= days) continue;
+    perDay[diffDays] += 1;
+    const code = statusToDocumentStateCode(row.status as RequirementStatus);
+    if (code === "approved") {
+      byBucketApproved[diffDays] += 1;
+    } else if (code === "in_review" || code === "uploaded") {
+      byBucketReview[diffDays] += 1;
+    } else if (
+      code === "rejected" ||
+      code === "needs_review" ||
+      code === "expired"
+    ) {
+      byBucketAttention[diffDays] += 1;
+    }
+  }
+
+  const total = perDay.reduce((sum, n) => sum + n, 0);
+  return {
+    perDay,
+    dayLabels,
+    byBucketAttention,
+    byBucketReview,
+    byBucketApproved,
+    total,
+  };
+}
+
+function UploadActivityCard({
+  activity,
+  className,
+}: {
+  activity: ActivityWindow;
+  className?: string;
+}) {
+  const max = Math.max(0, ...activity.perDay);
+  // Highlight today's column with brand tone, others with teal tint.
+  const data = activity.perDay.map((value, idx) => ({
+    label: activity.dayLabels[idx] ?? "",
+    value,
+    tone: (idx === activity.perDay.length - 1 ? "brand" : "teal") as ChartTone,
+  }));
+  return (
+    <section
+      aria-label="Actividad de cargas (14 días)"
+      className={cn(
+        "cw-fade-up rounded-lg border border-[color:var(--border-default)] bg-[color:var(--surface-raised)] shadow-xs",
+        className,
+      )}
+    >
+      <header className="flex flex-wrap items-center justify-between gap-3 border-b border-[color:var(--border-subtle)] px-5 py-3">
+        <div className="flex items-center gap-2">
+          <TrendUp className="h-4 w-4 text-[color:var(--text-brand)]" weight="duotone" aria-hidden="true" />
+          <h3 className="text-[12px] font-semibold uppercase tracking-wide text-[color:var(--text-primary)]">
+            Actividad de cargas
+          </h3>
+          <span className="font-mono text-[10px] uppercase tracking-wide text-[color:var(--text-tertiary)]">
+            últimos 14 días
+          </span>
+        </div>
+        <div className="flex items-baseline gap-2">
+          <span className="font-mono text-2xl font-semibold tabular-nums leading-none text-[color:var(--text-primary)]">
+            {activity.total}
+          </span>
+          <span className="font-mono text-[10px] uppercase tracking-wide text-[color:var(--text-tertiary)]">
+            {activity.total === 1 ? "carga" : "cargas"}
+          </span>
+        </div>
+      </header>
+      <div className="p-5">
+        {activity.total === 0 ? (
+          <div className="flex flex-col items-center justify-center gap-1 py-10 text-center">
+            <Tray
+              className="h-8 w-8 text-[color:var(--text-tertiary)]"
+              weight="duotone"
+              aria-hidden="true"
+            />
+            <p className="text-[13px] font-medium text-[color:var(--text-primary)]">
+              Sin actividad reciente
+            </p>
+            <p className="max-w-xs text-xs text-[color:var(--text-secondary)]">
+              Cuando subas un documento, aquí verás un pulso diario de tu
+              expediente durante las últimas dos semanas.
+            </p>
+          </div>
+        ) : (
+          <div className="space-y-3">
+            <MiniBars data={data} height={140} />
+            <div className="flex flex-wrap items-center justify-between gap-2 border-t border-[color:var(--border-subtle)] pt-3 font-mono text-[10px] uppercase tracking-wide text-[color:var(--text-tertiary)]">
+              <span>
+                Pico:{" "}
+                <span className="text-[color:var(--text-primary)]">
+                  {max} {max === 1 ? "carga" : "cargas"}/día
+                </span>
+              </span>
+              <span>
+                Promedio:{" "}
+                <span className="text-[color:var(--text-primary)]">
+                  {(activity.total / 14).toFixed(1)}/día
+                </span>
+              </span>
+            </div>
+          </div>
+        )}
+      </div>
+    </section>
+  );
+}
+
+// ─── Institution breakdown ────────────────────────────────────────
+
+function InstitutionBreakdownCard({
+  rows,
+  className,
+}: {
+  rows: DashboardInstitutionBreakdown[];
+  className?: string;
+}) {
+  return (
+    <section
+      aria-label="Distribución por institución"
+      className={cn(
+        "cw-fade-up rounded-lg border border-[color:var(--border-default)] bg-[color:var(--surface-raised)] shadow-xs",
+        className,
+      )}
+    >
+      <header className="flex items-center justify-between gap-2 border-b border-[color:var(--border-subtle)] px-5 py-3">
+        <div className="flex items-center gap-2">
+          <Bank className="h-4 w-4 text-[color:var(--text-brand)]" weight="duotone" aria-hidden="true" />
+          <h3 className="text-[12px] font-semibold uppercase tracking-wide text-[color:var(--text-primary)]">
+            Por institución
+          </h3>
+        </div>
+        <span className="font-mono text-[10px] uppercase tracking-wide text-[color:var(--text-tertiary)]">
+          obligatorios
+        </span>
+      </header>
+      <div className="p-5">
+        {rows.length === 0 ? (
+          <p className="py-6 text-center text-xs text-[color:var(--text-secondary)]">
+            Sin obligaciones registradas.
+          </p>
+        ) : (
+          <ul className="space-y-3">
+            {rows.map((row) => {
+              const segments: ChartSegment[] = [
+                { label: "Aprobados", value: row.approved, tone: "success" },
+                { label: "En revisión", value: row.in_review, tone: "info" },
+                { label: "Por atender", value: row.needs_action, tone: "warning" },
+                { label: "Pendientes", value: row.pending, tone: "neutral" },
+              ];
+              return (
+                <li key={row.institution} className="space-y-1.5">
+                  <div className="flex items-center justify-between gap-2">
+                    <span className="font-mono text-[11px] font-semibold uppercase tracking-wide text-[color:var(--text-primary)]">
+                      {INSTITUTION_LABEL[row.institution] ?? row.institution.toUpperCase()}
+                    </span>
+                    <span className="font-mono text-[10px] tabular-nums text-[color:var(--text-tertiary)]">
+                      {row.approved}/{row.total}
+                    </span>
+                  </div>
+                  <StackedBars segments={segments} height={8} showLegend={false} />
+                </li>
+              );
+            })}
+          </ul>
+        )}
+      </div>
+    </section>
+  );
+}
+
+// ─── Operational queues ───────────────────────────────────────────
 
 const SLOT_STATE_TO_DOC_CODE: Record<string, DocumentStateCode> = {
   missing: "pending",
@@ -477,12 +1106,14 @@ const SLOT_STATE_TO_DOC_CODE: Record<string, DocumentStateCode> = {
   not_applicable: "approved",
 };
 
-function splitAttentionItems(items: DashboardAttentionItem[]): {
-  actionable: DashboardAttentionItem[];
-  dueSoon: DashboardAttentionItem[];
+function splitAttentionItems(
+  items: { id: string; title: string; institution: string; state: string; due_in_days: number | null; href: string }[],
+): {
+  actionable: typeof items;
+  dueSoon: typeof items;
 } {
-  const actionable: DashboardAttentionItem[] = [];
-  const dueSoon: DashboardAttentionItem[] = [];
+  const actionable: typeof items = [];
+  const dueSoon: typeof items = [];
   for (const row of items) {
     if (
       row.state === "rejected" ||
@@ -504,8 +1135,8 @@ function OperationalQueues({
   inReview,
   recent,
 }: {
-  attention: DashboardAttentionItem[];
-  dueSoon: DashboardAttentionItem[];
+  attention: ReturnType<typeof splitAttentionItems>["actionable"];
+  dueSoon: ReturnType<typeof splitAttentionItems>["dueSoon"];
   inReview: DashboardRecentUpload[];
   recent: DashboardRecentUpload[];
 }) {
@@ -706,7 +1337,7 @@ function formatSubmittedAt(iso: string): string {
   });
 }
 
-// ─── Upcoming deadlines sidebar panel ─────────────────────────────
+// ─── Right rail: upcoming deadlines ───────────────────────────────
 
 function UpcomingDeadlinesPanel({ rows }: { rows: DashboardUpcomingDeadline[] }) {
   return (
@@ -791,11 +1422,7 @@ function UpcomingDeadlinesPanel({ rows }: { rows: DashboardUpcomingDeadline[] })
                         "bg-[color:var(--surface-sunken)] text-[color:var(--text-secondary)]",
                     )}
                   >
-                    {due == null
-                      ? "—"
-                      : due === 0
-                        ? "Hoy"
-                        : `${due}d`}
+                    {due == null ? "—" : due === 0 ? "Hoy" : `${due}d`}
                   </span>
                 </Link>
               </li>
@@ -807,30 +1434,27 @@ function UpcomingDeadlinesPanel({ rows }: { rows: DashboardUpcomingDeadline[] })
   );
 }
 
-// ─── Compliance ledger (compact state counts, replaces donut) ─────
+// ─── Right rail: compliance donut ─────────────────────────────────
 
-function ComplianceLedger({
+function ComplianceDonut({
   counts,
 }: {
   counts: DashboardPayload["document_state_counts"];
 }) {
-  const entries: { state: DocumentStateCode; label: string; count: number }[] = useMemo(
-    () => [
-      { state: "approved", label: "Aprobados", count: counts.approved },
-      { state: "in_review", label: "En revisión", count: counts.in_review },
-      { state: "uploaded", label: "Recibidos", count: counts.uploaded },
-      { state: "needs_review", label: "Necesitan acción", count: counts.needs_review },
-      { state: "rejected", label: "Rechazados", count: counts.rejected },
-      { state: "expired", label: "Vencidos", count: counts.expired },
-      { state: "pending", label: "Pendientes", count: counts.pending },
-    ],
-    [counts],
-  );
-  const total = entries.reduce((sum, row) => sum + row.count, 0);
-
+  const segments: ChartSegment[] = [
+    { label: "Aprobados", value: counts.approved, tone: "success" },
+    { label: "En revisión", value: counts.in_review + counts.uploaded, tone: "info" },
+    {
+      label: "Necesitan acción",
+      value: counts.needs_review + counts.rejected + counts.expired,
+      tone: "warning",
+    },
+    { label: "Pendientes", value: counts.pending, tone: "neutral" },
+  ];
+  const total = segments.reduce((sum, s) => sum + s.value, 0);
   return (
     <section
-      aria-label="Resumen por estado"
+      aria-label="Distribución por estado"
       className="rounded-lg border border-[color:var(--border-default)] bg-[color:var(--surface-raised)] shadow-xs"
     >
       <header className="flex items-center justify-between gap-2 border-b border-[color:var(--border-subtle)] px-4 py-2.5">
@@ -841,26 +1465,29 @@ function ComplianceLedger({
             aria-hidden="true"
           />
           <h3 className="text-[12px] font-semibold uppercase tracking-wide text-[color:var(--text-primary)]">
-            Resumen por estado
+            Distribución
           </h3>
         </div>
         <span className="font-mono text-[10px] tabular-nums text-[color:var(--text-tertiary)]">
           {total} {total === 1 ? "doc" : "docs"}
         </span>
       </header>
-      <ul className="divide-y divide-[color:var(--border-subtle)]">
-        {entries.map((row) => (
-          <li
-            key={row.state}
-            className="flex items-center justify-between gap-3 px-4 py-2"
-          >
-            <DocStateBadge state={row.state} label={row.label} withIcon={false} />
-            <span className="font-mono text-[13px] font-semibold tabular-nums text-[color:var(--text-primary)]">
-              {row.count}
-            </span>
-          </li>
-        ))}
-      </ul>
+      <div className="p-5">
+        {total === 0 ? (
+          <p className="py-4 text-center text-xs text-[color:var(--text-secondary)]">
+            Aún no hay documentos cargados.
+          </p>
+        ) : (
+          <Donut
+            segments={segments}
+            size={132}
+            thickness={14}
+            centerLabel={total}
+            centerCaption="docs"
+            showLegend
+          />
+        )}
+      </div>
     </section>
   );
 }
@@ -919,4 +1546,3 @@ function ProvisionalAccessBanner() {
     </Alert>
   );
 }
-

@@ -438,6 +438,17 @@ export type DashboardUpcomingDeadline = {
   due_in_days?: number | null;
 };
 
+export type DashboardInstitutionBreakdown = {
+  /** Lowercase institution code (``sat``, ``imss``, ``infonavit``,
+   *  ``stps_repse``, ``interno_cliente``, …). */
+  institution: string;
+  approved: number;
+  in_review: number;
+  needs_action: number;
+  pending: number;
+  total: number;
+};
+
 export type DashboardRecentUpload = {
   submission_id: string;
   requirement_code: string | null;
@@ -463,9 +474,12 @@ export type DashboardPayload = {
   suggested_actions: DashboardSuggestedAction[];
   attention_today: DashboardAttentionItem[];
   upcoming_deadlines: DashboardUpcomingDeadline[];
-  /** Session 4 (2026-05-21) — 5 most recent submissions, newest
+  /** Session 4 (2026-05-21) — most recent submissions, newest
    *  first. Older payloads may omit; default to ``[]`` defensively. */
   recent_uploads?: DashboardRecentUpload[];
+  /** Session 5 (2026-05-21) — per-institution rollup of required
+   *  slot states. Older payloads may omit; default to ``[]``. */
+  institution_breakdown?: DashboardInstitutionBreakdown[];
 };
 
 export async function getDashboard(
