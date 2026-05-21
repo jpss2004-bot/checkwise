@@ -50,7 +50,6 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { usePathname } from "next/navigation";
 import {
   Bug,
-  Camera,
   ChatCenteredDots,
   Image as ImageIcon,
   Lightbulb,
@@ -281,48 +280,15 @@ export function FeedbackLauncher({
     }
   }, [attachBlob, capturing, open, shouldIgnoreForScreenshot]);
 
-  /**
-   * Re-capture from inside the dialog (the "Capturar página" button
-   * in the screenshot panel). Kept for users who scrolled or
-   * dismissed an overlay after opening the dialog and want a fresh
-   * snap. Waits long enough for the Radix exit animation to settle
-   * (~200ms per the dialog primitive CSS) and excludes any node
-   * carrying ``data-screenshot-exclude`` belt-and-suspenders.
-   */
-  const capturePage = useCallback(async () => {
-    setCapturing(true);
-    setOpen(false);
-    // Animation buffer — the Radix Dialog exit (data-[state=closed]
-    // fade-out + zoom-out + slide-out) typically runs 150-200ms. The
-    // legacy 80ms wait was racing it. 280ms gives the portal time to
-    // be removed from the DOM AND the overlay's opacity to reach 0
-    // before html2canvas paints.
-    await new Promise((r) => setTimeout(r, 280));
-    try {
-      const mod = await import("html2canvas");
-      const html2canvas = mod.default;
-      const canvas = await html2canvas(document.documentElement, {
-        backgroundColor: null,
-        useCORS: true,
-        logging: false,
-        ignoreElements: shouldIgnoreForScreenshot,
-      });
-      const blob: Blob | null = await new Promise((resolve) =>
-        canvas.toBlob((b) => resolve(b), "image/png"),
-      );
-      if (!blob) {
-        toast.error("No se pudo generar la captura.");
-        return;
-      }
-      await attachBlob(blob);
-    } catch (err) {
-      console.error("feedback: html2canvas failed", err);
-      toast.error("No se pudo capturar la página. Adjunta una imagen.");
-    } finally {
-      setCapturing(false);
-      setOpen(true);
-    }
-  }, [attachBlob, shouldIgnoreForScreenshot]);
+  // UX simplification (2026-05-21) — the in-dialog "Capturar página"
+  // recapture path was removed. Auto-capture at button click now
+  // covers the primary case; users who specifically want a different
+  // screenshot can still paste with Cmd+V (the dialog's onPaste
+  // handler stays wired) or use the manual upload fallback the
+  // ScreenshotPanel surfaces only when auto-capture failed. Removing
+  // the close-then-snap-then-reopen ping-pong also eliminates the
+  // possibility of the dialog re-mounting with the locked
+  // ``originalContextRef`` stale.
 
   const onSubmit = useCallback(
     async (event: React.FormEvent) => {
@@ -540,9 +506,7 @@ export function FeedbackLauncher({
             <ScreenshotPanel
               screenshot={screenshot}
               screenshotUrl={screenshotUrl}
-              capturing={capturing}
               onPickFile={() => fileInputRef.current?.click()}
-              onCapturePage={capturePage}
               onRemove={() => setScreenshot(null)}
             />
 
@@ -663,68 +627,79 @@ function KindOption({
   );
 }
 
+/**
+ * UX simplification (2026-05-21) — dialog no longer surfaces capture
+ * controls. The auto-capture at floating-button click is the primary
+ * (and effectively only) path; this panel just confirms the
+ * screenshot is there.
+ *
+ * Two states:
+ *   - Screenshot attached → thumbnail + "Captura adjunta · PNG · X KB"
+ *     + a small "Quitar" trash button (lets the user drop the
+ *     auto-capture if they don't want any image at all).
+ *   - Screenshot null (auto-capture failed silently with a toast) →
+ *     show a single "Subir PNG manualmente" fallback so the user
+ *     isn't stranded. No "Capturar página" button (the auto-capture
+ *     already ran), no Cmd+V hint (paste handler stays wired on the
+ *     dialog so power users can still paste — just no visible
+ *     prompt).
+ */
 function ScreenshotPanel({
   screenshot,
   screenshotUrl,
-  capturing,
   onPickFile,
-  onCapturePage,
   onRemove,
 }: {
   screenshot: Blob | null;
   screenshotUrl: string | null;
-  capturing: boolean;
   onPickFile: () => void;
-  onCapturePage: () => void;
   onRemove: () => void;
 }) {
-  return (
-    <div className="flex flex-col gap-2">
-      <div className="flex flex-wrap items-center gap-2">
-        <Button
-          type="button"
-          size="sm"
-          variant="outline"
-          onClick={onCapturePage}
-          loading={capturing}
-        >
-          <Camera className="h-3.5 w-3.5" weight="bold" aria-hidden="true" />
-          Capturar página
-        </Button>
-        <Button type="button" size="sm" variant="outline" onClick={onPickFile}>
-          <ImageIcon className="h-3.5 w-3.5" weight="bold" aria-hidden="true" />
-          Subir PNG
-        </Button>
-        <span className="text-[11px] text-[color:var(--text-tertiary)]">
-          o pega con Cmd+V
-        </span>
-      </div>
-      {screenshot && screenshotUrl ? (
-        <div className="flex items-start gap-3 rounded-md border border-[color:var(--border-default)] bg-[color:var(--surface-raised)] p-2">
-          {/* eslint-disable-next-line @next/next/no-img-element */}
-          <img
-            src={screenshotUrl}
-            alt="Captura adjunta"
-            className="h-16 w-24 rounded-sm border border-[color:var(--border-subtle)] object-cover"
-          />
-          <div className="flex flex-1 flex-col text-[12px] text-[color:var(--text-secondary)]">
-            <span className="font-medium text-[color:var(--text-primary)]">
-              Captura adjunta
-            </span>
-            <span className="font-mono text-[11px] text-[color:var(--text-tertiary)]">
-              PNG · {Math.round(screenshot.size / 1024)} KB
-            </span>
-          </div>
-          <button
-            type="button"
-            onClick={onRemove}
-            aria-label="Quitar captura"
-            className="rounded-sm p-1 text-[color:var(--text-tertiary)] transition-colors hover:bg-[color:var(--surface-hover)] hover:text-[color:var(--status-error-text)]"
-          >
-            <Trash className="h-3.5 w-3.5" weight="bold" aria-hidden="true" />
-          </button>
+  if (screenshot && screenshotUrl) {
+    return (
+      <div className="flex items-start gap-3 rounded-md border border-[color:var(--border-default)] bg-[color:var(--surface-raised)] p-2">
+        {/* eslint-disable-next-line @next/next/no-img-element */}
+        <img
+          src={screenshotUrl}
+          alt="Captura adjunta"
+          className="h-16 w-24 rounded-sm border border-[color:var(--border-subtle)] object-cover"
+        />
+        <div className="flex flex-1 flex-col text-[12px] text-[color:var(--text-secondary)]">
+          <span className="font-medium text-[color:var(--text-primary)]">
+            Captura adjunta
+          </span>
+          <span className="font-mono text-[11px] text-[color:var(--text-tertiary)]">
+            PNG · {Math.round(screenshot.size / 1024)} KB · capturada
+            automáticamente
+          </span>
         </div>
-      ) : null}
+        <button
+          type="button"
+          onClick={onRemove}
+          aria-label="Quitar captura"
+          className="rounded-sm p-1 text-[color:var(--text-tertiary)] transition-colors hover:bg-[color:var(--surface-hover)] hover:text-[color:var(--status-error-text)]"
+        >
+          <Trash className="h-3.5 w-3.5" weight="bold" aria-hidden="true" />
+        </button>
+      </div>
+    );
+  }
+  // Fallback: auto-capture failed (a toast already explained why).
+  // Single discrete button so the user can attach manually instead
+  // of being stranded without a screenshot.
+  return (
+    <div className="flex items-center gap-2 rounded-md border border-dashed border-[color:var(--border-subtle)] bg-[color:var(--surface-sunken)]/40 p-3 text-[12px] text-[color:var(--text-secondary)]">
+      <ImageIcon
+        className="h-3.5 w-3.5 shrink-0 text-[color:var(--text-tertiary)]"
+        weight="bold"
+        aria-hidden="true"
+      />
+      <span className="flex-1">
+        No pudimos adjuntar la captura automática.
+      </span>
+      <Button type="button" size="sm" variant="outline" onClick={onPickFile}>
+        Subir PNG
+      </Button>
     </div>
   );
 }
