@@ -1,7 +1,9 @@
 from __future__ import annotations
 
 from functools import lru_cache
+from typing import Any
 
+from pydantic import field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -147,6 +149,30 @@ class Settings(BaseSettings):
     AUTH_FORGOT_PASSWORD_RATE_LIMIT_PER_HOUR: int = 5
 
     model_config = SettingsConfigDict(env_file=".env", env_file_encoding="utf-8", extra="ignore")
+
+    # Render (and many hosts) accept env vars set to an empty string as
+    # "the var exists with an empty value". pydantic-settings 2.13 stopped
+    # silently coercing those to None / default, so any int/bool/float
+    # field that ends up empty in the dashboard now hard-fails the boot
+    # with a ValidationError. This validator runs before type coercion
+    # and substitutes the field's declared default when the raw value is
+    # an empty string AND the field's annotation is a non-str scalar
+    # type. We intentionally do NOT do this for `str` fields, because
+    # empty-string-as-deliberate-value is meaningful there (e.g. setting
+    # `CORS_ORIGINS=""` to mean "no allowed origins" is a legitimate
+    # — albeit harsh — production choice).
+    @field_validator("*", mode="before")
+    @classmethod
+    def _blank_non_str_to_default(cls, value: Any, info: Any) -> Any:
+        if not (isinstance(value, str) and value == ""):
+            return value
+        field = cls.model_fields.get(info.field_name)
+        if field is None:
+            return value
+        annotation = field.annotation
+        if annotation is str:
+            return value
+        return field.default
 
     @property
     def cors_origins_list(self) -> list[str]:
