@@ -13,8 +13,9 @@
 #   * runtime: python — Render has native Python support, no Dockerfile
 #     needed. Uvicorn is a long-lived ASGI process, not a Lambda; that's
 #     why we host it here instead of Vercel.
-#   * rootDir: backend — the FastAPI app lives in /backend; the
-#     frontend deploys to Vercel separately.
+#   * rootDir: apps/api — the FastAPI app lives in /apps/api after the
+#     2026-05-21 monorepo restructure; the frontend (/apps/web)
+#     deploys to Vercel separately.
 #   * preDeployCommand — runs migrations BEFORE traffic shifts to the
 #     new instance. If migration fails, the new instance never goes
 #     live and the old one keeps serving.
@@ -29,7 +30,7 @@ services:
     name: checkwise-api
     runtime: python
     plan: starter
-    rootDir: backend
+    rootDir: apps/api
     branch: main
     autoDeploy: true
     buildCommand: pip install -e .
