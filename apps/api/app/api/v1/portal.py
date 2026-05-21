@@ -2225,6 +2225,27 @@ class DashboardUpcomingDeadline(BaseModel):
     due_in_days: int | None = None
 
 
+class DashboardRecentUpload(BaseModel):
+    """A single row in the dashboard's "Cargas recientes" surface.
+
+    Session 4 (2026-05-21) — added so the operational dashboard can
+    answer "what did I upload?" without forcing the provider to leave
+    the surface for /portal/submissions. Sourced from the same
+    submissions table the slot resolver reads; the row's status is
+    surfaced verbatim so the timeline truth never diverges.
+    """
+
+    submission_id: str
+    requirement_code: str | None
+    requirement_name: str
+    institution: str
+    period_key: str | None
+    status: str
+    submitted_at: str
+    filename: str | None
+    href: str
+
+
 class DashboardResponse(BaseModel):
     workspace_id: str
     persona_type: str
@@ -2234,6 +2255,7 @@ class DashboardResponse(BaseModel):
     suggested_actions: list[DashboardSuggestedAction]
     attention_today: list[DashboardAttentionItem]
     upcoming_deadlines: list[DashboardUpcomingDeadline]
+    recent_uploads: list[DashboardRecentUpload]
 
 
 # ``SlotState`` values that mean "the provider must act now."
@@ -2706,6 +2728,81 @@ def _compute_upcoming_deadlines(
     return [r[1] for r in rows[:5]]
 
 
+def _recent_upload_href(submission: Submission) -> str:
+    """Deep link into the submission detail view.
+
+    Mirrors ``/portal/submissions/{id}`` — the canonical surface for
+    a single submission's timeline, validation, and reviewer trail.
+    """
+    return f"/portal/submissions/{submission.id}"
+
+
+def _compute_recent_uploads(
+    db: Session, workspace: ProviderWorkspace, *, limit: int = 5
+) -> list[DashboardRecentUpload]:
+    """Return the provider's N most recent submissions, newest first.
+
+    Reads the same submissions table the slot resolver consumes, so the
+    status surfaced here matches the timeline truth. Replacement
+    lineage is intentionally NOT filtered: each upload event the
+    provider performed is worth surfacing on its own so they can spot
+    a recent re-upload that's still in review without having to chase
+    the slot.
+    """
+    stmt = (
+        select(Submission)
+        .where(
+            Submission.client_id == workspace.client_id,
+            Submission.vendor_id == workspace.vendor_id,
+        )
+        .order_by(Submission.created_at.desc())
+        .limit(limit)
+    )
+    submissions = list(db.scalars(stmt))
+    rows: list[DashboardRecentUpload] = []
+    for sub in submissions:
+        # Pull the canonical name + institution via the requirement
+        # relationship; fall back to the denormalized code so a missing
+        # FK never breaks the surface.
+        requirement_name: str
+        institution_code: str
+        if sub.requirement is not None:
+            requirement_name = sub.requirement.name
+            institution_code = (
+                sub.requirement.institution.code
+                if sub.requirement.institution is not None
+                else ""
+            )
+        else:
+            requirement_name = sub.requirement_code or "Documento"
+            institution_code = ""
+        # Most-recent document filename (None when no document was
+        # finalized — e.g. an intake row that errored out before the
+        # PDF was persisted).
+        filename: str | None = None
+        if sub.documents:
+            # documents are loaded eagerly via the relationship; pick
+            # the most recent by created_at.
+            latest_doc = sorted(
+                sub.documents, key=lambda d: d.created_at, reverse=True
+            )[0]
+            filename = latest_doc.original_filename
+        rows.append(
+            DashboardRecentUpload(
+                submission_id=sub.id,
+                requirement_code=sub.requirement_code,
+                requirement_name=requirement_name,
+                institution=institution_code,
+                period_key=sub.period_key,
+                status=sub.status,
+                submitted_at=sub.created_at.isoformat(),
+                filename=filename,
+                href=_recent_upload_href(sub),
+            )
+        )
+    return rows
+
+
 @router.get(
     "/workspaces/{workspace_id}/dashboard",
     response_model=DashboardResponse,
@@ -2752,4 +2849,5 @@ def get_workspace_dashboard(
             onboarding_slots, calendar_slots, today
         ),
         upcoming_deadlines=_compute_upcoming_deadlines(calendar_slots, today),
+        recent_uploads=_compute_recent_uploads(db, workspace),
     )

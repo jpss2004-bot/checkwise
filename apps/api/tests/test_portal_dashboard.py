@@ -370,8 +370,10 @@ def test_dashboard_returns_expected_payload_shape(api_client: TestClient) -> Non
         "suggested_actions",
         "attention_today",
         "upcoming_deadlines",
+        "recent_uploads",
     ):
         assert key in body, f"missing key {key}"
+    assert isinstance(body["recent_uploads"], list)
 
     onboarding = body["onboarding_summary"]
     for key in (
@@ -519,6 +521,46 @@ def test_dashboard_uses_replacement_submission_as_current_not_superseded(
     # "no avance" reason. The assertion below is intentionally only
     # on the level — the *reason* string would distinguish them.
     assert body["semaphore"]["level"] == "red"
+
+
+def test_dashboard_recent_uploads_returns_latest_submissions(
+    api_client: TestClient,
+) -> None:
+    """Session 4 (2026-05-21): the dashboard now exposes a
+    ``recent_uploads`` list — the N most recent submissions, newest
+    first — so the operational surface can answer "what did I upload?"
+    without a round-trip to /portal/submissions.
+
+    Empty for a brand-new workspace; populated after the provider
+    uploads, with the status surfaced verbatim from the submissions
+    table so the timeline truth never diverges.
+    """
+    ws = _setup_workspace(api_client)
+    empty = api_client.get(
+        f"/api/v1/portal/workspaces/{ws['workspace_id']}/dashboard"
+    ).json()
+    assert empty["recent_uploads"] == []
+
+    first = _upload(api_client, ws["workspace_id"], data=_canonical_b1_payload())
+    submission_id = first.json()["submission_id"]
+    _set_status(api_client, submission_id, DocumentStatus.APROBADO.value)
+
+    body = api_client.get(
+        f"/api/v1/portal/workspaces/{ws['workspace_id']}/dashboard"
+    ).json()
+    rows = body["recent_uploads"]
+    assert len(rows) == 1
+    row = rows[0]
+    assert row["submission_id"] == submission_id
+    assert row["status"] == DocumentStatus.APROBADO.value
+    assert row["institution"] == "infonavit"
+    assert row["period_key"] == "2026-B1"
+    assert row["href"] == f"/portal/submissions/{submission_id}"
+    assert row["filename"] == "doc.pdf"
+    # ISO timestamp — keep parseable without locking to a precise value.
+    from datetime import datetime
+
+    datetime.fromisoformat(row["submitted_at"])
 
 
 def test_dashboard_rejects_foreign_workspace(api_client: TestClient) -> None:
