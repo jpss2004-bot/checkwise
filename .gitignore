@@ -96,3 +96,16 @@ CodexConvo.txt
 .claude/skills/high-end-visual-design
 .claude/skills/impeccable
 .claude/skills/redesign-existing-projects
+
+# Local handoff / pasted-context notes (root-level scratch files).
+# Tracked planning docs live under docs/, not at the repo root.
+/CLAUDE_CODE_HANDOFF_*.md
+/Checkwise-slack-feedback.txt
+/*-slack-feedback.txt
+
+# Heavy local audit-screenshot intermediates (raw recordings + silent
+# masters used to produce the tracked demo.mp4). Final renders that
+# ARE meant to ship stay tracked alongside.
+docs/audit-screenshots/**/_raw_demo/
+docs/audit-screenshots/**/demo.silent.mp4
+docs/audit-screenshots/**/*.webm
