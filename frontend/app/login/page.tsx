@@ -10,6 +10,7 @@ import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
 import { Field } from "@/components/ui/field";
 import { Input } from "@/components/ui/input";
+import { PasswordInput } from "@/components/ui/password-input";
 import { Skeleton } from "@/components/ui/skeleton";
 import { AuthApiError, login } from "@/lib/api/auth";
 import {
@@ -151,9 +152,8 @@ export default function LoginPage() {
               </Field>
 
               <Field label="Contraseña" htmlFor="login-password" required>
-                <Input
+                <PasswordInput
                   id="login-password"
-                  type="password"
                   value={password}
                   onChange={(e) => setPassword(e.target.value)}
                   autoComplete="current-password"

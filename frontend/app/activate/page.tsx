@@ -15,8 +15,6 @@ import {
   ArrowRight,
   Check,
   CheckCircle,
-  Eye,
-  EyeSlash,
   ShieldCheck,
 } from "@phosphor-icons/react";
 
@@ -24,7 +22,7 @@ import { BrandLogo } from "@/components/checkwise/brand-logo";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
 import { Field } from "@/components/ui/field";
-import { Input } from "@/components/ui/input";
+import { PasswordInput } from "@/components/ui/password-input";
 import { Skeleton } from "@/components/ui/skeleton";
 import { evaluatePassword } from "@/lib/email-inference";
 import { AuthApiError, setPassword } from "@/lib/api/auth";
@@ -71,7 +69,6 @@ function ActivateInner() {
 
   const [password, setPasswordValue] = useState("");
   const [confirm, setConfirm] = useState("");
-  const [show, setShow] = useState(false);
   const [confirmError, setConfirmError] = useState<string | null>(null);
 
   const session = useMemo(() => (bootChecked ? readAdminSession() : null), [
@@ -233,29 +230,13 @@ function ActivateInner() {
               )}
 
               <Field label="Nueva contraseña" htmlFor="new-password" required>
-                <div className="relative">
-                  <Input
-                    id="new-password"
-                    type={show ? "text" : "password"}
-                    value={password}
-                    onChange={(e) => setPasswordValue(e.target.value)}
-                    autoComplete="new-password"
-                    autoFocus
-                    className="pr-12"
-                  />
-                  <button
-                    type="button"
-                    onClick={() => setShow((s) => !s)}
-                    aria-label={show ? "Ocultar contraseña" : "Mostrar contraseña"}
-                    className="absolute inset-y-0 right-0 flex w-12 items-center justify-center text-[color:var(--text-tertiary)] hover:text-[color:var(--text-primary)]"
-                  >
-                    {show ? (
-                      <EyeSlash className="h-4 w-4" weight="bold" aria-hidden="true" />
-                    ) : (
-                      <Eye className="h-4 w-4" weight="bold" aria-hidden="true" />
-                    )}
-                  </button>
-                </div>
+                <PasswordInput
+                  id="new-password"
+                  value={password}
+                  onChange={(e) => setPasswordValue(e.target.value)}
+                  autoComplete="new-password"
+                  autoFocus
+                />
               </Field>
 
               <ul
@@ -291,9 +272,8 @@ function ActivateInner() {
                 required
                 error={confirmError}
               >
-                <Input
+                <PasswordInput
                   id="confirm-password"
-                  type={show ? "text" : "password"}
                   value={confirm}
                   onChange={(e) => {
                     setConfirm(e.target.value);

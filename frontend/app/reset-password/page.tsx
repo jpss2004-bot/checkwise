@@ -13,8 +13,6 @@ import {
   ArrowRight,
   Check,
   CheckCircle,
-  Eye,
-  EyeSlash,
   ShieldCheck,
   Warning,
 } from "@phosphor-icons/react";
@@ -23,7 +21,7 @@ import { BrandLogo } from "@/components/checkwise/brand-logo";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
 import { Field } from "@/components/ui/field";
-import { Input } from "@/components/ui/input";
+import { PasswordInput } from "@/components/ui/password-input";
 import { Skeleton } from "@/components/ui/skeleton";
 import { AuthApiError, resetPassword } from "@/lib/api/auth";
 import { evaluatePassword } from "@/lib/email-inference";
@@ -44,7 +42,6 @@ function ResetPasswordInner() {
 
   const [password, setPassword] = useState("");
   const [confirm, setConfirm] = useState("");
-  const [show, setShow] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const [success, setSuccess] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -160,31 +157,14 @@ function ResetPasswordInner() {
                 )}
 
                 <Field label="Nueva contraseña" htmlFor="reset-password" required>
-                  <div className="relative">
-                    <Input
-                      id="reset-password"
-                      type={show ? "text" : "password"}
-                      value={password}
-                      onChange={(e) => setPassword(e.target.value)}
-                      autoComplete="new-password"
-                      autoFocus
-                      className="pr-12"
-                      disabled={!token}
-                    />
-                    <button
-                      type="button"
-                      onClick={() => setShow((value) => !value)}
-                      aria-label={show ? "Ocultar contraseña" : "Mostrar contraseña"}
-                      className="absolute inset-y-0 right-0 flex w-12 items-center justify-center text-[color:var(--text-tertiary)] hover:text-[color:var(--text-primary)] disabled:opacity-40"
-                      disabled={!token}
-                    >
-                      {show ? (
-                        <EyeSlash className="h-4 w-4" weight="bold" aria-hidden="true" />
-                      ) : (
-                        <Eye className="h-4 w-4" weight="bold" aria-hidden="true" />
-                      )}
-                    </button>
-                  </div>
+                  <PasswordInput
+                    id="reset-password"
+                    value={password}
+                    onChange={(e) => setPassword(e.target.value)}
+                    autoComplete="new-password"
+                    autoFocus
+                    disabled={!token}
+                  />
                 </Field>
 
                 <ul
@@ -220,9 +200,8 @@ function ResetPasswordInner() {
                   required
                   error={confirmError}
                 >
-                  <Input
+                  <PasswordInput
                     id="reset-confirm-password"
-                    type={show ? "text" : "password"}
                     value={confirm}
                     onChange={(e) => {
                       setConfirm(e.target.value);
