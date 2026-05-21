@@ -248,7 +248,24 @@ function CalendarInner({ session }: { session: PortalSession }) {
             className="cw-fade-up overflow-x-auto rounded-lg border border-[color:var(--border-default)] bg-[color:var(--surface-raised)] shadow-xs"
             aria-label="Cuadrícula del calendario"
           >
-            <table className="w-full min-w-[860px] border-collapse text-sm">
+            {/* Bugfix (2026-05-21) — spacing drift.
+                ``table-fixed`` + the explicit <colgroup> below force
+                the 12 month columns to share the remaining width
+                equally regardless of cell content. Without this, the
+                browser's auto-layout was pushing the institution
+                column past 240px and progressively compacting the
+                later month columns (the icon-only cells lose to any
+                column that ever renders text). */}
+            <table className="w-full table-fixed min-w-[860px] border-collapse text-sm">
+              <colgroup>
+                {/* Institution row header — was effectively ~240px+
+                    via min-w on the th. 160px is enough for the icon +
+                    label + "X/Y" chip + 40px progress bar. */}
+                <col style={{ width: "160px" }} />
+                {Array.from({ length: 12 }, (_, i) => (
+                  <col key={`month-col-${i}`} />
+                ))}
+              </colgroup>
               <thead>
                 <tr className="border-b border-[color:var(--border-subtle)] bg-[color:var(--surface-page)] text-left">
                   <th
@@ -289,7 +306,12 @@ function CalendarInner({ session }: { session: PortalSession }) {
                     >
                       <th
                         scope="row"
-                        className="sticky left-0 z-10 min-w-[240px] border-r border-[color:var(--border-subtle)] bg-[color:var(--surface-page)] px-4 py-3 text-left align-middle"
+                        // Bugfix (2026-05-21) — width comes from the
+                        // <colgroup> above (160px). The previous
+                        // ``min-w-[240px]`` overrode table-fixed and
+                        // pushed the layout. Keep px-4 for padding
+                        // so the content has breathing room.
+                        className="sticky left-0 z-10 border-r border-[color:var(--border-subtle)] bg-[color:var(--surface-page)] px-4 py-3 text-left align-middle"
                       >
                         <InstitutionRowHeader
                           icon={IconComponent}

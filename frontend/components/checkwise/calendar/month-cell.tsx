@@ -136,7 +136,18 @@ export function MonthCell({
   const states = uniqueStates(events);
   const isSingleState = states.length === 1;
   const urgent = hasUrgent(events);
-  const dim = isPast && !urgent && !isCurrent;
+  // Bugfix (2026-05-21) — past months that contain real history
+  // (approved uploads, in-review submissions, anything other than an
+  // empty slot) must NOT be visually dimmed. A fully-compliant user
+  // viewing the current year was seeing every past month rendered
+  // at opacity-50 + grayscale-[25%], making their entire upload
+  // history look washed out — they reported the calendar "seemed
+  // empty" because the green approved markers and submission counts
+  // were barely visible. Cells with events now render at full
+  // opacity regardless of month position; the past-vs-current
+  // distinction lives only on truly empty cells (handled in the
+  // events.length === 0 branch above). ``urgent`` still drives the
+  // rejected ring below so missed-and-overdue cells stay loud.
   const monthLabel = MONTH_LABELS_ES[month];
   const firstEvent = events[0];
   const ariaLabel =
@@ -168,8 +179,7 @@ export function MonthCell({
           (isCurrent
             ? " ring-1 ring-[color:var(--border-focus)] "
             : " ") +
-          "transition-[transform,box-shadow,opacity,filter,border-color] duration-150 ease-out hover:-translate-y-px hover:border-[color:var(--border-default)] hover:shadow-sm focus:outline-none focus-visible:ring-2 focus-visible:ring-[color:var(--border-focus)] focus-visible:ring-offset-1 " +
-          (dim ? "opacity-50 grayscale-[25%] hover:opacity-100 hover:grayscale-0 " : "") +
+          "transition-[transform,box-shadow,border-color] duration-150 ease-out hover:-translate-y-px hover:border-[color:var(--border-default)] hover:shadow-sm focus:outline-none focus-visible:ring-2 focus-visible:ring-[color:var(--border-focus)] focus-visible:ring-offset-1 " +
           (urgent && isPast ? "ring-1 ring-[color:var(--doc-rejected-border)] " : "")
         }
       >
@@ -183,10 +193,7 @@ export function MonthCell({
             aria-hidden="true"
           />
           <span
-            className={
-              "font-mono text-[11px] lg:text-[12px] font-semibold tabular-nums " +
-              (dim ? "text-[color:var(--text-tertiary)]" : "text-[color:var(--text-primary)]")
-            }
+            className="font-mono text-[11px] lg:text-[12px] font-semibold tabular-nums text-[color:var(--text-primary)]"
           >
             {events.length}
           </span>
