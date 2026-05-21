@@ -1,8 +1,52 @@
 # Native Metadata Table Export
 
-This tool is the first native CheckWise replacement for the n8n spreadsheet prototype.
+This is the first native CheckWise replacement for the n8n spreadsheet prototype.
 
-It takes one uploaded/local PDF, applies the real metadata rulebook, inspects the PDF, and writes structured metadata rows to CSV or XLSX.
+When a provider uploads a PDF through the portal, CheckWise now generates an XLSX metadata table automatically. The CLI remains available for local QA and backfills.
+
+## Automatic Upload Export
+
+Provider upload endpoint:
+
+```text
+POST /api/v1/portal/workspaces/{workspace_id}/submissions
+```
+
+After the upload is accepted, the backend writes an XLSX file under:
+
+```text
+metadata_exports/{client}/{provider}/{period}/{document_type}/
+```
+
+The automatic files are:
+
+```text
+{submission_id}_{document_id}_metadata.xlsx
+latest_metadata.xlsx
+```
+
+Example:
+
+```text
+metadata_exports/cliente-piloto-checkwise/servicios-demo-sa-de-cv/2026-b1/comprobante-pago-bancario-infonavit/
+  3f6..._9ac..._metadata.xlsx
+  latest_metadata.xlsx
+```
+
+Every automatic export writes a `validation_events` row:
+
+```text
+event_type = metadata_table_exported
+rule_code  = metadata_table_export
+result     = completed | skipped | failed
+```
+
+The event payload includes:
+
+- `document_type_code`
+- `output_path`
+- `latest_path`
+- `reason`
 
 ## What It Does
 
@@ -15,14 +59,36 @@ It takes one uploaded/local PDF, applies the real metadata rulebook, inspects th
 
 ## What It Does Not Do
 
-- No database writes.
+- No extracted metadata table persistence yet; the automatic upload flow only writes the audit/validation event that points to the XLSX.
 - No legal approval.
 - No Google Sheets write.
 - No n8n dependency.
 - No AI call yet.
 - OCR only runs when explicitly enabled and local OCR tools are installed.
 
-## CSV Example
+## Configuration
+
+Automatic export is controlled by:
+
+```text
+AUTO_METADATA_EXPORT_ENABLED=true
+METADATA_EXPORT_PATH=./metadata_exports
+```
+
+In local development, both defaults are already set.
+
+## Document Type Resolution
+
+The upload flow resolves the metadata document type automatically from:
+
+1. The selected canonical requirement, when it maps directly.
+2. The expected requirement name plus institution.
+3. The PDF signal classifier, for known high-confidence aliases.
+4. The uploaded filename, as a fallback.
+
+If the type cannot be resolved, the provider upload still succeeds. CheckWise records `metadata_table_exported` with `result=skipped` and a reason so LegalShelf can fix the mapping.
+
+## Manual CSV Example
 
 ```bash
 cd apps/api
@@ -35,7 +101,7 @@ cd apps/api
   --validate-rulebook
 ```
 
-## XLSX Example
+## Manual XLSX Example
 
 ```bash
 cd apps/api

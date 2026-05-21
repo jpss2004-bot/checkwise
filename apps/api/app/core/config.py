@@ -25,6 +25,8 @@ class Settings(BaseSettings):
     STORAGE_BUCKET: str = "checkwise-local"
     STORAGE_PUBLIC_BASE_URL: str = ""
     LOCAL_STORAGE_PATH: str = "./storage"
+    AUTO_METADATA_EXPORT_ENABLED: bool = True
+    METADATA_EXPORT_PATH: str = "./metadata_exports"
 
     # S3-compatible object storage (used when STORAGE_BACKEND == "s3").
     # AWS_S3_ENDPOINT is the bucket endpoint URL — set it for Cloudflare R2,

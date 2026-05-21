@@ -38,6 +38,7 @@ from app.schemas.submissions import (
 )
 from app.services.audit_log import add_audit_event
 from app.services.document_intelligence import DocumentSignals, analyze_document_text
+from app.services.metadata_export import export_metadata_table_after_upload
 from app.services.pdf_validation import PdfInspectionResult, inspect_pdf
 from app.services.prevalidation import build_initial_validations
 from app.services.requirement_service import ResolvedPeriod, ResolvedRequirement
@@ -575,6 +576,40 @@ def finalize_intake_submission(
             actor_type="system",
         )
 
+    metadata_export = export_metadata_table_after_upload(
+        stored_file=stored_file,
+        client=client,
+        vendor=vendor,
+        contract=contract,
+        institution=institution,
+        resolved_requirement=resolved_requirement,
+        resolved_period=resolved_period,
+        document=document,
+        detected_document_type=document_signals.detected_document_type,
+    )
+    metadata_export_event = add_validation_event(
+        db,
+        submission_id=submission.id,
+        document_id=document.id,
+        event_type="metadata_table_exported",
+        rule_code="metadata_table_export",
+        result=metadata_export.status,
+        severity="info" if metadata_export.status == "completed" else "warning",
+        message=(
+            "Metadata XLSX generado automáticamente."
+            if metadata_export.status == "completed"
+            else "No se pudo generar el Metadata XLSX automáticamente."
+        ),
+        payload={
+            "document_type_code": metadata_export.document_type_code,
+            "output_path": metadata_export.output_path,
+            "latest_path": metadata_export.latest_path,
+            "reason": metadata_export.reason,
+        },
+        actor_type="system",
+    )
+    validation_events.append(metadata_export_event)
+
     audit_metadata: dict = {
         # Kept for backward compatibility with existing audit consumers.
         "source": "native_intake",
@@ -589,6 +624,13 @@ def finalize_intake_submission(
             "legacy_period_code" if resolved_period.used_legacy else "canonical_period_key"
         ),
         "validation_events": [event.event_type for event in validation_events],
+        "metadata_export": {
+            "status": metadata_export.status,
+            "document_type_code": metadata_export.document_type_code,
+            "output_path": metadata_export.output_path,
+            "latest_path": metadata_export.latest_path,
+            "reason": metadata_export.reason,
+        },
     }
     if supersedes_submission is not None:
         audit_metadata["supersedes_submission_id"] = supersedes_submission.id

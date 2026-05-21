@@ -25,6 +25,7 @@ from __future__ import annotations
 import itertools
 from collections.abc import Generator
 from io import BytesIO
+from pathlib import Path
 
 import pytest
 from fastapi.testclient import TestClient
@@ -65,6 +66,10 @@ def api_client(tmp_path) -> Generator[TestClient, None, None]:
 
     previous = settings.LOCAL_STORAGE_PATH
     settings.LOCAL_STORAGE_PATH = str(tmp_path / "storage")
+    previous_export_path = settings.METADATA_EXPORT_PATH
+    previous_auto_export = settings.AUTO_METADATA_EXPORT_ENABLED
+    settings.METADATA_EXPORT_PATH = str(tmp_path / "metadata_exports")
+    settings.AUTO_METADATA_EXPORT_ENABLED = True
 
     def override_get_db() -> Generator[Session, None, None]:
         db = testing_session()
@@ -81,6 +86,8 @@ def api_client(tmp_path) -> Generator[TestClient, None, None]:
     finally:
         app.dependency_overrides.clear()
         settings.LOCAL_STORAGE_PATH = previous
+        settings.METADATA_EXPORT_PATH = previous_export_path
+        settings.AUTO_METADATA_EXPORT_ENABLED = previous_auto_export
 
 
 def _pdf_bytes() -> bytes:
@@ -228,6 +235,30 @@ def test_workspace_upload_happy_path(api_client: TestClient) -> None:
     assert body["sha256"]
     assert body["storage_key"].endswith("infonavit.pdf")
     assert body["inspection"]["is_pdf"] is True
+
+    factory = api_client.app.state.testing_session  # type: ignore[attr-defined]
+    db: Session = factory()
+    try:
+        event = db.scalar(
+            select(ValidationEvent)
+            .where(
+                ValidationEvent.submission_id == body["submission_id"],
+                ValidationEvent.event_type == "metadata_table_exported",
+            )
+            .limit(1)
+        )
+        assert event is not None
+        assert event.result == "completed"
+        assert event.payload is not None
+        assert event.payload["document_type_code"] == "comprobante_pago_bancario_infonavit"
+        output_path = event.payload["output_path"]
+        latest_path = event.payload["latest_path"]
+        assert output_path and output_path.endswith("_metadata.xlsx")
+        assert latest_path and latest_path.endswith("latest_metadata.xlsx")
+        assert Path(output_path).exists()
+        assert Path(latest_path).exists()
+    finally:
+        db.close()
 
 
 def test_workspace_upload_rejects_unauthenticated(api_client: TestClient) -> None:
