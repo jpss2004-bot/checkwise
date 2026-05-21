@@ -100,6 +100,11 @@ function DashboardInner({ session }: { session: PortalSession }) {
   }, [session]);
 
   const onboardingPct = dashboard?.onboarding_summary.completion_pct ?? null;
+  // ``useMemo14DayActivity`` is a hook — it must run unconditionally on
+  // every render. We compute it from the (possibly null) payload's
+  // ``recent_uploads`` so the early returns below can stay simple
+  // without violating the rules of hooks.
+  const uploadActivity = useMemo14DayActivity(dashboard?.recent_uploads ?? []);
 
   if (loadError && !dashboard) {
     return (
@@ -136,7 +141,6 @@ function DashboardInner({ session }: { session: PortalSession }) {
   const counts = dashboard.document_state_counts;
   const recent = dashboard.recent_uploads ?? [];
   const institutionBreakdown = dashboard.institution_breakdown ?? [];
-  const uploadActivity = useMemo14DayActivity(recent);
 
   const attentionRows = splitAttentionItems(dashboard.attention_today);
   const inReviewRows = recent
@@ -319,12 +323,6 @@ const TONE_TO_BORDER: Record<DashboardSemaphoreLevel, string> = {
   green: "border-[color:var(--status-success-border)]",
   yellow: "border-[color:var(--status-warning-border)]",
   red: "border-[color:var(--status-error-border)]",
-};
-
-const TONE_TO_TEXT: Record<DashboardSemaphoreLevel, string> = {
-  green: "text-[color:var(--status-success-text)]",
-  yellow: "text-[color:var(--status-warning-text)]",
-  red: "text-[color:var(--status-error-text)]",
 };
 
 const TONE_TO_GAUGE: Record<DashboardSemaphoreLevel, ChartTone> = {
