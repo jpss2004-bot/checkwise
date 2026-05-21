@@ -57,6 +57,12 @@ class Settings(BaseSettings):
     SMTP_FROM_NAME: str = "CheckWise"
     SMTP_USE_TLS: bool = True
     SMTP_USE_SSL: bool = False
+    # Backward-compatible names from the earlier email env template.
+    EMAIL_SMTP_HOST: str = ""
+    EMAIL_SMTP_PORT: int = 587
+    EMAIL_SMTP_USER: str = ""
+    EMAIL_SMTP_PASSWORD: str = ""
+    EMAIL_FROM: str = ""
 
     # Portal session cookie (CheckWise 1.7). Provider portal moves off
     # localStorage and onto an httpOnly signed cookie. Cookie is

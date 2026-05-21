@@ -16,17 +16,32 @@ class EmailDeliveryResult:
 
 
 def _sender() -> str:
-    email = settings.SMTP_FROM_EMAIL or settings.SMTP_USERNAME
+    email = _from_email()
     return formataddr((settings.SMTP_FROM_NAME, email)) if settings.SMTP_FROM_NAME else email
 
 
+def _host() -> str:
+    return settings.SMTP_HOST or settings.EMAIL_SMTP_HOST
+
+
+def _port() -> int:
+    return settings.SMTP_PORT or settings.EMAIL_SMTP_PORT
+
+
+def _username() -> str:
+    return settings.SMTP_USERNAME or settings.EMAIL_SMTP_USER
+
+
+def _password() -> str:
+    return settings.SMTP_PASSWORD or settings.EMAIL_SMTP_PASSWORD
+
+
+def _from_email() -> str:
+    return settings.SMTP_FROM_EMAIL or settings.EMAIL_FROM or _username()
+
+
 def smtp_configured() -> bool:
-    return bool(
-        settings.SMTP_HOST
-        and settings.SMTP_USERNAME
-        and settings.SMTP_PASSWORD
-        and (settings.SMTP_FROM_EMAIL or settings.SMTP_USERNAME)
-    )
+    return bool(_host() and _username() and _password() and _from_email())
 
 
 def send_password_reset_email(*, to_email: str, reset_url: str) -> EmailDeliveryResult:
@@ -58,14 +73,14 @@ def send_password_reset_email(*, to_email: str, reset_url: str) -> EmailDelivery
 
     try:
         if settings.SMTP_USE_SSL:
-            with smtplib.SMTP_SSL(settings.SMTP_HOST, settings.SMTP_PORT, timeout=15) as smtp:
-                smtp.login(settings.SMTP_USERNAME, settings.SMTP_PASSWORD)
+            with smtplib.SMTP_SSL(_host(), _port(), timeout=15) as smtp:
+                smtp.login(_username(), _password())
                 smtp.send_message(message)
         else:
-            with smtplib.SMTP(settings.SMTP_HOST, settings.SMTP_PORT, timeout=15) as smtp:
+            with smtplib.SMTP(_host(), _port(), timeout=15) as smtp:
                 if settings.SMTP_USE_TLS:
                     smtp.starttls()
-                smtp.login(settings.SMTP_USERNAME, settings.SMTP_PASSWORD)
+                smtp.login(_username(), _password())
                 smtp.send_message(message)
     except Exception as exc:  # pragma: no cover - network/provider dependent
         return EmailDeliveryResult(delivered=False, status="failed", error=str(exc))

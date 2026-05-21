@@ -25,6 +25,8 @@ The provider portal (``X-Workspace-Token``) is intentionally untouched
 
 from __future__ import annotations
 
+import hashlib
+import logging
 from collections.abc import Callable
 from datetime import UTC, datetime, timedelta
 from typing import Annotated
@@ -54,6 +56,7 @@ from app.services.email_delivery import send_password_reset_email
 
 router = APIRouter(prefix="/auth", tags=["auth"])
 DbSession = Annotated[Session, Depends(get_db)]
+log = logging.getLogger("checkwise.auth")
 
 
 # ---------------------------------------------------------------------------
@@ -174,6 +177,10 @@ def _as_utc(value: datetime) -> datetime:
     if value.tzinfo is None:
         return value.replace(tzinfo=UTC)
     return value.astimezone(UTC)
+
+
+def _email_log_hash(email: str) -> str:
+    return hashlib.sha256(email.encode("utf-8")).hexdigest()[:12]
 
 
 def get_current_user(
@@ -355,6 +362,10 @@ def forgot_password(
         select(User).where(User.email == payload.email, User.status == "active")
     ).scalar_one_or_none()
     if user is None:
+        log.warning(
+            "password_reset_request_no_active_user email_hash=%s",
+            _email_log_hash(payload.email),
+        )
         return generic
 
     now = utc_now()
@@ -389,6 +400,14 @@ def forgot_password(
     delivery = send_password_reset_email(to_email=user.email, reset_url=reset_url)
     reset_token.delivery_status = delivery.status
     reset_token.delivery_error = delivery.error
+    log_method = log.info if delivery.status == "sent" else log.warning
+    log_method(
+        "password_reset_delivery status=%s email_hash=%s reset_token_id=%s error=%s",
+        delivery.status,
+        _email_log_hash(user.email),
+        reset_token.id,
+        delivery.error,
+    )
     add_audit_event(
         db,
         action="auth.password_reset_requested",
