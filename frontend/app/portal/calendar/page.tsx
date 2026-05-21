@@ -233,15 +233,25 @@ function CalendarInner({ session }: { session: PortalSession }) {
           </p>
         )}
 
-        {filteredCount === 0 && !loadError ? (
+        {/* Bugfix (2026-05-21) — three distinct empty states.
+              The legacy code collapsed them all into "Sin
+              obligaciones" which silently lied to providers whose
+              calendar came back genuinely empty due to a data bug
+              (e.g. workspace.persona_type stored in a non-canonical
+              shape — see compliance_catalog.normalize_persona_type
+              for the root cause). The three cases:
+                1. ``totalCount === 0``  → unexpected; ask user to flag.
+                2. ``filteredCount === 0 AND filterInstitution !== "all"``
+                   → legitimate zero (no obligations for that
+                   institution); offer a "quitar filtro" reset.
+                3. otherwise render the grid. */}
+        {totalCount === 0 && !loadError ? (
+          <UnexpectedEmpty />
+        ) : filteredCount === 0 && !loadError ? (
           <FilteredEmpty
-            label={
-              filterInstitution === "all"
-                ? "este año"
-                : INSTITUTION_LABELS[filterInstitution]
-            }
+            label={INSTITUTION_LABELS[filterInstitution as CalendarInstitutionCode]}
             onReset={() => setFilterInstitution("all")}
-            canReset={filterInstitution !== "all"}
+            canReset
           />
         ) : (
           <section
@@ -442,6 +452,44 @@ function FilteredEmpty({
           Quitar filtro
         </Button>
       )}
+    </section>
+  );
+}
+
+// ─── Unexpected-empty state ─────────────────────────────────────
+//
+// Triggered when the API returned 200 OK but the calendar carries
+// literally zero items — which should never happen for any valid
+// workspace year (REPSE recurring catalog produces 139 v1 rows / 34
+// v2 rows per year per persona). When it does, the most likely cause
+// is a data integrity issue (legacy ``persona_type`` value the
+// catalog filter can't match — see ``normalize_persona_type`` on the
+// backend). Surface that honestly instead of pretending the user has
+// no obligations.
+
+function UnexpectedEmpty() {
+  return (
+    <section
+      className="rounded-lg border border-dashed border-[color:var(--status-warning-border)] bg-[color:var(--surface-raised)] px-6 py-10 text-center"
+      role="alert"
+    >
+      <p className="font-mono text-[10px] uppercase tracking-wide text-[color:var(--status-warning-text)]">
+        No pudimos cargar tu calendario
+      </p>
+      <p className="mt-2 text-sm text-[color:var(--text-primary)]">
+        Tu calendario debería mostrar tus obligaciones REPSE; algo no
+        cuadra del lado nuestro.
+      </p>
+      <p className="mt-1 text-[12px] text-[color:var(--text-secondary)]">
+        Recarga la página. Si sigues sin ver obligaciones, escríbenos a{" "}
+        <a
+          href="mailto:soporte@checkwise.mx"
+          className="font-medium underline"
+        >
+          soporte@checkwise.mx
+        </a>{" "}
+        para revisarlo.
+      </p>
     </section>
   );
 }
