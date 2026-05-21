@@ -2,7 +2,7 @@
 
 import { useState, type FormEvent } from "react";
 import Link from "next/link";
-import { ArrowLeft, CheckCircle, PaperPlaneTilt, Warning } from "@phosphor-icons/react";
+import { ArrowLeft, PaperPlaneTilt } from "@phosphor-icons/react";
 
 import { BrandLogo } from "@/components/checkwise/brand-logo";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
@@ -76,10 +76,7 @@ export default function ForgotPasswordPage() {
           >
             {sent && (
               <Alert variant="success" className="mb-5">
-                <AlertTitle className="flex items-center gap-2">
-                  <CheckCircle className="h-4 w-4" weight="fill" aria-hidden="true" />
-                  Revisa tu correo
-                </AlertTitle>
+                <AlertTitle>Revisa tu correo</AlertTitle>
                 <AlertDescription>
                   Si encontramos una cuenta con ese correo, enviamos el enlace para
                   restablecer la contraseña.
@@ -89,10 +86,7 @@ export default function ForgotPasswordPage() {
 
             {error && (
               <Alert variant="error" className="mb-5">
-                <AlertTitle className="flex items-center gap-2">
-                  <Warning className="h-4 w-4" weight="bold" aria-hidden="true" />
-                  No pudimos procesar la solicitud
-                </AlertTitle>
+                <AlertTitle>No pudimos procesar la solicitud</AlertTitle>
                 <AlertDescription>{error}</AlertDescription>
               </Alert>
             )}

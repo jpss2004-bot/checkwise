@@ -14,7 +14,6 @@ import {
   Check,
   CheckCircle,
   ShieldCheck,
-  Warning,
 } from "@phosphor-icons/react";
 
 import { BrandLogo } from "@/components/checkwise/brand-logo";
@@ -116,10 +115,7 @@ function ResetPasswordInner() {
 
           {!token && (
             <Alert variant="error">
-              <AlertTitle className="flex items-center gap-2">
-                <Warning className="h-4 w-4" weight="bold" aria-hidden="true" />
-                Enlace incompleto
-              </AlertTitle>
+              <AlertTitle>Enlace incompleto</AlertTitle>
               <AlertDescription>
                 Solicita un nuevo enlace desde la pantalla de recuperación.
               </AlertDescription>
