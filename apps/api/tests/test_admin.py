@@ -441,7 +441,9 @@ def _seed_metadata_export(db_factory, export_root) -> str:
         db.add(document)
         db.flush()
         output_path = export_root / "cliente-metadata" / "proveedor-metadata" / "2026-m05" / "acuse_sisub" / "latest_metadata.xlsx"
+        master_path = export_root / "cliente-metadata" / "client_master_metadata.xlsx"
         _write_metadata_preview_xlsx(output_path)
+        _write_metadata_preview_xlsx(master_path)
         event = ValidationEvent(
             submission_id=submission.id,
             document_id=document.id,
@@ -453,6 +455,7 @@ def _seed_metadata_export(db_factory, export_root) -> str:
                 "document_type_code": "acuse_sisub",
                 "output_path": str(output_path),
                 "latest_path": str(output_path),
+                "master_path": str(master_path),
             },
         )
         db.add(event)
@@ -513,11 +516,14 @@ def test_admin_can_list_preview_and_download_metadata_exports(
         item = listing.json()["items"][0]
         assert item["id"] == event_id
         assert item["client_name"] == "Cliente Metadata"
+        assert item["client_id"]
         assert item["vendor_name"] == "Proveedor Metadata"
         assert item["document_type_code"] == "acuse_sisub"
         assert item["file_exists"] is True
         assert item["preview_available"] is True
+        assert item["master_available"] is True
         assert item["latest_path"].endswith("latest_metadata.xlsx")
+        assert item["master_path"].endswith("client_master_metadata.xlsx")
 
         preview = api_client.get(
             f"/api/v1/admin/metadata-exports/{event_id}", headers=_h(token)
@@ -529,6 +535,13 @@ def test_admin_can_list_preview_and_download_metadata_exports(
         assert body["sheets"][0]["rows"][0][0] == "CheckWise Metadata Review"
         assert body["sheets"][1]["rows"][0][1] == "Accion sugerida"
 
+        master = api_client.get(
+            f"/api/v1/admin/metadata-exports/clients/{item['client_id']}/master",
+            headers=_h(token),
+        )
+        assert master.status_code == 200, master.text
+        assert master.json()["master_path"].endswith("client_master_metadata.xlsx")
+
         download = api_client.get(
             f"/api/v1/admin/metadata-exports/{event_id}/download",
             headers=_h(token),
@@ -538,6 +551,11 @@ def test_admin_can_list_preview_and_download_metadata_exports(
             download.headers["content-type"]
             == "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
         )
+        master_download = api_client.get(
+            f"/api/v1/admin/metadata-exports/clients/{item['client_id']}/master/download",
+            headers=_h(token),
+        )
+        assert master_download.status_code == 200, master_download.text
     finally:
         settings.METADATA_EXPORT_PATH = old_export_path
 

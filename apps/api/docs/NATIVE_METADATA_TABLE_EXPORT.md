@@ -25,6 +25,12 @@ The automatic files are:
 latest_metadata.xlsx
 ```
 
+CheckWise also rebuilds one current master workbook per client:
+
+```text
+metadata_exports/{client}/client_master_metadata.xlsx
+```
+
 Example:
 
 ```text
@@ -150,6 +156,14 @@ The automatic XLSX is organized as a LegalShelf review workbook:
 
 The workbook uses visual status colors so LegalShelf can immediately separate fields that are ready, prefilled but needing review, pending, or possible mismatch/more urgent review.
 
+The client master workbook is intentionally cleaner and shareable:
+
+- `00 Guia`: client-level summary.
+- `01 Metadata Cliente`: the LegalShelf parameters per provider/document/field.
+- `02 Documentos`: document-level expected-vs-detected signals.
+
+It does not include backend paths, hashes, database ids, or raw technical dump tabs.
+
 The CSV output remains a long table: one row per document field.
 
 Core columns:
@@ -159,6 +173,7 @@ Core columns:
 - `document_type_code`
 - `document_type_name`
 - `institution`
+- `period_key`
 - `original_filename`
 - `sha256`
 - `page_count`
@@ -186,6 +201,10 @@ metadata_exports/{client}/{provider}/{period}/{document_type}/latest_metadata.xl
 ```
 
 Use `latest_metadata.xlsx` for the newest upload in that client/provider/period/document folder. Use the `{submission_id}_{document_id}_metadata.xlsx` file when you need the exact historical export for a specific upload.
+
+Use `metadata_exports/{client}/client_master_metadata.xlsx` when LegalShelf needs the current client-level file to review or share.
+
+Admins can access the same files inside the MVP at `/admin/metadata`. The page supports document-level preview/download and client master preview/download.
 
 ## Verification
 

@@ -604,6 +604,7 @@ def finalize_intake_submission(
             "document_type_code": metadata_export.document_type_code,
             "output_path": metadata_export.output_path,
             "latest_path": metadata_export.latest_path,
+            "master_path": metadata_export.master_path,
             "reason": metadata_export.reason,
         },
         actor_type="system",

@@ -29,6 +29,8 @@ explorer itself answers "what did this admin do."
 
 from __future__ import annotations
 
+import re
+import unicodedata
 import zipfile
 from datetime import date, datetime
 from pathlib import Path
@@ -1253,6 +1255,7 @@ class MetadataExportListItem(BaseModel):
     id: str
     submission_id: str
     document_id: str | None
+    client_id: str | None
     result: str
     severity: str
     document_type_code: str | None
@@ -1263,8 +1266,10 @@ class MetadataExportListItem(BaseModel):
     original_filename: str | None
     output_path: str | None
     latest_path: str | None
+    master_path: str | None
     file_exists: bool
     preview_available: bool
+    master_available: bool
     reason: str | None
     created_at: datetime
 
@@ -1282,6 +1287,13 @@ class MetadataExportSheetPreview(BaseModel):
 
 class MetadataExportPreviewResponse(BaseModel):
     export: MetadataExportListItem
+    sheets: list[MetadataExportSheetPreview]
+
+
+class ClientMasterMetadataPreviewResponse(BaseModel):
+    client_id: str
+    client_name: str
+    master_path: str
     sheets: list[MetadataExportSheetPreview]
 
 
@@ -1351,6 +1363,54 @@ def download_metadata_export(
     )
 
 
+@router.get(
+    "/metadata-exports/clients/{client_id}/master",
+    response_model=ClientMasterMetadataPreviewResponse,
+)
+def preview_client_master_metadata_export(
+    client_id: str, db: DbSession, current: AdminUser
+) -> ClientMasterMetadataPreviewResponse:
+    """Preview the shareable client-level metadata workbook."""
+    _ = current
+    client = db.get(Client, client_id)
+    if client is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, detail="Cliente no encontrado.")
+    path = _client_master_file_path(client)
+    if not path.exists():
+        raise HTTPException(
+            status.HTTP_404_NOT_FOUND,
+            detail="Master de metadata no encontrado para este cliente.",
+        )
+    return ClientMasterMetadataPreviewResponse(
+        client_id=client.id,
+        client_name=client.name,
+        master_path=_display_export_path(str(path)) or path.name,
+        sheets=_read_xlsx_preview(path, max_rows_per_sheet=80, max_columns=12),
+    )
+
+
+@router.get("/metadata-exports/clients/{client_id}/master/download")
+def download_client_master_metadata_export(
+    client_id: str, db: DbSession, current: AdminUser
+) -> FileResponse:
+    """Download the shareable client-level metadata workbook."""
+    _ = current
+    client = db.get(Client, client_id)
+    if client is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, detail="Cliente no encontrado.")
+    path = _client_master_file_path(client)
+    if not path.exists():
+        raise HTTPException(
+            status.HTTP_404_NOT_FOUND,
+            detail="Master de metadata no encontrado para este cliente.",
+        )
+    return FileResponse(
+        path,
+        media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        filename=f"{client.name}_metadata_master.xlsx",
+    )
+
+
 def _get_metadata_export_event(db: Session, export_event_id: str) -> ValidationEvent:
     event = db.get(ValidationEvent, export_event_id)
     if event is None or event.event_type != "metadata_table_exported":
@@ -1375,6 +1435,7 @@ def _metadata_export_item(
         id=event.id,
         submission_id=event.submission_id,
         document_id=event.document_id,
+        client_id=client.id if client else None,
         result=event.result,
         severity=event.severity,
         document_type_code=payload.get("document_type_code"),
@@ -1385,8 +1446,11 @@ def _metadata_export_item(
         original_filename=document.original_filename if document else None,
         output_path=_display_export_path(payload.get("output_path")),
         latest_path=_display_export_path(payload.get("latest_path")),
+        master_path=_display_export_path(payload.get("master_path"))
+        or (_display_export_path(str(_client_master_file_path(client))) if client else None),
         file_exists=file_exists,
         preview_available=event.result == "completed" and file_exists,
+        master_available=bool(client and _client_master_file_path(client).exists()),
         reason=payload.get("reason") or event.message,
         created_at=event.created_at,
     )
@@ -1409,6 +1473,14 @@ def _metadata_export_file_path(event: ValidationEvent) -> Path | None:
     return candidate
 
 
+def _client_master_file_path(client: Client) -> Path:
+    return (
+        Path(settings.METADATA_EXPORT_PATH).expanduser().resolve()
+        / _export_slug(client.name)
+        / "client_master_metadata.xlsx"
+    )
+
+
 def _display_export_path(value: object) -> str | None:
     if not isinstance(value, str) or not value.strip():
         return None
@@ -1418,6 +1490,13 @@ def _display_export_path(value: object) -> str | None:
         return str(path.relative_to(export_root))
     except ValueError:
         return path.name
+
+
+def _export_slug(value: str) -> str:
+    normalized = unicodedata.normalize("NFKD", value or "")
+    ascii_text = normalized.encode("ascii", "ignore").decode("ascii")
+    clean = re.sub(r"\s+", " ", re.sub(r"[^a-zA-Z0-9]+", " ", ascii_text).lower()).strip()
+    return re.sub(r"[^a-z0-9-]+", "-", clean.replace(" ", "-")).strip("-") or "unknown"
 
 
 def _read_xlsx_preview(

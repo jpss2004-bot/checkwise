@@ -253,10 +253,13 @@ def test_workspace_upload_happy_path(api_client: TestClient) -> None:
         assert event.payload["document_type_code"] == "comprobante_pago_bancario_infonavit"
         output_path = event.payload["output_path"]
         latest_path = event.payload["latest_path"]
+        master_path = event.payload["master_path"]
         assert output_path and output_path.endswith("_metadata.xlsx")
         assert latest_path and latest_path.endswith("latest_metadata.xlsx")
+        assert master_path and master_path.endswith("client_master_metadata.xlsx")
         assert Path(output_path).exists()
         assert Path(latest_path).exists()
+        assert Path(master_path).exists()
     finally:
         db.close()
 

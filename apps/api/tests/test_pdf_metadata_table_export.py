@@ -14,6 +14,8 @@ from tools.export_pdf_metadata_table import (
     build_metadata_field_rows,
     export_pdf_metadata_table,
     main,
+    read_metadata_field_rows_from_xlsx,
+    write_client_master_xlsx,
 )
 from tools.test_pdf_metadata_dry_run import build_pdf_metadata_dry_run_payload
 
@@ -145,6 +147,40 @@ def test_export_pdf_metadata_table_writes_guided_xlsx(tmp_path: Path) -> None:
 
     assert "document_type_code" in raw_xml
     assert "acuse_sisub" in raw_xml
+
+    loaded_rows = read_metadata_field_rows_from_xlsx(output_path)
+    assert len(loaded_rows) == len(rows)
+    assert loaded_rows[0]["document_type_code"] == "acuse_sisub"
+
+
+def test_client_master_xlsx_keeps_shareable_metadata_only(tmp_path: Path) -> None:
+    pdf_path = tmp_path / "acuse.pdf"
+    output_path = tmp_path / "master.xlsx"
+    _write_blank_pdf(pdf_path)
+
+    payload = build_pdf_metadata_dry_run_payload(
+        pdf_path=pdf_path,
+        document_type_code="acuse_sisub",
+        context=_context(),
+        include_intelligence=False,
+    )
+    rows = build_metadata_field_rows(payload)
+    write_client_master_xlsx(rows, output_path, client_name="CLIENTE DEMO, S.A. DE C.V.")
+
+    with zipfile.ZipFile(output_path, "r") as archive:
+        workbook_xml = archive.read("xl/workbook.xml").decode("utf-8")
+        guide_xml = archive.read("xl/worksheets/sheet1.xml").decode("utf-8")
+        metadata_xml = archive.read("xl/worksheets/sheet2.xml").decode("utf-8")
+        documents_xml = archive.read("xl/worksheets/sheet3.xml").decode("utf-8")
+
+    assert "00 Guia" in workbook_xml
+    assert "01 Metadata Cliente" in workbook_xml
+    assert "02 Documentos" in workbook_xml
+    assert "LegalShelf Client Metadata Master" in guide_xml
+    assert "Valor metadata" in metadata_xml
+    assert "Regla LegalShelf" in metadata_xml
+    assert "sha256" not in metadata_xml
+    assert "Mismatch" in documents_xml
 
 
 def test_cli_writes_csv_file(tmp_path: Path) -> None:

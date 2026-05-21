@@ -16,6 +16,7 @@ import sys
 import zipfile
 from pathlib import Path
 from typing import Any
+from xml.etree import ElementTree as ET
 from xml.sax.saxutils import escape
 
 BACKEND_ROOT = Path(__file__).resolve().parents[1]
@@ -48,6 +49,7 @@ FIELD_ROW_COLUMNS = [
     "institution",
     "client_legal_name",
     "provider_nomenclature",
+    "period_key",
     "original_filename",
     "sha256",
     "page_count",
@@ -90,6 +92,34 @@ REVIEW_COLUMNS = [
 ]
 
 RAW_SHEET_NAME = "03 Datos"
+
+CLIENT_MASTER_COLUMNS = [
+    "Cliente",
+    "Proveedor",
+    "Periodo",
+    "Documento",
+    "Institucion",
+    "Campo",
+    "Regla LegalShelf",
+    "Valor metadata",
+    "Confianza",
+    "Estado",
+    "Accion LegalShelf",
+    "Archivo fuente",
+]
+
+CLIENT_DOCUMENT_COLUMNS = [
+    "Cliente",
+    "Proveedor",
+    "Periodo",
+    "Documento",
+    "Institucion esperada",
+    "Documento detectado",
+    "Institucion detectada",
+    "Confianza match",
+    "Mismatch",
+    "Archivo fuente",
+]
 
 
 def _read_json_file(path: Path) -> dict[str, Any]:
@@ -164,6 +194,7 @@ def build_metadata_field_rows(payload: dict[str, Any]) -> list[dict[str, str]]:
         "institution": document_type["institution"],
         "client_legal_name": context.get("client_legal_name"),
         "provider_nomenclature": context.get("provider_nomenclature"),
+        "period_key": context.get("period_key") or context.get("reported_period"),
         "original_filename": deterministic["original_filename"],
         "sha256": deterministic["sha256"],
         "page_count": deterministic["page_count"],
@@ -213,8 +244,42 @@ def write_csv(rows: list[dict[str, str]], output_path: Path) -> None:
 
 def write_xlsx(rows: list[dict[str, str]], output_path: Path) -> None:
     """Write a guided XLSX workbook without adding an openpyxl dependency."""
+    _write_xlsx_workbook(_build_workbook_sheets(rows), output_path)
+
+
+def write_client_master_xlsx(
+    rows: list[dict[str, str]], output_path: Path, *, client_name: str | None = None
+) -> None:
+    """Write the shareable per-client LegalShelf metadata workbook."""
+    _write_xlsx_workbook(_build_client_master_sheets(rows, client_name=client_name), output_path)
+
+
+def read_metadata_field_rows_from_xlsx(path: str | Path) -> list[dict[str, str]]:
+    """Read the raw metadata rows from a CheckWise generated XLSX workbook."""
+    workbook_path = Path(path).expanduser()
+    with zipfile.ZipFile(workbook_path, "r") as archive:
+        workbook_xml = archive.read("xl/workbook.xml")
+        sheet_names = _xlsx_sheet_names(workbook_xml)
+        try:
+            sheet_index = sheet_names.index(RAW_SHEET_NAME) + 1
+        except ValueError:
+            raise ValueError(f"Workbook does not contain {RAW_SHEET_NAME!r}: {workbook_path}") from None
+        rows = _xlsx_sheet_rows(archive.read(f"xl/worksheets/sheet{sheet_index}.xml"))
+    if not rows:
+        return []
+    headers = rows[0]
+    return [
+        {
+            header: values[index] if index < len(values) else ""
+            for index, header in enumerate(headers)
+            if header
+        }
+        for values in rows[1:]
+    ]
+
+
+def _write_xlsx_workbook(worksheets: list[dict[str, Any]], output_path: Path) -> None:
     output_path.parent.mkdir(parents=True, exist_ok=True)
-    worksheets = _build_workbook_sheets(rows)
     with zipfile.ZipFile(output_path, "w", compression=zipfile.ZIP_DEFLATED) as archive:
         archive.writestr("[Content_Types].xml", _content_types_xml(len(worksheets)))
         archive.writestr("_rels/.rels", _root_rels_xml())
@@ -342,6 +407,49 @@ def _column_name(index: int) -> str:
     return name
 
 
+def _xlsx_sheet_names(workbook_xml: bytes) -> list[str]:
+    namespace = {"x": "http://schemas.openxmlformats.org/spreadsheetml/2006/main"}
+    root = ET.fromstring(workbook_xml)
+    return [
+        sheet.attrib.get("name", f"Sheet {index}")
+        for index, sheet in enumerate(root.findall(".//x:sheet", namespace), start=1)
+    ]
+
+
+def _xlsx_sheet_rows(worksheet_xml: bytes) -> list[list[str]]:
+    namespace = {"x": "http://schemas.openxmlformats.org/spreadsheetml/2006/main"}
+    root = ET.fromstring(worksheet_xml)
+    parsed_rows: list[list[str]] = []
+    for row in root.findall(".//x:sheetData/x:row", namespace):
+        values: list[str] = []
+        for cell in row.findall("x:c", namespace):
+            column_index = _xlsx_column_index(cell.attrib.get("r", "A1")) - 1
+            while len(values) <= column_index:
+                values.append("")
+            values[column_index] = _xlsx_cell_text(cell, namespace)
+        while values and values[-1] == "":
+            values.pop()
+        parsed_rows.append(values)
+    return parsed_rows
+
+
+def _xlsx_column_index(cell_ref: str) -> int:
+    index = 0
+    for char in cell_ref:
+        if not char.isalpha():
+            break
+        index = index * 26 + (ord(char.upper()) - 64)
+    return max(index, 1)
+
+
+def _xlsx_cell_text(cell: ET.Element, namespace: dict[str, str]) -> str:
+    inline = cell.find("x:is", namespace)
+    if inline is not None:
+        return "".join(node.text or "" for node in inline.findall(".//x:t", namespace))
+    value = cell.find("x:v", namespace)
+    return value.text if value is not None and value.text is not None else ""
+
+
 def _build_workbook_sheets(rows: list[dict[str, str]]) -> list[dict[str, Any]]:
     return [
         _guide_sheet(rows),
@@ -349,6 +457,143 @@ def _build_workbook_sheets(rows: list[dict[str, str]]) -> list[dict[str, Any]]:
         _signals_sheet(rows),
         _raw_data_sheet(rows),
     ]
+
+
+def _build_client_master_sheets(
+    rows: list[dict[str, str]], *, client_name: str | None
+) -> list[dict[str, Any]]:
+    visible_rows = [
+        row
+        for row in rows
+        if row.get("requirement_level") != "blank"
+        and row.get("field_key") not in {"related_documents"}
+    ]
+    return [
+        _client_master_guide_sheet(visible_rows, client_name=client_name),
+        _client_metadata_sheet(visible_rows),
+        _client_documents_sheet(rows),
+    ]
+
+
+def _client_master_guide_sheet(
+    rows: list[dict[str, str]], *, client_name: str | None
+) -> dict[str, Any]:
+    documents = _unique_document_rows(rows)
+    pending = sum(1 for row in rows if row.get("review_status") == "pending")
+    mismatch = sum(1 for row in documents if row.get("mismatch_reason"))
+    first = rows[0] if rows else {}
+    guide_rows = [
+        ["LegalShelf Client Metadata Master", "", "", ""],
+        ["Cliente", client_name or first.get("client_legal_name", ""), "Documentos", str(len(documents))],
+        ["Que contiene", "Metadata documental parametrizada segun la guia LegalShelf. No incluye rutas internas, hashes ni datos tecnicos del backend.", "", ""],
+        ["Como usarlo", "Compartir esta version cuando LegalShelf haya revisado pendientes y posibles mismatch.", "", ""],
+        ["Campos de metadata", str(len(rows)), "Campos pendientes", str(pending)],
+        ["Posibles mismatch", str(mismatch), "Fuente", "CW & LS- PROPUESTA MD SIMPLIFICADA"],
+    ]
+    return {
+        "name": "00 Guia",
+        "rows": guide_rows,
+        "styles": [[1, 1, 1, 1]] + [[9, 10, 9, 10] for _ in guide_rows[1:]],
+        "widths": [24, 76, 22, 40],
+        "freeze": False,
+        "autofilter": False,
+    }
+
+
+def _client_metadata_sheet(rows: list[dict[str, str]]) -> dict[str, Any]:
+    sorted_rows = sorted(
+        rows,
+        key=lambda row: (
+            row.get("provider_nomenclature", ""),
+            row.get("period_key", "") or row.get("period_mentions", "") or row.get("document_frequency", ""),
+            row.get("document_type_name", ""),
+            row.get("field_label", ""),
+        ),
+    )
+    metadata_rows = [CLIENT_MASTER_COLUMNS]
+    styles = [[3] * len(CLIENT_MASTER_COLUMNS)]
+    for row in sorted_rows:
+        status = row.get("review_status", "")
+        value = row.get("normalized_value") or row.get("raw_value") or "(pendiente)"
+        metadata_rows.append(
+            [
+                row.get("client_legal_name", ""),
+                row.get("provider_nomenclature", ""),
+                row.get("period_key", "") or row.get("period_mentions", "") or row.get("document_frequency", ""),
+                row.get("document_type_name", ""),
+                row.get("institution", ""),
+                row.get("field_label", ""),
+                row.get("field_description", ""),
+                value,
+                row.get("confidence", ""),
+                status,
+                _action_for_status(status),
+                row.get("original_filename", ""),
+            ]
+        )
+        styles.append([_style_for_status(status)] * len(CLIENT_MASTER_COLUMNS))
+    return {
+        "name": "01 Metadata Cliente",
+        "rows": metadata_rows,
+        "styles": styles,
+        "widths": [30, 30, 22, 34, 18, 30, 62, 42, 12, 24, 52, 34],
+        "freeze": True,
+        "autofilter": True,
+    }
+
+
+def _client_documents_sheet(rows: list[dict[str, str]]) -> dict[str, Any]:
+    document_rows = [CLIENT_DOCUMENT_COLUMNS]
+    styles = [[3] * len(CLIENT_DOCUMENT_COLUMNS)]
+    for row in _unique_document_rows(rows):
+        has_mismatch = bool(row.get("mismatch_reason"))
+        document_rows.append(
+            [
+                row.get("client_legal_name", ""),
+                row.get("provider_nomenclature", ""),
+                row.get("period_key", "") or row.get("period_mentions", "") or row.get("document_frequency", ""),
+                row.get("document_type_name", ""),
+                row.get("institution", ""),
+                row.get("detected_document_type", ""),
+                row.get("detected_institution", ""),
+                row.get("requirement_match_confidence", ""),
+                row.get("mismatch_reason", "") or "Sin mismatch automatico detectado",
+                row.get("original_filename", ""),
+            ]
+        )
+        styles.append([7 if has_mismatch else 10] * len(CLIENT_DOCUMENT_COLUMNS))
+    return {
+        "name": "02 Documentos",
+        "rows": document_rows,
+        "styles": styles,
+        "widths": [30, 30, 22, 34, 20, 28, 24, 16, 56, 34],
+        "freeze": True,
+        "autofilter": True,
+    }
+
+
+def _unique_document_rows(rows: list[dict[str, str]]) -> list[dict[str, str]]:
+    seen: set[tuple[str, str, str]] = set()
+    unique: list[dict[str, str]] = []
+    for row in rows:
+        key = (
+            row.get("submission_id", ""),
+            row.get("document_id", ""),
+            row.get("document_type_code", ""),
+        )
+        if key in seen:
+            continue
+        seen.add(key)
+        unique.append(row)
+    return sorted(
+        unique,
+        key=lambda row: (
+            row.get("client_legal_name", ""),
+            row.get("provider_nomenclature", ""),
+            row.get("period_key", "") or row.get("period_mentions", "") or row.get("document_frequency", ""),
+            row.get("document_type_name", ""),
+        ),
+    )
 
 
 def _guide_sheet(rows: list[dict[str, str]]) -> dict[str, Any]:
@@ -360,7 +605,7 @@ def _guide_sheet(rows: list[dict[str, str]]) -> dict[str, Any]:
         ["Fuente de reglas", "CW & LS- PROPUESTA MD SIMPLIFICADA.docx.pdf", "", ""],
         ["Cliente", first.get("client_legal_name", ""), "Proveedor", first.get("provider_nomenclature", "")],
         ["Documento esperado", first.get("document_type_name", ""), "Institucion", first.get("institution", "")],
-        ["Periodo", first.get("period_mentions", "") or first.get("document_frequency", ""), "Archivo", first.get("original_filename", "")],
+        ["Periodo", first.get("period_key", "") or first.get("period_mentions", "") or first.get("document_frequency", ""), "Archivo", first.get("original_filename", "")],
         ["Estado general", _overall_status_label(rows), "Campos pendientes", str(counts.get("pending", 0))],
         ["Mismatch", first.get("mismatch_reason", "") or "Sin mismatch automatico detectado", "", ""],
         ["Como revisarlo", "1. Confirma documento esperado vs detectado. 2. Revisa RFCs/fechas/periodos. 3. Atiende campos pendientes. 4. Comparte solo cuando LegalShelf lo haya validado.", "", ""],

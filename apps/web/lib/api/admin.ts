@@ -229,6 +229,7 @@ export type MetadataExportItem = {
   id: string;
   submission_id: string;
   document_id: string | null;
+  client_id: string | null;
   result: "completed" | "skipped" | "failed" | string;
   severity: string;
   document_type_code: string | null;
@@ -239,8 +240,10 @@ export type MetadataExportItem = {
   original_filename: string | null;
   output_path: string | null;
   latest_path: string | null;
+  master_path: string | null;
   file_exists: boolean;
   preview_available: boolean;
+  master_available: boolean;
   reason: string | null;
   created_at: string;
 };
@@ -258,6 +261,13 @@ export type MetadataExportSheetPreview = {
 
 export type MetadataExportPreview = {
   export: MetadataExportItem;
+  sheets: MetadataExportSheetPreview[];
+};
+
+export type ClientMasterMetadataPreview = {
+  client_id: string;
+  client_name: string;
+  master_path: string;
   sheets: MetadataExportSheetPreview[];
 };
 
@@ -285,6 +295,30 @@ export async function downloadMetadataExport(id: string): Promise<Blob> {
   }
   const response = await fetch(
     `${API_BASE_URL}/api/v1/admin/metadata-exports/${id}/download`,
+    { headers: { Authorization: `Bearer ${session.access_token}` } },
+  );
+  if (!response.ok) {
+    const detail = await response.text().catch(() => "");
+    throw new AdminApiError(response.status, detail || response.statusText);
+  }
+  return response.blob();
+}
+
+export async function getClientMasterMetadataPreview(
+  clientId: string,
+): Promise<ClientMasterMetadataPreview> {
+  return fetchJson(`/api/v1/admin/metadata-exports/clients/${clientId}/master`);
+}
+
+export async function downloadClientMasterMetadata(
+  clientId: string,
+): Promise<Blob> {
+  const session = readAdminSession();
+  if (!session?.access_token) {
+    throw new AdminApiError(401, "No active admin session.");
+  }
+  const response = await fetch(
+    `${API_BASE_URL}/api/v1/admin/metadata-exports/clients/${clientId}/master/download`,
     { headers: { Authorization: `Bearer ${session.access_token}` } },
   );
   if (!response.ok) {

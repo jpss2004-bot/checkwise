@@ -13,7 +13,11 @@ from app.models import Client, Contract, Document, Vendor
 from app.models import Institution as InstitutionModel
 from app.services.requirement_service import ResolvedPeriod, ResolvedRequirement
 from app.services.storage import StoredFile
-from tools.export_pdf_metadata_table import export_pdf_metadata_table
+from tools.export_pdf_metadata_table import (
+    export_pdf_metadata_table,
+    read_metadata_field_rows_from_xlsx,
+    write_client_master_xlsx,
+)
 
 
 @dataclass(frozen=True)
@@ -22,6 +26,7 @@ class MetadataExportResult:
     document_type_code: str | None = None
     output_path: str | None = None
     latest_path: str | None = None
+    master_path: str | None = None
     reason: str | None = None
 
 
@@ -98,6 +103,7 @@ def export_metadata_table_after_upload(
             enable_ocr=False,
         )
         shutil.copyfile(output_path, latest_path)
+        master_path = rebuild_client_master_metadata_export(client_name=client.name)
     except Exception as exc:  # noqa: BLE001 - surfaced as telemetry, not a provider error
         return MetadataExportResult(
             status="failed",
@@ -110,7 +116,29 @@ def export_metadata_table_after_upload(
         document_type_code=document_type_code,
         output_path=str(output_path),
         latest_path=str(latest_path),
+        master_path=str(master_path) if master_path else None,
     )
+
+
+def rebuild_client_master_metadata_export(*, client_name: str) -> Path | None:
+    """Rebuild the current shareable master workbook for one client.
+
+    The master intentionally reads only each slot's ``latest_metadata.xlsx``
+    so it represents the current state rather than every historical upload.
+    """
+    client_root = Path(settings.METADATA_EXPORT_PATH) / _slug(client_name)
+    if not client_root.exists():
+        return None
+
+    rows: list[dict[str, str]] = []
+    for workbook_path in sorted(client_root.rglob("latest_metadata.xlsx")):
+        rows.extend(read_metadata_field_rows_from_xlsx(workbook_path))
+    if not rows:
+        return None
+
+    master_path = client_root / "client_master_metadata.xlsx"
+    write_client_master_xlsx(rows, master_path, client_name=client_name)
+    return master_path
 
 
 def resolve_metadata_document_type_code(
