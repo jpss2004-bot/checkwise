@@ -30,8 +30,9 @@ CheckWise/
   setup_claude_desktop_optimized.sh
   skills-lock.json
 
-  backend/
-  frontend/
+  apps/
+    api/                  # FastAPI backend (was backend/)
+    web/                  # Next.js frontend (was frontend/)
 
   brand_assets/           # logos, brand-mark guidance
   demo_assets/            # sample PDFs, screenshots, demo guide
@@ -44,12 +45,12 @@ Tracked top-level dotfiles are limited to `.env.example`, `.gitignore`,
 `.github/`, and the curated subtree under `.claude/skills/`. Everything
 else under `.claude/` is local-only (see `.gitignore`).
 
-## 2. Frontend (`frontend/`)
+## 2. Frontend (`apps/web/`)
 
 Next.js App Router project.
 
 ```
-frontend/
+apps/web/
   app/                    # routes only
     activate/
     admin/
@@ -118,12 +119,12 @@ Folder responsibilities:
   files (PSD, AI, raw logo exports) belong under `brand_assets/` at
   the repo root, not `public/`.
 
-## 3. Backend (`backend/`)
+## 3. Backend (`apps/api/`)
 
 FastAPI app on Python 3.11.
 
 ```
-backend/
+apps/api/
   alembic/                # migrations
   alembic.ini
   app/
@@ -163,13 +164,13 @@ Folder responsibilities:
 
 ## 4. Where local tools and scripts belong
 
-- `backend/tools/` — local-only Python. Examples currently present:
+- `apps/api/tools/` — local-only Python. Examples currently present:
   `build_n8n_review_payload.py`, `export_n8n_metadata_templates.py`,
-  `test_pdf_metadata_dry_run.py`. **Rule: nothing under `backend/app/`
-  may import from `backend/tools/`.** These files must not be on the
+  `test_pdf_metadata_dry_run.py`. **Rule: nothing under `apps/api/app/`
+  may import from `apps/api/tools/`.** These files must not be on the
   production image's `PYTHONPATH` and must not be referenced by
   `render.yaml`.
-- `backend/scripts/` — operator one-shots (`dev_reset.sh`,
+- `apps/api/scripts/` — operator one-shots (`dev_reset.sh`,
   `dev_seed.py`, `dev_setup.sh`, `dev_start.sh`, `add_test_provider.py`,
   `add_internal_admin.py`, `generate_sample_pdfs.py`,
   `provision_test_provider.py`). Run by hand or by `dev.sh`. Same rule:
@@ -177,8 +178,8 @@ Folder responsibilities:
 - `scripts/` at the repo root — cross-cutting helpers (audit
   screenshot capture, demo recording, PDF rendering). These can use
   both backend and frontend artifacts but are never deployed.
-- `frontend/scripts/` — frontend-local dev scripts. Same rule: never
-  imported by `frontend/app/` or `frontend/components/`.
+- `apps/web/scripts/` — frontend-local dev scripts. Same rule: never
+  imported by `apps/web/app/` or `apps/web/components/`.
 
 ## 5. Where docs, audits, and reference material live
 
@@ -236,19 +237,20 @@ Folder responsibilities:
 
 ## 7. Rules for not mounting local-only tools in production
 
-These rules apply to `backend/tools/`, `backend/scripts/`, top-level
-`scripts/`, `frontend/scripts/`, and anything new added to those
+These rules apply to `apps/api/tools/`, `apps/api/scripts/`, top-level
+`scripts/`, `apps/web/scripts/`, and anything new added to those
 folders.
 
-1. **No imports.** Production code in `backend/app/` and
-   `frontend/app/`+`frontend/components/`+`frontend/lib/` must not
+1. **No imports.** Production code in `apps/api/app/` and
+   `apps/web/app/`+`apps/web/components/`+`apps/web/lib/` must not
    import from any `tools/` or `scripts/` folder. If a helper needs to
    be reused by `app/`, promote it into `app/services/` or
    `lib/<surface>/` first.
-2. **Not in the deploy artifact.** `render.yaml` runs from
-   `rootDir: backend` and starts `uvicorn` against `app.main`. Tools
-   and scripts live in sibling folders and are not part of the running
-   process. Do not add `tools/` to any module path or sys.path.
+2. **Not in the deploy artifact.** `render.yaml` should run from
+   `rootDir: apps/api` (update post-monorepo-move) and starts
+   `uvicorn` against `app.main`. Tools and scripts live in sibling
+   folders and are not part of the running process. Do not add
+   `tools/` to any module path or sys.path.
 3. **No production env reads at import time.** A tool may need
    `DATABASE_URL` to run locally, but it must read env at execution,
    not at module import, so accidental imports do not crash a prod
@@ -263,16 +265,16 @@ folders.
        raise SystemExit("This script must not run in production.")
    ```
 
-5. **Frontend equivalent.** Files under `frontend/scripts/` and
-   anything in `frontend/lib/mock/` must not be imported from server
+5. **Frontend equivalent.** Files under `apps/web/scripts/` and
+   anything in `apps/web/lib/mock/` must not be imported from server
    components or route handlers that ship to production. Demo and
    mock surfaces are gated behind explicit demo routes
-   (`frontend/app/dev/*`, anything imported by `portal-adapters.ts`'s
+   (`apps/web/app/dev/*`, anything imported by `portal-adapters.ts`'s
    demo branch) and are removed as backend endpoints land.
 
 ## 8. Open questions deferred to later passes
 
-- Whether `frontend/lib/demo-clients.ts` should live under `lib/mock/`
+- Whether `apps/web/lib/demo-clients.ts` should live under `lib/mock/`
   (currently untracked at the root of `lib/`). Decision pending the
   Phase-3 mock-removal sweep.
 - Whether to extract design tokens to `packages/design/` (deferred to

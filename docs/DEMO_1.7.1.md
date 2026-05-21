@@ -93,7 +93,7 @@ The intake wizard's step 3 *"Sube el documento"* exposes a button:
 > demostración para recorrer el flujo sin tu archivo real.
 
 It fetches `/samples/checkwise-demo-document.pdf` (committed at
-`frontend/public/samples/`) and attaches it to the upload form. The
+`apps/web/public/samples/`) and attaches it to the upload form. The
 PDF carries a visible *"DOCUMENTO DE MUESTRA · CHECKWISE 1.7.1 DEMO"*
 ribbon so a reviewer who opens the file outside CheckWise immediately
 sees it is demo data.
@@ -156,9 +156,9 @@ recreates them deterministically. It does not touch any non-demo data.
   endpoints accept both the JWT and the legacy `checkwise_portal_session`
   httpOnly cookie. JWT path is the cross-origin-safe primary; the
   cookie is kept as a transparent fallback. See
-  `backend/app/api/v1/portal.py::current_portal_workspace`.
+  `apps/api/app/api/v1/portal.py::current_portal_workspace`.
 - **Expediente gate:** centralised in
-  `frontend/lib/session/with-onboarding-gate.tsx`. Single rule:
+  `apps/web/lib/session/with-onboarding-gate.tsx`. Single rule:
   `expediente_status === "complete"` unlocks `/portal/dashboard`,
   `/portal/calendar`, `/portal/reports`. Anything else redirects to
   `/portal/onboarding`. Backend computes the status in

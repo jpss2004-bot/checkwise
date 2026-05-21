@@ -1061,4 +1061,4 @@ if __name__ == "__main__":
     with sync_playwright() as pw:
         webm = run(pw)
     encode_silent_mp4(webm)
-    print("\n→ Next: backend/.venv/bin/python scripts/finalize_demo.py")
+    print("\n→ Next: apps/api/.venv/bin/python scripts/finalize_demo.py")

@@ -25,9 +25,9 @@ Within each tier, sorted by impact.
 
 **What Jorge sees:** After login, he lands on a confirmation screen showing his workspace identity (LegalShelf - CheckwiseDEMO, RFC SNM070412PT7) and a form asking him to confirm name / phone / job title / contact preference. He fills it in, clicks **"Entrar a mi espacio"**, sees a loading state, then routes to his dashboard.
 
-**What actually happens:** [`app/portal/entra-a-tu-espacio/page.tsx:82`](frontend/app/portal/entra-a-tu-espacio/page.tsx) calls `saveEditableProfile(workspace_id, profile)` from `lib/mock/corrections.ts` — a mock helper that awaits 300ms and writes the data to `localStorage['checkwise.mock.profile.{workspace_id}.v1']`. **No POST to the backend.** When his browser session ends, the data is gone. If you ever inspect Postgres for that profile data, it will not be there.
+**What actually happens:** [`app/portal/entra-a-tu-espacio/page.tsx:82`](apps/web/app/portal/entra-a-tu-espacio/page.tsx) calls `saveEditableProfile(workspace_id, profile)` from `lib/mock/corrections.ts` — a mock helper that awaits 300ms and writes the data to `localStorage['checkwise.mock.profile.{workspace_id}.v1']`. **No POST to the backend.** When his browser session ends, the data is gone. If you ever inspect Postgres for that profile data, it will not be there.
 
-**Why it slipped:** `TODO[backend-integration]` in [`lib/mock/corrections.ts:12`](frontend/lib/mock/corrections.ts) and [`lib/workspace/resolver.ts:13`](frontend/lib/workspace/resolver.ts). Documented in [CHECKWISE_1_6.md:158](docs/CHECKWISE_1_6.md).
+**Why it slipped:** `TODO[backend-integration]` in [`lib/mock/corrections.ts:12`](apps/web/lib/mock/corrections.ts) and [`lib/workspace/resolver.ts:13`](apps/web/lib/workspace/resolver.ts). Documented in [CHECKWISE_1_6.md:158](docs/CHECKWISE_1_6.md).
 
 **Mitigation for the test:** brief Jorge that this confirmation step is informational; the persistent record of him is the User + ProviderWorkspace row you created in Neon (which IS real and correct). Tell him "what you type in the confirmation form is for our records during the test session; we'll capture it manually."
 
@@ -37,9 +37,9 @@ Within each tier, sorted by impact.
 
 **What Jorge sees:** On the same workspace-entry screen, locked tenant fields (workspace_id, RFC, role, company legal name, email domain) appear in a "Verifica tus datos protegidos" card.
 
-**What actually happens:** [`lib/workspace/resolver.ts:44-80`](frontend/lib/workspace/resolver.ts) (`buildWorkspaceContext`) synthesizes those values from the in-memory PortalSession + the optional invitation token. The comment at line 38-39 calls it an *"interim hack"*. The values *happen to be correct* for Jorge because they match the DB row you created — but the security claim ("backend is source of truth for protected fields") is not actually enforced by this render path.
+**What actually happens:** [`lib/workspace/resolver.ts:44-80`](apps/web/lib/workspace/resolver.ts) (`buildWorkspaceContext`) synthesizes those values from the in-memory PortalSession + the optional invitation token. The comment at line 38-39 calls it an *"interim hack"*. The values *happen to be correct* for Jorge because they match the DB row you created — but the security claim ("backend is source of truth for protected fields") is not actually enforced by this render path.
 
-**Why it slipped:** Two `TODO[security-backend]` markers ([`lib/workspace/types.ts:26`](frontend/lib/workspace/types.ts), [`app/portal/entra-a-tu-espacio/page.tsx:52`](frontend/app/portal/entra-a-tu-espacio/page.tsx)) — both flagging that backend must re-verify every value at render time.
+**Why it slipped:** Two `TODO[security-backend]` markers ([`lib/workspace/types.ts:26`](apps/web/lib/workspace/types.ts), [`app/portal/entra-a-tu-espacio/page.tsx:52`](apps/web/app/portal/entra-a-tu-espacio/page.tsx)) — both flagging that backend must re-verify every value at render time.
 
 **Tester impact:** Looks fine for this test (values match DB). The risk is "what looks like a verified server-render is actually a client-side echo of the session token." A clever tester poking the network tab will notice.
 
@@ -49,9 +49,9 @@ Within each tier, sorted by impact.
 
 **What anyone sees:** Visit `https://checkwise-six.vercel.app/` → scroll to "Solicitar información" → fill name, company, email, role, message → submit → success message with folio ID like `req-mock-7f2k...`.
 
-**What actually happens:** [`components/marketing/contact-form.tsx:51-68`](frontend/components/marketing/contact-form.tsx) calls `submitContactRequest()` from [`lib/mock/contact-requests.ts`](frontend/lib/mock/contact-requests.ts) — local stub that returns a fake ID. **No CRM, no Slack, no email, no DB row.** If anyone other than Jorge visits the prod URL and submits, that request is lost.
+**What actually happens:** [`components/marketing/contact-form.tsx:51-68`](apps/web/components/marketing/contact-form.tsx) calls `submitContactRequest()` from [`lib/mock/contact-requests.ts`](apps/web/lib/mock/contact-requests.ts) — local stub that returns a fake ID. **No CRM, no Slack, no email, no DB row.** If anyone other than Jorge visits the prod URL and submits, that request is lost.
 
-**Why it slipped:** `TODO[backend-integration]: replace with a POST to a real endpoint` in [`lib/mock/contact-requests.ts:9`](frontend/lib/mock/contact-requests.ts).
+**Why it slipped:** `TODO[backend-integration]: replace with a POST to a real endpoint` in [`lib/mock/contact-requests.ts:9`](apps/web/lib/mock/contact-requests.ts).
 
 **Mitigation:** If you're showing the landing page to anyone, tell them "the contact form on production is currently a demo — to actually reach us, write to [email]." Or land a quick `POST /api/v1/contact` endpoint that drops into a Slack webhook before exposing the URL to anyone but Jorge.
 
@@ -61,9 +61,9 @@ Within each tier, sorted by impact.
 
 **What Jorge sees:** Onboarding checklist with cards per required document. Each card has: requirement title, why-this-matters paragraph, accepted format hint, next-action CTA, and reviewer note (when rejected).
 
-**What actually happens:** [`lib/api/portal-adapters.ts:74-92`](frontend/lib/api/portal-adapters.ts) — the *status* (aprobado / rechazado / pendiente / etc.) comes from the real backend at `/api/v1/portal/workspaces/{id}/onboarding`. The *educational copy* (`why`, `format`, `next_action`, `reviewer_note`) comes from a frontend dictionary `ENRICHMENT_BY_CODE` keyed by requirement_code. If the backend ever adds a requirement code the frontend doesn't recognize, the card falls back to generic copy.
+**What actually happens:** [`lib/api/portal-adapters.ts:74-92`](apps/web/lib/api/portal-adapters.ts) — the *status* (aprobado / rechazado / pendiente / etc.) comes from the real backend at `/api/v1/portal/workspaces/{id}/onboarding`. The *educational copy* (`why`, `format`, `next_action`, `reviewer_note`) comes from a frontend dictionary `ENRICHMENT_BY_CODE` keyed by requirement_code. If the backend ever adds a requirement code the frontend doesn't recognize, the card falls back to generic copy.
 
-**Why it slipped:** `TODO[backend-integration]` at [`lib/api/portal-adapters.ts:11`](frontend/lib/api/portal-adapters.ts). The backend is supposed to grow these fields; until then the adapter bridges.
+**Why it slipped:** `TODO[backend-integration]` at [`lib/api/portal-adapters.ts:11`](apps/web/lib/api/portal-adapters.ts). The backend is supposed to grow these fields; until then the adapter bridges.
 
 **Tester impact:** subtle — the page looks complete. But two requirements with the same status get identical copy from the dictionary, and a real reviewer note (which doesn't exist server-side yet) cannot be passed through.
 
@@ -73,7 +73,7 @@ Within each tier, sorted by impact.
 
 **What Jorge sees:** Login page. If he forgets the password you sent him, there's no "¿Olvidaste tu contraseña?" link.
 
-**What actually happens:** Doesn't exist. The auth backend exposes only `POST /api/v1/auth/login`, `GET /api/v1/auth/me`, `POST /api/v1/auth/set-password` ([`backend/app/api/v1/auth.py:247-304`](backend/app/api/v1/auth.py)). The third only works when the user is already authenticated with the must-change-password JWT.
+**What actually happens:** Doesn't exist. The auth backend exposes only `POST /api/v1/auth/login`, `GET /api/v1/auth/me`, `POST /api/v1/auth/set-password` ([`apps/api/app/api/v1/auth.py:247-304`](apps/api/app/api/v1/auth.py)). The third only works when the user is already authenticated with the must-change-password JWT.
 
 **Mitigation:** if Jorge gets locked out, you (operator) regenerate his bcrypt hash locally and run an `UPDATE users SET password_hash=..., must_change_password=true WHERE email=...` in Neon. Same workflow as the initial account creation.
 
@@ -85,9 +85,9 @@ Within each tier, sorted by impact.
 
 **What it looks like:** A welcome-email-style invitation flow where a new vendor clicks a link, lands at `/activate?token=...`, sees a 3-step wizard, sets a password, lands in the portal.
 
-**What actually happens:** [`lib/mock/invitations.ts`](frontend/lib/mock/invitations.ts) — tokens are issued, verified, and consumed entirely in `localStorage['checkwise.mock.invitations.v1']`. There is no `Invitation` table, no token signing service, no `POST /api/v1/invitations` endpoint, no email transport. The only token that resolves is the literal string `"demo"`, hardcoded in the mock module.
+**What actually happens:** [`lib/mock/invitations.ts`](apps/web/lib/mock/invitations.ts) — tokens are issued, verified, and consumed entirely in `localStorage['checkwise.mock.invitations.v1']`. There is no `Invitation` table, no token signing service, no `POST /api/v1/invitations` endpoint, no email transport. The only token that resolves is the literal string `"demo"`, hardcoded in the mock module.
 
-**`writePortalSession` shim:** [`lib/session/portal.ts:125-132`](frontend/lib/session/portal.ts) populates an in-memory cache when the mocked activation completes. A page reload bounces the user back to `/`. Console-warns at runtime: *"writePortalSession is a transition shim; the real session is the httpOnly cookie minted by POST /api/v1/portal/enter."*
+**`writePortalSession` shim:** [`lib/session/portal.ts:125-132`](apps/web/lib/session/portal.ts) populates an in-memory cache when the mocked activation completes. A page reload bounces the user back to `/`. Console-warns at runtime: *"writePortalSession is a transition shim; the real session is the httpOnly cookie minted by POST /api/v1/portal/enter."*
 
 **Why Jorge is unaffected:** he never enters this code path. He logs in at `/login` with the manually-created credentials, which uses the REAL `POST /api/v1/auth/login` and a real JWT.
 
@@ -97,7 +97,7 @@ Within each tier, sorted by impact.
 
 ### P1-2 · No welcome / activation / notification email transport
 
-**What's shipped:** [`frontend/lib/email/welcome.ts`](frontend/lib/email/welcome.ts) — a templating module that produces the HTML + plaintext bodies. It is rendering-only; no provider wired.
+**What's shipped:** [`apps/web/lib/email/welcome.ts`](apps/web/lib/email/welcome.ts) — a templating module that produces the HTML + plaintext bodies. It is rendering-only; no provider wired.
 
 **What's NOT shipped:** the SMTP / Resend / Postmark / SES adapter, the queue, the backend endpoint that triggers it, the unsubscribe handler. `TODO[backend-integration]` at line 14.
 
@@ -107,9 +107,9 @@ Within each tier, sorted by impact.
 
 ### P1-3 · `POST /api/v1/submissions` is the legacy intake path; `POST /api/v1/portal/workspaces/{id}/submissions` is canonical
 
-**What's marked deprecated:** [`backend/app/api/v1/endpoints.py:84-85`](backend/app/api/v1/endpoints.py) — `deprecated=True`, summary literally says "Legacy native-intake submission (deprecated)". Comment at [`portal.py:1436`](backend/app/api/v1/portal.py): *"Tenant-safe replacement for the legacy `POST /api/v1/submissions`."*
+**What's marked deprecated:** [`apps/api/app/api/v1/endpoints.py:84-85`](apps/api/app/api/v1/endpoints.py) — `deprecated=True`, summary literally says "Legacy native-intake submission (deprecated)". Comment at [`portal.py:1436`](apps/api/app/api/v1/portal.py): *"Tenant-safe replacement for the legacy `POST /api/v1/submissions`."*
 
-**What still calls the deprecated endpoint:** [`components/checkwise/document-submission-form.tsx`](frontend/components/checkwise/document-submission-form.tsx). However, this component is in our confirmed-orphan list (no consumers), so the deprecated endpoint shouldn't be hit in the live flow.
+**What still calls the deprecated endpoint:** [`components/checkwise/document-submission-form.tsx`](apps/web/components/checkwise/document-submission-form.tsx). However, this component is in our confirmed-orphan list (no consumers), so the deprecated endpoint shouldn't be hit in the live flow.
 
 **What Jorge actually hits:** the canonical workspace-scoped endpoint (via the `intake-wizard.tsx` at `/portal/upload`).
 
@@ -119,7 +119,7 @@ Within each tier, sorted by impact.
 
 ### P1-4 · Provider portal still authenticates with the V1.2 opaque `X-Workspace-Token`
 
-**What's shipped:** [`backend/app/api/v1/portal.py:24`](backend/app/api/v1/portal.py): *"The legacy `X-Workspace-Token` header is still accepted by reads as a fallback for callers that haven't migrated yet."* The dual-path is documented and is intentional during the V1.x → V2.2 migration window.
+**What's shipped:** [`apps/api/app/api/v1/portal.py:24`](apps/api/app/api/v1/portal.py): *"The legacy `X-Workspace-Token` header is still accepted by reads as a fallback for callers that haven't migrated yet."* The dual-path is documented and is intentional during the V1.x → V2.2 migration window.
 
 **What's NOT shipped:** the unified provider-JWT migration. Provider portal still uses the opaque token model from V1.2; staff users (admin/reviewer/client_admin) use the JWT/RBAC model from V1.3. Two auth strategies coexist.
 
@@ -131,12 +131,12 @@ Within each tier, sorted by impact.
 
 ### P1-5 · `ReportShare` + `ReportExport` exist as DB models with no service layer
 
-**What's promised by the schema:** [`backend/app/models/entities.py:606-645`](backend/app/models/entities.py) defines `ReportShare` (signed delivery to external vendors) and `ReportExport` (async PDF / DOCX render workers).
+**What's promised by the schema:** [`apps/api/app/models/entities.py:606-645`](apps/api/app/models/entities.py) defines `ReportShare` (signed delivery to external vendors) and `ReportExport` (async PDF / DOCX render workers).
 
 **What's NOT shipped:**
 - No router endpoint to create / consume share links.
 - No worker to render exports asynchronously.
-- Schemas marked *"placeholder schemas"* at [`backend/app/schemas/reports.py:142`](backend/app/schemas/reports.py).
+- Schemas marked *"placeholder schemas"* at [`apps/api/app/schemas/reports.py:142`](apps/api/app/schemas/reports.py).
 
 **What Jorge gets instead:** browser print-to-PDF via `window.print()` from the `/portal/reports/[id]/print` route. Works, just not server-side.
 
@@ -146,7 +146,7 @@ Within each tier, sorted by impact.
 
 ### P1-6 · No client/admin endpoint to re-download original uploaded PDFs
 
-**What's missing:** [`docs/system-workflow-map/README.md`](docs/system-workflow-map/README.md) explicitly calls out: *"No existe endpoint final de descarga segura de documentos para cliente/admin."* `S3StorageService` has `presigned_download_url()` ([`storage.py:213`](backend/app/services/storage.py)) but no router exposes it.
+**What's missing:** [`docs/system-workflow-map/README.md`](docs/system-workflow-map/README.md) explicitly calls out: *"No existe endpoint final de descarga segura de documentos para cliente/admin."* `S3StorageService` has `presigned_download_url()` ([`storage.py:213`](apps/api/app/services/storage.py)) but no router exposes it.
 
 **Tester impact:** Jorge uploads a PDF, sees its status, but cannot re-download it through the UI. If he asks "where did my file go?" the answer is "the system has it, you just can't see it from here yet."
 
@@ -156,7 +156,7 @@ Within each tier, sorted by impact.
 
 **What's promised by the LLM client protocol:** async streaming for concurrent per-block generation, used by the copilot in 3.3c.
 
-**What actually happens:** [`backend/app/services/reports/llm/anthropic_client.py:134-149`](backend/app/services/reports/llm/anthropic_client.py) — `astream_text` raises NotImplementedError with the message *"Async streaming arrives in Phase 3.3c when the copilot needs concurrent per-block streams."*
+**What actually happens:** [`apps/api/app/services/reports/llm/anthropic_client.py:134-149`](apps/api/app/services/reports/llm/anthropic_client.py) — `astream_text` raises NotImplementedError with the message *"Async streaming arrives in Phase 3.3c when the copilot needs concurrent per-block streams."*
 
 **Tester impact:** none today — the copilot uses `stream_text` (sync) under the hood. The dead branch only matters if someone wires a parallel-streams path.
 
@@ -164,7 +164,7 @@ Within each tier, sorted by impact.
 
 ### P1-8 · Block Inspector for editing per-block config doesn't ship
 
-**What the UI hints at:** in [`kpi-strip.tsx:140`](frontend/components/checkwise/reports/blocks/kpi-strip.tsx) the editor footer says *"4 métricas. Configurable desde el inspector."* and there's a "Cambiar formato" button that cycles the first metric's format as a placeholder. Several other blocks have similar copy.
+**What the UI hints at:** in [`kpi-strip.tsx:140`](apps/web/components/checkwise/reports/blocks/kpi-strip.tsx) the editor footer says *"4 métricas. Configurable desde el inspector."* and there's a "Cambiar formato" button that cycles the first metric's format as a placeholder. Several other blocks have similar copy.
 
 **What's NOT shipped:** the right-rail Inspector panel where authors configure block parameters (deferred to 3.5 per the same file's comment).
 
@@ -215,15 +215,15 @@ These are documented as deferred in [docs/ROADMAP.md](docs/ROADMAP.md) and [docs
 
 Already documented in [AUDIT_NEXT_SESSION_READINESS.md §5.4](docs/AUDIT_NEXT_SESSION_READINESS.md). Reproduced for completeness:
 
-- `frontend/components/ui/stepper.tsx`
-- `frontend/components/checkwise/support-card.tsx`
-- `frontend/components/checkwise/confidence-badge.tsx`
-- `frontend/components/checkwise/portal/provider-context-bar.tsx` (superseded by PortalAppShell sidebar)
-- `frontend/components/checkwise/portal/suggested-actions.tsx`
-- `frontend/components/checkwise/workspace/correction-request-form.tsx`
-- `frontend/components/checkwise/document-submission-form.tsx`
-- `frontend/lib/demo-clients.ts`
-- `frontend/lib/portal-client.ts`
+- `apps/web/components/ui/stepper.tsx`
+- `apps/web/components/checkwise/support-card.tsx`
+- `apps/web/components/checkwise/confidence-badge.tsx`
+- `apps/web/components/checkwise/portal/provider-context-bar.tsx` (superseded by PortalAppShell sidebar)
+- `apps/web/components/checkwise/portal/suggested-actions.tsx`
+- `apps/web/components/checkwise/workspace/correction-request-form.tsx`
+- `apps/web/components/checkwise/document-submission-form.tsx`
+- `apps/web/lib/demo-clients.ts`
+- `apps/web/lib/portal-client.ts`
 
 Each verified via symbol grep across `app/`, `components/`, `lib/`. Safe to delete in one commit; recommended for the cleanup PR after Jorge's test.
 

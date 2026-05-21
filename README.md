@@ -50,7 +50,7 @@ Full detail: [docs/CHECKWISE_2_0.md](docs/CHECKWISE_2_0.md) + [docs/design-syste
 
 ```bash
 docker compose up -d postgres                       # local Postgres on :5432
-bash backend/scripts/dev_setup.sh                   # venv, deps, alembic migrate, seed demo
+bash apps/api/scripts/dev_setup.sh                   # venv, deps, alembic migrate, seed demo
 cd frontend && npm install && cd ..
 ```
 
@@ -63,19 +63,19 @@ bash dev.sh
 Or in two terminals:
 
 ```bash
-bash backend/scripts/dev_start.sh                   # http://localhost:8000
+bash apps/api/scripts/dev_start.sh                   # http://localhost:8000
 cd frontend && npm run dev                          # http://localhost:3000
 ```
 
 Reset DB:
 
 ```bash
-bash backend/scripts/dev_reset.sh                   # drops + re-migrates + re-seeds
+bash apps/api/scripts/dev_reset.sh                   # drops + re-migrates + re-seeds
 ```
 
 ## Demo credentials
 
-Created by `backend/scripts/dev_seed.py`.
+Created by `apps/api/scripts/dev_seed.py`.
 
 | Surface | URL | Auth |
 | --- | --- | --- |
@@ -84,7 +84,7 @@ Created by `backend/scripts/dev_seed.py`.
 | Activation demo | `http://localhost:3000/activate?token=demo` | resolves to a seeded provider invitation |
 | Reviewer / admin | `http://localhost:3000/admin/login` | `ada@legalshelf.mx` / `demo1234` |
 
-Seeded demo accounts (`backend/scripts/dev_seed.py`):
+Seeded demo accounts (`apps/api/scripts/dev_seed.py`):
 
 | Role | Email | Password | Reaches |
 | --- | --- | --- | --- |
@@ -194,8 +194,8 @@ node_modules/.bin/next build
 ## Conventions
 
 - **Status vocabulary (Spanish, plain-language UI)** — `Esperando revisión` · `Posible inconsistencia` · `Necesita aclaración` · `Aprobado` · `Rechazado`. Canonical codes stay English in code (`pendiente_revision`, `posible_mismatch`, `requiere_aclaracion`, `aprobado`, `rechazado`).
-- **REPSE document states (8)** — `pending`, `uploaded`, `in_review`, `approved`, `rejected`, `expired`, `needs_review`, `empty`. Single source of truth in `frontend/lib/constants/statuses.ts` and `backend/app/constants/statuses.py`.
-- **Brand colors only via HSL CSS variables** in `frontend/app/globals.css`. Primary navy `#013557`, accent teal `#09c1b0`. Semantic colors (success/attention/destructive) via Tailwind defaults (`emerald` / `amber` / `red`).
+- **REPSE document states (8)** — `pending`, `uploaded`, `in_review`, `approved`, `rejected`, `expired`, `needs_review`, `empty`. Single source of truth in `apps/web/lib/constants/statuses.ts` and `apps/api/app/constants/statuses.py`.
+- **Brand colors only via HSL CSS variables** in `apps/web/app/globals.css`. Primary navy `#013557`, accent teal `#09c1b0`. Semantic colors (success/attention/destructive) via Tailwind defaults (`emerald` / `amber` / `red`).
 - **One icon family** — `@phosphor-icons/react`. No emoji in product UI.
 - **Fonts** — `Geist` for UI, `Geist Mono` for RFCs, hashes, IDs, technical metadata.
 - **Domain terms** — English in code identifiers, Spanish in user-facing copy.
@@ -209,7 +209,7 @@ The frontend (Next.js) and backend (FastAPI) have different runtime needs:
 
 - **Frontend → Vercel** is the natural target (Next.js native, edge-rendered routes, ISR).
 - **Backend → not Vercel.** FastAPI is a long-lived Python server. Vercel can run Python via serverless functions, but the stack here uses SQLAlchemy + Alembic + pg connection pooling that maps poorly to that runtime. Better targets: **Render**, **Railway**, **Fly.io**, **Cloud Run**, or self-hosted via Docker.
-- **Database → Neon** (or any managed Postgres) using the existing SQLAlchemy/Alembic setup. The `DATABASE_URL` env var feeds `backend/app/core/config.py`.
+- **Database → Neon** (or any managed Postgres) using the existing SQLAlchemy/Alembic setup. The `DATABASE_URL` env var feeds `apps/api/app/core/config.py`.
 - **Storage → S3-compatible** (R2 / S3 / GCS) — currently `LocalStorageService` writes to `./storage`. Vercel's filesystem is read-only outside `/tmp`, so this **must** be migrated before any production-style deploy.
 
 Production blockers and the full integration plan live in [docs/CHECKWISE_1_6.md](docs/CHECKWISE_1_6.md). A 1.7 production-readiness audit is tracked in this branch's session notes.

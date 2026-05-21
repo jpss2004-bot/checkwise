@@ -47,7 +47,7 @@ Convert the seven Slack feedback messages into a structured, prioritized roadmap
 - **Severity:** medium.
 - **Confidence:** likely (well-described, consistent with the platform's "guided compliance assistant" thesis).
 - **Console attached:** yes — RSC chunk error (see RX-1 below).
-- **Likely owners:** `frontend/app/portal/upload/page.tsx`, `frontend/components/checkwise/intake-wizard.tsx`, `frontend/components/checkwise/document-submission-form.tsx`, backend catalog source `backend/app/core/catalogs.py` (where per-requirement description metadata lives or would need to be added).
+- **Likely owners:** `apps/web/app/portal/upload/page.tsx`, `apps/web/components/checkwise/intake-wizard.tsx`, `apps/web/components/checkwise/document-submission-form.tsx`, backend catalog source `apps/api/app/core/catalogs.py` (where per-requirement description metadata lives or would need to be added).
 
 ### F2 — `/portal/upload` · Improvement · 11:12 AM
 
@@ -64,11 +64,11 @@ Convert the seven Slack feedback messages into a structured, prioritized roadmap
 > "En esta parte, considero que lo está como `file_exists` o `allowed_file_type` y ese tipo de detalles, se conviertan en lenguaje humano, ya que, quien va a realizar la carga no podrá entenderlo del todo y probablemente tenga confusiones al momento de navegar en esta parte de la plataforma."
 
 - **What the user wants:** Validation rule labels translated from developer codes to plain Spanish.
-- **Root cause located:** `frontend/components/checkwise/validation-summary.tsx:29` renders `{validation.rule_code}` verbatim. The backend service `backend/app/services/prevalidation.py` defines codes like `file_exists`, `allowed_file_type`, `pdf_magic_header`, `pdf_encrypted`, `pdf_readable_text`, `max_file_size`, `sha256_hash`, `duplicate_hash`, `vendor_match` — every one of those is shown to non-technical users.
+- **Root cause located:** `apps/web/components/checkwise/validation-summary.tsx:29` renders `{validation.rule_code}` verbatim. The backend service `apps/api/app/services/prevalidation.py` defines codes like `file_exists`, `allowed_file_type`, `pdf_magic_header`, `pdf_encrypted`, `pdf_readable_text`, `max_file_size`, `sha256_hash`, `duplicate_hash`, `vendor_match` — every one of those is shown to non-technical users.
 - **Type:** Copy / UX. Direct, fixable.
 - **Severity:** high (this is exactly the kind of detail that erodes trust on a compliance product).
 - **Confidence:** confirmed (root cause grepped).
-- **Likely owners:** `frontend/components/checkwise/validation-summary.tsx`, plus a new `frontend/lib/constants/validation.ts` (or extend `frontend/lib/constants/statuses.ts`) holding the `rule_code → human label` map.
+- **Likely owners:** `apps/web/components/checkwise/validation-summary.tsx`, plus a new `apps/web/lib/constants/validation.ts` (or extend `apps/web/lib/constants/statuses.ts`) holding the `rule_code → human label` map.
 
 ### F4 — `/portal/dashboard` · Improvement · 12:14 PM
 
@@ -80,7 +80,7 @@ Convert the seven Slack feedback messages into a structured, prioritized roadmap
 - **Type:** Feature gap (history view) + UX clarity (gauge copy).
 - **Severity:** high (history view is the primary trust artifact for a provider's own expediente).
 - **Confidence:** likely.
-- **Likely owners:** `frontend/app/portal/dashboard/page.tsx`, `frontend/components/checkwise/portal/*` (gauge + suggested-actions strip), and a new history component (`provider-history-list.tsx` or similar). Backend: an enriched submissions-list endpoint that returns vendor submissions grouped by institution/period (probably already covered by `backend/app/api/v1/portal.py` calendar or submissions endpoints).
+- **Likely owners:** `apps/web/app/portal/dashboard/page.tsx`, `apps/web/components/checkwise/portal/*` (gauge + suggested-actions strip), and a new history component (`provider-history-list.tsx` or similar). Backend: an enriched submissions-list endpoint that returns vendor submissions grouped by institution/period (probably already covered by `apps/api/app/api/v1/portal.py` calendar or submissions endpoints).
 
 ### F5 — `/portal/reports` · Improvement · 12:42 PM
 
@@ -90,29 +90,29 @@ Convert the seven Slack feedback messages into a structured, prioritized roadmap
 - **Type:** UX clarity (today's gauge does not explain causes) + strategic (collapse three presets into one configurable report).
 - **Severity:** medium — but pairs naturally with the F6 bug since it's on the same surface.
 - **Confidence:** likely.
-- **Likely owners:** `frontend/components/checkwise/reports/list/compliance-pulse-strip.tsx` (the gauge), `frontend/components/checkwise/reports/list/reports-list-view.tsx` (preset gallery), `backend/app/services/reports/templates.py` (preset definitions — `_PROVIDER_CURRENT_STATE`, `_PROVIDER_MISSING_DOCUMENTS`, `_PROVIDER_RECENT_REJECTIONS`).
+- **Likely owners:** `apps/web/components/checkwise/reports/list/compliance-pulse-strip.tsx` (the gauge), `apps/web/components/checkwise/reports/list/reports-list-view.tsx` (preset gallery), `apps/api/app/services/reports/templates.py` (preset definitions — `_PROVIDER_CURRENT_STATE`, `_PROVIDER_MISSING_DOCUMENTS`, `_PROVIDER_RECENT_REJECTIONS`).
 
 ### F6 — `/portal/reports` · Bug · 12:43 PM
 
 > "En esta parte no deja ver las plantillas de los reportes."
 
 - **What the user observes:** The Plantillas section either renders empty ("Tu rol todavía no tiene plantillas asignadas") or the preset request fails silently.
-- **Root cause hypothesis:** The presets API requires `actor.is_workspace_owner = True` to surface the three `vendor_facing` provider presets (`backend/app/services/report_service.py:121`, `backend/app/services/reports/templates.py:293`). `is_workspace_owner` is defined as `not self.roles and self.workspace_vendor_id is not None`. **If `jluna@legalshelf.mx`'s session has any non-empty `roles` tuple AND a `workspace_vendor_id`, the gate returns `False` and the provider presets disappear.** The tester's Slack message lists `Roles —` (i.e. no role shown in the feedback payload's role echo) but that field is the *feedback payload* role echo, not necessarily the membership record. Needs reproduction.
+- **Root cause hypothesis:** The presets API requires `actor.is_workspace_owner = True` to surface the three `vendor_facing` provider presets (`apps/api/app/services/report_service.py:121`, `apps/api/app/services/reports/templates.py:293`). `is_workspace_owner` is defined as `not self.roles and self.workspace_vendor_id is not None`. **If `jluna@legalshelf.mx`'s session has any non-empty `roles` tuple AND a `workspace_vendor_id`, the gate returns `False` and the provider presets disappear.** The tester's Slack message lists `Roles —` (i.e. no role shown in the feedback payload's role echo) but that field is the *feedback payload* role echo, not necessarily the membership record. Needs reproduction.
 - **Type:** Bug — backend role gate OR seed-data classification.
 - **Severity:** **critical** (it is the only explicit "bug" in the channel, it blocks the report flow the user just praised one minute earlier in F5, and it makes the provider experience visibly broken on a demo route).
 - **Confidence:** needs reproduction — but a clear failure mode is identified.
-- **Likely owners:** `backend/app/services/report_service.py` (the `ReportActor.is_workspace_owner` property), `backend/app/api/v1/reports.py` (how `actor` is built — check if it includes the `workspace_vendor_id` for users who also have a legalshelf.mx email), `frontend/components/checkwise/reports/list/reports-list-view.tsx` (the silent fallback from `listPresets()` to `[]` on non-401 errors hides the real failure mode and should surface a debug message during testing).
+- **Likely owners:** `apps/api/app/services/report_service.py` (the `ReportActor.is_workspace_owner` property), `apps/api/app/api/v1/reports.py` (how `actor` is built — check if it includes the `workspace_vendor_id` for users who also have a legalshelf.mx email), `apps/web/components/checkwise/reports/list/reports-list-view.tsx` (the silent fallback from `listPresets()` to `[]` on non-401 errors hides the real failure mode and should surface a debug message during testing).
 
 ### F7 — `/portal/calendar` · Improvement · 12:46 PM
 
 > "Para este apartado, sugiero que se pueda visualizar de mejor manera el calendario, con detalle sobre el día en el que se hizo la carga y el nombre del documento que se cargó a la plataforma, para así tener una mejor pista y seguimiento de los documentos y el expediente en general."
 
 - **What the user wants:** Cell-level (or hover/drawer-level) information about (a) the actual upload date and (b) the filename of the document submitted in that slot.
-- **Today's behavior:** The calendar slot exposes `submission_id` and links into the submission detail, but the grid view itself does not surface upload date or filename. The detail drawer at `frontend/app/portal/calendar/page.tsx` line 421 has the data slot for it but the cell preview does not.
+- **Today's behavior:** The calendar slot exposes `submission_id` and links into the submission detail, but the grid view itself does not surface upload date or filename. The detail drawer at `apps/web/app/portal/calendar/page.tsx` line 421 has the data slot for it but the cell preview does not.
 - **Type:** UX / information density.
 - **Severity:** medium.
 - **Confidence:** likely.
-- **Likely owners:** `frontend/app/portal/calendar/page.tsx`, `frontend/lib/api/portal.ts` (extend `CalendarItem` to include `uploaded_at` + `filename` if the backend doesn't already return them), `backend/app/api/v1/portal.py` calendar endpoint.
+- **Likely owners:** `apps/web/app/portal/calendar/page.tsx`, `apps/web/lib/api/portal.ts` (extend `CalendarItem` to include `uploaded_at` + `filename` if the backend doesn't already return them), `apps/api/app/api/v1/portal.py` calendar endpoint.
 
 ### RX-1 — Production runtime · console-error pattern (attached to F1, F2, F3)
 
@@ -125,7 +125,7 @@ Convert the seven Slack feedback messages into a structured, prioritized roadmap
 - **Type:** Production runtime regression / build-deploy hygiene.
 - **Severity:** high.
 - **Confidence:** confirmed (the error signature is canonical for stale-chunk-after-deploy on Next 15 + Vercel).
-- **Likely owners:** `frontend/next.config.ts` (we recently changed `distDir` for non-ASCII paths — verify it does NOT apply on Vercel; Vercel builds run from an ASCII path so the override is inert there, but worth confirming), the Vercel project settings (ensure long-term caching headers are not preserved across deploys), and possibly the `next.config.ts` `output`/`generateBuildId` strategy. May also be aggravated by the recent visual redesign push and a subsequent stale tab.
+- **Likely owners:** `apps/web/next.config.ts` (we recently changed `distDir` for non-ASCII paths — verify it does NOT apply on Vercel; Vercel builds run from an ASCII path so the override is inert there, but worth confirming), the Vercel project settings (ensure long-term caching headers are not preserved across deploys), and possibly the `next.config.ts` `output`/`generateBuildId` strategy. May also be aggravated by the recent visual redesign push and a subsequent stale tab.
 
 ---
 
@@ -197,7 +197,7 @@ Convert the seven Slack feedback messages into a structured, prioritized roadmap
   1. Reproduce as `jluna@legalshelf.mx` against staging. Capture the actual `/api/v1/reports/_presets` response body + status.  
   2. If response is `200 { items: [] }`: investigate `actor.is_workspace_owner` construction. The current property requires `not self.roles AND workspace_vendor_id is not None`. If jluna has *any* role attached (even an unintended one) the gate flips to `False`. Either (a) fix the seed data, or (b) loosen the property to "has workspace_vendor_id, regardless of roles" — and adjust the docstring + safety branches accordingly.  
   3. If response is non-200: replace the silent `.catch(() => setPresets([]))` in `reports-list-view.tsx` with a visible warning so the empty-state copy distinguishes "no plantillas para tu rol" from "error cargando plantillas".  
-- Likely files: `backend/app/services/report_service.py`, `backend/app/api/v1/reports.py`, `frontend/components/checkwise/reports/list/reports-list-view.tsx`.  
+- Likely files: `apps/api/app/services/report_service.py`, `apps/api/app/api/v1/reports.py`, `apps/web/components/checkwise/reports/list/reports-list-view.tsx`.  
 - Test plan: (a) backend unit test that constructs a `ReportActor` for the actual seed shape of jluna's account and asserts `is_workspace_owner=True` + `presets_for_roles(...).length === 3`; (b) frontend integration test that mocks `listPresets()` to throw a non-401 and asserts the warning surfaces.  
 - Acceptance criteria: Logged in as jluna, `/portal/reports` shows three preset cards, "Estado actual del expediente" featured first. The empty-state warning never fires for valid workspace owners.  
 - Risk: low (single-surface fix, well-contained).
@@ -210,8 +210,8 @@ Convert the seven Slack feedback messages into a structured, prioritized roadmap
 - User: provider.  
 - Problem: First-time uploaders cannot tell what a given requirement document should look like or what fields it must contain.  
 - Expected behavior: Each requirement card exposes (a) a 2-4-sentence Spanish description of the document's anatomy, and (b) an optional reference image (sample of what the document looks like, with sensitive data redacted).  
-- Suggested approach: Extend the requirement catalog in `backend/app/core/catalogs.py` with optional `anatomy_es: str` and `sample_image: str | None` fields. Surface them in the existing requirement card / submission form. Sample images live under `frontend/public/marketing/requirement-samples/` (new folder) — start with the five highest-volume requirements (CSF, REPSE, IMSS opinion, INFONAVIT certificate, ISR declaration) and ship the rest incrementally.  
-- Likely files: `backend/app/core/catalogs.py`, `backend/app/schemas/portal.py`, `frontend/components/checkwise/document-submission-form.tsx`, `frontend/components/checkwise/intake-wizard.tsx`, `frontend/public/marketing/requirement-samples/*`.  
+- Suggested approach: Extend the requirement catalog in `apps/api/app/core/catalogs.py` with optional `anatomy_es: str` and `sample_image: str | None` fields. Surface them in the existing requirement card / submission form. Sample images live under `apps/web/public/marketing/requirement-samples/` (new folder) — start with the five highest-volume requirements (CSF, REPSE, IMSS opinion, INFONAVIT certificate, ISR declaration) and ship the rest incrementally.  
+- Likely files: `apps/api/app/core/catalogs.py`, `apps/api/app/schemas/portal.py`, `apps/web/components/checkwise/document-submission-form.tsx`, `apps/web/components/checkwise/intake-wizard.tsx`, `apps/web/public/marketing/requirement-samples/*`.  
 - Test plan: Visual QA on five seeded requirements. Confirm the anatomy text and sample image render in both intake-wizard and the standalone upload flow.  
 - Acceptance criteria: For at least the five priority requirements, the upload card shows an anatomy paragraph and either a sample image or a clear "Sample coming soon" note. No layout breakage at the user's tested viewport (1802×862) or at the responsive breakpoints we already QA'd.  
 - Risk: medium (requires content + image curation, not just code).
@@ -222,8 +222,8 @@ Convert the seven Slack feedback messages into a structured, prioritized roadmap
 - User: provider (and internal reviewer benefits too).  
 - Problem: `validation-summary.tsx:29` renders `validation.rule_code` directly. Users see `file_exists`, `allowed_file_type`, `pdf_magic_header`, etc.  
 - Expected behavior: Each signal shows a Spanish-language title (e.g. "Archivo recibido", "Tipo de archivo permitido", "Estructura PDF válida") with the existing `message` as the supporting sentence. The raw `rule_code` may stay as a small mono tag for QA reproducibility but it cannot be the primary label.  
-- Suggested approach: Add `frontend/lib/constants/validation.ts` with a `RULE_CODE_LABELS_ES` map mirroring every code defined in `backend/app/services/prevalidation.py`. Render `RULE_CODE_LABELS_ES[code] ?? code` from the validation-summary component. Add a `?` icon with the rule_code on hover for engineer fallback.  
-- Likely files: `frontend/lib/constants/validation.ts` (new), `frontend/components/checkwise/validation-summary.tsx`, optionally `frontend/components/checkwise/document-submission-form.tsx` if it has its own rendering.  
+- Suggested approach: Add `apps/web/lib/constants/validation.ts` with a `RULE_CODE_LABELS_ES` map mirroring every code defined in `apps/api/app/services/prevalidation.py`. Render `RULE_CODE_LABELS_ES[code] ?? code` from the validation-summary component. Add a `?` icon with the rule_code on hover for engineer fallback.  
+- Likely files: `apps/web/lib/constants/validation.ts` (new), `apps/web/components/checkwise/validation-summary.tsx`, optionally `apps/web/components/checkwise/document-submission-form.tsx` if it has its own rendering.  
 - Test plan: Unit test of the label map covers every code emitted by `prevalidation.py`. Visual regression on the existing submissions detail page.  
 - Acceptance criteria: No raw `rule_code` strings render on any user-facing surface. Reviewers can still see the original code via tooltip or `title` attribute.  
 - Risk: low.
@@ -235,7 +235,7 @@ Convert the seven Slack feedback messages into a structured, prioritized roadmap
 - Problem: There is no read-only view of the documents already uploaded, grouped by Institution × Month × Year. The dashboard's compliance gauge does not communicate what specifically is missing.  
 - Expected behavior: A new "Documentos cargados" section on the dashboard (and a deeper drilldown route if needed) listing every submission grouped by institution, then month/year, with status pill, submitted date, and a link to the submission detail. Read-only — no edit affordance to prevent the alteration risk the tester explicitly warned about. The gauge gets a "Te faltan N documentos" subtitle with the count + a chip listing the top 1-2 missing requirements.  
 - Suggested approach: New component `provider-history-list.tsx` powered by the existing `GET /api/v1/portal/workspaces/{id}/submissions` endpoint (or extend it to return grouped output). Render under the dashboard hero block. For the gauge, derive the missing-count from the same payload that already drives the percentage.  
-- Likely files: `frontend/app/portal/dashboard/page.tsx`, `frontend/components/checkwise/portal/*` (gauge), `backend/app/api/v1/portal.py`, `backend/app/services/submission_service.py`.  
+- Likely files: `apps/web/app/portal/dashboard/page.tsx`, `apps/web/components/checkwise/portal/*` (gauge), `apps/api/app/api/v1/portal.py`, `apps/api/app/services/submission_service.py`.  
 - Test plan: Seed a provider with 5 mixed submissions across 3 months and 4 institutions. Assert grouping order and counts. Smoke-test the gauge subtitle.  
 - Acceptance criteria: Submissions appear grouped Institution → Year → Month with month names in Spanish. No edit/delete buttons. Gauge displays "Te faltan N documentos" when N > 0 and the chip lists the highest-priority missing requirement.  
 - Risk: medium (touches a dashboard layout we just stabilized).
@@ -246,8 +246,8 @@ Convert the seven Slack feedback messages into a structured, prioritized roadmap
 - User: every visitor whose tab spans a deploy.  
 - Problem: `TypeError: Cannot read properties of undefined (reading 'call')` on `webpack-9513878bb031f797.js` indicates the browser tried to consume a chunk that the new deploy renamed. Symptom: every client-side nav across portal routes hard-reloads.  
 - Expected behavior: Client-side navigation works for at least the standard 24 h CDN window after a deploy, or hard-reloads gracefully without a console error and without a perceptible flash.  
-- Suggested approach: (a) Verify the recent `distDir` override in `frontend/next.config.ts` is inert on Vercel (Vercel cwd is ASCII; the resolver should return `.next`). (b) Confirm Vercel's "Auto-cleanup of build artifacts" / chunk-fallback config; consider enabling `experimental.optimisticClientCache: false` for the portal segment, or adopt the standard Next pattern `if (event.error?.name === 'ChunkLoadError') window.location.reload()` at the layout level. (c) Validate that `output: 'standalone'` is NOT silently engaged with the new `distDir`. (d) Smoke-test a fresh deploy + browser-back + nav.  
-- Likely files: `frontend/next.config.ts`, possibly a new `frontend/app/portal/error.tsx` or `frontend/app/portal/layout.tsx` for ChunkLoadError handling.  
+- Suggested approach: (a) Verify the recent `distDir` override in `apps/web/next.config.ts` is inert on Vercel (Vercel cwd is ASCII; the resolver should return `.next`). (b) Confirm Vercel's "Auto-cleanup of build artifacts" / chunk-fallback config; consider enabling `experimental.optimisticClientCache: false` for the portal segment, or adopt the standard Next pattern `if (event.error?.name === 'ChunkLoadError') window.location.reload()` at the layout level. (c) Validate that `output: 'standalone'` is NOT silently engaged with the new `distDir`. (d) Smoke-test a fresh deploy + browser-back + nav.  
+- Likely files: `apps/web/next.config.ts`, possibly a new `apps/web/app/portal/error.tsx` or `apps/web/app/portal/layout.tsx` for ChunkLoadError handling.  
 - Test plan: Manual — deploy a no-op change to Vercel preview, leave a tab on `/portal/dashboard`, deploy again, navigate. Confirm no console error and no hard nav.  
 - Acceptance criteria: A fresh Vercel deploy does not produce the chunk error for users navigating between portal routes within the next 60 minutes.  
 - Risk: medium (production change; benefits from a Vercel preview before promotion).
@@ -261,7 +261,7 @@ Convert the seven Slack feedback messages into a structured, prioritized roadmap
 - Problem: Calendar cells show status but not the upload date or filename.  
 - Expected behavior: Hovered or focused cells reveal upload date and filename (truncated). The drawer already has the data but the cell preview doesn't.  
 - Suggested approach: Extend `CalendarItem` (frontend type + backend response) with `uploaded_at: string | null` and `filename: string | null` (already-stored values for the latest submission). Render under the status badge on the cell. Mobile/tablet keep the drawer pattern.  
-- Likely files: `frontend/app/portal/calendar/page.tsx`, `frontend/lib/api/portal.ts`, `backend/app/api/v1/portal.py` calendar endpoint, `backend/app/schemas/portal.py`.  
+- Likely files: `apps/web/app/portal/calendar/page.tsx`, `apps/web/lib/api/portal.ts`, `apps/api/app/api/v1/portal.py` calendar endpoint, `apps/api/app/schemas/portal.py`.  
 - Test plan: Seed a workspace with one filled and one empty cell. Verify upload-date format `DD/MM/YYYY` and filename rendered with `truncate` on overflow.  
 - Acceptance criteria: Provider can see the upload date and filename of every populated cell without opening the drawer. Empty cells stay empty.  
 - Risk: low.
@@ -272,8 +272,8 @@ Convert the seven Slack feedback messages into a structured, prioritized roadmap
 - User: provider.  
 - Problem: Provider does not understand *what* is keeping the expediente below 100 %.  
 - Expected behavior: The Compliance Pulse strip subtitle includes the top reason ("3 documentos pendientes en IMSS", "1 documento rechazado por aclarar"). The "Estado actual del expediente" preset's generated executive summary mentions the same blockers explicitly.  
-- Suggested approach: Extend `frontend/components/checkwise/reports/list/compliance-pulse-strip.tsx` to render the top missing/rejected requirement chip. Backend: reuse the existing `provider_current_state` block executor output to surface the blocker list.  
-- Likely files: `compliance-pulse-strip.tsx`, `backend/app/services/reports/blocks/*` (provider-state block).  
+- Suggested approach: Extend `apps/web/components/checkwise/reports/list/compliance-pulse-strip.tsx` to render the top missing/rejected requirement chip. Backend: reuse the existing `provider_current_state` block executor output to surface the blocker list.  
+- Likely files: `compliance-pulse-strip.tsx`, `apps/api/app/services/reports/blocks/*` (provider-state block).  
 - Test plan: Seed a provider at 70 % completion. Verify the chip lists the top blocker.  
 - Acceptance criteria: Whenever compliance % < 100, the strip shows at least one specific reason.  
 - Risk: low.
@@ -285,7 +285,7 @@ Convert the seven Slack feedback messages into a structured, prioritized roadmap
 - Problem: A failed `listPresets()` collapses to empty silently. During testing this hides real bugs and looks identical to a legitimately empty role.  
 - Expected behavior: On non-401/403 errors, render a small inline warning that distinguishes "no presets for your role" from "presets endpoint failed."  
 - Suggested approach: Add a `presetsError` state, render an Alert above the gallery when populated.  
-- Likely files: `frontend/components/checkwise/reports/list/reports-list-view.tsx`.  
+- Likely files: `apps/web/components/checkwise/reports/list/reports-list-view.tsx`.  
 - Test plan: Mock `listPresets()` to throw a 500. Assert Alert renders. Mock to throw 403. Assert role-scoped message renders (existing behavior).  
 - Acceptance criteria: Real preset-loading failures are visible during testing.  
 - Risk: low.
@@ -298,8 +298,8 @@ Convert the seven Slack feedback messages into a structured, prioritized roadmap
 - User: provider.  
 - Problem: Three presets ("Estado actual", "Documentos faltantes", "Rechazos recientes") show as three separate cards; the tester would prefer one unified report with section-level download/export.  
 - Expected behavior: A single "Estado del expediente" preset that includes all three sections, with per-section export buttons in the report editor.  
-- Suggested approach: Define a new combined preset in `backend/app/services/reports/templates.py`. Keep the three existing presets behind a feature flag for backward compat. Add per-section download in `frontend/components/checkwise/reports/editor/report-editor.tsx`.  
-- Likely files: `backend/app/services/reports/templates.py`, `frontend/components/checkwise/reports/editor/report-editor.tsx`, `frontend/components/checkwise/reports/canvas.tsx`.  
+- Suggested approach: Define a new combined preset in `apps/api/app/services/reports/templates.py`. Keep the three existing presets behind a feature flag for backward compat. Add per-section download in `apps/web/components/checkwise/reports/editor/report-editor.tsx`.  
+- Likely files: `apps/api/app/services/reports/templates.py`, `apps/web/components/checkwise/reports/editor/report-editor.tsx`, `apps/web/components/checkwise/reports/canvas.tsx`.  
 - Test plan: Generate the combined report, verify each section renders. Verify download of an individual section.  
 - Acceptance criteria: One preset card creates a report whose three sub-sections match the legacy three presets, with per-section export.  
 - Risk: high (changes data model and demo flow; do not rush).

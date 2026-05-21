@@ -20,13 +20,13 @@ Three commits on `main`:
 - **P1.7** — `feat(provider-reports): P1.7 Actualizar con datos de hoy + freshness labels`
 
 ### P1.1 — Safety scoping helper
-`backend/app/services/reports/blocks/_safety.py` (`assert_workspace_scope`)
+`apps/api/app/services/reports/blocks/_safety.py` (`assert_workspace_scope`)
 enforces the audience contract before any vendor-scoped fetcher reads
 workspace data.
 
 ### P1.2 — `compliance_state` block
 Semáforo + reason + cumplimiento % + 8-bucket document-state count
-strip. Sourced from the new shared `backend/app/services/dashboard_compute.py`
+strip. Sourced from the new shared `apps/api/app/services/dashboard_compute.py`
 (single source of truth for semaphore + counts, mirrored from the
 portal dashboard endpoint).
 
@@ -100,7 +100,7 @@ prerequisite that blocked P1.6/P1.7/P1.8 in-browser verification.
   (break-before page), vendor_risk_matrix + upcoming_deadlines
   (per-`<tr>` keep-together).
 
-**3. `frontend/scripts/check-print-contract.mjs` + `npm run check:print`** —
+**3. `apps/web/scripts/check-print-contract.mjs` + `npm run check:print`** —
 zero-dep Node script (32 assertions, ~50 ms) that guards the P1.8
 contract directly against source files. Catches all the practical
 regressions a Playwright snapshot would catch for static CSS
@@ -282,7 +282,7 @@ and client report use.
 
 - **Live authenticated browser verification was not completed** in
   the P1.6/P1.7/P1.8 sessions. The local dev stack expects Postgres at
-  `localhost:5432` (per `backend/.env`), which wasn't running.
+  `localhost:5432` (per `apps/api/.env`), which wasn't running.
   `dev_seed.py`'s safety guard rejects SQLite URLs (host parses as
   `<unknown>`, the `CHECKWISE_ALLOW_SEED_AGAINST` substring check
   needs a non-empty host). The 427-pytest gauntlet covers the
@@ -312,7 +312,7 @@ print mode without going through the planner endpoint by hand.
 
 The smallest next slice:
 
-- Extend `backend/scripts/dev_seed.py` to create at least one
+- Extend `apps/api/scripts/dev_seed.py` to create at least one
   `vendor_facing` report with the canonical 4-block sequence
   populated from `dashboard_compute` for `boss.demo`'s workspace.
 - Add a minimal admin/internal report that uses

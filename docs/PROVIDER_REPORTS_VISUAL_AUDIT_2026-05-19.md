@@ -2,7 +2,7 @@
 
 > **Date:** 2026-05-19
 > **Subject:** /portal/reports list, /portal/reports/[id] editor, /portal/reports/[id]/print, and the 10 block components.
-> **Method:** Reviewed 3 prod screenshots ([25-portal-reports.png](audit-screenshots/2026-05-18-system-audit/25-portal-reports.png), [26-portal-report-print.png](audit-screenshots/2026-05-18-system-audit/26-portal-report-print.png), [19-reports-editor.png](executive-evidence/screenshots/19-reports-editor.png)) against the source. Cross-referenced with [block-header.tsx](../frontend/components/checkwise/reports/block-header.tsx), [kpi-strip.tsx](../frontend/components/checkwise/reports/blocks/kpi-strip.tsx), [reports-list-view.tsx](../frontend/components/checkwise/reports/reports-list-view.tsx), and the print page.
+> **Method:** Reviewed 3 prod screenshots ([25-portal-reports.png](audit-screenshots/2026-05-18-system-audit/25-portal-reports.png), [26-portal-report-print.png](audit-screenshots/2026-05-18-system-audit/26-portal-report-print.png), [19-reports-editor.png](executive-evidence/screenshots/19-reports-editor.png)) against the source. Cross-referenced with [block-header.tsx](../apps/web/components/checkwise/reports/block-header.tsx), [kpi-strip.tsx](../apps/web/components/checkwise/reports/blocks/kpi-strip.tsx), [reports-list-view.tsx](../apps/web/components/checkwise/reports/reports-list-view.tsx), and the print page.
 > **Verdict:** the "wireframe feel" comes from **5 specific code patterns** repeated across surfaces. One of them is dominant — fix it first and the perceived polish jump is significant.
 
 ---
@@ -13,7 +13,7 @@
 
 The print screenshot makes it obvious: half of what the eye sees on the page is type labels, not content.
 
-- **Single line of code drives it:** [block-header.tsx:59](../frontend/components/checkwise/reports/block-header.tsx)
+- **Single line of code drives it:** [block-header.tsx:59](../apps/web/components/checkwise/reports/block-header.tsx)
   ```tsx
   <span className="cw-eyebrow">{label}</span>
   ```
@@ -30,7 +30,7 @@ The print screenshot makes it obvious: half of what the eye sees on the page is 
 
 **What you see:** `Aa TEXTO`, `TIRA DE KPIS`, `— DIVISOR` headers above every block on the printable page. Reads as a wireframe / outline, not a finished compliance document.
 
-**Source:** [block-header.tsx:59](../frontend/components/checkwise/reports/block-header.tsx) renders `<span className="cw-eyebrow">{label}</span>` unconditionally. The whole `<BlockHeader>` component is mounted by Canvas for every block in both editable and read-only modes; only the action buttons (lock, delete, regenerate) are gated on `editable`.
+**Source:** [block-header.tsx:59](../apps/web/components/checkwise/reports/block-header.tsx) renders `<span className="cw-eyebrow">{label}</span>` unconditionally. The whole `<BlockHeader>` component is mounted by Canvas for every block in both editable and read-only modes; only the action buttons (lock, delete, regenerate) are gated on `editable`.
 
 **Where it leaks:**
 - /portal/reports/[id]/print (worst — should be invisible chrome)
@@ -39,7 +39,7 @@ The print screenshot makes it obvious: half of what the eye sees on the page is 
 
 **Minimum-viable fix (~5 lines, one file):**
 
-In [block-header.tsx](../frontend/components/checkwise/reports/block-header.tsx):
+In [block-header.tsx](../apps/web/components/checkwise/reports/block-header.tsx):
 
 1. **Skip the whole component when not editable** — wrap the `return` with `if (!editable) return null;` and let blocks render without any chrome on top. Tradeoff: read-only viewers also lose the icon. Most blocks already render their own title inside (Executive Summary's h2, KPI strip's labels, etc.), so the icon is decorative.
 
@@ -65,7 +65,7 @@ Recommendation: **option 1 — return null when not editable.** Cleanest, bigges
 
 **What you see:** the Compliance Pulse strip on /portal/reports renders metrics as `CUMPLIMIENTO 78%  EN RIESGO 1  VENCIDOS 0  PRÓXIMO EN 12d` — small uppercase eyebrow labels with monospace numbers, on a thin top/bottom-bordered strip. No color, no chart, no hierarchy.
 
-**Source:** [kpi-strip.tsx:113-127](../frontend/components/checkwise/reports/blocks/kpi-strip.tsx) uses the `cw-metadata-strip` pattern — a row of label/value pairs. The pattern is intentional (V2.x called out "identical card grids" as anti-patterns and replaced them with metadata strips), but the result is too flat for a compliance dashboard's headline numbers.
+**Source:** [kpi-strip.tsx:113-127](../apps/web/components/checkwise/reports/blocks/kpi-strip.tsx) uses the `cw-metadata-strip` pattern — a row of label/value pairs. The pattern is intentional (V2.x called out "identical card grids" as anti-patterns and replaced them with metadata strips), but the result is too flat for a compliance dashboard's headline numbers.
 
 **Where it leaks:**
 - /portal/reports CompliancePulseStrip
@@ -92,7 +92,7 @@ This is one block, doesn't touch layout. Same data, much sharper reading.
 
 **What you see:** below the KPI strip in the print screenshot, a small all-caps "SIN SELLO DE ACTUALIZACIÓN" badge. Reads as a developer note ("no fetched_at present in data payload"), not a thing a reader of the report cares about.
 
-**Source:** [freshness-label.tsx](../frontend/components/checkwise/reports/freshness-label.tsx) renders this fallback when `data.fetched_at` is missing. Useful in the editor — tells the author the block hasn't been hydrated yet. Useless in print.
+**Source:** [freshness-label.tsx](../apps/web/components/checkwise/reports/freshness-label.tsx) renders this fallback when `data.fetched_at` is missing. Useful in the editor — tells the author the block hasn't been hydrated yet. Useless in print.
 
 **Minimum-viable fix:** in the FreshnessLabel component, when `editable === false` AND `fetched_at == null`, **render nothing**. The "Datos al [date]" line is valuable when there's a date; the "no seal" warning is not valuable to a reader.
 
@@ -109,7 +109,7 @@ if (!fetchedAt && !showInEditor) return null;
 
 **What you see:** 3 cards under "Plantillas" — "Mi estado de cumplimiento" / "Documentos faltantes" / "Rechazos recientes" — same size, same icon style, same `[Usar plantilla]` button. The user has no signal about which is the recommended starting point. Reads as a checkbox list of options, not a curated entry point.
 
-**Source:** [reports-list-view.tsx:248-260](../frontend/components/checkwise/reports/reports-list-view.tsx) maps presets to identical cards.
+**Source:** [reports-list-view.tsx:248-260](../apps/web/components/checkwise/reports/reports-list-view.tsx) maps presets to identical cards.
 
 **Why it matters for Jorge's test:** he doesn't know that `provider-current-state` is the only one that produces meaningful data on a fresh workspace. Visual hierarchy could nudge him there without you having to brief him.
 
@@ -126,7 +126,7 @@ OR — minimum-er fix: just add a "✨ Recomendado" pill on the first preset in 
 
 **What you see:** in the print screenshot, just under the title "Riesgo del portafolio · Q2 2026", a row of metadata: `AUDIENCIA Para el cliente · ESTADO Activo · VERSIÓN v1 · GENERADO 18 de mayo de 2026 a las 6:57 p.m.` followed by a separate badge `🕐 GENERADO EL 18 DE MAYO DE 2026 A LAS 6:57 P.M.`. The badge **duplicates** the inline metadata line above it, and is rendered in a bordered all-caps box that draws attention away from the report's actual content.
 
-**Source:** [app/portal/reports/[id]/print/page.tsx](../frontend/app/portal/reports/[id]/print/page.tsx) — the cover-page section composes title + subtitle + metadata-strip + a separate `fetched_at`-derived seal.
+**Source:** [app/portal/reports/[id]/print/page.tsx](../apps/web/app/portal/reports/[id]/print/page.tsx) — the cover-page section composes title + subtitle + metadata-strip + a separate `fetched_at`-derived seal.
 
 **Minimum-viable fix:** remove the duplicate seal badge. The metadata-strip already shows the generated timestamp. If the freshness anchor matters, fold it into the existing metadata row instead of a separate boxed badge.
 
@@ -136,7 +136,7 @@ OR — minimum-er fix: just add a "✨ Recomendado" pill on the first preset in 
 
 **What you see:** in the editor screenshot (19-reports-editor.png), every block has a chrome row with: drag handle (on hover), icon, type-label, raw type code in mono, then on the right side icons for explain / regenerate / lock / delete. With 4+ blocks in a report, this is a lot of repeated chrome.
 
-**Source:** [block-header.tsx:48-130](../frontend/components/checkwise/reports/block-header.tsx).
+**Source:** [block-header.tsx:48-130](../apps/web/components/checkwise/reports/block-header.tsx).
 
 **Why it feels generic:** action buttons sit on hover-reveal but the chrome row itself is always visible. The block becomes a "card with a header" instead of a piece of content.
 
@@ -171,7 +171,7 @@ Lower-effort alternative: remove the raw type-code monospace span (`{type}` next
 
 **What you see:** in the print screenshot, `DETALLE POR PROVEEDOR` appears centered between two horizontal lines — but in tiny all-caps eyebrow style, almost as small as the type-label leak from F1.
 
-**Source:** [divider.tsx:31](../frontend/components/checkwise/reports/blocks/divider.tsx) — the optional label is rendered with `className="cw-eyebrow ..."` so it gets the eyebrow treatment.
+**Source:** [divider.tsx:31](../apps/web/components/checkwise/reports/blocks/divider.tsx) — the optional label is rendered with `className="cw-eyebrow ..."` so it gets the eyebrow treatment.
 
 **Why it's wrong:** a section divider with a label is essentially a section heading. Sections in a printed report should feel like H2-level demarcations, not eyebrow labels.
 

@@ -61,9 +61,9 @@ This map turns a longer-form provider-side feedback transcript (Jose Pablo's not
 - **Affected pages/routes:** `/portal/entra-a-tu-espacio` (workspace confirmation card), `/portal/dashboard` (provider context bar), provider profile surface (does not exist yet — locked Tier B from §18 of the experience plan).
 - **User role:** Provider.
 - **Code state today:**  
-  - **`frontend/components/checkwise/workspace/correction-request-form.tsx` already exists.** It is a fully built React component with a Field/Input/Select/Textarea form, an `isProtectedField` gate, and a `submitCorrection` call.  
+  - **`apps/web/components/checkwise/workspace/correction-request-form.tsx` already exists.** It is a fully built React component with a Field/Input/Select/Textarea form, an `isProtectedField` gate, and a `submitCorrection` call.  
   - **It is currently NOT mounted on any provider-facing route.** A `grep` for `CorrectionRequestForm` returns only the definition file itself.  
-  - The backing API at `submitCorrection` lives in `frontend/lib/mock/corrections.ts` — **mock only**, no real backend endpoint.
+  - The backing API at `submitCorrection` lives in `apps/web/lib/mock/corrections.ts` — **mock only**, no real backend endpoint.
 - **Severity:** P1 (provider clarity blocker; Slack-feedback note N1 also raised this).
 - **Implementation complexity:** Low frontend (mount existing component, link from provider context bar). Medium backend (replace mock with a real endpoint + audit log row + admin notification).
 - **Legal/security dependency:** Light. RFC/razón social/contract-reference edits must remain support-only (Tier B locked decision). Audit every request.
@@ -74,12 +74,12 @@ This map turns a longer-form provider-side feedback transcript (Jose Pablo's not
 
 - **What the user said:** Review every "REPSE 2026" / hardcoded date. Decide whether to remove, dynamically calculate, or legally validate. Avoid hardcoded future years that may become wrong or confusing.
 - **Affected pages/routes (verified by grep):**
-  - `frontend/components/marketing/features-section.tsx:46` — `title: "Calendario REPSE 2026"` (marketing)
-  - `frontend/components/marketing/hero-section.tsx:61` — `México · 2026`
-  - `frontend/components/marketing/hero-section.tsx:151` — `label: "REPSE 2026"`
-  - `frontend/components/marketing/legal-shelf-section.tsx:21` — `Estándar REPSE 2026`
-  - `frontend/app/portal/entra-a-tu-espacio/page.tsx:267` — `"Calendario REPSE 2026: SAT mensual..."` (provider-facing)
-  - `backend/app/api/v1/portal.py:883` — `year: int = 2026` (calendar endpoint default)
+  - `apps/web/components/marketing/features-section.tsx:46` — `title: "Calendario REPSE 2026"` (marketing)
+  - `apps/web/components/marketing/hero-section.tsx:61` — `México · 2026`
+  - `apps/web/components/marketing/hero-section.tsx:151` — `label: "REPSE 2026"`
+  - `apps/web/components/marketing/legal-shelf-section.tsx:21` — `Estándar REPSE 2026`
+  - `apps/web/app/portal/entra-a-tu-espacio/page.tsx:267` — `"Calendario REPSE 2026: SAT mensual..."` (provider-facing)
+  - `apps/api/app/api/v1/portal.py:883` — `year: int = 2026` (calendar endpoint default)
   - Test files (`tests/test_portal_dashboard.py`, etc.) — fixtures, ignore.
 - **User role:** Provider (entra-a-tu-espacio), public visitor (marketing).
 - **Severity:** P2 (polish; not a safety blocker, but ages badly).
@@ -92,7 +92,7 @@ This map turns a longer-form provider-side feedback transcript (Jose Pablo's not
 
 - **What the user said:** Current upload appears to be one document at a time. Providers may need to upload multiple files for one requirement (contract + annex, RFC + actualizaciones). Evaluate whether the data model already supports it; if so, improve the UI; if not, document the safest path.
 - **Code state today:**
-  - **`Submission` has a 1:N relationship to `Document`** (`backend/app/models/entities.py:222`: `documents: Mapped[list[Document]] = relationship(back_populates="submission")`). **The data model already supports multiple documents per submission.**
+  - **`Submission` has a 1:N relationship to `Document`** (`apps/api/app/models/entities.py:222`: `documents: Mapped[list[Document]] = relationship(back_populates="submission")`). **The data model already supports multiple documents per submission.**
   - The endpoint `POST /api/v1/portal/workspaces/{id}/submissions` (line 1453) accepts **one** `UploadFile`, runs `assert_pdf_upload(file)`, then stores one Document.
   - The prevalidation pipeline is per-document and per-submission.
   - The replacement lineage (`supersedes_submission_id`) is for re-uploads after rejection — **NOT** for grouping multiple documents under one submission.
@@ -122,10 +122,10 @@ This map turns a longer-form provider-side feedback transcript (Jose Pablo's not
 
 - **What the user said:** Evaluate whether XML uploads are required. Do not enable just because users mention it. Produce a security recommendation: allow / block / allow only in specific types / quarantine-then-process / parse with hardened parser.
 - **Code state today (verified):**
-  - `backend/app/core/config.py:37` — `ALLOWED_FILE_EXTENSIONS: str = ".pdf"` — **PDF-only by default.**
-  - `backend/app/services/submission_service.py:57` — `if not filename.lower().endswith(".pdf")` — hard reject for non-PDF.
-  - `backend/app/api/v1/metadata_dry_run.py:41` — same PDF-only check.
-  - `backend/app/services/prevalidation.py:30` — `allowed_file_type` rule fails on non-PDF.
+  - `apps/api/app/core/config.py:37` — `ALLOWED_FILE_EXTENSIONS: str = ".pdf"` — **PDF-only by default.**
+  - `apps/api/app/services/submission_service.py:57` — `if not filename.lower().endswith(".pdf")` — hard reject for non-PDF.
+  - `apps/api/app/api/v1/metadata_dry_run.py:41` — same PDF-only check.
+  - `apps/api/app/services/prevalidation.py:30` — `allowed_file_type` rule fails on non-PDF.
   - **XML is currently rejected at three layers.** The system is safe today.
 - **Affected pages/routes:** `/portal/upload`.
 - **User role:** Provider; reviewer/admin if XML ever enters the pipeline.
@@ -139,9 +139,9 @@ This map turns a longer-form provider-side feedback transcript (Jose Pablo's not
 
 - **What the user said:** Period filters currently accept impossible dates like 1945. Since REPSE began in 2021, period selectors / filters should not accept dates before 2021.
 - **Code state today (verified):**
-  - `backend/app/api/v1/portal.py:883` — `year: int = 2026` (no `Query(ge=..., le=...)`). **Accepts `?year=1945` and `?year=9999`.**
-  - `backend/app/api/v1/portal.py:1993` — `period_key`-based deadline lookup reads `int(period_key[:4])` with no min/max check.
-  - Frontend calendar page (`frontend/app/portal/calendar/page.tsx:109`) sets the year from `new Date().getFullYear() || 2026` — **already dynamic**, only the fallback is hardcoded.
+  - `apps/api/app/api/v1/portal.py:883` — `year: int = 2026` (no `Query(ge=..., le=...)`). **Accepts `?year=1945` and `?year=9999`.**
+  - `apps/api/app/api/v1/portal.py:1993` — `period_key`-based deadline lookup reads `int(period_key[:4])` with no min/max check.
+  - Frontend calendar page (`apps/web/app/portal/calendar/page.tsx:109`) sets the year from `new Date().getFullYear() || 2026` — **already dynamic**, only the fallback is hardcoded.
 - **Affected pages/routes:** `/portal/calendar`, `/portal/dashboard` (via period query), `/portal/reports` (period filter), `/portal/upload` (period_key form field), admin/client calendars.
 - **User role:** Provider; admin/client read-only.
 - **Severity:** P0 (correctness blocker — accepts impossible inputs).
@@ -154,9 +154,9 @@ This map turns a longer-form provider-side feedback transcript (Jose Pablo's not
 
 - **What the user said:** The product correctly flagged a mismatch in some cases (valuable), but misidentified a manual as a possible CFDI (reduces trust). Product must prevent "upload anything → 100% compliance." Continue improving identification but don't overclaim AI if it's rule-based.
 - **Code state today (verified):**
-  - `backend/app/services/dashboard_compute.py:40-47` — `ACTIONABLE_SLOT_STATES = {REJECTED, NEEDS_CORRECTION, POSSIBLE_MISMATCH}` blocks the semaphore to red. `RESOLVED_SLOT_STATES = {APPROVED, EXCEPTION, NOT_APPLICABLE}` are the only states that count toward `compliance_pct`. **The "100% with mismatched document" path is structurally prevented.** A document in `POSSIBLE_MISMATCH` cannot reach `APPROVED` without explicit reviewer action.
-  - `backend/app/services/prevalidation.py:120-136` — `requirement_match` rule fires `result="warning"` and `requires_human_review=True` when `document_signals.mismatch_reason` is set.
-  - The manual-vs-CFDI misclassification suggests `document_signals.mismatch_reason` *did not fire* for that file. The bug is in the upstream classifier (probably `backend/app/services/document_intelligence/`), not in the safety net.
+  - `apps/api/app/services/dashboard_compute.py:40-47` — `ACTIONABLE_SLOT_STATES = {REJECTED, NEEDS_CORRECTION, POSSIBLE_MISMATCH}` blocks the semaphore to red. `RESOLVED_SLOT_STATES = {APPROVED, EXCEPTION, NOT_APPLICABLE}` are the only states that count toward `compliance_pct`. **The "100% with mismatched document" path is structurally prevented.** A document in `POSSIBLE_MISMATCH` cannot reach `APPROVED` without explicit reviewer action.
+  - `apps/api/app/services/prevalidation.py:120-136` — `requirement_match` rule fires `result="warning"` and `requires_human_review=True` when `document_signals.mismatch_reason` is set.
+  - The manual-vs-CFDI misclassification suggests `document_signals.mismatch_reason` *did not fire* for that file. The bug is in the upstream classifier (probably `apps/api/app/services/document_intelligence/`), not in the safety net.
 - **Affected pages/routes:** `/portal/upload` (validation summary), `/portal/submissions/[id]` (timeline), `/portal/dashboard` (semaphore).
 - **User role:** Provider; reviewer for diagnosis.
 - **Severity:** P3 (strategic differentiator) for the classifier itself; P1 for the UI honesty around it.
@@ -169,13 +169,13 @@ This map turns a longer-form provider-side feedback transcript (Jose Pablo's not
 
 - **What the user said:** Provider users don't understand "hash," "OCR," "extraction," internal process labels. Rewrite provider-facing timeline / status language for non-technical users. Keep valuable messages like "posible discrepancia detectada" and "el documento parece…". Hide technical details under an advanced/debug area only if useful for QA/admin.
 - **Code state today (verified):**
-  - `backend/app/services/prevalidation.py:86` — message contains `"Hash SHA-256 calculado: {sha256}"`. Surfaced to providers.
-  - `backend/app/services/prevalidation.py:106` — `"Pendiente de extracción/OCR para confirmar RFC..."`.
-  - `backend/app/services/prevalidation.py:115` — `"Pendiente de extracción/OCR para confirmar que el documento corresponde al periodo."`.
-  - `backend/app/services/prevalidation.py:94-97` — `"Ya existe un documento con el mismo hash..."`.
-  - `frontend/components/checkwise/intake-wizard.tsx:1104` — `"Calculamos hash SHA-256, inspeccionamos la estructura PDF..."` (provider-facing helper text).
-  - `frontend/components/checkwise/intake-wizard.tsx:1232` — `"Hash SHA-256, estructura PDF, texto legible, señales documentales."`.
-  - `frontend/components/marketing/features-section.tsx:70` — `"Validación lista para OCR/IA"` (marketing — acceptable).
+  - `apps/api/app/services/prevalidation.py:86` — message contains `"Hash SHA-256 calculado: {sha256}"`. Surfaced to providers.
+  - `apps/api/app/services/prevalidation.py:106` — `"Pendiente de extracción/OCR para confirmar RFC..."`.
+  - `apps/api/app/services/prevalidation.py:115` — `"Pendiente de extracción/OCR para confirmar que el documento corresponde al periodo."`.
+  - `apps/api/app/services/prevalidation.py:94-97` — `"Ya existe un documento con el mismo hash..."`.
+  - `apps/web/components/checkwise/intake-wizard.tsx:1104` — `"Calculamos hash SHA-256, inspeccionamos la estructura PDF..."` (provider-facing helper text).
+  - `apps/web/components/checkwise/intake-wizard.tsx:1232` — `"Hash SHA-256, estructura PDF, texto legible, señales documentales."`.
+  - `apps/web/components/marketing/features-section.tsx:70` — `"Validación lista para OCR/IA"` (marketing — acceptable).
   - **Stage 1 BL-003 fixed the `rule_code` labels but left the message bodies and the wizard helper text untouched.**
 - **Affected pages/routes:** `/portal/upload` (validation summary + intake wizard), `/portal/submissions/[id]`.
 - **User role:** Provider.

@@ -10,7 +10,7 @@ La base conceptual proviene de:
 
 ### Mapeo Árbol → catálogo de código
 
-`backend/app/core/compliance_catalog.py` encodea el árbol como:
+`apps/api/app/core/compliance_catalog.py` encodea el árbol como:
 
 - `OnboardingRequirement` (Expediente Corporativo) por persona moral / física:
   Contrato, Documentación Corporativa, Registro REPSE, Registro Patronal.

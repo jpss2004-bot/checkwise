@@ -13,16 +13,16 @@ and [PROVIDER_DASHBOARD_READ_MODEL.md](PROVIDER_DASHBOARD_READ_MODEL.md).
 
 ## What changed in Phase 5
 
-* `frontend/app/portal/onboarding/page.tsx` consumes the backend
+* `apps/web/app/portal/onboarding/page.tsx` consumes the backend
   onboarding response directly. The legacy
   `adaptOnboardingToRequirements` + `MOCK_EXPEDIENTE` enrichment is
   gone.
-* `frontend/app/portal/calendar/page.tsx` consumes the backend
+* `apps/web/app/portal/calendar/page.tsx` consumes the backend
   calendar response directly. `adaptCalendarToEvents` +
   `MOCK_CALENDAR_2026` removed.
-* `frontend/lib/api/portal-adapters.ts` and
-  `frontend/lib/mock/calendar.ts` deleted (no remaining consumers).
-* `frontend/lib/mock/expediente.ts` **survives** — still referenced by
+* `apps/web/lib/api/portal-adapters.ts` and
+  `apps/web/lib/mock/calendar.ts` deleted (no remaining consumers).
+* `apps/web/lib/mock/expediente.ts` **survives** — still referenced by
   `lib/workspace/resolver.ts` and `lib/routing/post-login.ts`. Both
   are out of scope for Phase 5; see "Remaining mock dependencies"
   below.
@@ -128,7 +128,7 @@ fixtures path explicitly — not silently shadow the canonical reads.
 
 ## Remaining mock dependencies
 
-`frontend/lib/mock/expediente.ts` was **deleted in Phase 6**. The
+`apps/web/lib/mock/expediente.ts` was **deleted in Phase 6**. The
 `MOCK_EXPEDIENTE` fallback chain it powered was traced to two helpers
 (`decideWorkspaceAccess` in `lib/workspace/resolver.ts` and
 `decidePostLoginRoute` in `lib/routing/post-login.ts`) that **had
@@ -138,12 +138,12 @@ related `AccessDecisionBanner` component were removed:
 
 | Deleted in Phase 6                                            | Reason                                                                |
 |---------------------------------------------------------------|-----------------------------------------------------------------------|
-| `frontend/lib/routing/post-login.ts`                          | `decidePostLoginRoute` had no callers — routing happens inline in `/login`. |
-| `frontend/lib/routing/` (directory)                           | Empty after the file removal.                                          |
-| `frontend/lib/mock/expediente.ts`                             | No remaining importers after the two helpers were removed.             |
-| `frontend/components/checkwise/workspace/access-decision-banner.tsx` | Orphan component, no importers.                                        |
-| `frontend/lib/workspace/resolver.ts::decideWorkspaceAccess`   | No callers; deleted along with its `slugMatches` + `GENERIC_DOMAINS` helpers. |
-| `frontend/lib/workspace/types.ts::WorkspaceAccessOutcome`     | Only consumer was the deleted banner.                                  |
+| `apps/web/lib/routing/post-login.ts`                          | `decidePostLoginRoute` had no callers — routing happens inline in `/login`. |
+| `apps/web/lib/routing/` (directory)                           | Empty after the file removal.                                          |
+| `apps/web/lib/mock/expediente.ts`                             | No remaining importers after the two helpers were removed.             |
+| `apps/web/components/checkwise/workspace/access-decision-banner.tsx` | Orphan component, no importers.                                        |
+| `apps/web/lib/workspace/resolver.ts::decideWorkspaceAccess`   | No callers; deleted along with its `slugMatches` + `GENERIC_DOMAINS` helpers. |
+| `apps/web/lib/workspace/types.ts::WorkspaceAccessOutcome`     | Only consumer was the deleted banner.                                  |
 
 `buildWorkspaceContext` (the workspace-identity snapshot used by
 `/portal/dashboard` and `/portal/entra-a-tu-espacio`) is preserved

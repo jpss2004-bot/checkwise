@@ -170,5 +170,5 @@ Each is tracked as a follow-up phase and can adopt the same scope
 
 | Backend                                                                | Frontend                                                             |
 |------------------------------------------------------------------------|----------------------------------------------------------------------|
-| [backend/app/api/v1/client.py](../backend/app/api/v1/client.py)        | [frontend/lib/api/client.ts](../frontend/lib/api/client.ts)          |
-| [backend/tests/test_client_portal.py](../backend/tests/test_client_portal.py) | [frontend/app/client/_shell.tsx](../frontend/app/client/_shell.tsx) + the 6 new pages under `frontend/app/client/{dashboard,vendors,vendors/[vendor_id],calendar,submissions,activity}/` |
+| [apps/api/app/api/v1/client.py](../apps/api/app/api/v1/client.py)        | [apps/web/lib/api/client.ts](../apps/web/lib/api/client.ts)          |
+| [apps/api/tests/test_client_portal.py](../apps/api/tests/test_client_portal.py) | [apps/web/app/client/_shell.tsx](../apps/web/app/client/_shell.tsx) + the 6 new pages under `apps/web/app/client/{dashboard,vendors,vendors/[vendor_id],calendar,submissions,activity}/` |

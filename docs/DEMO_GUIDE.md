@@ -84,7 +84,7 @@ Los screenshots de esta guía se capturan desde el sistema local corriendo. No s
 - Backend corriendo en `http://127.0.0.1:8000`.
 - Frontend corriendo en `http://127.0.0.1:3000`.
 - PDF de demo disponible en `demo_assets/sample_documents/checkwise_demo_opinion_sat.pdf`.
-- `frontend/.env.local` con `NEXT_PUBLIC_DEMO_MODE=true` para exponer el botón "Usar PDF demo" (oculto en producción).
+- `apps/web/.env.local` con `NEXT_PUBLIC_DEMO_MODE=true` para exponer el botón "Usar PDF demo" (oculto en producción).
 - Screenshots disponibles en `demo_assets/screenshots/`.
 - `http://127.0.0.1:8000/health` responde `200`.
 - `http://127.0.0.1:8000/api/v1/catalogs` responde `200`.
@@ -96,7 +96,7 @@ Los screenshots de esta guía se capturan desde el sistema local corriendo. No s
 Primera vez:
 
 ```bash
-bash backend/scripts/dev_setup.sh
+bash apps/api/scripts/dev_setup.sh
 cd frontend && npm install && cd ..
 ```
 
@@ -110,7 +110,7 @@ O en terminales separadas:
 
 ```bash
 # Terminal 1
-bash backend/scripts/dev_start.sh
+bash apps/api/scripts/dev_start.sh
 
 # Terminal 2
 cd frontend && npm run dev
@@ -177,19 +177,19 @@ cd frontend && npm run dev
 ```bash
 lsof -i :8000
 kill -9 $(lsof -ti :8000)
-bash backend/scripts/dev_start.sh
+bash apps/api/scripts/dev_start.sh
 ```
 
 ### Backend no responde
 
-1. Confirmar que el backend está corriendo (`bash backend/scripts/dev_start.sh`).
-2. Si la DB local está corrupta, resetear: `bash backend/scripts/dev_reset.sh`.
+1. Confirmar que el backend está corriendo (`bash apps/api/scripts/dev_start.sh`).
+2. Si la DB local está corrupta, resetear: `bash apps/api/scripts/dev_reset.sh`.
 3. Confirmar `curl http://localhost:8000/health`.
 
 ### Frontend no compila
 
 ```bash
-rm -rf frontend/.next frontend/tsconfig.tsbuildinfo
+rm -rf frontend/.next apps/web/tsconfig.tsbuildinfo
 cd frontend
 npm run typecheck
 npm run build
@@ -202,7 +202,7 @@ El stack de desarrollo usa SQLite local por defecto (`backend/checkwise.db`), po
 ### El formulario no envía
 
 - Confirmar que el backend responde en `http://127.0.0.1:8000/health`.
-- Confirmar que `frontend/.env.local` usa `NEXT_PUBLIC_API_BASE_URL=http://127.0.0.1:8000`.
+- Confirmar que `apps/web/.env.local` usa `NEXT_PUBLIC_API_BASE_URL=http://127.0.0.1:8000`.
 - Confirmar que el archivo seleccionado sea PDF y pese menos de 15 MB.
 - Usar el PDF de demo incluido.
 

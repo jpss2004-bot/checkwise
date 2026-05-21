@@ -5,7 +5,7 @@ How to work on this repo without breaking anything important. Read once, refer b
 ## Getting set up
 
 ```bash
-bash backend/scripts/dev_setup.sh      # venv, deps, alembic migrate, seed
+bash apps/api/scripts/dev_setup.sh      # venv, deps, alembic migrate, seed
 cd frontend && npm install && cd ..
 bash dev.sh                            # boots both services
 ```
@@ -37,8 +37,8 @@ If you change something user-visible, also do a smoke pass in the browser. The h
 
 Submission / document statuses are the canonical Spanish codes (`pendiente_revision`, `posible_mismatch`, etc.). They live in:
 
-- Backend → [`backend/app/constants/statuses.py`](backend/app/constants/statuses.py) as a `DocumentStatus` StrEnum.
-- Frontend → [`frontend/lib/constants/statuses.ts`](frontend/lib/constants/statuses.ts) as a mirror.
+- Backend → [`apps/api/app/constants/statuses.py`](apps/api/app/constants/statuses.py) as a `DocumentStatus` StrEnum.
+- Frontend → [`apps/web/lib/constants/statuses.ts`](apps/web/lib/constants/statuses.ts) as a mirror.
 
 Never inline a status string in a conditional. Import the constant and compare.
 
@@ -46,21 +46,21 @@ User-facing labels are plain-language Spanish: `Esperando revisión`, `Posible i
 
 ### Roles
 
-`internal_admin`, `reviewer`, `client_admin` — defined in `backend/app/constants/roles.py`. Wire new RBAC guards via `require_role` / `require_any_role` from [`backend/app/api/v1/auth.py`](backend/app/api/v1/auth.py).
+`internal_admin`, `reviewer`, `client_admin` — defined in `apps/api/app/constants/roles.py`. Wire new RBAC guards via `require_role` / `require_any_role` from [`apps/api/app/api/v1/auth.py`](apps/api/app/api/v1/auth.py).
 
 ### Institutions
 
-`stps_repse`, `sat`, `imss`, `infonavit`, `interno_cliente` — defined in `backend/app/constants/institutions.py`. The frontend gets the human label from `INSTITUTION_LABELS` exported by [`frontend/lib/api/portal.ts`](frontend/lib/api/portal.ts).
+`stps_repse`, `sat`, `imss`, `infonavit`, `interno_cliente` — defined in `apps/api/app/constants/institutions.py`. The frontend gets the human label from `INSTITUTION_LABELS` exported by [`apps/web/lib/api/portal.ts`](apps/web/lib/api/portal.ts).
 
 ### Brand colors
 
-- **Brand palette only via HSL CSS variables** in [`frontend/app/globals.css`](frontend/app/globals.css). Navy `#013557`, mid-blue `#02558a`, teal `#09c1b0`, slate `#4b90a4`.
+- **Brand palette only via HSL CSS variables** in [`apps/web/app/globals.css`](apps/web/app/globals.css). Navy `#013557`, mid-blue `#02558a`, teal `#09c1b0`, slate `#4b90a4`.
 - **Semantic colors via Tailwind defaults**: `emerald` (success), `amber` (attention), `red` (destructive).
 - **No emoji** in UI. One icon family: `lucide-react`.
 
 ### Typography
 
-Open Sans, set in `frontend/app/layout.tsx`. Don't add a second font without explicit design buy-in.
+Open Sans, set in `apps/web/app/layout.tsx`. Don't add a second font without explicit design buy-in.
 
 ### Domain language
 
@@ -89,8 +89,8 @@ State transitions worth tracking go through `services/audit_log.add_audit_event`
 
 ## Service-layer expectations
 
-- Routers under `backend/app/api/v1/` stay **thin**: parse, dispatch, respond.
-- Business logic lives in `backend/app/services/`.
+- Routers under `apps/api/app/api/v1/` stay **thin**: parse, dispatch, respond.
+- Business logic lives in `apps/api/app/services/`.
   - `submission_service.py` — intake helpers (PDF gate, get-or-create, status derivation, validation timeline).
   - `requirement_service.py` — canonical-vs-legacy resolution + period resolution.
   - One service per cross-cutting concern; don't lump.

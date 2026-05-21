@@ -22,10 +22,10 @@ Fecha: 19 de mayo de 2026
 
 ## Inspección realizada
 
-- Frontend: `frontend/app/**/*.tsx`, `frontend/lib/api/*.ts`, session guards y redirects.
-- Backend: `backend/app/api/v1/*.py`, `backend/app/services/*.py`, modelos, constantes y configuración.
+- Frontend: `apps/web/app/**/*.tsx`, `apps/web/lib/api/*.ts`, session guards y redirects.
+- Backend: `apps/api/app/api/v1/*.py`, `apps/api/app/services/*.py`, modelos, constantes y configuración.
 - Docs: `API_CONTRACT_MAP.md`, `ARCHITECTURE.md`, `DATA_MODEL.md`, `REPORTS_ARCHITECTURE.md`, `REPORTS_AUDIT_2026-05-18.md`, `codex-route-workflow-audit/*`, `PROD_AUDIT_2026-05-18.md`.
-- Brand: `frontend/app/globals.css`, `docs/DESIGN_SYSTEM.md`, `frontend/public/checkwise-logo.png`.
+- Brand: `apps/web/app/globals.css`, `docs/DESIGN_SYSTEM.md`, `apps/web/public/checkwise-logo.png`.
 
 ## Supuestos y límites
 

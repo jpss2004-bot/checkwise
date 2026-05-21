@@ -8,7 +8,7 @@
 .env
 .env.*
 !.env.example
-!frontend/.env.local.example
+!apps/web/.env.local.example
 
 # Secrets and certificates — defense in depth on top of .env
 *.pem
@@ -28,10 +28,10 @@ __pycache__/
 .mypy_cache/
 .venv/
 venv/
-backend/.venv/
-backend/storage/
-backend/uploads/
-backend/*.egg-info/
+apps/api/.venv/
+apps/api/storage/
+apps/api/uploads/
+apps/api/*.egg-info/
 
 # Node / Next.js
 node_modules/
@@ -39,11 +39,11 @@ node_modules/
 out/
 dist/
 coverage/
-frontend/node_modules/
-frontend/.next/
-frontend/.cw-next-*/
-frontend/out/
-frontend/.turbo/
+apps/web/node_modules/
+apps/web/.next/
+apps/web/.cw-next-*/
+apps/web/out/
+apps/web/.turbo/
 *.tsbuildinfo
 
 # Vercel local
@@ -69,8 +69,8 @@ uploads/
 
 # Local database
 postgres-data/
-backend/*.db
-backend/*.db-journal
+apps/api/*.db
+apps/api/*.db-journal
 
 # Build / report artifacts (generated PDFs etc.)
 outputs/

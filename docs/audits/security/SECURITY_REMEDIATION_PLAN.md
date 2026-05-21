@@ -30,18 +30,18 @@ Companion to: [docs/REPO_CLEANUP_PLAN.md](../../REPO_CLEANUP_PLAN.md) §11.
 ## 3. Files changed
 
 Backend (production code):
-- [backend/app/core/config.py](../../../backend/app/core/config.py) — added `ENABLE_API_DOCS`, `EXPOSE_LEGACY_SUBMISSIONS`, `EXPOSE_METADATA_DRY_RUN`, `AUTH_LOGIN_RATE_LIMIT_PER_MINUTE`, `AUTH_FORGOT_PASSWORD_RATE_LIMIT_PER_HOUR`, and the `is_local_env`, `api_docs_enabled`, `allowed_csrf_origins` properties.
-- [backend/app/core/security_gates.py](../../../backend/app/core/security_gates.py) — new module. `require_local_or_internal_admin` dependency used by the two legacy endpoints.
-- [backend/app/core/rate_limit.py](../../../backend/app/core/rate_limit.py) — new module. `SlidingWindowRateLimiter`, plus the `login_limiter` / `forgot_password_limiter` instances and the `hash_identifier` helper.
-- [backend/app/main.py](../../../backend/app/main.py) — `/docs`, `/redoc`, `/openapi.json` URLs gated by `settings.api_docs_enabled`; root redirect targets `/health` when docs are off.
-- [backend/app/api/v1/endpoints.py](../../../backend/app/api/v1/endpoints.py) — legacy `POST /submissions` now declares `dependencies=[Depends(require_local_or_internal_admin)]`.
-- [backend/app/api/v1/metadata_dry_run.py](../../../backend/app/api/v1/metadata_dry_run.py) — router-level `require_local_or_internal_admin` gate; `Content-Length` check + capped `file.read(...)` so an oversized upload is rejected with 413 before the full body lands in memory.
-- [backend/app/api/v1/portal.py](../../../backend/app/api/v1/portal.py) — `enforce_portal_csrf` dependency mounted at the router. Mutating methods that rely on the portal cookie must present an allowed `Origin` (or `Referer`); bearer-token requests, safe methods, and requests not carrying the cookie are bypassed.
-- [backend/app/api/v1/auth.py](../../../backend/app/api/v1/auth.py) — login + forgot-password call `_enforce_login_rate_limit` / `_enforce_forgot_password_rate_limit`. Both throttles run before any DB work so a brute-force flood cannot ramp bcrypt CPU.
+- [apps/api/app/core/config.py](../../../apps/api/app/core/config.py) — added `ENABLE_API_DOCS`, `EXPOSE_LEGACY_SUBMISSIONS`, `EXPOSE_METADATA_DRY_RUN`, `AUTH_LOGIN_RATE_LIMIT_PER_MINUTE`, `AUTH_FORGOT_PASSWORD_RATE_LIMIT_PER_HOUR`, and the `is_local_env`, `api_docs_enabled`, `allowed_csrf_origins` properties.
+- [apps/api/app/core/security_gates.py](../../../apps/api/app/core/security_gates.py) — new module. `require_local_or_internal_admin` dependency used by the two legacy endpoints.
+- [apps/api/app/core/rate_limit.py](../../../apps/api/app/core/rate_limit.py) — new module. `SlidingWindowRateLimiter`, plus the `login_limiter` / `forgot_password_limiter` instances and the `hash_identifier` helper.
+- [apps/api/app/main.py](../../../apps/api/app/main.py) — `/docs`, `/redoc`, `/openapi.json` URLs gated by `settings.api_docs_enabled`; root redirect targets `/health` when docs are off.
+- [apps/api/app/api/v1/endpoints.py](../../../apps/api/app/api/v1/endpoints.py) — legacy `POST /submissions` now declares `dependencies=[Depends(require_local_or_internal_admin)]`.
+- [apps/api/app/api/v1/metadata_dry_run.py](../../../apps/api/app/api/v1/metadata_dry_run.py) — router-level `require_local_or_internal_admin` gate; `Content-Length` check + capped `file.read(...)` so an oversized upload is rejected with 413 before the full body lands in memory.
+- [apps/api/app/api/v1/portal.py](../../../apps/api/app/api/v1/portal.py) — `enforce_portal_csrf` dependency mounted at the router. Mutating methods that rely on the portal cookie must present an allowed `Origin` (or `Referer`); bearer-token requests, safe methods, and requests not carrying the cookie are bypassed.
+- [apps/api/app/api/v1/auth.py](../../../apps/api/app/api/v1/auth.py) — login + forgot-password call `_enforce_login_rate_limit` / `_enforce_forgot_password_rate_limit`. Both throttles run before any DB work so a brute-force flood cannot ramp bcrypt CPU.
 
 Backend (tests):
-- [backend/tests/conftest.py](../../../backend/tests/conftest.py) — autouse fixture resets the in-memory limiter buckets between tests so the process-global state cannot leak across cases.
-- [backend/tests/test_security_hardening.py](../../../backend/tests/test_security_hardening.py) — new file. 15 tests covering: anonymous legacy submissions allowed in local + blocked in production + accepted with internal_admin in production; metadata dry-run blocked in production + 413 on oversize upload; portal CSRF reject on foreign origin + accept on allowed origin + reject on missing Origin in production + bearer-token bypass + GET no-op; login + forgot-password 429 on exhaustion; `/docs` gated by env and flag.
+- [apps/api/tests/conftest.py](../../../apps/api/tests/conftest.py) — autouse fixture resets the in-memory limiter buckets between tests so the process-global state cannot leak across cases.
+- [apps/api/tests/test_security_hardening.py](../../../apps/api/tests/test_security_hardening.py) — new file. 15 tests covering: anonymous legacy submissions allowed in local + blocked in production + accepted with internal_admin in production; metadata dry-run blocked in production + 413 on oversize upload; portal CSRF reject on foreign origin + accept on allowed origin + reject on missing Origin in production + bearer-token bypass + GET no-op; login + forgot-password 429 on exhaustion; `/docs` gated by env and flag.
 
 No frontend code was changed in this pass.
 
@@ -79,7 +79,7 @@ dependency installs or upgrades were performed.
 
 ## 6. localStorage JWT — follow-up
 
-`frontend/lib/session/admin.ts` stores the staff JWT in `localStorage`.
+`apps/web/lib/session/admin.ts` stores the staff JWT in `localStorage`.
 That exposes it to any XSS payload that reaches the React tree. Migration
 is non-trivial and stays deferred:
 
@@ -105,7 +105,7 @@ frontend sweep to convert every admin API client.
 
 ## 7. Backend dependency lock / audit — follow-up
 
-`backend/pyproject.toml` pins minimum versions only (`fastapi>=0.111`,
+`apps/api/pyproject.toml` pins minimum versions only (`fastapi>=0.111`,
 `sqlalchemy>=2.0`, etc.). There is no resolved lockfile and no scheduled
 audit. Recommended remediation:
 
@@ -123,7 +123,7 @@ runnable. Adding it to CI is a smaller follow-up.
 
 ## 8. Redis / distributed rate limiter — follow-up
 
-`backend/app/core/rate_limit.py` is in-memory per worker. Today the
+`apps/api/app/core/rate_limit.py` is in-memory per worker. Today the
 backend runs single-worker on Render, so the counters are effectively
 global. Before horizontal scaling:
 
@@ -147,7 +147,7 @@ In priority order:
 
 1. **localStorage JWT migration (§6).** Single biggest residual risk.
 2. **Dependency lockfile + scheduled audit (§7).** Cheap, high signal.
-3. **Add a `Content-Security-Policy` header** in `frontend/next.config.ts`
+3. **Add a `Content-Security-Policy` header** in `apps/web/next.config.ts`
    or a Next middleware. Even a conservative report-only policy gets us
    telemetry on inline-script surfaces.
 4. **Audit logging completeness.** Ensure every state transition we

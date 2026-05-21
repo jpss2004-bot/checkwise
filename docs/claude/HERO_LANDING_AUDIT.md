@@ -4,7 +4,7 @@ Captured: 2026-05-20
 
 ## Current state
 
-The public landing page lives in `frontend/app/page.tsx`.
+The public landing page lives in `apps/web/app/page.tsx`.
 
 The hero is a hand-built JSX cockpit:
 
@@ -26,13 +26,13 @@ visually less believable as a product landing page.
 
 Runtime public images are limited mostly to logos and brand collateral:
 
-- `frontend/public/brand/checkwise-brand-sheet.png`
-- `frontend/public/brand/checkwise-impi.jpg`
-- `frontend/public/brand/checkwise-mark.png`
-- `frontend/public/brand/checkwise-square.jpg`
-- `frontend/public/brand/checkwise-wordmark.png`
-- `frontend/public/checkwise-logo.png`
-- `frontend/public/checkwise-whatsapp-qr.png`
+- `apps/web/public/brand/checkwise-brand-sheet.png`
+- `apps/web/public/brand/checkwise-impi.jpg`
+- `apps/web/public/brand/checkwise-mark.png`
+- `apps/web/public/brand/checkwise-square.jpg`
+- `apps/web/public/brand/checkwise-wordmark.png`
+- `apps/web/public/checkwise-logo.png`
+- `apps/web/public/checkwise-whatsapp-qr.png`
 
 Real product screenshots exist outside the runtime public folder:
 
@@ -58,7 +58,7 @@ current checked tree.
   metadata rail, preview lattice, trust strip, and fine print all compete
   before the user sees a real surface.
 - **The asset strategy is incomplete.** The repo has screenshots, but no
-  curated `frontend/public/marketing/` product-image set for the landing page.
+  curated `apps/web/public/marketing/` product-image set for the landing page.
 
 ## Design direction for the next pass
 
@@ -100,11 +100,11 @@ Do not use these as visual direction for the new hero:
 
 ## Concrete patch sequence
 
-1. Create `frontend/public/marketing/` and copy or regenerate curated real
+1. Create `apps/web/public/marketing/` and copy or regenerate curated real
    product screenshots from the audit/demo screenshot sets.
-2. Add Motion for React to `frontend/package.json`.
+2. Add Motion for React to `apps/web/package.json`.
 3. Split the landing page into focused components instead of keeping the whole
-   marketing surface inside `frontend/app/page.tsx`.
+   marketing surface inside `apps/web/app/page.tsx`.
 4. Replace `HeroCockpit` with a real screenshot-based product stage.
 5. Add a controlled animated reveal: screenshot stack, active document state,
    report preview, and reviewer action moving through the system.
@@ -115,13 +115,13 @@ Do not use these as visual direction for the new hero:
 
 ## Files to inspect before patching
 
-- `frontend/app/page.tsx`
-- `frontend/app/globals.css`
-- `frontend/package.json`
-- `frontend/public/`
-- `frontend/components/checkwise/brand-logo.tsx`
-- `frontend/components/ui/button.tsx`
-- `frontend/components/ui/badge.tsx`
+- `apps/web/app/page.tsx`
+- `apps/web/app/globals.css`
+- `apps/web/package.json`
+- `apps/web/public/`
+- `apps/web/components/checkwise/brand-logo.tsx`
+- `apps/web/components/ui/button.tsx`
+- `apps/web/components/ui/badge.tsx`
 - `docs/audit-screenshots/2026-05-18-system-audit/`
 - `design-concepts/screenshots/public/`
 - `demo_assets/screenshots/`

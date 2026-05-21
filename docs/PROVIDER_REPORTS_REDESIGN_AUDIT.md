@@ -88,7 +88,7 @@ What is *not* yet provider-grade:
 | `/portal/reports/[id]/print` | shared print view | unframed |
 
 The wrappers are ~25 LOC. All real UI lives in
-`frontend/components/checkwise/reports/`.
+`apps/web/components/checkwise/reports/`.
 
 ### 1.2 Backend surface (provider-relevant)
 
@@ -148,7 +148,7 @@ reports module simply does not consume it yet.
 
 ### 2.3 Provider presets — content
 
-`backend/app/services/reports/templates.py`:
+`apps/api/app/services/reports/templates.py`:
 
 | Preset | Audience | Block plan (recommended_prompt) |
 |---|---|---|
@@ -162,7 +162,7 @@ admin-style.
 
 ### 2.4 Permission helpers
 
-`backend/app/services/report_service.py`:
+`apps/api/app/services/report_service.py`:
 
 ```
 visible_audiences(actor):
@@ -181,7 +181,7 @@ via either `required_roles` intersection or
 
 ### 2.5 Tests (P1)
 
-`backend/tests/test_reports_presets.py` adds 7 P1 tests, each ~30–60
+`apps/api/tests/test_reports_presets.py` adds 7 P1 tests, each ~30–60
 LOC. They lock: provider-only preset visibility, auto-resolve of
 vendor + client ids, cross-vendor isolation in `list`, audience
 boundary on `get`, admin-preset 403 for provider, regression guards
@@ -211,7 +211,7 @@ exactly what is wrong, click to fix it.* The current editor:
 
 ### 3.2 The blocks are generic, not provider-aware
 
-`frontend/lib/reports/registry.ts` registers 6 block types. None are
+`apps/web/lib/reports/registry.ts` registers 6 block types. None are
 shaped around the provider story.
 
 | Block | Provider relevance today |
@@ -351,8 +351,8 @@ implementation.
 ### 4.6 Block registry symmetry
 
 Every new block type needs both a frontend `BlockDefinition` (in
-`frontend/lib/reports/registry.ts`) and a backend `data_fetcher` (in
-`backend/app/services/reports/blocks/`). If they drift, the planner
+`apps/web/lib/reports/registry.ts`) and a backend `data_fetcher` (in
+`apps/api/app/services/reports/blocks/`). If they drift, the planner
 will emit a config the renderer can't render, or vice versa.
 
 ---

@@ -59,10 +59,10 @@ The deployed frontend can reach the deployed backend, CORS is locked to the Verc
 
 ### 2.3 Code spot-checks for tester-facing surfaces
 
-- `/activate` Cancel button — confirmed it calls `clearAdminSession()` before redirect to `/login` (security fix CW-AUD-P1-01 in `frontend/app/activate/page.tsx:174`, `frontend/lib/session/admin.ts:28`).
-- `frontend/app/login/page.tsx:45` honors `must_change_password` on login (security fix CW-AUD-P1-01).
-- `frontend/app/portal/dashboard/page.tsx:126` references finding CW-AUD-P2-02 — the corresponding control is in place.
-- `backend/scripts/dev_seed.py:1018` refuses to run against non-local DB hosts. This means the operator cannot accidentally re-seed prod with documented passwords.
+- `/activate` Cancel button — confirmed it calls `clearAdminSession()` before redirect to `/login` (security fix CW-AUD-P1-01 in `apps/web/app/activate/page.tsx:174`, `apps/web/lib/session/admin.ts:28`).
+- `apps/web/app/login/page.tsx:45` honors `must_change_password` on login (security fix CW-AUD-P1-01).
+- `apps/web/app/portal/dashboard/page.tsx:126` references finding CW-AUD-P2-02 — the corresponding control is in place.
+- `apps/api/scripts/dev_seed.py:1018` refuses to run against non-local DB hosts. This means the operator cannot accidentally re-seed prod with documented passwords.
 - `.gitignore` properly blocks `.env`, `.env.*` (except `.env.example`), `*.pem`, `*.key`, `*credentials*`, `service-account*.json`, `*-secret.json`, `*.db`, `__pycache__/`, etc.
 - No hardcoded prod URL/secret in frontend or backend source. API base URL is env-driven via `NEXT_PUBLIC_API_BASE_URL`; backend secrets are `BaseSettings`-driven.
 
@@ -91,7 +91,7 @@ The deployed frontend can reach the deployed backend, CORS is locked to the Verc
 
 | Item | Why it matters for the tester |
 |---|---|
-| Some `/client/*` dashboard tiles still consume `frontend/lib/mock/*` | Tester may see plausible-looking but mock-derived numbers on parts of the client dashboard / activity feed. Functional, not deceptive. |
+| Some `/client/*` dashboard tiles still consume `apps/web/lib/mock/*` | Tester may see plausible-looking but mock-derived numbers on parts of the client dashboard / activity feed. Functional, not deceptive. |
 | Welcome email is **not wired** | Operator hands credentials over out-of-band (Signal / Telegram / 1Password / whatever). Tester won't get an automated email. |
 | No client/admin endpoint to **re-download** their own uploaded PDFs | Tester can upload and see status, but if they ask "where do I download my submitted PDF?" the answer is "not in this test". |
 | Provider auth still uses opaque `X-Workspace-Token` (V1.2 surface) | Internal mechanism; tester won't notice. Roadmapped for V2.2. |
@@ -170,11 +170,11 @@ VALUES (
 );
 ```
 
-Then attach the user to a workspace/organization with the right role. Use the `Membership` row pattern visible in `backend/scripts/dev_seed.py` (and copy the role you want: `provider`, `client_admin`, or `internal_admin` for a reviewer view).
+Then attach the user to a workspace/organization with the right role. Use the `Membership` row pattern visible in `apps/api/scripts/dev_seed.py` (and copy the role you want: `provider`, `client_admin`, or `internal_admin` for a reviewer view).
 
 **Option B — One-off helper script (recommended if you'll repeat this)**:
 
-Build `backend/scripts/create_prod_user.py` that takes `--email`, `--role`, `--workspace-id`, reads the password from stdin (no command-line history leak), bcrypt-hashes locally, inserts the row. **Do not include this script in this commit** — it deserves its own PR with tests. For now use Option A.
+Build `apps/api/scripts/create_prod_user.py` that takes `--email`, `--role`, `--workspace-id`, reads the password from stdin (no command-line history leak), bcrypt-hashes locally, inserts the row. **Do not include this script in this commit** — it deserves its own PR with tests. For now use Option A.
 
 ### 6.5 Send credentials out-of-band
 

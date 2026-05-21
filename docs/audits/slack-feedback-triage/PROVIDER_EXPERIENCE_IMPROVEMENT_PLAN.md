@@ -73,15 +73,15 @@ In order of how often the same complaint surfaced across feedback items:
 
 Findings grounded in direct reads of:
 
-- `frontend/app/portal/upload/page.tsx`
-- `frontend/components/checkwise/intake-wizard.tsx`
-- `frontend/components/checkwise/validation-summary.tsx`
-- `frontend/app/portal/dashboard/page.tsx`
-- `frontend/app/portal/calendar/page.tsx`
-- `frontend/app/portal/reports/page.tsx`
-- `frontend/components/checkwise/reports/list/reports-list-view.tsx`
-- `backend/app/services/prevalidation.py`
-- `backend/app/services/reports/templates.py`
+- `apps/web/app/portal/upload/page.tsx`
+- `apps/web/components/checkwise/intake-wizard.tsx`
+- `apps/web/components/checkwise/validation-summary.tsx`
+- `apps/web/app/portal/dashboard/page.tsx`
+- `apps/web/app/portal/calendar/page.tsx`
+- `apps/web/app/portal/reports/page.tsx`
+- `apps/web/components/checkwise/reports/list/reports-list-view.tsx`
+- `apps/api/app/services/prevalidation.py`
+- `apps/api/app/services/reports/templates.py`
 
 ### 4.1 `/portal/upload` — Guided upload resolver
 
@@ -94,8 +94,8 @@ Findings grounded in direct reads of:
 - Replacement-lineage flow (`?replaces=<id>`) is well thought out.
 
 **What hurts the user:**
-- `frontend/app/portal/upload/page.tsx:108` ships an **English** eyebrow: `eyebrow="Guided upload resolver"`. On a Spanish-first product that targets non-technical Mexican providers, this is the worst possible first impression.
-- `frontend/components/checkwise/validation-summary.tsx:29` renders `validation.rule_code` directly. The user reads `file_exists`, `allowed_file_type`, `pdf_magic_header`, `pdf_encrypted`, `pdf_readable_text`, `max_file_size`, `sha256_hash`, `duplicate_hash`, `vendor_match`. F3 verbatim.
+- `apps/web/app/portal/upload/page.tsx:108` ships an **English** eyebrow: `eyebrow="Guided upload resolver"`. On a Spanish-first product that targets non-technical Mexican providers, this is the worst possible first impression.
+- `apps/web/components/checkwise/validation-summary.tsx:29` renders `validation.rule_code` directly. The user reads `file_exists`, `allowed_file_type`, `pdf_magic_header`, `pdf_encrypted`, `pdf_readable_text`, `max_file_size`, `sha256_hash`, `duplicate_hash`, `vendor_match`. F3 verbatim.
 - The wizard exposes "Tipo de carga" + "Código canónico" / "Periodo canónico" as state. The codes themselves don't render as labels (per the comment at `intake-wizard.tsx:134-136`) but the URL contains `requirement_code=...&period_key=...&load_type=...` which a screen-recording-aware user can absolutely see.
 - Each requirement has **no anatomy text and no sample image**. A first-time provider doesn't know what a CSF or REPSE registration should look like before uploading. F1/F2 verbatim.
 - The "back" links in the page header are labeled "Expediente" and "Calendario" — but they both point to `/portal/onboarding` and `/portal/dashboard` respectively. The second label is wrong: it says "Calendario" but routes to the dashboard (`page.tsx:124-127`).
@@ -137,7 +137,7 @@ Findings grounded in direct reads of:
 **Purpose:** Generate executive reports about the expediente.
 
 **What works:**
-- Preset titles already read well in Spanish: "Mi estado de cumplimiento", "Documentos faltantes", "Rechazos recientes" (`backend/app/services/reports/templates.py:196,224,248`).
+- Preset titles already read well in Spanish: "Mi estado de cumplimiento", "Documentos faltantes", "Rechazos recientes" (`apps/api/app/services/reports/templates.py:196,224,248`).
 - Featured first card (F4 visual audit) gives a clear "empieza aquí" without explicit copy.
 
 **What hurts the user:**
@@ -189,8 +189,8 @@ Per-item rules for every engineer-dialect leak. The default action is **rename o
 
 | Leak | Where | Action | Replacement |
 |---|---|---|---|
-| `eyebrow="Guided upload resolver"` | `frontend/app/portal/upload/page.tsx:108` | Rename | `"Carga guiada"` (eyebrow) |
-| `validation.rule_code` rendered as primary label | `frontend/components/checkwise/validation-summary.tsx:29` | Rename via map + keep raw as tooltip | `RULE_CODE_LABELS_ES[code]` with code in `title=""` |
+| `eyebrow="Guided upload resolver"` | `apps/web/app/portal/upload/page.tsx:108` | Rename | `"Carga guiada"` (eyebrow) |
+| `validation.rule_code` rendered as primary label | `apps/web/components/checkwise/validation-summary.tsx:29` | Rename via map + keep raw as tooltip | `RULE_CODE_LABELS_ES[code]` with code in `title=""` |
 | `file_exists`, `allowed_file_type`, `pdf_magic_header`, `pdf_encrypted`, `pdf_readable_text`, `max_file_size`, `sha256_hash`, `duplicate_hash`, `vendor_match` | Backend `prevalidation.py` rule_code values | Wrap with frontend label map; keep backend codes intact | "Archivo recibido", "Tipo de archivo permitido", "PDF válido", "PDF protegido", "Texto legible", "Tamaño dentro del límite", "Hash de integridad", "Posible duplicado", "RFC del proveedor coincide" |
 | `requirement_code`, `period_key`, `load_type` in URL | `/portal/upload?requirement_code=...&period_key=...` | Hide via `useEffect → router.replace(...)` after read, OR move to a session-store. Acceptable to leave for now but document. | Same params, but stripped from URL after hydration |
 | "Workspace" in copy ("acciones urgentes para tu workspace") | `dashboard/page.tsx:168` | Rename | `"tu empresa"` or `"tu expediente"` |
@@ -212,7 +212,7 @@ Per-item rules for every engineer-dialect leak. The default action is **rename o
 
 ## 7. Plain-language Spanish copy recommendations
 
-Curated set of replacements. Treat as the canonical first batch; the full map lives in `frontend/lib/constants/validation.ts` (new) + extends `frontend/lib/constants/statuses.ts`.
+Curated set of replacements. Treat as the canonical first batch; the full map lives in `apps/web/lib/constants/validation.ts` (new) + extends `apps/web/lib/constants/statuses.ts`.
 
 ### Validation rule codes
 
@@ -253,7 +253,7 @@ The upload page becomes the first place a provider learns what a document *is*, 
 
 - `anatomy_es: str | None` — 2-4 sentence description of what the document should contain. Example for CSF:  
   > "La Constancia de Situación Fiscal vigente la emite el SAT. Debe estar a nombre de la empresa proveedora, vigente al día de hoy, y mostrar el RFC, el régimen fiscal y el domicilio actualizados. Solo aceptamos la versión emitida en los últimos 30 días."
-- `sample_image: string | null` — relative path to a redacted sample. Lives under `frontend/public/marketing/requirement-samples/`.
+- `sample_image: string | null` — relative path to a redacted sample. Lives under `apps/web/public/marketing/requirement-samples/`.
 - `where_to_obtain_es: string | null` — short instruction with link (e.g. SAT portal URL).
 - `common_errors_es: string[]` — 1-3 bullets: "El documento debe estar a nombre de la empresa, no de un representante." / "Verifica que el RFC coincida con el del contrato."
 
@@ -472,7 +472,7 @@ Audit log every change to `audit_events` with `actor=provider`.
 This is the BL-005 work from the triage, but framed for the new staged plan:
 
 1. Audit `next.config.ts` — the recently added `distDir` override is keyed on non-ASCII cwd; verify Vercel cwd is ASCII so the override is inert in production. (Quick check: log `process.cwd()` during a one-time Vercel preview build.)
-2. Add `frontend/app/portal/error.tsx` or wrap the portal layout with a small client component that listens for `ChunkLoadError` and triggers `window.location.reload()` after a 500 ms grace period.
+2. Add `apps/web/app/portal/error.tsx` or wrap the portal layout with a small client component that listens for `ChunkLoadError` and triggers `window.location.reload()` after a 500 ms grace period.
 3. Investigate Vercel's deploy-preserve behavior. If chunks get pruned aggressively, switch to `experimental.optimisticClientCache: false` for the portal segment.
 4. Smoke-test by deploying a no-op to a preview, leaving a portal tab open, deploying again, and navigating.
 
@@ -503,11 +503,11 @@ Each stage is one PR. Each stage is independently shippable.
 
 After approval, the very first PR is **Stage 1**, in this order inside the PR:
 
-1. `frontend/components/checkwise/reports/list/reports-list-view.tsx` — add `presetsError` state and a visible `Alert` for non-401/403 errors (BL-008).
+1. `apps/web/components/checkwise/reports/list/reports-list-view.tsx` — add `presetsError` state and a visible `Alert` for non-401/403 errors (BL-008).
 2. Reproduce BL-001 on staging with jluna's account. Capture the actual `/api/v1/reports/_presets` response. If `200 { items: [] }`, decide between (a) seed-data fix or (b) loosening `ReportActor.is_workspace_owner`. Ship the chosen fix.
-3. `frontend/lib/constants/validation.ts` (new) + `frontend/components/checkwise/validation-summary.tsx` — BL-003. Keep raw codes as `title=""` tooltips.
-4. `frontend/app/portal/upload/page.tsx:108` — replace `"Guided upload resolver"` with `"Carga guiada"`.
-5. `frontend/app/portal/upload/page.tsx:124-127` — fix the back-link mislabel (either change "Calendario" to "Dashboard" or change the route to `/portal/calendar` per UX preference).
+3. `apps/web/lib/constants/validation.ts` (new) + `apps/web/components/checkwise/validation-summary.tsx` — BL-003. Keep raw codes as `title=""` tooltips.
+4. `apps/web/app/portal/upload/page.tsx:108` — replace `"Guided upload resolver"` with `"Carga guiada"`.
+5. `apps/web/app/portal/upload/page.tsx:124-127` — fix the back-link mislabel (either change "Calendario" to "Dashboard" or change the route to `/portal/calendar` per UX preference).
 6. Audit & rename `"workspace"` in user-facing strings.
 
 Single PR, single review surface. Then ship Stages 2–7 sequentially.
@@ -577,7 +577,7 @@ Jose Pablo provided the staging row for `jluna@legalshelf.mx`:
 - The query did not surface a `roles` field. If the row truly has no role assignments (the standard "provider invite" path), then `ReportActor.is_workspace_owner = not self.roles and self.workspace_vendor_id is not None` should resolve to `True`, and the three vendor-facing presets should render.
 - `must_change_password: true` plus the `token_prefix: 1cfc525c…` suggest Jorge is operating on the **temporary activation token** (he hasn't completed credential rotation yet). This is the path most likely to mis-thread `workspace_vendor_id` into the `ReportActor` dependency.
 
-**Stage 1 backend investigation step (revised):** before touching `ReportActor.is_workspace_owner`, the implementation session must inspect `backend/app/api/v1/reports.py` — specifically the dependency that constructs `actor` for the `_presets` endpoint — and verify that `workspace_vendor_id` is populated when the session is authenticated with a portal activation token. If it is **not** populated for that token shape, the fix lives in the dependency (correctly thread the workspace into `ReportActor`), not in the property. If it **is** populated, then the `roles` tuple must contain something unexpected for Jorge's seed and the fix lives in seed data (or the property loosens to "has workspace_vendor_id, regardless of roles" — the safer change).
+**Stage 1 backend investigation step (revised):** before touching `ReportActor.is_workspace_owner`, the implementation session must inspect `apps/api/app/api/v1/reports.py` — specifically the dependency that constructs `actor` for the `_presets` endpoint — and verify that `workspace_vendor_id` is populated when the session is authenticated with a portal activation token. If it is **not** populated for that token shape, the fix lives in the dependency (correctly thread the workspace into `ReportActor`), not in the property. If it **is** populated, then the `roles` tuple must contain something unexpected for Jorge's seed and the fix lives in seed data (or the property loosens to "has workspace_vendor_id, regardless of roles" — the safer change).
 
 The order of checks:
 1. Reproduce on staging as Jorge. Capture the response body of `GET /api/v1/reports/_presets`.
@@ -636,7 +636,7 @@ After Stages 1 and 2 shipped, a longer-form transcript review surfaced ten provi
 ### 20.1 What the transcript changes
 
 - **Priority shift.** Four items become P0 (one already-mitigated, three actionable): privacy notice (T1, gated on legal), XML decision (T6, document-only), period filter validation (T7), and confirmation that the compliance-% safety net (T8) already structurally prevents "upload anything → 100 %". This bumps the dashboard data-viz rework (former Stage 3) **behind** trust/safety/language polish.
-- **Existing assets discovered.** The `CorrectionRequestForm` component is already built (`frontend/components/checkwise/workspace/correction-request-form.tsx`) but unmounted; T2's lift is mostly wiring + a real backend endpoint, not a green-field build. Stage 2.5/2.7 can land it quickly.
+- **Existing assets discovered.** The `CorrectionRequestForm` component is already built (`apps/web/components/checkwise/workspace/correction-request-form.tsx`) but unmounted; T2's lift is mostly wiring + a real backend endpoint, not a green-field build. Stage 2.5/2.7 can land it quickly.
 - **Multi-file is a UI/API problem, not a schema problem.** `Submission` already has `documents: list[Document]`. T4 becomes a Stage 2.7 implementation question, not an architectural one.
 - **Stage 1 BL-003 was the labels only.** The transcript exposes that the *messages* (the second sentence under each rule_code) still carry "Hash SHA-256", "extracción/OCR", "anomaly_codes". Stage 2.6 finishes that work.
 
@@ -650,10 +650,10 @@ The roadmap below supersedes the §15 sequence for anything not already shipped.
 - **Why it matters:** Period filters today accept impossible inputs (e.g. `?year=1945`). REPSE 2026 is hardcoded on the provider-facing `entra-a-tu-espacio` route. XML acceptance is not documented as a decision. Each is small to fix; together they harden the trust baseline.
 - **Affected pages:** `/portal/calendar`, `/portal/dashboard`, `/portal/reports`, `/portal/upload`, `/portal/entra-a-tu-espacio`. Backend `portal.py` calendar + period endpoints.
 - **Likely files:**
-  - `backend/app/api/v1/portal.py` (add `Query(ge=2021, le=...)` on every `year` param; helper `validate_period_key`)
-  - `frontend/app/portal/calendar/page.tsx` (cap year selector)
-  - `frontend/app/portal/entra-a-tu-espacio/page.tsx` (replace literal "REPSE 2026")
-  - `frontend/components/marketing/*-section.tsx` (replace marketing literals — non-blocking)
+  - `apps/api/app/api/v1/portal.py` (add `Query(ge=2021, le=...)` on every `year` param; helper `validate_period_key`)
+  - `apps/web/app/portal/calendar/page.tsx` (cap year selector)
+  - `apps/web/app/portal/entra-a-tu-espacio/page.tsx` (replace literal "REPSE 2026")
+  - `apps/web/components/marketing/*-section.tsx` (replace marketing literals — non-blocking)
   - `docs/security/XML_UPLOAD_SECURITY_RECOMMENDATION.md` (new — documents the "block by default" decision)
 - **Backend impact:** Add a min/max `Query` constraint on every year-bearing endpoint + a `validate_period_key` helper called wherever a `period_key` arrives from user input. Add backend tests for the boundary cases (`?year=2020`, `?year=2021`, `?year=current+1`, `?year=current+2`).
 - **Frontend impact:** Year selectors cap at `[2021, currentYear + 1]`. Marketing + activation strings derive from `new Date().getFullYear()` or a `CHECKWISE_DEFAULT_YEAR` constant.
@@ -672,11 +672,11 @@ The roadmap below supersedes the §15 sequence for anything not already shipped.
 - **Why it matters:** Providers still read "Hash SHA-256", "extracción/OCR", "anomaly_codes" inside the validation summary's second sentence and inside the intake wizard's helper text. The transcript also asks for explicit "el documento parece…" / "no podemos confirmar que sea el documento solicitado" framing when the classifier flags a possible mismatch.
 - **Affected pages:** `/portal/upload` (intake wizard + validation summary), `/portal/submissions/[id]` (timeline), admin/reviewer detail.
 - **Likely files:**
-  - `backend/app/services/prevalidation.py` (rewrite the `message` strings; surface a separate `technical_detail` field for admin-only consumption)
-  - `frontend/components/checkwise/validation-summary.tsx` (render the friendly message; hide the technical detail behind an admin-visible / QA-visible `<details>`)
-  - `frontend/components/checkwise/intake-wizard.tsx:1100-1240` (rewrite the "Calculamos hash SHA-256…" helper lines)
-  - `frontend/components/checkwise/confidence-badge.tsx` (audit copy)
-  - Possibly expand `frontend/lib/constants/validation.ts` with a `message_es` override map keyed by `rule_code`.
+  - `apps/api/app/services/prevalidation.py` (rewrite the `message` strings; surface a separate `technical_detail` field for admin-only consumption)
+  - `apps/web/components/checkwise/validation-summary.tsx` (render the friendly message; hide the technical detail behind an admin-visible / QA-visible `<details>`)
+  - `apps/web/components/checkwise/intake-wizard.tsx:1100-1240` (rewrite the "Calculamos hash SHA-256…" helper lines)
+  - `apps/web/components/checkwise/confidence-badge.tsx` (audit copy)
+  - Possibly expand `apps/web/lib/constants/validation.ts` with a `message_es` override map keyed by `rule_code`.
 - **Backend impact:** Modify validation message strings; optionally add a `technical_detail: str | None` field on `ValidationSignal` that frontend admin paths render and provider paths skip. Or keep the technical bits under a backend-only logger and just send the friendly version to the API.
 - **Frontend impact:** Update the validation summary to render `messageFor(ruleCode, signal)` (a small helper) and tuck the SHA-256 / anomaly-code details under an admin-only or reviewer-only disclosure. Rewrite the wizard helper text in plain Spanish.
 - **Legal/security dependencies:** None.
@@ -693,15 +693,15 @@ The roadmap below supersedes the §15 sequence for anything not already shipped.
 - **Why it matters:** Today the wizard accepts one file; contract + annex requires two separate submissions. The existing `CorrectionRequestForm` is unmounted, so providers have no way to ask for an RFC / razón social fix without leaving the product.
 - **Affected pages:** `/portal/upload`, `/portal/entra-a-tu-espacio`, provider context bar (sitewide).
 - **Likely files (multi-file):**
-  - `backend/app/api/v1/portal.py:1453` (endpoint `files: list[UploadFile]` instead of `file: UploadFile`; loop storage + prevalidation per document)
-  - `backend/app/services/submission_service.py` (multi-doc submission write path)
-  - `frontend/components/checkwise/intake-wizard.tsx` (multi-file dropzone, per-file progress + status)
+  - `apps/api/app/api/v1/portal.py:1453` (endpoint `files: list[UploadFile]` instead of `file: UploadFile`; loop storage + prevalidation per document)
+  - `apps/api/app/services/submission_service.py` (multi-doc submission write path)
+  - `apps/web/components/checkwise/intake-wizard.tsx` (multi-file dropzone, per-file progress + status)
 - **Likely files (correction request):**
-  - Existing `frontend/components/checkwise/workspace/correction-request-form.tsx` mounted on the workspace identity card / provider profile area
-  - `frontend/lib/mock/corrections.ts` → real `frontend/lib/api/corrections.ts` + `POST /api/v1/portal/workspaces/{id}/correction-requests` backend endpoint
+  - Existing `apps/web/components/checkwise/workspace/correction-request-form.tsx` mounted on the workspace identity card / provider profile area
+  - `apps/web/lib/mock/corrections.ts` → real `apps/web/lib/api/corrections.ts` + `POST /api/v1/portal/workspaces/{id}/correction-requests` backend endpoint
   - New `correction_requests` table or `audit_events` row with admin notification
 - **Likely files (expanded rejection causes):**
-  - `backend/app/core/compliance_catalog.py` (expand each priority requirement's `common_errors` from 3 to 5)
+  - `apps/api/app/core/compliance_catalog.py` (expand each priority requirement's `common_errors` from 3 to 5)
 - **Backend impact:** New endpoint for correction requests; multi-file endpoint changes; multi-doc transaction discipline (atomic vs partial submit semantics — recommend atomic: all-or-nothing per submission).
 - **Frontend impact:** Multi-file UI redesign; small profile / context bar surface for the correction-request entry point.
 - **Legal/security dependencies:** Multi-file aggregate size limit must be enforced. Correction-request workflow needs an admin path to act on the request — confirm whether admin notification goes via Slack (existing pattern, see Stage 1 BL-008) or via a new admin tray.
@@ -718,7 +718,7 @@ The roadmap below supersedes the §15 sequence for anything not already shipped.
 - **Objective:** Land the privacy notice acceptance UI + the real correction-request endpoint once Paco/Beko return the legal copy.
 - **Why it matters:** Privacy notice is a regulatory requirement before sharing provider/client info. Cannot ship without final copy.
 - **Affected pages:** `/activate`, `/login`, `/portal/entra-a-tu-espacio`, possibly `/`.
-- **Likely files:** New `frontend/components/marketing/privacy-notice-modal.tsx`; new `backend/app/api/v1/auth.py` accept-privacy endpoint; `accepted_privacy_notice_at` column on `users` or `provider_workspaces`.
+- **Likely files:** New `apps/web/components/marketing/privacy-notice-modal.tsx`; new `apps/api/app/api/v1/auth.py` accept-privacy endpoint; `accepted_privacy_notice_at` column on `users` or `provider_workspaces`.
 - **Legal/security dependency:** **Blocking** — Paco/Beko/legal copy.
 - **Acceptance criteria:** The user cannot proceed past activation without explicit acceptance; the acceptance is timestamped and audited.
 - **Implementation risk:** Low code-wise; high process-wise (legal copy).
@@ -778,15 +778,15 @@ Stage 2.7 landed as a single phase per Jose Pablo's direction, covering all thre
 
 | Layer | Files |
 |---|---|
-| Backend catalog | `backend/app/core/compliance_catalog.py` |
-| Backend API | `backend/app/api/v1/portal.py` (correction-request endpoint, multi-file batch endpoint, calendar guidance fields) |
-| Backend services | `backend/app/services/correction_request_service.py` (new), `backend/app/services/submission_service.py` (`finalize_multi_document_submission`) |
-| Backend schemas | `backend/app/schemas/submissions.py` (`MultiSubmissionResponse`, `DocumentBatchEntry`) |
-| Backend config | `backend/app/core/config.py` (`SLACK_CORRECTION_WEBHOOK_URL`, `MULTI_FILE_UPLOAD_ENABLED`) |
-| Backend tests | `backend/tests/test_portal_correction_requests.py` (new), `backend/tests/test_portal_multi_file_upload.py` (new), `backend/tests/test_portal_canonical_enrichment.py` (extended) |
-| Frontend API | `frontend/lib/api/corrections.ts` (new), `frontend/lib/api/portal.ts` (`CalendarItem` guidance fields) |
-| Frontend components | `frontend/components/checkwise/workspace/correction-request-form.tsx` (real API + Tier B restriction), `frontend/components/checkwise/portal/expediente-card.tsx` (`DocumentGuidanceDisclosure` exported), `frontend/components/checkwise/intake-wizard.tsx` (additional-files block, flag-gated) |
-| Frontend pages | `frontend/app/portal/entra-a-tu-espacio/page.tsx` (correction-request mount), `frontend/app/portal/calendar/page.tsx` (drawer disclosure) |
+| Backend catalog | `apps/api/app/core/compliance_catalog.py` |
+| Backend API | `apps/api/app/api/v1/portal.py` (correction-request endpoint, multi-file batch endpoint, calendar guidance fields) |
+| Backend services | `apps/api/app/services/correction_request_service.py` (new), `apps/api/app/services/submission_service.py` (`finalize_multi_document_submission`) |
+| Backend schemas | `apps/api/app/schemas/submissions.py` (`MultiSubmissionResponse`, `DocumentBatchEntry`) |
+| Backend config | `apps/api/app/core/config.py` (`SLACK_CORRECTION_WEBHOOK_URL`, `MULTI_FILE_UPLOAD_ENABLED`) |
+| Backend tests | `apps/api/tests/test_portal_correction_requests.py` (new), `apps/api/tests/test_portal_multi_file_upload.py` (new), `apps/api/tests/test_portal_canonical_enrichment.py` (extended) |
+| Frontend API | `apps/web/lib/api/corrections.ts` (new), `apps/web/lib/api/portal.ts` (`CalendarItem` guidance fields) |
+| Frontend components | `apps/web/components/checkwise/workspace/correction-request-form.tsx` (real API + Tier B restriction), `apps/web/components/checkwise/portal/expediente-card.tsx` (`DocumentGuidanceDisclosure` exported), `apps/web/components/checkwise/intake-wizard.tsx` (additional-files block, flag-gated) |
+| Frontend pages | `apps/web/app/portal/entra-a-tu-espacio/page.tsx` (correction-request mount), `apps/web/app/portal/calendar/page.tsx` (drawer disclosure) |
 
 ### 21.3 Stage 2.8 unblocks?
 

@@ -16,14 +16,14 @@ Use these files before frontend redesign work:
 - `docs/design-system/ASSET_MANIFEST.md`
 - `docs/design-system/claude-design-v0.1/AUDIT.md`
 - `docs/DESIGN_SYSTEM.md`
-- `frontend/app/globals.css`
+- `apps/web/app/globals.css`
 - `frontend/tailwind.config.ts`
 
 ## Runtime Tokens
 
 The canonical runtime token files are:
 
-- `frontend/app/globals.css`
+- `apps/web/app/globals.css`
 - `frontend/tailwind.config.ts`
 
 Do not create a parallel visual system. Do not paste Claude Design static HTML into the app. Convert visual direction into reusable Next.js/React/Tailwind primitives and CheckWise-specific patterns.
@@ -49,8 +49,8 @@ Do not create a parallel visual system. Do not paste Claude Design static HTML i
 
 ## Craft Rules
 
-- Reuse existing primitives in `frontend/components/ui/`.
-- Extend CheckWise patterns in `frontend/components/checkwise/`.
+- Reuse existing primitives in `apps/web/components/ui/`.
+- Extend CheckWise patterns in `apps/web/components/checkwise/`.
 - Prefer route-level experiences when a workflow deserves a focused surface.
 - Preserve backend/session/API contracts.
 - Show loading, empty, error, success, unauthorized, and replacement states.

@@ -100,8 +100,8 @@ Verified by code-read, **not** by clicking:
 | Upload | `app/portal/upload/page.tsx` | portal upload endpoint | mime/size from `ALLOWED_FILE_EXTENSIONS` + `MAX_UPLOAD_SIZE_BYTES` | code-verified |
 | Inline "Nuevo reporte" | `app/portal/reports/page.tsx` | `POST /reports` | title length | code-verified |
 | AI prompt textarea | `app/portal/reports/[id]/page.tsx` | SSE stream | non-empty | end-to-end verified |
-| Correction request | `components/checkwise/workspace/correction-request-form.tsx` | mock — `frontend/lib/mock/corrections.ts` | client-side only | **mock; TODO marker** |
-| Marketing contact | `components/marketing/contact-form.tsx` | mock — `frontend/lib/mock/contact-requests.ts` | client-side only | **mock; TODO marker** |
+| Correction request | `components/checkwise/workspace/correction-request-form.tsx` | mock — `apps/web/lib/mock/corrections.ts` | client-side only | **mock; TODO marker** |
+| Marketing contact | `components/marketing/contact-form.tsx` | mock — `apps/web/lib/mock/contact-requests.ts` | client-side only | **mock; TODO marker** |
 
 ## 6. Reports system status
 
@@ -143,7 +143,7 @@ Verified end-to-end via curl:
 
 ## 9. Mock vs real data wiring
 
-5 modules in `frontend/lib/mock/` with `TODO[backend-integration]` markers — these are **intentionally documented mocks**, not bugs:
+5 modules in `apps/web/lib/mock/` with `TODO[backend-integration]` markers — these are **intentionally documented mocks**, not bugs:
 
 | Module | Consumer | What's mocked |
 |---|---|---|
@@ -189,18 +189,18 @@ Verified end-to-end via curl:
 ### P1 — core flow broken or misleading
 **Fixed in this session:**
 
-- **B4 — `AdminShell` rejected reviewer-only users.** Line 74 of `frontend/app/admin/_shell.tsx` was `if (!current.roles.includes("internal_admin"))`. A user with only `reviewer` (no `internal_admin`) would be bounced to `/admin` even though `/admin/reviewer` is the reviewer's primary route. No seeded account triggers it because `ada` holds both roles, but the gate is wrong. Now accepts either role.
+- **B4 — `AdminShell` rejected reviewer-only users.** Line 74 of `apps/web/app/admin/_shell.tsx` was `if (!current.roles.includes("internal_admin"))`. A user with only `reviewer` (no `internal_admin`) would be bounced to `/admin` even though `/admin/reviewer` is the reviewer's primary route. No seeded account triggers it because `ada` holds both roles, but the gate is wrong. Now accepts either role.
 - **B5 — pytest fails when a real Anthropic key is present in env.** 4 tests assume the deterministic mock LLM. When the developer has a real key in `.env`, the factory builds the real client and these tests fail on shape mismatch. Fixed via session-level `tests/conftest.py` that pops `ANTHROPIC_API_KEY` and forces `CHECKWISE_LLM_BACKEND=mock` at import time. Confirmed: 320/320 pass.
 
 **Filed but not fixed:**
 
-- **B3 — `/admin/login` legacy double-hop.** `frontend/app/admin/login/page.tsx` redirects to `/login`. `AdminShell` and `ClientShell` redirect to `/admin/login` on unauthorized, causing a double hop. Cosmetic only — works functionally. Recommended fix: change both shells to redirect directly to `/login`.
+- **B3 — `/admin/login` legacy double-hop.** `apps/web/app/admin/login/page.tsx` redirects to `/login`. `AdminShell` and `ClientShell` redirect to `/admin/login` on unauthorized, causing a double hop. Cosmetic only — works functionally. Recommended fix: change both shells to redirect directly to `/login`.
 
 ### P2 — visible quality issue
 Static audit did not surface any P2s with confidence. Per-page loading/error/empty states need browser verification.
 
 ### P3 — cleanup / hygiene
-- 5 mock modules in `frontend/lib/mock/` with `TODO[backend-integration]` markers. Real backend integration for invitations / corrections / contact-requests / expediente / calendar is deferred. These are honest scaffolds today.
+- 5 mock modules in `apps/web/lib/mock/` with `TODO[backend-integration]` markers. Real backend integration for invitations / corrections / contact-requests / expediente / calendar is deferred. These are honest scaffolds today.
 - `/admin/reports/[id]` is currently a redirect to `/portal/reports/[id]` (deliberate; the shared-editor extraction is R1.0.1).
 
 ### Deferred — product feature gap
@@ -216,8 +216,8 @@ Static audit did not surface any P2s with confidence. Per-page loading/error/emp
 
 | Change | File | Commit candidate |
 |---|---|---|
-| Force mock LLM at pytest session start | `backend/tests/conftest.py` (new, 17 lines) | yes |
-| Admin shell accepts reviewer-only users | `frontend/app/admin/_shell.tsx` (12 lines changed) | yes |
+| Force mock LLM at pytest session start | `apps/api/tests/conftest.py` (new, 17 lines) | yes |
+| Admin shell accepts reviewer-only users | `apps/web/app/admin/_shell.tsx` (12 lines changed) | yes |
 | Full system audit doc | `docs/FULL_SYSTEM_AUDIT.md` (this file) | yes |
 | QA results doc | `docs/QA_RESULTS.md` | yes |
 

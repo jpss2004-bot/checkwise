@@ -226,7 +226,7 @@ Screenshots were captured live during this session as inline conversation artifa
 
 Only safe, localized, no-business-logic changes:
 
-1. **I-02 — Custom branded 404 page.** Added `frontend/app/not-found.tsx` rendering an H1, friendly Spanish copy, and a CTA back to `/`. Replaces Next.js default English "404 / This page could not be found."
+1. **I-02 — Custom branded 404 page.** Added `apps/web/app/not-found.tsx` rendering an H1, friendly Spanish copy, and a CTA back to `/`. Replaces Next.js default English "404 / This page could not be found."
 2. **I-03 — Shorten print toolbar button label.** Print page top-of-document toolbar button changed from "Imprimir / Guardar como PDF" to "Imprimir" — the calling editor button is already labeled "Vista previa PDF" / "Descargar PDF", so the button on the print page only needs to label the action ("Imprimir").
 3. **I-06 — Hide block type-code label in non-edit (read-only) views.** `BlockHeader`'s `cw-print-meta-code` already hides under `print:hidden` from P1.8; this pass extends it to hide whenever `editable === false`. The internal token (`text`, `kpi_strip`, `divider`) was bleeding through into the print preview shell. After the fix, viewers see only the human label.
 
@@ -296,9 +296,9 @@ This route avoids the audited rough edges (no tablet-portrait views, no unknown 
 
 ## 13. Files changed in this audit pass
 
-- `frontend/app/not-found.tsx` — **new**, branded 404 page (I-02).
-- `frontend/app/portal/reports/[id]/print/page.tsx` — toolbar button label (I-03).
-- `frontend/components/checkwise/reports/block-header.tsx` — hide block type-code label in read-only mode (I-06).
+- `apps/web/app/not-found.tsx` — **new**, branded 404 page (I-02).
+- `apps/web/app/portal/reports/[id]/print/page.tsx` — toolbar button label (I-03).
+- `apps/web/components/checkwise/reports/block-header.tsx` — hide block type-code label in read-only mode (I-06).
 - `docs/SYSTEM_UX_AUDIT_REPORT.md` — **this report.**
 - `docs/NEXT_SESSION_HANDOFF.md` — short companion handoff for the next session.
 

@@ -29,7 +29,7 @@ Read these before changing major frontend surfaces:
 - `docs/design-system/VISUAL_DIRECTION_2_X.md`
 - `docs/design-system/VISUAL_REDESIGN_DOCTRINE.md`
 - `docs/design-system/ASSET_MANIFEST.md`
-- `frontend/app/globals.css`
+- `apps/web/app/globals.css`
 - `frontend/tailwind.config.ts`
 - relevant route, component, API, and mock-data files
 

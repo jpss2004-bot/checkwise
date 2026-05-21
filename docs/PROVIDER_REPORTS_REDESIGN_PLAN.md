@@ -330,14 +330,14 @@ as-is. No new role. No new column.
 
 ### 7.2 Context Assembler change
 
-`backend/app/services/reports/context.py`: when the actor is a
+`apps/api/app/services/reports/context.py`: when the actor is a
 workspace owner, pull the dashboard payload once and attach it to the
 `ReportContext.current_state` field (new optional field). The
 planner system prompt and the per-block fetchers can both read this.
 
 ### 7.3 Per-block data fetchers
 
-Four new modules under `backend/app/services/reports/blocks/`:
+Four new modules under `apps/api/app/services/reports/blocks/`:
 
 | Module | data_fetcher pulls from |
 |---|---|
@@ -354,14 +354,14 @@ Each module exports `config_schema` (zod-mirror), `data_schema`,
 ### 7.4 Vendor-scope assertion helper
 
 New helper `assert_workspace_scope(context)` lives in
-`backend/app/services/reports/blocks/_safety.py`. Each vendor-only
+`apps/api/app/services/reports/blocks/_safety.py`. Each vendor-only
 block calls it first. The helper raises `LLMError` if
 `context.audience != "vendor_facing"` and `context.workspace_vendor_id
 is None`. Tests pin this.
 
 ### 7.5 Preset block plans
 
-`backend/app/services/reports/templates.py`: each provider preset's
+`apps/api/app/services/reports/templates.py`: each provider preset's
 `recommended_prompt` already exists; what changes is the planner
 should bias toward the new block types. Achieve via the
 `llm_example_configs` on each new block — the planner sees the
@@ -377,19 +377,19 @@ and new `config` shapes; the renderer dispatches via the registry.
 ### 8.1 New components
 
 ```
-frontend/components/checkwise/reports/blocks/
+apps/web/components/checkwise/reports/blocks/
   compliance-state-block.tsx
   attention-list-block.tsx
   upcoming-deadlines-block.tsx
   prioritized-actions-block.tsx
 
-frontend/components/checkwise/reports/list/
+apps/web/components/checkwise/reports/list/
   compliance-pulse-strip.tsx          ← new, on /portal/reports
 ```
 
 ### 8.2 Registry update
 
-`frontend/lib/reports/registry.ts`: 4 new entries. Each registers
+`apps/web/lib/reports/registry.ts`: 4 new entries. Each registers
 `type`, `label`, `icon`, `configSchema`, `dataSchema`,
 `defaultConfig`, `Component`, `EditPanel` (minimal — most config is
 auto-derived), `llmDescription`, `llmExampleConfigs`.

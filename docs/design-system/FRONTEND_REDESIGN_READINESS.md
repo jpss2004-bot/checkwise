@@ -15,8 +15,8 @@ Ready:
 - Visual doctrine exists at `docs/design-system/VISUAL_REDESIGN_DOCTRINE.md`.
 - Package audit exists at `docs/design-system/claude-design-v0.1/AUDIT.md`.
 - Phase 1 token hardening has started in the real frontend.
-- Existing UI primitives live in `frontend/components/ui/`.
-- Existing CheckWise product patterns live in `frontend/components/checkwise/` and `frontend/app/portal/`.
+- Existing UI primitives live in `apps/web/components/ui/`.
+- Existing CheckWise product patterns live in `apps/web/components/checkwise/` and `apps/web/app/portal/`.
 
 Not ready:
 
@@ -33,11 +33,11 @@ Read in this order before any redesign work:
 3. `docs/design-system/VISUAL_REDESIGN_DOCTRINE.md`
 4. `docs/DESIGN_SYSTEM.md`
 5. `docs/design-system/claude-design-v0.1/uploads/DESIGN_SYSTEM.md`
-6. `frontend/app/globals.css`
+6. `apps/web/app/globals.css`
 7. `frontend/tailwind.config.ts`
-8. `frontend/components/ui/`
-9. `frontend/components/checkwise/`
-10. `frontend/app/portal/`
+8. `apps/web/components/ui/`
+9. `apps/web/components/checkwise/`
+10. `apps/web/app/portal/`
 
 ## Design Intent
 
@@ -67,7 +67,7 @@ Avoid:
 - Generic SaaS cards without decision value.
 - Copying the static Claude HTML into the app.
 - Changing working flows without preserving backend truth and user outcomes.
-- New visual systems that bypass `frontend/app/globals.css`.
+- New visual systems that bypass `apps/web/app/globals.css`.
 
 Creative permission after architecture is ready:
 
@@ -111,7 +111,7 @@ Phase 0: Source consolidation.
 
 Phase 1: Token hardening.
 
-- Continue using `frontend/app/globals.css` and `frontend/tailwind.config.ts` as canonical runtime token files.
+- Continue using `apps/web/app/globals.css` and `frontend/tailwind.config.ts` as canonical runtime token files.
 - Preserve compatibility aliases until all components migrate.
 - Do not change page layouts in this phase.
 
@@ -119,31 +119,31 @@ Phase 2: Primitive alignment.
 
 - Update existing primitives instead of creating parallel components.
 - Primary files:
-  - `frontend/components/ui/button.tsx`
-  - `frontend/components/ui/badge.tsx`
-  - `frontend/components/ui/alert.tsx`
-  - `frontend/components/ui/card.tsx`
-  - `frontend/components/ui/field.tsx`
-  - `frontend/components/ui/input.tsx`
-  - `frontend/components/ui/progress.tsx`
-  - `frontend/components/ui/select.tsx`
-  - `frontend/components/ui/textarea.tsx`
+  - `apps/web/components/ui/button.tsx`
+  - `apps/web/components/ui/badge.tsx`
+  - `apps/web/components/ui/alert.tsx`
+  - `apps/web/components/ui/card.tsx`
+  - `apps/web/components/ui/field.tsx`
+  - `apps/web/components/ui/input.tsx`
+  - `apps/web/components/ui/progress.tsx`
+  - `apps/web/components/ui/select.tsx`
+  - `apps/web/components/ui/textarea.tsx`
 
 Phase 3: Pattern alignment.
 
 - Map Claude Design patterns into existing CheckWise surfaces.
 - Add new surfaces when the architecture-backed workflow deserves a stronger task-specific route.
 - Primary surfaces:
-  - `frontend/app/page.tsx`
-  - `frontend/app/login/page.tsx`
-  - `frontend/app/activate/page.tsx`
-  - `frontend/app/portal/entra-a-tu-espacio/page.tsx`
-  - `frontend/app/portal/onboarding/page.tsx`
-  - `frontend/app/portal/dashboard/page.tsx`
-  - `frontend/app/portal/calendar/page.tsx`
-  - `frontend/app/portal/reports/page.tsx`
-  - `frontend/app/portal/upload/page.tsx`
-  - `frontend/app/admin/reviewer/page.tsx`
+  - `apps/web/app/page.tsx`
+  - `apps/web/app/login/page.tsx`
+  - `apps/web/app/activate/page.tsx`
+  - `apps/web/app/portal/entra-a-tu-espacio/page.tsx`
+  - `apps/web/app/portal/onboarding/page.tsx`
+  - `apps/web/app/portal/dashboard/page.tsx`
+  - `apps/web/app/portal/calendar/page.tsx`
+  - `apps/web/app/portal/reports/page.tsx`
+  - `apps/web/app/portal/upload/page.tsx`
+  - `apps/web/app/admin/reviewer/page.tsx`
 
 Possible new surfaces after architecture read models exist:
 
@@ -179,11 +179,11 @@ Read:
 - docs/DESIGN_SYSTEM.md
 - docs/WORKFLOW_STATE_MACHINE.md
 - docs/EVIDENCE_SLOTS.md
-- frontend/app/globals.css
+- apps/web/app/globals.css
 - frontend/tailwind.config.ts
-- frontend/components/ui/
-- frontend/components/checkwise/
-- frontend/app/portal/
+- apps/web/components/ui/
+- apps/web/components/checkwise/
+- apps/web/app/portal/
 
 Return:
 1. Current frontend surface inventory.

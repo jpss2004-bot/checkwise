@@ -83,7 +83,7 @@ This confirms: planner reaches Anthropic → executor fetches per-block data →
 
 | ID | Severity | Location | Status |
 |---|---|---|---|
-| B4 | P1 | `frontend/app/admin/_shell.tsx:74` rejected reviewer-only users | **fixed** |
+| B4 | P1 | `apps/web/app/admin/_shell.tsx:74` rejected reviewer-only users | **fixed** |
 | B5 | P1 | `pytest` failed when real `ANTHROPIC_API_KEY` was in env | **fixed** |
 | B3 | P2 | `/admin/login` legacy double-hop redirect | filed, not fixed |
 
@@ -104,12 +104,12 @@ P0 / additional P1 bugs: none found via static + API audit.
      }
 ```
 
-`frontend/app/admin/_shell.tsx` — 12 lines changed. Reviewer-only users (none currently seeded but the role exists) can now reach `/admin/reviewer`, their primary surface.
+`apps/web/app/admin/_shell.tsx` — 12 lines changed. Reviewer-only users (none currently seeded but the role exists) can now reach `/admin/reviewer`, their primary surface.
 
 ### B5 — pytest LLM isolation via conftest.py
 
 ```python
-# backend/tests/conftest.py
+# apps/api/tests/conftest.py
 import os
 os.environ.pop("ANTHROPIC_API_KEY", None)
 os.environ["CHECKWISE_LLM_BACKEND"] = "mock"
@@ -143,7 +143,7 @@ Runs at session import. Strips any inherited Anthropic key and forces the determ
 - R1.2 — `external_signed` signed-link delivery for vendors
 - R2 — interactive filters
 - Server-side DOCX / PDF export
-- 5 mock modules still backed by `frontend/lib/mock/*` (documented as `TODO[backend-integration]`)
+- 5 mock modules still backed by `apps/web/lib/mock/*` (documented as `TODO[backend-integration]`)
 
 ## Confidence level
 

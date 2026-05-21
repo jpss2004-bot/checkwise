@@ -34,7 +34,7 @@ uploads.
 ```bash
 # Prereqs (already in place locally):
 # - Postgres via docker-compose
-# - backend/.venv (python 3.11), frontend/node_modules
+# - apps/api/.venv (python 3.11), apps/web/node_modules
 
 cd CheckWise
 docker compose up -d postgres                  # Postgres on :5432
@@ -55,17 +55,17 @@ workspace-entry screen, click "Entrar a mi espacio", then navigate to
 
 ## Provider Reports routes discovered
 
-Located via `find frontend/app/portal -name "page.tsx"` and
-`grep -rln "reports" frontend/app/portal`:
+Located via `find apps/web/app/portal -name "page.tsx"` and
+`grep -rln "reports" apps/web/app/portal`:
 
 | Route | File | Purpose |
 |---|---|---|
-| `/portal/reports` | [page.tsx](../../../frontend/app/portal/reports/page.tsx) | List view + Compliance Pulse strip (provider-only mount). Wraps shared `ReportsListView` with `role="portal"`. |
-| `/portal/reports/[id]` | [page.tsx](../../../frontend/app/portal/reports/[id]/page.tsx) | Editor. Wraps shared `ReportEditor` inside `PortalAppShell`. Print href is set so the editor toolbar's "Vista previa PDF" / "Descargar PDF" land in the provider's print-mode page. |
-| `/portal/reports/[id]/print` | [print/page.tsx](../../../frontend/app/portal/reports/[id]/print/page.tsx) | Print mode. Mounts `<Canvas>` WITHOUT `ReportActionsContext` so per-block freshness chips drop their interactive "Actualizar" handles. `?autoprint=1` fires `window.print()` once. |
+| `/portal/reports` | [page.tsx](../../../apps/web/app/portal/reports/page.tsx) | List view + Compliance Pulse strip (provider-only mount). Wraps shared `ReportsListView` with `role="portal"`. |
+| `/portal/reports/[id]` | [page.tsx](../../../apps/web/app/portal/reports/[id]/page.tsx) | Editor. Wraps shared `ReportEditor` inside `PortalAppShell`. Print href is set so the editor toolbar's "Vista previa PDF" / "Descargar PDF" land in the provider's print-mode page. |
+| `/portal/reports/[id]/print` | [print/page.tsx](../../../apps/web/app/portal/reports/[id]/print/page.tsx) | Print mode. Mounts `<Canvas>` WITHOUT `ReportActionsContext` so per-block freshness chips drop their interactive "Actualizar" handles. `?autoprint=1` fires `window.print()` once. |
 
 The provider nav exposes "Reportes" from
-[portal-app-shell.tsx:73](../../../frontend/components/checkwise/portal/portal-app-shell.tsx#L73).
+[portal-app-shell.tsx:73](../../../apps/web/components/checkwise/portal/portal-app-shell.tsx#L73).
 **No other provider page calls `/api/v1/reports/*`.**
 
 ## Provider Reports routes tested
@@ -88,7 +88,7 @@ captured PNGs into `docs/audits/provider-reports-local-demo/screenshots/`.
 ## Mock provider data created
 
 Phase 2 of this audit extended `_seed_submissions` in
-[backend/scripts/dev_seed.py](../../../backend/scripts/dev_seed.py)
+[apps/api/scripts/dev_seed.py](../../../apps/api/scripts/dev_seed.py)
 from 6 → 16 submissions on the `boss.demo` workspace
 (`ws-demo-0002`, vendor: Servicios Especializados Aurora · Demo,
 client: Constructora Aurora · Demo, filial: Filial Centro).
@@ -198,7 +198,7 @@ All saved under `docs/audits/provider-reports-local-demo/screenshots/`:
 - ⚠️ The Pulse strip says **5% / 7 of 144**, while the report's KPI strip says **38% / 4 envíos / 25% aprobados**. Two different denominators in the same flow — Pulse is "obligaciones requeridas en el calendario", KPI is "envíos del periodo del reporte". Worth annotating with tooltips so providers don't read the numbers as conflicting.
 - ⚠️ The Borrador filter, on a workspace where every report is Borrador, produces an unchanged result. Functionally correct, but visually identical to the unfiltered state. Same with Audiencia (hidden for providers because only one audience is visible to them).
 - ⚠️ The mobile filter row may swallow the Estado dropdown into a less-discoverable position — screenshot 08 didn't visibly change between mobile populated and "Archivado" filter, suggesting the select wasn't engaged by the script. Need a manual mobile pass.
-- ⚠️ `/portal/reports/<id>/print` was not exercised end-to-end (no `window.print()` capture in headless mode). The page renders; the print CSS contract is covered by [`frontend/scripts/check-print-contract.mjs`](../../../frontend/scripts/check-print-contract.mjs).
+- ⚠️ `/portal/reports/<id>/print` was not exercised end-to-end (no `window.print()` capture in headless mode). The page renders; the print CSS contract is covered by [`apps/web/scripts/check-print-contract.mjs`](../../../apps/web/scripts/check-print-contract.mjs).
 
 ## What's broken
 
@@ -219,11 +219,11 @@ all fixed and live on `b44533b` (Render + Vercel).
 
 | Severity | Issue | File |
 |---|---|---|
-| P2 | Pulse + KPI strip use different denominators with no in-product hint. | [compliance-pulse-strip.tsx](../../../frontend/components/checkwise/reports/list/compliance-pulse-strip.tsx) / `kpi-strip.tsx` block |
-| P2 | "Empieza aquí" ribbon on the first preset slightly overlaps the card border; readable but tight. | [reports-list-view.tsx:480](../../../frontend/components/checkwise/reports/list/reports-list-view.tsx#L480) |
-| P2 | Audiencia filter is hidden for providers (only one visible audience). Filter bar would feel less skeletal if we replaced the gap with a sort or a date range. | [reports-list-view.tsx:398](../../../frontend/components/checkwise/reports/list/reports-list-view.tsx#L398) |
-| P3 | Editor toolbar shows two near-synonym actions ("Vista previa PDF" + "Descargar PDF"); could collapse into a split-button. | [report-editor.tsx](../../../frontend/components/checkwise/reports/editor/report-editor.tsx) |
-| P3 | "Sin cambios" badge sits *under* the toolbar rather than inline with it — visually dangling. | [report-editor.tsx](../../../frontend/components/checkwise/reports/editor/report-editor.tsx) |
+| P2 | Pulse + KPI strip use different denominators with no in-product hint. | [compliance-pulse-strip.tsx](../../../apps/web/components/checkwise/reports/list/compliance-pulse-strip.tsx) / `kpi-strip.tsx` block |
+| P2 | "Empieza aquí" ribbon on the first preset slightly overlaps the card border; readable but tight. | [reports-list-view.tsx:480](../../../apps/web/components/checkwise/reports/list/reports-list-view.tsx#L480) |
+| P2 | Audiencia filter is hidden for providers (only one visible audience). Filter bar would feel less skeletal if we replaced the gap with a sort or a date range. | [reports-list-view.tsx:398](../../../apps/web/components/checkwise/reports/list/reports-list-view.tsx#L398) |
+| P3 | Editor toolbar shows two near-synonym actions ("Vista previa PDF" + "Descargar PDF"); could collapse into a split-button. | [report-editor.tsx](../../../apps/web/components/checkwise/reports/editor/report-editor.tsx) |
+| P3 | "Sin cambios" badge sits *under* the toolbar rather than inline with it — visually dangling. | [report-editor.tsx](../../../apps/web/components/checkwise/reports/editor/report-editor.tsx) |
 
 ## Backend / API issues
 
@@ -307,7 +307,7 @@ What it earns:
 ## Exact files changed
 
 ```
-M  backend/scripts/dev_seed.py    Phase 2 — added 10 submissions covering
+M  apps/api/scripts/dev_seed.py    Phase 2 — added 10 submissions covering
                                   vencido, requiere_aclaracion, excepcion_legal,
                                   supersession chain (IMSS Feb), INFONAVIT B1,
                                   STPS Q1, SAT ISR retención + nómina + entero.

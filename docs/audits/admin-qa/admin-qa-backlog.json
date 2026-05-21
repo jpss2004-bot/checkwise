@@ -19,7 +19,7 @@
       "severity": "high",
       "priority": "P1",
       "confidence": "high",
-      "source": "backend/app/api/v1/portal.py (Stage 2.7-a) ships POST /portal/.../correction-requests writing audit_log + Slack, but no /admin/* GET + UI consumes them. Admins must hand-filter /admin/audit-log by action=correction_request.submitted.",
+      "source": "apps/api/app/api/v1/portal.py (Stage 2.7-a) ships POST /portal/.../correction-requests writing audit_log + Slack, but no /admin/* GET + UI consumes them. Admins must hand-filter /admin/audit-log by action=correction_request.submitted.",
       "description": "Providers can submit Tier B correction requests from the portal. Each one writes a row to audit_log and best-effort POSTs to Slack. There is no curated admin queue to review the requests, mark them resolved, or capture the resolution. Today admins discover them via Slack, then must manually navigate the audit log to find context.",
       "why_it_matters": "Slack is a transient channel and audit_log is not a triage UI. Without a dedicated inbox, valid correction requests can stall, and there is no admin-side aggregate view of how many requests are open, which proveedores raised them, or which fields were disputed.",
       "recommended_fix": [
@@ -29,11 +29,11 @@
         "Reuse the existing audit_log row as the source of truth — no new table; persist status transitions back to the same row's metadata or a sibling table only if necessary."
       ],
       "likely_files": [
-        "backend/app/api/v1/admin.py",
-        "backend/app/services/correction_request_service.py",
-        "frontend/app/admin/correction-requests/page.tsx (new)",
-        "frontend/app/admin/_shell.tsx (nav entry)",
-        "frontend/lib/api/admin.ts"
+        "apps/api/app/api/v1/admin.py",
+        "apps/api/app/services/correction_request_service.py",
+        "apps/web/app/admin/correction-requests/page.tsx (new)",
+        "apps/web/app/admin/_shell.tsx (nav entry)",
+        "apps/web/lib/api/admin.ts"
       ],
       "acceptance_criteria": [
         "An internal_admin can open /admin/correction-requests and see all correction-request audit_log rows with status filter.",
@@ -59,7 +59,7 @@
       "severity": "high",
       "priority": "P1",
       "confidence": "high",
-      "source": "frontend/app/admin/clients/page.tsx:255 (RFC input rendered in both create and edit modes); contrast vendor form which hides RFC in edit mode.",
+      "source": "apps/web/app/admin/clients/page.tsx:255 (RFC input rendered in both create and edit modes); contrast vendor form which hides RFC in edit mode.",
       "description": "An internal admin can rewrite a client's RFC inline. The audit log captures the change but no UI guardrail explains the legal weight of the field or asks for a justification. The matching vendor edit form correctly hides RFC on edit; this inconsistency suggests an oversight rather than a deliberate choice.",
       "why_it_matters": "RFC is a legal identifier. Quiet edits can mask provider/client mix-ups, hide subsequent compliance breaches, and create reconciliation problems with SAT lookups. The audit log is reactive, not preventive.",
       "recommended_fix": [
@@ -69,9 +69,9 @@
         "Optionally mirror vendor form: keep RFC immutable from the UI, route edits through a dedicated correction-request flow (A-001)."
       ],
       "likely_files": [
-        "frontend/app/admin/clients/page.tsx",
-        "backend/app/api/v1/admin.py (client PATCH)",
-        "backend/app/services/audit_log.py"
+        "apps/web/app/admin/clients/page.tsx",
+        "apps/api/app/api/v1/admin.py (client PATCH)",
+        "apps/api/app/services/audit_log.py"
       ],
       "acceptance_criteria": [
         "Editing a client without toggling the RFC lock leaves RFC unchanged.",
@@ -95,7 +95,7 @@
       "severity": "high",
       "priority": "P0",
       "confidence": "high",
-      "source": "frontend/app/admin/reviewer/[submission_id]/page.tsx:329-358 (ReasonsCard) — `title={r.rule_code}`. Provider equivalent uses a REASON_TITLES map; central helper `lib/constants/validation.ts::validationLabel` exists and is already used by `components/checkwise/validation-summary.tsx`.",
+      "source": "apps/web/app/admin/reviewer/[submission_id]/page.tsx:329-358 (ReasonsCard) — `title={r.rule_code}`. Provider equivalent uses a REASON_TITLES map; central helper `lib/constants/validation.ts::validationLabel` exists and is already used by `components/checkwise/validation-summary.tsx`.",
       "description": "Reviewers see raw snake_case rule_codes (`file_exists`, `pdf_readable_text`, `duplicate_hash`, …) as the primary title of each signal row. Stage 1 BL-003 fixed this on the provider portal but the admin reviewer surface was missed.",
       "why_it_matters": "Reviewers are not engineers. Reading 'file_exists' next to 'PDF protegido con contraseña' breaks the trust layer the rest of the page builds. It also makes it harder to write reviewer-side QA without inside knowledge of the prevalidation module.",
       "recommended_fix": [
@@ -104,8 +104,8 @@
         "If a code is not yet in `VALIDATION_RULE_LABELS_ES`, the helper falls back to the raw code so a missing entry is loud, not silent."
       ],
       "likely_files": [
-        "frontend/app/admin/reviewer/[submission_id]/page.tsx",
-        "frontend/lib/constants/validation.ts"
+        "apps/web/app/admin/reviewer/[submission_id]/page.tsx",
+        "apps/web/lib/constants/validation.ts"
       ],
       "acceptance_criteria": [
         "Reviewer detail shows 'Texto legible' rather than 'pdf_readable_text' as the primary title.",
@@ -128,7 +128,7 @@
       "severity": "high",
       "priority": "P0",
       "confidence": "high",
-      "source": "frontend/app/admin/calendar/page.tsx:93 `min={2024}`; frontend/app/client/calendar/page.tsx:108 `min={2024}`. Backend `period_validation.MIN_YEAR=2021`.",
+      "source": "apps/web/app/admin/calendar/page.tsx:93 `min={2024}`; apps/web/app/client/calendar/page.tsx:108 `min={2024}`. Backend `period_validation.MIN_YEAR=2021`.",
       "description": "The year input on both calendar surfaces enforces `min=2024`, stricter than the backend (`MIN_YEAR=2021`). Admins inspecting historical REPSE periods between 2021 and 2023 cannot type the year — the browser blocks submission.",
       "why_it_matters": "REPSE compliance starts in 2021. The product story is 'we track everything since the reform.' A UI floor that contradicts that story silently truncates the operational window and contradicts the backend BL-T7 fix.",
       "recommended_fix": [
@@ -136,8 +136,8 @@
         "Optionally import MIN_YEAR / MAX_YEAR from a shared module to avoid drift."
       ],
       "likely_files": [
-        "frontend/app/admin/calendar/page.tsx",
-        "frontend/app/client/calendar/page.tsx"
+        "apps/web/app/admin/calendar/page.tsx",
+        "apps/web/app/client/calendar/page.tsx"
       ],
       "acceptance_criteria": [
         "Year input accepts 2021, 2022, 2023 without browser-side rejection.",
@@ -169,9 +169,9 @@
         "Sign off the chip list with Paco / Beko / legal — do not ship final copy without their approval."
       ],
       "likely_files": [
-        "frontend/components/checkwise/admin/review-decision-panel.tsx",
-        "backend/app/api/v1/reviewer.py",
-        "backend/app/services/submission_workflow.py"
+        "apps/web/components/checkwise/admin/review-decision-panel.tsx",
+        "apps/api/app/api/v1/reviewer.py",
+        "apps/api/app/services/submission_workflow.py"
       ],
       "acceptance_criteria": [
         "ReviewDecisionPanel shows a chip list when action is reject/clarify/exception.",
@@ -204,9 +204,9 @@
         "Pull from the same `compliance_catalog` source; no new DB table."
       ],
       "likely_files": [
-        "frontend/app/admin/reviewer/[submission_id]/page.tsx",
-        "frontend/components/checkwise/admin/review-decision-panel.tsx",
-        "backend/app/api/v1/reviewer.py"
+        "apps/web/app/admin/reviewer/[submission_id]/page.tsx",
+        "apps/web/components/checkwise/admin/review-decision-panel.tsx",
+        "apps/api/app/api/v1/reviewer.py"
       ],
       "acceptance_criteria": [
         "Reviewer can expand 'Acerca de este documento' on /admin/reviewer/<id> and see anatomy / dónde obtenerlo / errores comunes.",
@@ -228,7 +228,7 @@
       "severity": "medium",
       "priority": "P1",
       "confidence": "high",
-      "source": "backend/app/api/v1/admin.py:841 `year: Annotated[int, Query(ge=MIN_YEAR, le=MAX_YEAR)] = 2026`. Mirrors the BL-T3 spirit — hardcoded forward years age silently.",
+      "source": "apps/api/app/api/v1/admin.py:841 `year: Annotated[int, Query(ge=MIN_YEAR, le=MAX_YEAR)] = 2026`. Mirrors the BL-T3 spirit — hardcoded forward years age silently.",
       "description": "If a caller omits the year query parameter, the admin calendar serves the 2026 snapshot. In 2027 this will quietly read stale unless the frontend always sets the parameter (which it does today, but the contract should not rely on it).",
       "why_it_matters": "Defaults that age make demos and integration tests lie about the current state. The BL-T3 fix already removed hardcoded 2026 from provider UI copy; the backend default is the next leak.",
       "recommended_fix": [
@@ -236,7 +236,7 @@
         "Keep the `ge=MIN_YEAR, le=MAX_YEAR` clamp."
       ],
       "likely_files": [
-        "backend/app/api/v1/admin.py"
+        "apps/api/app/api/v1/admin.py"
       ],
       "acceptance_criteria": [
         "Calling GET /admin/calendar with no year returns the current calendar year's snapshot.",
@@ -258,7 +258,7 @@
       "severity": "medium",
       "priority": "P2",
       "confidence": "high",
-      "source": "backend/app/services/requirement_service.py:153 `legal_basis=\"Pendiente de semilla completa desde matriz regulatoria REPSE 2026.\"`.",
+      "source": "apps/api/app/services/requirement_service.py:153 `legal_basis=\"Pendiente de semilla completa desde matriz regulatoria REPSE 2026.\"`.",
       "description": "When the catalog has not been seeded for a requirement, the service stamps a fallback `legal_basis` that contains 'REPSE 2026' literally. Surfaces back to admin/legal-facing requirement detail.",
       "why_it_matters": "Same class of issue BL-T3 fixed in the marketing surfaces. Quietly ages and starts to feel wrong by year-end.",
       "recommended_fix": [
@@ -266,7 +266,7 @@
         "Final copy needs Paco / Beko / legal sign-off."
       ],
       "likely_files": [
-        "backend/app/services/requirement_service.py"
+        "apps/api/app/services/requirement_service.py"
       ],
       "acceptance_criteria": [
         "No literal 'REPSE 2026' string in `app/services/requirement_service.py`.",
@@ -287,7 +287,7 @@
       "severity": "low",
       "priority": "P2",
       "confidence": "high",
-      "source": "frontend/lib/constants/validation.ts vs backend rule_code emitters in `services/submission_service.py` and `services/prevalidation.py`.",
+      "source": "apps/web/lib/constants/validation.ts vs backend rule_code emitters in `services/submission_service.py` and `services/prevalidation.py`.",
       "description": "Some rule_codes the backend can emit are not in the central label map: `native_intake`, `canonical_requirement_code`, `canonical_period_key`, `submission_replacement`. They normally have severity=info and are filtered out of reviewer reasons, but the gap exists.",
       "why_it_matters": "If one of these ever escalates to warning/error severity, the reviewer surface will fall back to the raw code — silent regression of A-003.",
       "recommended_fix": [
@@ -295,7 +295,7 @@
         "Document the map invariant: every rule_code emitter in backend has an entry in `VALIDATION_RULE_LABELS_ES`."
       ],
       "likely_files": [
-        "frontend/lib/constants/validation.ts"
+        "apps/web/lib/constants/validation.ts"
       ],
       "acceptance_criteria": [
         "All backend rule_codes have an entry in the label map.",
@@ -316,7 +316,7 @@
       "severity": "low",
       "priority": "P3",
       "confidence": "medium",
-      "source": "frontend/app/admin/dashboard/page.tsx:56,102,198 — 'workspaces activos' caption + signal label + description.",
+      "source": "apps/web/app/admin/dashboard/page.tsx:56,102,198 — 'workspaces activos' caption + signal label + description.",
       "description": "The dashboard description and signal list still use the internal term 'workspaces'. The Stage 1 audit consciously kept 'workspace' as internal vocabulary; this finding is a small clarity tap on the shoulder, not a rewrite.",
       "why_it_matters": "Non-engineering ops staff sometimes ask what 'workspace' means. A tooltip closes the loop without changing the model.",
       "recommended_fix": [
@@ -324,7 +324,7 @@
         "Do not rename the field in the API."
       ],
       "likely_files": [
-        "frontend/app/admin/dashboard/page.tsx"
+        "apps/web/app/admin/dashboard/page.tsx"
       ],
       "acceptance_criteria": [
         "The signal row exposes a tooltip explaining what an active workspace is.",
@@ -345,7 +345,7 @@
       "severity": "low",
       "priority": "P2",
       "confidence": "high",
-      "source": "frontend/components/checkwise/reports/editor/report-editor.tsx:566 — placeholder string 'Genera un resumen REPSE de mayo 2026 para los proveedores con SAT pendiente.'",
+      "source": "apps/web/components/checkwise/reports/editor/report-editor.tsx:566 — placeholder string 'Genera un resumen REPSE de mayo 2026 para los proveedores con SAT pendiente.'",
       "description": "The AI-prompt placeholder example mentions a specific month-year. Cosmetic, but ages with calendar time.",
       "why_it_matters": "Same class as A-011. Placeholder example reads stale at year boundaries.",
       "recommended_fix": [
@@ -353,7 +353,7 @@
         "Keep the rest of the example intact."
       ],
       "likely_files": [
-        "frontend/components/checkwise/reports/editor/report-editor.tsx"
+        "apps/web/components/checkwise/reports/editor/report-editor.tsx"
       ],
       "acceptance_criteria": [
         "Placeholder no longer references a hardcoded month-year.",
@@ -374,15 +374,15 @@
       "severity": "low",
       "priority": "P3",
       "confidence": "high",
-      "source": "frontend/app/admin/reviewer/page.tsx:148 + /[submission_id]/page.tsx:149.",
+      "source": "apps/web/app/admin/reviewer/page.tsx:148 + /[submission_id]/page.tsx:149.",
       "description": "Both reviewer pages use the eyebrow 'Reviewer workbench' in English. Everything else on the page is Spanish. Internal vocabulary tolerated, but flagged for polish.",
       "why_it_matters": "Minor consistency improvement.",
       "recommended_fix": [
         "Replace with 'Bandeja de revisión' or 'Workbench de revisión' — pick one and apply consistently."
       ],
       "likely_files": [
-        "frontend/app/admin/reviewer/page.tsx",
-        "frontend/app/admin/reviewer/[submission_id]/page.tsx"
+        "apps/web/app/admin/reviewer/page.tsx",
+        "apps/web/app/admin/reviewer/[submission_id]/page.tsx"
       ],
       "acceptance_criteria": [
         "No English-only eyebrows on admin reviewer surfaces."
@@ -410,8 +410,8 @@
         "Map known event_types to plain Spanish detection labels."
       ],
       "likely_files": [
-        "frontend/app/admin/reviewer/[submission_id]/page.tsx",
-        "frontend/lib/api/portal.ts (Reason type)"
+        "apps/web/app/admin/reviewer/[submission_id]/page.tsx",
+        "apps/web/lib/api/portal.ts (Reason type)"
       ],
       "acceptance_criteria": [
         "Signals with non-null confidence show it in plain Spanish.",
@@ -440,8 +440,8 @@
         "For admin: 'No hay plantillas operativas asignadas a tu rol. Confirma con el equipo que el seed esté completo.'"
       ],
       "likely_files": [
-        "frontend/components/checkwise/reports/list/reports-list-view.tsx",
-        "frontend/app/admin/reports/page.tsx"
+        "apps/web/components/checkwise/reports/list/reports-list-view.tsx",
+        "apps/web/app/admin/reports/page.tsx"
       ],
       "acceptance_criteria": [
         "Admin empty copy differs from provider empty copy.",
@@ -470,7 +470,7 @@
         "Keep the example list short (1-2 per action)."
       ],
       "likely_files": [
-        "frontend/components/checkwise/admin/review-decision-panel.tsx"
+        "apps/web/components/checkwise/admin/review-decision-panel.tsx"
       ],
       "acceptance_criteria": [
         "Placeholder copy varies per action.",
@@ -491,7 +491,7 @@
       "severity": "low",
       "priority": "P3",
       "confidence": "medium",
-      "source": "frontend/app/admin/reviewer/[submission_id]/page.tsx:424-459.",
+      "source": "apps/web/app/admin/reviewer/[submission_id]/page.tsx:424-459.",
       "description": "Traceability card surfaces SHA-256, filename, requirement code. It is labeled 'Trazabilidad' but a stronger eyebrow 'Datos técnicos · sólo para diagnóstico' would make the operator separation between business signal and engineering trail clearer.",
       "why_it_matters": "Reduces the chance a reviewer copies a hash into a provider-facing communication.",
       "recommended_fix": [
@@ -499,7 +499,7 @@
         "Keep the existing data."
       ],
       "likely_files": [
-        "frontend/app/admin/reviewer/[submission_id]/page.tsx"
+        "apps/web/app/admin/reviewer/[submission_id]/page.tsx"
       ],
       "acceptance_criteria": [
         "Eyebrow text 'Datos técnicos · sólo para diagnóstico' present above the card data.",

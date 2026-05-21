@@ -18,7 +18,7 @@ The two highest-priority findings are both workflow blockers: the activation can
 
 - Initial repo path supplied by the environment was one level above the Git repo; the actual repo audited was `/Users/josepablosamano/Desktop/Work — LegalShelf/checkwise/CheckWise`.
 - `git status` at initial inspection was clean on `main`.
-- During the audit, parallel source changes appeared outside the allowed Codex audit folder: `backend/app/api/v1/reports.py, backend/app/services/report_service.py, backend/app/services/reports/templates.py, backend/tests/test_reports_presets.py, frontend/app/portal/reports/page.tsx`. I did not edit those files.
+- During the audit, parallel source changes appeared outside the allowed Codex audit folder: `apps/api/app/api/v1/reports.py, apps/api/app/services/report_service.py, apps/api/app/services/reports/templates.py, apps/api/tests/test_reports_presets.py, apps/web/app/portal/reports/page.tsx`. I did not edit those files.
 - Final working tree includes only Codex-created report artifacts under `docs/codex-route-workflow-audit/` plus the parallel source changes above.
 - Local stack: frontend `http://localhost:3000` and backend `http://127.0.0.1:8000` both responded successfully.
 - Verification: backend health OK, DB health OK, `frontend` typecheck passed, backend pytest passed `332 passed, 2 warnings`.
@@ -184,8 +184,8 @@ What is confusing or blocked:
 - `curl http://127.0.0.1:8000/api/v1/health/db`
 - Browser UI login and route checks for admin, client, provider, activation.
 - API role/preset/report probes via Python `urllib`.
-- `backend/.venv/bin/pytest -q` -> `332 passed, 2 warnings`.
-- `frontend/node_modules/.bin/tsc --noEmit` -> passed.
+- `apps/api/.venv/bin/pytest -q` -> `332 passed, 2 warnings`.
+- `apps/web/node_modules/.bin/tsc --noEmit` -> passed.
 
 ## Limitations
 

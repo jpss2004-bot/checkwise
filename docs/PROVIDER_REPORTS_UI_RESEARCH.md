@@ -316,7 +316,7 @@ of the report, not the whole report.
 | Confusion: "is this report current or last week's?" | Medium | Every new block carries a `data.fetched_at` timestamp the block frame displays subtly above the content. |
 | Dual-workspace owner edge case | Low (no seed coverage) | Add a test in the first slice where one user owns two workspaces; assert the report scopes to the workspace whose `vendor_id` matches the report. |
 | Performance: dashboard payload is ~5 KB; injecting into planner system prompt costs tokens every generate | Low | Acceptable. Prompt-caching the catalog + workspace context once per session keeps the marginal cost bounded. |
-| Block registry symmetry drift (FE def vs BE fetcher) | Medium | Add a CI check that every block in `frontend/lib/reports/registry.ts` has a matching `backend/app/services/reports/blocks/<type>.py`. |
+| Block registry symmetry drift (FE def vs BE fetcher) | Medium | Add a CI check that every block in `apps/web/lib/reports/registry.ts` has a matching `apps/api/app/services/reports/blocks/<type>.py`. |
 
 ---
 

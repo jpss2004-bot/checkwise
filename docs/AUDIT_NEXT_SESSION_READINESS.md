@@ -13,7 +13,7 @@
 
 The repository is in **excellent shape** going into the next coding session. The full verification gauntlet is green on a clean checkout: backend ruff clean, **427/427 pytest pass**, frontend tsc 0 errors, eslint 0 warnings, `next build` compiles all **29/29 routes**, and the print-contract test passes. No tracked generated artefacts. No `TODO`/`FIXME`/`HACK` markers in backend source. CORS, auth, file-upload size limits, and dev-seed production guards are all in place.
 
-The known unfinished work is the **V2.2 mock→real backend wiring** that V2.0 deliberately deferred — well-marked with `TODO[backend-integration]` and `TODO[security-backend]` comments under `frontend/lib/mock/*`, `frontend/lib/workspace/*`, and `frontend/lib/api/portal-adapters.ts`. That is the natural next development thread, and is what the existing [docs/ROADMAP.md](ROADMAP.md) §V2.2 already calls out.
+The known unfinished work is the **V2.2 mock→real backend wiring** that V2.0 deliberately deferred — well-marked with `TODO[backend-integration]` and `TODO[security-backend]` comments under `apps/web/lib/mock/*`, `apps/web/lib/workspace/*`, and `apps/web/lib/api/portal-adapters.ts`. That is the natural next development thread, and is what the existing [docs/ROADMAP.md](ROADMAP.md) §V2.2 already calls out.
 
 This audit applied three small safe fixes (CI off deprecated `next lint`; README ditto; two frontend localhost-fallback inconsistencies). Everything else worth doing — orphan-component removal, audit-doc consolidation, P2.0 provider-block seed fixtures — is captured below for the next session to action.
 
@@ -128,20 +128,20 @@ checkwise/
 - `.github/workflows/ci.yml`
 
 ### 3.2 Backend
-- `backend/app/main.py`, `backend/app/core/config.py`
-- `backend/app/api/v1/router.py` (verified all 9 sub-routers wire in)
-- `backend/app/services/storage.py` (local + S3 implementations, streaming + size cap + SHA-256)
-- `backend/scripts/dev_seed.py` (P0 production guard verified — refuses to run against non-local hosts unless `CHECKWISE_ALLOW_SEED_AGAINST` override is set)
-- `backend/pyproject.toml` (deps + ruff + pytest config)
-- `backend/alembic/versions/` (9 migrations, sequential 0001–0009)
+- `apps/api/app/main.py`, `apps/api/app/core/config.py`
+- `apps/api/app/api/v1/router.py` (verified all 9 sub-routers wire in)
+- `apps/api/app/services/storage.py` (local + S3 implementations, streaming + size cap + SHA-256)
+- `apps/api/scripts/dev_seed.py` (P0 production guard verified — refuses to run against non-local hosts unless `CHECKWISE_ALLOW_SEED_AGAINST` override is set)
+- `apps/api/pyproject.toml` (deps + ruff + pytest config)
+- `apps/api/alembic/versions/` (9 migrations, sequential 0001–0009)
 
 ### 3.3 Frontend
-- `frontend/package.json`, `frontend/tsconfig.json`, `frontend/next.config.ts`
-- Every page file under `frontend/app/` (35 routes catalogued — see §2 map)
-- All 9 API clients under `frontend/lib/api/`
-- Session/HOC modules under `frontend/lib/session/`
-- Mock modules under `frontend/lib/mock/` (each one has a `TODO[backend-integration]` header)
-- `frontend/scripts/check-print-contract.mjs`
+- `apps/web/package.json`, `apps/web/tsconfig.json`, `apps/web/next.config.ts`
+- Every page file under `apps/web/app/` (35 routes catalogued — see §2 map)
+- All 9 API clients under `apps/web/lib/api/`
+- Session/HOC modules under `apps/web/lib/session/`
+- Mock modules under `apps/web/lib/mock/` (each one has a `TODO[backend-integration]` header)
+- `apps/web/scripts/check-print-contract.mjs`
 
 ### 3.4 Docs (full enumeration)
 
@@ -231,11 +231,11 @@ No broken route, no failing test, no incorrect import, no missing migration, no 
 |---|---|---|---|---|
 | F-01 | CI uses `npx next lint --quiet` which will be removed in Next 16 | Low (forced migration eventually) | `.github/workflows/ci.yml:59` | **Fixed in this pass** → `npx eslint . --quiet` |
 | F-02 | README verification gauntlet uses `node_modules/.bin/next lint --quiet` | Low | `README.md:188` | **Fixed in this pass** → `node_modules/.bin/eslint .` |
-| F-03 | 2 frontend files use `localhost:8000` fallback while 9 others use `127.0.0.1:8000`. Cosmetic inconsistency; only kicks in if `NEXT_PUBLIC_API_BASE_URL` is unset | Trivial | `frontend/components/checkwise/document-submission-form.tsx:37`, `frontend/components/checkwise/intake-wizard.tsx:168` | **Fixed in this pass** → both normalized to `127.0.0.1:8000` |
+| F-03 | 2 frontend files use `localhost:8000` fallback while 9 others use `127.0.0.1:8000`. Cosmetic inconsistency; only kicks in if `NEXT_PUBLIC_API_BASE_URL` is unset | Trivial | `apps/web/components/checkwise/document-submission-form.tsx:37`, `apps/web/components/checkwise/intake-wizard.tsx:168` | **Fixed in this pass** → both normalized to `127.0.0.1:8000` |
 | F-10 | 3 pre-existing `@typescript-eslint/no-unused-vars` warnings (`EmptyState`, `Button`, `DataTableColumn`) surfaced only by `next build`'s lint pass — `eslint --quiet` was hiding them. Documented since `STABILIZATION_AUDIT_2026-05-18.md`. | Low | `app/admin/dashboard/page.tsx:24`, `app/admin/reviewer/page.tsx:14`, `app/admin/vendors/page.tsx:15` | **Fixed in this pass** → 3 unused imports removed; `next build` is now fully silent |
 | F-04 | 9 orphan frontend files — confirmed unused (no consumer beyond their own file or a comment-mention) | Low (dead code) | See §5.4 | **Documented, not removed** |
-| F-05 | `lib/types.ts:32` references `DocumentSubmissionForm` in a comment; the component is itself orphaned | Trivial | `frontend/lib/types.ts:32` | Documented |
-| F-06 | README §"Repo layout (tracked)" lists `components/checkwise/portal/ProviderContextBar` but PortalAppShell has superseded it (see `portal-app-shell.tsx:29` comment) | Trivial doc drift | `README.md:127` and `frontend/components/checkwise/portal/portal-app-shell.tsx:29` | Documented; defer to orphan-cleanup pass |
+| F-05 | `lib/types.ts:32` references `DocumentSubmissionForm` in a comment; the component is itself orphaned | Trivial | `apps/web/lib/types.ts:32` | Documented |
+| F-06 | README §"Repo layout (tracked)" lists `components/checkwise/portal/ProviderContextBar` but PortalAppShell has superseded it (see `portal-app-shell.tsx:29` comment) | Trivial doc drift | `README.md:127` and `apps/web/components/checkwise/portal/portal-app-shell.tsx:29` | Documented; defer to orphan-cleanup pass |
 | F-07 | Two `pytest` deprecation warnings: `HTTP_422_UNPROCESSABLE_ENTITY` → `_CONTENT` (transitive: anyio/starlette) | Low (upstream noise) | `tests/test_reports*.py` execution | Out-of-scope; clears on upstream version bump |
 | F-08 | Many "audit/handoff" docs dated 2026-05-18 sit together in `docs/` root — readable but cluttered | Low (organization) | `docs/*AUDIT*.md`, `docs/*HANDOFF*.md` | Documented; archive folder recommendation in §8.4 |
 | F-09 | `dev.sh` and `dev_demo.sh` both exist with overlapping purpose (`dev.sh` is plain; `dev_demo.sh` adds Docker bring-up + seed) | Trivial | Root scripts | No action — both useful, intentionally |
@@ -249,7 +249,7 @@ No broken route, no failing test, no incorrect import, no missing migration, no 
 | JWT | HS256, configurable rounds (`AUTH_BCRYPT_ROUNDS=12`), expiry knob, default secret marked "change-me" with explicit comment about prod override (`core/config.py:43`). |
 | Upload validation | Streamed read with byte-counter that raises before the `max_bytes` cap (`services/storage.py:88`); SHA-256 computed during stream; PDF-only extension allowlist (`MAX_UPLOAD_SIZE_BYTES=15 MB`, `ALLOWED_FILE_EXTENSIONS=.pdf`). |
 | Tenant isolation | Backend is documented as source of truth for protected fields. `TODO[security-backend]` markers in `lib/workspace/types.ts:26`, `lib/mock/corrections.ts:18`, `app/portal/entra-a-tu-espacio/page.tsx:52` are reminders — none of them indicate a current bypass. |
-| dev_seed prod guard | `backend/scripts/dev_seed.py:1018` refuses to run unless `DATABASE_URL` host is localhost / 127.0.0.1 / *.local, with an explicit `CHECKWISE_ALLOW_SEED_AGAINST` bypass for recovery. Added 2026-05-18 in response to the P0 documented in `PROD_AUDIT_2026-05-18.md`. |
+| dev_seed prod guard | `apps/api/scripts/dev_seed.py:1018` refuses to run unless `DATABASE_URL` host is localhost / 127.0.0.1 / *.local, with an explicit `CHECKWISE_ALLOW_SEED_AGAINST` bypass for recovery. Added 2026-05-18 in response to the P0 documented in `PROD_AUDIT_2026-05-18.md`. |
 | Portal session | httpOnly signed cookie (`config.py:52`), `Secure` + `SameSite=None` flipped on automatically in non-local environments (`config.py:76-90`). |
 
 ### 5.4 Confirmed orphan frontend files (documented; not removed)
@@ -258,15 +258,15 @@ Verified by symbol-level grep across `app/`, `components/`, `lib/`. Each item be
 
 | File | Evidence |
 |---|---|
-| `frontend/components/ui/stepper.tsx` | `Stepper` symbol only resolves inside its own file |
-| `frontend/components/checkwise/support-card.tsx` | `SupportCard` only in its own file |
-| `frontend/components/checkwise/confidence-badge.tsx` | `ConfidenceBadge` only in its own file |
-| `frontend/components/checkwise/portal/provider-context-bar.tsx` | `ProviderContextBar` referenced only in a "Replaces the top-only ``ProviderContextBar``" comment in `portal-app-shell.tsx:29` |
-| `frontend/components/checkwise/portal/suggested-actions.tsx` | `SuggestedActions` not imported anywhere. (`SuggestedActionsCard` is a separate local function in `app/client/vendors/[vendor_id]/page.tsx`.) |
-| `frontend/components/checkwise/workspace/correction-request-form.tsx` | `CorrectionRequestForm` only in its own file |
-| `frontend/components/checkwise/document-submission-form.tsx` | `DocumentSubmissionForm` only in its own file + a stale doc-comment in `lib/types.ts:32` |
-| `frontend/lib/demo-clients.ts` | No importers |
-| `frontend/lib/portal-client.ts` | No importers |
+| `apps/web/components/ui/stepper.tsx` | `Stepper` symbol only resolves inside its own file |
+| `apps/web/components/checkwise/support-card.tsx` | `SupportCard` only in its own file |
+| `apps/web/components/checkwise/confidence-badge.tsx` | `ConfidenceBadge` only in its own file |
+| `apps/web/components/checkwise/portal/provider-context-bar.tsx` | `ProviderContextBar` referenced only in a "Replaces the top-only ``ProviderContextBar``" comment in `portal-app-shell.tsx:29` |
+| `apps/web/components/checkwise/portal/suggested-actions.tsx` | `SuggestedActions` not imported anywhere. (`SuggestedActionsCard` is a separate local function in `app/client/vendors/[vendor_id]/page.tsx`.) |
+| `apps/web/components/checkwise/workspace/correction-request-form.tsx` | `CorrectionRequestForm` only in its own file |
+| `apps/web/components/checkwise/document-submission-form.tsx` | `DocumentSubmissionForm` only in its own file + a stale doc-comment in `lib/types.ts:32` |
+| `apps/web/lib/demo-clients.ts` | No importers |
+| `apps/web/lib/portal-client.ts` | No importers |
 
 These look like V2.0/V2.1 redesign leftovers — analogous to the `access-decision-banner.tsx` orphan that `CHECKWISE_2_0.md` already documents as removed. **Recommended action for the next session:** verify each in 5–10 minutes by checking the V2.1 commits, then delete them as one focused commit.
 
@@ -278,8 +278,8 @@ These look like V2.0/V2.1 redesign leftovers — analogous to the `access-decisi
 |---|---|---|
 | F-01 | CI now lints via `npx eslint . --quiet` instead of deprecated `npx next lint --quiet` | `.github/workflows/ci.yml:59` |
 | F-02 | README verification gauntlet uses `node_modules/.bin/eslint . --quiet` (kept `--quiet` matching CI) | `README.md:188` |
-| F-03 | Two `localhost:8000` fallback strings normalized to `127.0.0.1:8000` so all 11 API base-URL fallbacks read identically | `frontend/components/checkwise/document-submission-form.tsx:37`, `frontend/components/checkwise/intake-wizard.tsx:168` |
-| F-10 | Removed 3 unused imports flagged by `next build`'s lint pass | `frontend/app/admin/dashboard/page.tsx` (drop `EmptyState`), `frontend/app/admin/reviewer/page.tsx` (drop `Button`), `frontend/app/admin/vendors/page.tsx` (drop `DataTableColumn` type-only import) |
+| F-03 | Two `localhost:8000` fallback strings normalized to `127.0.0.1:8000` so all 11 API base-URL fallbacks read identically | `apps/web/components/checkwise/document-submission-form.tsx:37`, `apps/web/components/checkwise/intake-wizard.tsx:168` |
+| F-10 | Removed 3 unused imports flagged by `next build`'s lint pass | `apps/web/app/admin/dashboard/page.tsx` (drop `EmptyState`), `apps/web/app/admin/reviewer/page.tsx` (drop `Button`), `apps/web/app/admin/vendors/page.tsx` (drop `DataTableColumn` type-only import) |
 
 Verification after edits: ruff clean · pytest **427/427** · `tsc --noEmit` clean · `eslint . --quiet` clean · `next build` **fully silent** (0 warnings, 0 errors) · 29/29 routes compile · print contract passes.
 
@@ -344,7 +344,7 @@ None at the code level. Two notes for ongoing hygiene:
 | Storage in prod | `STORAGE_BACKEND=s3` in `render.yaml` with R2/S3 env vars `sync: false`. `S3StorageService` in `app/services/storage.py:134` is implemented and tested (moto-backed). |
 | Frontend deploy | Vercel target. `NEXT_PUBLIC_API_BASE_URL` must point at the Render backend in prod. (Code fallbacks default to `127.0.0.1:8000` for dev safety — see F-03.) |
 | Database | Neon (per render.yaml comments). `DIRECT_DATABASE_URL` covers the Alembic-advisory-lock gotcha around pooled endpoints. |
-| Email | Not wired (`# ── Email (planned, not yet wired)` in `.env.example`). Welcome-email template lives in `frontend/lib/email/welcome.ts` with a `TODO[backend-integration]`. Not a blocker; flagged in `.env.example`. |
+| Email | Not wired (`# ── Email (planned, not yet wired)` in `.env.example`). Welcome-email template lives in `apps/web/lib/email/welcome.ts` with a `TODO[backend-integration]`. Not a blocker; flagged in `.env.example`. |
 | Observability | `SENTRY_DSN`/`LOG_LEVEL` placeholders in `.env.example` but not implemented. Not a blocker for the demo phase. |
 | `scripts/record_demo.py` and `scripts/finalize_demo.py` | **Local uncommitted changes exist** (cursor/breathe/bob animation rewrite + finalize-demo tweaks). Untracked `docs/audit-screenshots/2026-05-18-system-audit/_raw_demo/` folder also present. Not made by this audit pass. Left intact; flagged here so the user/next session can decide to commit, discard, or extend. |
 

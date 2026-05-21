@@ -58,17 +58,17 @@ persona_type='' / None                 → 0 items
 
 ## 5. Fix implemented
 
-**A) Defensive normalization at every catalog boundary.** New `normalize_persona_type(value)` helper in `backend/app/core/compliance_catalog.py` maps any reasonable variant (full-label, accented, case-different, short codes `"PM"`/`"PF"`) to the canonical token. Unknown values fall back to `"moral"` with a WARNING log — preferring a wrong-but-visible calendar to a silent empty one. Operators can grep the log for `compliance_catalog: unrecognized persona_type` to find bad rows.
+**A) Defensive normalization at every catalog boundary.** New `normalize_persona_type(value)` helper in `apps/api/app/core/compliance_catalog.py` maps any reasonable variant (full-label, accented, case-different, short codes `"PM"`/`"PF"`) to the canonical token. Unknown values fall back to `"moral"` with a WARNING log — preferring a wrong-but-visible calendar to a silent empty one. Operators can grep the log for `compliance_catalog: unrecognized persona_type` to find bad rows.
 
 Wired the normalizer into every catalog call site that reads from DB:
 
-- `backend/app/services/evidence_slots.py` — both `build_workspace_onboarding_slots` and the v1 + v2 branches of `build_workspace_calendar_slots`.
-- `backend/app/api/v1/portal.py` — `/portal/workspaces/{id}/onboarding` and `/portal/workspaces/{id}/calendar` endpoints.
-- `backend/app/api/v1/client.py` — `list_client_calendar`.
+- `apps/api/app/services/evidence_slots.py` — both `build_workspace_onboarding_slots` and the v1 + v2 branches of `build_workspace_calendar_slots`.
+- `apps/api/app/api/v1/portal.py` — `/portal/workspaces/{id}/onboarding` and `/portal/workspaces/{id}/calendar` endpoints.
+- `apps/api/app/api/v1/client.py` — `list_client_calendar`.
 
 The compliance.py / admin.py catalog endpoints take `persona_type` as a URL query parameter typed `Literal["moral", "fisica"]` — FastAPI enforces the contract at the boundary, so they don't need the normalizer.
 
-**B) Truthful frontend empty state.** `frontend/app/portal/calendar/page.tsx` now has three distinct empty branches:
+**B) Truthful frontend empty state.** `apps/web/app/portal/calendar/page.tsx` now has three distinct empty branches:
 
 | Case | Trigger | UI |
 |---|---|---|
@@ -113,12 +113,12 @@ Browser /portal/calendar?year=2026
 
 | Layer | File | Change |
 |---|---|---|
-| Backend (catalog) | `backend/app/core/compliance_catalog.py` | New `normalize_persona_type` helper + alias table; exported in `__all__`. |
-| Backend (services) | `backend/app/services/evidence_slots.py` | Onboarding + v1 + v2 slot resolvers normalize before calling the catalog. |
-| Backend (portal) | `backend/app/api/v1/portal.py` | `/onboarding` + `/calendar` endpoints normalize before calling the catalog. |
-| Backend (client) | `backend/app/api/v1/client.py` | `list_client_calendar` normalizes. |
-| Backend (tests) | `backend/tests/test_compliance.py` | 4 new tests pinning canonical/variant/unknown/end-to-end behavior. |
-| Frontend (calendar) | `frontend/app/portal/calendar/page.tsx` | Three-branch empty state; new `UnexpectedEmpty` component. |
+| Backend (catalog) | `apps/api/app/core/compliance_catalog.py` | New `normalize_persona_type` helper + alias table; exported in `__all__`. |
+| Backend (services) | `apps/api/app/services/evidence_slots.py` | Onboarding + v1 + v2 slot resolvers normalize before calling the catalog. |
+| Backend (portal) | `apps/api/app/api/v1/portal.py` | `/onboarding` + `/calendar` endpoints normalize before calling the catalog. |
+| Backend (client) | `apps/api/app/api/v1/client.py` | `list_client_calendar` normalizes. |
+| Backend (tests) | `apps/api/tests/test_compliance.py` | 4 new tests pinning canonical/variant/unknown/end-to-end behavior. |
+| Frontend (calendar) | `apps/web/app/portal/calendar/page.tsx` | Three-branch empty state; new `UnexpectedEmpty` component. |
 | Docs | `docs/audits/provider-calendar-completed-requirements/PROVIDER_CALENDAR_COMPLETED_REQUIREMENTS_BUGFIX.md` | This document. |
 
 ## 8. Test scenarios verified
@@ -161,7 +161,7 @@ When tested with `provision_test_provider.py` for both canonical persona_types +
 ## 10. Remaining limitations + risks
 
 1. **Bad data still lives in the DB.** The normalizer maps `"persona_moral"` → `"moral"` at read time. The DB still carries the bad value, so other consumers of `workspace.persona_type` (analytics, audit, future endpoints that don't go through normalize) could still trip over it. Follow-up: schedule a one-off SQL migration to canonicalize the values (`UPDATE provider_workspaces SET persona_type = CASE persona_type WHEN 'persona_moral' THEN 'moral' WHEN 'persona_fisica' THEN 'fisica' ELSE persona_type END;`).
-2. **Provisioning paths.** `backend/scripts/add_test_provider.py` and `backend/scripts/dev_seed.py` both accept arbitrary strings for `persona_type`. Adding a `Literal["moral", "fisica"]` validator at the CLI argparse level would prevent new bad rows. Out of scope for this bugfix but a sensible follow-up.
+2. **Provisioning paths.** `apps/api/scripts/add_test_provider.py` and `apps/api/scripts/dev_seed.py` both accept arbitrary strings for `persona_type`. Adding a `Literal["moral", "fisica"]` validator at the CLI argparse level would prevent new bad rows. Out of scope for this bugfix but a sensible follow-up.
 3. **The fallback is `"moral"`.** A workspace with a truly unrecognized value will see persona-moral obligations (~139 rows) instead of persona-fisica (which happens to also be 139 rows in the current catalog — they share the same set). If the catalog ever diverges by persona, the fallback will produce subtly wrong content. The WARNING log is the operational mitigation; routine grepping should catch it.
 4. **Calendar empty state.** The new `UnexpectedEmpty` triggers on `totalCount === 0`. The normalizer fix means this should now be impossible in practice — but the branch is a defense-in-depth net so it never silently lies again.
 
@@ -177,12 +177,12 @@ When tested with `provision_test_provider.py` for both canonical persona_types +
 ## 12. `git status`
 
 ```
- M backend/app/api/v1/client.py
- M backend/app/api/v1/portal.py
- M backend/app/core/compliance_catalog.py
- M backend/app/services/evidence_slots.py
- M backend/tests/test_compliance.py
- M frontend/app/portal/calendar/page.tsx
+ M apps/api/app/api/v1/client.py
+ M apps/api/app/api/v1/portal.py
+ M apps/api/app/core/compliance_catalog.py
+ M apps/api/app/services/evidence_slots.py
+ M apps/api/tests/test_compliance.py
+ M apps/web/app/portal/calendar/page.tsx
 ?? docs/audits/provider-calendar-completed-requirements/
 ```
 

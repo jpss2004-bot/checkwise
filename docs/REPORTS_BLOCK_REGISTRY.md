@@ -551,9 +551,9 @@ Each entry below names:
 ## Adding a new block
 
 1. Declare the type, config schema, data schema in this doc.
-2. Add the backend module under `backend/app/services/reports/blocks/<type>.py` with `fetch_data` + `render_docx` + `render_ai_summary` (or none).
-3. Add the frontend module under `frontend/components/checkwise/reports/blocks/<type>.tsx` exporting the `BlockDefinition`.
-4. Register in `frontend/lib/reports/registry.ts` and `backend/app/services/reports/registry.py`.
+2. Add the backend module under `apps/api/app/services/reports/blocks/<type>.py` with `fetch_data` + `render_docx` + `render_ai_summary` (or none).
+3. Add the frontend module under `apps/web/components/checkwise/reports/blocks/<type>.tsx` exporting the `BlockDefinition`.
+4. Register in `apps/web/lib/reports/registry.ts` and `apps/api/app/services/reports/registry.py`.
 5. Add at least one example config + one few-shot prompt example.
 6. Write tenant-isolation tests for the new data_fetcher.
 7. Ship behind a feature flag if the block is experimental.

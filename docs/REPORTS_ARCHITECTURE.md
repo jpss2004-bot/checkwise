@@ -255,7 +255,7 @@ Two halves, sharing the type contract.
 
 ### 6.1 Frontend half
 
-`frontend/lib/reports/registry.ts` — one entry per block type:
+`apps/web/lib/reports/registry.ts` — one entry per block type:
 
 ```typescript
 interface BlockDefinition<TConfig, TData> {
@@ -277,7 +277,7 @@ Components are RSC-compatible where possible. Editor mode forces `"use client"` 
 
 ### 6.2 Backend half
 
-`backend/app/services/reports/blocks/<type>.py` — one module per block:
+`apps/api/app/services/reports/blocks/<type>.py` — one module per block:
 
 ```python
 class BlockDefinition(BaseModel):
@@ -594,7 +594,7 @@ All editor routes share one canvas component. Audience defaults differ by entry 
 
 ## 15. Component inventory (Phase 3.2 baseline)
 
-`frontend/components/checkwise/reports/`:
+`apps/web/components/checkwise/reports/`:
 
 - `Canvas.tsx` — BlockNote shell + custom block specs
 - `ChatCopilot.tsx` — right-rail copilot
@@ -695,13 +695,13 @@ R1.0 turns Reports from a single provider-portal page into a role-aware intellig
 | `client_admin` | `client_facing` only | `client_facing` only |
 | (no recognised role) | none — default-deny | none |
 
-Source of truth: `visible_audiences()` and `writable_audiences()` in `backend/app/services/report_service.py`. The list endpoint intersects with `visible_audiences`; create + patch reject audiences outside `writable_audiences`; `get_report` returns 404 (not 403) for forbidden audiences to avoid id enumeration.
+Source of truth: `visible_audiences()` and `writable_audiences()` in `apps/api/app/services/report_service.py`. The list endpoint intersects with `visible_audiences`; create + patch reject audiences outside `writable_audiences`; `get_report` returns 404 (not 403) for forbidden audiences to avoid id enumeration.
 
 Vendor users are intentionally absent from the matrix in R1.0. Vendors do not hold a `User` row — they authenticate via `X-Workspace-Token` on the upload-flow portal. Vendor-targeted reports are delivered via the existing `external_signed` audience (Phase 2.2 share-link work).
 
 ### Preset registry
 
-`backend/app/services/reports/templates.py` defines `ReportPreset` — a starting point for a report: title, description, audience, `required_roles`, and `recommended_prompt`. R1.0 ships three internal-only presets:
+`apps/api/app/services/reports/templates.py` defines `ReportPreset` — a starting point for a report: title, description, audience, `required_roles`, and `recommended_prompt`. R1.0 ships three internal-only presets:
 
 - `admin-daily-queue` — operational triage for the review team
 - `admin-high-risk-vendors` — cross-vendor risk matrix
@@ -749,7 +749,7 @@ content + a new shell entry.
 
 ### New presets
 
-Three `client_facing` presets in `backend/app/services/reports/templates.py`:
+Three `client_facing` presets in `apps/api/app/services/reports/templates.py`:
 
 - `client-monthly-executive` — Resumen ejecutivo mensual
 - `client-vendor-risk-matrix` — Matriz de riesgo de proveedores
@@ -818,7 +818,7 @@ The existing `?status=` param continues to work; it composes cleanly with `?audi
 
 **Frontend:**
 
-A new shared component at `frontend/components/checkwise/reports/list/reports-list-view.tsx` owns the entire list body: preset gallery, filter bar, report table, empty state. It takes:
+A new shared component at `apps/web/components/checkwise/reports/list/reports-list-view.tsx` owns the entire list body: preset gallery, filter bar, report table, empty state. It takes:
 
 ```ts
 interface ReportsListViewProps {
@@ -830,7 +830,7 @@ interface ReportsListViewProps {
 }
 ```
 
-`frontend/app/admin/reports/page.tsx` and `frontend/app/client/reports/page.tsx` are now thin `unframed` shell wrappers (~25 LOC each) around this component. `/portal/reports` still uses its V2.1 implementation in R2 — migration is part of the proposed P1 (Provider-first Reports) slice.
+`apps/web/app/admin/reports/page.tsx` and `apps/web/app/client/reports/page.tsx` are now thin `unframed` shell wrappers (~25 LOC each) around this component. `/portal/reports` still uses its V2.1 implementation in R2 — migration is part of the proposed P1 (Provider-first Reports) slice.
 
 ### Filter UX
 
@@ -852,7 +852,7 @@ The R2 filter does **not** weaken any existing audience boundary. Every layer st
 2. The filter branch first checks `audience not in allowed → return [], 0` before adding the equality clause.
 3. `get_report()` independently rejects forbidden-audience reads with a `404` — id enumeration of internal_only or vendor_facing reports is impossible.
 
-Three tests in `backend/tests/test_reports_presets.py` lock this behavior in:
+Three tests in `apps/api/tests/test_reports_presets.py` lock this behavior in:
 
 - `test_list_audience_filter_admin_narrows_to_one` — happy path.
 - `test_list_audience_filter_client_admin_requesting_forbidden_returns_empty` — the security-critical case. Admin seeds an internal_only report **inside the client_admin's own org**; client_admin's call with `?audience=internal_only` returns `{"items": [], "total": 0}`.
@@ -907,7 +907,7 @@ The default branch of `list_reports()` (when no explicit audience filter is supp
 
 ### Three provider presets
 
-`backend/app/services/reports/templates.py`:
+`apps/api/app/services/reports/templates.py`:
 
 - `provider-current-state` — *Mi estado de cumplimiento*
 - `provider-missing-documents` — *Documentos faltantes*
@@ -944,7 +944,7 @@ The `_validate_scope` rule (audience ≠ `internal_only` requires at least one o
 
 ### Frontend
 
-`frontend/app/portal/reports/page.tsx` is collapsed from the V2.1 inline-create implementation to a thin `PortalAppShell` wrapper around `<ReportsListView role="portal">`. The provider gets for free:
+`apps/web/app/portal/reports/page.tsx` is collapsed from the V2.1 inline-create implementation to a thin `PortalAppShell` wrapper around `<ReportsListView role="portal">`. The provider gets for free:
 
 - The 3 vendor-facing preset cards
 - The R2 filter bar (search + Estado; Audiencia hidden — provider sees only one audience)
@@ -955,14 +955,14 @@ The editor route `/portal/reports/[id]` is unchanged — it already used the sha
 
 ### Seed adjustment
 
-`backend/scripts/dev_seed.py`:
+`apps/api/scripts/dev_seed.py`:
 
 - Adds an `Organization` (kind=`client`) tied to `BOSS_DEMO_CLIENT_NAME` so `_actor_from`'s workspace → owning-org resolution succeeds for boss.demo.
 - Re-audiences the seeded vendor-scoped report from `client_facing` to `vendor_facing` and corrects its `organization_id` + `client_id` to match the boss-client tenant (the previous shape was cross-tenant).
 
 ### Tests
 
-`backend/tests/test_reports_presets.py` adds **7 new tests** (total now 20):
+`apps/api/tests/test_reports_presets.py` adds **7 new tests** (total now 20):
 
 | Test | Locks in |
 |---|---|

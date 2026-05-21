@@ -390,8 +390,8 @@ const routeRows = [
 ];
 
 const maturityRows = [
-  ["Frontend routes", "Implementado", "frontend/app/**/page.tsx; route_inventory.csv", "Algunas rutas reportes proveedor bloqueadas por datos/DB", "Cerrar provider reports y activar pruebas con ids propios"],
-  ["Backend APIs", "Implementado", "backend/app/api/v1/*.py; API_CONTRACT_MAP.md", "Superficie amplia; no endpoint de descarga de documentos", "Agregar descarga segura/presigned URL con RBAC"],
+  ["Frontend routes", "Implementado", "apps/web/app/**/page.tsx; route_inventory.csv", "Algunas rutas reportes proveedor bloqueadas por datos/DB", "Cerrar provider reports y activar pruebas con ids propios"],
+  ["Backend APIs", "Implementado", "apps/api/app/api/v1/*.py; API_CONTRACT_MAP.md", "Superficie amplia; no endpoint de descarga de documentos", "Agregar descarga segura/presigned URL con RBAC"],
   ["Upload workflow", "Implementado", "portal.py create_workspace_submission; submission_service.py", "Legacy /submissions aún existe y confía identidad de formulario", "Mantener solo para importer/dev; migrar wizard a catálogo workspace-scoped"],
   ["Reports", "Parcial", "reports.py, report_service.py, executor.py, REPORTS_AUDIT_2026-05-18.md", "Mock LLM si no hay ANTHROPIC_API_KEY; exports async pendientes", "Configurar AI real, completar export worker y provider report creation"],
   ["Auth/security", "Parcial", "auth.py, portal_session.py, config.py", "Activation cancel bug; portal token legacy; producción no validada", "Fix /activate cancel, retirar legacy token gradualmente, hardening prod"],
@@ -479,7 +479,7 @@ const html = `<!doctype html>
 </head>
 <body>
 <section class="page cover">
-  <img class="logo" src="../../frontend/public/checkwise-logo.png" alt="CheckWise logo">
+  <img class="logo" src="../../apps/web/public/checkwise-logo.png" alt="CheckWise logo">
   <h1>CheckWise<br>Mapa Final<br>del Flujo del Sistema</h1>
   <p class="sub">Flujos, rutas, redirecciones, APIs, estados documentales y controles de seguridad.</p>
   <div class="meta">
@@ -521,7 +521,7 @@ const html = `<!doctype html>
   <div class="eyebrow">Sección 3</div><h2>Vista general completa del sistema</h2>
   <p class="lead">El producto opera tres rutas principales: proveedor, cliente y equipo interno. El backend mantiene la verdad documental: estados, eventos, hashes, inspección PDF, auditoría y reportes.</p>
   ${diagram("01-system-overview.svg", "Vista general")}
-  <div class="footer"><span>Fuente: ARCHITECTURE.md, DATA_MODEL.md, backend/app/models/entities.py</span><span>03</span></div>
+  <div class="footer"><span>Fuente: ARCHITECTURE.md, DATA_MODEL.md, apps/api/app/models/entities.py</span><span>03</span></div>
 </section>
 
 <section class="page">
@@ -584,13 +584,13 @@ const html = `<!doctype html>
   <div class="eyebrow">Sección 9</div><h2>Route-to-API map visual</h2>
   <p class="lead">Mapa comprimido por superficie. La tabla completa de rutas aparece en la siguiente página para trazabilidad operativa.</p>
   ${diagram("07-route-api-map.svg", "Route API map")}
-  <div class="footer"><span>Fuente: frontend/app inventory, backend/app/api/v1 inventory</span><span>09</span></div>
+  <div class="footer"><span>Fuente: frontend/app inventory, apps/api/app/api/v1 inventory</span><span>09</span></div>
 </section>
 
 <section class="page">
   <div class="eyebrow">Sección 9 · detalle</div><h2>Tabla route-to-API</h2>
   ${table(["Ruta frontend", "Propósito", "Endpoint(s) backend", "Auth/rol", "Estado"], routeRows.slice(0, 22), "route-table")}
-  <div class="footer"><span>Fuente: frontend/app/**/*.tsx, frontend/lib/api/*.ts, backend/app/api/v1/*.py</span><span>10</span></div>
+  <div class="footer"><span>Fuente: apps/web/app/**/*.tsx, apps/web/lib/api/*.ts, apps/api/app/api/v1/*.py</span><span>10</span></div>
 </section>
 
 <section class="page">
@@ -664,10 +664,10 @@ Fecha: ${DATE}
 
 ## Inspección realizada
 
-- Frontend: \`frontend/app/**/*.tsx\`, \`frontend/lib/api/*.ts\`, session guards y redirects.
-- Backend: \`backend/app/api/v1/*.py\`, \`backend/app/services/*.py\`, modelos, constantes y configuración.
+- Frontend: \`apps/web/app/**/*.tsx\`, \`apps/web/lib/api/*.ts\`, session guards y redirects.
+- Backend: \`apps/api/app/api/v1/*.py\`, \`apps/api/app/services/*.py\`, modelos, constantes y configuración.
 - Docs: \`API_CONTRACT_MAP.md\`, \`ARCHITECTURE.md\`, \`DATA_MODEL.md\`, \`REPORTS_ARCHITECTURE.md\`, \`REPORTS_AUDIT_2026-05-18.md\`, \`codex-route-workflow-audit/*\`, \`PROD_AUDIT_2026-05-18.md\`.
-- Brand: \`frontend/app/globals.css\`, \`docs/DESIGN_SYSTEM.md\`, \`frontend/public/checkwise-logo.png\`.
+- Brand: \`apps/web/app/globals.css\`, \`docs/DESIGN_SYSTEM.md\`, \`apps/web/public/checkwise-logo.png\`.
 
 ## Supuestos y límites
 

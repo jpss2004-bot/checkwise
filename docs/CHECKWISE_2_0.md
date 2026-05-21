@@ -107,7 +107,7 @@ UX-curated mock data, extracted from inline page state so it stays in one place.
 
 ## Token contract
 
-All new primitives consume the semantic CSS variables defined in [`frontend/app/globals.css`](../frontend/app/globals.css). No raw hex, no Tailwind palette imports, no inline gradients. This keeps 2.0 cleanly within the "Visual Source Of Truth" rules in [`DESIGN.md`](../DESIGN.md).
+All new primitives consume the semantic CSS variables defined in [`apps/web/app/globals.css`](../apps/web/app/globals.css). No raw hex, no Tailwind palette imports, no inline gradients. This keeps 2.0 cleanly within the "Visual Source Of Truth" rules in [`DESIGN.md`](../DESIGN.md).
 
 Banned in this pass and preserved going forward:
 
@@ -118,7 +118,7 @@ Banned in this pass and preserved going forward:
 
 ## Removed
 
-- `frontend/components/checkwise/workspace/access-decision-banner.tsx` — orphan referencing the `WorkspaceAccessOutcome` type that was deliberately deleted in Phase 6. No consumers. Routing now reads `session.expediente_status` straight from the backend at every post-auth surface.
+- `apps/web/components/checkwise/workspace/access-decision-banner.tsx` — orphan referencing the `WorkspaceAccessOutcome` type that was deliberately deleted in Phase 6. No consumers. Routing now reads `session.expediente_status` straight from the backend at every post-auth surface.
 
 ## Verification
 

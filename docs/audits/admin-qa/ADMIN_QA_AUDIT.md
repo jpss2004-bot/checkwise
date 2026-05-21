@@ -11,8 +11,8 @@ QA + parity + implementation-readiness audit, not a redesign.
 ## Scope
 
 - All routes under `app/admin/*` plus admin-only shared components.
-- Backend admin API (`backend/app/api/v1/admin.py`), reviewer API
-  (`backend/app/api/v1/reviewer.py`), and the cross-role surfaces those
+- Backend admin API (`apps/api/app/api/v1/admin.py`), reviewer API
+  (`apps/api/app/api/v1/reviewer.py`), and the cross-role surfaces those
   pages mount (reports list, report editor, submission timeline,
   reviewer decision panel).
 - Provider-side improvements only insofar as they have an admin
@@ -118,9 +118,9 @@ For each route I checked: route guard, data-load path, retry path, skeleton vs e
 
 | ID | Title | Severity | Route / File |
 |---|---|---|---|
-| A-003 | Raw `rule_code` rendered as primary signal title on `/admin/reviewer/[submission_id]` (Spanish labels missing). | P0 | `frontend/app/admin/reviewer/[submission_id]/page.tsx:351` |
-| A-004 | Admin/Client calendar year input floors at 2024, excluding 2021-2023 REPSE periods that the backend accepts. | P0 | `frontend/app/admin/calendar/page.tsx:93`, `frontend/app/client/calendar/page.tsx:108` |
-| A-010 | Backend `/admin/calendar` default `year=2026` is hardcoded and will silently age. | P1 | `backend/app/api/v1/admin.py:841` |
+| A-003 | Raw `rule_code` rendered as primary signal title on `/admin/reviewer/[submission_id]` (Spanish labels missing). | P0 | `apps/web/app/admin/reviewer/[submission_id]/page.tsx:351` |
+| A-004 | Admin/Client calendar year input floors at 2024, excluding 2021-2023 REPSE periods that the backend accepts. | P0 | `apps/web/app/admin/calendar/page.tsx:93`, `apps/web/app/client/calendar/page.tsx:108` |
+| A-010 | Backend `/admin/calendar` default `year=2026` is hardcoded and will silently age. | P1 | `apps/api/app/api/v1/admin.py:841` |
 
 ## UX issues found
 
@@ -144,8 +144,8 @@ For each route I checked: route guard, data-load path, retry path, skeleton vs e
 
 | ID | Title | Severity |
 |---|---|---|
-| A-011 | Hardcoded fallback string `"Pendiente de semilla completa desde matriz regulatoria REPSE 2026."` in `backend/app/services/requirement_service.py:153`. Surfaces as `legal_basis` when the catalog is incomplete, and quietly ages. | P2 |
-| A-012 | Missing entries in `frontend/lib/constants/validation.ts::VALIDATION_RULE_LABELS_ES`: `native_intake`, `canonical_requirement_code`, `canonical_period_key`, `submission_replacement`. Falls back gracefully but a forgotten entry stands out in QA as raw snake_case. | P2 |
+| A-011 | Hardcoded fallback string `"Pendiente de semilla completa desde matriz regulatoria REPSE 2026."` in `apps/api/app/services/requirement_service.py:153`. Surfaces as `legal_basis` when the catalog is incomplete, and quietly ages. | P2 |
+| A-012 | Missing entries in `apps/web/lib/constants/validation.ts::VALIDATION_RULE_LABELS_ES`: `native_intake`, `canonical_requirement_code`, `canonical_period_key`, `submission_replacement`. Falls back gracefully but a forgotten entry stands out in QA as raw snake_case. | P2 |
 
 ## Report / export issues found
 
@@ -162,8 +162,8 @@ For each route I checked: route guard, data-load path, retry path, skeleton vs e
 
 ## XML / file-validation findings
 
-- `backend/app/services/submission_service.py:54-67` rejects anything that does not end in `.pdf` and a non-PDF MIME type. Error copy is plain Spanish: "En esta fase solo se aceptan archivos PDF."
-- `backend/app/api/v1/metadata_dry_run.py` is a local-only n8n endpoint with no production admin UI consumer. No admin auth bypass observed.
+- `apps/api/app/services/submission_service.py:54-67` rejects anything that does not end in `.pdf` and a non-PDF MIME type. Error copy is plain Spanish: "En esta fase solo se aceptan archivos PDF."
+- `apps/api/app/api/v1/metadata_dry_run.py` is a local-only n8n endpoint with no production admin UI consumer. No admin auth bypass observed.
 - Frontend intake (`components/checkwise/intake-wizard.tsx`, `components/checkwise/document-submission-form.tsx`) sets `accept=".pdf,application/pdf"` and shows a plain-Spanish error on non-PDF.
 - Decision: XML stays blocked. Documented at `docs/audits/.../HANDOFF_2026-05-20.md` (BL-T6).
 
@@ -176,7 +176,7 @@ For each route I checked: route guard, data-load path, retry path, skeleton vs e
 
 ## Automatic document identification findings
 
-- Detection lives in `backend/app/services/document_intelligence.py`. Surfaces:
+- Detection lives in `apps/api/app/services/document_intelligence.py`. Surfaces:
   - `inspection.mismatch_reason` (string) → shown as "Posible mismatch" on the reviewer detail and provider detail (`ReasonsCard`).
   - `Submission.status = posible_mismatch` → reviewer queue mismatch tab and `RequirementStatusBadge`.
   - `Validation` rows with `severity=warning|error` reach `detail.reasons`.
@@ -200,7 +200,7 @@ scope at small parity fixes, not a full live demo).
 To capture proof under `docs/audits/admin-qa/screenshots/`, an operator
 with `internal_admin` and `reviewer` roles must:
 
-1. `./dev.sh` and seed via `backend/scripts/seed_demo.py` (the existing
+1. `./dev.sh` and seed via `apps/api/scripts/seed_demo.py` (the existing
    demo provisioner).
 2. Authenticate at `http://localhost:3000/login` with a reviewer-capable
    admin.
@@ -239,18 +239,18 @@ Naming and location to live under `docs/audits/admin-qa/screenshots/`.
 All changes are narrowly tied to today's Stage 1 / Stage 2 / BL-Tx work,
 under the "small safe parity fixes" allowance.
 
-1. **`frontend/app/admin/reviewer/[submission_id]/page.tsx`** — translate
+1. **`apps/web/app/admin/reviewer/[submission_id]/page.tsx`** — translate
    the validation `rule_code` into the existing Spanish label via
    `lib/constants/validation.ts::validationLabel`. The raw code stays in
    the row's `title=` attribute and aria-label so QA / engineers can
    still map a row to a backend assertion. Mirrors the provider-side
    `REASON_TITLES` pattern.
-2. **`frontend/app/admin/calendar/page.tsx`** + **`frontend/app/client/calendar/page.tsx`**
+2. **`apps/web/app/admin/calendar/page.tsx`** + **`apps/web/app/client/calendar/page.tsx`**
    — lower the `<Input type="number" min={2024}>` to `min={2021}` to match
-   `backend/app/core/period_validation.py::MIN_YEAR`. Admins can now
+   `apps/api/app/core/period_validation.py::MIN_YEAR`. Admins can now
    inspect any legitimate REPSE period since the 2021 outsourcing reform
    without bypassing the form.
-3. **`backend/app/api/v1/admin.py`** — replace the hardcoded
+3. **`apps/api/app/api/v1/admin.py`** — replace the hardcoded
    `year: int = 2026` default on `GET /admin/calendar` with a dynamic
    `date.today().year` resolved at request time. The clamp `ge=MIN_YEAR,
    le=MAX_YEAR` already enforces the validator window. Mirrors the BL-T3

@@ -73,15 +73,15 @@ Because these files are missing, the v0.1 preview is not enough for full pattern
 
 The live app already has a substantial token and component foundation:
 
-- `frontend/app/globals.css` already defines primitive, semantic, component, status, document-state, confidence, and motion tokens.
+- `apps/web/app/globals.css` already defines primitive, semantic, component, status, document-state, confidence, and motion tokens.
 - `frontend/tailwind.config.ts` already maps shadcn-compatible aliases, brand aliases, radii, shadows, fonts, and motion easing.
-- `frontend/app/layout.tsx` already wires `GeistSans.variable` and `GeistMono.variable`.
-- `frontend/lib/types.ts` already centralizes several frontend domain types.
-- `frontend/lib/session/with-portal-session.tsx` is newer than the v0.2 snippet and includes cookie/JWT bootstrap behavior.
+- `apps/web/app/layout.tsx` already wires `GeistSans.variable` and `GeistMono.variable`.
+- `apps/web/lib/types.ts` already centralizes several frontend domain types.
+- `apps/web/lib/session/with-portal-session.tsx` is newer than the v0.2 snippet and includes cookie/JWT bootstrap behavior.
 
 Important token gap found in the current app:
 
-- `frontend/app/globals.css` references `--blue-200` via `--doc-uploaded-border`, but `--blue-200` is not defined.
+- `apps/web/app/globals.css` references `--blue-200` via `--doc-uploaded-border`, but `--blue-200` is not defined.
 
 Important compatibility issue:
 
@@ -104,16 +104,16 @@ Phase 1: Token hardening only.
 
 Phase 2: Primitive alignment.
 
-- Update existing primitives in `frontend/components/ui/` instead of creating parallel primitives.
+- Update existing primitives in `apps/web/components/ui/` instead of creating parallel primitives.
 - Review `Button.secondary`, `Badge.teal`, `Progress.teal`, `Alert`, `Field`, `Input`, and `Card` against the v0.2 token rules.
 - Preserve current accessibility behavior and loading/error states.
 
 Phase 3: Pattern alignment.
 
 - Map visual patterns into existing CheckWise components:
-  - dashboard patterns into `frontend/app/portal/dashboard/page.tsx` and `frontend/components/checkwise/portal/*`
-  - upload/OCR patterns into `frontend/components/checkwise/intake-wizard.tsx`
-  - onboarding patterns into `frontend/app/portal/onboarding/page.tsx`
+  - dashboard patterns into `apps/web/app/portal/dashboard/page.tsx` and `apps/web/components/checkwise/portal/*`
+  - upload/OCR patterns into `apps/web/components/checkwise/intake-wizard.tsx`
+  - onboarding patterns into `apps/web/app/portal/onboarding/page.tsx`
 - Do not paste static HTML or Babel JSX examples into the app.
 
 ## Next Claude Code Prompt
@@ -125,10 +125,10 @@ Do not paste static HTML. Do not replace working app files wholesale.
 Tasks:
 
 1. Fix the current token gap where `--doc-uploaded-border` references undefined `--blue-200`.
-2. Compare `v0.2/globals.css` and `v0.2/tailwind.config.ts` against the live `frontend/app/globals.css` and `frontend/tailwind.config.ts`.
+2. Compare `v0.2/globals.css` and `v0.2/tailwind.config.ts` against the live `apps/web/app/globals.css` and `frontend/tailwind.config.ts`.
 3. Selectively merge safe token improvements only: density tokens, radius/shadow CSS variables, AI-specific teal aliases, status color aliases, and typography scale.
 4. Keep compatibility aliases for existing `--surface-teal-muted`, `--text-teal`, `--brand-teal`, and `--interactive-secondary` usages.
-5. Do not replace `frontend/lib/session/with-portal-session.tsx`; it is newer than the v0.2 snippet.
+5. Do not replace `apps/web/lib/session/with-portal-session.tsx`; it is newer than the v0.2 snippet.
 6. Run `npm run typecheck`, `npm run lint`, and `npm run build` from `frontend`.
 
 Stop after Phase 1 and report the diff.

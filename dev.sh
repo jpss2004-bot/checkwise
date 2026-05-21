@@ -3,18 +3,18 @@
 # Boot the whole CheckWise stack locally — backend + frontend in
 # parallel. Ctrl-C once cleans up both processes.
 #
-# Prereq once: backend/scripts/dev_setup.sh and frontend/npm install.
+# Prereq once: apps/api/scripts/dev_setup.sh and (cd apps/web && npm install).
 
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "$0")" && pwd)"
 
-if [ ! -d "$ROOT/backend/.venv" ]; then
-  echo "Backend not set up. Run backend/scripts/dev_setup.sh first." >&2
+if [ ! -d "$ROOT/apps/api/.venv" ]; then
+  echo "Backend not set up. Run apps/api/scripts/dev_setup.sh first." >&2
   exit 1
 fi
-if [ ! -d "$ROOT/frontend/node_modules" ]; then
-  echo "Frontend deps not installed. Run: cd frontend && npm install" >&2
+if [ ! -d "$ROOT/apps/web/node_modules" ]; then
+  echo "Frontend deps not installed. Run: cd apps/web && npm install" >&2
   exit 1
 fi
 
@@ -43,7 +43,7 @@ trap cleanup EXIT INT TERM
 
 echo "==> Starting backend on http://127.0.0.1:8000"
 (
-  cd "$ROOT/backend"
+  cd "$ROOT/apps/api"
   exec .venv/bin/uvicorn app.main:app --reload --host 127.0.0.1 --port 8000 \
     2>&1 | sed -e 's/^/[backend] /'
 ) &
@@ -51,7 +51,7 @@ BACKEND_PID=$!
 
 echo "==> Starting frontend on http://localhost:3000"
 (
-  cd "$ROOT/frontend"
+  cd "$ROOT/apps/web"
   exec npm run dev 2>&1 | sed -e 's/^/[frontend] /'
 ) &
 FRONTEND_PID=$!

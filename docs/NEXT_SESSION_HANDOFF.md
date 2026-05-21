@@ -23,18 +23,18 @@
 - **Frontend** — every page in `app/{admin,client,portal}/**` compiles and renders. Print-contract test guarantees that all 8 reports block types expose their `data-block-type` attribute.
 - **Auth + RBAC** — JWT (HS256), bcrypt(12) for staff; httpOnly signed cookie for portal sessions; `withOnboardingGate` + `withPortalSession` HOCs gate every protected portal route.
 - **Storage** — local-FS in dev, S3-compatible (R2/S3) for prod. Streamed upload with hash + size cap (15 MB · `.pdf` only).
-- **Dev-seed prod guard** — `backend/scripts/dev_seed.py:1018` refuses to run against non-local hosts. Documented after the 2026-05-18 P0.
+- **Dev-seed prod guard** — `apps/api/scripts/dev_seed.py:1018` refuses to run against non-local hosts. Documented after the 2026-05-18 P0.
 
 ## What is unstable / not yet wired
 
-Mock-backed surfaces marked with `TODO[backend-integration]` in `frontend/lib/mock/*`, `frontend/lib/workspace/*`, `frontend/lib/api/portal-adapters.ts`. None block any user flow; they are V2.0/V2.1 deferred work scheduled as V2.2.
+Mock-backed surfaces marked with `TODO[backend-integration]` in `apps/web/lib/mock/*`, `apps/web/lib/workspace/*`, `apps/web/lib/api/portal-adapters.ts`. None block any user flow; they are V2.0/V2.1 deferred work scheduled as V2.2.
 
 | Area | What's still mocked | Next step |
 |---|---|---|
 | `/portal/workspaces/{id}/onboarding` adapter | `portal-adapters.ts` synthesises `why` / `format` / `next_action` / `reviewer_note` fields | Backend enrichment lands → drop the adapter |
 | Client dashboard / admin dashboard tiles | `lib/mock/*` (calendar, contact-requests, corrections, expediente, invitations) | Wire to real `/api/v1/clients/*` payloads |
 | Provider portal auth | V1.2 opaque `X-Workspace-Token` still in use | Replace with the JWT/RBAC stack already used by `/admin/*` |
-| Welcome email | template only (`frontend/lib/email/welcome.ts`) | Pick provider, add backend service |
+| Welcome email | template only (`apps/web/lib/email/welcome.ts`) | Pick provider, add backend service |
 
 ## What should NOT be touched yet
 
@@ -59,7 +59,7 @@ Brings up Docker Postgres → migrates → seeds → starts uvicorn (`:8000`) an
 
 ```sh
 # T1: backend
-bash backend/scripts/dev_start.sh           # http://127.0.0.1:8000/docs
+bash apps/api/scripts/dev_start.sh           # http://127.0.0.1:8000/docs
 
 # T2: frontend
 cd frontend && npm run dev                  # http://localhost:3000/
@@ -69,19 +69,19 @@ cd frontend && npm run dev                  # http://localhost:3000/
 
 ```sh
 docker compose up -d postgres
-bash backend/scripts/dev_setup.sh           # venv, deps, alembic upgrade, seed
+bash apps/api/scripts/dev_setup.sh           # venv, deps, alembic upgrade, seed
 cd frontend && npm install
 ```
 
 **Reset DB:**
 
 ```sh
-bash backend/scripts/dev_reset.sh           # drop → migrate → seed
+bash apps/api/scripts/dev_reset.sh           # drop → migrate → seed
 ```
 
 ---
 
-## Demo credentials (from `backend/scripts/dev_seed.py`)
+## Demo credentials (from `apps/api/scripts/dev_seed.py`)
 
 | Role | Email | Password | Reaches |
 |---|---|---|---|
@@ -98,7 +98,7 @@ Demo provider workspace token: `demo-token` (workspace `ws-demo-0001`).
 
 Template at root: [`.env.example`](../.env.example). Highlights:
 
-- **Backend** (`backend/.env`):
+- **Backend** (`apps/api/.env`):
   - `DATABASE_URL` — required. Local default points at `docker compose` postgres.
   - `CORS_ORIGINS` — comma-separated origins for the deployed frontend(s).
   - `AUTH_JWT_SECRET` — must be 32+ chars in any non-local env. Default value contains "change-me".
@@ -106,7 +106,7 @@ Template at root: [`.env.example`](../.env.example). Highlights:
   - `ANTHROPIC_API_KEY` — optional. Empty falls back to the deterministic mock LLM (used in CI). `CHECKWISE_LLM_BACKEND=mock|anthropic|''` overrides auto-detection.
   - `MAX_UPLOAD_SIZE_BYTES`, `ALLOWED_FILE_EXTENSIONS` — upload limits.
 
-- **Frontend** (`frontend/.env.local`):
+- **Frontend** (`apps/web/.env.local`):
   - `NEXT_PUBLIC_API_BASE_URL` — defaults to `http://127.0.0.1:8000` if unset (kept consistent across the codebase as of this pass).
   - `NEXT_PUBLIC_DEMO_MODE=true` — exposes the "Usar PDF demo" affordance.
   - `NEXT_PUBLIC_WHATSAPP_SUPPORT_URL`, `NEXT_PUBLIC_SUPPORT_QR_PLACEHOLDER_URL` — display-only support links.
@@ -183,11 +183,11 @@ cd "/Users/josepablosamano/Desktop/Work — LegalShelf/checkwise/CheckWise"
 # 1) audit edits only (excluding the pre-existing record_demo.py change)
 git add .github/workflows/ci.yml \
         README.md \
-        frontend/components/checkwise/document-submission-form.tsx \
-        frontend/components/checkwise/intake-wizard.tsx \
-        frontend/app/admin/dashboard/page.tsx \
-        frontend/app/admin/reviewer/page.tsx \
-        frontend/app/admin/vendors/page.tsx \
+        apps/web/components/checkwise/document-submission-form.tsx \
+        apps/web/components/checkwise/intake-wizard.tsx \
+        apps/web/app/admin/dashboard/page.tsx \
+        apps/web/app/admin/reviewer/page.tsx \
+        apps/web/app/admin/vendors/page.tsx \
         docs/AUDIT_NEXT_SESSION_READINESS.md \
         docs/NEXT_SESSION_HANDOFF.md
 git commit -m "chore(audit): readiness audit 2026-05-19 + safe fixes

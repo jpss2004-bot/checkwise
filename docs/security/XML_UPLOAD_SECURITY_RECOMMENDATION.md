@@ -19,14 +19,14 @@ This document records the current stance, the layers that enforce it, the threat
 CheckWise rejects non-PDF uploads at three independent layers:
 
 1. **Configuration default.**
-   `backend/app/core/config.py:37`
+   `apps/api/app/core/config.py:37`
    ```python
    ALLOWED_FILE_EXTENSIONS: str = ".pdf"
    ```
    The setting reads from `CHECKWISE_ALLOWED_FILE_EXTENSIONS` env if present, but the shipped default is PDF-only. The exposed property `allowed_extensions_set` splits the string on commas, so adding `.xml` would require an intentional config change in every deployment environment.
 
 2. **Submission-service hard check.**
-   `backend/app/services/submission_service.py:57`
+   `apps/api/app/services/submission_service.py:57`
    ```python
    if not filename.lower().endswith(".pdf"):
        ...
@@ -34,13 +34,13 @@ CheckWise rejects non-PDF uploads at three independent layers:
    The portal's `POST /api/v1/portal/workspaces/{id}/submissions` calls `assert_pdf_upload(file)` (line 1495) before any storage write. Any file with a non-`.pdf` extension is rejected with HTTP 422 + plain-Spanish detail before reaching disk.
 
 3. **Prevalidation `allowed_file_type` rule.**
-   `backend/app/services/prevalidation.py:30`
+   `apps/api/app/services/prevalidation.py:30`
    ```python
    allowed_type = stored_file.extension in settings.allowed_extensions_set
    ```
    The validation pipeline records a `fail` signal on any extension outside `allowed_extensions_set`. Even if a future config change loosened the extension set, the rule would still flag the document for human review.
 
-The dry-run metadata endpoint at `backend/app/api/v1/metadata_dry_run.py:41` also gates on `.pdf` before storing the file.
+The dry-run metadata endpoint at `apps/api/app/api/v1/metadata_dry_run.py:41` also gates on `.pdf` before storing the file.
 
 **Net effect:** today, an attacker (or a curious provider) cannot upload an XML file through any public CheckWise endpoint. The blocking happens at the configuration level, the service-layer hard check, and the prevalidation rule.
 

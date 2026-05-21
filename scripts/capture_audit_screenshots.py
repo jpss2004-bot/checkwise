@@ -42,7 +42,7 @@ class Shot:
     settle: float = DELAY
 
 
-# ── Demo accounts (seeded by backend/scripts/dev_seed.py) ──
+# ── Demo accounts (seeded by apps/api/scripts/dev_seed.py) ──
 ACCOUNTS = {
     "admin": ("ada@legalshelf.mx", "demo1234"),
     "provider": ("boss.demo@checkwise.mx", "BossDemo!2026"),

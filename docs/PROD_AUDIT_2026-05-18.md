@@ -44,16 +44,16 @@ Ada's password (`demo1234`) is documented openly in:
 - `README.md` (table on line 91)
 - `docs/CREDENTIALS.md`
 - `docs/DEMO_LOGIN_MATRIX.md`
-- `backend/scripts/dev_seed.py` (constant `DEMO_USER_PASSWORD`)
+- `apps/api/scripts/dev_seed.py` (constant `DEMO_USER_PASSWORD`)
 
 Anyone who reads the public repo can authenticate to live production as `internal_admin` + `reviewer`, with AI generation backed by the real Anthropic key.
 
 ### Likely root cause
 
-`backend/scripts/dev_seed.py` was at some point run with `DATABASE_URL` pointing at the production Neon instance. Confirmed by:
+`apps/api/scripts/dev_seed.py` was at some point run with `DATABASE_URL` pointing at the production Neon instance. Confirmed by:
 
 - `render.yaml.preDeployCommand` is `alembic upgrade head` — does NOT run `dev_seed.py`.
-- `grep -rn "ada@legalshelf\|Ada Reyes\|demo1234"` across `backend/alembic/` returns nothing — no migration seeds her.
+- `grep -rn "ada@legalshelf\|Ada Reyes\|demo1234"` across `apps/api/alembic/` returns nothing — no migration seeds her.
 - `last_login_at: None` means nobody has ever used the account through normal auth — it's a freshly-seeded row.
 
 ### Why only ada (not the other three)
@@ -227,7 +227,7 @@ Production now has **zero users**, zero memberships, zero organizations, zero pr
 
 ### Defense-in-depth — `dev_seed.py` operator guard
 
-In the same session a small defensive change was added to `backend/scripts/dev_seed.py`:
+In the same session a small defensive change was added to `apps/api/scripts/dev_seed.py`:
 
 - At `main()` entry, the script reads `settings.DATABASE_URL`, extracts the host portion, and **refuses to run** unless the host is `localhost`, `127.0.0.1`, or ends in `.local`.
 - An explicit escape hatch — `CHECKWISE_ALLOW_SEED_AGAINST=<substring>` env var — exists for legitimate recovery scenarios, but it requires a deliberate operator action.

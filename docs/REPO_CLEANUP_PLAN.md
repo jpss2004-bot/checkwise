@@ -10,6 +10,15 @@ The next milestone after this plan is the **cybersecurity remediation pass**.
 That pass owns auth/route hardening, secret-handling, and dependency review.
 This document deliberately stays away from those areas.
 
+**Status update (2026-05-21):** Stages 0–4 of §7 have landed on `main`.
+The cybersecurity remediation pass (see
+[audits/security/SECURITY_REMEDIATION_PLAN.md](audits/security/SECURITY_REMEDIATION_PLAN.md))
+shipped before the monorepo move; the monorepo move
+(`backend/ → apps/api/`, `frontend/ → apps/web/`) shipped immediately
+after. Stage 5 (`packages/`) remains future-only. The historical
+sections below reflect the state at the time of writing; references
+to `backend/` and `frontend/` describe the pre-move layout.
+
 ---
 
 ## 1. Current repo classification
@@ -18,32 +27,32 @@ Inventoried from `git status --short`, `git ls-files`, and a walk of the top
 level + `docs/`, `backend/`, `frontend/`.
 
 ### 1.1 Application code (tracked, must stay tracked)
-- `backend/app/**` — FastAPI app, routers, models, schemas, services, db, core.
-- `backend/alembic/**` — migrations.
-- `frontend/app/**` — Next.js App Router routes.
-- `frontend/components/**` — UI primitives, domain components, marketing,
+- `apps/api/app/**` — FastAPI app, routers, models, schemas, services, db, core.
+- `apps/api/alembic/**` — migrations.
+- `apps/web/app/**` — Next.js App Router routes.
+- `apps/web/components/**` — UI primitives, domain components, marketing,
   feedback.
-- `frontend/lib/**` — API clients, session, reports, mocks, catalogs.
-- `frontend/public/**` — static public assets.
+- `apps/web/lib/**` — API clients, session, reports, mocks, catalogs.
+- `apps/web/public/**` — static public assets.
 
 ### 1.2 Production config (tracked)
 - `render.yaml` — Render blueprint for `checkwise-api`.
 - `docker-compose.yml` — local Postgres only; not the production topology,
   but tracked because every contributor needs the same dev DB shape.
-- `backend/pyproject.toml`, `backend/alembic.ini`.
-- `frontend/package.json`, `frontend/package-lock.json`,
-  `frontend/tsconfig.json`, `frontend/next.config.ts`,
-  `frontend/tailwind.config.ts`, `frontend/postcss.config.mjs`,
-  `frontend/eslint.config.mjs`.
-- `.env.example`, `frontend/.env.local.example` (templates only — real env
+- `apps/api/pyproject.toml`, `apps/api/alembic.ini`.
+- `apps/web/package.json`, `apps/web/package-lock.json`,
+  `apps/web/tsconfig.json`, `apps/web/next.config.ts`,
+  `apps/web/tailwind.config.ts`, `apps/web/postcss.config.mjs`,
+  `apps/web/eslint.config.mjs`.
+- `.env.example`, `apps/web/.env.local.example` (templates only — real env
   files are ignored).
 
 ### 1.3 Local-only config (ignored by `.gitignore`)
 - `.env`, `.env.*` (real secrets), every variant except `.env.example`.
-- `backend/*.db`, `backend/*.db-journal` (sqlite dev DB).
-- `backend/storage/`, `backend/uploads/` (dev file storage).
+- `apps/api/*.db`, `apps/api/*.db-journal` (sqlite dev DB).
+- `apps/api/storage/`, `apps/api/uploads/` (dev file storage).
 - `postgres-data/` (docker volume mount, if used).
-- `.vercel/`, `.next/`, `frontend/.cw-next-*/`.
+- `.vercel/`, `.next/`, `apps/web/.cw-next-*/`.
 
 ### 1.4 Generated artifacts (ignored — should stay ignored)
 - `node_modules/`, `__pycache__/`, `*.tsbuildinfo`, `*.egg-info/`,
@@ -88,16 +97,16 @@ level + `docs/`, `backend/`, `frontend/`.
 - `Checkwise-slack-feedback.txt`, `*-slack-feedback.txt` — now ignored.
 
 ### 1.8 Test assets (tracked)
-- `backend/fixtures/` — golden fixtures for `pytest`.
-- `backend/tests/` — full test suite.
-- `frontend/scripts/` — frontend dev helpers.
+- `apps/api/fixtures/` — golden fixtures for `pytest`.
+- `apps/api/tests/` — full test suite.
+- `apps/web/scripts/` — frontend dev helpers.
 
 ### 1.9 Dev tooling and scripts (tracked)
 - `dev.sh`, `dev_demo.sh` — local dev runners.
 - `scripts/` (top level) — capture, demo, audit-rendering helpers.
-- `backend/scripts/` — operator and dev scripts (seed, reset, setup,
+- `apps/api/scripts/` — operator and dev scripts (seed, reset, setup,
   start, provision).
-- `backend/tools/` — local-only tooling, **never mounted in
+- `apps/api/tools/` — local-only tooling, **never mounted in
   production**. See §6.
 
 ---
@@ -171,7 +180,7 @@ top-level naming.
 
 ## 6. Near-term layout (this pass)
 
-Frontend (`frontend/`):
+Frontend (`apps/web/`):
 - `app/` — Next.js App Router routes only.
 - `components/ui/` — reusable primitives.
 - `components/checkwise/` — domain components.
@@ -185,7 +194,7 @@ Frontend (`frontend/`):
   production code paths once Phase-3 mocks are removed.
 - `public/` — static public assets.
 
-Backend (`backend/`):
+Backend (`apps/api/`):
 - `app/api/v1/` — routers only. No business logic.
 - `app/core/` — config, catalogs, domain rules.
 - `app/services/` — business logic.
@@ -213,13 +222,13 @@ Each stage must land green before the next stage starts.
 **Stage 2 — frontend internal tidy.**
 - Confirm all `lib/mock/*` are import-fenced to routes/components that
   still need them.
-- Confirm `frontend/lib/demo-clients.ts` (currently untracked) belongs
+- Confirm `apps/web/lib/demo-clients.ts` (currently untracked) belongs
   under `lib/mock/` or `lib/demo/` and rename accordingly.
 - No path changes that would break import graphs.
 
 **Stage 3 — backend internal tidy.**
-- Confirm `backend/tools/` is not imported by `backend/app/`.
-- Confirm `backend/scripts/` is not imported by `backend/app/`.
+- Confirm `apps/api/tools/` is not imported by `apps/api/app/`.
+- Confirm `apps/api/scripts/` is not imported by `apps/api/app/`.
 - Add a lint check or import-linter rule (deferred — not in this pass).
 
 **Stage 4 — monorepo move.**
@@ -227,7 +236,7 @@ Each stage must land green before the next stage starts.
 - `git mv frontend apps/web`
 - Update `render.yaml` `rootDir`, Vercel project root, every `docs/*`
   reference, `.github/workflows/*`, `dev.sh`, `dev_demo.sh`,
-  `docker-compose.yml`, `scripts/*`, `backend/scripts/*`.
+  `docker-compose.yml`, `scripts/*`, `apps/api/scripts/*`.
 - Roll out behind a single PR. Do not split — partial moves break
   import paths and CI.
 
@@ -242,13 +251,13 @@ Each stage must land green before the next stage starts.
   project root setting points at `frontend/`. Both must change in the
   same PR as the directory rename, with the Render/Vercel dashboards
   updated **before** merge.
-- **Import path breakage.** Top-level `backend/scripts/*`,
-  `backend/tools/*`, and many docs reference `backend/app/...` as a
+- **Import path breakage.** Top-level `apps/api/scripts/*`,
+  `apps/api/tools/*`, and many docs reference `apps/api/app/...` as a
   string. A grep-and-replace must be exhaustive.
-- **Test-asset paths.** `backend/fixtures/` is referenced by relative
+- **Test-asset paths.** `apps/api/fixtures/` is referenced by relative
   path from tests; pytest's `rootdir` must follow.
 - **Documentation drift.** Every `docs/*.md` linking to
-  `backend/app/...` or `frontend/...` will go stale. There are ~60+ such
+  `apps/api/app/...` or `frontend/...` will go stale. There are ~60+ such
   references today.
 - **Open work.** Several frontend files are currently untracked but
   in-progress (new components, new lib files). A directory move on top
@@ -278,12 +287,12 @@ committed or shelved.
 
 These are **flagged**, not changed in this pass.
 
-- `backend/.ruff_cache/` and root `.ruff_cache/` — both exist on disk.
+- `apps/api/.ruff_cache/` and root `.ruff_cache/` — both exist on disk.
   Both are covered by `.gitignore`. Safe to delete locally any time.
-- `backend/checkwise.db` + `backend/checkwise.db-journal` — local dev
+- `apps/api/checkwise.db` + `apps/api/checkwise.db-journal` — local dev
   sqlite, already ignored. Safe to delete locally to force a fresh seed.
-- `backend/checkwise_backend.egg-info/` — generated; ignored.
-- `frontend/tsconfig.tsbuildinfo` — generated; ignored.
+- `apps/api/checkwise_backend.egg-info/` — generated; ignored.
+- `apps/web/tsconfig.tsbuildinfo` — generated; ignored.
 - `.claude/settings.local.json.save` — looks like an editor backup of
   `settings.local.json`. The `.save` file is ignored (matches
   `.claude/*`). Candidate for manual local deletion.
@@ -308,15 +317,15 @@ No deletion is performed in this pass.
 
 Out of scope for this pass, queued next:
 
-- Audit every route in `backend/app/api/v1/**` for `require_role` /
+- Audit every route in `apps/api/app/api/v1/**` for `require_role` /
   `require_org_role` / `Depends(get_current_user)` coverage. The
   current README still flags the V1.2 opaque `X-Workspace-Token` for
   the provider portal as a roadmap item.
-- Review `backend/app/core/` for secret handling, JWT secret rotation,
+- Review `apps/api/app/core/` for secret handling, JWT secret rotation,
   CORS origins, and storage-backend credential surface.
-- Sweep `frontend/lib/api/*` for any client-side trust of role claims
+- Sweep `apps/web/lib/api/*` for any client-side trust of role claims
   the backend should be enforcing.
-- Confirm `backend/tools/` cannot reach a production import path.
+- Confirm `apps/api/tools/` cannot reach a production import path.
 - Confirm Render's `preDeployCommand` and `healthCheckPath` semantics
   against the current `app/main.py`.
 - Re-verify `.env.example` has no real secret values and that no

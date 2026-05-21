@@ -6,7 +6,7 @@ features, no redesigns, no new abstractions. Read-only Phase A report.
 **Repo state at audit time**
 
 - Branch / HEAD: `main` @ `2d38726` (Phase 5 — v2.1 close).
-- Working tree: 1 modified file (`backend/scripts/dev_seed.py`,
+- Working tree: 1 modified file (`apps/api/scripts/dev_seed.py`,
   +519/-42, uncommitted) + 4 untracked artefacts under `docs/`.
 - Local branches ahead of `origin`: none. `main` is in sync with
   `origin/main`.
@@ -15,11 +15,11 @@ features, no redesigns, no new abstractions. Read-only Phase A report.
 
 | Check | Result |
 |---|---|
-| `backend/.venv/bin/pytest -q` | **312 passed**, 2 deprecation warnings (anyio · `HTTP_422_UNPROCESSABLE_ENTITY`) |
-| `backend/.venv/bin/ruff check .` | **All checks passed** |
-| `frontend/node_modules/.bin/tsc --noEmit` | **0 errors** |
-| `frontend/node_modules/.bin/next lint --quiet` | **0 errors, 3 warnings** (unused symbols) |
-| `frontend/node_modules/.bin/next build` | **27/27 routes compile** |
+| `apps/api/.venv/bin/pytest -q` | **312 passed**, 2 deprecation warnings (anyio · `HTTP_422_UNPROCESSABLE_ENTITY`) |
+| `apps/api/.venv/bin/ruff check .` | **All checks passed** |
+| `apps/web/node_modules/.bin/tsc --noEmit` | **0 errors** |
+| `apps/web/node_modules/.bin/next lint --quiet` | **0 errors, 3 warnings** (unused symbols) |
+| `apps/web/node_modules/.bin/next build` | **27/27 routes compile** |
 
 Baseline is green. Stabilization here is therefore about **wiring gaps
 and dead code**, not about a broken build.
@@ -76,7 +76,7 @@ Client portfolio (`/client/*`)
 
 All 27 statically/dynamically compile.
 
-### 1.2 Backend routers (`backend/app/api/v1/`)
+### 1.2 Backend routers (`apps/api/app/api/v1/`)
 
 Wired in `router.py` in this order: `endpoints`, `compliance`,
 `portal`, `auth`, `reviewer`, `admin`, `client`, `metadata_dry_run`,
@@ -107,7 +107,7 @@ between memory note and the migration tree.
 
 **P0-1. `client_admin` users are routed to the wrong portal after login.**
 
-`frontend/app/login/page.tsx:217-229` — `decideDestination` only
+`apps/web/app/login/page.tsx:217-229` — `decideDestination` only
 recognises two role classes:
 
 ```
@@ -124,7 +124,7 @@ cliente)" rows and lists `cliente.demo` as reaching `/client/*`. This
 worked in V1.x (no `client_admin` role existed) and silently regressed
 when the persona shipped in V2.1.
 
-Same routing bug repeats on the boot-check at `frontend/app/login/page.tsx:49`
+Same routing bug repeats on the boot-check at `apps/web/app/login/page.tsx:49`
 (authenticated visitor hits `/` then `/login`) and in the post-submit
 redirect at `:69`.
 
@@ -136,11 +136,11 @@ returning `/client/dashboard`. ~5 LOC, single file.
 **P1-1. Uncommitted `dev_seed.py` (+519/-42) is the working refactor that
 makes the seed idempotent for the V2.1 multi-workspace client portfolio.**
 
-`backend/tests/test_seed.py` passes against this version. The previous
+`apps/api/tests/test_seed.py` passes against this version. The previous
 seed (HEAD) deletes orgs *before* it deletes the Client rows that FK
 into them, which is the bug the diff fixes. If anyone runs `git reset
 --hard` or pulls in a teammate, the working-tree-only fix is lost and
-`bash backend/scripts/dev_reset.sh` will fail on re-seed against a
+`bash apps/api/scripts/dev_reset.sh` will fail on re-seed against a
 populated DB. This is a producer/consumer split waiting to happen
 (exactly the failure mode of the May 15 incident captured in memory).
 
@@ -171,8 +171,8 @@ keep the local files. No source changes.
 
 | File | Consumers in `app/`, `components/`, `lib/` (excluding the file itself and the .next cache) |
 |---|---|
-| `frontend/lib/mock/activation.ts` | 0 |
-| `frontend/lib/mock/reports.ts` | 0 |
+| `apps/web/lib/mock/activation.ts` | 0 |
+| `apps/web/lib/mock/reports.ts` | 0 |
 
 Both files document themselves as `TODO[backend-integration]` bridges
 but no code imports them today. Safe to delete.
@@ -181,10 +181,10 @@ but no code imports them today. Safe to delete.
 
 | File | Consumers |
 |---|---|
-| `frontend/components/checkwise/portal/compliance-calendar.tsx` | 0 |
-| `frontend/components/checkwise/portal/onboarding-checklist.tsx` | 0 |
-| `frontend/components/checkwise/portal/provider-access-form.tsx` | 0 |
-| `frontend/components/checkwise/portal/semaphore-card.tsx` | 0 (also the sole reason `lib/mock/dashboard.ts` is kept in tree — its only consumer is type-only) |
+| `apps/web/components/checkwise/portal/compliance-calendar.tsx` | 0 |
+| `apps/web/components/checkwise/portal/onboarding-checklist.tsx` | 0 |
+| `apps/web/components/checkwise/portal/provider-access-form.tsx` | 0 |
+| `apps/web/components/checkwise/portal/semaphore-card.tsx` | 0 (also the sole reason `lib/mock/dashboard.ts` is kept in tree — its only consumer is type-only) |
 
 These were superseded by the V2 primitives (`StatCard`,
 `EvidenceSlotGrid`, the new `PortalAppShell`) but never removed. Safe
@@ -211,17 +211,17 @@ consume `lib/mock/*` …" warning shrinks to: `corrections`,
 
 | File:line | Symbol |
 |---|---|
-| `frontend/app/client/vendors/page.tsx:9` | `Storefront` import |
-| `frontend/app/portal/dashboard/page.tsx:3` | `useMemo` import |
-| `frontend/lib/mock/invitations.ts:71` | `_demo` constant |
+| `apps/web/app/client/vendors/page.tsx:9` | `Storefront` import |
+| `apps/web/app/portal/dashboard/page.tsx:3` | `useMemo` import |
+| `apps/web/lib/mock/invitations.ts:71` | `_demo` constant |
 
 If P2-1/P2-2 ship, the third disappears with the file.
 
 **P2-5. `react-hooks/exhaustive-deps` disables (3 sites).**
 
-`frontend/app/admin/audit-log/page.tsx:51`,
-`frontend/app/client/vendors/page.tsx:64`,
-`frontend/app/client/submissions/page.tsx:69`.
+`apps/web/app/admin/audit-log/page.tsx:51`,
+`apps/web/app/client/vendors/page.tsx:64`,
+`apps/web/app/client/submissions/page.tsx:69`.
 
 Each guards a `useEffect(() => { refresh(); }, [])` pattern where
 `refresh` is declared in the same component. The disable is the
@@ -282,7 +282,7 @@ stabilization unless asked.
 
 ## 3. Contract / wiring spot-checks
 
-- `withOnboardingGate` (`frontend/lib/session/with-onboarding-gate.tsx`):
+- `withOnboardingGate` (`apps/web/lib/session/with-onboarding-gate.tsx`):
   role-aware bypass for `internal_admin` / `reviewer` is present and
   reads from `readAdminSession()`. Behaves as documented.
 - `lib/api/portal-adapters.ts`: maps backend `OnboardingSummary` →
@@ -310,7 +310,7 @@ consumers, no cross-tenant leak path found in this pass.
 | ID | Severity | Title | Fix size |
 |---|---|---|---|
 | P0-1 | P0 | `client_admin` routed away from `/client/*` in `app/login/page.tsx:217` | 1 file, ~5 LOC |
-| P1-1 | P1 | Commit `backend/scripts/dev_seed.py` working-tree refactor | 0 source LOC, 1 commit |
+| P1-1 | P1 | Commit `apps/api/scripts/dev_seed.py` working-tree refactor | 0 source LOC, 1 commit |
 | P1-2 | P1 | Add `.gitignore` entries for `docs/CREDENTIALS.md`, `docs/EXECUTIVE_REPORT*.html`, `docs/executive-evidence/` | 1 file, ~3 lines |
 | P2-1 | P2 | Delete orphaned mocks: `lib/mock/activation.ts`, `lib/mock/reports.ts` | 2 files |
 | P2-2 | P2 | Delete 4 orphaned portal components (and `lib/mock/dashboard.ts` when `semaphore-card` goes) | 4–5 files |
@@ -345,11 +345,11 @@ Re-run on `stabilization/2026-05-18` after the final commit.
 
 | Check | Result |
 |---|---|
-| `backend/.venv/bin/pytest -q` | **312 passed** (unchanged) |
-| `backend/.venv/bin/ruff check .` | **All checks passed** |
-| `frontend/node_modules/.bin/tsc --noEmit` | **0 errors** |
-| `frontend/node_modules/.bin/next lint --quiet` | **0 errors, 0 warnings** (was 0 errors, 3 warnings) |
-| `frontend/node_modules/.bin/next build` | **27/27 routes compile** |
+| `apps/api/.venv/bin/pytest -q` | **312 passed** (unchanged) |
+| `apps/api/.venv/bin/ruff check .` | **All checks passed** |
+| `apps/web/node_modules/.bin/tsc --noEmit` | **0 errors** |
+| `apps/web/node_modules/.bin/next lint --quiet` | **0 errors, 0 warnings** (was 0 errors, 3 warnings) |
+| `apps/web/node_modules/.bin/next build` | **27/27 routes compile** |
 
 Branch is 5 commits ahead of `origin/main`. Not pushed.
 

@@ -140,7 +140,7 @@ notifications) should branch on `SlotState`, not on raw status codes:
 
 ## Service API (read-only)
 
-`backend/app/services/evidence_slots.py` exposes:
+`apps/api/app/services/evidence_slots.py` exposes:
 
 ```python
 SlotState                          # enum (10 states)

@@ -12,7 +12,7 @@ local follow-up commit for the `boss.demo` membership bug.
 
 Verified by name only (no values printed):
 
-| Variable | `backend/.env` | Notes |
+| Variable | `apps/api/.env` | Notes |
 |---|---|---|
 | `ANTHROPIC_API_KEY` | set | Rotated on 2026-05-18 after an accidental terminal print exposed the previous key. |
 | `CHECKWISE_LLM_BACKEND` | set (`anthropic`) | |
@@ -21,7 +21,7 @@ Verified by name only (no values printed):
 | `AUTH_JWT_SECRET` / `AUTH_JWT_ALGORITHM` / `AUTH_JWT_EXPIRES_MINUTES` | set | |
 | `STORAGE_BACKEND` | set (`local`) | |
 
-| Variable | `frontend/.env.local` |
+| Variable | `apps/web/.env.local` |
 |---|---|
 | `NEXT_PUBLIC_API_BASE_URL` | set (`http://127.0.0.1:8000`) |
 | `NEXT_PUBLIC_DEMO_MODE` | set |
@@ -66,11 +66,11 @@ Full credentials in `docs/DEMO_LOGIN_MATRIX.md`.
 
 **Symptom.** A returning provider account whose docs (README, DEMO_1.7.1) say it should land on `/portal/dashboard` was routing through `/client/*`.
 
-**Cause.** `backend/scripts/dev_seed.py` (former lines 1004-1026) injected a `client_admin` membership into `boss.demo` for both the LegalShelf org and the client-portfolio org. The stated reason was "give boss.demo memberships so the Reports surface is populated when she visits /portal/reports". Side effect: the login router saw `client_admin` and routed her to `/client/dashboard`.
+**Cause.** `apps/api/scripts/dev_seed.py` (former lines 1004-1026) injected a `client_admin` membership into `boss.demo` for both the LegalShelf org and the client-portfolio org. The stated reason was "give boss.demo memberships so the Reports surface is populated when she visits /portal/reports". Side effect: the login router saw `client_admin` and routed her to `/client/dashboard`.
 
 **Fix.** Removed the membership injection. `boss.demo` now has no memberships → `decideDestination` falls through to `/portal/entra-a-tu-espacio`. `/portal/reports` will render empty for her until vendor report delivery ships in R1.2 — that's the honest state.
 
-**Files touched.** `backend/scripts/dev_seed.py` (1 file).
+**Files touched.** `apps/api/scripts/dev_seed.py` (1 file).
 
 ### B2 — Login double-spinner (already fixed)
 
@@ -78,7 +78,7 @@ Committed as `f294c31`. The `<Button loading={...}>` injected its own `<Spinner>
 
 ### B3 — `/admin/login` is a legacy double-hop redirect to `/login`
 
-`frontend/app/admin/login/page.tsx` immediately `router.replace("/login")`. The admin shell and client shell still redirect to `/admin/login` on unauthorized — they hop through this stub instead of going to `/login` directly.
+`apps/web/app/admin/login/page.tsx` immediately `router.replace("/login")`. The admin shell and client shell still redirect to `/admin/login` on unauthorized — they hop through this stub instead of going to `/login` directly.
 
 **Severity.** Cosmetic only. Functionally works. Filed for follow-up.
 
@@ -86,7 +86,7 @@ Committed as `f294c31`. The `<Button loading={...}>` injected its own `<Spinner>
 
 ### B4 — Admin shell rejects reviewer-only users
 
-`frontend/app/admin/_shell.tsx:74` checks `!current.roles.includes("internal_admin")` and bounces anyone without `internal_admin`. A user holding only `reviewer` (no `internal_admin`) would be blocked from `/admin/*` even though the role exists and `/admin/reviewer` is its primary surface.
+`apps/web/app/admin/_shell.tsx:74` checks `!current.roles.includes("internal_admin")` and bounces anyone without `internal_admin`. A user holding only `reviewer` (no `internal_admin`) would be blocked from `/admin/*` even though the role exists and `/admin/reviewer` is its primary surface.
 
 **Severity.** Latent — no seeded account triggers it (`ada` holds both roles).
 

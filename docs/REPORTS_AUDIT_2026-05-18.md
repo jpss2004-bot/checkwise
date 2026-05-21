@@ -68,7 +68,7 @@ Reports UI (Next.js, /portal/reports/*)
          │ Bearer JWT (readAdminSession) + JSON / SSE
          ▼
 
-FastAPI Reports API (backend/app/api/v1/reports.py)
+FastAPI Reports API (apps/api/app/api/v1/reports.py)
   • CRUD:    POST/GET /reports                         create/list
              GET/PATCH /reports/{id}                    read/update
              POST/GET  /reports/{id}/versions          save/list
@@ -204,17 +204,17 @@ silently downgrades. Which is the source of the #1 risk in §0.
 local permission settings), so this audit cannot verify line-by-line
 whether `ANTHROPIC_API_KEY` and `CHECKWISE_LLM_BACKEND` are in the
 example file. If they are missing, add them — they are documented in
-`backend/app/core/config.py` and silently change AI behaviour when
+`apps/api/app/core/config.py` and silently change AI behaviour when
 unset.
 
 ---
 
 ## 5. Frontend / Backend contract audit
 
-Cross-checked `frontend/lib/api/reports.ts`, `lib/reports/use-generation.ts`,
+Cross-checked `apps/web/lib/api/reports.ts`, `lib/reports/use-generation.ts`,
 `lib/reports/use-conversation.ts`, and the four block components
-against `backend/app/api/v1/reports.py` + `backend/app/schemas/reports.py`
-+ `backend/app/services/reports/executor.py`.
+against `apps/api/app/api/v1/reports.py` + `apps/api/app/schemas/reports.py`
++ `apps/api/app/services/reports/executor.py`.
 
 | Surface | Frontend | Backend | Match? |
 |---|---|---|---|
@@ -240,7 +240,7 @@ eye on:
 - `generated_by` defaults are aligned (`"user"` on FE save, `"ai"` on
   backend executor save).
 - Audience labels and status labels are duplicated in
-  `frontend/lib/reports/constants.ts` and `backend/app/constants/reports.py`
+  `apps/web/lib/reports/constants.ts` and `apps/api/app/constants/reports.py`
   — these must be kept in sync manually. They are in sync today.
 
 ---
@@ -271,11 +271,11 @@ eye on:
 ## 7. Test results
 
 ```
-backend/.venv/bin/ruff check app            All checks passed!
-backend/.venv/bin/python -c "import app.main"   no errors
-backend/.venv/bin/pytest tests/test_reports*.py 43 passed, 2 deprecation warnings (~14.6s)
-frontend/node_modules/.bin/tsc --noEmit     no errors
-frontend/node_modules/.bin/next lint        No ESLint warnings or errors
+apps/api/.venv/bin/ruff check app            All checks passed!
+apps/api/.venv/bin/python -c "import app.main"   no errors
+apps/api/.venv/bin/pytest tests/test_reports*.py 43 passed, 2 deprecation warnings (~14.6s)
+apps/web/node_modules/.bin/tsc --noEmit     no errors
+apps/web/node_modules/.bin/next lint        No ESLint warnings or errors
 ```
 
 `next build` was not re-run during this audit pass; the v2.1.1
@@ -313,7 +313,7 @@ already shows 27/27 routes compiling.
 | ID | Finding | Status |
 |---|---|---|
 | P1-1 | No UI surface tells the user when the active LLM backend is the mock client. The "AI-generated" pill is rendered the same way for real and mock content. | **resolved (this commit)** — backend exposes `GET /reports/_engine`; editor renders a banner when backend is `mock`. |
-| P1-2 | The demo seed script does not insert example `reports` rows, so a fresh login on a clean DB lands on the empty state. Not blocking but soft for live demos. | unresolved (deferred — seeding is owned by `backend/scripts/dev_seed.py`, separate concern) |
+| P1-2 | The demo seed script does not insert example `reports` rows, so a fresh login on a clean DB lands on the empty state. Not blocking but soft for live demos. | unresolved (deferred — seeding is owned by `apps/api/scripts/dev_seed.py`, separate concern) |
 | P1-3 | `AnthropicLLMClient` hardcodes the model ids (`claude-sonnet-4-5-20250929`, `claude-haiku-4-5-20251001`). To swap to a different Claude model we need a code change. | deferred (small but out of audit scope; tracked here) |
 
 ### P2 — Polish
@@ -344,13 +344,13 @@ Three files changed, all conservative:
    as `sync: false` so the Blueprint deploy flow prompts the operator
    for them. **No values committed to git.**
 
-2. `backend/app/api/v1/reports.py` — add `GET /reports/_engine` that
+2. `apps/api/app/api/v1/reports.py` — add `GET /reports/_engine` that
    reports the active LLM backend's `name`, `planner_model`, and
    `content_model`. Cheap, no DB hit, no auth requirement beyond
    `get_current_user`, no PII surface. Lets the frontend tell the
    user *AI report generation is not configured in this environment.*
 
-3. `frontend/app/portal/reports/[id]/page.tsx` — call
+3. `apps/web/app/portal/reports/[id]/page.tsx` — call
    `/reports/_engine` once on mount and render a one-line banner
    above the canvas when `backend === "mock"`. The "Generar con IA"
    button stays enabled (the mock still produces a useful
@@ -371,7 +371,7 @@ In priority order:
    `AnthropicLLMClient` automatically.
 2. **Add the same two vars to `.env.example`** (local-dev parity).
 3. (Optional) Add a small seed of 2–3 example reports to
-   `backend/scripts/dev_seed.py` so demo accounts land on a populated
+   `apps/api/scripts/dev_seed.py` so demo accounts land on a populated
    list. Owned by the seed track, separate PR.
 4. (Optional) Lift the hardcoded model ids in `AnthropicLLMClient`
    into env-driven settings (`ANTHROPIC_PLANNER_MODEL`,
@@ -382,10 +382,10 @@ In priority order:
 ## 12. Verification after fixes
 
 ```
-backend/.venv/bin/ruff check app            All checks passed!
-backend/.venv/bin/pytest tests/test_reports*.py
-frontend/node_modules/.bin/tsc --noEmit
-frontend/node_modules/.bin/next lint
+apps/api/.venv/bin/ruff check app            All checks passed!
+apps/api/.venv/bin/pytest tests/test_reports*.py
+apps/web/node_modules/.bin/tsc --noEmit
+apps/web/node_modules/.bin/next lint
 ```
 
 Re-run after the patch. Each step should still be green; the

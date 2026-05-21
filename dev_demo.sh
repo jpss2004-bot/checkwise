@@ -12,8 +12,8 @@
 #
 # Prereq once:
 #   - Docker Desktop installed (started automatically if not running).
-#   - backend/scripts/dev_setup.sh has been run (creates .venv).
-#   - cd frontend && npm install.
+#   - apps/api/scripts/dev_setup.sh has been run (creates .venv).
+#   - cd apps/web && npm install.
 #
 # After this script prints "stack up", open
 # http://localhost:3000/login and use one of the documented demo
@@ -25,12 +25,12 @@ ROOT="$(cd "$(dirname "$0")" && pwd)"
 cd "$ROOT"
 
 # ── Preflight ──────────────────────────────────────────────────────
-if [ ! -d "backend/.venv" ]; then
-  echo "ERROR: backend/.venv not found. Run backend/scripts/dev_setup.sh first." >&2
+if [ ! -d "apps/api/.venv" ]; then
+  echo "ERROR: apps/api/.venv not found. Run apps/api/scripts/dev_setup.sh first." >&2
   exit 1
 fi
-if [ ! -d "frontend/node_modules" ]; then
-  echo "ERROR: frontend deps not installed. Run: cd frontend && npm install" >&2
+if [ ! -d "apps/web/node_modules" ]; then
+  echo "ERROR: frontend deps not installed. Run: cd apps/web && npm install" >&2
   exit 1
 fi
 if ! command -v docker >/dev/null 2>&1; then
@@ -75,10 +75,10 @@ fi
 
 # ── Migrate + seed ─────────────────────────────────────────────────
 echo "==> Applying Alembic migrations"
-(cd backend && .venv/bin/alembic upgrade head)
+(cd apps/api && .venv/bin/alembic upgrade head)
 
 echo "==> Loading dev seed"
-(cd backend && .venv/bin/python scripts/dev_seed.py)
+(cd apps/api && .venv/bin/python scripts/dev_seed.py)
 
 # ── Backend + frontend ─────────────────────────────────────────────
 echo

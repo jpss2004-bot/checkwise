@@ -7,7 +7,7 @@ recurring REPSE calendar.
 
 The single source of truth for what providers must upload is
 `C.Árbol Plataforma Proveedores REPSE VF` (sheet "Árbol Plataforma"), encoded
-in `backend/app/core/compliance_catalog.py` and exposed via
+in `apps/api/app/core/compliance_catalog.py` and exposed via
 `/api/v1/compliance/*`. The portal endpoints at `/api/v1/portal/*` overlay
 that catalog with each provider's actual submissions to compute "what's
 missing vs received."
@@ -86,7 +86,7 @@ Sesión demo guardada en `localStorage` bajo la clave `checkwise.portal.session.
 ```
 
 Helpers: `readPortalSession`, `writePortalSession`, `clearPortalSession`
-(`frontend/lib/portal-session.ts`).
+(`apps/web/lib/portal-session.ts`).
 
 ## Reglas que se respetan
 

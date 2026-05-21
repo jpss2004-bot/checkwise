@@ -6,11 +6,11 @@ These files implement **Phase 1 (Token + typography hardening)** from the v0.2 p
 
 | File in this folder | Destination in the Next.js repo | Action |
 |---|---|---|
-| `globals.css` | `frontend/app/globals.css` | **Replace** the existing file |
+| `globals.css` | `apps/web/app/globals.css` | **Replace** the existing file |
 | `tailwind.config.ts` | `frontend/tailwind.config.ts` | **Merge** — keep your existing `content` array; replace `theme.extend` |
-| `lib/types.ts` | `frontend/lib/types.ts` | **Create** (new file) |
-| `lib/with-portal-session.tsx` | `frontend/lib/with-portal-session.tsx` | **Create** (new file) |
-| `app-layout.snippet.tsx` | `frontend/app/layout.tsx` | **Merge** — apply the diff shown in that file |
+| `lib/types.ts` | `apps/web/lib/types.ts` | **Create** (new file) |
+| `lib/with-portal-session.tsx` | `apps/web/lib/with-portal-session.tsx` | **Create** (new file) |
+| `app-layout.snippet.tsx` | `apps/web/app/layout.tsx` | **Merge** — apply the diff shown in that file |
 | `INSTALL.md` | — | Read first; runs the deps install + wiring |
 
 ## Pre-flight checklist (run in Claude Code)

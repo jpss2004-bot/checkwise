@@ -23,7 +23,7 @@ It is not a friendly consumer SaaS. It is not a fintech-dark cockpit. It is a le
 | **Operational** | 5 (default product) | `/portal/dashboard`, `/portal/calendar`, `/portal/onboarding`, `/portal/upload`, `/portal/submissions/*` | Provider register. Tight enough to scan, loose enough to not stress users who are stressed about compliance. |
 | **Premium-dense** | 7 (admin + reports) | `/admin/*`, `/portal/reports`, `/client/*` | Operator + power-user register. Tables get one extra column. Padding tightens. Mono carries every number, ID, and timestamp. |
 
-Implementation: the existing `[data-density]` token system in [globals.css](../../frontend/app/globals.css) gets a third value, `dense`, sitting between `comfortable` and `compact`. Phase 5 applies `[data-density="dense"]` to `<html>` for `/admin/*` and `/portal/reports` routes.
+Implementation: the existing `[data-density]` token system in [globals.css](../../apps/web/app/globals.css) gets a third value, `dense`, sitting between `comfortable` and `compact`. Phase 5 applies `[data-density="dense"]` to `<html>` for `/admin/*` and `/portal/reports` routes.
 
 ## Type scale (locked)
 
@@ -87,7 +87,7 @@ Phase 2 absolute bans, codified from `impeccable` + `design-taste-frontend`:
 
 ## Motion doctrine
 
-The existing motion system in [globals.css](../../frontend/app/globals.css) is good. Phase 2 codifies how to use it:
+The existing motion system in [globals.css](../../apps/web/app/globals.css) is good. Phase 2 codifies how to use it:
 
 | Use case | Class / curve | Duration |
 |---|---|---|
@@ -149,7 +149,7 @@ We have all the tokens. Phase 2 commits to one rendering:
 Notes:
 - **No border by default.** The token triplet stays, but the border is opt-in (used only when a pill sits on a same-tint background).
 - The pill carries an icon **only** when the status name alone is ambiguous (e.g., `requiere_aclaracion` benefits from a question icon; `aprobado` does not need a check).
-- Label text is the canonical Spanish from `frontend/lib/constants/statuses.ts`. No improvisation.
+- Label text is the canonical Spanish from `apps/web/lib/constants/statuses.ts`. No improvisation.
 
 This finalizes Linear's "tint, no border" pattern translated to our tokens.
 
@@ -191,7 +191,7 @@ Lifted from `impeccable` + `design-taste-frontend` + DESIGN.md, locked here for 
 
 ## Token deltas — this phase
 
-Minimal, additive, no breaking change. See diff in [globals.css](../../frontend/app/globals.css).
+Minimal, additive, no breaking change. See diff in [globals.css](../../apps/web/app/globals.css).
 
 1. **New density tier:** `[data-density="dense"]` between comfortable and compact.
 2. **Type scale tokens:** `--text-eyebrow` through `--text-display` exposed as CSS custom properties + matching utility classes (`.cw-eyebrow`, `.cw-display`, `.cw-display-sm`, `.cw-prose`).

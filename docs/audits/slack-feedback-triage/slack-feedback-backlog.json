@@ -21,12 +21,12 @@
       "severity": "critical",
       "priority": "P0",
       "confidence": "needs_reproduction",
-      "suggested_fix": "Reproduce on staging as jluna; capture the /api/v1/reports/_presets response. If 200 with items=[], inspect ReportActor.is_workspace_owner construction (backend/app/services/report_service.py:121) and the actor builder in backend/app/api/v1/reports.py — workspace owners with any non-empty roles tuple are excluded by the current property. Fix in seed data OR loosen the property. If non-200, lean on BL-008 to surface the failure.",
+      "suggested_fix": "Reproduce on staging as jluna; capture the /api/v1/reports/_presets response. If 200 with items=[], inspect ReportActor.is_workspace_owner construction (apps/api/app/services/report_service.py:121) and the actor builder in apps/api/app/api/v1/reports.py — workspace owners with any non-empty roles tuple are excluded by the current property. Fix in seed data OR loosen the property. If non-200, lean on BL-008 to surface the failure.",
       "likely_files": [
-        "backend/app/services/report_service.py",
-        "backend/app/api/v1/reports.py",
-        "backend/app/services/reports/templates.py",
-        "frontend/components/checkwise/reports/list/reports-list-view.tsx"
+        "apps/api/app/services/report_service.py",
+        "apps/api/app/api/v1/reports.py",
+        "apps/api/app/services/reports/templates.py",
+        "apps/web/components/checkwise/reports/list/reports-list-view.tsx"
       ],
       "acceptance_criteria": [
         "Logged in as jluna on staging, /portal/reports renders the three vendor_facing preset cards",
@@ -51,13 +51,13 @@
       "severity": "high",
       "priority": "P1",
       "confidence": "confirmed",
-      "suggested_fix": "Extend the requirement catalog with optional anatomy_es and sample_image fields. Surface both on the upload card and intake wizard. Ship sample images for the five highest-volume requirements first under frontend/public/marketing/requirement-samples/.",
+      "suggested_fix": "Extend the requirement catalog with optional anatomy_es and sample_image fields. Surface both on the upload card and intake wizard. Ship sample images for the five highest-volume requirements first under apps/web/public/marketing/requirement-samples/.",
       "likely_files": [
-        "backend/app/core/catalogs.py",
-        "backend/app/schemas/portal.py",
-        "frontend/components/checkwise/document-submission-form.tsx",
-        "frontend/components/checkwise/intake-wizard.tsx",
-        "frontend/public/marketing/requirement-samples/"
+        "apps/api/app/core/catalogs.py",
+        "apps/api/app/schemas/portal.py",
+        "apps/web/components/checkwise/document-submission-form.tsx",
+        "apps/web/components/checkwise/intake-wizard.tsx",
+        "apps/web/public/marketing/requirement-samples/"
       ],
       "acceptance_criteria": [
         "Five priority requirements show an anatomy paragraph in Spanish",
@@ -82,11 +82,11 @@
       "severity": "high",
       "priority": "P1",
       "confidence": "confirmed",
-      "suggested_fix": "Add frontend/lib/constants/validation.ts with RULE_CODE_LABELS_ES mapping every code defined in backend/app/services/prevalidation.py. Render the friendly label as primary in components/checkwise/validation-summary.tsx (line 29). Keep the raw rule_code in a small mono tag or title attribute for QA.",
+      "suggested_fix": "Add apps/web/lib/constants/validation.ts with RULE_CODE_LABELS_ES mapping every code defined in apps/api/app/services/prevalidation.py. Render the friendly label as primary in components/checkwise/validation-summary.tsx (line 29). Keep the raw rule_code in a small mono tag or title attribute for QA.",
       "likely_files": [
-        "frontend/lib/constants/validation.ts (new)",
-        "frontend/components/checkwise/validation-summary.tsx",
-        "frontend/components/checkwise/document-submission-form.tsx"
+        "apps/web/lib/constants/validation.ts (new)",
+        "apps/web/components/checkwise/validation-summary.tsx",
+        "apps/web/components/checkwise/document-submission-form.tsx"
       ],
       "acceptance_criteria": [
         "No raw rule_code strings render on any user-facing surface",
@@ -113,11 +113,11 @@
       "confidence": "likely",
       "suggested_fix": "Build a read-only ProviderHistoryList grouped by institution → year → month and place it under the existing 'Tu siguiente acción' strip. Extend the existing dashboard payload to include grouped submissions, or call the submissions list endpoint client-side. Add a 'Te faltan N documentos' subtitle to the compliance gauge with a chip listing the top missing requirement.",
       "likely_files": [
-        "frontend/app/portal/dashboard/page.tsx",
-        "frontend/components/checkwise/portal/* (gauge)",
-        "frontend/components/checkwise/portal/provider-history-list.tsx (new)",
-        "backend/app/api/v1/portal.py",
-        "backend/app/services/submission_service.py"
+        "apps/web/app/portal/dashboard/page.tsx",
+        "apps/web/components/checkwise/portal/* (gauge)",
+        "apps/web/components/checkwise/portal/provider-history-list.tsx (new)",
+        "apps/api/app/api/v1/portal.py",
+        "apps/api/app/services/submission_service.py"
       ],
       "acceptance_criteria": [
         "History list groups submissions by Institución then Año then Mes",
@@ -146,9 +146,9 @@
       "confidence": "confirmed",
       "suggested_fix": "(a) Verify the new distDir override is inert on Vercel (Vercel cwd is ASCII so resolver returns .next). (b) Add a ChunkLoadError boundary at /portal/layout.tsx or /portal/error.tsx that triggers a soft reload on chunk failures. (c) Audit Vercel project settings for assetPrefix / outputFileTracingRoot. (d) Smoke a Vercel preview deploy.",
       "likely_files": [
-        "frontend/next.config.ts",
-        "frontend/app/portal/layout.tsx",
-        "frontend/app/portal/error.tsx (new)"
+        "apps/web/next.config.ts",
+        "apps/web/app/portal/layout.tsx",
+        "apps/web/app/portal/error.tsx (new)"
       ],
       "acceptance_criteria": [
         "After a Vercel deploy, navigating between portal routes from a tab opened before the deploy does not produce the chunk error in the console",
@@ -175,10 +175,10 @@
       "confidence": "likely",
       "suggested_fix": "Extend the CalendarItem schema (frontend + backend) with uploaded_at and filename for the latest submission of each slot. Render under the status badge on the desktop cell; mobile keeps the drawer pattern.",
       "likely_files": [
-        "frontend/app/portal/calendar/page.tsx",
-        "frontend/lib/api/portal.ts",
-        "backend/app/api/v1/portal.py",
-        "backend/app/schemas/portal.py"
+        "apps/web/app/portal/calendar/page.tsx",
+        "apps/web/lib/api/portal.ts",
+        "apps/api/app/api/v1/portal.py",
+        "apps/api/app/schemas/portal.py"
       ],
       "acceptance_criteria": [
         "Every populated cell shows the upload date (DD/MM/YYYY) and the filename truncated with ellipsis",
@@ -205,8 +205,8 @@
       "confidence": "likely",
       "suggested_fix": "Add a top-blocker chip to compliance-pulse-strip.tsx (e.g. '3 documentos pendientes en IMSS'). Source the chip text from the existing provider_current_state block executor.",
       "likely_files": [
-        "frontend/components/checkwise/reports/list/compliance-pulse-strip.tsx",
-        "backend/app/services/reports/blocks/* (provider-state block)"
+        "apps/web/components/checkwise/reports/list/compliance-pulse-strip.tsx",
+        "apps/api/app/services/reports/blocks/* (provider-state block)"
       ],
       "acceptance_criteria": [
         "When compliance % < 100, the strip shows at least one specific blocker",
@@ -232,7 +232,7 @@
       "confidence": "confirmed",
       "suggested_fix": "Add a presetsError state to reports-list-view.tsx. On non-401/403 errors, render an Alert above the preset gallery. Keep the existing role-empty message for legitimately empty preset sets.",
       "likely_files": [
-        "frontend/components/checkwise/reports/list/reports-list-view.tsx"
+        "apps/web/components/checkwise/reports/list/reports-list-view.tsx"
       ],
       "acceptance_criteria": [
         "Mock listPresets() throwing a 500 renders a visible Alert",
@@ -258,9 +258,9 @@
       "confidence": "unclear (single-tester signal)",
       "suggested_fix": "Behind a feature flag, define a new combined preset that includes the three current sections. Add per-section export in the report editor. Keep the legacy three presets for backward compatibility.",
       "likely_files": [
-        "backend/app/services/reports/templates.py",
-        "frontend/components/checkwise/reports/editor/report-editor.tsx",
-        "frontend/components/checkwise/reports/canvas.tsx"
+        "apps/api/app/services/reports/templates.py",
+        "apps/web/components/checkwise/reports/editor/report-editor.tsx",
+        "apps/web/components/checkwise/reports/canvas.tsx"
       ],
       "acceptance_criteria": [
         "One new preset card creates a report whose three sub-sections match the legacy three presets",

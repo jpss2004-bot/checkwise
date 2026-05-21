@@ -134,5 +134,5 @@ audit + permission scaffolding.
 
 | Backend                                                         | Frontend                                                       |
 |-----------------------------------------------------------------|-----------------------------------------------------------------|
-| [backend/app/api/v1/admin.py](../backend/app/api/v1/admin.py)   | [frontend/lib/api/admin.ts](../frontend/lib/api/admin.ts)       |
-| [backend/tests/test_admin.py](../backend/tests/test_admin.py)   | [frontend/app/admin/_shell.tsx](../frontend/app/admin/_shell.tsx) and the six new pages under `frontend/app/admin/{dashboard,clients,vendors,requirements,calendar,audit-log}/` |
+| [apps/api/app/api/v1/admin.py](../apps/api/app/api/v1/admin.py)   | [apps/web/lib/api/admin.ts](../apps/web/lib/api/admin.ts)       |
+| [apps/api/tests/test_admin.py](../apps/api/tests/test_admin.py)   | [apps/web/app/admin/_shell.tsx](../apps/web/app/admin/_shell.tsx) and the six new pages under `apps/web/app/admin/{dashboard,clients,vendors,requirements,calendar,audit-log}/` |

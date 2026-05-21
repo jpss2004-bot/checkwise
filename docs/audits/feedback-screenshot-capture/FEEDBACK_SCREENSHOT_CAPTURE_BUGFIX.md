@@ -3,8 +3,8 @@
 **Status:** authored 2026-05-21.
 **Tracked task:** task #12 in the current session log.
 **Touched files:**
-- `frontend/components/feedback/feedback-launcher.tsx`
-- `frontend/components/ui/dialog.tsx`
+- `apps/web/components/feedback/feedback-launcher.tsx`
+- `apps/web/components/ui/dialog.tsx`
 
 ---
 
@@ -61,7 +61,7 @@ If the user never clicked "Capturar página" no screenshot was attached at all, 
 
 Two-file patch. No backend changes, no Slack config touched.
 
-**`frontend/components/feedback/feedback-launcher.tsx`** — new primary capture path:
+**`apps/web/components/feedback/feedback-launcher.tsx`** — new primary capture path:
 
 - New `originalContextRef = useRef<{ url, path, viewport, capturedAt } | null>(null)`.
 - New `openWithCapture` callback wired to the floating button:
@@ -76,7 +76,7 @@ Two-file patch. No backend changes, no Slack config touched.
 - Existing in-dialog "Capturar página" button kept as a re-capture path for users who want to scroll first or grab a different state. Its close-then-snap wait is bumped from 80ms → 280ms to outwait the Radix exit animation.
 - `ignoreElements` factored into a reusable `shouldIgnoreForScreenshot` callback that excludes both `data-feedback-launcher="true"` (the launcher chip) AND `data-screenshot-exclude="true"` (the Dialog primitive — see below).
 
-**`frontend/components/ui/dialog.tsx`** — generic opt-out attribute:
+**`apps/web/components/ui/dialog.tsx`** — generic opt-out attribute:
 
 - `DialogOverlay` and `DialogPrimitive.Content` now render `data-screenshot-exclude="true"`. Radix renders both inside a portal attached to `document.body`, so consumers that filter by a wrapper class can't reach them; the attribute gives screenshot tools a single semantic selector to honor. Harmless on every other Dialog in the app.
 
@@ -84,8 +84,8 @@ Two-file patch. No backend changes, no Slack config touched.
 
 | File | Change |
 |---|---|
-| `frontend/components/feedback/feedback-launcher.tsx` | Primary capture-on-click path, locked route metadata, longer Radix-animation buffer for the recapture path, factored `shouldIgnoreForScreenshot` filter, capturing-state UI. |
-| `frontend/components/ui/dialog.tsx` | Added `data-screenshot-exclude="true"` to `DialogOverlay` and `DialogContent`. |
+| `apps/web/components/feedback/feedback-launcher.tsx` | Primary capture-on-click path, locked route metadata, longer Radix-animation buffer for the recapture path, factored `shouldIgnoreForScreenshot` filter, capturing-state UI. |
+| `apps/web/components/ui/dialog.tsx` | Added `data-screenshot-exclude="true"` to `DialogOverlay` and `DialogContent`. |
 | `docs/audits/feedback-screenshot-capture/FEEDBACK_SCREENSHOT_CAPTURE_BUGFIX.md` | This document. |
 
 No other files touched. Backend unchanged. Slack config unchanged. No new dependencies.
@@ -169,8 +169,8 @@ Visual screenshots not captured in this session — the portal routes require a 
 
 Re-run the manual QA in §8 after any of the following:
 
-- Any change to `frontend/components/feedback/feedback-launcher.tsx`.
-- Any change to `frontend/components/ui/dialog.tsx` that touches the overlay / content rendering.
+- Any change to `apps/web/components/feedback/feedback-launcher.tsx`.
+- Any change to `apps/web/components/ui/dialog.tsx` that touches the overlay / content rendering.
 - Any upgrade of `html2canvas` or `@radix-ui/react-dialog`.
 - Any redesign of the global app shells (`AdminShell`, `ClientShell`, `PortalAppShell`) that changes where the launcher mounts.
 

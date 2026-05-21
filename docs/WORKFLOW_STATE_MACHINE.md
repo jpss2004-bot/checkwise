@@ -4,7 +4,7 @@ Single source of truth for how a CheckWise submission moves between
 statuses after it has been received.
 
 The workflow service lives at
-[`backend/app/services/submission_workflow.py`](../backend/app/services/submission_workflow.py).
+[`apps/api/app/services/submission_workflow.py`](../apps/api/app/services/submission_workflow.py).
 Every reviewer- or legal-driven status transition MUST go through it.
 Direct `Submission.status = ...` or `Document.status = ...` writes
 outside that service are a bug — they bypass the audit trail.
@@ -12,7 +12,7 @@ outside that service are a bug — they bypass the audit trail.
 ## Statuses
 
 Canonical values stored in `Submission.status` and `Document.status`.
-Defined in [`backend/app/constants/statuses.py`](../backend/app/constants/statuses.py).
+Defined in [`apps/api/app/constants/statuses.py`](../apps/api/app/constants/statuses.py).
 
 | Code (DB)              | Spanish label              | Category   | Meaning                                          |
 |------------------------|---------------------------|------------|--------------------------------------------------|
@@ -30,7 +30,7 @@ Defined in [`backend/app/constants/statuses.py`](../backend/app/constants/status
 
 ## Reviewer actions
 
-Defined in `ReviewerAction` in `backend/app/constants/statuses.py`.
+Defined in `ReviewerAction` in `apps/api/app/constants/statuses.py`.
 
 | Action                  | Maps to status          | Requires reason? |
 |-------------------------|------------------------|------------------|

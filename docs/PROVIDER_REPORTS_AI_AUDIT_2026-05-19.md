@@ -34,7 +34,7 @@
 
 1. After login + password change, Jorge gets routed by `lib/routing/post-login.ts`. As a workspace owner (no Membership rows, owns one ProviderWorkspace), he lands at `/portal/entra-a-tu-espacio` first (workspace confirmation), then at `/portal/dashboard`.
 2. Sidebar navigation includes **Reportes** → `/portal/reports`.
-3. The route is gated by `withOnboardingGate` ([frontend/app/portal/reports/page.tsx](frontend/app/portal/reports/page.tsx)). If Jorge has not finished his expediente (he won't — fresh workspace), he is bounced to `/portal/onboarding` first. **Action for the test brief:** complete onboarding before opening Reports, OR temporarily set `onboarding_completed_at` on his provider_workspace.
+3. The route is gated by `withOnboardingGate` ([apps/web/app/portal/reports/page.tsx](apps/web/app/portal/reports/page.tsx)). If Jorge has not finished his expediente (he won't — fresh workspace), he is bounced to `/portal/onboarding` first. **Action for the test brief:** complete onboarding before opening Reports, OR temporarily set `onboarding_completed_at` on his provider_workspace.
 
 ### Empty list view
 
@@ -45,7 +45,7 @@ Assuming he passes the onboarding gate:
   - "Mi estado de cumplimiento" — `provider-current-state`
   - "Documentos faltantes" — `provider-missing-documents`
   - "Rechazos recientes" — `provider-recent-rejections`
-- **Reports list:** dashed-border empty state — *"Aún no hay reportes. Usa una de las plantillas arriba para crear el primero."* ([reports-list-view.tsx:556–591](frontend/components/checkwise/reports/reports-list-view.tsx))
+- **Reports list:** dashed-border empty state — *"Aún no hay reportes. Usa una de las plantillas arriba para crear el primero."* ([reports-list-view.tsx:556–591](apps/web/components/checkwise/reports/reports-list-view.tsx))
 
 He always has a primary action: pick a preset.
 
@@ -67,14 +67,14 @@ He always has a primary action: pick a preset.
 1. `POST /api/v1/reports/from-preset` is called with `preset_id="provider-current-state"` (or whichever he picked).
 2. Backend creates an empty `Report` row + v1 `ReportVersion` with no blocks yet, and stores the preset's `recommended_prompt` in the report's global config.
 3. Frontend navigates to `/portal/reports/{new_id}`.
-4. **`ReportEditor` mounts** ([editor/report-editor.tsx:77](frontend/components/checkwise/reports/editor/report-editor.tsx)). It:
+4. **`ReportEditor` mounts** ([editor/report-editor.tsx:77](apps/web/components/checkwise/reports/editor/report-editor.tsx)). It:
    - Calls `GET /api/v1/reports/_engine` to detect mock-vs-real mode. If mock, surfaces a yellow banner: *"El motor de IA está en modo mock determinista (no hay ANTHROPIC_API_KEY configurada en el backend)."*
    - Auto-opens the AI generation panel with the recommended prompt pre-filled.
 5. Jorge hits **"Generar"** — the SSE generation pipeline kicks in.
 
 ### The generation pipeline (server-side)
 
-[`backend/app/services/reports/executor.py`](backend/app/services/reports/executor.py) implements the spec from [REPORTS_ARCHITECTURE.md §8](REPORTS_ARCHITECTURE.md):
+[`apps/api/app/services/reports/executor.py`](apps/api/app/services/reports/executor.py) implements the spec from [REPORTS_ARCHITECTURE.md §8](REPORTS_ARCHITECTURE.md):
 
 ```
 plan → for each block:
@@ -87,8 +87,8 @@ plan → for each block:
 For the `provider-current-state` preset, the LLM planner sees the canvas catalog + the system prompt + Jorge's `recommended_prompt`. It emits tool-use calls. Per the preset's wording, it should emit (in order): `compliance_state` → `attention_list` → `upcoming_deadlines` → `prioritized_actions`.
 
 Each block then:
-1. Runs through `fetch_for_block()` ([blocks/data_fetchers.py](backend/app/services/reports/blocks/data_fetchers.py)) with the report's `ReportScope`.
-2. Calls `assert_workspace_scope()` ([blocks/_safety.py](backend/app/services/reports/blocks/_safety.py)) — the redundant tenant check.
+1. Runs through `fetch_for_block()` ([blocks/data_fetchers.py](apps/api/app/services/reports/blocks/data_fetchers.py)) with the report's `ReportScope`.
+2. Calls `assert_workspace_scope()` ([blocks/_safety.py](apps/api/app/services/reports/blocks/_safety.py)) — the redundant tenant check.
 3. Reads vendor-scoped data via canonical helpers (`build_compliance_state_for_vendor`, evidence slots, etc.).
 4. Stamps `fetched_at` (ISO8601) so the print view's "Datos al…" label and the per-block "Actualizar" button know data age.
 5. Emits `block_data` → optionally `ai_summary_delta*` (only if the block type is AI-aware; the four provider blocks are **not** AI-aware — they render factual data only). The preset wording explicitly forbids `ai_recommendation` blocks.
@@ -119,7 +119,7 @@ If the planner picks the `provider-missing-documents` or `provider-recent-reject
 
 ### LLM client factory
 
-[`backend/app/services/reports/llm/factory.py:24`](backend/app/services/reports/llm/factory.py)
+[`apps/api/app/services/reports/llm/factory.py:24`](apps/api/app/services/reports/llm/factory.py)
 
 ```
 CHECKWISE_LLM_BACKEND=mock      → DeterministicMockLLMClient (always)
@@ -132,7 +132,7 @@ Three call surfaces — **planner**, **content streamer**, **copilot conversatio
 
 ### Real-Anthropic models pinned
 
-[`backend/app/services/reports/llm/anthropic_client.py:35-37`](backend/app/services/reports/llm/anthropic_client.py)
+[`apps/api/app/services/reports/llm/anthropic_client.py:35-37`](apps/api/app/services/reports/llm/anthropic_client.py)
 
 ```python
 planner_model = "claude-sonnet-4-5-20250929"
@@ -146,26 +146,26 @@ content_model = "claude-haiku-4-5-20251001"
 
 ### Mock client
 
-[`backend/app/services/reports/llm/mock_client.py`](backend/app/services/reports/llm/mock_client.py) — deterministic, used in CI and as a safe fallback. Generates plausible but canned tool calls + AI summaries. When mock is active, the editor surfaces an explicit yellow banner so the user knows the AI text is not real.
+[`apps/api/app/services/reports/llm/mock_client.py`](apps/api/app/services/reports/llm/mock_client.py) — deterministic, used in CI and as a safe fallback. Generates plausible but canned tool calls + AI summaries. When mock is active, the editor surfaces an explicit yellow banner so the user knows the AI text is not real.
 
 ### Safety architecture (three layers, defence-in-depth)
 
-From [`backend/app/services/reports/context.py:1`](backend/app/services/reports/context.py) and [`backend/app/services/reports/blocks/_safety.py:1`](backend/app/services/reports/blocks/_safety.py):
+From [`apps/api/app/services/reports/context.py:1`](apps/api/app/services/reports/context.py) and [`apps/api/app/services/reports/blocks/_safety.py:1`](apps/api/app/services/reports/blocks/_safety.py):
 
 | Layer | What it does |
 |---|---|
 | **Pre-fetch** | Every block fetcher receives a frozen `ReportContext` with org/client/vendor IDs derived from the **authenticated session**, never from the prompt. The LLM never sees the actor's user_id or unrelated workspace IDs. |
 | **At-fetch** | Every SQLAlchemy query joins through organization_id / client_id / vendor_id — orphan or cross-tenant rows literally cannot appear in the result set. |
-| **Per-block redundant guard** | `assert_workspace_scope()` ([_safety.py:38](backend/app/services/reports/blocks/_safety.py)) — every vendor-only fetcher re-checks the actor's workspace vs the scope. Raises `ReportPermissionError` → API surfaces as 403. The redundancy is deliberate. |
-| **Post-fetch sanitizer** | `_redact_for_audience()` ([executor.py:69](backend/app/services/reports/executor.py)) walks block-specific PII paths (`vendor_risk_matrix.rows.*.vendor_rfc`, etc.) and nulls them out for `client_facing` / `vendor_facing` audiences. Internal-only audience passes through. |
+| **Per-block redundant guard** | `assert_workspace_scope()` ([_safety.py:38](apps/api/app/services/reports/blocks/_safety.py)) — every vendor-only fetcher re-checks the actor's workspace vs the scope. Raises `ReportPermissionError` → API surfaces as 403. The redundancy is deliberate. |
+| **Post-fetch sanitizer** | `_redact_for_audience()` ([executor.py:69](apps/api/app/services/reports/executor.py)) walks block-specific PII paths (`vendor_risk_matrix.rows.*.vendor_rfc`, etc.) and nulls them out for `client_facing` / `vendor_facing` audiences. Internal-only audience passes through. |
 
 ### Test coverage for safety
 
 | File | Tests | Focus |
 |---|---|---|
-| [tests/test_reports_ai_safety.py](backend/tests/test_reports_ai_safety.py) | 8 | "Even an adversarial LLM cannot get past the assembler" — prompt assembly, context windows, cross-tenant attempts, hallucinated statuses, unauthorized data inclusion |
-| [tests/test_reports_safety.py](backend/tests/test_reports_safety.py) | 6 | Unit tests for `assert_workspace_scope` value-object guard |
-| [tests/test_reports_planner.py](backend/tests/test_reports_planner.py) | 6 | Planner output validation against block catalog input schemas |
+| [tests/test_reports_ai_safety.py](apps/api/tests/test_reports_ai_safety.py) | 8 | "Even an adversarial LLM cannot get past the assembler" — prompt assembly, context windows, cross-tenant attempts, hallucinated statuses, unauthorized data inclusion |
+| [tests/test_reports_safety.py](apps/api/tests/test_reports_safety.py) | 6 | Unit tests for `assert_workspace_scope` value-object guard |
+| [tests/test_reports_planner.py](apps/api/tests/test_reports_planner.py) | 6 | Planner output validation against block catalog input schemas |
 | Block-specific suites (4 files) | 67 total | `compliance_state` (16), `attention_list` (20), `upcoming_deadlines` (16), `prioritized_actions` (15) |
 
 Total reports-related coverage: **~140 tests** (of 427 across the whole backend).
@@ -233,15 +233,15 @@ Returns `{"backend":"anthropic"|"mock", "planner_model":"…", "content_model":"
 
 | # | Finding | Severity | Where |
 |---|---|---|---|
-| F-AI-01 | Planner Sonnet model is `claude-sonnet-4-5-20250929`; the current latest is **Sonnet 4.6** (`claude-sonnet-4-6`). Worth bumping to keep parity with current model quality. | Low | [llm/anthropic_client.py:36](backend/app/services/reports/llm/anthropic_client.py) |
-| F-AI-02 | `astream_text` is `raise NotImplementedError` ([anthropic_client.py:143](backend/app/services/reports/llm/anthropic_client.py)) — reserved for "3.3c concurrent streams" that don't ship yet. Not user-visible; no current path hits it. | Doc-only | same |
-| F-AI-03 | The system prompt is cache-controlled (good), but the **per-block content streamer** does NOT cache its system prompt ([anthropic_client.py:124-130](backend/app/services/reports/llm/anthropic_client.py)). Each block's stream pays full system-token cost. Small optimization for cost. | Low (cost) | same |
-| F-AI-04 | `prioritized_actions` for a brand-new workspace will likely show "Complete tu expediente" — make sure the action button there links to `/portal/onboarding` not to a 404. Worth manually clicking once before the test. | Low | [blocks/prioritized_actions.py](backend/app/services/reports/blocks/prioritized_actions.py) — code looks right, just verify in UI |
+| F-AI-01 | Planner Sonnet model is `claude-sonnet-4-5-20250929`; the current latest is **Sonnet 4.6** (`claude-sonnet-4-6`). Worth bumping to keep parity with current model quality. | Low | [llm/anthropic_client.py:36](apps/api/app/services/reports/llm/anthropic_client.py) |
+| F-AI-02 | `astream_text` is `raise NotImplementedError` ([anthropic_client.py:143](apps/api/app/services/reports/llm/anthropic_client.py)) — reserved for "3.3c concurrent streams" that don't ship yet. Not user-visible; no current path hits it. | Doc-only | same |
+| F-AI-03 | The system prompt is cache-controlled (good), but the **per-block content streamer** does NOT cache its system prompt ([anthropic_client.py:124-130](apps/api/app/services/reports/llm/anthropic_client.py)). Each block's stream pays full system-token cost. Small optimization for cost. | Low (cost) | same |
+| F-AI-04 | `prioritized_actions` for a brand-new workspace will likely show "Complete tu expediente" — make sure the action button there links to `/portal/onboarding` not to a 404. Worth manually clicking once before the test. | Low | [blocks/prioritized_actions.py](apps/api/app/services/reports/blocks/prioritized_actions.py) — code looks right, just verify in UI |
 | F-AI-05 | The **embedded copilot does NOT mutate the canvas** by design (see `chat-copilot.tsx` docstring). If Jorge says "add a block X", the copilot replies but does not edit. This is intentional — but if he expects it, surprise. | UX expectation | document in the test brief |
-| F-AI-06 | `ReportExport` model exists ([entities.py](backend/app/models/entities.py)) but no worker/render is wired. The print-mode HTML is the only export path. | Known limitation | [docs/REPORTS_ARCHITECTURE.md §21 deferred](REPORTS_ARCHITECTURE.md) |
-| F-AI-07 | `getReportsEngine()` requires auth but is otherwise zero-cost (no DB hit). Cheap way to expose mock-vs-real to the UI banner. ✅ Working. | Note | [reports.py:218](backend/app/api/v1/reports.py) |
-| F-AI-08 | The provider-block fetchers (`compliance_state`, etc.) explicitly stamp `fetched_at` server-side ([compliance_state.py:91](backend/app/services/reports/blocks/compliance_state.py)) so the freshness label / "Actualizar" button work correctly. Good. | ✅ | — |
-| F-AI-09 | The four vendor-facing presets all share the same "NO uses ai_recommendation" instruction. This is a strong safety choice — provider-facing content stays factual, no model hallucinations creep into reports a vendor reads. Worth keeping. | ✅ Architecture note | [templates.py:218,242,267](backend/app/services/reports/templates.py) |
+| F-AI-06 | `ReportExport` model exists ([entities.py](apps/api/app/models/entities.py)) but no worker/render is wired. The print-mode HTML is the only export path. | Known limitation | [docs/REPORTS_ARCHITECTURE.md §21 deferred](REPORTS_ARCHITECTURE.md) |
+| F-AI-07 | `getReportsEngine()` requires auth but is otherwise zero-cost (no DB hit). Cheap way to expose mock-vs-real to the UI banner. ✅ Working. | Note | [reports.py:218](apps/api/app/api/v1/reports.py) |
+| F-AI-08 | The provider-block fetchers (`compliance_state`, etc.) explicitly stamp `fetched_at` server-side ([compliance_state.py:91](apps/api/app/services/reports/blocks/compliance_state.py)) so the freshness label / "Actualizar" button work correctly. Good. | ✅ | — |
+| F-AI-09 | The four vendor-facing presets all share the same "NO uses ai_recommendation" instruction. This is a strong safety choice — provider-facing content stays factual, no model hallucinations creep into reports a vendor reads. Worth keeping. | ✅ Architecture note | [templates.py:218,242,267](apps/api/app/services/reports/templates.py) |
 
 ---
 

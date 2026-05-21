@@ -1,13 +1,13 @@
 # Demo login matrix
 
 **Synthetic local-dev credentials only.** These accounts are seeded by
-`backend/scripts/dev_seed.py` against your local Postgres. Production
+`apps/api/scripts/dev_seed.py` against your local Postgres. Production
 (Vercel + Render + Neon) has none of them — see
 `docs/CREDENTIALS.md` for the rationale.
 
 The login form at `/login` routes every user via the same
 `decideDestination(session, mustChangePassword)` logic in
-`frontend/app/login/page.tsx`:
+`apps/web/app/login/page.tsx`:
 
 ```
 must_change_password=true                       → /activate

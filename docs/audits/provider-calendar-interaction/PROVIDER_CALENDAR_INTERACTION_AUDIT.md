@@ -27,31 +27,31 @@ Two pre-existing UI issues blocked this:
 
 | Layer | Path | Purpose |
 |---|---|---|
-| Route | [app/portal/calendar/page.tsx](../../../frontend/app/portal/calendar/page.tsx) | Provider calendar grid + slide-in drawer |
-| Cell primitives | [components/checkwise/calendar/](../../../frontend/components/checkwise/calendar/) | `MonthCell`, `CellPopover`, `InstitutionRowHeader`, `types` |
-| Calendar API | [`lib/api/portal.ts`](../../../frontend/lib/api/portal.ts) — `getCalendar()` | `GET /api/v1/portal/workspaces/{id}/calendar?year=` |
-| Backend endpoint | [`backend/app/api/v1/portal.py`](../../../backend/app/api/v1/portal.py) line 1333 | Returns `CalendarPayload` |
-| Backend `_calendar_upload_href()` | `backend/app/api/v1/portal.py:378` | Precomputes per-row upload URL with `requirement_code`, `institution`, `period_key`, `load_type`, `v2`, `replaces` |
-| **Reused** — Upload route | [app/portal/upload/page.tsx](../../../frontend/app/portal/upload/page.tsx) | Reads query params; locks context; prefills wizard |
-| **Reused** — Submission detail | [app/portal/submissions/[submission_id]/page.tsx](../../../frontend/app/portal/submissions/[submission_id]/page.tsx) | Existing rich detail page: status, reasons, filename, history, lineage, retry CTA |
-| Status tokens | [`app/globals.css`](../../../frontend/app/globals.css) lines 157-198 | `--doc-{state}-{bg,text,border}` × 8 states |
-| Dev mock | [app/dev/calendar-preview/page.tsx](../../../frontend/app/dev/calendar-preview/page.tsx) | Unauthenticated synthetic-data preview, mirrors the real grid |
+| Route | [app/portal/calendar/page.tsx](../../../apps/web/app/portal/calendar/page.tsx) | Provider calendar grid + slide-in drawer |
+| Cell primitives | [components/checkwise/calendar/](../../../apps/web/components/checkwise/calendar/) | `MonthCell`, `CellPopover`, `InstitutionRowHeader`, `types` |
+| Calendar API | [`lib/api/portal.ts`](../../../apps/web/lib/api/portal.ts) — `getCalendar()` | `GET /api/v1/portal/workspaces/{id}/calendar?year=` |
+| Backend endpoint | [`apps/api/app/api/v1/portal.py`](../../../apps/api/app/api/v1/portal.py) line 1333 | Returns `CalendarPayload` |
+| Backend `_calendar_upload_href()` | `apps/api/app/api/v1/portal.py:378` | Precomputes per-row upload URL with `requirement_code`, `institution`, `period_key`, `load_type`, `v2`, `replaces` |
+| **Reused** — Upload route | [app/portal/upload/page.tsx](../../../apps/web/app/portal/upload/page.tsx) | Reads query params; locks context; prefills wizard |
+| **Reused** — Submission detail | [app/portal/submissions/[submission_id]/page.tsx](../../../apps/web/app/portal/submissions/[submission_id]/page.tsx) | Existing rich detail page: status, reasons, filename, history, lineage, retry CTA |
+| Status tokens | [`app/globals.css`](../../../apps/web/app/globals.css) lines 157-198 | `--doc-{state}-{bg,text,border}` × 8 states |
+| Dev mock | [app/dev/calendar-preview/page.tsx](../../../apps/web/app/dev/calendar-preview/page.tsx) | Unauthenticated synthetic-data preview, mirrors the real grid |
 
 ### Affected routes / components in this change
 
-- `frontend/app/portal/calendar/page.tsx` — drawer action + ya-enviado notice
-- `frontend/components/checkwise/calendar/cell-popover.tsx` — full rewrite (portal + collision)
-- `frontend/components/checkwise/calendar/month-cell.tsx` — rewrite (clean edges, icon glyph, popover triggerRef)
-- `frontend/app/dev/calendar-preview/page.tsx` — inherits popover/cell changes via shared primitives; no edits required this round
+- `apps/web/app/portal/calendar/page.tsx` — drawer action + ya-enviado notice
+- `apps/web/components/checkwise/calendar/cell-popover.tsx` — full rewrite (portal + collision)
+- `apps/web/components/checkwise/calendar/month-cell.tsx` — rewrite (clean edges, icon glyph, popover triggerRef)
+- `apps/web/app/dev/calendar-preview/page.tsx` — inherits popover/cell changes via shared primitives; no edits required this round
 - New file: `docs/audits/provider-calendar-interaction/PROVIDER_CALENDAR_INTERACTION_AUDIT.md` (this file)
 - New folder: `docs/audits/provider-calendar-interaction/screenshots/`
 
 ### Not touched (deliberately out of scope)
 
-- `backend/app/api/v1/portal.py` (parallel session is editing)
-- `frontend/components/checkwise/intake-wizard.tsx`
-- `frontend/app/portal/upload/page.tsx`
-- `frontend/app/portal/submissions/[submission_id]/page.tsx` (reused as-is)
+- `apps/api/app/api/v1/portal.py` (parallel session is editing)
+- `apps/web/components/checkwise/intake-wizard.tsx`
+- `apps/web/app/portal/upload/page.tsx`
+- `apps/web/app/portal/submissions/[submission_id]/page.tsx` (reused as-is)
 - Admin and client routes
 - Dashboard, expediente, reports
 
@@ -72,7 +72,7 @@ This placed the popover inside the cell's wrapper, which lived inside a `<td>` i
 3. **Containment** — the `overflow-x-auto` section technically allowed scroll, but the popover was constrained to its `<td>` parent's stacking context
 4. **No flip** — vertically, no fallback when the cell sat near the bottom of the viewport
 
-**Fix.** Rewrote [cell-popover.tsx](../../../frontend/components/checkwise/calendar/cell-popover.tsx) to:
+**Fix.** Rewrote [cell-popover.tsx](../../../apps/web/components/checkwise/calendar/cell-popover.tsx) to:
 
 - Render via `createPortal(..., document.body)` so the popover escapes all parent stacking contexts and overflow clips
 - Position with `position: fixed` using `getBoundingClientRect()` of the cell button
@@ -108,7 +108,7 @@ Two problems:
 2. **State color carried twice.** The segment bar already showed composition; the button border duplicated the same signal less precisely.
 3. **No glyph in cell.** State was conveyed by color alone in the cell body (WCAG 1.4.1 risk for color-blind users).
 
-**Fix.** Rewrote [month-cell.tsx](../../../frontend/components/checkwise/calendar/month-cell.tsx):
+**Fix.** Rewrote [month-cell.tsx](../../../apps/web/components/checkwise/calendar/month-cell.tsx):
 
 - **Neutralized cell border** to `--border-subtle` so it reads as structural, not status-bearing. Hover transitions to `--border-default`.
 - **Removed the `border-b` seam** under the segment bar — the bar now flows into the cell body without a 1px gray line.
@@ -146,7 +146,7 @@ The drawer's primary action now depends on `event.state` × whether `event.submi
 | `pending` / `empty` | (no) | "Subir documento" | `event.href` (upload) | primary |
 | any without submission_id | no | upload-style routes apply | `event.href` | primary |
 
-Implemented at [`page.tsx:drawerAction()`](../../../frontend/app/portal/calendar/page.tsx) below the EventDrawer. The button uses `<Link href={action.href}>` so navigation respects Next.js prefetch and middleware.
+Implemented at [`page.tsx:drawerAction()`](../../../apps/web/app/portal/calendar/page.tsx) below the EventDrawer. The button uses `<Link href={action.href}>` so navigation respects Next.js prefetch and middleware.
 
 ### "Ya enviaste un documento" notice
 
@@ -170,7 +170,7 @@ The calendar does NOT re-implement upload routing. The backend's `_calendar_uplo
 - `v2=1` when the row carries `accepts_documents` alternatives (Session 3)
 - `replaces=<submission_id>` when re-uploading after rejection (Phase 3 lineage)
 
-The calendar drawer's action button consumes `event.href` for upload flows (`pending`, `empty`, `expired`). The upload route ([app/portal/upload/page.tsx](../../../frontend/app/portal/upload/page.tsx)) reads these params, locks context, and prefills the wizard with the matching requirement and (for v2 rows) the alternatives picker.
+The calendar drawer's action button consumes `event.href` for upload flows (`pending`, `empty`, `expired`). The upload route ([app/portal/upload/page.tsx](../../../apps/web/app/portal/upload/page.tsx)) reads these params, locks context, and prefills the wizard with the matching requirement and (for v2 rows) the alternatives picker.
 
 No upload-route changes were required — the contract was already there.
 
@@ -178,7 +178,7 @@ No upload-route changes were required — the contract was already there.
 
 ## 7. Uploaded-document preview flow
 
-**No new route created.** The existing [/portal/submissions/[submission_id]](../../../frontend/app/portal/submissions/[submission_id]/page.tsx) page is the reusable preview surface and already carries:
+**No new route created.** The existing [/portal/submissions/[submission_id]](../../../apps/web/app/portal/submissions/[submission_id]/page.tsx) page is the reusable preview surface and already carries:
 
 - Status hero + reasons
 - Document filename, upload date
@@ -248,12 +248,12 @@ All user-facing strings in the touched files use plain Spanish:
 ## 10. Files changed
 
 ```
-M  frontend/app/portal/calendar/page.tsx
-M  frontend/components/checkwise/calendar/cell-popover.tsx
-M  frontend/components/checkwise/calendar/month-cell.tsx
-A  frontend/components/checkwise/calendar/institution-row-header.tsx
-A  frontend/components/checkwise/calendar/types.ts
-A  frontend/app/dev/calendar-preview/page.tsx
+M  apps/web/app/portal/calendar/page.tsx
+M  apps/web/components/checkwise/calendar/cell-popover.tsx
+M  apps/web/components/checkwise/calendar/month-cell.tsx
+A  apps/web/components/checkwise/calendar/institution-row-header.tsx
+A  apps/web/components/checkwise/calendar/types.ts
+A  apps/web/app/dev/calendar-preview/page.tsx
 A  docs/audits/provider-calendar-interaction/PROVIDER_CALENDAR_INTERACTION_AUDIT.md
 A  docs/audits/provider-calendar-interaction/screenshots/
 ```
@@ -355,9 +355,9 @@ The implementation is **reviewable as-is**. All scope is delivered:
 Suggested commit boundary if approved:
 
 ```
-git add frontend/app/portal/calendar/page.tsx \
-        frontend/app/dev/calendar-preview/page.tsx \
-        frontend/components/checkwise/calendar/ \
+git add apps/web/app/portal/calendar/page.tsx \
+        apps/web/app/dev/calendar-preview/page.tsx \
+        apps/web/components/checkwise/calendar/ \
         docs/audits/provider-calendar-interaction/
 git commit -m "..."
 ```
