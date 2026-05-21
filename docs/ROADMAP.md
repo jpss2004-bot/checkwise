@@ -158,11 +158,18 @@ Finish the backend-integration TODOs that 2.0 carried forward through `portal-ad
 - Idempotent importer into PostgreSQL.
 - Report unmappable rows, duplicates, divergences.
 
-### V2.4 — OCR + Structured Extraction
+### V2.4 — Document Intelligence + Structured Metadata
 
-- Background jobs (Redis + RQ or Celery) for OCR, hashing, dedup.
-- Field extraction per institution.
-- Confidence-scored validations attached to submissions.
+Turn every uploaded PDF into reviewed, exportable document intelligence. PostgreSQL remains the canonical source of truth; Google Sheets / Excel are export bridges.
+
+- Add async extraction jobs (`document_extraction_requested` → `running` → `completed` / `failed`).
+- Add persistent extraction tables for runs, extracted fields, evidence, review status, and export batches.
+- Run OCR only when native PDF text is insufficient.
+- Extract structured fields per document rule in `metadata_rules.py`.
+- Compare extracted values against expected client, vendor, institution, requirement, period, and contract context.
+- Write confidence-scored `validation_events` and set `posible_mismatch` / `requiere_aclaracion` when objective mismatches appear.
+- Add reviewer UI for accepting, correcting, or rejecting extracted metadata before legal approval.
+- Export reviewed/pending metadata to CSV/XLSX first, then Google Sheets with idempotent row updates.
 
 ### V2.5 — Notifications
 
