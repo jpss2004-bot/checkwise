@@ -9,6 +9,7 @@ expected to write an ``AuditLog`` row with
 
 from __future__ import annotations
 
+import zipfile
 from collections.abc import Generator
 
 import pytest
@@ -17,19 +18,23 @@ from sqlalchemy import create_engine, select
 from sqlalchemy.orm import Session, sessionmaker
 from sqlalchemy.pool import StaticPool
 
+from app.core.config import settings
 from app.db.base import Base
 from app.db.session import get_db
 from app.main import app
 from app.models import (
     AuditLog,
     Client,
+    Document,
     Institution,
     Membership,
     Organization,
     Period,
     ProviderWorkspace,
     Requirement,
+    Submission,
     User,
+    ValidationEvent,
     Vendor,
     entities,  # noqa: F401 — register mappers
 )
@@ -348,6 +353,115 @@ def _seed_workspace(db_factory) -> tuple[str, str]:
         db.close()
 
 
+def _write_metadata_preview_xlsx(path) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    workbook = """<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<workbook xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships">
+  <sheets>
+    <sheet name="00 Guia" sheetId="1" r:id="rId1"/>
+    <sheet name="01 Revision" sheetId="2" r:id="rId2"/>
+  </sheets>
+</workbook>"""
+    sheet1 = """<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">
+  <sheetData>
+    <row r="1"><c r="A1" t="inlineStr"><is><t>CheckWise Metadata Review</t></is></c></row>
+    <row r="2"><c r="A2" t="inlineStr"><is><t>Documento esperado</t></is></c><c r="B2" t="inlineStr"><is><t>Acuse SISUB</t></is></c></row>
+  </sheetData>
+</worksheet>"""
+    sheet2 = """<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">
+  <sheetData>
+    <row r="1"><c r="A1" t="inlineStr"><is><t>Campo</t></is></c><c r="B1" t="inlineStr"><is><t>Accion sugerida</t></is></c></row>
+  </sheetData>
+</worksheet>"""
+    with zipfile.ZipFile(path, "w") as archive:
+        archive.writestr("xl/workbook.xml", workbook)
+        archive.writestr("xl/worksheets/sheet1.xml", sheet1)
+        archive.writestr("xl/worksheets/sheet2.xml", sheet2)
+
+
+def _seed_metadata_export(db_factory, export_root) -> str:
+    db = db_factory()
+    try:
+        client = Client(name="Cliente Metadata")
+        db.add(client)
+        db.flush()
+        vendor = Vendor(
+            client_id=client.id,
+            name="Proveedor Metadata",
+            rfc="PMD260512AB1",
+            persona_type="moral",
+        )
+        db.add(vendor)
+        institution = Institution(code="repse", name="REPSE")
+        db.add(institution)
+        db.flush()
+        period = Period(
+            code="2026-M05",
+            period_key="2026-M05",
+            year=2026,
+            month=5,
+            period_type="mensual",
+        )
+        db.add(period)
+        requirement = Requirement(
+            code="acuse_sisub",
+            name="Acuse SISUB",
+            institution_id=institution.id,
+            load_type="pdf",
+            frequency="cuatrimestral",
+            risk_level="medium",
+            is_active=True,
+            current_version=1,
+        )
+        db.add(requirement)
+        db.flush()
+        submission = Submission(
+            client_id=client.id,
+            vendor_id=vendor.id,
+            period_id=period.id,
+            institution_id=institution.id,
+            requirement_id=requirement.id,
+            load_type="pdf",
+            status="pendiente_revision",
+            requirement_code="acuse_sisub",
+            period_key="2026-M05",
+        )
+        db.add(submission)
+        db.flush()
+        document = Document(
+            submission_id=submission.id,
+            storage_key="documents/demo.pdf",
+            original_filename="acuse_sisub.pdf",
+            mime_type="application/pdf",
+            size_bytes=128,
+            sha256="a" * 64,
+        )
+        db.add(document)
+        db.flush()
+        output_path = export_root / "cliente-metadata" / "proveedor-metadata" / "2026-m05" / "acuse_sisub" / "latest_metadata.xlsx"
+        _write_metadata_preview_xlsx(output_path)
+        event = ValidationEvent(
+            submission_id=submission.id,
+            document_id=document.id,
+            event_type="metadata_table_exported",
+            rule_code="metadata_table_export",
+            result="completed",
+            severity="info",
+            payload={
+                "document_type_code": "acuse_sisub",
+                "output_path": str(output_path),
+                "latest_path": str(output_path),
+            },
+        )
+        db.add(event)
+        db.commit()
+        return event.id
+    finally:
+        db.close()
+
+
 def test_admin_workspaces_response_redacts_access_token(
     api_client: TestClient, db_factory
 ) -> None:
@@ -382,6 +496,50 @@ def test_admin_can_patch_workspace_and_write_audit(
     _assert_audit_admin(
         db_factory, action="admin.workspace.updated", entity_id=ws_id
     )
+
+
+def test_admin_can_list_preview_and_download_metadata_exports(
+    api_client: TestClient, db_factory, tmp_path
+) -> None:
+    old_export_path = settings.METADATA_EXPORT_PATH
+    export_root = tmp_path / "metadata_exports"
+    settings.METADATA_EXPORT_PATH = str(export_root)
+    try:
+        token = _admin_token(api_client, db_factory)
+        event_id = _seed_metadata_export(db_factory, export_root)
+
+        listing = api_client.get("/api/v1/admin/metadata-exports", headers=_h(token))
+        assert listing.status_code == 200, listing.text
+        item = listing.json()["items"][0]
+        assert item["id"] == event_id
+        assert item["client_name"] == "Cliente Metadata"
+        assert item["vendor_name"] == "Proveedor Metadata"
+        assert item["document_type_code"] == "acuse_sisub"
+        assert item["file_exists"] is True
+        assert item["preview_available"] is True
+        assert item["latest_path"].endswith("latest_metadata.xlsx")
+
+        preview = api_client.get(
+            f"/api/v1/admin/metadata-exports/{event_id}", headers=_h(token)
+        )
+        assert preview.status_code == 200, preview.text
+        body = preview.json()
+        assert body["export"]["id"] == event_id
+        assert body["sheets"][0]["name"] == "00 Guia"
+        assert body["sheets"][0]["rows"][0][0] == "CheckWise Metadata Review"
+        assert body["sheets"][1]["rows"][0][1] == "Accion sugerida"
+
+        download = api_client.get(
+            f"/api/v1/admin/metadata-exports/{event_id}/download",
+            headers=_h(token),
+        )
+        assert download.status_code == 200, download.text
+        assert (
+            download.headers["content-type"]
+            == "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+        )
+    finally:
+        settings.METADATA_EXPORT_PATH = old_export_path
 
 
 # ---------------------------------------------------------------------------

@@ -222,6 +222,79 @@ export async function updateWorkspace(
 }
 
 // ---------------------------------------------------------------------------
+// Metadata workbook exports
+// ---------------------------------------------------------------------------
+
+export type MetadataExportItem = {
+  id: string;
+  submission_id: string;
+  document_id: string | null;
+  result: "completed" | "skipped" | "failed" | string;
+  severity: string;
+  document_type_code: string | null;
+  client_name: string | null;
+  vendor_name: string | null;
+  requirement_name: string | null;
+  period_key: string | null;
+  original_filename: string | null;
+  output_path: string | null;
+  latest_path: string | null;
+  file_exists: boolean;
+  preview_available: boolean;
+  reason: string | null;
+  created_at: string;
+};
+
+export type MetadataExportList = {
+  items: MetadataExportItem[];
+  total: number;
+  limit: number;
+};
+
+export type MetadataExportSheetPreview = {
+  name: string;
+  rows: string[][];
+};
+
+export type MetadataExportPreview = {
+  export: MetadataExportItem;
+  sheets: MetadataExportSheetPreview[];
+};
+
+export async function listMetadataExports(params?: {
+  result?: "completed" | "skipped" | "failed";
+  limit?: number;
+}): Promise<MetadataExportList> {
+  const qs = new URLSearchParams();
+  if (params?.result) qs.set("result", params.result);
+  if (params?.limit !== undefined) qs.set("limit", String(params.limit));
+  const suffix = qs.toString() ? `?${qs.toString()}` : "";
+  return fetchJson(`/api/v1/admin/metadata-exports${suffix}`);
+}
+
+export async function getMetadataExportPreview(
+  id: string,
+): Promise<MetadataExportPreview> {
+  return fetchJson(`/api/v1/admin/metadata-exports/${id}`);
+}
+
+export async function downloadMetadataExport(id: string): Promise<Blob> {
+  const session = readAdminSession();
+  if (!session?.access_token) {
+    throw new AdminApiError(401, "No active admin session.");
+  }
+  const response = await fetch(
+    `${API_BASE_URL}/api/v1/admin/metadata-exports/${id}/download`,
+    { headers: { Authorization: `Bearer ${session.access_token}` } },
+  );
+  if (!response.ok) {
+    const detail = await response.text().catch(() => "");
+    throw new AdminApiError(response.status, detail || response.statusText);
+  }
+  return response.blob();
+}
+
+// ---------------------------------------------------------------------------
 // Requirements
 // ---------------------------------------------------------------------------
 
