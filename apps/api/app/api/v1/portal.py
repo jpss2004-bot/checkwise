@@ -2225,6 +2225,25 @@ class DashboardUpcomingDeadline(BaseModel):
     due_in_days: int | None = None
 
 
+class DashboardInstitutionBreakdown(BaseModel):
+    """Per-institution roll-up of slot states.
+
+    Session 5 (2026-05-21) — added so the dashboard can render a
+    per-institution chart (SAT / IMSS / INFONAVIT / STPS-REPSE /
+    interno_cliente) without re-aggregating on the frontend. Counts
+    are over every required slot (onboarding + calendar) so the
+    surface answers "where is the work concentrated by authority?"
+    at a glance.
+    """
+
+    institution: str
+    approved: int
+    in_review: int
+    needs_action: int
+    pending: int
+    total: int
+
+
 class DashboardRecentUpload(BaseModel):
     """A single row in the dashboard's "Cargas recientes" surface.
 
@@ -2256,6 +2275,7 @@ class DashboardResponse(BaseModel):
     attention_today: list[DashboardAttentionItem]
     upcoming_deadlines: list[DashboardUpcomingDeadline]
     recent_uploads: list[DashboardRecentUpload]
+    institution_breakdown: list[DashboardInstitutionBreakdown]
 
 
 # ``SlotState`` values that mean "the provider must act now."
@@ -2737,8 +2757,91 @@ def _recent_upload_href(submission: Submission) -> str:
     return f"/portal/submissions/{submission.id}"
 
 
+def _compute_institution_breakdown(
+    onboarding_slots: list[SlotView],
+    calendar_slots: list[SlotView],
+) -> list[DashboardInstitutionBreakdown]:
+    """Group required slots by institution and bucket each state.
+
+    Emits one entry per institution that has at least one required
+    slot. The four buckets mirror the metadata strip vocabulary so
+    the dashboard's per-institution chart, KPI counts, and the
+    semaphore stay in lockstep:
+
+      * approved    — SlotState in {APPROVED, EXCEPTION, NOT_APPLICABLE}
+      * in_review   — SlotState in {IN_REVIEW, UPLOADED}
+      * needs_action — SlotState in {REJECTED, NEEDS_CORRECTION,
+                                     POSSIBLE_MISMATCH, EXPIRED}
+      * pending     — SlotState.MISSING
+
+    Order is canonical (sat → imss → infonavit → stps_repse →
+    interno_cliente → anything else) so the frontend can render the
+    bars in a predictable left-to-right sequence.
+    """
+    canonical_order = (
+        "sat",
+        "imss",
+        "infonavit",
+        "stps_repse",
+        "interno_cliente",
+    )
+    rolled: dict[str, dict[str, int]] = {}
+    for view in onboarding_slots + calendar_slots:
+        if not view.required:
+            continue
+        key = (view.institution or "—").lower()
+        bucket = rolled.setdefault(
+            key,
+            {"approved": 0, "in_review": 0, "needs_action": 0, "pending": 0},
+        )
+        if view.state in _RESOLVED_SLOT_STATES:
+            bucket["approved"] += 1
+        elif view.state in (SlotState.IN_REVIEW, SlotState.UPLOADED):
+            bucket["in_review"] += 1
+        elif view.state in _ACTIONABLE_SLOT_STATES or view.state is SlotState.EXPIRED:
+            bucket["needs_action"] += 1
+        elif view.state is SlotState.MISSING:
+            bucket["pending"] += 1
+        # NOT_APPLICABLE already counted as approved above; nothing else falls through.
+    ordered: list[DashboardInstitutionBreakdown] = []
+    seen: set[str] = set()
+    for inst in canonical_order:
+        if inst in rolled:
+            counts = rolled[inst]
+            total = sum(counts.values())
+            ordered.append(
+                DashboardInstitutionBreakdown(
+                    institution=inst,
+                    approved=counts["approved"],
+                    in_review=counts["in_review"],
+                    needs_action=counts["needs_action"],
+                    pending=counts["pending"],
+                    total=total,
+                )
+            )
+            seen.add(inst)
+    # Append any other institutions present in the data but not in the
+    # canonical order — keeps the breakdown complete if the catalog
+    # adds a new authority later.
+    for inst, counts in sorted(rolled.items()):
+        if inst in seen:
+            continue
+        total = sum(counts.values())
+        ordered.append(
+            DashboardInstitutionBreakdown(
+                institution=inst,
+                approved=counts["approved"],
+                in_review=counts["in_review"],
+                needs_action=counts["needs_action"],
+                pending=counts["pending"],
+                total=total,
+            )
+        )
+    return ordered
+
+
 def _compute_recent_uploads(
-    db: Session, workspace: ProviderWorkspace, *, limit: int = 5
+    db: Session, workspace: ProviderWorkspace, *, limit: int = 30
 ) -> list[DashboardRecentUpload]:
     """Return the provider's N most recent submissions, newest first.
 
@@ -2850,4 +2953,7 @@ def get_workspace_dashboard(
         ),
         upcoming_deadlines=_compute_upcoming_deadlines(calendar_slots, today),
         recent_uploads=_compute_recent_uploads(db, workspace),
+        institution_breakdown=_compute_institution_breakdown(
+            onboarding_slots, calendar_slots
+        ),
     )

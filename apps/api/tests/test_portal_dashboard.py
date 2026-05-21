@@ -371,9 +371,21 @@ def test_dashboard_returns_expected_payload_shape(api_client: TestClient) -> Non
         "attention_today",
         "upcoming_deadlines",
         "recent_uploads",
+        "institution_breakdown",
     ):
         assert key in body, f"missing key {key}"
     assert isinstance(body["recent_uploads"], list)
+    assert isinstance(body["institution_breakdown"], list)
+    for row in body["institution_breakdown"]:
+        for key in (
+            "institution",
+            "approved",
+            "in_review",
+            "needs_action",
+            "pending",
+            "total",
+        ):
+            assert key in row, f"institution_breakdown row missing key {key}"
 
     onboarding = body["onboarding_summary"]
     for key in (
