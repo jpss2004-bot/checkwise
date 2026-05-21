@@ -575,6 +575,37 @@ def test_dashboard_recent_uploads_returns_latest_submissions(
     datetime.fromisoformat(row["submitted_at"])
 
 
+def test_dashboard_suggested_action_href_carries_requirement_name(
+    api_client: TestClient,
+) -> None:
+    """Bug fix (2026-05-21): the dashboard's suggested-action hrefs
+    must include the human ``requirement`` name alongside the
+    canonical ``requirement_code``. Without the name the intake
+    wizard falls back to an arbitrary catalog default and renders
+    the wrong document, breaking the entire deep-link flow.
+    """
+    from urllib.parse import parse_qs, urlparse
+
+    ws = _setup_workspace(api_client)
+    body = api_client.get(
+        f"/api/v1/portal/workspaces/{ws['workspace_id']}/dashboard"
+    ).json()
+    assert body["suggested_actions"], "expected at least one suggested action"
+    for action in body["suggested_actions"]:
+        href = action["href"]
+        assert href.startswith("/portal/upload?"), href
+        qs = parse_qs(urlparse(href).query)
+        # Every suggested-action href targets a slot with a
+        # requirement_code, so the matching human name must travel
+        # alongside it.
+        assert "requirement_code" in qs, (action, href)
+        assert "requirement" in qs, (
+            f"href missing human requirement name: {action} {href}"
+        )
+        # Both URL-encoded; decoding round-trips to a non-empty string.
+        assert qs["requirement"][0].strip(), action
+
+
 def test_dashboard_suggested_action_quotes_reviewer_note_when_rejected(
     api_client: TestClient,
 ) -> None:

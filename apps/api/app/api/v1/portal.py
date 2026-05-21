@@ -2437,7 +2437,17 @@ def _compute_semaphore(
 
 
 def _onboarding_reupload_href(view: SlotView) -> str:
+    from urllib.parse import quote
+
     parts = [f"requirement_code={view.requirement_code}"]
+    # Bug fix (2026-05-21): include the human ``requirement`` name
+    # alongside the canonical code so the intake wizard renders the
+    # document the provider actually clicked on. Without the name,
+    # the wizard falls back to an arbitrary 6th catalog entry (the
+    # intake-wizard guard now blanks the field instead, but passing
+    # the real name keeps the form pre-filled correctly).
+    if view.requirement_name:
+        parts.append(f"requirement={quote(view.requirement_name)}")
     if view.current_submission_id and view.state in _ACTIONABLE_SLOT_STATES:
         parts.append(f"replaces={view.current_submission_id}")
     parts.append("from=onboarding")
@@ -2445,9 +2455,15 @@ def _onboarding_reupload_href(view: SlotView) -> str:
 
 
 def _calendar_reupload_href(view: SlotView) -> str:
+    from urllib.parse import quote
+
     parts: list[str] = []
     if view.requirement_code:
         parts.append(f"requirement_code={view.requirement_code}")
+    # Bug fix (2026-05-21): pass the human ``requirement`` name so the
+    # wizard renders the right document.
+    if view.requirement_name:
+        parts.append(f"requirement={quote(view.requirement_name)}")
     if view.period_key:
         parts.append(f"period_key={view.period_key}")
         parts.append(f"period_label={view.period_key}")

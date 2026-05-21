@@ -159,7 +159,12 @@ function ProgressBadge({ summary }: { summary: DashboardOnboardingSummary }) {
 function StepRow({ step, index }: { step: OnboardingItem; index: number }) {
   const code = statusToDocumentStateCode(step.status as RequirementStatus);
   const status = stepStatus(code);
-  const href = `/portal/upload?requirement_code=${encodeURIComponent(step.code)}&from=onboarding`;
+  // Always pass both the canonical ``requirement_code`` AND the
+  // human ``requirement`` name so the intake wizard renders the
+  // document the provider actually clicked on. Without the name, the
+  // wizard would fall back to an arbitrary catalog default (see the
+  // intake-wizard 2026-05-21 fix).
+  const href = `/portal/upload?requirement_code=${encodeURIComponent(step.code)}&requirement=${encodeURIComponent(step.name)}&from=onboarding`;
 
   return (
     <Link

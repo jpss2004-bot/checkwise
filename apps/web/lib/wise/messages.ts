@@ -133,8 +133,12 @@ function welcomeMessage(args: {
           ? `Hola ${vendorName}. Aún no subes documentos. Empieza con tu ${firstStep.name} — desbloquea ${remaining - 1} obligaciones más de tu expediente inicial.`
           : `Hola ${vendorName}. Aún no subes documentos. Vamos paso a paso: el checklist de abajo tiene las cargas que necesitas para arrancar tu cumplimiento.`,
       ctaLabel: firstStep ? "Subir documento" : undefined,
+      // Carry both the canonical code AND the human name so the
+      // wizard renders the doc the user actually asked about —
+      // without the name the wizard silently defaults to a
+      // different requirement (see intake-wizard 2026-05-21 fix).
       ctaHref: firstStep
-        ? `/portal/upload?requirement_code=${encodeURIComponent(firstStep.code)}&from=onboarding`
+        ? `/portal/upload?requirement_code=${encodeURIComponent(firstStep.code)}&requirement=${encodeURIComponent(firstStep.name)}&from=onboarding`
         : undefined,
       meta: firstStep?.code,
     };

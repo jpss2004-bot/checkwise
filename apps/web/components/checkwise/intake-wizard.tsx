@@ -217,6 +217,21 @@ export function IntakeWizard({
     if (v2Mode) {
       base.requirement_name = "";
     }
+    // Bug fix (2026-05-21): when a deep-link supplies a
+    // ``requirement_code`` (canonical id) but no ``requirement_name``
+    // (human label), the spread above would silently fall back to
+    // ``initialForm.requirement_name`` — an arbitrary 6th catalog
+    // entry — and the wizard would render that wrong document as the
+    // selected one. Clearing the name here forces the wizard to
+    // either resolve from the local guide catalog (via the existing
+    // ``requirementGuide`` effect) or surface an empty selector
+    // instead of misleading the provider into uploading against the
+    // wrong slot. The canonical ``requirement_code`` is preserved.
+    const hasCode = Boolean(prefill?.requirement_code);
+    const hasName = Boolean(prefill?.requirement_name);
+    if (hasCode && !hasName) {
+      base.requirement_name = "";
+    }
     return base;
   });
   const [file, setFile] = useState<File | null>(null);

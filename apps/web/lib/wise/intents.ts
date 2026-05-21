@@ -155,7 +155,9 @@ function answerNextAction(
       tone: "brand",
       body: `Empieza por subir tu ${firstOnboardingStep.name}. Es uno de los documentos obligatorios de tu expediente.`,
       ctaLabel: "Subir documento",
-      ctaHref: `/portal/upload?requirement_code=${encodeURIComponent(firstOnboardingStep.code)}&from=onboarding`,
+      // Pass both code and human name so the intake wizard renders
+      // the requested document (see intake-wizard 2026-05-21 fix).
+      ctaHref: `/portal/upload?requirement_code=${encodeURIComponent(firstOnboardingStep.code)}&requirement=${encodeURIComponent(firstOnboardingStep.name)}&from=onboarding`,
       meta: firstOnboardingStep.code,
     });
   }
