@@ -37,6 +37,7 @@ from app.core.compliance_catalog import (
     RecurringRequirement,
     expediente_for_persona,
     recurring_for_year,
+    recurring_for_year_v2,
 )
 from app.models import Institution, Requirement, RequirementVersion
 
@@ -91,8 +92,26 @@ def seed_catalog(session: Session, *, years: Iterable[int] = (2026,)) -> SeedRes
         requirements_inserted += r
         requirement_versions_inserted += v
 
+    # Session 2 (2026-05-21): always seed BOTH catalog shapes. v1
+    # codes (with per-doc suffix) cover legacy submissions; v2 codes
+    # (collapsed per institution+period) cover new submissions once
+    # the ``RECURRING_CATALOG_V2`` flag flips. Both shapes have
+    # collision-free namespaces (pinned by
+    # ``test_v2_and_v1_codes_never_collide``) so seeding both into
+    # the same Requirement table is safe and idempotent. The cost is
+    # ~34 extra rows per seeded year — negligible.
     for year in years:
         for item in recurring_for_year(year):
+            r, v = _seed_recurring_requirement(
+                session,
+                item,
+                institution_id_by_code=institution_id_by_code,
+                existing_requirement_codes=existing_requirement_codes,
+                existing_versions=existing_versions,
+            )
+            requirements_inserted += r
+            requirement_versions_inserted += v
+        for item in recurring_for_year_v2(year):
             r, v = _seed_recurring_requirement(
                 session,
                 item,

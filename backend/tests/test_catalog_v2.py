@@ -26,12 +26,16 @@ Coverage:
 
 from __future__ import annotations
 
+import pytest
+
 from app.core.compliance_catalog import (
     RecurringRequirement,
+    lookup_recurring_by_code,
     recurring_accepted_documents,
     recurring_for_year,
     recurring_for_year_v2,
 )
+from app.core.config import settings
 
 # ---------------------------------------------------------------------------
 # Row counts + structure
@@ -256,3 +260,60 @@ def test_v2_persona_fisica_returns_same_obligations_as_persona_moral() -> None:
     fisica = recurring_for_year_v2(2026, "fisica")
     assert len(moral) == len(fisica)
     assert {r.code for r in moral} == {r.code for r in fisica}
+
+
+# ---------------------------------------------------------------------------
+# Session 2 — lookup_recurring_by_code flag-aware resolution
+# ---------------------------------------------------------------------------
+
+
+@pytest.fixture
+def flag_off(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(settings, "RECURRING_CATALOG_V2", False)
+
+
+@pytest.fixture
+def flag_on(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(settings, "RECURRING_CATALOG_V2", True)
+
+
+def test_lookup_returns_v1_row_when_flag_off(flag_off: None) -> None:
+    """With the flag off the function must behave exactly like the
+    pre-Session-2 version: v1 codes resolve, v2 codes do not."""
+    _ = flag_off
+    v1_code = "REC-IMSS-2026-01-cuotas-obrero-patronales"
+    v2_code = "REC-IMSS-2026-01"
+
+    v1_row = lookup_recurring_by_code(v1_code)
+    assert v1_row is not None
+    assert v1_row.code == v1_code
+
+    assert lookup_recurring_by_code(v2_code) is None
+
+
+def test_lookup_returns_v2_row_when_flag_on(flag_on: None) -> None:
+    """Flag on → v2 codes resolve."""
+    _ = flag_on
+    v2_code = "REC-IMSS-2026-01"
+    v2_row = lookup_recurring_by_code(v2_code)
+    assert v2_row is not None
+    assert v2_row.code == v2_code
+    assert v2_row.accepts_documents  # v2 carries the list
+
+
+def test_lookup_still_resolves_v1_codes_when_flag_on(flag_on: None) -> None:
+    """Legacy v1 codes must keep resolving after the flag flips so
+    historical audit-log entries and lineage references stay valid.
+    The fallback is the load-bearing piece of the compatibility-join
+    strategy."""
+    _ = flag_on
+    v1_code = "REC-IMSS-2026-01-cuotas-obrero-patronales"
+    row = lookup_recurring_by_code(v1_code)
+    assert row is not None
+    assert row.code == v1_code
+
+
+def test_lookup_returns_none_for_unknown_code() -> None:
+    assert lookup_recurring_by_code("REC-IMSS-9999-99-nonexistent") is None
+    assert lookup_recurring_by_code("not-a-rec-code") is None
+    assert lookup_recurring_by_code("") is None

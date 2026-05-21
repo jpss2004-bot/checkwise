@@ -55,6 +55,7 @@ from app.api.v1.auth import CurrentUser, _claims_from_header, get_current_user
 from app.constants.statuses import DocumentStatus
 from app.core.catalogs import DOCUMENT_STATUSES, INSTITUTIONS, LOAD_TYPES
 from app.core.compliance_catalog import (
+    RecurringRequirement,
     catalog_metadata,
     expediente_for_persona,
     onboarding_anatomy,
@@ -62,9 +63,11 @@ from app.core.compliance_catalog import (
     onboarding_format,
     onboarding_where_to_obtain,
     onboarding_why,
+    recurring_accepted_documents,
     recurring_anatomy,
     recurring_common_errors,
     recurring_for_year,
+    recurring_for_year_v2,
     recurring_required_document,
     recurring_where_to_obtain,
 )
@@ -1090,7 +1093,15 @@ def get_workspace_calendar(
         for view in slots
     }
 
-    recurring = recurring_for_year(year, workspace.persona_type)  # type: ignore[arg-type]
+    # Session 2 (2026-05-21) — pick the catalog shape the slot resolver
+    # used. Keeping them in lockstep matters: the resolver iterates v2
+    # rows when the flag is on, so the endpoint must too, or the row
+    # → slot lookup misses for every row.
+    recurring: list[RecurringRequirement] = (
+        list(recurring_for_year_v2(year, workspace.persona_type))  # type: ignore[arg-type]
+        if settings.RECURRING_CATALOG_V2
+        else list(recurring_for_year(year, workspace.persona_type))  # type: ignore[arg-type]
+    )
     months: dict[int, dict] = {
         m: {"month": m, "institutions": {}, "received": 0, "expected": 0}
         for m in range(1, 13)
@@ -1106,6 +1117,13 @@ def get_workspace_calendar(
         # Phase 5 — UX enrichment that used to live in the calendar mock.
         deadline_iso = _calendar_deadline_iso(year, req.due_month, req.due_day)
         href = _calendar_upload_href(year=year, code=req.code, period_key=req.period_key)
+        # Session 2 — when this is a v2 row, surface the rich
+        # per-accepted-doc list AND keep the legacy single-doc
+        # guidance fields populated with placeholders so the frontend
+        # can branch on accepts_documents.length without breaking
+        # callers that still read anatomy/where/common_errors as
+        # strings. v1 rows continue to emit the single-doc shape.
+        accepted_docs = recurring_accepted_documents(req)
         inst["items"].append(
             {
                 "code": req.code,
@@ -1120,13 +1138,24 @@ def get_workspace_calendar(
                 "deadline_iso": deadline_iso,
                 "suggested_action": _calendar_suggested_action(item_status),
                 "href": href,
-                # Stage 2.7 (T5 parity, 2026-05-20) — first-upload
-                # guidance mirroring the onboarding shape. Calendar
-                # drawer surfaces these in the same DocumentGuidanceDisclosure
-                # pattern used on /portal/onboarding expediente cards.
+                # Stage 2.7 (T5 parity, 2026-05-20) — single-doc
+                # first-upload guidance. On v2 rows these will fall
+                # back to institution defaults because req.name is the
+                # obligation label, not a doc name; the rich
+                # accepts_documents list below is the canonical source
+                # of truth in v2 mode.
                 "anatomy": recurring_anatomy(req),
                 "where_to_obtain": recurring_where_to_obtain(req),
                 "common_errors": list(recurring_common_errors(req)),
+                # Session 2 (2026-05-21) — accepted-doc-type
+                # alternatives. Empty list on v1 rows (no behavior
+                # change for legacy frontends). Non-empty on v2 rows,
+                # one entry per acceptable doc type with anatomy /
+                # where_to_obtain / common_errors keyed by
+                # (institution, doc_name) — Stage 2.7's
+                # _RECURRING_DOC_OVERRIDES map.
+                "accepts_documents": accepted_docs,
+                "minimum_documents": req.minimum_documents,
             }
         )
         inst["expected"] += 1

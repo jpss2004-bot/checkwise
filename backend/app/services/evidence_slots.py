@@ -40,8 +40,10 @@ from app.core.compliance_catalog import (
     RecurringRequirement,
     expediente_for_persona,
     recurring_for_year,
+    recurring_for_year_v2,
 )
-from app.models import ProviderWorkspace, Submission
+from app.core.config import settings
+from app.models import Institution, ProviderWorkspace, Submission
 
 
 class SlotState(StrEnum):
@@ -335,7 +337,28 @@ def build_workspace_calendar_slots(
     cuatrimestral, annual) plus prior-year carryover slots (e.g.
     January upload of last year's December) by reading
     :data:`RecurringRequirement.period_key` directly.
+
+    Catalog v1 (default) iterates ``recurring_for_year`` and matches
+    submissions by exact ``(requirement_code, period_key)``. Catalog
+    v2 (Session 2, 2026-05-20) iterates ``recurring_for_year_v2`` —
+    one row per (institution, period) carrying an ``accepts_documents``
+    list — and matches submissions via a **compatibility join**:
+    submissions whose ``(institution_code, period_key)`` matches the
+    v2 row's ``(institution, period_key)`` count toward the slot,
+    regardless of whether they carry a v2 code or a legacy v1
+    per-doc-suffix code. This keeps historical submissions resolved
+    after the flag flips so nothing appears unsubmitted to providers.
+
+    The v2 branch implements ``minimum_documents="one"`` semantics
+    directly (any candidate satisfies the slot). ``"all"`` semantics
+    — every accepted doc type must be present — are stubbed with a
+    fallback to the same "one" logic. No production v2 row uses
+    ``"all"`` today; when one does, the matching by accepted-doc-name
+    lives behind the explicit branch below.
     """
+    if settings.RECURRING_CATALOG_V2:
+        return _build_workspace_calendar_slots_v2(db, workspace, year)
+
     catalog: list[RecurringRequirement] = list(
         recurring_for_year(year, workspace.persona_type)  # type: ignore[arg-type]
     )
@@ -363,6 +386,76 @@ def build_workspace_calendar_slots(
             requirement_code=req.code,
             period_key=req.period_key,
         )
+        views.append(
+            _slot_view_from_candidates(
+                slot_key=slot_key,
+                requirement_name=req.name,
+                institution=req.institution,
+                required=True,
+                candidates=candidates,
+            )
+        )
+    return views
+
+
+def _build_workspace_calendar_slots_v2(
+    db: Session, workspace: ProviderWorkspace, year: int
+) -> list[SlotView]:
+    """Catalog v2 slot resolver — collapsed rows + compatibility join.
+
+    Submission matching key: ``(institution_code, period_key)`` instead
+    of ``(requirement_code, period_key)``. The institution code is
+    resolved from ``Submission.institution_id`` via the ``Institution``
+    table so both v2-coded submissions (``REC-IMSS-2026-01``) and
+    legacy v1-coded submissions
+    (``REC-IMSS-2026-01-comprobante-de-pago-bancario``) sharing the
+    same institution + period both contribute candidates.
+    """
+    catalog: list[RecurringRequirement] = list(
+        recurring_for_year_v2(year, workspace.persona_type)  # type: ignore[arg-type]
+    )
+
+    # One-shot id → code map for the institutions referenced by this
+    # workspace's submissions. Keeps the resolver self-contained.
+    institutions_by_id: dict[str, str] = {
+        inst.id: inst.code for inst in db.scalars(select(Institution))
+    }
+
+    all_for_workspace = list(
+        db.scalars(
+            select(Submission).where(
+                Submission.client_id == workspace.client_id,
+                Submission.vendor_id == workspace.vendor_id,
+            )
+        )
+    )
+    by_slot: dict[tuple[str, str], list[Submission]] = {}
+    for sub in all_for_workspace:
+        if not sub.institution_id or not sub.period_key:
+            continue
+        inst_code = institutions_by_id.get(sub.institution_id)
+        if not inst_code:
+            continue
+        by_slot.setdefault((inst_code, sub.period_key), []).append(sub)
+
+    views: list[SlotView] = []
+    for req in catalog:
+        candidates = by_slot.get((req.institution, req.period_key), [])
+        slot_key = SlotKey(
+            workspace_id=workspace.id,
+            client_id=workspace.client_id,
+            vendor_id=workspace.vendor_id,
+            requirement_code=req.code,
+            period_key=req.period_key,
+        )
+        # ``minimum_documents="all"`` would require per-accepted-doc
+        # matching (e.g. group candidates by detected/requirement name
+        # and require coverage of every entry in req.accepts_documents
+        # before marking the slot APPROVED). No production row uses
+        # "all" today; until one does, the "one" path's any-candidate
+        # logic is correct for both modes — a real "all" implementation
+        # belongs alongside the first row that needs it so the
+        # matching contract is informed by a concrete example.
         views.append(
             _slot_view_from_candidates(
                 slot_key=slot_key,

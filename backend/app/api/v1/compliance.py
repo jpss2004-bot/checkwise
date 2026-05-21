@@ -22,7 +22,9 @@ from app.core.compliance_catalog import (
     expediente_as_dicts,
     recurring_as_dicts,
     recurring_for_year,
+    recurring_for_year_v2,
 )
+from app.core.config import settings
 
 router = APIRouter(prefix="/compliance", tags=["compliance"])
 
@@ -62,7 +64,15 @@ def get_calendar(
     persona_type: PersonaQuery = "moral",
 ) -> dict:
     """Recurring REPSE calendar grouped by month and institution."""
-    items = recurring_for_year(year, persona_type)
+    # Session 2 (2026-05-21) — flag-aware. v2 emits ~34 rows/year per
+    # persona instead of v1's ~139; the row shape is otherwise compatible
+    # with this endpoint's response. Frontend Session 3 will branch on
+    # ``accepts_documents.length`` to render the alternatives list.
+    items = (
+        recurring_for_year_v2(year, persona_type)
+        if settings.RECURRING_CATALOG_V2
+        else recurring_for_year(year, persona_type)
+    )
     months: dict[int, dict] = {
         month: {
             "month": month,

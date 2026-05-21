@@ -44,7 +44,9 @@ from app.constants.statuses import DocumentStatus
 from app.core.compliance_catalog import (
     catalog_metadata,
     recurring_for_year,
+    recurring_for_year_v2,
 )
+from app.core.config import settings
 from app.core.period_validation import MAX_YEAR, MIN_YEAR
 from app.db.session import get_db
 from app.models import (
@@ -854,7 +856,16 @@ def get_admin_calendar(
     """
     _ = current
     target_year = year if year is not None else date.today().year
-    catalog = recurring_for_year(target_year, persona_type)
+    # Session 2 (2026-05-21) — flag-aware. The admin-side "expected
+    # rows per month" count drops dramatically under v2 (collapsed
+    # alternatives). Operators reading this endpoint after the flag
+    # flips will see the new totals — consistent with the v2 calendar
+    # in the provider portal.
+    catalog = (
+        recurring_for_year_v2(target_year, persona_type)
+        if settings.RECURRING_CATALOG_V2
+        else recurring_for_year(target_year, persona_type)
+    )
     months: dict[int, dict] = {
         m: {"month": m, "institutions": {}, "expected_total": 0} for m in range(1, 13)
     }

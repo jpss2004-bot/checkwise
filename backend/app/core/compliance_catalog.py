@@ -19,6 +19,8 @@ from __future__ import annotations
 from dataclasses import asdict, dataclass, field
 from typing import Literal
 
+from app.core.config import settings
+
 CATALOG_SOURCE = "C.Árbol Plataforma Proveedores REPSE VF"
 CATALOG_VERSION = "2026.06.0"
 
@@ -774,10 +776,27 @@ def lookup_onboarding_by_code(code: str) -> OnboardingRequirement | None:
 def lookup_recurring_by_code(code: str) -> RecurringRequirement | None:
     """Lookup a recurring requirement by canonical ``REC-*`` code.
 
-    The catalog generates recurring items per year, so the year is recovered
-    from the code itself (``REC-<INST>-<YEAR>-<DUE_MONTH>-<slug>``). When the
-    code does not parse to a known shape the function returns ``None`` and the
-    caller should treat the input as unknown.
+    The catalog generates recurring items per year, so the year is
+    recovered from the code itself.
+
+    v1 codes carry a per-doc suffix:
+        ``REC-<INST>-<YEAR>-<DUE_MONTH>-<slug>``
+
+    v2 codes (Session 1, 2026-05-20) collapse to one row per
+    (institution, period):
+        ``REC-<INST>-<YEAR>-<DUE_MONTH>``         (monthly / bimestral / cuatrimestral)
+        ``REC-SAT-<YEAR>-04-anual``               (annual exception)
+
+    This function tries v2 first when ``settings.RECURRING_CATALOG_V2``
+    is on, then falls back to v1. With the flag off, behavior is
+    identical to the v1-only world.
+
+    The v1 fallback runs unconditionally so submissions written under
+    the legacy code shape continue to resolve even after the flag
+    flips — the compatibility-join story Session 2 locks in (legacy
+    data never appears missing).
+
+    Returns ``None`` when the code does not parse to any known shape.
     """
     parts = code.split("-")
     if len(parts) < 4 or parts[0] != "REC":
@@ -786,6 +805,17 @@ def lookup_recurring_by_code(code: str) -> RecurringRequirement | None:
         year = int(parts[2])
     except ValueError:
         return None
+
+    # v2-first when the flag is on. Iterating only the year's v2 rows
+    # is cheap (~34 entries) and keeps the lookup deterministic.
+    if settings.RECURRING_CATALOG_V2:
+        for req in recurring_for_year_v2(year):
+            if req.code == code:
+                return req
+
+    # v1 lookup. Runs whether the flag is on or off so legacy codes
+    # remain resolvable forever — required for compatibility-join slot
+    # resolution and for replaying historical audit-log entries.
     for req in recurring_for_year(year):
         if req.code == code:
             return req
