@@ -153,7 +153,7 @@ CheckWise/
 ├── demo_assets/                      screenshots + demo guide PDF
 ├── design-concepts/                  active design inspiration (inspo-screenshots/)
 ├── .claude/skills/                   project-discoverable Claude Code skills
-│                                     (14 checkwise-* + 4 local design overrides
+│                                     (14 checkwise-* + 4 legacy local design overrides
 │                                     + 5 bridged upstream skills via symlink)
 ├── .agents/skills/                   untracked upstream design skill installs
 │                                     (reproducible from skills-lock.json)

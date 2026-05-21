@@ -1,13 +1,19 @@
 ---
-description: Redesign the public marketing hero on CheckWise's landing page (frontend/app/page.tsx). Activate when reworking the first viewport at /, the headline + subhead, the primary/secondary CTAs, the preview card or compliance illustration, the trust strip, and the section that has to convert a non-technical compliance buyer in 8 seconds. Not for inner product surfaces — those go to the real downloaded Taste skills and impeccable.
+description: Legacy CheckWise landing hero guidance. Do not activate for the next hero redesign unless the user explicitly asks to inspect or preserve the old hero approach; prefer external design tools, real product screenshots/assets, upstream design skills, and Motion.
 ---
 
 # CheckWise Hero Redesign
 
-The landing page hero (`frontend/app/page.tsx`, the `<Hero />` and
-`<HeroPreviewCard />` blocks plus the `<Header />` it sits beneath)
-is the only marketing surface the product owns. This skill bounds
-how it can change.
+Legacy note: this skill documents the previous landing hero constraints. It is
+not the preferred source for the next hero redesign. The next pass should use
+external design tools, real product screenshots/assets, richer but purposeful
+motion, and the real upstream design skills while preserving CheckWise product
+truth from the system docs.
+
+Historical guidance follows. The landing page hero (`frontend/app/page.tsx`,
+the `<Hero />` and `<HeroPreviewCard />` blocks plus the `<Header />` it sits
+beneath) used to be constrained by this skill. Do not apply these constraints
+to the next hero unless the user explicitly asks to preserve the old approach.
 
 ## What the hero is for
 

@@ -1,13 +1,18 @@
 ---
-description: Project-local UI craftsmanship pass for CheckWise. Activate when a frontend surface needs to be tightened, polished, or hardened against demo-day scrutiny — covers spacing audits, state coverage, accessibility, focus order, error surfaces, empty states, responsive collapse, and the small details that separate a real product from a wireframe.
+description: Legacy CheckWise-local UI craftsmanship pass. Do not activate for new visual direction unless the user explicitly asks to inspect or preserve the old CheckWise-local polish rules; prefer the real upstream /impeccable skill.
 ---
 
 # CheckWise Impeccable UI
 
-Local override of the global `impeccable` skill. Same intent — make
-the surface look and feel finished — but bound to CheckWise's
-constraints, vocabulary, and component library so the output stays
-consistent with what already ships.
+Legacy note: this skill is retained for historical CheckWise-local polish
+rules. For new frontend design critique, responsive polish, accessibility, and
+motion work, prefer the real upstream `/impeccable` skill and external design
+tools. Use CheckWise docs as product constraints.
+
+Historical guidance follows. This was the local override of the global
+`impeccable` skill: same intent — make the surface look and feel finished —
+but bound to CheckWise's earlier constraints, vocabulary, and component
+library.
 
 ## When to invoke
 
@@ -21,9 +26,9 @@ consistent with what already ships.
   contrast ratios, screen-reader copy).
 - After a feature lands but before it's added to the boss-demo flow.
 
-Do **not** invoke for greenfield design or restructuring an entire
-flow — that belongs to `taste` (judgement) or `hero-redesign`
-(landing surface). This skill polishes what already exists.
+Do **not** invoke for greenfield design, landing page redesign, or
+restructuring an entire flow. Use external design tools and upstream skills
+for that work.
 
 ## Audit checklist
 

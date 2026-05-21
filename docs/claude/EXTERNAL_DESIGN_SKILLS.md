@@ -16,9 +16,10 @@ CheckWise runs three layers of design skills side by side:
    visual-redesign, dependency-audit, and git-safe operations.
 
 2. **CheckWise-local design overrides** — `.claude/skills/{impeccable-ui,taste,hero-redesign,emil-kowalski-design}/`
-   Tracked in git. These are intentional **project-local overrides** of
-   generic design skills, narrowed to CheckWise's compliance/legal-tech
-   voice and the tokens in `frontend/app/globals.css`.
+   Tracked in git. These are now **legacy references**, not the preferred
+   design direction for new work. They can help explain previous CheckWise
+   design decisions, but they should not drive the next landing page,
+   screenshot strategy, animation system, or high-end UI pass.
 
 3. **Upstream design packages** — `.agents/skills/<name>/`
    Installed from external GitHub sources, untracked, reproducible from
@@ -43,10 +44,28 @@ in sync — the lockfile only pins what is actually bridged.
 
 Other upstream skills (`brandkit`, `industrial-brutalist-ui`,
 `minimalist-ui`, `image-to-code`, `imagegen-frontend-{mobile,web}`,
-`full-output-enforcement`, `stitch-design-taste`) were previously
-installed but are **not currently registered**. They can be re-added by
-appending to the SKILLS array and to `skills-lock.json`, then re-running
-the install + register scripts.
+`full-output-enforcement`, `stitch-design-taste`) may have been considered
+in earlier notes but are **not currently registered**. Re-add any of them
+only after confirming the package exists locally, appending to the SKILLS
+array and to `skills-lock.json`, then re-running the install + register
+scripts.
+
+## Intended next external design stack
+
+The next landing page and frontend visual pass should use external design
+tools as intended, with CheckWise system docs acting as constraints:
+
+- UI UX Pro Max — design planning, critique, and higher-end visual direction.
+- 21st.dev / Magic MCP — component discovery and modern UI implementation
+  acceleration.
+- Motion for React — purposeful animation primitives via the `motion`
+  package and `motion/react` imports.
+- `/impeccable`, `/design-taste-frontend`, `/gpt-taste`,
+  `/high-end-visual-design`, and `/redesign-existing-projects` — the real
+  upstream skills currently bridged into Claude Code.
+
+CheckWise docs remain authoritative for product model, REPSE terminology,
+trust posture, routes, tokens, accessibility, and backend contracts.
 
 ## Run order on a fresh checkout
 
@@ -63,25 +82,24 @@ the install + register scripts.
 - Main capability: frontend design, critique, polish, accessibility,
   responsive behavior, motion, tokens, and live visual iteration.
 
-The local override `/impeccable-ui` exists alongside it as a
-CheckWise-narrowed variant. Use `/impeccable-ui` for CheckWise-bound
-craftsmanship passes; reach for global `/impeccable` only when you
-genuinely need the broader generic toolkit.
+The local override `/impeccable-ui` exists alongside it as a legacy
+CheckWise-narrowed variant. Prefer the real upstream `/impeccable` for new
+frontend design critique, polish, accessibility, responsive behavior, and
+motion passes.
 
 Important setup:
 
 - `PRODUCT.md` exists at the repo root for product context.
 - `DESIGN.md` exists at the repo root for visual context.
-- Both `/impeccable` and `/impeccable-ui` should read those before design work.
+- `/impeccable` should read those before design work.
 
 ## Taste
 
 - Upstream package: `Leonxlnx/taste-skill` (specifically `skills/taste-skill/`)
 - Skill command: `/design-taste-frontend`
-- The local override `/taste` is CheckWise-narrowed and tuned to the
-  compliance/legal-tech voice. Reach for the upstream `/design-taste-frontend`
-  for cross-project taste judgments; use `/taste` when the question is
-  specifically "is this CheckWise enough?"
+- The local override `/taste` is a legacy CheckWise-narrowed reference.
+  Prefer upstream `/design-taste-frontend`, `/gpt-taste`, and
+  `/high-end-visual-design` for new visual direction.
 
 ## Provenance Note
 

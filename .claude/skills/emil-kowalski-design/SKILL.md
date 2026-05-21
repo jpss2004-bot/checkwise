@@ -1,10 +1,16 @@
 ---
-description: Applies an Emil Kowalski-inspired interaction design craft pass to CheckWise: refined motion, precise spatial rhythm, tactile product details, premium interface composition, and memorable microinteractions grounded in backend truth and design tokens.
+description: Legacy CheckWise-local interaction craft lens. Do not activate for new design direction unless the user explicitly asks for this historical local pass; prefer external design tools, Motion, and upstream /impeccable for motion and polish.
 ---
 
 # Emil Kowalski Design Skill
 
-Use this skill during the future CheckWise frontend redesign when the work needs exceptional interaction craft, motion taste, and premium product feel.
+Legacy note: this project-local craft lens is retained for historical context.
+For new landing page, visual direction, and motion work, prefer external design
+tools, Motion, and upstream `/impeccable` while using CheckWise docs as
+constraints.
+
+Historical guidance follows. Do not use this as the default interaction craft
+pass for the future CheckWise frontend redesign.
 
 This skill is not a license to copy any designer's work. Use it as a high-level craft lens: crisp motion, elegant interaction states, strong spatial composition, and restrained visual drama.
 

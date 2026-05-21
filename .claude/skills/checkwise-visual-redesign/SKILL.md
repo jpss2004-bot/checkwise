@@ -1,14 +1,21 @@
 ---
-description: Guides the future full CheckWise visual redesign after architecture phases are complete, enforcing a distinctive evidence-slot compliance cockpit rather than generic SaaS UI.
+description: Legacy CheckWise-local full visual redesign guidance. Do not activate for new visual direction unless the user explicitly asks to inspect prior CheckWise redesign doctrine; prefer external design tools and upstream design skills.
 ---
 
 # CheckWise Visual Redesign Skill
 
-Use this skill only when the user is ready to plan or implement the full visual redesign after the architecture gap has been closed.
+Legacy note: this skill preserves prior redesign doctrine. For new landing page
+and visual redesign direction, use external design tools and upstream design
+skills, with CheckWise docs as product, token, workflow, and compliance
+constraints.
+
+Historical guidance follows. Do not use this as the default full visual
+redesign plan.
 
 This skill is not for backend architecture phases. It is not for generic UI polish. It exists to make the eventual redesign distinctive, product-specific, and grounded in CheckWise's real compliance state.
 
-Pair this skill with `emil-kowalski-design` when the redesign needs exceptional interaction craft, motion, and tactile product details.
+For new interaction craft, motion, and tactile product details, prefer Motion,
+external design tools, and upstream `/impeccable`.
 
 ## Required Sources
 

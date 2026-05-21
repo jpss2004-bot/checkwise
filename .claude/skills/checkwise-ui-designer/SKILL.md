@@ -1,12 +1,18 @@
 ---
-description: Audits and improves CheckWise as a premium legal-tech/compliance SaaS interface with strong UX, hierarchy, spacing and dashboard clarity.
+description: Legacy CheckWise-local UI design guidance. Do not activate for new visual direction unless the user explicitly asks for the old CheckWise-local design standard; prefer external design tools and upstream design skills.
 ---
 
 # CheckWise UI Designer Skill
 
-Use this skill for dashboards, forms, landing pages, report previews and frontend polish.
+Legacy note: use this only to understand prior CheckWise-local UI assumptions.
+For new visual design, landing page, motion, and premium interface direction,
+prefer external design tools and upstream design skills. Keep CheckWise system
+docs as product constraints.
 
-Before a full redesign, pair this skill with `checkwise-redesign-prep` and read:
+Historical guidance follows. Do not use this as the default skill for landing
+pages, new visual direction, or premium frontend polish.
+
+When inspecting prior CheckWise-local design assumptions, read:
 
 - `docs/design-system/FRONTEND_REDESIGN_READINESS.md`
 - `docs/design-system/VISUAL_REDESIGN_DOCTRINE.md`

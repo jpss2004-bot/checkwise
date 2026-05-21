@@ -1,12 +1,22 @@
 ---
-description: Prepares CheckWise for a full frontend redesign by consolidating design docs, assets, screenshots, tokens, existing components, and implementation phases before any UI code is changed.
+description: Legacy CheckWise-local redesign prep. Use only for inventorying docs, assets, screenshots, tokens, components, and implementation risks; do not use it as visual direction for new design work.
 ---
 
 # CheckWise Redesign Prep Skill
 
-Use this skill before any full frontend redesign or large UI refactor.
+Legacy note: this skill may still be useful as an inventory checklist, but it
+should not drive the next visual direction. Use external design tools and
+upstream design skills for design judgment, while keeping CheckWise system docs
+as constraints.
 
-The goal is preparation, not implementation. This skill should produce a grounded redesign plan that can later be executed by `checkwise-frontend`, `checkwise-ui-designer`, the real downloaded Taste skills (`gpt-taste`, `design-taste-frontend`, `high-end-visual-design`, `redesign-existing-projects`), and the real downloaded `impeccable` skill.
+Use this only when a historical inventory checklist is useful before a full
+frontend redesign or large UI refactor.
+
+The goal is preparation, not implementation or visual direction. A current
+redesign plan should be executed with `checkwise-frontend`, the real
+downloaded Taste skills (`gpt-taste`, `design-taste-frontend`,
+`high-end-visual-design`, `redesign-existing-projects`), the real downloaded
+`impeccable` skill, and the configured external design tools.
 
 ## Required Sources
 

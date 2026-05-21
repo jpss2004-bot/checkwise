@@ -1,12 +1,19 @@
 ---
-description: Project-local design-taste guard for CheckWise. Activate when judging or rewriting any visual decision in the frontend so it stays grounded in CheckWise's compliance/legal-tech voice and the tokens defined in frontend/app/globals.css and docs/DESIGN_SYSTEM.md.
+description: Legacy CheckWise-local design-taste guard. Do not activate for new visual direction unless the user explicitly asks to inspect or preserve the old CheckWise design taste; prefer the real upstream design skills and external design tools.
 ---
 
 # CheckWise Taste
 
-Use this skill before approving any UI change. It is the local override
-of the global `taste-skill`: stricter, narrower, and tuned to one
-product — CheckWise — instead of generic web aesthetic.
+Legacy note: this skill is retained for historical CheckWise design context.
+For new landing page, visual redesign, motion, or premium UI work, prefer the
+real upstream skills (`/impeccable`, `/design-taste-frontend`, `/gpt-taste`,
+`/high-end-visual-design`, `/redesign-existing-projects`) and the configured
+external tools. Use CheckWise docs as product constraints.
+
+Historical guidance follows. Do not use it as the default approval gate for
+new UI changes. It was the local override of the global `taste-skill`:
+stricter, narrower, and tuned to one product — CheckWise — instead of generic
+web aesthetic.
 
 The product is a Mexican REPSE compliance SaaS. Reviewers, internal
 operators and legal counsel are the primary audience. Tone is closer
