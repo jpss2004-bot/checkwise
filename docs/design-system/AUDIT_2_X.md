@@ -21,7 +21,7 @@ Companion: [INSPO_MAP.md](INSPO_MAP.md) — the inspo signal extraction.
 
 | Route | What's strong | What's weak | Next move |
 |---|---|---|---|
-| `/` | Asymmetric 2-column hero with real "Centro de cumplimiento" preview card carrying live evidence-slot data. Monospace metadata strip is a real signal of legal-tech voice. Navy + teal restraint. | Standalone V2.0 polish; the rest of the product doesn't match it. The preview card is the **only** surface that already speaks the target visual language. | Hold as the anchor reference. Phase 4 lifts everything else *into* this register. |
+| `/` | Historical V2.0 asymmetric hero with a detailed "Centro de cumplimiento" preview card. Monospace metadata and navy/teal restraint still carry useful product signals. | The preview is synthetic JSX, not a real product screenshot. It now reads too plain/static for the desired landing page and should not remain the target visual language. | Superseded by `docs/claude/HERO_LANDING_AUDIT.md`: rebuild around real product screenshots/assets, external design tooling, and purposeful Motion. |
 | `/login` | Calm centered card. Single email+password input pair. Helper copy positioned correctly above the form. | The card is generic SaaS chrome — would not feel out of place in 100 other products. No marker that this is a compliance product. The placeholder `tu.correo@empresa.com` is the only Spanish hint. | Cosmetic-only: introduce the same monospace metadata strip that lives on `/`, plus a "Powered by Legal Shelf" tighter typographic lockup. Drop the duplicate "Acceso a CheckWise" header — the page already says it. |
 | `/admin/login` | Same form as `/login`, which means cross-role parity. | **Visually 1:1 identical to `/login`.** If the system already collapses all auth into a single surface (per `app/login/page.tsx` comment: "CheckWise 1.8 collapsed the old 3-role picker into a single email + password form"), then `/admin/login` exists but is a redundant route. | Verify the route is still reachable from any UI link. If yes, redirect to `/login`. If no, consider deleting it. |
 | `/activate?token=demo` | The route is wired; doesn't error. | With an invalid token the page falls back to the **same** login form — no acknowledgement that activation was attempted, no "this invitation token is invalid" message. The README promises a "3-step wizard + role confirmation" that's unreachable without a valid seeded invitation. | Two follow-ups: (a) add an invalid-token state with clear copy; (b) the activate wizard itself needs a real audit pass once a valid token can be seeded. |
@@ -72,7 +72,7 @@ Action for Phase 2: add a seeded `client_admin` (e.g. `cliente.demo@checkwise.mx
 
 Onboarding, reports, dashboard KPIs, vendors — every non-table surface defaults to "equal cards in a grid." `impeccable` calls this out as an absolute ban: *"Identical card grids — same-sized cards with icon + heading + text, repeated endlessly."* `design-taste-frontend` says the same with different words: *"generic card containers are strictly BANNED. Use logic-grouping via `border-t`, `divide-y`, or purely negative space."*
 
-**Phase 2 action:** add a single rule to `taste`/`impeccable-ui`: any new surface that introduces three+ identical cards in a row must justify why a vertical list with full borders isn't a better affordance.
+**Phase 2 action:** add a single rule to the active external design workflow: any new surface that introduces three+ identical cards in a row must justify why a vertical list with full borders isn't a better affordance.
 
 ### F3 — `/portal/reports` is the lowest-density, lowest-signal surface
 
@@ -94,7 +94,7 @@ This is the one the user has called out as needing to be "the strongest part pos
 
 `design-taste-frontend` mandates *"Beautifully composed empty states indicating how to populate data."* CheckWise's voice (calm, precise, Spanish-first) gives a clear path: each empty state should tell the operator *exactly* what to do next, in plain Spanish, with a single primary CTA.
 
-**Phase 5 action:** dedicated empty-states pass during the `impeccable-ui` final-mile sweep.
+**Phase 5 action:** dedicated empty-states pass during the upstream `/impeccable` final-mile sweep.
 
 ### F6 — Density target
 
@@ -123,7 +123,7 @@ When Phase 2 (Visual Direction Lock) opens, carry these forward as the constrain
 
 1. **Density target: 6–7** for admin + reports; **5** for provider portal; **4** kept for marketing / login.
 2. **Banned this round:** any new identical-card grid. Any new modal that could have been a side panel or inline.
-3. **Hero anchor:** `/` (the V2.0 hero) is the language target. Every inner surface must look like it belongs to the same product.
+3. **Hero anchor superseded:** `/` should no longer be treated as the locked language target. Use the current hero audit and external-design policy for the next landing pass.
 4. **Token deltas:** likely additions are a tighter spacing scale (`--space-5: 1.125rem`?) and an explicit monospace metadata utility. Phase 2 decides.
 5. **Reports gets the deepest pass** (Phase 3). Marketing + login get the conversion-critical pass (Phase 4). Internal surfaces get the systematic roll-out (Phase 5).
 6. **Seed gap:** add `cliente.demo@checkwise.mx` (client_admin) to `dev_seed.py` before Phase 5 so `/client/*` can be audited and demoed.

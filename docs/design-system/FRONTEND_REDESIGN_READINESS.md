@@ -78,33 +78,27 @@ Creative permission after architecture is ready:
 
 ## Claude Skill Stack
 
-Use the skills in this sequence for the future full redesign:
+Use this sequence for a future full redesign under the current external-design policy:
 
-1. `/checkwise-redesign-prep`
-   - Establish source material, target surfaces, constraints, and implementation phases.
-2. `/checkwise-audit`
+1. `/checkwise-audit`
    - Confirm actual repo state before edits.
-3. `/checkwise-ui-designer`
-   - Decide UX hierarchy and visual treatment per surface.
-4. `/gpt-taste`
+2. External design tools
+   - Use UI UX Pro Max, 21st.dev / Magic MCP, and Motion once configured.
+3. `/gpt-taste`
    - Apply the real downloaded Taste skill's high-variance design guardrails.
-5. `/design-taste-frontend`
+4. `/design-taste-frontend`
    - Translate Taste direction into implementable React/Tailwind decisions.
-6. `/high-end-visual-design`
+5. `/high-end-visual-design`
    - Push visual hierarchy, motion, spacing, and materiality above generic SaaS.
-7. `/redesign-existing-projects`
+6. `/redesign-existing-projects`
    - Upgrade the existing app without breaking functionality or inventing a parallel system.
-8. `/checkwise-visual-redesign`
-   - Enforce the distinctive evidence-slot compliance cockpit direction.
-9. `/emil-kowalski-design`
-   - Add high-craft interaction detail: motion, microinteractions, tactile states, and premium visual rhythm.
-10. `/checkwise-frontend`
+7. `/checkwise-frontend`
    - Implement reusable Next.js/React/Tailwind components.
-11. `/impeccable`
+8. `/impeccable`
    - Polish state coverage, responsive behavior, accessibility, and demo-day details.
-12. `/checkwise-qa-release`
+9. `/checkwise-qa-release`
    - Verify typecheck/lint/build and smoke routes.
-13. `/checkwise-git-safe`
+10. `/checkwise-git-safe`
    - Commit safely only after scope is clear.
 
 ## Recommended Redesign Phases
@@ -173,7 +167,7 @@ Phase 4: Visual QA.
 Use this only after Phase 1 token hardening, design-package setup, and the architecture phases for workflow/evidence slots are complete:
 
 ```text
-Use /checkwise-redesign-prep, /checkwise-audit, /checkwise-ui-designer, /gpt-taste, /design-taste-frontend, /high-end-visual-design, /redesign-existing-projects, /checkwise-visual-redesign, /emil-kowalski-design, /checkwise-frontend, and /impeccable.
+Use /checkwise-audit, external design tools, /gpt-taste, /design-taste-frontend, /high-end-visual-design, /redesign-existing-projects, /checkwise-frontend, and /impeccable.
 
 Goal: plan the full CheckWise frontend redesign, but do not edit code yet.
 

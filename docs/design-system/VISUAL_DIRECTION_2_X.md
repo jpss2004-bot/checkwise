@@ -166,7 +166,7 @@ LABEL_MONO_CAPS   value         LABEL_MONO_CAPS   value         LABEL_MONO_CAPS 
 - Separator: 24px gap, no bullet.
 - Wraps to next line at breakpoint, never to a vertical list.
 
-This is the visual signature of the V2.0 hero ("CENTRO DE CUMPLIMIENTO · MAYO 2026 · 3 acciones pendientes"). Phase 2 promotes it from one-off to a shared pattern.
+This was the visual signature of the V2.0 hero ("CENTRO DE CUMPLIMIENTO · MAYO 2026 · 3 acciones pendientes"). Treat it as historical context, not as the locked landing-page target.
 
 ## Anti-patterns — codified ban list
 

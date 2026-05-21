@@ -63,7 +63,7 @@ The `taste` skill specifically vetoes anything that *"makes the screen feel more
 
 | Signal | Tag | Notes |
 |---|---|---|
-| Centered headline → dashboard preview card embedded immediately below the fold | **ADOPT** | Already shipped on `/` (the V2.0 hero). The "Centro de cumplimiento" preview card is exactly this pattern, executed correctly. |
+| Centered headline → dashboard preview card embedded immediately below the fold | **SUPERSEDED** | Historical V2.0 direction. The next landing pass should use real product screenshots/assets and richer product depth instead of treating the synthetic "Centro de cumplimiento" preview as final. |
 | Asymmetric headline layout (large headline left, supporting visual right, no center bias) | **ADOPT** | Already on `/`. Phase 4 extends the asymmetric register to `/login` and `/activate` without copying the layout literally. |
 | Feature-spotlight dual-column (text + supporting screenshot or illustration) | **TRANSLATE** | Use on a future `/about` or `/security` marketing surface. Not currently in scope for 2.x. |
 | Curated FAQ list with collapsible rows | **TRANSLATE** | Could land on a future Public security or compliance-documentation page. Not in scope for 2.x. |
@@ -109,7 +109,7 @@ The `taste` skill specifically vetoes anything that *"makes the screen feel more
 
 ## Phase 2 inputs derived from this map
 
-1. **Hero language is locked.** The V2.0 `/` page is the visual anchor. Every signal in this map gets translated into the same register before it lands.
+1. **Hero language is no longer locked.** The V2.0 `/` page is historical context, not the target for the next landing pass. Translate useful signals into the current external-design workflow.
 2. **Dashboard composition** changes shape:
    - Anchor signal (gauge or large-format chart) replaces the equal-card 4-up.
    - KPI strip becomes a varied-rhythm row (large, medium, medium, small) with sparklines where the trend is real signal.

@@ -223,7 +223,9 @@ Do not create these all at once. Let architecture-backed surfaces drive which co
 
 Motion should communicate state, not decoration.
 
-For interaction craft, use the project-local `emil-kowalski-design` skill as an additional lens. It should sharpen transitions, tactile states, and premium microinteractions without copying any designer's work or weakening CheckWise's compliance clarity.
+For interaction craft, prefer Motion, external design tools, and upstream
+`/impeccable`. Motion should sharpen transitions, tactile states, and premium
+microinteractions without weakening CheckWise's compliance clarity.
 
 Use motion for:
 
