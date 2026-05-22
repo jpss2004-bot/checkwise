@@ -221,21 +221,26 @@ _PROVIDER_CURRENT_STATE = ReportPreset(
 
 _PROVIDER_MISSING_DOCUMENTS = ReportPreset(
     id="provider-missing-documents",
-    title="Documentos faltantes",
+    title="Brechas de cumplimiento",
     description=(
         "Lista de obligaciones del periodo con evidencia pendiente, "
-        "agrupada por institución y prioridad."
+        "agrupada por institución, con motivo y siguiente acción."
     ),
     audience=ReportAudience.VENDOR_FACING,
     required_roles=(),
     recommended_prompt=(
-        "Genera un reporte de documentos faltantes para este proveedor. "
-        "Empieza SIEMPRE con un bloque compliance_state (semáforo + "
-        "conteos). Sigue con un bloque attention_list filtrado a estados "
-        "missing / in_review / uploaded y solo elementos por vencer en "
-        "los próximos 14 días — cada renglón muestra institución, "
-        "título, días al vencimiento y un botón para subir. Cierra con "
-        "un bloque prioritized_actions (3 tarjetas, filtrado a tipos "
+        "Genera un reporte de brechas de cumplimiento para este "
+        "proveedor — muestra exactamente por qué su expediente no está "
+        "al 100%. Empieza SIEMPRE con un bloque compliance_state "
+        "(semáforo + conteos). Sigue con un bloque attention_list con "
+        "``group_by_institution=true`` para que las brechas aparezcan "
+        "agrupadas bajo SAT / IMSS / INFONAVIT / STPS · REPSE — cada "
+        "renglón muestra estado, título, días al vencimiento y un "
+        "botón para subir. Aplica filtros amplios (incluye missing, "
+        "in_review, uploaded, rejected, needs_correction, "
+        "possible_mismatch, expired) para que el provider vea toda la "
+        "brecha, no solo lo urgente. Cierra con un bloque "
+        "prioritized_actions (3 tarjetas, filtrado a tipos "
         "complete_onboarding y upcoming) — NO uses ai_recommendation: "
         "las acciones provienen de la lista canónica y siempre llevan "
         "un botón para subir el documento."

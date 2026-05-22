@@ -64,6 +64,12 @@ interface AttentionListFilter {
 interface AttentionListConfig {
   filter?: AttentionListFilter;
   max_rows?: number;
+  /** When true, render items grouped under per-institution headings
+   *  instead of one flat list. Jorge feedback (2026-05-21, reports):
+   *  the provider wants to see *why* the expediente isn't 100%, with
+   *  brechas agrupadas por institución. The data shape stays flat —
+   *  the grouping is a pure render concern. */
+  group_by_institution?: boolean;
 }
 
 interface AttentionListData {
@@ -191,66 +197,123 @@ export function AttentionListBlock({
     );
   }
 
+  const groupByInstitution = block.config?.group_by_institution === true;
+
   return (
     <section className="space-y-2 py-2" data-block-type="attention_list">
       {filterChips}
-      <ul className="divide-y divide-[color:var(--border-subtle)] border-y border-[color:var(--border-subtle)]">
-        {items.map((item) => {
-          const meta = STATE_META[item.state] ?? STATE_META.missing;
-          const dueInfo = formatDue(item.due_in_days);
-          const dueClass =
-            dueInfo.tone === "red"
-              ? "text-[color:var(--state-red-fg,#991b1b)]"
-              : dueInfo.tone === "yellow"
-              ? "text-[color:var(--state-orange-fg,#9a3412)]"
-              : "text-[color:var(--text-tertiary)]";
-          const inst = INSTITUTION_LABEL[item.institution] ?? item.institution;
-          return (
-            <li
-              key={item.id}
-              className="flex flex-col gap-2 py-3 sm:flex-row sm:items-center sm:justify-between"
-            >
-              <div className="flex flex-wrap items-center gap-2">
-                <span
-                  className={`inline-flex items-center rounded-sm border px-1.5 py-[1px] text-[11px] font-medium uppercase tracking-[0.04em] ${TONE_CLASS[meta.tone]} print:hidden`}
-                >
-                  {meta.label}
-                </span>
-                <span className="sr-only print:not-sr-only print:mr-1">
-                  {meta.print}
-                </span>
-                <span className="inline-flex items-center rounded-sm border border-[color:var(--border-subtle)] bg-[color:var(--surface-muted,transparent)] px-1.5 py-[1px] text-[11px] font-medium uppercase tracking-[0.04em] text-[color:var(--text-secondary)]">
-                  {inst}
-                </span>
-                <span className="text-[13px] font-medium text-[color:var(--text-primary)]">
-                  {item.title}
-                </span>
-                <span className={`text-[12px] tabular-nums ${dueClass}`}>
-                  · {dueInfo.label}
-                </span>
-              </div>
-              <div className="flex items-center gap-2">
-                <a
-                  href={item.href}
-                  target="_blank"
-                  rel="noreferrer"
-                  className="inline-flex items-center gap-1 rounded-sm border border-[color:var(--border-strong,var(--border-subtle))] px-2 py-1 text-[12px] font-medium text-[color:var(--text-primary)] hover:bg-[color:var(--surface-hover)] focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-[color:var(--ring)] print:hidden"
-                >
-                  {STATE_CTA[item.state] ?? "Subir"}
-                </a>
-                <span className="sr-only print:not-sr-only print:text-[11px] print:text-[color:var(--text-tertiary)]">
-                  Acción: {STATE_CTA[item.state] ?? "Subir"} ({item.href})
-                </span>
-              </div>
-            </li>
-          );
-        })}
-      </ul>
+      {groupByInstitution ? (
+        <GroupedRows items={items} hideInstitutionChip />
+      ) : (
+        <ul className="divide-y divide-[color:var(--border-subtle)] border-y border-[color:var(--border-subtle)]">
+          {items.map((item) => (
+            <AttentionRow key={item.id} item={item} />
+          ))}
+        </ul>
+      )}
       <p className="text-[11px] text-[color:var(--text-tertiary)]">
         {items.length} de {data.total_before_filter} elementos
       </p>
       <FreshnessLabel fetchedAt={data.fetched_at} />
     </section>
+  );
+}
+
+function GroupedRows({
+  items,
+  hideInstitutionChip,
+}: {
+  items: AttentionItem[];
+  hideInstitutionChip?: boolean;
+}) {
+  // Preserve incoming order within each institution; the backend has
+  // already ranked items by urgency.
+  const groups = new Map<string, AttentionItem[]>();
+  for (const item of items) {
+    const key = item.institution || "otros";
+    const bucket = groups.get(key);
+    if (bucket) {
+      bucket.push(item);
+    } else {
+      groups.set(key, [item]);
+    }
+  }
+  const ordered = Array.from(groups.entries()).sort((a, b) => {
+    const la = INSTITUTION_LABEL[a[0]] ?? a[0];
+    const lb = INSTITUTION_LABEL[b[0]] ?? b[0];
+    return la.localeCompare(lb, "es-MX");
+  });
+  return (
+    <div className="space-y-4">
+      {ordered.map(([code, groupItems]) => (
+        <div key={code} className="space-y-1">
+          <h4 className="text-[11px] font-semibold uppercase tracking-[0.06em] text-[color:var(--text-secondary)]">
+            {INSTITUTION_LABEL[code] ?? code} · {groupItems.length}
+          </h4>
+          <ul className="divide-y divide-[color:var(--border-subtle)] border-y border-[color:var(--border-subtle)]">
+            {groupItems.map((item) => (
+              <AttentionRow
+                key={item.id}
+                item={item}
+                hideInstitutionChip={hideInstitutionChip}
+              />
+            ))}
+          </ul>
+        </div>
+      ))}
+    </div>
+  );
+}
+
+function AttentionRow({
+  item,
+  hideInstitutionChip,
+}: {
+  item: AttentionItem;
+  hideInstitutionChip?: boolean;
+}) {
+  const meta = STATE_META[item.state] ?? STATE_META.missing;
+  const dueInfo = formatDue(item.due_in_days);
+  const dueClass =
+    dueInfo.tone === "red"
+      ? "text-[color:var(--state-red-fg,#991b1b)]"
+      : dueInfo.tone === "yellow"
+        ? "text-[color:var(--state-orange-fg,#9a3412)]"
+        : "text-[color:var(--text-tertiary)]";
+  const inst = INSTITUTION_LABEL[item.institution] ?? item.institution;
+  return (
+    <li className="flex flex-col gap-2 py-3 sm:flex-row sm:items-center sm:justify-between">
+      <div className="flex flex-wrap items-center gap-2">
+        <span
+          className={`inline-flex items-center rounded-sm border px-1.5 py-[1px] text-[11px] font-medium uppercase tracking-[0.04em] ${TONE_CLASS[meta.tone]} print:hidden`}
+        >
+          {meta.label}
+        </span>
+        <span className="sr-only print:not-sr-only print:mr-1">{meta.print}</span>
+        {!hideInstitutionChip ? (
+          <span className="inline-flex items-center rounded-sm border border-[color:var(--border-subtle)] bg-[color:var(--surface-muted,transparent)] px-1.5 py-[1px] text-[11px] font-medium uppercase tracking-[0.04em] text-[color:var(--text-secondary)]">
+            {inst}
+          </span>
+        ) : null}
+        <span className="text-[13px] font-medium text-[color:var(--text-primary)]">
+          {item.title}
+        </span>
+        <span className={`text-[12px] tabular-nums ${dueClass}`}>· {dueInfo.label}</span>
+      </div>
+      <div className="flex items-center gap-2">
+        <a
+          href={item.href}
+          target="_blank"
+          rel="noreferrer"
+          className="inline-flex items-center gap-1 rounded-sm border border-[color:var(--border-strong,var(--border-subtle))] px-2 py-1 text-[12px] font-medium text-[color:var(--text-primary)] hover:bg-[color:var(--surface-hover)] focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-[color:var(--ring)] print:hidden"
+        >
+          {STATE_CTA[item.state] ?? "Subir"}
+        </a>
+        <span className="sr-only print:not-sr-only print:text-[11px] print:text-[color:var(--text-tertiary)]">
+          Acción: {STATE_CTA[item.state] ?? "Subir"} ({item.href})
+        </span>
+      </div>
+    </li>
   );
 }
 
