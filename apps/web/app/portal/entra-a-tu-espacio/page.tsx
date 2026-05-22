@@ -222,8 +222,8 @@ function EntraATuEspacioInner({ session }: { session: PortalSession }) {
               </h2>
               <p className="text-xs text-[color:var(--text-secondary)]">
                 Edita estos campos cuando quieras. Para corregir RFC,
-                razón social o tu correo registrado, usa "Solicitar
-                cambio".
+                razón social o tu correo registrado, usa &quot;Solicitar
+                cambio&quot;.
               </p>
             </div>
           </header>

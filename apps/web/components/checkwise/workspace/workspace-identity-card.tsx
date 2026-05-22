@@ -114,7 +114,7 @@ export function WorkspaceIdentityCard({
         <p className="ml-auto inline-flex items-center gap-1.5 text-[11px] text-[color:var(--text-tertiary)]">
           <PaperPlaneTilt className="h-3 w-3" weight="bold" aria-hidden="true" />
           Para corregir RFC, razón social o datos de contacto, usa la
-          sección "Reportar información incorrecta".
+          sección &quot;Reportar información incorrecta&quot;.
         </p>
       </footer>
 

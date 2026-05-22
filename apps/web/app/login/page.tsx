@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState, type FormEvent } from "react";
+import { Suspense, useEffect, useState, type FormEvent } from "react";
 import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
 import { ArrowLeft, SignIn, Warning } from "@phosphor-icons/react";
@@ -34,6 +34,20 @@ import {
  *   5. otherwise → /portal/entra-a-tu-espacio
  */
 export default function LoginPage() {
+  // Next 15 requires any component reading useSearchParams to live
+  // under a Suspense boundary so the page can be statically prerendered
+  // without bailing out to client-side rendering. The boundary
+  // bridges the prerender — the boot effect inside LoginInner still
+  // gates on bootChecked, so users won't see the form flash either
+  // way.
+  return (
+    <Suspense fallback={<LoginSkeleton />}>
+      <LoginInner />
+    </Suspense>
+  );
+}
+
+function LoginInner() {
   const router = useRouter();
   const searchParams = useSearchParams();
   const nextParam = sanitizeNext(searchParams?.get("next"));
