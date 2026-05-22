@@ -3149,6 +3149,20 @@ class WiseStateDigestIn(BaseModel):
     upcoming_deadline_titles: list[str] = Field(default_factory=list, max_length=10)
 
 
+class WisePageContextIn(BaseModel):
+    """Phase 4 (2026-05-21) — page context shipped by the dock so the
+    LLM knows which portal screen the user is on + what task they're
+    in the middle of. Every field is optional so a page that doesn't
+    have a specific task just sends ``{route, page_label}``."""
+
+    route: str = Field(..., max_length=200)
+    page_label: str = Field(..., max_length=80)
+    requirement_code: str | None = Field(default=None, max_length=120)
+    requirement_name: str | None = Field(default=None, max_length=240)
+    submission_id: str | None = Field(default=None, max_length=80)
+    period_key: str | None = Field(default=None, max_length=20)
+
+
 class WiseAskRequest(BaseModel):
     prompt: str = Field(..., max_length=500)
     ctas: list[WiseAskCtaIn] = Field(default_factory=list, max_length=20)
@@ -3158,6 +3172,10 @@ class WiseAskRequest(BaseModel):
     # contents. Remove after a transition window when no client is
     # sending the field anymore.
     digest: WiseStateDigestIn | None = None
+    # Phase 4 (2026-05-21): per-page context so Wise can be aware of
+    # which screen the user is on + what specific task they're
+    # working on. Optional for backward compat.
+    page_context: WisePageContextIn | None = None
 
 
 class WiseAskResponse(BaseModel):
@@ -3189,7 +3207,7 @@ def ask_wise_endpoint(
 ) -> WiseAskResponse:
     _ = workspace_id  # tenant guard already enforced by dependency
 
-    from app.services.wise.ai import WiseCta, ask_wise
+    from app.services.wise.ai import WiseCta, WisePageContext, ask_wise
     from app.services.wise.context import (
         build_static_context,
         build_workspace_context,
@@ -3206,11 +3224,22 @@ def ask_wise_endpoint(
         WiseCta(id=c.id, label=c.label, href=c.href, description=c.description)
         for c in payload.ctas
     ]
+    page_ctx: WisePageContext | None = None
+    if payload.page_context is not None:
+        page_ctx = WisePageContext(
+            route=payload.page_context.route,
+            page_label=payload.page_context.page_label,
+            requirement_code=payload.page_context.requirement_code,
+            requirement_name=payload.page_context.requirement_name,
+            submission_id=payload.page_context.submission_id,
+            period_key=payload.page_context.period_key,
+        )
     result = ask_wise(
         prompt=payload.prompt,
         workspace=workspace_ctx,
         static=static_ctx,
         ctas=ctas,
+        page_context=page_ctx,
     )
     return WiseAskResponse(
         body=result.body,

@@ -72,6 +72,69 @@ class WiseCta:
     description: str
 
 
+# Phase 4 (2026-05-21) — always-available navigation CTAs. Injected by
+# the endpoint into every ``/wise/ask`` call so the model can attach a
+# clickable button instead of writing a literal path string like
+# ``/portal/onboarding`` into its reply (reported by a tester after
+# Wise told them "Todo está en /portal/onboarding"). The ``nav-`` id
+# prefix lets the frontend distinguish them from contextual CTAs.
+NAVIGATION_CTAS: tuple[WiseCta, ...] = (
+    WiseCta(
+        id="nav-dashboard",
+        label="Ir al dashboard",
+        href="/portal/dashboard",
+        description="Resumen de cumplimiento + próximos pasos.",
+    ),
+    WiseCta(
+        id="nav-onboarding",
+        label="Ver expediente inicial",
+        href="/portal/onboarding",
+        description="Checklist del expediente que se sube una vez al darse de alta.",
+    ),
+    WiseCta(
+        id="nav-calendar",
+        label="Abrir calendario REPSE",
+        href="/portal/calendar",
+        description="Obligaciones recurrentes del año, mes por mes.",
+    ),
+    WiseCta(
+        id="nav-upload",
+        label="Subir un documento",
+        href="/portal/upload",
+        description="Formulario de carga guiada para resolver una obligación.",
+    ),
+    WiseCta(
+        id="nav-submissions",
+        label="Ver mis cargas",
+        href="/portal/submissions",
+        description="Listado e historial de cada documento subido.",
+    ),
+    WiseCta(
+        id="nav-reports",
+        label="Ver reportes",
+        href="/portal/reports",
+        description="Reportes ejecutivos generados por CheckWise.",
+    ),
+)
+
+
+@dataclass(frozen=True)
+class WisePageContext:
+    """Phase 4 — where the user is right now and what they're doing.
+
+    Surfaced from ``usePathname()`` + URL search params on the dock.
+    Every field is optional so a portal page that doesn't have extra
+    context can just supply the ``route`` + ``page_label``.
+    """
+
+    route: str  # e.g. "/portal/upload"
+    page_label: str  # e.g. "Cargar documento"
+    requirement_code: str | None = None
+    requirement_name: str | None = None
+    submission_id: str | None = None
+    period_key: str | None = None
+
+
 @dataclass(frozen=True)
 class WiseAskResult:
     body: str
@@ -89,11 +152,41 @@ Estilo obligatorio:
 - Máximo 3 oraciones cortas, salvo cuando el proveedor pida una explicación de un documento o concepto — en ese caso, puedes extenderte hasta 5 oraciones y, si ayuda, usar viñetas cortas.
 - Directo y útil; nada de cortesías largas ni descargos.
 - Cuando la pregunta sea ambigua, asume la interpretación más operativa (qué hacer ahora).
-- Si necesitas mandar al usuario a otra pantalla, usa SIEMPRE el campo ``cta_id`` del tool y elige uno de los IDs de la lista que se te entrega. **Nunca inventes URLs, IDs, ni nombres de documentos.** Si ningún CTA aplica, deja ``cta_id`` vacío.
-- Nunca inventes datos del usuario (números, fechas, RFCs, archivos). Cita siempre el contexto. Si el dato no está disponible, dilo: "no tengo ese dato a la mano".
+- **NUNCA escribas rutas literales como "/portal/onboarding" o "/portal/calendar" en el cuerpo de la respuesta.** Cuando quieras mandar al usuario a una pantalla, atacha SIEMPRE el ``cta_id`` correspondiente del listado de CTAs y describe la pantalla por su nombre legible (e.g. "tu expediente inicial", "el calendario REPSE"). El dock renderiza un botón clickeable a partir del ``cta_id``; el usuario no debe nunca tener que copiar/pegar una URL.
+- Si la respuesta no se beneficia de un CTA, déjalo vacío. Si más de un CTA aplica, elige el más útil para la siguiente acción del usuario.
+- Sé consciente del contexto de página: si el bloque "Página actual del usuario" indica que ya está en la pantalla a la que llevarías, no atachés ese mismo CTA — responde sobre lo que hay frente al usuario.
+- Nunca inventes datos del usuario (números, fechas, RFCs, archivos) ni ``cta_id`` que no aparezcan en el listado. Si el dato no está disponible, dilo: "no tengo ese dato a la mano".
 - Si la pregunta es ajena al cumplimiento REPSE o a CheckWise (chistes, política, IA general), responde brevemente que tu rol es ayudar con el cumplimiento y sugiere reformular.
 
 Llama SIEMPRE al tool ``respond_to_provider`` con ``body`` (la respuesta) y opcionalmente ``cta_id``. No respondas con texto libre fuera del tool."""
+
+
+def _build_page_block(ctx: WisePageContext) -> str:
+    """Render the per-request 'where is the user right now' block.
+
+    Surfaces the route + a Spanish page label and, when present, the
+    specific task the user is on (the requirement they're uploading,
+    the submission they're inspecting, the period they're filtering
+    the calendar by). Lets Wise answer questions like "¿qué es esto
+    que estoy viendo?" or "¿qué pongo aquí?" without the user
+    re-stating which screen they're on.
+    """
+    lines = [
+        "# Página actual del usuario",
+        "",
+        f"- Ruta: `{ctx.route}`",
+        f"- Pantalla: {ctx.page_label}",
+    ]
+    if ctx.requirement_code or ctx.requirement_name:
+        descriptor = ctx.requirement_name or ctx.requirement_code or ""
+        if ctx.requirement_code and ctx.requirement_name:
+            descriptor = f"{ctx.requirement_name} (código `{ctx.requirement_code}`)"
+        lines.append(f"- Documento en contexto: {descriptor}")
+    if ctx.period_key:
+        lines.append(f"- Periodo en contexto: {ctx.period_key}")
+    if ctx.submission_id:
+        lines.append(f"- Carga en contexto: `{ctx.submission_id}`")
+    return "\n".join(lines)
 
 
 def _build_cta_block(ctas: list[WiseCta]) -> str:
@@ -142,6 +235,7 @@ def ask_wise(
     workspace: WiseWorkspaceContext,
     static: WiseStaticContext,
     ctas: list[WiseCta],
+    page_context: WisePageContext | None = None,
     api_key: str | None = None,
     client: Anthropic | None = None,
 ) -> WiseAskResult:
@@ -186,6 +280,14 @@ def ask_wise(
             "a soporte si necesitas algo puntual."
         )
 
+    # Always merge in the navigation CTAs so the model can hand the
+    # user a button instead of writing a path string. Contextual
+    # CTAs (dashboard suggested-actions, upcoming-deadlines) come
+    # first in the list so the model prefers them when relevant.
+    # ``cta_id`` collisions are impossible because nav ids carry a
+    # ``nav-`` prefix and contextual ids use ``act-``/``due-``.
+    merged_ctas = [*ctas, *NAVIGATION_CTAS]
+
     try:
         if client is None:
             client = Anthropic(api_key=key)
@@ -204,9 +306,13 @@ def ask_wise(
             },
         ]
 
+        page_block = (
+            _build_page_block(page_context) + "\n\n" if page_context else ""
+        )
         user_message = (
+            f"{page_block}"
             f"{render_workspace_block(workspace)}\n\n"
-            f"{_build_cta_block(ctas)}\n\n"
+            f"{_build_cta_block(merged_ctas)}\n\n"
             f"# Pregunta del proveedor\n{prompt.strip()}"
         )
 
@@ -229,7 +335,7 @@ def ask_wise(
             "Algo falló de mi lado. Intenta de nuevo en un momento."
         )
 
-    return _parse_tool_response(response, ctas)
+    return _parse_tool_response(response, merged_ctas)
 
 
 def _parse_tool_response(response, ctas: list[WiseCta]) -> WiseAskResult:

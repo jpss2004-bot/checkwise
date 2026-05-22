@@ -37,7 +37,9 @@ from app.models import (
 )
 from app.services.auth import hash_password, issue_access_token
 from app.services.wise.ai import (
+    NAVIGATION_CTAS,
     WiseCta,
+    WisePageContext,
     ask_wise,
 )
 from app.services.wise.context import (
@@ -542,3 +544,141 @@ def test_ask_endpoint_rejects_too_long_prompt_at_validation(
         },
     )
     assert response.status_code == 422
+
+
+# ─── Phase 4: navigation CTAs + page context ───────────────────────
+
+
+def test_service_merges_navigation_ctas_into_allowed_list(
+    api_client: TestClient,
+) -> None:
+    """The service must inject ``NAVIGATION_CTAS`` into every call
+    so the model can attach a button to any portal page instead of
+    writing a literal path string in the reply. Reported by a
+    tester after Wise said "Todo está en /portal/onboarding"
+    instead of giving them a clickable link."""
+    ws = _setup_workspace(api_client)
+    factory = api_client.app.state.testing_session  # type: ignore[attr-defined]
+    db: Session = factory()
+    try:
+        workspace = db.get(ProviderWorkspace, ws["workspace_id"])
+        assert workspace is not None
+        workspace_ctx = build_workspace_context(db, workspace)
+    finally:
+        db.close()
+    static_ctx = build_static_context()
+    captured: dict = {}
+
+    class FakeClient:
+        def __init__(self) -> None:
+            def create(**kwargs):
+                captured.update(kwargs)
+                # Model picks the nav CTA the user needs.
+                return _stub_anthropic(body="Ve al expediente.", cta_id="nav-onboarding")
+
+            self.messages = SimpleNamespace(create=create)
+
+    result = ask_wise(
+        prompt="por dónde empiezo?",
+        workspace=workspace_ctx,
+        static=static_ctx,
+        ctas=[],  # caller passes no contextual CTAs; nav must still work
+        client=FakeClient(),  # type: ignore[arg-type]
+    )
+    assert result.source == "llm"
+    assert result.cta_id == "nav-onboarding"
+    assert result.cta_href == "/portal/onboarding"
+    # The user-message block sent to the model must enumerate every
+    # nav CTA id so the model has them as options.
+    messages = captured.get("messages") or []
+    assert messages
+    user_content = messages[0].get("content", "")
+    for nav in NAVIGATION_CTAS:
+        assert nav.id in user_content, (
+            f"nav CTA {nav.id!r} missing from prompt"
+        )
+
+
+def test_service_renders_page_context_when_provided(
+    api_client: TestClient,
+) -> None:
+    """When the dock ships a ``page_context``, the prompt must
+    surface the route + page label + any specific task descriptor
+    (requirement, submission, period) so Wise can answer "qué pongo
+    aquí?" without the user re-stating where they are."""
+    ws = _setup_workspace(api_client)
+    factory = api_client.app.state.testing_session  # type: ignore[attr-defined]
+    db: Session = factory()
+    try:
+        workspace = db.get(ProviderWorkspace, ws["workspace_id"])
+        assert workspace is not None
+        workspace_ctx = build_workspace_context(db, workspace)
+    finally:
+        db.close()
+    static_ctx = build_static_context()
+    captured: dict = {}
+
+    class FakeClient:
+        def __init__(self) -> None:
+            def create(**kwargs):
+                captured.update(kwargs)
+                return _stub_anthropic(body="OK", cta_id=None)
+
+            self.messages = SimpleNamespace(create=create)
+
+    page = WisePageContext(
+        route="/portal/upload",
+        page_label="Cargar documento",
+        requirement_code="REC-INFONAVIT-2026-03-comprobante-de-pago-bancario",
+        requirement_name="Acuse INFONAVIT B1 2026",
+        period_key="2026-B1",
+    )
+    ask_wise(
+        prompt="qué pongo aquí?",
+        workspace=workspace_ctx,
+        static=static_ctx,
+        ctas=[],
+        page_context=page,
+        client=FakeClient(),  # type: ignore[arg-type]
+    )
+    user_content = captured["messages"][0]["content"]
+    assert "Página actual del usuario" in user_content
+    assert "/portal/upload" in user_content
+    assert "Cargar documento" in user_content
+    assert "Acuse INFONAVIT B1 2026" in user_content
+    assert "2026-B1" in user_content
+
+
+def test_ask_endpoint_accepts_page_context(api_client: TestClient) -> None:
+    """End-to-end: dock ships page_context in the request and the
+    endpoint plumbs it through to the service."""
+    ws = _setup_workspace(api_client)
+
+    captured: dict = {}
+
+    class FakeClient:
+        def __init__(self, **_: object) -> None:
+            def create(**kwargs):
+                captured.update(kwargs)
+                return _stub_anthropic(body="OK", cta_id=None)
+
+            self.messages = SimpleNamespace(create=create)
+
+    with patch("app.services.wise.ai.Anthropic", FakeClient), patch.object(
+        settings, "ANTHROPIC_API_KEY", "test-key"
+    ):
+        response = api_client.post(
+            f"/api/v1/portal/workspaces/{ws['workspace_id']}/wise/ask",
+            json={
+                "prompt": "qué hay aquí?",
+                "ctas": [],
+                "page_context": {
+                    "route": "/portal/calendar",
+                    "page_label": "Calendario REPSE",
+                },
+            },
+        )
+    assert response.status_code == 200, response.text
+    user_content = captured["messages"][0]["content"]
+    assert "/portal/calendar" in user_content
+    assert "Calendario REPSE" in user_content
