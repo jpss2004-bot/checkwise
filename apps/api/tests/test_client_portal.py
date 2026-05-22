@@ -513,6 +513,79 @@ def test_client_submissions_filters_by_vendor_status_period(
     assert mismatched["items"] == []
 
 
+def test_client_submissions_filters_by_institution(
+    api_client: TestClient, db_factory
+) -> None:
+    """Phase 3 / Slice 3A — the new ``?institution=`` filter scopes the
+    response to submissions whose requirement maps to that institution
+    (sat / imss / infonavit / stps_repse / interno_cliente). Each
+    ClientSubmissionItem also carries its institution code so the
+    client portal table can render an institution column without a
+    follow-up lookup.
+    """
+    client_id = _seed_client(db_factory)
+    _, ws_id = _seed_vendor_with_workspace(db_factory, client_id=client_id)
+    # Two submissions on the same workspace under different
+    # institutions. ``_seed_submission_for_workspace`` already accepts
+    # an institution_code override.
+    _seed_submission_for_workspace(
+        api_client,
+        db_factory,
+        ws_id,
+        requirement_code="REC-IMSS-2026-05-cuotas-obrero-patronales",
+        period_key="2026-M04",
+        period_code="2026-M04",
+        institution_code="imss",
+        load_type="mensual",
+        requirement_name="Cuotas obrero patronales",
+    )
+    _seed_submission_for_workspace(
+        api_client,
+        db_factory,
+        ws_id,
+        requirement_code="REC-SAT-2026-05-declaracion-iva",
+        period_key="2026-M04",
+        period_code="2026-M04",
+        institution_code="sat",
+        load_type="mensual",
+        requirement_name="Declaración IVA",
+    )
+    _, email, pw = _seed_user_with_role(
+        db_factory, role="client_admin", client_id=client_id, email_prefix="ca"
+    )
+    token = _login(api_client, email, pw)
+
+    # No filter → both rows back, each carrying its institution.
+    all_resp = api_client.get(
+        "/api/v1/client/submissions", headers=_h(token)
+    ).json()
+    institutions = {item["institution"] for item in all_resp["items"]}
+    assert institutions == {"imss", "sat"}
+
+    # Filter by ``imss`` → only the IMSS row.
+    imss_only = api_client.get(
+        "/api/v1/client/submissions?institution=imss", headers=_h(token)
+    ).json()
+    assert len(imss_only["items"]) == 1
+    assert imss_only["items"][0]["institution"] == "imss"
+    assert imss_only["items"][0]["requirement_name"] == "Cuotas obrero patronales"
+
+    # Filter by ``sat`` → only the SAT row.
+    sat_only = api_client.get(
+        "/api/v1/client/submissions?institution=sat", headers=_h(token)
+    ).json()
+    assert len(sat_only["items"]) == 1
+    assert sat_only["items"][0]["institution"] == "sat"
+
+    # Filter by an unknown code → empty (no 400; future catalog
+    # additions can ship without breaking the client portal).
+    unknown = api_client.get(
+        "/api/v1/client/submissions?institution=does_not_exist",
+        headers=_h(token),
+    ).json()
+    assert unknown["items"] == []
+
+
 def test_client_submissions_carries_replacement_lineage(
     api_client: TestClient, db_factory
 ) -> None:

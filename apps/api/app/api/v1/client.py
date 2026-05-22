@@ -71,6 +71,7 @@ from app.models import (
     Client,
     ClientNotification,
     Document,
+    Institution,
     Membership,
     Organization,
     ProviderWorkspace,
@@ -362,6 +363,12 @@ class ClientSubmissionItem(BaseModel):
     vendor_name: str
     requirement_code: str | None
     requirement_name: str | None
+    # Phase 3 / Slice 3A — institution code (``sat``, ``imss``,
+    # ``infonavit``, ``stps_repse``, ``interno_cliente``). Surfaced so
+    # the client portal table can show an institution column AND so
+    # the new ``?institution=`` filter on this endpoint stays
+    # round-trippable (filter by value, render the same value back).
+    institution: str | None
     period_key: str | None
     status: str
     filename: str | None
@@ -1022,6 +1029,11 @@ def client_submissions(
     status_filter: Annotated[str | None, Query(alias="status")] = None,
     requirement_code: str | None = None,
     period_key: str | None = None,
+    # Phase 3 / Slice 3A — institution code filter (``sat``, ``imss``,
+    # ``infonavit``, ``stps_repse``, ``interno_cliente``). Unknown
+    # codes return an empty result set rather than 400 so a future
+    # catalog addition can ship before this code is updated.
+    institution: str | None = None,
     limit: Annotated[int, Query(ge=1, le=500)] = 100,
 ) -> ClientSubmissionsResponse:
     # Stage 2.5 (BL-T7) — reject impossible periods at the wire. Same
@@ -1048,6 +1060,20 @@ def client_submissions(
         filters.append(Submission.requirement_code == requirement_code)
     if period_key:
         filters.append(Submission.period_key == period_key)
+    if institution:
+        # Resolve via the FK rather than relying on a relationship
+        # property so the filter stays a single indexed comparison.
+        # Unknown codes naturally yield zero rows (no Institution row
+        # with that code → no submission with that institution_id).
+        inst_id = db.scalar(
+            select(Institution.id).where(Institution.code == institution)
+        )
+        if inst_id is None:
+            # Force-empty result without flagging the input as invalid;
+            # a typo / future catalog code stays a no-op rather than 400.
+            filters.append(Submission.id == "__nonexistent__")
+        else:
+            filters.append(Submission.institution_id == inst_id)
 
     rows = list(
         db.scalars(
@@ -1087,6 +1113,9 @@ def client_submissions(
                 requirement_code=sub.requirement_code,
                 requirement_name=(
                     sub.requirement.name if sub.requirement else None
+                ),
+                institution=(
+                    sub.institution.code if sub.institution else None
                 ),
                 period_key=sub.period_key,
                 status=sub.status,

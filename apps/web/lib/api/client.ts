@@ -226,6 +226,12 @@ export type ClientSubmissionItem = {
   vendor_name: string;
   requirement_code: string | null;
   requirement_name: string | null;
+  /** Phase 3 / Slice 3A — institution code (``sat``, ``imss``,
+   *  ``infonavit``, ``stps_repse``, ``interno_cliente``). Surfaced so
+   *  the client portal table can render an institution column AND so
+   *  the new ``?institution=`` filter on this endpoint stays
+   *  round-trippable. */
+  institution: string | null;
   period_key: string | null;
   status: string;
   filename: string | null;
@@ -359,6 +365,10 @@ export async function listClientSubmissions(params?: {
   status?: string;
   requirement_code?: string;
   period_key?: string;
+  /** Phase 3 / Slice 3A — institution code filter. Pass the canonical
+   *  lowercase code (``sat`` / ``imss`` / ``infonavit`` / ``stps_repse``
+   *  / ``interno_cliente``). Unknown codes return an empty list. */
+  institution?: string;
   limit?: number;
 }): Promise<ClientSubmissionsResponse> {
   return fetchJson<ClientSubmissionsResponse>(
