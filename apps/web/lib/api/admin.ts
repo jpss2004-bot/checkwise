@@ -605,6 +605,78 @@ export async function updateContactRequestStatus(
 }
 
 // ---------------------------------------------------------------------------
+// Provider correction requests (Stage 2.7-a admin triage)
+// ---------------------------------------------------------------------------
+
+export type CorrectionRequestStatus = "pending" | "approved" | "rejected";
+
+export interface AdminCorrectionRequest {
+  id: string;
+  status: CorrectionRequestStatus;
+  workspace_id: string;
+  vendor_id: string | null;
+  vendor_name: string | null;
+  vendor_rfc: string | null;
+  client_id: string | null;
+  client_name: string | null;
+  user_id: string;
+  user_email: string | null;
+  user_name: string | null;
+  field: string;
+  current_value: string;
+  proposed_value: string;
+  reason: string;
+  message: string | null;
+  submitted_at: string;
+  resolved_at: string | null;
+  resolved_by_user_id: string | null;
+  resolution_note: string | null;
+}
+
+export interface AdminCorrectionRequestList {
+  items: AdminCorrectionRequest[];
+  total: number;
+  limit: number;
+  offset: number;
+}
+
+export async function listCorrectionRequests(params?: {
+  status?: CorrectionRequestStatus;
+  limit?: number;
+  offset?: number;
+}): Promise<AdminCorrectionRequestList> {
+  const qs = new URLSearchParams();
+  for (const [key, value] of Object.entries(params ?? {})) {
+    if (value === undefined || value === null) continue;
+    const asString = String(value);
+    if (!asString) continue;
+    qs.set(key, asString);
+  }
+  const suffix = qs.toString() ? `?${qs.toString()}` : "";
+  return fetchJson(`/api/v1/admin/correction-requests${suffix}`);
+}
+
+export async function approveCorrectionRequest(
+  id: string,
+  note?: string,
+): Promise<AdminCorrectionRequest> {
+  return fetchJson(`/api/v1/admin/correction-requests/${id}/approve`, {
+    method: "POST",
+    body: JSON.stringify({ note: note?.trim() || null }),
+  });
+}
+
+export async function rejectCorrectionRequest(
+  id: string,
+  note?: string,
+): Promise<AdminCorrectionRequest> {
+  return fetchJson(`/api/v1/admin/correction-requests/${id}/reject`, {
+    method: "POST",
+    body: JSON.stringify({ note: note?.trim() || null }),
+  });
+}
+
+// ---------------------------------------------------------------------------
 // Feedback reports (bug + improvement reports from the Reportar launcher)
 // ---------------------------------------------------------------------------
 

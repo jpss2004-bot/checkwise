@@ -34,7 +34,7 @@ import unicodedata
 import zipfile
 from datetime import date, datetime
 from pathlib import Path
-from typing import Annotated, Literal
+from typing import Annotated, Final, Literal
 from xml.etree import ElementTree as ET
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
@@ -67,6 +67,7 @@ from app.models import (
     Requirement,
     RequirementVersion,
     Submission,
+    User,
     ValidationEvent,
     Vendor,
 )
@@ -138,6 +139,7 @@ def _vendor_to_dict(row: Vendor) -> dict:
         "rfc": row.rfc,
         "contact_name": row.contact_name,
         "contact_email": row.contact_email,
+        "contact_phone": row.contact_phone,
         "repse_id": row.repse_id,
         "persona_type": row.persona_type,
         "status": row.status,
@@ -1027,6 +1029,329 @@ def update_contact_request_status(
     db.commit()
     db.refresh(row)
     return _contact_to_dict(row)
+
+
+# ---------------------------------------------------------------------------
+# Provider correction-request triage (Stage 2.7-a admin approval flow)
+#
+# Provider-side submissions land as audit_log rows with
+# ``action='correction_request.submitted'``. Admins read them here,
+# approve (auto-apply to Vendor.contact_{name|email|phone}) or reject.
+# Resolution is tracked by mutating the original row's
+# ``event_metadata.status`` AND writing a sibling audit_log row so the
+# audit trail captures who decided what and when.
+# ---------------------------------------------------------------------------
+
+
+_CORRECTION_FIELD_TO_VENDOR_COLUMN: Final[dict[str, str]] = {
+    "contact_email": "contact_email",
+    "contact_phone": "contact_phone",
+    "contact_name": "contact_name",
+}
+
+
+class CorrectionRequestAdminItem(BaseModel):
+    id: str
+    status: Literal["pending", "approved", "rejected"]
+    workspace_id: str
+    vendor_id: str | None
+    vendor_name: str | None
+    vendor_rfc: str | None
+    client_id: str | None
+    client_name: str | None
+    user_id: str
+    user_email: str | None
+    user_name: str | None
+    field: str
+    current_value: str
+    proposed_value: str
+    reason: str
+    message: str | None
+    submitted_at: datetime
+    resolved_at: datetime | None = None
+    resolved_by_user_id: str | None = None
+    resolution_note: str | None = None
+
+
+class CorrectionRequestList(BaseModel):
+    items: list[CorrectionRequestAdminItem]
+    total: int
+    limit: int
+    offset: int
+
+
+class CorrectionRequestResolution(BaseModel):
+    note: str | None = Field(default=None, max_length=2000)
+
+
+def _correction_row_to_item(
+    row: AuditLog,
+    *,
+    vendor: Vendor | None,
+    client: Client | None,
+    user: User | None,
+) -> CorrectionRequestAdminItem:
+    meta = row.event_metadata or {}
+    before = row.before or {}
+    after = row.after or {}
+    raw_status = meta.get("status", "pending")
+    status_val: Literal["pending", "approved", "rejected"] = (
+        raw_status if raw_status in ("pending", "approved", "rejected") else "pending"
+    )
+    return CorrectionRequestAdminItem(
+        id=row.id,
+        status=status_val,
+        workspace_id=row.entity_id,
+        vendor_id=vendor.id if vendor else None,
+        vendor_name=vendor.name if vendor else None,
+        vendor_rfc=vendor.rfc if vendor else None,
+        client_id=client.id if client else None,
+        client_name=client.name if client else None,
+        user_id=row.actor_id or "",
+        user_email=(meta.get("user_email") if isinstance(meta, dict) else None)
+        or (user.email if user else None),
+        user_name=user.full_name if user else None,
+        field=str(before.get("field") or after.get("field") or ""),
+        current_value=str(before.get("value") or ""),
+        proposed_value=str(after.get("value") or ""),
+        reason=str(meta.get("reason") or ""),
+        message=meta.get("message"),
+        submitted_at=row.created_at,
+        resolved_at=(
+            datetime.fromisoformat(meta["resolved_at"])
+            if isinstance(meta.get("resolved_at"), str)
+            else None
+        ),
+        resolved_by_user_id=meta.get("resolved_by_user_id"),
+        resolution_note=meta.get("resolution_note"),
+    )
+
+
+def _load_correction_context(
+    db: Session, row: AuditLog
+) -> tuple[Vendor | None, Client | None, User | None]:
+    """Look up the workspace -> vendor + client + actor user for an audit row.
+
+    ``row.entity_id`` is the workspace_id. The workspace is the only
+    record-level link to the vendor (and through it, the client). Any
+    lookup that fails returns None so the list endpoint stays robust
+    against an orphaned correction request.
+    """
+    workspace = db.get(ProviderWorkspace, row.entity_id) if row.entity_id else None
+    vendor = workspace.vendor if workspace else None
+    client = workspace.client if workspace else None
+    user = db.get(User, row.actor_id) if row.actor_id else None
+    return vendor, client, user
+
+
+def _get_correction_row_or_404(db: Session, request_id: str) -> AuditLog:
+    row = db.get(AuditLog, request_id)
+    if row is None or row.action != "correction_request.submitted":
+        raise HTTPException(
+            status.HTTP_404_NOT_FOUND,
+            detail="Solicitud de corrección no encontrada.",
+        )
+    return row
+
+
+@router.get("/correction-requests", response_model=CorrectionRequestList)
+def list_correction_requests(
+    db: DbSession,
+    current: AdminUser,
+    status_filter: Annotated[
+        Literal["pending", "approved", "rejected"] | None,
+        Query(alias="status"),
+    ] = None,
+    limit: Annotated[int, Query(ge=1, le=200)] = 50,
+    offset: Annotated[int, Query(ge=0)] = 0,
+) -> CorrectionRequestList:
+    """List provider correction requests, newest first.
+
+    Reads ``audit_log`` rows with ``action='correction_request.submitted'``
+    and joins the workspace -> vendor + client + actor user for the
+    admin UI. Status filtering happens in Python against
+    ``event_metadata.status`` because JSON-column WHERE clauses are not
+    portable across SQLite (tests) and Postgres (prod). The dataset is
+    small enough that the in-memory filter is fine.
+    """
+    _ = current
+    stmt = (
+        select(AuditLog)
+        .where(AuditLog.action == "correction_request.submitted")
+        .order_by(AuditLog.created_at.desc())
+    )
+    rows = list(db.scalars(stmt))
+
+    def _row_status(r: AuditLog) -> str:
+        meta = r.event_metadata or {}
+        return meta.get("status", "pending") if isinstance(meta, dict) else "pending"
+
+    if status_filter:
+        rows = [r for r in rows if _row_status(r) == status_filter]
+    total = len(rows)
+    page = rows[offset : offset + limit]
+
+    items: list[CorrectionRequestAdminItem] = []
+    for row in page:
+        vendor, client, user = _load_correction_context(db, row)
+        items.append(
+            _correction_row_to_item(row, vendor=vendor, client=client, user=user)
+        )
+
+    return CorrectionRequestList(
+        items=items, total=total, limit=limit, offset=offset
+    )
+
+
+def _resolve_correction(
+    db: Session,
+    *,
+    current: CurrentUser,
+    row: AuditLog,
+    decision: Literal["approved", "rejected"],
+    note: str | None,
+) -> CorrectionRequestAdminItem:
+    """Shared resolver for approve / reject. Mutates the original
+    audit row's event_metadata to record the decision and writes a
+    sibling audit row so the audit explorer can surface the decision
+    independently of the submission row."""
+
+    meta = dict(row.event_metadata or {})
+    if meta.get("status") in ("approved", "rejected"):
+        # Idempotent — return current state without re-applying.
+        vendor, client, user = _load_correction_context(db, row)
+        return _correction_row_to_item(row, vendor=vendor, client=client, user=user)
+
+    from app.models.entities import utc_now
+
+    resolved_at = utc_now()
+    note_clean = (note or "").strip() or None
+
+    vendor, client, user = _load_correction_context(db, row)
+    before_field = (row.before or {}).get("field", "")
+    proposed_value = (row.after or {}).get("value", "")
+
+    applied_change: dict | None = None
+    if decision == "approved":
+        column = _CORRECTION_FIELD_TO_VENDOR_COLUMN.get(before_field)
+        if column is None:
+            raise HTTPException(
+                status.HTTP_422_UNPROCESSABLE_ENTITY,
+                detail=(
+                    "Este campo no se aplica automáticamente. Resuelve la "
+                    "solicitud manualmente o márcala como rechazada."
+                ),
+            )
+        if vendor is None:
+            raise HTTPException(
+                status.HTTP_409_CONFLICT,
+                detail=(
+                    "El workspace de esta solicitud ya no apunta a un "
+                    "proveedor válido; no podemos aplicar la corrección."
+                ),
+            )
+        previous_value = getattr(vendor, column)
+        new_value = proposed_value.strip() or None
+        setattr(vendor, column, new_value)
+        applied_change = {
+            "vendor_id": vendor.id,
+            "column": column,
+            "previous_value": previous_value,
+            "new_value": new_value,
+        }
+
+    meta.update(
+        {
+            "status": decision,
+            "resolved_at": resolved_at.isoformat(),
+            "resolved_by_user_id": current.user.id,
+            "resolution_note": note_clean,
+        }
+    )
+    if applied_change is not None:
+        meta["applied_change"] = applied_change
+    row.event_metadata = meta
+
+    _audit_admin(
+        db,
+        actor=current,
+        action=(
+            "correction_request.approved"
+            if decision == "approved"
+            else "correction_request.rejected"
+        ),
+        entity_type="provider_workspace",
+        entity_id=row.entity_id,
+        before={"field": before_field, "status": "pending"},
+        after={
+            "field": before_field,
+            "status": decision,
+            "applied_change": applied_change,
+            "note": note_clean,
+        },
+        extra_metadata={"correction_request_id": row.id},
+    )
+
+    db.flush()
+    db.commit()
+    db.refresh(row)
+    if vendor is not None:
+        db.refresh(vendor)
+    vendor, client, user = _load_correction_context(db, row)
+    return _correction_row_to_item(row, vendor=vendor, client=client, user=user)
+
+
+@router.post(
+    "/correction-requests/{request_id}/approve",
+    response_model=CorrectionRequestAdminItem,
+)
+def approve_correction_request(
+    request_id: str,
+    payload: CorrectionRequestResolution,
+    db: DbSession,
+    current: AdminUser,
+) -> CorrectionRequestAdminItem:
+    """Approve a pending correction request and auto-apply the change.
+
+    Writes the proposed value to the vendor's matching contact column
+    (``contact_email`` / ``contact_phone`` / ``contact_name``), marks
+    the submission row as approved, and records the resolution as a
+    sibling audit row. Idempotent on already-resolved rows.
+    """
+    row = _get_correction_row_or_404(db, request_id)
+    return _resolve_correction(
+        db,
+        current=current,
+        row=row,
+        decision="approved",
+        note=payload.note,
+    )
+
+
+@router.post(
+    "/correction-requests/{request_id}/reject",
+    response_model=CorrectionRequestAdminItem,
+)
+def reject_correction_request(
+    request_id: str,
+    payload: CorrectionRequestResolution,
+    db: DbSession,
+    current: AdminUser,
+) -> CorrectionRequestAdminItem:
+    """Reject a pending correction request without applying any change.
+
+    Records the rejection note (when provided) on the submission row's
+    ``event_metadata`` and writes a sibling audit_log row capturing
+    the decision. Idempotent on already-resolved rows.
+    """
+    row = _get_correction_row_or_404(db, request_id)
+    return _resolve_correction(
+        db,
+        current=current,
+        row=row,
+        decision="rejected",
+        note=payload.note,
+    )
 
 
 # ---------------------------------------------------------------------------
