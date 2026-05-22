@@ -2018,6 +2018,20 @@ def get_workspace_submission_document(
     from fastapi.responses import FileResponse
 
     path = storage.open_for_read(document.storage_key)
+    # Guard the FileResponse with an existence check. Without it,
+    # Starlette raises ``RuntimeError`` (which the ASGI layer maps to a
+    # bare 500) the first time the iframe fetches the URL, leaking a
+    # stack trace and a confusing error to the provider. Orphaned
+    # storage keys (seed fixtures, missing prod artifacts, drift after
+    # a restore) should degrade to a clean 404 the frontend can render
+    # as "No pudimos cargar la vista previa". Tested locally — the
+    # dev seed writes ``local://demo/<id>.pdf`` storage keys with no
+    # backing file, which used to crash this endpoint with a 500.
+    if not path.exists():
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Documento no disponible en almacenamiento.",
+        )
     return FileResponse(
         path,
         media_type="application/pdf",

@@ -339,16 +339,59 @@ export async function getSubmissionDetail(
 }
 
 /**
- * Absolute URL the submission detail iframe should point at to render
- * the uploaded PDF inline. Cookie auth piggybacks on same-site
- * credentials when the frontend is colocated with the API, and on
- * ``SameSite=None; Secure`` in production deploys (Vercel ↔ Render).
+ * Absolute URL of the PDF-streaming endpoint. Used as the
+ * ``Authorization``-carrying fetch target by
+ * ``fetchSubmissionDocumentBlob`` and as an opt-out fallback for
+ * callers that don't need the Blob-URL behavior.
  */
 export function submissionDocumentUrl(
   session: PortalSession,
   submissionId: string,
 ): string {
   return `${API_BASE_URL}/api/v1/portal/workspaces/${session.workspace_id}/submissions/${submissionId}/document`;
+}
+
+/**
+ * Fetch the submission's PDF with the same auth pattern as the rest
+ * of the portal client (Bearer JWT + cookie fallback) and return a
+ * Blob URL the iframe can render.
+ *
+ * Background: pointing an ``<iframe src={apiUrl}>`` directly at the
+ * API endpoint relies on the browser sending the portal session
+ * cookie on a cross-site subresource request. In local dev the
+ * cookie is ``SameSite=Lax`` (Chrome blocks it for iframe loads
+ * across origins); in production the cookie is ``SameSite=None;
+ * Secure`` but third-party cookie blocking can still drop it. The
+ * Bearer JWT is only sendable via ``fetch`` headers — not directly
+ * from an iframe ``src`` — so we fetch + Blob-URL the bytes
+ * ourselves. The caller MUST ``URL.revokeObjectURL`` the returned
+ * string when the iframe unmounts.
+ */
+export async function fetchSubmissionDocumentBlob(
+  session: PortalSession,
+  submissionId: string,
+): Promise<string> {
+  const headers = new Headers();
+  const adminSession = readAdminSession();
+  if (adminSession?.access_token) {
+    headers.set("Authorization", `Bearer ${adminSession.access_token}`);
+  }
+  if (
+    session.access_token &&
+    session.access_token !== "cookie-managed"
+  ) {
+    headers.set("X-Workspace-Token", session.access_token);
+  }
+  const response = await fetch(submissionDocumentUrl(session, submissionId), {
+    headers,
+    credentials: "include",
+  });
+  if (!response.ok) {
+    const detail = await response.text().catch(() => "");
+    throw new PortalApiError(response.status, detail || response.statusText);
+  }
+  const blob = await response.blob();
+  return URL.createObjectURL(blob);
 }
 
 export type WorkspaceSubmissionListItem = {

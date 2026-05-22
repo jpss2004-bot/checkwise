@@ -26,10 +26,10 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { PageHeader } from "@/components/ui/page-header";
 import {
+  fetchSubmissionDocumentBlob,
   getSubmissionDetail,
   INSTITUTION_LABELS,
   PortalApiError,
-  submissionDocumentUrl,
   type RequirementStatus,
   type SubmissionDetail,
   type SubmissionPreviousAttempt,
@@ -542,8 +542,46 @@ function SubmissionPreview({
   detail: SubmissionDetail;
   session: PortalSession;
 }) {
+  // Fetch the PDF via the portal API client (Bearer + cookie) and
+  // serve it to the iframe as a Blob URL. Pointing the iframe at the
+  // API URL directly relied on the cross-site cookie surviving
+  // ``SameSite=Lax`` in dev and third-party cookie blocking in prod;
+  // both can drop the cookie. The Blob path authenticates with the
+  // JWT every portal page already holds and works regardless of
+  // cookie policy. ``URL.revokeObjectURL`` runs on unmount and on
+  // submission id change so we never leak object URLs.
+  const [blobUrl, setBlobUrl] = useState<string | null>(null);
+  const [loadError, setLoadError] = useState(false);
+  const submissionId = detail.submission_id;
+  const documentId = detail.document?.document_id ?? null;
+
+  useEffect(() => {
+    if (!documentId) {
+      setBlobUrl(null);
+      return;
+    }
+    let cancelled = false;
+    let issuedUrl: string | null = null;
+    setLoadError(false);
+    fetchSubmissionDocumentBlob(session, submissionId)
+      .then((url) => {
+        if (cancelled) {
+          URL.revokeObjectURL(url);
+          return;
+        }
+        issuedUrl = url;
+        setBlobUrl(url);
+      })
+      .catch(() => {
+        if (!cancelled) setLoadError(true);
+      });
+    return () => {
+      cancelled = true;
+      if (issuedUrl) URL.revokeObjectURL(issuedUrl);
+    };
+  }, [session, submissionId, documentId]);
+
   if (!detail.document) return null;
-  const src = submissionDocumentUrl(session, detail.submission_id);
   return (
     <Card>
       <CardHeader>
@@ -556,23 +594,37 @@ function SubmissionPreview({
         </p>
       </CardHeader>
       <CardContent>
-        <iframe
-          src={src}
-          title={`Vista previa de ${detail.document.filename}`}
-          className="h-[640px] w-full rounded-md border border-border bg-white"
-        />
-        <p className="mt-2 text-xs text-muted-foreground">
-          Si la vista previa no carga,{" "}
-          <a
-            href={src}
-            target="_blank"
-            rel="noreferrer"
-            className="text-primary hover:underline"
-          >
-            ábrelo en una pestaña nueva
-          </a>
-          .
-        </p>
+        {blobUrl ? (
+          <>
+            <iframe
+              src={blobUrl}
+              title={`Vista previa de ${detail.document.filename}`}
+              className="h-[640px] w-full rounded-md border border-border bg-white"
+            />
+            <p className="mt-2 text-xs text-muted-foreground">
+              Si la vista previa no carga,{" "}
+              <a
+                href={blobUrl}
+                target="_blank"
+                rel="noreferrer"
+                className="text-primary hover:underline"
+              >
+                ábrelo en una pestaña nueva
+              </a>
+              .
+            </p>
+          </>
+        ) : loadError ? (
+          <p className="text-sm text-muted-foreground">
+            No pudimos cargar la vista previa. Recarga la página o
+            inténtalo de nuevo en unos momentos.
+          </p>
+        ) : (
+          <div
+            className="h-[640px] w-full animate-pulse rounded-md border border-border bg-muted/40"
+            aria-label="Cargando vista previa"
+          />
+        )}
       </CardContent>
     </Card>
   );
