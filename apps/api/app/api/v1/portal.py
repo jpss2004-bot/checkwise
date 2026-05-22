@@ -3125,32 +3125,39 @@ class WiseAskCtaIn(BaseModel):
 
 
 class WiseStateDigestIn(BaseModel):
-    """Caller-supplied snapshot of the dashboard. The dock already
-    has all of this in memory after its initial fetch, so shipping
-    it server-side is cheaper than a redundant DB round-trip."""
+    """Phase 2.b legacy payload — kept optional during the Phase 3
+    transition so the frontend can stop sending it on its own
+    cadence without breaking older deploys. Backend ignores it now
+    that ``/wise/ask`` builds the full context server-side from the
+    DB. Safe to remove after the next FE deploy lands."""
 
-    vendor_name: str = Field(..., max_length=200)
-    persona_type: Literal["moral", "fisica"]
-    onboarding_completed: bool
-    compliance_pct: int = Field(..., ge=0, le=100)
-    on_track: int = Field(..., ge=0)
-    total_tracked: int = Field(..., ge=0)
-    needs_action: int = Field(..., ge=0)
-    in_review: int = Field(..., ge=0)
-    completed_required: int = Field(..., ge=0)
-    total_required: int = Field(..., ge=0)
-    approved_count: int = Field(..., ge=0)
-    pending_count: int = Field(..., ge=0)
-    rejected_count: int = Field(..., ge=0)
-    expired_count: int = Field(..., ge=0)
+    vendor_name: str = Field(default="", max_length=200)
+    persona_type: Literal["moral", "fisica"] | None = None
+    onboarding_completed: bool | None = None
+    compliance_pct: int | None = Field(default=None, ge=0, le=100)
+    on_track: int | None = Field(default=None, ge=0)
+    total_tracked: int | None = Field(default=None, ge=0)
+    needs_action: int | None = Field(default=None, ge=0)
+    in_review: int | None = Field(default=None, ge=0)
+    completed_required: int | None = Field(default=None, ge=0)
+    total_required: int | None = Field(default=None, ge=0)
+    approved_count: int | None = Field(default=None, ge=0)
+    pending_count: int | None = Field(default=None, ge=0)
+    rejected_count: int | None = Field(default=None, ge=0)
+    expired_count: int | None = Field(default=None, ge=0)
     next_action_titles: list[str] = Field(default_factory=list, max_length=10)
     upcoming_deadline_titles: list[str] = Field(default_factory=list, max_length=10)
 
 
 class WiseAskRequest(BaseModel):
     prompt: str = Field(..., max_length=500)
-    digest: WiseStateDigestIn
     ctas: list[WiseAskCtaIn] = Field(default_factory=list, max_length=20)
+    # Phase 3 (2026-05-21): the backend now assembles the full state
+    # context server-side from the DB. Old frontends still send a
+    # ``digest`` — we accept it for backward compat but ignore the
+    # contents. Remove after a transition window when no client is
+    # sending the field anymore.
+    digest: WiseStateDigestIn | None = None
 
 
 class WiseAskResponse(BaseModel):
@@ -3177,36 +3184,34 @@ class WiseAskResponse(BaseModel):
 def ask_wise_endpoint(
     workspace_id: str,
     payload: WiseAskRequest,
+    db: DbSession,
     workspace: Annotated[ProviderWorkspace, Depends(current_portal_workspace)],
 ) -> WiseAskResponse:
     _ = workspace_id  # tenant guard already enforced by dependency
-    _ = workspace  # auth side effect — body has its own state digest
 
-    from app.services.wise.ai import WiseCta, WiseStateDigest, ask_wise
-
-    digest = WiseStateDigest(
-        vendor_name=payload.digest.vendor_name,
-        persona_type=payload.digest.persona_type,
-        onboarding_completed=payload.digest.onboarding_completed,
-        compliance_pct=payload.digest.compliance_pct,
-        on_track=payload.digest.on_track,
-        total_tracked=payload.digest.total_tracked,
-        needs_action=payload.digest.needs_action,
-        in_review=payload.digest.in_review,
-        completed_required=payload.digest.completed_required,
-        total_required=payload.digest.total_required,
-        approved_count=payload.digest.approved_count,
-        pending_count=payload.digest.pending_count,
-        rejected_count=payload.digest.rejected_count,
-        expired_count=payload.digest.expired_count,
-        next_action_titles=tuple(payload.digest.next_action_titles[:3]),
-        upcoming_deadline_titles=tuple(payload.digest.upcoming_deadline_titles[:3]),
+    from app.services.wise.ai import WiseCta, ask_wise
+    from app.services.wise.context import (
+        build_static_context,
+        build_workspace_context,
     )
+
+    # Phase 3 — assemble the full context server-side. The workspace
+    # block reads onboarding + calendar + recent submissions + reviewer
+    # notes via the same evidence-slot service the dashboard uses.
+    # The static block (glossary + REPSE catalog guidance) is shared
+    # across all vendors and qualifies for Anthropic prompt caching.
+    workspace_ctx = build_workspace_context(db, workspace)
+    static_ctx = build_static_context()
     ctas = [
         WiseCta(id=c.id, label=c.label, href=c.href, description=c.description)
         for c in payload.ctas
     ]
-    result = ask_wise(prompt=payload.prompt, digest=digest, ctas=ctas)
+    result = ask_wise(
+        prompt=payload.prompt,
+        workspace=workspace_ctx,
+        static=static_ctx,
+        ctas=ctas,
+    )
     return WiseAskResponse(
         body=result.body,
         cta_label=result.cta_label,

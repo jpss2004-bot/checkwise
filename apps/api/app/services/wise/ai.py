@@ -31,10 +31,17 @@ from __future__ import annotations
 import json
 import logging
 from dataclasses import dataclass
+from typing import Any
 
 from anthropic import Anthropic, APIError
 
 from app.core.config import settings
+from app.services.wise.context import (
+    WiseStaticContext,
+    WiseWorkspaceContext,
+    render_static_block,
+    render_workspace_block,
+)
 
 log = logging.getLogger("checkwise.wise.ai")
 
@@ -66,34 +73,6 @@ class WiseCta:
 
 
 @dataclass(frozen=True)
-class WiseStateDigest:
-    """Snapshot of the provider's current compliance state.
-
-    Curated — never the raw dashboard JSON. Just enough for the
-    model to answer "how am I doing?" / "what's left?" / "which
-    documents are pending?" accurately without seeing submission
-    ids, filenames, or other PII.
-    """
-
-    vendor_name: str
-    persona_type: str  # "moral" | "fisica"
-    onboarding_completed: bool
-    compliance_pct: int
-    on_track: int
-    total_tracked: int
-    needs_action: int
-    in_review: int
-    completed_required: int
-    total_required: int
-    approved_count: int
-    pending_count: int
-    rejected_count: int
-    expired_count: int
-    next_action_titles: tuple[str, ...]  # top 3
-    upcoming_deadline_titles: tuple[str, ...]  # top 3
-
-
-@dataclass(frozen=True)
 class WiseAskResult:
     body: str
     cta_id: str | None
@@ -102,45 +81,19 @@ class WiseAskResult:
     source: str  # "llm" | "fallback"
 
 
-_SYSTEM_PROMPT = """Eres **Wise**, el copiloto de CheckWise — la plataforma de cumplimiento REPSE de Legal Shelf en México.
+_SYSTEM_RULES = """Eres **Wise**, el copiloto de CheckWise — la plataforma de cumplimiento REPSE de Legal Shelf en México.
 
-Tu trabajo: responder dudas concretas del proveedor sobre el estado de su expediente, sus cargas de documentos, sus revisiones y sus próximos vencimientos. Hablas en español **mexicano casual de "tú"**, nunca de "usted".
+Tu trabajo: ayudar al proveedor a resolver dudas concretas sobre **(a)** el estado de su expediente, sus cargas y sus próximos vencimientos, **(b)** los documentos REPSE que CheckWise solicita (qué son, dónde se obtienen, errores comunes), y **(c)** cómo funciona CheckWise (estados de los documentos, semáforo, flujo de revisión, dónde encontrar cada pantalla). Hablas en español **mexicano casual de "tú"**, nunca de "usted".
 
 Estilo obligatorio:
-- Máximo 3 oraciones cortas.
+- Máximo 3 oraciones cortas, salvo cuando el proveedor pida una explicación de un documento o concepto — en ese caso, puedes extenderte hasta 5 oraciones y, si ayuda, usar viñetas cortas.
 - Directo y útil; nada de cortesías largas ni descargos.
 - Cuando la pregunta sea ambigua, asume la interpretación más operativa (qué hacer ahora).
 - Si necesitas mandar al usuario a otra pantalla, usa SIEMPRE el campo ``cta_id`` del tool y elige uno de los IDs de la lista que se te entrega. **Nunca inventes URLs, IDs, ni nombres de documentos.** Si ningún CTA aplica, deja ``cta_id`` vacío.
-- Nunca inventes datos del usuario (números, fechas, RFCs). Si el dato no está en el contexto, dilo claramente: "no tengo ese dato a la mano".
-- Si la pregunta es ajena al expediente REPSE (chistes, política, IA general), responde brevemente que tu rol es ayudar con el cumplimiento y sugiere reformular.
+- Nunca inventes datos del usuario (números, fechas, RFCs, archivos). Cita siempre el contexto. Si el dato no está disponible, dilo: "no tengo ese dato a la mano".
+- Si la pregunta es ajena al cumplimiento REPSE o a CheckWise (chistes, política, IA general), responde brevemente que tu rol es ayudar con el cumplimiento y sugiere reformular.
 
 Llama SIEMPRE al tool ``respond_to_provider`` con ``body`` (la respuesta) y opcionalmente ``cta_id``. No respondas con texto libre fuera del tool."""
-
-
-def _build_state_block(digest: WiseStateDigest) -> str:
-    """Format the state digest as a compact pseudo-table the model
-    can scan. Plain text over JSON — Anthropic responds slightly
-    better to readable contexts on small payloads like this."""
-    lines = [
-        f"Proveedor: {digest.vendor_name}",
-        f"Persona: {'moral' if digest.persona_type == 'moral' else 'física'}",
-        f"Expediente inicial: {'completo' if digest.onboarding_completed else 'incompleto'}",
-        f"Cumplimiento: {digest.compliance_pct}% ({digest.on_track}/{digest.total_tracked} obligaciones al día)",
-        f"Expediente obligatorio: {digest.completed_required}/{digest.total_required} completados",
-        f"Aprobados: {digest.approved_count}",
-        f"En revisión: {digest.in_review}",
-        f"Por atender: {digest.needs_action}",
-        f"Pendientes (sin subir): {digest.pending_count}",
-        f"Rechazados: {digest.rejected_count}",
-        f"Vencidos: {digest.expired_count}",
-    ]
-    if digest.next_action_titles:
-        actions = "\n  - " + "\n  - ".join(digest.next_action_titles)
-        lines.append(f"Próximas acciones sugeridas:{actions}")
-    if digest.upcoming_deadline_titles:
-        deadlines = "\n  - " + "\n  - ".join(digest.upcoming_deadline_titles)
-        lines.append(f"Próximos vencimientos:{deadlines}")
-    return "\n".join(lines)
 
 
 def _build_cta_block(ctas: list[WiseCta]) -> str:
@@ -186,12 +139,27 @@ _RESPOND_TOOL: dict = {
 def ask_wise(
     *,
     prompt: str,
-    digest: WiseStateDigest,
+    workspace: WiseWorkspaceContext,
+    static: WiseStaticContext,
     ctas: list[WiseCta],
     api_key: str | None = None,
     client: Anthropic | None = None,
 ) -> WiseAskResult:
-    """Run a single Wise free-text turn.
+    """Run a single Wise free-text turn with full server-assembled context.
+
+    Phase 3 (2026-05-21) — the request now ships:
+
+      * ``workspace``: per-vendor state (slots + recent uploads +
+        reviewer notes), built fresh per call.
+      * ``static``: glossary + REPSE catalog guidance, byte-identical
+        across vendors so Anthropic's prompt cache hits.
+      * ``ctas``: allowed CTAs the model can attach (still validated
+        against this exact list before echoing back).
+
+    Anthropic prompt caching is applied to the system rules + the
+    static block (rules + glossary + catalog). The cache TTL is
+    5 minutes; on a warm cache the per-question cost drops from
+    ~$0.01 to ~$0.003.
 
     ``client`` is injectable for tests. ``api_key`` lets the caller
     pass an explicit key (e.g. a per-tenant key in the future); when
@@ -211,12 +179,6 @@ def ask_wise(
 
     key = api_key if api_key is not None else getattr(settings, "ANTHROPIC_API_KEY", "")
     if client is None and not key:
-        # Phase 2.c (2026-05-21) — softened the no-key copy. The
-        # previous "no tengo cerebro" read as a bug to testers; this
-        # version frames the limitation as "preguntas libres todavía
-        # están en aprobación" and points them at the buttons that
-        # do work, so the surface still feels intentional rather
-        # than broken when ANTHROPIC_API_KEY is unset.
         log.warning("wise.ai.no_key", extra={"prompt_len": len(prompt)})
         return _fallback(
             "Las preguntas libres todavía están en aprobación interna. "
@@ -227,15 +189,31 @@ def ask_wise(
     try:
         if client is None:
             client = Anthropic(api_key=key)
+
+        # System prompt is a two-part list so we can attach
+        # ``cache_control`` to the static prefix only. The runtime
+        # rules sit in the first block (rarely change), the glossary
+        # + full catalog sits in the second block (also static,
+        # versioned per deploy). Both qualify for caching together.
+        system_param: list[dict[str, Any]] = [
+            {"type": "text", "text": _SYSTEM_RULES},
+            {
+                "type": "text",
+                "text": render_static_block(static),
+                "cache_control": {"type": "ephemeral"},
+            },
+        ]
+
         user_message = (
-            f"Estado actual del proveedor:\n{_build_state_block(digest)}\n\n"
+            f"{render_workspace_block(workspace)}\n\n"
             f"{_build_cta_block(ctas)}\n\n"
-            f"Pregunta del proveedor:\n{prompt.strip()}"
+            f"# Pregunta del proveedor\n{prompt.strip()}"
         )
+
         response = client.messages.create(
             model=WISE_MODEL,
-            max_tokens=400,
-            system=_SYSTEM_PROMPT,
+            max_tokens=500,
+            system=system_param,
             tools=[_RESPOND_TOOL],
             tool_choice={"type": "tool", "name": "respond_to_provider"},
             messages=[{"role": "user", "content": user_message}],
