@@ -60,6 +60,15 @@ export type PortalSession = {
   job_title: string | null;
   contact_preference: ContactPreference;
   profile_confirmed_at: string | null;
+  /** Phase 1 / Slice 1A — legal-consent gate state. The gate fires
+   *  when ``legal_consent_accepted_at`` is null OR when
+   *  ``legal_consent_version`` differs from
+   *  ``current_legal_consent_version`` (Slice 1B — version-aware
+   *  re-prompt). The current version is owned by the backend so a
+   *  document bump cleanly invalidates older acceptances. */
+  legal_consent_accepted_at: string | null;
+  legal_consent_version: string | null;
+  current_legal_consent_version: string | null;
 };
 
 let cached: PortalSession | null = null;
@@ -94,6 +103,9 @@ export function summaryToSession(summary: WorkspaceSummary): PortalSession {
     job_title: summary.job_title,
     contact_preference: summary.contact_preference,
     profile_confirmed_at: summary.profile_confirmed_at,
+    legal_consent_accepted_at: summary.legal_consent_accepted_at,
+    legal_consent_version: summary.legal_consent_version,
+    current_legal_consent_version: summary.current_legal_consent_version,
   };
 }
 

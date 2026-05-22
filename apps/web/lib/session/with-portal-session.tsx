@@ -11,6 +11,38 @@ import {
   type PortalSession,
 } from "./portal";
 
+// Phase 1 / Slice 1A — legal-consent gate. Pages where the gate is
+// resolved (entra-a-tu-espacio itself) MUST NOT redirect to itself, or
+// the page would never render. Internal staff (internal_admin /
+// reviewer) bypass the gate to match the onboarding-gate pattern.
+const LEGAL_CONSENT_EXEMPT_PATHS = new Set([
+  "/portal/entra-a-tu-espacio",
+]);
+const INTERNAL_ROLES = new Set(["internal_admin", "reviewer"]);
+
+function isInternalStaff(): boolean {
+  const admin = readAdminSession();
+  if (!admin) return false;
+  return admin.roles.some((r) => INTERNAL_ROLES.has(r));
+}
+
+// Slice 1B — the gate fires when the provider has never accepted, OR
+// when the canonical version published by the backend has moved past
+// their stored acceptance. When the backend omits the current version
+// (legacy summaries during a rollout) we fall back to a null-only
+// check so we never redirect-loop on missing data.
+function legalConsentRequired(session: {
+  legal_consent_accepted_at: string | null;
+  legal_consent_version: string | null;
+  current_legal_consent_version: string | null;
+}): boolean {
+  if (session.legal_consent_accepted_at === null) return true;
+  if (session.current_legal_consent_version === null) return false;
+  return (
+    session.legal_consent_version !== session.current_legal_consent_version
+  );
+}
+
 /**
  * Build a /login URL that asks the login page to redirect back to the
  * pathname (+ search) the user was originally trying to reach. The
@@ -106,7 +138,30 @@ export function withPortalSession<P extends { session: PortalSession }>(
       };
     }, [router, pathname]);
 
+    // Phase 1 / Slice 1A — once a session exists, enforce the
+    // legal-consent gate before rendering anything else. Slice 1B
+    // broadened the trigger from "never accepted" to "accepted version
+    // differs from current canonical version" so document bumps also
+    // re-prompt. Internal staff bypass the gate.
+    useEffect(() => {
+      if (!session) return;
+      if (!legalConsentRequired(session)) return;
+      if (isInternalStaff()) return;
+      if (pathname && LEGAL_CONSENT_EXEMPT_PATHS.has(pathname)) return;
+      router.replace("/portal/entra-a-tu-espacio");
+    }, [router, pathname, session]);
+
     if (!session) return null;
+    // Block render on un-consented sessions for non-exempt paths so the
+    // page doesn't flash while the redirect above resolves.
+    if (
+      legalConsentRequired(session) &&
+      !isInternalStaff() &&
+      pathname &&
+      !LEGAL_CONSENT_EXEMPT_PATHS.has(pathname)
+    ) {
+      return null;
+    }
     return <Component {...(props as P)} session={session} />;
   };
 }

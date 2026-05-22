@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useState, type FormEvent } from "react";
+import Link from "next/link";
 import { useRouter } from "next/navigation";
 import {
   ArrowRight,
@@ -19,6 +20,7 @@ import { WorkspaceIdentityCard } from "@/components/checkwise/workspace/workspac
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import { Checkbox } from "@/components/ui/checkbox";
 import {
   Dialog,
   DialogContent,
@@ -29,7 +31,10 @@ import {
 import { Field } from "@/components/ui/field";
 import { Input } from "@/components/ui/input";
 import { Select } from "@/components/ui/select";
-import { patchWorkspaceProfile } from "@/lib/api/portal-session";
+import {
+  acceptLegalConsent,
+  patchWorkspaceProfile,
+} from "@/lib/api/portal-session";
 import { buildWorkspaceContext } from "@/lib/workspace/resolver";
 import type {
   EditableProfileFields,
@@ -70,6 +75,19 @@ function EntraATuEspacioInner({ session }: { session: PortalSession }) {
   // each successful save.
   const [liveSession, setLiveSession] = useState<PortalSession>(session);
   const isFirstVisit = liveSession.profile_confirmed_at === null;
+  // Phase 1 / Slice 1A — legal-consent gate. The provider cannot
+  // continue until they accept the three legal notices. Slice 1B
+  // broadens the trigger to version mismatches: a future ``v1`` bump
+  // makes ``v0-draft`` acceptors fall back into the gate even though
+  // their ``legal_consent_accepted_at`` is set. The current canonical
+  // version is owned by the backend and surfaced on the session
+  // summary so the comparison stays single-sourced.
+  const needsLegalConsent =
+    liveSession.legal_consent_accepted_at === null ||
+    (liveSession.current_legal_consent_version !== null &&
+      liveSession.legal_consent_version !==
+        liveSession.current_legal_consent_version);
+  const [legalConsentAccepted, setLegalConsentAccepted] = useState(false);
 
   const workspace = useMemo<WorkspaceContext>(
     () => buildWorkspaceContext(liveSession),
@@ -117,6 +135,29 @@ function EntraATuEspacioInner({ session }: { session: PortalSession }) {
     event.preventDefault();
     setSubmitting(true);
     setSaveError(null);
+    // Phase 1 / Slice 1A — record legal consent BEFORE the profile
+    // patch. If the consent POST fails we abort with a clear error
+    // and do not write the profile, so the audit trail and the
+    // profile_confirmed_at marker stay in lockstep.
+    if (needsLegalConsent) {
+      if (!legalConsentAccepted) {
+        setSubmitting(false);
+        setSaveError(
+          "Para entrar a tu espacio necesitamos que aceptes los avisos legales.",
+        );
+        return;
+      }
+      const consent = await acceptLegalConsent(
+        workspace.protected.workspace_id,
+      );
+      if (!consent) {
+        setSubmitting(false);
+        setSaveError(
+          "No pudimos registrar tu aceptación de los avisos legales. Intenta de nuevo en unos segundos.",
+        );
+        return;
+      }
+    }
     // Persist via PATCH /portal/workspaces/{id}/profile. Backend
     // recombines first+last into the canonical User.full_name and
     // bumps profile_confirmed_at so the next session refresh flips
@@ -147,9 +188,10 @@ function EntraATuEspacioInner({ session }: { session: PortalSession }) {
     setCachedPortalSession(refreshed);
     setJustSaved(true);
 
-    if (isFirstVisit) {
-      // First-visit gate flow — onward to the expediente or dashboard
-      // depending on whether the user has already loaded documents.
+    if (isFirstVisit || needsLegalConsent) {
+      // First-visit gate flow, or a returning user who just satisfied
+      // the legal-consent gate — route them onward to the expediente
+      // or dashboard depending on whether they have an expediente yet.
       const next =
         liveSession.expediente_status === "complete"
           ? "/portal/dashboard"
@@ -306,6 +348,13 @@ function EntraATuEspacioInner({ session }: { session: PortalSession }) {
             />
           ) : null}
 
+          {needsLegalConsent ? (
+            <LegalConsentBlock
+              checked={legalConsentAccepted}
+              onChange={setLegalConsentAccepted}
+            />
+          ) : null}
+
           {saveError ? (
             <Alert variant="error" className="mt-4">
               <AlertTitle>No pudimos guardar tus cambios</AlertTitle>
@@ -330,23 +379,29 @@ function EntraATuEspacioInner({ session }: { session: PortalSession }) {
             <Button
               type="submit"
               loading={submitting}
-              disabled={justSaved && isFirstVisit}
+              disabled={
+                (justSaved && (isFirstVisit || needsLegalConsent)) ||
+                (needsLegalConsent && !legalConsentAccepted)
+              }
               size="lg"
             >
               <span>
-                {justSaved && isFirstVisit
+                {justSaved && (isFirstVisit || needsLegalConsent)
                   ? "Continuando…"
                   : isFirstVisit
                     ? "Entrar a mi espacio"
-                    : "Guardar cambios"}
+                    : needsLegalConsent
+                      ? "Aceptar y entrar"
+                      : "Guardar cambios"}
               </span>
-              {!submitting && !(justSaved && isFirstVisit) && (
-                <ArrowRight
-                  className="h-4 w-4"
-                  weight="bold"
-                  aria-hidden="true"
-                />
-              )}
+              {!submitting &&
+                !(justSaved && (isFirstVisit || needsLegalConsent)) && (
+                  <ArrowRight
+                    className="h-4 w-4"
+                    weight="bold"
+                    aria-hidden="true"
+                  />
+                )}
             </Button>
           </footer>
         </form>
@@ -572,4 +627,81 @@ function NextStepPreview({
 // gradients (navy + teal) violated §"Color strategy — Restrained".
 // The page now uses the standard --surface-page background; if more
 // texture is needed in a future polish, add cw-grid-pattern instead.
+
+// ---------------------------------------------------------------------------
+// Phase 1 / Slice 1A — legal-consent gate UI
+// ---------------------------------------------------------------------------
+
+function LegalConsentBlock({
+  checked,
+  onChange,
+}: {
+  checked: boolean;
+  onChange: (next: boolean) => void;
+}) {
+  return (
+    <section
+      aria-labelledby="legal-consent-title"
+      className="mt-6 rounded-xl border border-[color:var(--border-default)] bg-[color:var(--surface-sunken)] p-5"
+    >
+      <h2
+        id="legal-consent-title"
+        className="text-sm font-semibold text-[color:var(--text-primary)]"
+      >
+        Avisos legales
+      </h2>
+      <p className="mt-1 text-xs text-[color:var(--text-secondary)]">
+        Antes de entrar a tu espacio necesitamos que confirmes que leíste y
+        aceptas estos tres documentos. Tu aceptación queda registrada
+        para auditoría.
+      </p>
+      <label className="mt-4 flex items-start gap-3 text-sm text-[color:var(--text-primary)]">
+        <Checkbox
+          id="legal-consent-checkbox"
+          checked={checked}
+          onCheckedChange={(value) => onChange(value === true)}
+          aria-describedby="legal-consent-links"
+        />
+        <span>
+          Acepto el{" "}
+          <Link
+            href="/legal/privacidad"
+            target="_blank"
+            rel="noopener"
+            className="font-medium text-[color:var(--text-brand)] hover:underline"
+          >
+            aviso de privacidad
+          </Link>
+          , los{" "}
+          <Link
+            href="/legal/terminos"
+            target="_blank"
+            rel="noopener"
+            className="font-medium text-[color:var(--text-brand)] hover:underline"
+          >
+            términos de uso
+          </Link>
+          {" y el "}
+          <Link
+            href="/legal/consentimiento"
+            target="_blank"
+            rel="noopener"
+            className="font-medium text-[color:var(--text-brand)] hover:underline"
+          >
+            aviso de consentimiento
+          </Link>
+          {" de CheckWise."}
+        </span>
+      </label>
+      <p
+        id="legal-consent-links"
+        className="mt-3 text-[11px] text-[color:var(--text-tertiary)]"
+      >
+        Cada enlace abre el documento en una pestaña nueva. Documentos
+        en versión <code className="font-mono">v0-draft</code> pendientes
+        de revisión legal.
+      </p>
+    </section>
+  );
+}
 

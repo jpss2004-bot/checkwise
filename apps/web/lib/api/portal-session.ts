@@ -49,6 +49,14 @@ export interface WorkspaceSummary {
   job_title: string | null;
   contact_preference: ContactPreference;
   profile_confirmed_at: string | null;
+  // Phase 1 / Slice 1A — legal-consent gate state. The gate fires
+  // when ``legal_consent_accepted_at`` is null OR when
+  // ``legal_consent_version`` differs from
+  // ``current_legal_consent_version`` (Slice 1B — version-aware
+  // re-prompt after a document bump).
+  legal_consent_accepted_at: string | null;
+  legal_consent_version: string | null;
+  current_legal_consent_version: string | null;
 }
 
 export interface WorkspaceProfileUpdate {
@@ -101,6 +109,39 @@ export async function postPortalLogout(): Promise<void> {
  * follow-up /me round-trip. Returns null on auth / network failure —
  * the caller surfaces a generic "no pudimos guardar" message.
  */
+export interface LegalConsentResponse {
+  workspace_id: string;
+  legal_consent_accepted_at: string;
+  legal_consent_version: string;
+}
+
+/**
+ * Persist the provider's acceptance of the legal-consent gate.
+ *
+ * The backend owns the canonical document version string so the
+ * client does not pass one. Idempotent — a second call on an
+ * already-accepted workspace returns the existing acceptance without
+ * mutating the row. Returns null on auth / network failure.
+ */
+export async function acceptLegalConsent(
+  workspace_id: string,
+): Promise<LegalConsentResponse | null> {
+  try {
+    const response = await fetch(
+      `${API_BASE_URL}/api/v1/portal/workspaces/${encodeURIComponent(workspace_id)}/legal-consent`,
+      {
+        method: "POST",
+        credentials: "include",
+        headers: { Accept: "application/json", ...bearerHeader() },
+      },
+    );
+    if (!response.ok) return null;
+    return (await response.json()) as LegalConsentResponse;
+  } catch {
+    return null;
+  }
+}
+
 export async function patchWorkspaceProfile(
   workspace_id: string,
   payload: WorkspaceProfileUpdate,
