@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useState, type FormEvent } from "react";
+import { useEffect, useMemo, useState, type FormEvent } from "react";
 import { useRouter } from "next/navigation";
 import {
   ArrowRight,
@@ -8,6 +8,7 @@ import {
   ChartLineUp,
   CheckCircle,
   ClipboardText,
+  IdentificationCard,
   ShieldCheck,
   Sparkle,
   type Icon,
@@ -18,22 +19,30 @@ import { WorkspaceIdentityCard } from "@/components/checkwise/workspace/workspac
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
 import { Field } from "@/components/ui/field";
 import { Input } from "@/components/ui/input";
 import { Select } from "@/components/ui/select";
 import {
   readEditableProfile,
   saveEditableProfile,
-} from "@/lib/mock/corrections";
+} from "@/lib/workspace/profile-local";
 import { buildWorkspaceContext } from "@/lib/workspace/resolver";
 import type {
   EditableProfileFields,
   WorkspaceContext,
 } from "@/lib/workspace/types";
 import { withPortalSession } from "@/lib/session/with-portal-session";
-import type { PortalSession } from "@/lib/session/portal";
-
-const STORAGE_KEY_CONFIRMED = "checkwise.workspace.confirmed.v1";
+import type {
+  ExpedienteStatus,
+  PortalSession,
+} from "@/lib/session/portal";
 
 /**
  * /portal/entra-a-tu-espacio
@@ -61,7 +70,7 @@ function EntraATuEspacioInner({ session }: { session: PortalSession }) {
   // (cookie-backed /portal/me). No more mock invitations — the user is
   // already inside their assigned workspace by the time this page renders.
   const workspace = useMemo<WorkspaceContext>(
-    () => buildWorkspaceContext(session, null),
+    () => buildWorkspaceContext(session),
     [session],
   );
 
@@ -80,23 +89,44 @@ function EntraATuEspacioInner({ session }: { session: PortalSession }) {
   });
   const [submitting, setSubmitting] = useState(false);
 
+  // Correction-request modal state. The dashboard's
+  // <WorkspaceIdentityCard /> footer link still routes here with
+  // ``#correccion`` so existing deep-links don't break; on arrival we
+  // auto-open the dialog and clear the fragment so the URL stays clean
+  // when the user closes it.
+  const [correctionOpen, setCorrectionOpen] = useState(false);
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    if (window.location.hash === "#correccion") {
+      setCorrectionOpen(true);
+      // Clear the fragment without scrolling so a second back-and-forth
+      // doesn't keep reopening the dialog.
+      window.history.replaceState(
+        null,
+        "",
+        window.location.pathname + window.location.search,
+      );
+    }
+  }, []);
+
+  // Inline confirmation that the form persisted before we navigate
+  // away. Without it the button label flipped straight from "Entrar a
+  // mi espacio" to a route change, which felt like the form had been
+  // ignored. ``justSaved`` flips on for ~700ms so the user sees a
+  // "Guardado" affordance before the redirect fires.
+  const [justSaved, setJustSaved] = useState(false);
+
   async function handleConfirm(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     setSubmitting(true);
+    // Profile fields persist locally only today — see lib/workspace/
+    // profile-local.ts. The "confirmed_at" timestamp was previously
+    // also written to localStorage but nothing read it back, so the
+    // dead-state write was dropped during the audit. Real backend
+    // persistence is tracked as a follow-up (E in the audit punch list).
     await saveEditableProfile(workspace.protected.workspace_id, profile);
-    if (typeof window !== "undefined") {
-      const confirmed = (() => {
-        try {
-          const raw = window.localStorage.getItem(STORAGE_KEY_CONFIRMED);
-          return raw ? (JSON.parse(raw) as Record<string, string>) : {};
-        } catch {
-          return {} as Record<string, string>;
-        }
-      })();
-      confirmed[workspace.protected.workspace_id] = new Date().toISOString();
-      window.localStorage.setItem(STORAGE_KEY_CONFIRMED, JSON.stringify(confirmed));
-    }
     setSubmitting(false);
+    setJustSaved(true);
     // Onboarding gate: a brand-new provider must finish their initial
     // expediente before the dashboard becomes available. The session's
     // expediente_status comes from the backend (single source of truth).
@@ -104,8 +134,22 @@ function EntraATuEspacioInner({ session }: { session: PortalSession }) {
       session.expediente_status === "complete"
         ? "/portal/dashboard"
         : "/portal/onboarding";
-    router.push(next);
+    // Brief pause so the saved affordance is visible before nav.
+    window.setTimeout(() => router.push(next), 700);
   }
+
+  // Lenient MX phone-format check. Empty is fine (phone is optional);
+  // anything with at least 10 digits passes, anything else is flagged
+  // inline. We do NOT block submit on this — the field is optional and
+  // we don't want to wedge the welcome flow over a format quibble.
+  const phoneError = (() => {
+    if (!profile.phone) return null;
+    const digits = profile.phone.replace(/\D+/g, "");
+    if (digits.length < 10) {
+      return "Captura al menos 10 dígitos (puedes incluir +52).";
+    }
+    return null;
+  })();
 
   return (
     <main className="relative min-h-[100dvh] overflow-hidden bg-[color:var(--surface-page)]">
@@ -150,7 +194,9 @@ function EntraATuEspacioInner({ session }: { session: PortalSession }) {
                 Confirma tus datos de contacto
               </h2>
               <p className="text-xs text-[color:var(--text-secondary)]">
-                Estos campos sí los puedes editar directamente.
+                Edita estos campos cuando quieras. Para corregir RFC,
+                razón social o tu correo registrado, usa "Solicitar
+                cambio".
               </p>
             </div>
           </header>
@@ -172,13 +218,26 @@ function EntraATuEspacioInner({ session }: { session: PortalSession }) {
                 autoComplete="family-name"
               />
             </Field>
-            <Field label="Teléfono" htmlFor="ws-phone" helper="Opcional, para recordatorios.">
+            <Field
+              label="Teléfono"
+              htmlFor="ws-phone"
+              helper={
+                phoneError ?? "Opcional, para recordatorios."
+              }
+            >
               <Input
                 id="ws-phone"
                 value={profile.phone ?? ""}
-                onChange={(e) => setProfile({ ...profile, phone: e.target.value || null })}
+                onChange={(e) =>
+                  setProfile({
+                    ...profile,
+                    phone: e.target.value || null,
+                  })
+                }
                 autoComplete="tel"
+                inputMode="tel"
                 placeholder="+52 55 1234 5678"
+                aria-invalid={phoneError ? true : undefined}
               />
             </Field>
             <Field label="Cargo o puesto" htmlFor="ws-job-title">
@@ -213,16 +272,39 @@ function EntraATuEspacioInner({ session }: { session: PortalSession }) {
             </Field>
           </div>
 
-          <NextStepPreview workspace={workspace} />
+          <NextStepPreview
+            workspace={workspace}
+            expedienteStatus={session.expediente_status}
+          />
 
-          <footer className="mt-6 flex justify-end border-t border-[color:var(--border-subtle)] pt-4">
+          <footer className="mt-6 flex items-center justify-end gap-3 border-t border-[color:var(--border-subtle)] pt-4">
+            {justSaved ? (
+              <p
+                className="inline-flex items-center gap-1.5 text-[12px] font-medium text-[color:var(--status-success-text)]"
+                role="status"
+              >
+                <CheckCircle
+                  className="h-4 w-4"
+                  weight="fill"
+                  aria-hidden="true"
+                />
+                Guardado
+              </p>
+            ) : null}
             <Button
               type="submit"
               loading={submitting}
+              disabled={justSaved}
               size="lg"
             >
-              <span>Entrar a mi espacio</span>
-              {!submitting && <ArrowRight className="h-4 w-4" weight="bold" aria-hidden="true" />}
+              <span>{justSaved ? "Continuando…" : "Entrar a mi espacio"}</span>
+              {!submitting && !justSaved && (
+                <ArrowRight
+                  className="h-4 w-4"
+                  weight="bold"
+                  aria-hidden="true"
+                />
+              )}
             </Button>
           </footer>
         </form>
@@ -243,28 +325,61 @@ function EntraATuEspacioInner({ session }: { session: PortalSession }) {
             The form covers only the locked Tier B fields
             (contact_email / contact_phone / contact_name). Everything
             else routes to support per the locked decision in §18 of
-            the experience plan. */}
+            the experience plan.
+
+            The form now lives inside a Dialog so the page stays focused
+            on the welcome flow. ``id="correccion"`` is the anchor
+            target referenced by <WorkspaceIdentityCard /> on the
+            dashboard; arriving with that fragment auto-opens the
+            dialog via the useEffect at the top of this component. */}
         <section
-          className="cw-fade-up rounded-xl border border-[color:var(--border-default)] bg-[color:var(--surface-raised)] p-6 shadow-sm sm:p-8"
+          id="correccion"
+          className="cw-fade-up flex flex-wrap items-center justify-between gap-3 rounded-xl border border-[color:var(--border-default)] bg-[color:var(--surface-raised)] p-5 shadow-sm sm:p-6"
           aria-label="Solicitar corrección de un dato de contacto"
         >
-          <header className="mb-5">
+          <div className="min-w-0">
             <h2 className="text-base font-semibold text-[color:var(--text-primary)]">
-              Solicitar corrección de un dato de contacto
+              ¿Necesitas corregir un dato?
             </h2>
-            <p className="mt-1 text-xs text-[color:var(--text-secondary)]">
-              Usa esta sección si necesitas que actualicemos tu correo,
-              teléfono o nombre de contacto. Cada solicitud entra a revisión
-              antes de aplicarse.
+            <p className="mt-1 max-w-prose text-xs text-[color:var(--text-secondary)]">
+              Pide la actualización de tu correo, teléfono o nombre de
+              contacto. Cada solicitud entra a revisión antes de aplicarse.
             </p>
-          </header>
+          </div>
+          <Button
+            type="button"
+            variant="outline"
+            onClick={() => setCorrectionOpen(true)}
+            aria-haspopup="dialog"
+          >
+            <IdentificationCard
+              className="h-4 w-4"
+              weight="bold"
+              aria-hidden="true"
+            />
+            <span>Solicitar cambio</span>
+          </Button>
+        </section>
+      </div>
+
+      <Dialog open={correctionOpen} onOpenChange={setCorrectionOpen}>
+        <DialogContent className="max-w-2xl">
+          <DialogHeader>
+            <DialogTitle>Solicitar corrección de un dato</DialogTitle>
+            <DialogDescription>
+              Captura el dato que deseas corregir y una razón breve. Cada
+              solicitud entra a revisión antes de aplicarse — te avisamos
+              por correo cuando se aplique o si necesitamos más
+              información.
+            </DialogDescription>
+          </DialogHeader>
           <CorrectionRequestForm
             workspace_id={workspace.protected.workspace_id}
             initialField="contact_email"
             initialCurrentValue={workspace.protected.email ?? ""}
           />
-        </section>
-      </div>
+        </DialogContent>
+      </Dialog>
     </main>
   );
 }
@@ -273,37 +388,78 @@ export default withPortalSession(EntraATuEspacioInner);
 
 // ─── Next-step preview ──────────────────────────────────────────
 
-function NextStepPreview({ workspace }: { workspace: WorkspaceContext }) {
-  const items: { icon: Icon; title: string; body: string }[] = [
-    {
-      icon: ClipboardText,
-      title: "Completar expediente inicial",
-      body:
-        "Una checklist guiada con cada documento que necesitas para arrancar tu alta REPSE.",
-    },
-    {
-      icon: CheckCircle,
-      title: "Revisar dashboard",
-      body:
-        "Tu semáforo de cumplimiento, acciones sugeridas y atención del día — todo en una vista.",
-    },
-    {
-      icon: CalendarBlank,
-      title: "Ver próximos vencimientos",
-      body:
-        // Stage 2.5 (BL-T3, 2026-05-20) — the year used to be a
-        // hardcoded "REPSE 2026" literal that aged badly. Now derives
-        // from the current year so the copy reads correctly on any
-        // calendar load.
-        `Calendario REPSE ${new Date().getFullYear()}: SAT mensual, IMSS bimestral, INFONAVIT, acuses STPS.`,
-    },
-    {
-      icon: ChartLineUp,
-      title: "Revisar reportes",
-      body:
-        "Reportes ejecutivos por periodo, proveedor, faltantes y riesgos.",
-    },
-  ];
+type StepState = "primary" | "default" | "done";
+type Step = { icon: Icon; title: string; body: string; state: StepState };
+
+function buildSteps(expedienteStatus: ExpedienteStatus): Step[] {
+  // Stage 2.7 (audit follow-up G, 2026-05-22) — the rail used to render
+  // the same 4 items in the same order regardless of state, so a user
+  // with a complete expediente saw "Completar expediente inicial" as
+  // step 1 and the system looked like it had forgotten what they did.
+  // Now the lead item adapts:
+  //   not_started → "Empieza tu expediente" (primary)
+  //   in_progress → "Continúa tu expediente" (primary)
+  //   complete    → "Expediente completo" (done) with dashboard first
+  const yearLabel = `Calendario REPSE ${new Date().getFullYear()}: SAT mensual, IMSS bimestral, INFONAVIT, acuses STPS.`;
+  const dashboard: Step = {
+    icon: CheckCircle,
+    title: "Revisar dashboard",
+    body:
+      "Tu semáforo de cumplimiento, acciones sugeridas y atención del día — todo en una vista.",
+    state: "default",
+  };
+  const calendar: Step = {
+    icon: CalendarBlank,
+    title: "Ver próximos vencimientos",
+    body: yearLabel,
+    state: "default",
+  };
+  const reports: Step = {
+    icon: ChartLineUp,
+    title: "Revisar reportes",
+    body: "Reportes ejecutivos por periodo, proveedor, faltantes y riesgos.",
+    state: "default",
+  };
+
+  if (expedienteStatus === "complete") {
+    return [
+      {
+        icon: ClipboardText,
+        title: "Expediente completo",
+        body: "Ya entregaste los documentos iniciales. Puedes seguir cargando los recurrentes desde el calendario.",
+        state: "done",
+      },
+      { ...dashboard, state: "primary" },
+      calendar,
+      reports,
+    ];
+  }
+
+  const expediente: Step =
+    expedienteStatus === "in_progress"
+      ? {
+          icon: ClipboardText,
+          title: "Continúa tu expediente",
+          body: "Te faltan algunos documentos iniciales. La checklist guiada te lleva paso a paso.",
+          state: "primary",
+        }
+      : {
+          icon: ClipboardText,
+          title: "Empieza tu expediente",
+          body: "Una checklist guiada con cada documento que necesitas para arrancar tu alta REPSE.",
+          state: "primary",
+        };
+  return [expediente, dashboard, calendar, reports];
+}
+
+function NextStepPreview({
+  workspace,
+  expedienteStatus,
+}: {
+  workspace: WorkspaceContext;
+  expedienteStatus: ExpedienteStatus;
+}) {
+  const items = buildSteps(expedienteStatus);
 
   // V2.x: replaces the previous 2×2 tile grid with a numbered
   // vertical rail. The audit (AUDIT_2_X.md §"Provider portal") flagged
@@ -314,37 +470,55 @@ function NextStepPreview({ workspace }: { workspace: WorkspaceContext }) {
   return (
     <section className="mt-6">
       <p className="cw-eyebrow mb-3 text-[color:var(--text-teal)]">
-        Tu próximo paso, {workspace.editable.first_name || "bienvenido"}
+        {workspace.editable.first_name
+          ? `Tu próximo paso, ${workspace.editable.first_name}`
+          : "Tu próximo paso"}
       </p>
       <ol className="border-t border-b border-[color:var(--border-subtle)] divide-y divide-[color:var(--border-subtle)]">
-        {items.map(({ icon: IconComponent, title, body }, idx) => (
-          <li
-            key={title}
-            className="flex items-start gap-4 py-3"
-          >
-            <span
-              className="mt-0.5 flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-[color:var(--surface-brand-muted)] font-mono text-[11px] font-semibold text-[color:var(--text-brand)]"
-              aria-hidden="true"
+        {items.map(({ icon: IconComponent, title, body, state }, idx) => {
+          const badgeClass =
+            state === "done"
+              ? "bg-[color:var(--status-success-bg)] text-[color:var(--status-success-text)]"
+              : state === "primary"
+                ? "bg-[color:var(--text-teal)] text-white"
+                : "bg-[color:var(--surface-brand-muted)] text-[color:var(--text-brand)]";
+          return (
+            <li
+              key={title}
+              className={
+                state === "done"
+                  ? "flex items-start gap-4 py-3 opacity-70"
+                  : "flex items-start gap-4 py-3"
+              }
             >
-              {idx + 1}
-            </span>
-            <div className="min-w-0 flex-1">
-              <div className="flex items-center gap-2">
-                <IconComponent
-                  className="h-3.5 w-3.5 text-[color:var(--text-tertiary)]"
-                  weight="regular"
-                  aria-hidden="true"
-                />
-                <p className="text-[13px] font-semibold text-[color:var(--text-primary)]">
-                  {title}
+              <span
+                className={`mt-0.5 flex h-7 w-7 shrink-0 items-center justify-center rounded-full font-mono text-[11px] font-semibold ${badgeClass}`}
+                aria-hidden="true"
+              >
+                {state === "done" ? (
+                  <CheckCircle className="h-4 w-4" weight="fill" />
+                ) : (
+                  idx + 1
+                )}
+              </span>
+              <div className="min-w-0 flex-1">
+                <div className="flex items-center gap-2">
+                  <IconComponent
+                    className="h-3.5 w-3.5 text-[color:var(--text-tertiary)]"
+                    weight="regular"
+                    aria-hidden="true"
+                  />
+                  <p className="text-[13px] font-semibold text-[color:var(--text-primary)]">
+                    {title}
+                  </p>
+                </div>
+                <p className="mt-1 text-[12px] leading-relaxed text-[color:var(--text-secondary)]">
+                  {body}
                 </p>
               </div>
-              <p className="mt-1 text-[12px] leading-relaxed text-[color:var(--text-secondary)]">
-                {body}
-              </p>
-            </div>
-          </li>
-        ))}
+            </li>
+          );
+        })}
       </ol>
     </section>
   );
