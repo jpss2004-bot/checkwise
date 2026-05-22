@@ -65,38 +65,31 @@ export function WorkspaceIdentityCard({
             <h2 className="text-base font-semibold text-[color:var(--text-primary)]">
               {workspace.protected.company_legal_name}
             </h2>
-            <p className="mt-0.5 text-xs text-[color:var(--text-secondary)]">
-              {workspace.invitation_hints.inviter
-                ? `Invitado por ${workspace.invitation_hints.inviter}`
-                : "Workspace creado por tu cliente"}
-            </p>
+            {workspace.invitation_hints.inviter ? (
+              <p className="mt-0.5 text-xs text-[color:var(--text-secondary)]">
+                Invitado por {workspace.invitation_hints.inviter}
+              </p>
+            ) : null}
           </div>
         </div>
         <Badge variant="brand">{ROLE_LABEL[workspace.protected.role]}</Badge>
       </header>
 
-      <dl className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
-        <ProtectedFieldNotice
-          label="Rol asignado"
-          value={ROLE_LABEL[workspace.protected.role]}
-          helper="Definido por la invitación."
-        />
+      <dl className="grid gap-3 sm:grid-cols-2">
         <ProtectedFieldNotice
           label="RFC"
           value={workspace.protected.rfc ?? ""}
           mono
-          helper={workspace.protected.rfc ? "Locked al alta." : "Aún no registrado."}
+          helper={
+            workspace.protected.rfc
+              ? "Locked al alta."
+              : "Aún no registrado. Escríbenos a soporte para registrarlo."
+          }
         />
         <ProtectedFieldNotice
           label="Razón social"
           value={workspace.protected.company_legal_name}
           helper="Locked al alta. Solicita corrección si difiere."
-        />
-        <ProtectedFieldNotice
-          label="Workspace"
-          value={workspace.protected.workspace_id}
-          mono
-          helper="Identificador interno."
         />
       </dl>
 
@@ -120,9 +113,23 @@ export function WorkspaceIdentityCard({
         )}
         <p className="ml-auto inline-flex items-center gap-1.5 text-[11px] text-[color:var(--text-tertiary)]">
           <PaperPlaneTilt className="h-3 w-3" weight="bold" aria-hidden="true" />
-          Cambios sensibles pasan por revisión.
+          Para corregir RFC, razón social o datos de contacto, usa la
+          sección "Reportar información incorrecta".
         </p>
       </footer>
+
+      {/* Internal identifier — surfaced as a copyable support code, not as
+          a top-level identity field. Users don't need to act on it, but
+          when they open a ticket the workspace_id is the fastest way for
+          support to locate them. */}
+      <details className="mt-3 text-[11px] text-[color:var(--text-tertiary)]">
+        <summary className="cursor-pointer select-none">
+          Código de soporte
+        </summary>
+        <p className="mt-1 font-mono text-[11px] select-all">
+          {workspace.protected.workspace_id}
+        </p>
+      </details>
     </section>
   );
 }
