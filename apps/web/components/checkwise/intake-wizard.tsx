@@ -20,6 +20,21 @@ import {
 } from "@phosphor-icons/react";
 
 import { institutions, loadTypes, requirementGuides, requirements } from "@/lib/api/catalogs";
+
+// Map an institution dropdown ``value`` (e.g. "sat") to the matching
+// label used inside ``requirementGuides[].institution`` (e.g. "SAT") so
+// the requirement dropdown can be filtered by the currently selected
+// institution. The label form is what each guide entry stores; the
+// value form is what the form state holds. Falls back to the value
+// itself when no match is found, which keeps unknown future codes
+// from silently emptying the list.
+function requirementsForInstitution(institutionValue: string): string[] {
+  const label =
+    institutions.find((i) => i.value === institutionValue)?.label ?? institutionValue;
+  return requirementGuides
+    .filter((guide) => guide.institution === label)
+    .map((guide) => guide.name);
+}
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -307,7 +322,21 @@ export function IntakeWizard({
   }, [form.requirement_name, form.institution_code, form.load_type]);
 
   function updateField(field: keyof IntakeForm, value: string) {
-    setForm((current) => ({ ...current, [field]: value }));
+    setForm((current) => {
+      const next = { ...current, [field]: value };
+      // When the institution changes, snap requirement_name to the first
+      // option scoped to the new institution so the dropdown doesn't
+      // hold a value from the prior institution's catalog (Jorge
+      // feedback 2026-05-21). If the current value is still valid under
+      // the new institution we keep it.
+      if (field === "institution_code") {
+        const scoped = requirementsForInstitution(value);
+        if (scoped.length > 0 && !scoped.includes(current.requirement_name)) {
+          next.requirement_name = scoped[0]!;
+        }
+      }
+      return next;
+    });
     setError(null);
   }
 
@@ -1057,17 +1086,40 @@ function ContextStep({
           />
         ) : !lockedSet.has("requirement_name") ? (
           <Field label="Requisito / documento" htmlFor="requirement_name">
-            <Select
-              id="requirement_name"
-              value={form.requirement_name}
-              onChange={(event) => updateField("requirement_name", event.target.value)}
-            >
-              {requirements.map((requirement) => (
-                <option key={requirement} value={requirement}>
-                  {requirement}
-                </option>
-              ))}
-            </Select>
+            {(() => {
+              // Jorge feedback (2026-05-21, /portal/upload): "En el
+              // dropdown menu solo me deben aparecer las opciones acorde
+              // a la institución seleccionada." Filter requirements by
+              // the currently selected institution; fall back to the
+              // full catalog only if filtering would leave nothing
+              // (e.g. an institution we don't yet have guides for) so
+              // the user still has a usable list.
+              const scoped = requirementsForInstitution(form.institution_code);
+              const options = scoped.length > 0 ? scoped : requirements;
+              const valueOutOfScope =
+                form.requirement_name &&
+                !options.includes(form.requirement_name);
+              return (
+                <Select
+                  id="requirement_name"
+                  value={form.requirement_name}
+                  onChange={(event) =>
+                    updateField("requirement_name", event.target.value)
+                  }
+                >
+                  {valueOutOfScope ? (
+                    <option value={form.requirement_name}>
+                      {form.requirement_name}
+                    </option>
+                  ) : null}
+                  {options.map((requirement) => (
+                    <option key={requirement} value={requirement}>
+                      {requirement}
+                    </option>
+                  ))}
+                </Select>
+              );
+            })()}
           </Field>
         ) : null}
       </div>
