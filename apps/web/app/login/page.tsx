@@ -2,7 +2,7 @@
 
 import { useEffect, useState, type FormEvent } from "react";
 import Link from "next/link";
-import { useRouter } from "next/navigation";
+import { useRouter, useSearchParams } from "next/navigation";
 import { ArrowLeft, SignIn, Warning } from "@phosphor-icons/react";
 
 import { BrandLogo } from "@/components/checkwise/brand-logo";
@@ -35,6 +35,8 @@ import {
  */
 export default function LoginPage() {
   const router = useRouter();
+  const searchParams = useSearchParams();
+  const nextParam = sanitizeNext(searchParams?.get("next"));
   const [bootChecked, setBootChecked] = useState(false);
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
@@ -50,11 +52,11 @@ export default function LoginPage() {
       // cancelled out of /activate could re-enter the portal via the
       // boot redirect — bypassing the forced password change.
       const mustChange = session.user?.must_change_password ?? false;
-      router.replace(decideDestination(session, mustChange));
+      router.replace(decideDestination(session, mustChange, nextParam));
       return;
     }
     setBootChecked(true);
-  }, [router]);
+  }, [router, nextParam]);
 
   async function onSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -70,7 +72,9 @@ export default function LoginPage() {
         roles: result.roles,
         organization_ids: result.organization_ids,
       });
-      router.replace(decideDestination(result, result.must_change_password));
+      router.replace(
+        decideDestination(result, result.must_change_password, nextParam),
+      );
     } catch (err) {
       if (err instanceof AuthApiError && err.status === 401) {
         setError("Correo o contraseña incorrectos.");
@@ -226,18 +230,63 @@ export default function LoginPage() {
 function decideDestination(
   session: { roles: string[] },
   mustChangePassword: boolean,
+  next: string | null,
 ): string {
   if (mustChangePassword) return "/activate";
-  if (session.roles.includes("internal_admin")) {
-    return "/admin/dashboard";
-  }
-  if (session.roles.includes("reviewer")) {
-    return "/admin/reviewer";
-  }
-  if (session.roles.includes("client_admin")) {
-    return "/client/dashboard";
-  }
+  // Honor the ``next`` query param only when it matches the role the
+  // user actually has — a provider should not be able to coerce a
+  // login redirect into ``/admin/...`` and a client_admin shouldn't be
+  // bounced into ``/portal/...`` by a hand-crafted link. We keep the
+  // role's default destination as the fallback.
+  const defaultDest = defaultDestination(session);
+  if (next && allowedForRoles(next, session.roles)) return next;
+  return defaultDest;
+}
+
+function defaultDestination(session: { roles: string[] }): string {
+  if (session.roles.includes("internal_admin")) return "/admin/dashboard";
+  if (session.roles.includes("reviewer")) return "/admin/reviewer";
+  if (session.roles.includes("client_admin")) return "/client/dashboard";
   return "/portal/entra-a-tu-espacio";
+}
+
+/**
+ * Restrict ``next`` to relative paths whose role-prefix matches the
+ * authenticated user's roles. Open-redirect protection already lives
+ * in ``sanitizeNext``; this is the authorization layer on top.
+ */
+function allowedForRoles(next: string, roles: string[]): boolean {
+  if (next.startsWith("/portal/")) return true;
+  if (next.startsWith("/admin/")) {
+    return roles.includes("internal_admin") || roles.includes("reviewer");
+  }
+  if (next.startsWith("/client/")) {
+    return roles.includes("client_admin");
+  }
+  // Non-app routes ("/", "/activate", marketing pages, etc.) are fine
+  // for any authenticated user — but those aren't where with-portal-
+  // session redirects from, so this branch is mostly defensive.
+  return !next.startsWith("/admin/") && !next.startsWith("/client/");
+}
+
+/**
+ * Treat ``next`` as untrusted input. We only accept relative same-
+ * origin paths and reject protocol-relative URLs, absolute URLs,
+ * ``javascript:`` schemes, and anything with a backslash that browsers
+ * sometimes treat as a scheme separator.
+ */
+function sanitizeNext(raw: string | null | undefined): string | null {
+  if (!raw) return null;
+  if (!raw.startsWith("/")) return null;
+  if (raw.startsWith("//")) return null;
+  if (raw.startsWith("/\\")) return null;
+  if (raw.includes("\\")) return null;
+  // Schemes like "/javascript:..." would already fail the startsWith
+  // check above, but be explicit about colons in the first segment.
+  const firstSegmentEnd = raw.indexOf("/", 1);
+  const firstSegment = firstSegmentEnd === -1 ? raw : raw.slice(0, firstSegmentEnd);
+  if (firstSegment.includes(":")) return null;
+  return raw;
 }
 
 function LoginSkeleton() {

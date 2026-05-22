@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useState, type ComponentType } from "react";
-import { useRouter } from "next/navigation";
+import { usePathname, useRouter } from "next/navigation";
 
 import { enterPortal } from "@/lib/api/auth";
 import { readAdminSession } from "@/lib/session/admin";
@@ -10,6 +10,23 @@ import {
   readPortalSession,
   type PortalSession,
 } from "./portal";
+
+/**
+ * Build a /login URL that asks the login page to redirect back to the
+ * pathname (+ search) the user was originally trying to reach. The
+ * login page validates ``next`` is a same-origin relative path before
+ * honouring it, so it's safe to drop the current path in verbatim.
+ *
+ * Falls back to ``/login`` when no pathname is available (SSR) or
+ * when the pathname is already ``/login`` itself.
+ */
+function loginUrlForCurrentPath(pathname: string | null): string {
+  if (!pathname || pathname === "/login") return "/login";
+  const search =
+    typeof window !== "undefined" ? window.location.search : "";
+  const next = `${pathname}${search}`;
+  return `/login?next=${encodeURIComponent(next)}`;
+}
 
 /**
  * HOC that fronts a portal page with the standard session-check.
@@ -34,6 +51,7 @@ export function withPortalSession<P extends { session: PortalSession }>(
 ) {
   return function Guarded(props: Omit<P, "session">) {
     const router = useRouter();
+    const pathname = usePathname();
     const [session, setSession] = useState<PortalSession | null>(null);
 
     useEffect(() => {
@@ -51,13 +69,13 @@ export function withPortalSession<P extends { session: PortalSession }>(
         if (!resolved) {
           const admin = readAdminSession();
           if (!admin) {
-            router.replace("/login");
+            router.replace(loginUrlForCurrentPath(pathname));
             return;
           }
           try {
             await enterPortal(admin.access_token);
           } catch {
-            router.replace("/login");
+            router.replace(loginUrlForCurrentPath(pathname));
             return;
           }
           resolved = await fetchCurrentSession();
@@ -86,7 +104,7 @@ export function withPortalSession<P extends { session: PortalSession }>(
       return () => {
         cancelled = true;
       };
-    }, [router]);
+    }, [router, pathname]);
 
     if (!session) return null;
     return <Component {...(props as P)} session={session} />;
