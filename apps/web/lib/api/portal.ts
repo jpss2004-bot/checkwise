@@ -646,27 +646,6 @@ export async function postWiseEvent(
 // Wise copilot — LLM ask endpoint (Phase 2.b)
 // ---------------------------------------------------------------------------
 
-/** Curated state digest the dock ships to the LLM fallback. Matches
- *  the backend ``WiseStateDigestIn`` schema one-for-one. */
-export type WiseStateDigest = {
-  vendor_name: string;
-  persona_type: "moral" | "fisica";
-  onboarding_completed: boolean;
-  compliance_pct: number;
-  on_track: number;
-  total_tracked: number;
-  needs_action: number;
-  in_review: number;
-  completed_required: number;
-  total_required: number;
-  approved_count: number;
-  pending_count: number;
-  rejected_count: number;
-  expired_count: number;
-  next_action_titles: string[];
-  upcoming_deadline_titles: string[];
-};
-
 /** One CTA option the dock offers the model. ``id`` is the canonical
  *  matcher the model picks; the backend echoes back ``label`` +
  *  ``href`` (or null if the model didn't pick one / picked an
@@ -688,6 +667,12 @@ export type WiseAskResponse = {
 /**
  * Ask Wise — LLM-backed free-text reply for the copilot dock.
  *
+ * Phase 3 (2026-05-21) — the backend now assembles the full
+ * workspace + catalog + glossary context server-side from the DB,
+ * so the dock only ships the prompt and the allowed CTAs. The
+ * backend still accepts a legacy ``digest`` field for backward
+ * compat during the deploy transition, but we no longer send it.
+ *
  * Returns the structured reply. Rethrows on hard failures (auth
  * error, 5xx) so the dock can show a "tuve un problema" bubble
  * instead of pretending nothing happened.
@@ -695,14 +680,13 @@ export type WiseAskResponse = {
 export async function postWiseAsk(
   session: PortalSession,
   prompt: string,
-  digest: WiseStateDigest,
   ctas: WiseAskCta[],
 ): Promise<WiseAskResponse> {
   return await fetchJson<WiseAskResponse>(
     `/api/v1/portal/workspaces/${session.workspace_id}/wise/ask`,
     {
       method: "POST",
-      body: JSON.stringify({ prompt, digest, ctas }),
+      body: JSON.stringify({ prompt, ctas }),
     },
     session,
   );

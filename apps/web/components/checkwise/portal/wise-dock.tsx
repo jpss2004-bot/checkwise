@@ -20,7 +20,6 @@ import {
   type DashboardPayload,
   type OnboardingSummary,
   type WiseAskCta,
-  type WiseStateDigest,
 } from "@/lib/api/portal";
 import type { PortalSession } from "@/lib/session/portal";
 import {
@@ -175,9 +174,13 @@ export function WiseDock({
       };
       setTurns((prev) => [...prev, userTurn, placeholder]);
 
-      const digest = buildStateDigest({ session, dashboard, onboarding });
+      // Phase 3 (2026-05-21) — the backend assembles the full
+      // workspace + catalog context server-side from the DB, so the
+      // dock only needs to ship the prompt and the allowed-CTA
+      // list. ``buildStateDigest`` was removed from this file with
+      // the same change.
       const ctas = buildAllowedCtas(dashboard);
-      postWiseAsk(session, trimmed, digest, ctas)
+      postWiseAsk(session, trimmed, ctas)
         .then((response) => {
           setTurns((prev) =>
             prev.map((turn) =>
@@ -574,55 +577,7 @@ function DockComposer({
   );
 }
 
-// ─── Helpers: state digest + allowed CTAs for the LLM ─────────────
-
-/**
- * Build the curated state digest the backend expects. Mirrors the
- * server-side ``WiseStateDigestIn`` schema field-for-field.
- *
- * We only ship counts + 3 representative titles per category — no
- * submission ids, no filenames, no raw status strings. Just enough
- * for the model to answer "cómo voy?" / "qué documentos me faltan?"
- * accurately without exposing PII or paying for a big context.
- */
-function buildStateDigest({
-  session,
-  dashboard,
-  onboarding,
-}: {
-  session: PortalSession;
-  dashboard: DashboardPayload;
-  onboarding: OnboardingSummary | null;
-}): WiseStateDigest {
-  const counts = dashboard.document_state_counts;
-  const summary = dashboard.onboarding_summary;
-  const persona: "moral" | "fisica" =
-    session.persona_type === "moral" ? "moral" : "fisica";
-  return {
-    vendor_name: session.vendor_name,
-    persona_type: persona,
-    onboarding_completed: session.onboarding_completed_at !== null,
-    compliance_pct: dashboard.semaphore.compliance_pct,
-    on_track: dashboard.semaphore.on_track,
-    total_tracked: dashboard.semaphore.total_tracked,
-    needs_action: summary.needs_action,
-    in_review: summary.in_review,
-    completed_required:
-      onboarding?.summary.received_required ?? summary.completed,
-    total_required:
-      onboarding?.summary.total_required ?? summary.total_required,
-    approved_count: counts.approved,
-    pending_count: counts.pending,
-    rejected_count: counts.rejected,
-    expired_count: counts.expired,
-    next_action_titles: dashboard.suggested_actions
-      .slice(0, 3)
-      .map((a) => a.title),
-    upcoming_deadline_titles: dashboard.upcoming_deadlines
-      .slice(0, 3)
-      .map((d) => d.title),
-  };
-}
+// ─── Helpers: allowed CTAs for the LLM ────────────────────────────
 
 /**
  * Compose the allowed-CTA list the model can pick from. Drawn from
@@ -630,6 +585,10 @@ function buildStateDigest({
  * so the model can never link to anything the user didn't already
  * have access to. ``id`` is the canonical matcher; the backend
  * validates against this exact list before echoing label+href.
+ *
+ * Phase 3 (2026-05-21): the workspace+catalog state digest moved to
+ * the backend, so this is the only frontend-side context the dock
+ * still ships with each ``/wise/ask`` call.
  */
 function buildAllowedCtas(dashboard: DashboardPayload): WiseAskCta[] {
   const ctas: WiseAskCta[] = [];
