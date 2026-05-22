@@ -21,6 +21,7 @@ from __future__ import annotations
 
 from datetime import date, datetime
 from typing import Literal
+from urllib.parse import quote
 
 from sqlalchemy import select
 from sqlalchemy.orm import Session
@@ -261,8 +262,16 @@ def onboarding_reupload_href(view: SlotView) -> str:
     When the slot is in an actionable state and already carries a
     submission, the URL appends ``replaces=<submission_id>`` so the
     upload wizard creates a supersession link automatically.
+
+    Carries the human ``requirement`` name alongside the canonical
+    code so the intake wizard renders the document the provider
+    actually clicked on (matches the portal-layer fix from
+    2026-05-21 — see ``_onboarding_reupload_href`` in
+    ``app.api.v1.portal``).
     """
     parts = [f"requirement_code={view.requirement_code}"]
+    if view.requirement_name:
+        parts.append(f"requirement={quote(view.requirement_name)}")
     if view.current_submission_id and view.state in ACTIONABLE_SLOT_STATES:
         parts.append(f"replaces={view.current_submission_id}")
     parts.append("from=onboarding")
@@ -272,19 +281,27 @@ def onboarding_reupload_href(view: SlotView) -> str:
 def calendar_reupload_href(view: SlotView) -> str:
     """Build the ``/portal/upload`` URL for a calendar (periodic) slot.
 
-    Carries ``requirement_code`` + ``period_key`` + ``period_label`` so
-    the upload wizard preselects the right slot. ``replaces=`` is
-    appended when the slot is actionable and has a submission.
+    Carries ``requirement_code`` + ``requirement`` (human name) +
+    ``period_key`` + ``period_label`` so the upload wizard preselects
+    the right slot. ``replaces=`` is appended when the slot is
+    actionable and has a submission.
 
     Session 3 (2026-05-21) — when ``requirement_code`` matches the v2
     shape, appends ``&v2=1`` so the wizard switches to the
     alternatives radio picker. Without this, dashboard suggested-
     action CTAs that route v2 slots through this builder would mount
     the wizard in v1 mode against a collapsed code → broken submit.
+
+    Side-fix (2026-05-22) — the ``requirement=<name>`` parameter
+    matches the portal-layer fix from 2026-05-21. Without it the
+    reports attention-list links rendered through this helper would
+    drop into the wizard without a preselected document.
     """
     parts: list[str] = []
     if view.requirement_code:
         parts.append(f"requirement_code={view.requirement_code}")
+    if view.requirement_name:
+        parts.append(f"requirement={quote(view.requirement_name)}")
     if view.period_key:
         parts.append(f"period_key={view.period_key}")
         parts.append(f"period_label={view.period_key}")
