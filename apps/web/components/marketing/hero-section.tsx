@@ -193,40 +193,12 @@ export function HeroSection() {
           transition={{ duration: 0.6, ease: EASE_ENTER }}
         >
           <HeroStage />
-          {/* Operational metadata strip beneath the stage */}
-          <motion.div
-            initial={reduce ? false : { opacity: 0, y: 8 }}
-            animate={reduce ? { opacity: 1 } : { opacity: 1, y: 0 }}
-            transition={{
-              duration: 0.55,
-              ease: EASE_ENTER,
-              delay: 1.45,
-            }}
-            className="mt-8 flex flex-wrap items-baseline gap-x-6 gap-y-1.5 border-t border-[color:var(--border-subtle)] pt-5"
-          >
-            <Metadata label="Workspaces" value="142 proveedores" />
-            <Metadata label="Documentos" value="3,418 trazados" />
-            <Metadata label="Próx. vencimiento" value="IMSS · 18 may" />
-          </motion.div>
         </motion.div>
       </div>
 
       {/* Scroll hint — confirms there is more below the fold */}
       <ScrollHint />
     </section>
-  );
-}
-
-function Metadata({ label, value }: { label: string; value: string }) {
-  return (
-    <div className="inline-flex items-baseline gap-2">
-      <span className="font-mono text-[10px] uppercase tracking-[0.18em] text-[color:var(--text-tertiary)]">
-        {label}
-      </span>
-      <span className="font-mono text-[12px] tabular-nums text-[color:var(--text-primary)]">
-        {value}
-      </span>
-    </div>
   );
 }
 

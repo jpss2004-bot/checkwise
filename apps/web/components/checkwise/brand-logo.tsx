@@ -128,9 +128,11 @@ export function BrandLogo({
 }
 
 function BrandMark({ px }: { px: number }) {
-  // Three stacked rhombus-style sheets, top-to-bottom: navy, teal, blue.
-  // Drawn as a viewBox so it scales cleanly. Matches the official mark
-  // in CheckWise IMPI.jpg / "CW sin fondo.png".
+  // Three stacked horizontal capsules, top-to-bottom: navy, teal, blue.
+  // Matches the official trademark mark in CheckWise IMPI.jpg —
+  // horizontally-stretched stadium shapes with fully-rounded ends.
+  // The middle sheet is slightly narrower than the outer two, exactly
+  // as it appears in the registered artwork.
   return (
     <svg
       width={px}
@@ -143,28 +145,39 @@ function BrandMark({ px }: { px: number }) {
     >
       <defs>
         <linearGradient id="cw-mark-teal" x1="0" y1="0" x2="1" y2="0">
-          <stop offset="0%" stopColor="hsl(174, 91%, 45%)" />
-          <stop offset="100%" stopColor="hsl(180, 60%, 35%)" />
-        </linearGradient>
-        <linearGradient id="cw-mark-blue" x1="0" y1="0" x2="1" y2="1">
-          <stop offset="0%" stopColor="hsl(203, 97%, 27%)" />
-          <stop offset="100%" stopColor="hsl(207, 70%, 22%)" />
+          <stop offset="0%" stopColor="hsl(170, 84%, 42%)" />
+          <stop offset="100%" stopColor="hsl(186, 55%, 36%)" />
         </linearGradient>
       </defs>
-      {/* top sheet — navy */}
-      <path
-        d="M24 4 L42 11 L24 18 L6 11 Z"
+      {/* top sheet — navy capsule */}
+      <rect
+        x="4"
+        y="8"
+        width="40"
+        height="9"
+        rx="4.5"
+        ry="4.5"
         fill="hsl(207, 98%, 17%)"
       />
-      {/* middle sheet — teal */}
-      <path
-        d="M24 18 L42 24 L24 30 L6 24 Z"
+      {/* middle sheet — teal capsule (slightly narrower) */}
+      <rect
+        x="7"
+        y="19.5"
+        width="34"
+        height="9"
+        rx="4.5"
+        ry="4.5"
         fill="url(#cw-mark-teal)"
       />
-      {/* bottom sheet — blue */}
-      <path
-        d="M24 30 L42 37 L24 44 L6 37 Z"
-        fill="url(#cw-mark-blue)"
+      {/* bottom sheet — medium blue capsule */}
+      <rect
+        x="4"
+        y="31"
+        width="40"
+        height="9"
+        rx="4.5"
+        ry="4.5"
+        fill="hsl(206, 75%, 30%)"
       />
     </svg>
   );

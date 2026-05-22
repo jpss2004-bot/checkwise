@@ -13,10 +13,8 @@ import { JourneySection } from "@/components/marketing/journey-section";
 import { LegalShelfSection } from "@/components/marketing/legal-shelf-section";
 import { MarketingNav } from "@/components/marketing/marketing-nav";
 import { Reveal } from "@/components/marketing/motion-helpers";
-import {
-  MotionPreferenceProvider,
-  MotionToggle,
-} from "@/components/marketing/motion-preference";
+import { MotionPreferenceProvider } from "@/components/marketing/motion-preference";
+import { APP_VERSION, BUILD_SHA } from "@/lib/version";
 
 export default function PublicHome() {
   return (
@@ -98,7 +96,12 @@ function MarketingFooter() {
           <a href="#contacto" className="hover:text-[color:var(--text-primary)]">
             Contacto
           </a>
-          <MotionToggle />
+          <span
+            className="font-mono text-[10px] uppercase tracking-[0.16em] text-[color:var(--text-tertiary)]"
+            title={`Build ${BUILD_SHA}`}
+          >
+            v{APP_VERSION} · {BUILD_SHA}
+          </span>
         </div>
       </div>
     </footer>

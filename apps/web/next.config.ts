@@ -1,6 +1,19 @@
 import { createHash } from "node:crypto";
+import { readFileSync } from "node:fs";
+import { join } from "node:path";
 
 import type { NextConfig } from "next";
+
+const pkg = JSON.parse(
+  readFileSync(join(__dirname, "package.json"), "utf8"),
+) as { version?: string };
+
+const appVersion = pkg.version ?? "0.0.0";
+const gitSha = (
+  process.env.VERCEL_GIT_COMMIT_SHA ||
+  process.env.GIT_COMMIT_SHA ||
+  ""
+).slice(0, 7) || "local";
 
 /**
  * Resolve the `distDir` Next.js should write builds into.
@@ -46,6 +59,10 @@ const nextConfig: NextConfig = {
   reactStrictMode: true,
   allowedDevOrigins: ["127.0.0.1", "localhost"],
   distDir: resolveDistDir(),
+  env: {
+    NEXT_PUBLIC_APP_VERSION: appVersion,
+    NEXT_PUBLIC_GIT_SHA: gitSha,
+  },
 };
 
 export default nextConfig;
