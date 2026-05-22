@@ -384,6 +384,15 @@ class ProviderWorkspace(TimestampMixin, Base):
     profile_confirmed_at: Mapped[datetime | None] = mapped_column(
         DateTime(timezone=True)
     )
+    # Phase 1 / Slice 1A — legal consent gate. The provider cannot
+    # finish ``/portal/entra-a-tu-espacio`` until they accept the three
+    # legal notices (privacidad, términos, consentimiento). The version
+    # string pins the accepted document set so a future legal-approved
+    # version can supersede this one cleanly.
+    legal_consent_accepted_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True)
+    )
+    legal_consent_version: Mapped[str | None] = mapped_column(String(120))
     status: Mapped[str] = mapped_column(String(40), default="active", nullable=False)
 
     client: Mapped[Client] = relationship()

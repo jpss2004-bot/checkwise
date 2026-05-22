@@ -350,6 +350,12 @@ def _seed_boss_demo_workspace(db, *, owner_user_id: str) -> tuple[str, str, str]
         # Already-completed expediente. This is the field the
         # withOnboardingGate HOC reads to allow /portal/dashboard.
         onboarding_completed_at=datetime.now(UTC) - timedelta(days=14),
+        # Phase 1 / Slice 1A — legal_consent_accepted_at and
+        # legal_consent_version are intentionally LEFT NULL here. Per
+        # the locked grandfather policy every existing provider is
+        # treated as un-consented and re-prompted on next login. The
+        # demo flow benefits from this: it makes the consent gate
+        # observable on the very first launch of the dev stack.
         status="active",
     )
     db.add(workspace)

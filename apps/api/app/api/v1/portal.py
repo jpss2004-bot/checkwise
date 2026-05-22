@@ -93,6 +93,7 @@ from app.models import (
 )
 from app.models.entities import utc_now
 from app.schemas.submissions import MultiSubmissionResponse, SubmissionResponse
+from app.services.audit_log import add_audit_event
 from app.services.contact_service import hash_ip
 from app.services.correction_request_service import (
     TIER_B_FIELD_LABEL_ES,
@@ -327,6 +328,15 @@ class EnterResponse(BaseModel):
     job_title: str | None = None
     contact_preference: Literal["email", "whatsapp", "both"] = "email"
     profile_confirmed_at: str | None = None
+    # Phase 1 / Slice 1A — legal-consent gate state. Frontend gates
+    # the submit on /portal/entra-a-tu-espacio when
+    # ``legal_consent_accepted_at`` is null OR
+    # ``legal_consent_version != current_legal_consent_version`` (Slice
+    # 1B added the version-mismatch arm so a future ``v1`` bump
+    # prompts ``v0-draft`` acceptors to re-consent).
+    legal_consent_accepted_at: str | None = None
+    legal_consent_version: str | None = None
+    current_legal_consent_version: str | None = None
 
 
 class WorkspaceSummary(BaseModel):
@@ -345,6 +355,9 @@ class WorkspaceSummary(BaseModel):
     job_title: str | None = None
     contact_preference: Literal["email", "whatsapp", "both"] = "email"
     profile_confirmed_at: str | None = None
+    legal_consent_accepted_at: str | None = None
+    legal_consent_version: str | None = None
+    current_legal_consent_version: str | None = None
 
 
 class WorkspaceProfileUpdate(BaseModel):
@@ -849,6 +862,17 @@ def _profile_payload(db: Session, workspace: ProviderWorkspace) -> dict:
             if workspace.profile_confirmed_at
             else None
         ),
+        "legal_consent_accepted_at": (
+            workspace.legal_consent_accepted_at.isoformat()
+            if workspace.legal_consent_accepted_at
+            else None
+        ),
+        "legal_consent_version": workspace.legal_consent_version,
+        # Slice 1B — expose the canonical current version so the
+        # frontend can detect a stale acceptance (workspace at
+        # ``v0-draft`` after a bump to ``v1``) and re-prompt without
+        # hardcoding the version client-side.
+        "current_legal_consent_version": CURRENT_LEGAL_CONSENT_VERSION,
     }
 
 
@@ -962,6 +986,158 @@ def complete_onboarding(
         workspace_id=workspace.id,
         onboarding_completed_at=workspace.onboarding_completed_at.isoformat(),
         expediente_status="complete",
+    )
+
+
+# ---------------------------------------------------------------------------
+# Phase 1 / Slice 1A — legal-consent gate
+# ---------------------------------------------------------------------------
+#
+# The provider cannot finish the first-visit ``/portal/entra-a-tu-espacio``
+# flow until they accept the three legal documents (aviso de privacidad,
+# términos de uso, aviso de consentimiento). Acceptance is two-sided:
+#
+#   * ``provider_workspaces.legal_consent_accepted_at`` + ``.legal_consent_version``
+#     persist the fact for the gate check.
+#   * ``audit_log`` records the event with action
+#     ``provider.legal_consent_accepted`` and ``metadata={version, ip,
+#     user_agent}`` — the immutable forensic trail.
+#
+# The canonical version string is owned by the backend so the client
+# cannot lie about which document set it accepted. When legal returns
+# final wording the version bumps and providers re-consent.
+
+CURRENT_LEGAL_CONSENT_VERSION = "v0-draft"
+"""Active version of the legal document set the provider must accept.
+
+The string is intentionally readable. Bump when the published copy of
+any of the three documents changes materially. Existing acceptances
+stay tied to their old version so a "you must re-consent" UI can diff
+``workspace.legal_consent_version`` against the current value.
+"""
+
+
+class LegalConsentResponse(BaseModel):
+    workspace_id: str
+    legal_consent_accepted_at: str
+    legal_consent_version: str
+
+
+def _client_ip(request: Request) -> str | None:
+    """Best-effort client IP for the audit row.
+
+    Prefers the first hop in ``X-Forwarded-For`` (Render / Vercel set
+    this), falling back to ``request.client.host``. Returns ``None``
+    when nothing is available so the audit row carries an explicit
+    "unknown" rather than a misleading proxy address.
+    """
+    fwd = request.headers.get("x-forwarded-for")
+    if fwd:
+        first = fwd.split(",", 1)[0].strip()
+        if first:
+            return first
+    return request.client.host if request.client else None
+
+
+@router.post(
+    "/workspaces/{workspace_id}/legal-consent",
+    response_model=LegalConsentResponse,
+    status_code=status.HTTP_200_OK,
+    summary="Record provider acceptance of the legal-consent gate",
+)
+def accept_legal_consent(
+    workspace_id: str,
+    request: Request,
+    db: DbSession,
+    workspace: Annotated[ProviderWorkspace, Depends(current_portal_workspace)],
+) -> LegalConsentResponse:
+    """Persist the provider's acceptance of the current legal document set.
+
+    Body is empty by design: the backend owns the canonical version
+    string (``CURRENT_LEGAL_CONSENT_VERSION``) so the client cannot
+    claim to have accepted a different set than what was rendered.
+
+    Idempotent within a version: a second call on a workspace that
+    has already accepted the *current* version returns the existing
+    timestamp and does NOT write a duplicate audit row.
+
+    Slice 1B — version-aware re-acceptance. If the workspace's stored
+    version differs from ``CURRENT_LEGAL_CONSENT_VERSION`` (i.e. the
+    documents have been republished since they accepted), this is
+    treated as a fresh acceptance: a new ``AuditLog`` row is written
+    with the new version, and the workspace's timestamp is bumped.
+    The prior acceptance row stays untouched so the audit history
+    shows the full sequence (v0 accepted → v1 accepted).
+
+    Audit metadata captures the raw IP and User-Agent on the accepting
+    request. The ``audit_log`` table is staff-only; raw values are
+    retained for forensic linkage if a consent is ever challenged.
+    """
+    _ = workspace_id  # tenant guard already enforced by dependency
+
+    if (
+        workspace.legal_consent_accepted_at is not None
+        and workspace.legal_consent_version == CURRENT_LEGAL_CONSENT_VERSION
+    ):
+        # Idempotent path — already accepted the current version.
+        return LegalConsentResponse(
+            workspace_id=workspace.id,
+            legal_consent_accepted_at=workspace.legal_consent_accepted_at.isoformat(),
+            legal_consent_version=CURRENT_LEGAL_CONSENT_VERSION,
+        )
+
+    # Capture prior state BEFORE mutating so the audit row tells the
+    # full story on a version bump (e.g. v0-draft → v1).
+    prior_accepted_at = (
+        workspace.legal_consent_accepted_at.isoformat()
+        if workspace.legal_consent_accepted_at
+        else None
+    )
+    prior_version = workspace.legal_consent_version
+
+    accepted_at = utc_now()
+    workspace.legal_consent_accepted_at = accepted_at
+    workspace.legal_consent_version = CURRENT_LEGAL_CONSENT_VERSION
+
+    add_audit_event(
+        db,
+        action="provider.legal_consent_accepted",
+        entity_type="provider_workspace",
+        entity_id=workspace.id,
+        actor_type="provider",
+        actor_id=workspace.owner_user_id,
+        before=(
+            {
+                "legal_consent_accepted_at": prior_accepted_at,
+                "legal_consent_version": prior_version,
+            }
+            if prior_accepted_at is not None
+            else None
+        ),
+        after={
+            "legal_consent_accepted_at": accepted_at.isoformat(),
+            "legal_consent_version": CURRENT_LEGAL_CONSENT_VERSION,
+        },
+        metadata={
+            "version": CURRENT_LEGAL_CONSENT_VERSION,
+            "previous_version": prior_version,
+            "ip": _client_ip(request),
+            "user_agent": request.headers.get("user-agent"),
+        },
+    )
+
+    db.flush()
+    db.commit()
+    # Refresh so the response shape matches the idempotent path. Under
+    # Postgres with ``DateTime(timezone=True)`` both paths produce the
+    # same isoformat anyway; SQLite (used by tests) strips the tz on
+    # round-trip and the divergence would only surface in tests.
+    db.refresh(workspace)
+
+    return LegalConsentResponse(
+        workspace_id=workspace.id,
+        legal_consent_accepted_at=workspace.legal_consent_accepted_at.isoformat(),
+        legal_consent_version=CURRENT_LEGAL_CONSENT_VERSION,
     )
 
 
