@@ -8,7 +8,8 @@
     "start": "next start",
     "lint": "eslint .",
     "typecheck": "tsc --noEmit",
-    "check:print": "node scripts/check-print-contract.mjs"
+    "check:print": "node scripts/check-print-contract.mjs",
+    "check:intents": "node scripts/test-wise-intents.mjs"
   },
   "dependencies": {
     "@blocknote/core": "^0.51.0",

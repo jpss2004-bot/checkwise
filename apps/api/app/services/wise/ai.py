@@ -211,10 +211,17 @@ def ask_wise(
 
     key = api_key if api_key is not None else getattr(settings, "ANTHROPIC_API_KEY", "")
     if client is None and not key:
+        # Phase 2.c (2026-05-21) — softened the no-key copy. The
+        # previous "no tengo cerebro" read as a bug to testers; this
+        # version frames the limitation as "preguntas libres todavía
+        # están en aprobación" and points them at the buttons that
+        # do work, so the surface still feels intentional rather
+        # than broken when ANTHROPIC_API_KEY is unset.
         log.warning("wise.ai.no_key", extra={"prompt_len": len(prompt)})
         return _fallback(
-            "Por ahora no tengo cerebro para responder preguntas libres — "
-            "pero puedes usar los botones de arriba o escribirle a soporte."
+            "Las preguntas libres todavía están en aprobación interna. "
+            "Mientras tanto, usa los botones rápidos de arriba o escríbele "
+            "a soporte si necesitas algo puntual."
         )
 
     try:

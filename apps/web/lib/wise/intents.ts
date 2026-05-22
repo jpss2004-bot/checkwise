@@ -86,7 +86,27 @@ export function classifyIntent(prompt: string): WiseIntent {
     },
     {
       intent: "help",
-      needles: ["ayuda", "hola", "?", "help"],
+      // Phase 2.c (2026-05-21) — tightened vocabulary. The earlier
+      // ``"?"`` needle caught **every** Spanish question ending with
+      // ``?`` and routed it to the canned guide reply, making the
+      // LLM fallback unreachable from any well-formed question
+      // (reported by a tester who asked "Puedo visualizar cuantos
+      // documentos llevo cargados en plataforma?" and got the static
+      // help guide instead of an answer). Help now only fires on
+      // actual greetings or meta-questions about Wise itself; real
+      // free-text questions fall through to ``unknown`` → LLM.
+      needles: [
+        "ayuda",
+        "hola",
+        "buenas",
+        "buenos dias",
+        "buenas tardes",
+        "buenas noches",
+        "que puedes hacer",
+        "que sabes",
+        "como funciona",
+        "help",
+      ],
     },
   ];
 

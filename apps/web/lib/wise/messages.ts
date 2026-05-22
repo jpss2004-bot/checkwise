@@ -168,19 +168,40 @@ function welcomeMessage(args: {
   // mature
   const pendingActions = dashboard.suggested_actions.length;
   const compliance = dashboard.semaphore.compliance_pct;
+  const matureNeedsAction = dashboard.onboarding_summary.needs_action;
+  const matureNext = dashboard.upcoming_deadlines[0] ?? null;
   if (pendingActions === 0) {
+    // Phase 2.c (2026-05-21) — the previous "no hay acciones
+    // urgentes" copy fired even when ``summary.needs_action`` was
+    // > 0, which contradicted the metadata strip ("Por atender: 5").
+    // Mature workspaces with recurring obligations that are MISSING
+    // produce 0 suggested_actions (the backend suppresses missing-
+    // onboarding entries once initial onboarding is closed), but
+    // those MISSING items still feed ``summary.needs_action``. Now
+    // we name the discrepancy explicitly so Wise + the strip agree.
+    if (matureNeedsAction > 0) {
+      const deadlineLine = matureNext
+        ? ` El próximo vence ${formatDueLine(matureNext.due_in_days)}.`
+        : "";
+      return {
+        id: "wise-welcome-mature-pending",
+        tone: "info",
+        body: `${vendorName}, tu cumplimiento está al ${compliance}% y tienes ${matureNeedsAction} ${matureNeedsAction === 1 ? "documento pendiente" : "documentos pendientes"} por subir.${deadlineLine} Abre el calendario o pregúntame "¿qué sigue?".`,
+        ctaLabel: "Ver calendario",
+        ctaHref: "/portal/calendar",
+      };
+    }
     return {
       id: "wise-welcome-mature-clear",
       tone: "success",
       body: `${vendorName}, tu cumplimiento está al ${compliance}% y no hay acciones urgentes. Te aviso aquí cuando se acerque un vencimiento o un revisor pida algo.`,
     };
   }
-  const next = dashboard.upcoming_deadlines[0] ?? null;
   return {
     id: "wise-welcome-mature",
     tone: pendingActions > 2 ? "warning" : "info",
-    body: next
-      ? `${vendorName}, tienes ${pendingActions} ${pendingActions === 1 ? "tarea pendiente" : "tareas pendientes"} y el próximo vencimiento es ${formatDueLine(next.due_in_days)}. Vamos a por la primera.`
+    body: matureNext
+      ? `${vendorName}, tienes ${pendingActions} ${pendingActions === 1 ? "tarea pendiente" : "tareas pendientes"} y el próximo vencimiento es ${formatDueLine(matureNext.due_in_days)}. Vamos a por la primera.`
       : `${vendorName}, tienes ${pendingActions} ${pendingActions === 1 ? "tarea pendiente" : "tareas pendientes"}. Vamos a por la primera.`,
   };
 }
