@@ -4,14 +4,26 @@ Notifications are the durable client-facing layer on top of uploads,
 metadata generation, and reviewer decisions. They intentionally carry
 plain-language titles/bodies so the UI can show them without exposing
 internal validation-event names.
+
+Phase 4 / Slice 4A — every emitter passes an explicit ``severity``
+keyword. The canonical semáforo values are ``green`` (approved /
+complete), ``yellow`` (pending / in review / due soon), ``red``
+(rejected / missing / expired), and ``info`` (background automation,
+non-actionable). Storing the choice per row instead of deriving it
+from ``notification_type`` keeps future types free to pick their own
+severity without retrofitting a global mapping.
 """
 
 from __future__ import annotations
+
+from typing import Literal
 
 from sqlalchemy.orm import Session
 
 from app.constants.statuses import ReviewerAction
 from app.models import ClientNotification, Submission, Vendor
+
+NotificationSeverity = Literal["green", "yellow", "red", "info"]
 
 
 def add_client_notification(
@@ -19,6 +31,7 @@ def add_client_notification(
     *,
     client_id: str,
     notification_type: str,
+    severity: NotificationSeverity,
     title: str,
     body: str,
     vendor_id: str | None = None,
@@ -31,6 +44,7 @@ def add_client_notification(
         vendor_id=vendor_id,
         submission_id=submission_id,
         notification_type=notification_type,
+        severity=severity,
         title=title,
         body=body,
         action_url=action_url,
@@ -60,6 +74,9 @@ def notify_provider_uploaded(
         vendor_id=submission.vendor_id,
         submission_id=submission.id,
         notification_type="provider_uploaded",
+        # An upload sits in the review queue waiting for a human
+        # decision — that's the canonical "pending" state.
+        severity="yellow",
         title=f"{vendor.name} subio {count_text}",
         body=f"Recibimos {count_text} para {requirement}{period}.",
         action_url=f"/client/submissions?vendor_id={submission.vendor_id}",
@@ -85,6 +102,10 @@ def notify_metadata_ready(
         vendor_id=submission.vendor_id,
         submission_id=submission.id,
         notification_type="metadata_ready",
+        # Background automation completed; nothing for the client to
+        # act on. Neutral severity keeps these from competing visually
+        # with actionable approval / rejection rows.
+        severity="info",
         title="Metadata actualizada",
         body=(
             f"El Excel maestro del cliente ya incluye la metadata de "
@@ -118,6 +139,7 @@ def notify_reviewer_decision(
         vendor_id=submission.vendor_id,
         submission_id=submission.id,
         notification_type=f"document_{action.value}",
+        severity=_severity_for_decision(action),
         title=f"{vendor_name}: {label.lower()}",
         body=body,
         action_url=f"/client/submissions?vendor_id={submission.vendor_id}",
@@ -128,6 +150,22 @@ def notify_reviewer_decision(
             "period_key": submission.period_key,
         },
     )
+
+
+def _severity_for_decision(action: ReviewerAction) -> NotificationSeverity:
+    """Map a reviewer action onto a semáforo severity.
+
+    Aligns with the locked Phase 4 vocabulary:
+      * ``approve`` and ``mark_exception`` resolve the slot → green.
+      * ``reject`` puts the ball back in the provider's court and
+        carries explicit blame → red.
+      * ``request_clarification`` is still pending an answer → yellow.
+    """
+    if action in (ReviewerAction.APPROVE, ReviewerAction.MARK_EXCEPTION):
+        return "green"
+    if action == ReviewerAction.REJECT:
+        return "red"
+    return "yellow"
 
 
 def _requirement_label(submission: Submission) -> str:

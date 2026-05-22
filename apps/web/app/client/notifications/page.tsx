@@ -21,9 +21,66 @@ import {
   markAllClientNotificationsRead,
   markClientNotificationRead,
   type ClientNotificationItem,
+  type NotificationSeverity,
 } from "@/lib/api/client";
 
 import { ClientShell } from "../_shell";
+
+// Phase 4 / Slice 4A — render the semáforo per row. Every notification
+// carries an explicit ``severity`` set by the backend emitter; the
+// frontend maps each value to a triple of (unread border+bg, read
+// border+bg, icon bg, Badge variant, label) so the row's color tracks
+// the row's meaning, not its read state.
+type NotificationTone = {
+  unreadClass: string;
+  readClass: string;
+  iconBg: string;
+  badge: "success" | "warning" | "destructive" | "info";
+  label: string;
+};
+
+const TONE_BY_SEVERITY: Record<NotificationSeverity, NotificationTone> = {
+  green: {
+    unreadClass:
+      "border-[color:var(--status-success-border)] bg-[color:var(--status-success-bg)]",
+    readClass:
+      "border-[color:var(--border-subtle)] bg-[color:var(--surface-page)]",
+    iconBg:
+      "bg-[color:var(--status-success-bg)] text-[color:var(--status-success-text)]",
+    badge: "success",
+    label: "Aprobado",
+  },
+  yellow: {
+    unreadClass:
+      "border-[color:var(--status-warning-border)] bg-[color:var(--status-warning-bg)]",
+    readClass:
+      "border-[color:var(--border-subtle)] bg-[color:var(--surface-page)]",
+    iconBg:
+      "bg-[color:var(--status-warning-bg)] text-[color:var(--status-warning-text)]",
+    badge: "warning",
+    label: "Pendiente",
+  },
+  red: {
+    unreadClass:
+      "border-[color:var(--status-error-border)] bg-[color:var(--status-error-bg)]",
+    readClass:
+      "border-[color:var(--border-subtle)] bg-[color:var(--surface-page)]",
+    iconBg:
+      "bg-[color:var(--status-error-bg)] text-[color:var(--status-error-text)]",
+    badge: "destructive",
+    label: "Atención",
+  },
+  info: {
+    unreadClass:
+      "border-[color:var(--border-brand)] bg-[color:var(--surface-brand-muted)]",
+    readClass:
+      "border-[color:var(--border-subtle)] bg-[color:var(--surface-page)]",
+    iconBg:
+      "bg-[color:var(--surface-raised)] text-[color:var(--text-teal)]",
+    badge: "info",
+    label: "Aviso",
+  },
+};
 
 export default function ClientNotificationsPage() {
   const [rows, setRows] = useState<ClientNotificationItem[] | null>(null);
@@ -141,16 +198,20 @@ function NotificationRow({
 }) {
   const Icon = iconForType(row.notification_type);
   const unread = row.read_at === null;
+  const tone = TONE_BY_SEVERITY[row.severity] ?? TONE_BY_SEVERITY.info;
   const content = (
     <div
       className={
         "flex gap-3 rounded-md border p-3 transition-colors " +
-        (unread
-          ? "border-[color:var(--border-brand)] bg-[color:var(--surface-brand-muted)]"
-          : "border-[color:var(--border-subtle)] bg-[color:var(--surface-page)]")
+        (unread ? tone.unreadClass : tone.readClass)
       }
     >
-      <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-md bg-[color:var(--surface-raised)] text-[color:var(--text-teal)]">
+      <span
+        className={
+          "flex h-8 w-8 shrink-0 items-center justify-center rounded-md " +
+          tone.iconBg
+        }
+      >
         <Icon className="h-4 w-4" weight="bold" aria-hidden />
       </span>
       <div className="min-w-0 flex-1">
@@ -158,6 +219,7 @@ function NotificationRow({
           <p className="text-[13px] font-semibold text-[color:var(--text-primary)]">
             {row.title}
           </p>
+          <Badge variant={tone.badge}>{tone.label}</Badge>
           {unread ? <Badge variant="brand">Nueva</Badge> : null}
           {row.vendor_name ? <Badge variant="outline">{row.vendor_name}</Badge> : null}
         </div>

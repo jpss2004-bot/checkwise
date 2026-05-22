@@ -941,6 +941,15 @@ class ClientNotification(Base):
     body: Mapped[str] = mapped_column(Text, nullable=False)
     action_url: Mapped[str | None] = mapped_column(String(512))
     payload: Mapped[dict | None] = mapped_column(JSON)
+    # Phase 4 / Slice 4A — semáforo discriminator. Canonical values:
+    # ``green`` (approved / complete), ``yellow`` (pending / in
+    # review / due soon), ``red`` (rejected / missing / expired),
+    # ``info`` (background automation, non-actionable). Stored
+    # explicitly per row so a future notification type can pick its
+    # own severity without a global mapping update.
+    severity: Mapped[str] = mapped_column(
+        String(20), default="info", nullable=False
+    )
     read_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), index=True)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), default=utc_now, nullable=False, index=True

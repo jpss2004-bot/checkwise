@@ -743,6 +743,85 @@ def test_client_notifications_are_created_and_readable(
     assert mark_all.json()["unread_count"] == 0
 
 
+def test_client_notifications_carry_severity_per_emit_site(
+    api_client: TestClient, db_factory
+) -> None:
+    """Phase 4 / Slice 4A — every emit-site sets an explicit semáforo
+    severity and it round-trips through the API response. Tests cover
+    the three actionable reviewer decisions plus the upload + metadata
+    events that fire automatically.
+    """
+    client_id = _seed_client(db_factory)
+    _, ws_id = _seed_vendor_with_workspace(db_factory, client_id=client_id)
+
+    # Helper: seed a submission, apply a reviewer decision, return the
+    # severity propagated to the reviewer-decision notification.
+    def _seed_and_decide(action: ReviewerAction, reason: str | None) -> str:
+        sub_id = _seed_submission_for_workspace(api_client, db_factory, ws_id)
+        db = db_factory()
+        try:
+            sub = db.get(Submission, sub_id)
+            assert sub is not None
+            apply_reviewer_decision(
+                db,
+                submission=sub,
+                action=action,
+                reason=reason,
+                reviewer_user_id="rev-test-user",
+            )
+        finally:
+            db.close()
+        return sub_id
+
+    sub_approved = _seed_and_decide(ReviewerAction.APPROVE, None)
+    sub_rejected = _seed_and_decide(
+        ReviewerAction.REJECT, "Documento ilegible."
+    )
+    sub_clarif = _seed_and_decide(
+        ReviewerAction.REQUEST_CLARIFICATION, "Aclara el periodo."
+    )
+    sub_exception = _seed_and_decide(
+        ReviewerAction.MARK_EXCEPTION, "Aplicada por excepción legal."
+    )
+
+    _, email, pw = _seed_user_with_role(
+        db_factory, role="client_admin", client_id=client_id, email_prefix="ca"
+    )
+    token = _login(api_client, email, pw)
+    resp = api_client.get(
+        "/api/v1/client/notifications?limit=200", headers=_h(token)
+    )
+    assert resp.status_code == 200, resp.text
+    items = resp.json()["items"]
+
+    # Index every notification by (submission_id, notification_type) so
+    # the assertions read naturally.
+    by_key = {(it["submission_id"], it["notification_type"]): it for it in items}
+
+    # Every submission produced an upload event with yellow severity.
+    for sid in (sub_approved, sub_rejected, sub_clarif, sub_exception):
+        upload = by_key[(sid, "provider_uploaded")]
+        assert upload["severity"] == "yellow", upload
+
+    # Reviewer decisions per the locked Phase 4 vocabulary.
+    assert by_key[(sub_approved, "document_approve")]["severity"] == "green"
+    assert by_key[(sub_rejected, "document_reject")]["severity"] == "red"
+    assert (
+        by_key[(sub_clarif, "document_request_clarification")]["severity"]
+        == "yellow"
+    )
+    assert (
+        by_key[(sub_exception, "document_mark_exception")]["severity"] == "green"
+    )
+
+    # Metadata-ready notifications fire as background automation and
+    # carry the neutral ``info`` severity so they don't compete with
+    # actionable rows.
+    metadata_rows = [it for it in items if it["notification_type"] == "metadata_ready"]
+    assert metadata_rows, "expected at least one metadata_ready notification"
+    assert all(it["severity"] == "info" for it in metadata_rows)
+
+
 def test_client_metadata_endpoint_exposes_master_download_state(
     api_client: TestClient, db_factory
 ) -> None:

@@ -267,9 +267,16 @@ export type ClientActivityResponse = {
   limit: number;
 };
 
+/** Phase 4 / Slice 4A — semáforo discriminator on a notification row.
+ *  Canonical values: ``green`` (approved / complete), ``yellow``
+ *  (pending / in review / due soon), ``red`` (rejected / missing /
+ *  expired), ``info`` (background automation). */
+export type NotificationSeverity = "green" | "yellow" | "red" | "info";
+
 export type ClientNotificationItem = {
   id: string;
   notification_type: string;
+  severity: NotificationSeverity;
   title: string;
   body: string;
   action_url: string | null;

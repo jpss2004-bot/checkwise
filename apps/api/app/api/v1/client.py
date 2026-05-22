@@ -407,6 +407,13 @@ class ClientActivityResponse(BaseModel):
 class ClientNotificationItem(BaseModel):
     id: str
     notification_type: str
+    # Phase 4 / Slice 4A — semáforo discriminator. ``green`` (approved
+    # / complete), ``yellow`` (pending / in review / due soon),
+    # ``red`` (rejected / missing / expired), ``info`` (background
+    # automation). The frontend swaps row border + Badge color
+    # purely on this value, so a future severity-mapping change
+    # ships without coordinated UI code.
+    severity: Literal["green", "yellow", "red", "info"]
     title: str
     body: str
     action_url: str | None
@@ -1383,6 +1390,11 @@ def _notification_item(
     return ClientNotificationItem(
         id=row.id,
         notification_type=row.notification_type,
+        # Fallback defensively to ``info`` in case an older row
+        # somehow predates the migration default (shouldn't happen,
+        # but ``Literal`` validation will 500 if a bad value sneaks
+        # in).
+        severity=row.severity if row.severity in {"green", "yellow", "red", "info"} else "info",  # type: ignore[arg-type]
         title=row.title,
         body=row.body,
         action_url=row.action_url,
