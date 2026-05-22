@@ -1,24 +1,13 @@
 /**
  * Build a snapshot of the authenticated provider's workspace.
  *
- * The previous version (CheckWise 1.6) fabricated values the session
- * doesn't actually carry: a "demo@checkwise.mx" placeholder email, a
- * "tenant-<workspace_id>" synthetic id, first/last-name guesses from
- * the local part of the placeholder email, and client/provider id
- * prefixes. Once invitations were retired, those defaults started
- * showing up verbatim in the UI — every test user saw "Tu próximo
- * paso, demo" and a locked "demo@checkwise.mx" identity row.
- *
- * Today the function returns only what the session actually knows.
- * Fields the backend hasn't surfaced yet (email, tenant id, client
- * id, provider id, first/last name) come back as null / empty
- * strings, and the consuming UI (WorkspaceIdentityCard, the
- * confirmation form) is responsible for branching on absence rather
- * than rendering a fabricated value.
- *
- * TODO[backend-integration]: when ``GET /api/v1/portal/workspace``
- * lands, replace this synthesiser with the backend call and remove
- * the null branches from the UI.
+ * Reads everything from the backend-resolved ``PortalSession``.
+ * ``email``, ``full_name``, ``phone``, ``job_title`` and
+ * ``contact_preference`` come from the User row owning the workspace
+ * (surfaced by ``GET /portal/me`` after migration 0016 landed the
+ * supporting columns). Tenant / client / provider IDs stay null on
+ * this surface — they aren't currently consumed by any caller and
+ * the previous fabricated prefixes were misleading.
  */
 
 import type { PortalSession } from "@/lib/session/portal";
@@ -49,20 +38,32 @@ export function buildWorkspaceContext(session: PortalSession): WorkspaceContext 
     // this surface, swap to ``session.role`` here.
     role: "provider",
     rfc: session.vendor_rfc !== "PENDIENTE" ? session.vendor_rfc : null,
-    // The portal session does not currently expose the authenticated
-    // user's email. Returning null is honest; the correction form's
-    // initialCurrentValue branches on this and shows an empty field.
-    email: null,
+    // Authenticated user's email lives in session.contact_email after
+    // migration 0016. ``email_domain`` is still derived here on the
+    // client because no caller actually consumes it for verification
+    // — it's display-only when present.
+    email: session.contact_email,
     company_legal_name: session.vendor_name,
-    email_domain: null,
+    email_domain: session.contact_email
+      ? session.contact_email.split("@")[1]?.toLowerCase() ?? null
+      : null,
   };
 
+  // Split full_name at the first space so the form's two-field shape
+  // round-trips reasonably. The form below uses the same convention
+  // and re-joins on save, so the backend always stores the canonical
+  // full_name; the split is purely a presentation concern.
+  const fullName = session.full_name ?? "";
+  const firstSpace = fullName.indexOf(" ");
+  const firstName = firstSpace === -1 ? fullName : fullName.slice(0, firstSpace);
+  const lastName = firstSpace === -1 ? "" : fullName.slice(firstSpace + 1);
+
   const editable: EditableProfileFields = {
-    first_name: "",
-    last_name: "",
-    phone: null,
-    job_title: null,
-    contact_preference: "email",
+    first_name: firstName,
+    last_name: lastName,
+    phone: session.phone,
+    job_title: session.job_title,
+    contact_preference: session.contact_preference,
   };
 
   return {

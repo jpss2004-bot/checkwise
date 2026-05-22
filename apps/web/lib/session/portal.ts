@@ -31,6 +31,8 @@ export type PersonaType = "moral" | "fisica";
 
 export type ExpedienteStatus = "not_started" | "in_progress" | "complete";
 
+export type ContactPreference = "email" | "whatsapp" | "both";
+
 export type PortalSession = {
   workspace_id: string;
   /** Kept on the type for backward compatibility with existing code paths.
@@ -46,6 +48,18 @@ export type PortalSession = {
   /** Initial-expediente lifecycle marker.
    *  Only "complete" unlocks the dashboard. */
   expediente_status: ExpedienteStatus;
+  /** Editable profile fields. ``full_name`` and ``contact_email`` are
+   *  the User row's canonical name and email; the rest were added in
+   *  migration 0016. ``profile_confirmed_at`` is the marker the
+   *  /portal/entra-a-tu-espacio page uses to branch between the
+   *  first-visit confirmation gate and the returning-user settings
+   *  view. */
+  full_name: string | null;
+  contact_email: string | null;
+  phone: string | null;
+  job_title: string | null;
+  contact_preference: ContactPreference;
+  profile_confirmed_at: string | null;
 };
 
 let cached: PortalSession | null = null;
@@ -59,7 +73,7 @@ function clearLegacyLocalStorage(): void {
   }
 }
 
-function summaryToSession(summary: WorkspaceSummary): PortalSession {
+export function summaryToSession(summary: WorkspaceSummary): PortalSession {
   return {
     workspace_id: summary.workspace_id,
     // Browser no longer holds the real access_token. We carry a
@@ -74,7 +88,19 @@ function summaryToSession(summary: WorkspaceSummary): PortalSession {
     contract_reference: summary.contract_reference,
     onboarding_completed_at: summary.onboarding_completed_at,
     expediente_status: summary.expediente_status,
+    full_name: summary.full_name,
+    contact_email: summary.contact_email,
+    phone: summary.phone,
+    job_title: summary.job_title,
+    contact_preference: summary.contact_preference,
+    profile_confirmed_at: summary.profile_confirmed_at,
   };
+}
+
+/** Replace the cached portal session in place (e.g. after PATCH
+ *  /portal/.../profile resolves with a refreshed summary). */
+export function setCachedPortalSession(session: PortalSession): void {
+  cached = session;
 }
 
 /**

@@ -25,6 +25,8 @@ const API_BASE_URL =
 
 export type ExpedienteStatus = "not_started" | "in_progress" | "complete";
 
+export type ContactPreference = "email" | "whatsapp" | "both";
+
 export interface WorkspaceSummary {
   workspace_id: string;
   persona_type: string;
@@ -35,6 +37,25 @@ export interface WorkspaceSummary {
   contract_reference: string | null;
   onboarding_completed_at: string | null;
   expediente_status: ExpedienteStatus;
+  // Profile fields landed in migration 0016 + portal API ``PATCH
+  // /workspaces/{id}/profile``. ``profile_confirmed_at`` is the
+  // canonical "has the user confirmed their profile at least once"
+  // marker — the entra-a-tu-espacio page reads it to branch between
+  // the first-visit confirmation gate and the returning-user
+  // settings view.
+  full_name: string | null;
+  contact_email: string | null;
+  phone: string | null;
+  job_title: string | null;
+  contact_preference: ContactPreference;
+  profile_confirmed_at: string | null;
+}
+
+export interface WorkspaceProfileUpdate {
+  full_name?: string;
+  phone?: string;
+  job_title?: string;
+  contact_preference?: ContactPreference;
 }
 
 function bearerHeader(): Record<string, string> {
@@ -70,5 +91,37 @@ export async function postPortalLogout(): Promise<void> {
     });
   } catch {
     /* logout is best-effort */
+  }
+}
+
+/**
+ * Persist editable profile fields (full_name, phone, job_title,
+ * contact_preference) for the current workspace. Returns the refreshed
+ * WorkspaceSummary so callers can update their session cache without a
+ * follow-up /me round-trip. Returns null on auth / network failure —
+ * the caller surfaces a generic "no pudimos guardar" message.
+ */
+export async function patchWorkspaceProfile(
+  workspace_id: string,
+  payload: WorkspaceProfileUpdate,
+): Promise<WorkspaceSummary | null> {
+  try {
+    const response = await fetch(
+      `${API_BASE_URL}/api/v1/portal/workspaces/${encodeURIComponent(workspace_id)}/profile`,
+      {
+        method: "PATCH",
+        credentials: "include",
+        headers: {
+          Accept: "application/json",
+          "Content-Type": "application/json",
+          ...bearerHeader(),
+        },
+        body: JSON.stringify(payload),
+      },
+    );
+    if (!response.ok) return null;
+    return (await response.json()) as WorkspaceSummary;
+  } catch {
+    return null;
   }
 }

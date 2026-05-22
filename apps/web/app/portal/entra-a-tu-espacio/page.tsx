@@ -29,65 +29,62 @@ import {
 import { Field } from "@/components/ui/field";
 import { Input } from "@/components/ui/input";
 import { Select } from "@/components/ui/select";
-import {
-  readEditableProfile,
-  saveEditableProfile,
-} from "@/lib/workspace/profile-local";
+import { patchWorkspaceProfile } from "@/lib/api/portal-session";
 import { buildWorkspaceContext } from "@/lib/workspace/resolver";
 import type {
   EditableProfileFields,
   WorkspaceContext,
 } from "@/lib/workspace/types";
 import { withPortalSession } from "@/lib/session/with-portal-session";
-import type {
-  ExpedienteStatus,
-  PortalSession,
+import {
+  setCachedPortalSession,
+  summaryToSession,
+  type ExpedienteStatus,
+  type PortalSession,
 } from "@/lib/session/portal";
 
 /**
  * /portal/entra-a-tu-espacio
  *
- * Post-auth workspace confirmation step. The user reviews:
- *   - Tenant identity (role + company + RFC + workspace_id) — locked
- *   - Editable profile (name, phone, job title, contact preference)
- *   - Next-step preview that depends on expediente state
+ * Post-auth workspace confirmation step + ongoing settings surface.
  *
- * Before continuing the user must press the "Entrar a mi espacio"
- * primary CTA. That action persists the editable profile and the
- * "confirmed_at" timestamp, then routes via the same routing helper
- * that powers /login and /activate.
+ *   - First visit (``session.profile_confirmed_at`` is null) — the page
+ *     reads as a confirmation gate. The provider reviews tenant
+ *     identity, fills in contact info, and presses "Entrar a mi
+ *     espacio" to be routed onward to the expediente or dashboard.
+ *   - Returning visit (``profile_confirmed_at`` set) — the same form
+ *     becomes a quieter settings view. The button reads "Guardar
+ *     cambios" and the page does not route away after save.
  *
- * Spec: docs/CHECKWISE_1_6.md §2, §3, §4.
- *
- * TODO[security-backend]: every value rendered here must be re-fetched
- * from a backend endpoint that derives them from the authenticated
- * session — never trusting the localStorage portal session.
+ * Profile persistence calls ``PATCH /portal/workspaces/{id}/profile``
+ * which writes ``full_name`` / ``phone`` / ``job_title`` /
+ * ``contact_preference`` on the workspace's User row and bumps
+ * ``profile_confirmed_at`` on the workspace itself.
  */
 function EntraATuEspacioInner({ session }: { session: PortalSession }) {
   const router = useRouter();
 
-  // Workspace snapshot comes from the authenticated session
-  // (cookie-backed /portal/me). No more mock invitations — the user is
-  // already inside their assigned workspace by the time this page renders.
-  const workspace = useMemo<WorkspaceContext>(
-    () => buildWorkspaceContext(session),
-    [session],
-  );
+  // The page must respond to in-place session updates after PATCH so
+  // the first-visit / returning-user branch flips immediately. We
+  // shadow the prop in local state and ``setLiveSession`` it after
+  // each successful save.
+  const [liveSession, setLiveSession] = useState<PortalSession>(session);
+  const isFirstVisit = liveSession.profile_confirmed_at === null;
 
-  const storedProfile = useMemo(
-    () => readEditableProfile(workspace.protected.workspace_id),
-    [workspace.protected.workspace_id],
+  const workspace = useMemo<WorkspaceContext>(
+    () => buildWorkspaceContext(liveSession),
+    [liveSession],
   );
 
   const [profile, setProfile] = useState<EditableProfileFields>({
-    first_name: storedProfile.first_name ?? workspace.editable.first_name,
-    last_name: storedProfile.last_name ?? workspace.editable.last_name,
-    phone: storedProfile.phone ?? workspace.editable.phone,
-    job_title: storedProfile.job_title ?? workspace.editable.job_title,
-    contact_preference:
-      storedProfile.contact_preference ?? workspace.editable.contact_preference,
+    first_name: workspace.editable.first_name,
+    last_name: workspace.editable.last_name,
+    phone: workspace.editable.phone,
+    job_title: workspace.editable.job_title,
+    contact_preference: workspace.editable.contact_preference,
   });
   const [submitting, setSubmitting] = useState(false);
+  const [saveError, setSaveError] = useState<string | null>(null);
 
   // Correction-request modal state. The dashboard's
   // <WorkspaceIdentityCard /> footer link still routes here with
@@ -119,23 +116,51 @@ function EntraATuEspacioInner({ session }: { session: PortalSession }) {
   async function handleConfirm(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     setSubmitting(true);
-    // Profile fields persist locally only today — see lib/workspace/
-    // profile-local.ts. The "confirmed_at" timestamp was previously
-    // also written to localStorage but nothing read it back, so the
-    // dead-state write was dropped during the audit. Real backend
-    // persistence is tracked as a follow-up (E in the audit punch list).
-    await saveEditableProfile(workspace.protected.workspace_id, profile);
+    setSaveError(null);
+    // Persist via PATCH /portal/workspaces/{id}/profile. Backend
+    // recombines first+last into the canonical User.full_name and
+    // bumps profile_confirmed_at so the next session refresh flips
+    // this page into settings mode.
+    const full_name = `${profile.first_name.trim()} ${profile.last_name.trim()}`
+      .trim();
+    const updated = await patchWorkspaceProfile(
+      workspace.protected.workspace_id,
+      {
+        full_name: full_name || undefined,
+        phone: profile.phone ?? undefined,
+        job_title: profile.job_title ?? undefined,
+        contact_preference: profile.contact_preference,
+      },
+    );
     setSubmitting(false);
+    if (!updated) {
+      setSaveError(
+        "No pudimos guardar tus cambios. Verifica tu conexión e intenta de nuevo.",
+      );
+      return;
+    }
+    // Refresh the cached session so other portal surfaces (and the
+    // ``isFirstVisit`` branch on this page) see the latest data
+    // without a /me round-trip.
+    const refreshed = summaryToSession(updated);
+    setLiveSession(refreshed);
+    setCachedPortalSession(refreshed);
     setJustSaved(true);
-    // Onboarding gate: a brand-new provider must finish their initial
-    // expediente before the dashboard becomes available. The session's
-    // expediente_status comes from the backend (single source of truth).
-    const next =
-      session.expediente_status === "complete"
-        ? "/portal/dashboard"
-        : "/portal/onboarding";
-    // Brief pause so the saved affordance is visible before nav.
-    window.setTimeout(() => router.push(next), 700);
+
+    if (isFirstVisit) {
+      // First-visit gate flow — onward to the expediente or dashboard
+      // depending on whether the user has already loaded documents.
+      const next =
+        liveSession.expediente_status === "complete"
+          ? "/portal/dashboard"
+          : "/portal/onboarding";
+      window.setTimeout(() => router.push(next), 700);
+      return;
+    }
+    // Returning-user settings save — keep them here and clear the
+    // "Guardado" affordance after a moment so a second edit feels
+    // responsive.
+    window.setTimeout(() => setJustSaved(false), 1800);
   }
 
   // Lenient MX phone-format check. Empty is fine (phone is optional);
@@ -157,15 +182,15 @@ function EntraATuEspacioInner({ session }: { session: PortalSession }) {
         <header className="cw-fade-up flex flex-col gap-2">
           <Badge variant="teal" className="self-start rounded-full px-3 py-1">
             <Sparkle className="h-3 w-3" weight="fill" aria-hidden="true" />
-            Confirmación de espacio
+            {isFirstVisit ? "Confirmación de espacio" : "Mi espacio"}
           </Badge>
           <h1 className="text-3xl font-semibold tracking-tight text-[color:var(--text-primary)]">
-            Entra a tu espacio
+            {isFirstVisit ? "Entra a tu espacio" : "Tu espacio en CheckWise"}
           </h1>
           <p className="max-w-prose text-[15px] text-[color:var(--text-secondary)]">
-            Confirma que esta información es correcta antes de continuar.
-            Usamos estos datos para proteger tu expediente y evitar que los
-            documentos se asignen a la empresa incorrecta.
+            {isFirstVisit
+              ? "Confirma que esta información es correcta antes de continuar. Usamos estos datos para proteger tu expediente y evitar que los documentos se asignen a la empresa incorrecta."
+              : "Tus datos de contacto y la información de tu workspace. Edita los campos cuando lo necesites — los cambios se guardan al instante."}
           </p>
         </header>
 
@@ -191,7 +216,9 @@ function EntraATuEspacioInner({ session }: { session: PortalSession }) {
             </span>
             <div>
               <h2 className="text-base font-semibold text-[color:var(--text-primary)]">
-                Confirma tus datos de contacto
+                {isFirstVisit
+                  ? "Confirma tus datos de contacto"
+                  : "Tus datos de contacto"}
               </h2>
               <p className="text-xs text-[color:var(--text-secondary)]">
                 Edita estos campos cuando quieras. Para corregir RFC,
@@ -272,10 +299,19 @@ function EntraATuEspacioInner({ session }: { session: PortalSession }) {
             </Field>
           </div>
 
-          <NextStepPreview
-            workspace={workspace}
-            expedienteStatus={session.expediente_status}
-          />
+          {isFirstVisit ? (
+            <NextStepPreview
+              workspace={workspace}
+              expedienteStatus={liveSession.expediente_status}
+            />
+          ) : null}
+
+          {saveError ? (
+            <Alert variant="error" className="mt-4">
+              <AlertTitle>No pudimos guardar tus cambios</AlertTitle>
+              <AlertDescription>{saveError}</AlertDescription>
+            </Alert>
+          ) : null}
 
           <footer className="mt-6 flex items-center justify-end gap-3 border-t border-[color:var(--border-subtle)] pt-4">
             {justSaved ? (
@@ -294,11 +330,17 @@ function EntraATuEspacioInner({ session }: { session: PortalSession }) {
             <Button
               type="submit"
               loading={submitting}
-              disabled={justSaved}
+              disabled={justSaved && isFirstVisit}
               size="lg"
             >
-              <span>{justSaved ? "Continuando…" : "Entrar a mi espacio"}</span>
-              {!submitting && !justSaved && (
+              <span>
+                {justSaved && isFirstVisit
+                  ? "Continuando…"
+                  : isFirstVisit
+                    ? "Entrar a mi espacio"
+                    : "Guardar cambios"}
+              </span>
+              {!submitting && !(justSaved && isFirstVisit) && (
                 <ArrowRight
                   className="h-4 w-4"
                   weight="bold"
@@ -309,17 +351,19 @@ function EntraATuEspacioInner({ session }: { session: PortalSession }) {
           </footer>
         </form>
 
-        <Alert variant="info">
-          <AlertTitle className="flex items-center gap-2">
-            <ShieldCheck className="h-4 w-4" weight="bold" aria-hidden="true" />
-            ¿Por qué pedimos esto?
-          </AlertTitle>
-          <AlertDescription>
-            CheckWise opera tu expediente REPSE y debe garantizar que los
-            documentos se asignen a la empresa correcta. Esta pantalla es la
-            salvaguarda contra accesos cruzados.
-          </AlertDescription>
-        </Alert>
+        {isFirstVisit ? (
+          <Alert variant="info">
+            <AlertTitle className="flex items-center gap-2">
+              <ShieldCheck className="h-4 w-4" weight="bold" aria-hidden="true" />
+              ¿Por qué pedimos esto?
+            </AlertTitle>
+            <AlertDescription>
+              CheckWise opera tu expediente REPSE y debe garantizar que los
+              documentos se asignen a la empresa correcta. Esta pantalla es
+              la salvaguarda contra accesos cruzados.
+            </AlertDescription>
+          </Alert>
+        ) : null}
 
         {/* Stage 2.7-a — provider workspace correction-request entry point.
             The form covers only the locked Tier B fields
