@@ -23,6 +23,11 @@ export type CalendarEntry = {
   frequency: CalendarItem["frequency"];
   href: string;
   submission_id: string | null;
+  /** Filename of the current submission's PDF, if any. Surfaced in the
+   *  cell popover and drawer per Jorge feedback (2026-05-21). */
+  filename: string | null;
+  /** ISO timestamp of the current submission, if any. */
+  submitted_at: string | null;
   anatomy: string;
   where_to_obtain: string;
   common_errors: string[];

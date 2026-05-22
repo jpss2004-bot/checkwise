@@ -57,6 +57,8 @@ function makeEntry(
     frequency: "mensual",
     href: "#",
     submission_id: null,
+    filename: null,
+    submitted_at: null,
     anatomy: "",
     where_to_obtain: "",
     common_errors: [],

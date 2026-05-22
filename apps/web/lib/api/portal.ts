@@ -88,6 +88,11 @@ export type CalendarItem = {
   period_key: string;
   status: RequirementStatus;
   submission_id: string | null;
+  /** Filename of the current submission's PDF, when one exists. Surfaced
+   *  in the calendar cell popover + drawer per Jorge feedback. */
+  filename: string | null;
+  /** ISO timestamp of the current submission, when one exists. */
+  submitted_at: string | null;
   /** Phase 5 — backend-owned UX enrichment. */
   required_document: string;
   due_month: number;

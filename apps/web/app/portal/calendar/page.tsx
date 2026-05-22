@@ -75,6 +75,8 @@ function flattenCalendarPayload(payload: CalendarPayload): CalendarEntry[] {
           frequency: item.frequency,
           href: item.href,
           submission_id: item.submission_id,
+          filename: item.filename ?? null,
+          submitted_at: item.submitted_at ?? null,
           anatomy: item.anatomy ?? "",
           where_to_obtain: item.where_to_obtain ?? "",
           common_errors: item.common_errors ?? [],
@@ -613,15 +615,37 @@ function EventDrawer({
           )}
 
           {event.submission_id && (
-            <div className="flex items-start gap-2 rounded-md border border-[color:var(--border-subtle)] bg-[color:var(--surface-sunken)] px-3 py-2">
-              <Tray
-                className="mt-0.5 h-3.5 w-3.5 shrink-0 text-[color:var(--text-secondary)]"
-                weight="bold"
-                aria-hidden="true"
-              />
-              <p className="text-[12px] leading-5 text-[color:var(--text-secondary)]">
-                Ya enviaste un documento para este requisito. Toca abajo para revisarlo.
-              </p>
+            <div className="space-y-2 rounded-md border border-[color:var(--border-subtle)] bg-[color:var(--surface-sunken)] px-3 py-2">
+              <div className="flex items-start gap-2">
+                <Tray
+                  className="mt-0.5 h-3.5 w-3.5 shrink-0 text-[color:var(--text-secondary)]"
+                  weight="bold"
+                  aria-hidden="true"
+                />
+                <div className="min-w-0 flex-1 text-[12px] leading-5 text-[color:var(--text-secondary)]">
+                  <p>
+                    Ya enviaste un documento para este requisito. Toca abajo
+                    para revisarlo.
+                  </p>
+                  {/* Jorge feedback (2026-05-21) — surface filename +
+                      upload date directly in the drawer so the provider
+                      can confirm what they uploaded without first
+                      navigating into the detail page. */}
+                  {event.filename ? (
+                    <p
+                      className="mt-1 truncate font-medium text-[color:var(--text-primary)]"
+                      title={event.filename}
+                    >
+                      {event.filename}
+                    </p>
+                  ) : null}
+                  {event.submitted_at ? (
+                    <p className="font-mono text-[10px] uppercase tracking-wide text-[color:var(--text-tertiary)]">
+                      Cargado {formatLongDate(event.submitted_at)}
+                    </p>
+                  ) : null}
+                </div>
+              </div>
             </div>
           )}
 

@@ -1198,6 +1198,25 @@ def get_workspace_calendar(
         for view in slots
     }
 
+    # Jorge feedback (2026-05-21, /portal/calendar): "ver detalle sobre
+    # el día en el que se hizo la carga y el nombre del documento que
+    # se cargó". Same pattern as the onboarding endpoint — one batched
+    # lookup over the current_submission_ids and a dict merge on the way
+    # out so the cell tooltip + drawer can render filename without an
+    # extra per-row query.
+    current_ids = [
+        view.current_submission_id for view in slots if view.current_submission_id
+    ]
+    filename_by_submission: dict[str, str] = {}
+    if current_ids:
+        rows = db.execute(
+            select(Document.submission_id, Document.original_filename).where(
+                Document.submission_id.in_(current_ids)
+            )
+        ).all()
+        for sub_id, fname in rows:
+            filename_by_submission[sub_id] = fname
+
     # Session 2 (2026-05-21) — pick the catalog shape the slot resolver
     # used. Keeping them in lockstep matters: the resolver iterates v2
     # rows when the flag is on, so the endpoint must too, or the row
@@ -1244,6 +1263,7 @@ def get_workspace_calendar(
         # callers that still read anatomy/where/common_errors as
         # strings. v1 rows continue to emit the single-doc shape.
         accepted_docs = recurring_accepted_documents(req)
+        current_submission_id = view.current_submission_id if view else None
         inst["items"].append(
             {
                 "code": req.code,
@@ -1252,7 +1272,17 @@ def get_workspace_calendar(
                 "period_label": req.period_label,
                 "period_key": req.period_key,
                 "status": item_status,
-                "submission_id": view.current_submission_id if view else None,
+                "submission_id": current_submission_id,
+                # Jorge feedback (2026-05-21) — surface filename + upload
+                # date so the cell popover and drawer can give the
+                # provider an actual document name to anchor to instead
+                # of just a status pill.
+                "filename": (
+                    filename_by_submission.get(current_submission_id)
+                    if current_submission_id
+                    else None
+                ),
+                "submitted_at": view.submitted_at_iso if view else None,
                 "required_document": recurring_required_document(req),
                 "due_month": req.due_month,
                 "deadline_iso": deadline_iso,

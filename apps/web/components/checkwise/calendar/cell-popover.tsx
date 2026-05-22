@@ -141,30 +141,50 @@ export function CellPopover({
         {events.length === 1 ? "obligación" : "obligaciones"}
       </p>
       <ul className="space-y-px">
-        {visible.map((event) => (
-          <li key={event.id}>
-            <button
-              type="button"
-              role="menuitem"
-              onClick={() => onSelect(event.id)}
-              title={DOC_STATE_LABELS[event.state]}
-              className="group flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left transition-colors hover:bg-[color:var(--surface-hover)] focus:outline-none focus-visible:bg-[color:var(--surface-hover)]"
-            >
-              <span
-                aria-hidden="true"
-                className={
-                  "h-2 w-2 shrink-0 rounded-full ring-1 ring-inset " + STATE_DOT[event.state]
-                }
-              />
-              <span className="min-w-0 flex-1 truncate text-[12px] text-[color:var(--text-primary)]">
-                {event.obligation}
-              </span>
-              <span className="shrink-0 font-mono text-[10px] tabular-nums text-[color:var(--text-tertiary)] group-hover:text-[color:var(--text-secondary)]">
-                {formatDay(event.deadline_iso)}
-              </span>
-            </button>
-          </li>
-        ))}
+        {visible.map((event) => {
+          // Jorge feedback (2026-05-21) — surface filename + upload
+          // date so the cell tooltip gives the provider an actual
+          // document anchor, not just the deadline.
+          const uploaded = event.submitted_at
+            ? formatDay(event.submitted_at)
+            : null;
+          const tooltipParts = [DOC_STATE_LABELS[event.state]];
+          if (event.filename) tooltipParts.push(event.filename);
+          if (uploaded) tooltipParts.push(`Cargado ${uploaded}`);
+          return (
+            <li key={event.id}>
+              <button
+                type="button"
+                role="menuitem"
+                onClick={() => onSelect(event.id)}
+                title={tooltipParts.join(" · ")}
+                className="group flex w-full items-start gap-2 rounded-md px-2 py-1.5 text-left transition-colors hover:bg-[color:var(--surface-hover)] focus:outline-none focus-visible:bg-[color:var(--surface-hover)]"
+              >
+                <span
+                  aria-hidden="true"
+                  className={
+                    "mt-1 h-2 w-2 shrink-0 rounded-full ring-1 ring-inset " +
+                    STATE_DOT[event.state]
+                  }
+                />
+                <span className="min-w-0 flex-1">
+                  <span className="block truncate text-[12px] text-[color:var(--text-primary)]">
+                    {event.obligation}
+                  </span>
+                  {event.filename ? (
+                    <span className="block truncate text-[10px] text-[color:var(--text-tertiary)]">
+                      {event.filename}
+                      {uploaded ? ` · ${uploaded}` : ""}
+                    </span>
+                  ) : null}
+                </span>
+                <span className="mt-0.5 shrink-0 font-mono text-[10px] tabular-nums text-[color:var(--text-tertiary)] group-hover:text-[color:var(--text-secondary)]">
+                  {formatDay(event.deadline_iso)}
+                </span>
+              </button>
+            </li>
+          );
+        })}
       </ul>
       {overflow > 0 && (
         <p className="border-t border-[color:var(--border-subtle)] px-2 pb-1 pt-1.5 text-[11px] text-[color:var(--text-tertiary)]">
