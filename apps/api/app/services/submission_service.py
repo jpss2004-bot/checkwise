@@ -74,6 +74,26 @@ def assert_pdf_upload(file: UploadFile) -> None:
         )
 
 
+# Phase 1 — confidence-aware intake routing. Pre-Phase-1 the function
+# ignored ``requirement_match_confidence`` entirely: a 0.05-confidence
+# document and a 0.95-confidence document both landed in
+# ``pendiente_revision``, and any mismatch — however weak — surfaced as
+# ``posible_mismatch`` to the provider. The thresholds below are the
+# initial calibration; Phase 2 fixtures will let us retune them with
+# evidence instead of intuition.
+#
+# Bucketing (no mismatch, valid PDF):
+#   confidence >= 0.7  → PREVALIDADO          (auto-cleared for review)
+#   confidence >= 0.4  → PENDIENTE_REVISION   (today's default)
+#   confidence <  0.4  → PENDIENTE_REVISION   (queue, do not auto-clear)
+# Bucketing (mismatch reason set):
+#   confidence >= 0.5  → POSIBLE_MISMATCH     (surface to provider)
+#   confidence <  0.5  → PENDIENTE_REVISION   (route to human review,
+#                                             don't alarm the provider)
+_PREVALIDATION_CONFIDENCE_FLOOR = 0.7
+_MISMATCH_CONFIDENCE_FLOOR = 0.5
+
+
 def status_from_inspection(
     pdf_inspection: PdfInspectionResult,
     document_signals: DocumentSignals,
@@ -81,8 +101,16 @@ def status_from_inspection(
     """Derive the initial submission status from PDF inspection + signals."""
     if not pdf_inspection.is_pdf or pdf_inspection.is_corrupt or pdf_inspection.is_encrypted:
         return DocumentStatus.REQUIERE_ACLARACION
+
+    confidence = document_signals.requirement_match_confidence or 0.0
+
     if document_signals.mismatch_reason:
-        return DocumentStatus.POSIBLE_MISMATCH
+        if confidence >= _MISMATCH_CONFIDENCE_FLOOR:
+            return DocumentStatus.POSIBLE_MISMATCH
+        return DocumentStatus.PENDIENTE_REVISION
+
+    if confidence >= _PREVALIDATION_CONFIDENCE_FLOOR:
+        return DocumentStatus.PREVALIDADO
     return DocumentStatus.PENDIENTE_REVISION
 
 
@@ -760,18 +788,23 @@ def finalize_intake_submission(
 # status is the *worst* (most actionable) per-doc status.
 #
 # Status priority (worst → best):
-#   REQUIERE_ACLARACION  →  POSIBLE_MISMATCH  →  PENDIENTE_REVISION
+#   REQUIERE_ACLARACION  →  POSIBLE_MISMATCH  →  PENDIENTE_REVISION  →  PREVALIDADO
 
 
 _SUBMISSION_STATUS_PRIORITY: dict[str, int] = {
-    DocumentStatus.REQUIERE_ACLARACION.value: 3,
-    DocumentStatus.POSIBLE_MISMATCH.value: 2,
-    DocumentStatus.PENDIENTE_REVISION.value: 1,
+    DocumentStatus.REQUIERE_ACLARACION.value: 4,
+    DocumentStatus.POSIBLE_MISMATCH.value: 3,
+    DocumentStatus.PENDIENTE_REVISION.value: 2,
+    DocumentStatus.PREVALIDADO.value: 1,
 }
 
 
 def _worst_status(statuses: list[DocumentStatus]) -> DocumentStatus:
-    """Return the most actionable (= highest priority) status from the batch."""
+    """Return the most actionable (= highest priority) status from the batch.
+
+    Returns ``PENDIENTE_REVISION`` for an empty input — never ``PREVALIDADO``,
+    because an empty batch is not evidence of a clean upload.
+    """
     if not statuses:
         return DocumentStatus.PENDIENTE_REVISION
     return max(

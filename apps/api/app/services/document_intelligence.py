@@ -72,7 +72,19 @@ def analyze_document_text(
     token_hits = sum(1 for token in expected_tokens if token in normalized_text)
     token_score = token_hits / max(len(expected_tokens), 1)
 
-    institution_score = 1.0 if detected_institution == expected_institution else 0.0
+    # Phase 1 — boilerplate-tolerant institution scoring. Pre-Phase-1
+    # the score required ``detected_institution == expected``, which is
+    # the *best-match* — a SAT opinión de cumplimiento that also names
+    # IMSS in boilerplate often scored 0 on this axis because the IMSS
+    # keyword count beat SAT's. We now credit the expected institution
+    # for being mentioned at all; the best-match output remains
+    # available on ``detected_institution`` for reviewer context.
+    expected_institution_present = (
+        expected_institution
+        and _keyword_hit_count(normalized_text, INSTITUTION_KEYWORDS.get(expected_institution, []))
+        > 0
+    )
+    institution_score = 1.0 if expected_institution_present else 0.0
     confidence = round((token_score * 0.7) + (institution_score * 0.3), 2)
 
     mismatch_reason = None
@@ -84,7 +96,16 @@ def analyze_document_text(
             f"'{expected_doc_type}'."
         )
         confidence = min(confidence, 0.35)
-    elif detected_institution and detected_institution != expected_institution:
+    elif (
+        detected_institution
+        and detected_institution != expected_institution
+        and not expected_institution_present
+    ):
+        # Phase 1 — only fire if the expected institution is fully
+        # absent. If it's mentioned anywhere, treat the other detection
+        # as a legitimate cross-reference (SAT opinión naming IMSS,
+        # IMSS pago naming INFONAVIT in summary tables, etc.) rather
+        # than alarming the provider.
         anomalies.append("possible_institution_mismatch")
         mismatch_reason = (
             f"La institución detectada '{detected_institution}' no coincide con "
@@ -106,13 +127,30 @@ def analyze_document_text(
     )
 
 
+def _keyword_hit_count(text: str, keywords: list[str]) -> int:
+    """Number of distinct keywords from ``keywords`` that occur in ``text``."""
+    return sum(1 for keyword in keywords if _normalize(keyword) in text)
+
+
 def _best_keyword_match(text: str, keyword_map: dict[str, list[str]]) -> str | None:
-    scores = {
-        code: sum(1 for keyword in keywords if _normalize(keyword) in text)
-        for code, keywords in keyword_map.items()
-    }
-    best_code, best_score = max(scores.items(), key=lambda item: item[1])
-    return best_code if best_score > 0 else None
+    """Return the unique top-scoring key, or None if there is no clear winner.
+
+    Phase 1 — pre-Phase-1 a tie on a positive score silently returned
+    the first dict-inserted key, which produced a structural bias toward
+    ``opinion_cumplimiento_sat`` / ``sat`` (the first entries in each
+    catalog). Ties are now treated as ambiguous and return None so the
+    downstream mismatch logic does not act on a coin-flip.
+    """
+    scores = {code: _keyword_hit_count(text, keywords) for code, keywords in keyword_map.items()}
+    if not scores:
+        return None
+    best_score = max(scores.values())
+    if best_score == 0:
+        return None
+    top = [code for code, score in scores.items() if score == best_score]
+    if len(top) > 1:
+        return None
+    return top[0]
 
 
 def _expected_document_type(requirement: str) -> str | None:
