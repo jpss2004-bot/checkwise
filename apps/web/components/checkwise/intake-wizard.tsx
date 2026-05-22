@@ -1367,7 +1367,7 @@ function UploadStep({
                 <div className="min-w-0">
                   <p className="font-medium">Ya habías subido este archivo</p>
                   <p className="mt-1 text-xs">
-                    Mismo SHA-256 que una carga anterior
+                    Detectamos una carga anterior con el mismo contenido
                     {duplicateCheck.filename ? ` (${duplicateCheck.filename})` : ""}
                     {duplicateCheck.requirement_name
                       ? ` para "${duplicateCheck.requirement_name}"`

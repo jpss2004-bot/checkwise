@@ -12,7 +12,6 @@ import {
   Clock,
   FileText,
   ShieldCheck,
-  CloudArrowUp,
 } from "@phosphor-icons/react";
 
 import { PortalAppShell } from "@/components/checkwise/portal/portal-app-shell";
@@ -165,7 +164,6 @@ export default function SubmissionDetailPage({ params }: PageProps) {
             <div className="space-y-5">
               <SubmissionTimeline detail={detail} />
               <PreviousAttemptsCard previous={detail.previous_attempts} />
-              <TraceabilityCard detail={detail} />
             </div>
           </div>
         ) : null}
@@ -524,59 +522,14 @@ function PreviousAttemptsCard({
   );
 }
 
-// ---------------------------------------------------------------------------
-// Traceability footer
-// ---------------------------------------------------------------------------
-
-function TraceabilityCard({ detail }: { detail: SubmissionDetail }) {
-  return (
-    <Card>
-      <CardHeader>
-        <div className="flex items-center gap-2">
-          <CloudArrowUp className="h-4 w-4 text-muted-foreground" aria-hidden="true" />
-          <CardTitle>Datos de trazabilidad</CardTitle>
-        </div>
-        <p className="mt-1 text-sm text-muted-foreground">
-          Conserva esta información si necesitas referenciar el documento.
-        </p>
-      </CardHeader>
-      <CardContent className="space-y-2 text-xs text-muted-foreground">
-        <p>
-          <span className="font-medium text-foreground">Submission ID:</span>{" "}
-          <span className="break-all">{detail.submission_id}</span>
-        </p>
-        {detail.document ? (
-          <>
-            <p>
-              <span className="font-medium text-foreground">Document ID:</span>{" "}
-              <span className="break-all">{detail.document.document_id}</span>
-            </p>
-            <p>
-              <span className="font-medium text-foreground">Archivo:</span>{" "}
-              {detail.document.filename}
-            </p>
-            <p>
-              <span className="font-medium text-foreground">SHA-256:</span>{" "}
-              <span className="break-all">{detail.document.sha256}</span>
-            </p>
-            <p>
-              <span className="font-medium text-foreground">Páginas PDF:</span>{" "}
-              {detail.document.page_count ?? "—"}
-            </p>
-          </>
-        ) : null}
-        {detail.requirement.requirement_code ? (
-          <p>
-            <span className="font-medium text-foreground">Código canónico:</span>{" "}
-            <span className="break-all">
-              {detail.requirement.requirement_code}
-            </span>
-          </p>
-        ) : null}
-      </CardContent>
-    </Card>
-  );
-}
+// Phase 2 / Slice 2A — the former ``<TraceabilityCard />`` was removed
+// from this surface. It exposed Submission ID, Document ID, SHA-256,
+// page count and the canonical requirement_code to providers, which
+// violates the project non-negotiable "do not expose file hashes, OCR
+// internals, or technical validation details to providers." If a
+// support workflow ever needs those identifiers, surface them on the
+// admin/reviewer page or behind a staff-gated detail view — never
+// here.
 
 // ---------------------------------------------------------------------------
 // Inline PDF preview (Jorge feedback 2026-05-21)

@@ -52,7 +52,7 @@ export const VALIDATION_RULE_LABELS_ES: Record<ValidationRuleCode, string> = {
   vendor_match: "RFC del proveedor coincide",
   period_match: "Periodo coincide",
   requirement_match: "Cumple con el requisito",
-  document_intelligence: "Señales de calidad del documento",
+  document_intelligence: "Verificación automática del documento",
   human_review_required: "Requiere revisión humana",
 };
 
