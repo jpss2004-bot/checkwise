@@ -372,6 +372,13 @@ class ProviderWorkspace(TimestampMixin, Base):
     display_name: Mapped[str | None] = mapped_column(String(255))
     access_token: Mapped[str] = mapped_column(String(64), nullable=False)
     onboarding_completed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    # Set by PATCH /portal/me/profile the first time the provider
+    # confirms their profile on /portal/entra-a-tu-espacio. The
+    # frontend uses presence/absence to branch between the first-visit
+    # confirmation gate copy and the returning-user settings view.
+    profile_confirmed_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True)
+    )
     status: Mapped[str] = mapped_column(String(40), default="active", nullable=False)
 
     client: Mapped[Client] = relationship()
@@ -414,7 +421,16 @@ class User(TimestampMixin, Base):
     """
 
     __tablename__ = "users"
-    __table_args__ = (UniqueConstraint("email", name="uq_users_email"),)
+    __table_args__ = (
+        UniqueConstraint("email", name="uq_users_email"),
+        # Mirrors the migration-level CHECK so SQLite test fixtures
+        # (which run create_all rather than Alembic) reject bad
+        # contact_preference values consistently with prod Postgres.
+        CheckConstraint(
+            "contact_preference IN ('email', 'whatsapp', 'both')",
+            name="ck_users_contact_preference",
+        ),
+    )
 
     id: Mapped[str] = mapped_column(String(36), primary_key=True, default=new_id)
     email: Mapped[str] = mapped_column(String(255), nullable=False)
@@ -425,6 +441,15 @@ class User(TimestampMixin, Base):
         Boolean, default=False, nullable=False
     )
     last_login_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    # Editable profile fields surfaced on /portal/entra-a-tu-espacio.
+    # Phone and job_title are optional; contact_preference defaults to
+    # email so existing rows stay valid after migration 0016 backfills
+    # via the server_default.
+    phone: Mapped[str | None] = mapped_column(String(30))
+    job_title: Mapped[str | None] = mapped_column(String(120))
+    contact_preference: Mapped[str] = mapped_column(
+        String(20), default="email", nullable=False
+    )
 
     memberships: Mapped[list[Membership]] = relationship(
         back_populates="user", cascade="all, delete-orphan"
