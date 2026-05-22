@@ -313,6 +313,20 @@ class EnterResponse(BaseModel):
     #                      expediente has not been marked complete yet.
     #   * "not_started"  — zero submissions and no completion timestamp.
     expediente_status: Literal["not_started", "in_progress", "complete"]
+    # Profile fields owned by the workspace's User row. ``full_name`` and
+    # ``contact_email`` are derived from User; phone / job_title /
+    # contact_preference were added in migration 0016 to retire the
+    # localStorage-only profile form. ``profile_confirmed_at`` lives on
+    # the workspace and is set by PATCH /portal/.../profile the first
+    # time the provider confirms their data; the frontend uses
+    # presence/absence to branch between the first-visit confirmation
+    # gate copy and the returning-user settings view.
+    full_name: str | None = None
+    contact_email: str | None = None
+    phone: str | None = None
+    job_title: str | None = None
+    contact_preference: Literal["email", "whatsapp", "both"] = "email"
+    profile_confirmed_at: str | None = None
 
 
 class WorkspaceSummary(BaseModel):
@@ -325,6 +339,28 @@ class WorkspaceSummary(BaseModel):
     contract_reference: str | None
     onboarding_completed_at: str | None
     expediente_status: Literal["not_started", "in_progress", "complete"]
+    full_name: str | None = None
+    contact_email: str | None = None
+    phone: str | None = None
+    job_title: str | None = None
+    contact_preference: Literal["email", "whatsapp", "both"] = "email"
+    profile_confirmed_at: str | None = None
+
+
+class WorkspaceProfileUpdate(BaseModel):
+    """Body for PATCH /portal/workspaces/{wsid}/profile.
+
+    Every field is optional — the form sends the full payload on
+    submit but partial updates are accepted so future callers (Wise
+    nudges, etc.) can patch a single attribute.
+    """
+
+    full_name: str | None = Field(default=None, min_length=1, max_length=255)
+    phone: str | None = Field(default=None, max_length=30)
+    job_title: str | None = Field(default=None, max_length=120)
+    contact_preference: (
+        Literal["email", "whatsapp", "both"] | None
+    ) = None
 
 
 class CompleteOnboardingResponse(BaseModel):
@@ -777,6 +813,7 @@ def enter_workspace(
             else None
         ),
         expediente_status=_expediente_status(db, workspace),
+        **_profile_payload(db, workspace),
     )
 
 
@@ -784,6 +821,115 @@ def enter_workspace(
 def portal_logout(response: Response) -> None:
     """Clear the portal session cookie."""
     _clear_portal_session_cookie(response)
+
+
+def _profile_payload(db: Session, workspace: ProviderWorkspace) -> dict:
+    """Build the profile-field dict the workspace-summary responses
+    spread into their payloads. Centralized so ``/enter``, ``/me``,
+    and ``/workspaces/{id}`` all surface the same shape.
+
+    Returns email-default ``contact_preference`` when no owner user
+    row is attached (defensive — a workspace without an owner_user_id
+    cannot reach the portal in practice, but the read endpoints must
+    not 500 if the data drifts).
+    """
+    user: User | None = None
+    if workspace.owner_user_id:
+        user = db.get(User, workspace.owner_user_id)
+    return {
+        "full_name": user.full_name if user else None,
+        "contact_email": user.email if user else None,
+        "phone": user.phone if user else None,
+        "job_title": user.job_title if user else None,
+        "contact_preference": (
+            user.contact_preference if user else "email"
+        ),
+        "profile_confirmed_at": (
+            workspace.profile_confirmed_at.isoformat()
+            if workspace.profile_confirmed_at
+            else None
+        ),
+    }
+
+
+@router.patch(
+    "/workspaces/{workspace_id}/profile",
+    response_model=WorkspaceSummary,
+    summary="Update editable provider profile fields",
+)
+def patch_workspace_profile(
+    workspace_id: str,
+    payload: WorkspaceProfileUpdate,
+    db: DbSession,
+    workspace: Annotated[ProviderWorkspace, Depends(current_portal_workspace)],
+) -> WorkspaceSummary:
+    """Persist editable profile fields (full_name, phone, job_title,
+    contact_preference) on the workspace's owner User, and bump
+    ``profile_confirmed_at`` so the frontend can switch from the
+    first-visit confirmation gate copy to the returning-user settings
+    view.
+
+    Partial updates are allowed — any field left null keeps its prior
+    value. The first successful call sets ``profile_confirmed_at``;
+    subsequent calls move it forward so the timestamp doubles as
+    "last-edited at" for support.
+
+    Returns the full refreshed WorkspaceSummary so the frontend can
+    update its session cache without a follow-up /me round-trip.
+    """
+    _ = workspace_id  # tenant guard already enforced by dependency
+
+    if workspace.owner_user_id is None:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Este workspace no tiene un usuario asignado.",
+        )
+    user = db.get(User, workspace.owner_user_id)
+    if user is None:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Usuario del workspace no encontrado.",
+        )
+
+    if payload.full_name is not None:
+        trimmed = payload.full_name.strip()
+        if not trimmed:
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                detail="El nombre no puede estar vacío.",
+            )
+        user.full_name = trimmed
+    if payload.phone is not None:
+        # Empty string clears the column; preserving null vs empty
+        # would just create a discrimination headache for the frontend.
+        user.phone = payload.phone.strip() or None
+    if payload.job_title is not None:
+        user.job_title = payload.job_title.strip() or None
+    if payload.contact_preference is not None:
+        user.contact_preference = payload.contact_preference
+
+    workspace.profile_confirmed_at = utc_now()
+    db.flush()
+    db.commit()
+
+    return WorkspaceSummary(
+        workspace_id=workspace.id,
+        persona_type=workspace.persona_type,
+        client_name=workspace.client.name,
+        vendor_name=workspace.vendor.name,
+        vendor_rfc=workspace.vendor.rfc,
+        filial_name=workspace.filial_name,
+        contract_reference=(
+            workspace.contract.external_reference if workspace.contract else None
+        ),
+        onboarding_completed_at=(
+            workspace.onboarding_completed_at.isoformat()
+            if workspace.onboarding_completed_at
+            else None
+        ),
+        expediente_status=_expediente_status(db, workspace),
+        **_profile_payload(db, workspace),
+    )
 
 
 @router.post(
@@ -861,6 +1007,7 @@ def get_portal_me(
             else None
         ),
         expediente_status=_expediente_status(db, workspace),
+        **_profile_payload(db, workspace),
     )
 
 
@@ -887,6 +1034,7 @@ def get_workspace(
             else None
         ),
         expediente_status=_expediente_status(db, workspace),
+        **_profile_payload(db, workspace),
     )
 
 
