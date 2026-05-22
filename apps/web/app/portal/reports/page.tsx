@@ -29,6 +29,7 @@ function PortalReportsListPage({ session }: { session: PortalSession }) {
         presetCreateRedirectBase="/portal/reports"
         eyebrowDescription="Centro de cumplimiento personal: estado del expediente, obligaciones pendientes y rechazos por corregir."
         headerSlot={<CompliancePulseStrip session={session} />}
+        diagnosticCode={session.workspace_id}
       />
     </PortalAppShell>
   );

@@ -78,6 +78,14 @@ export interface ReportsListViewProps {
    * dependency onto the shared view.
    */
   headerSlot?: React.ReactNode;
+  /**
+   * Optional opaque identifier (workspace_id, org_id, etc.) shown in
+   * the preset-empty state so support can correlate a "no veo plantillas"
+   * ticket with the backend's reports.presets_empty INFO log. The shared
+   * view stays session-agnostic — callers wire whatever code makes sense
+   * for their tier.
+   */
+  diagnosticCode?: string;
 }
 
 export function ReportsListView({
@@ -87,6 +95,7 @@ export function ReportsListView({
   eyebrowDescription,
   showAudienceFilter = false,
   headerSlot,
+  diagnosticCode,
 }: ReportsListViewProps) {
   const router = useRouter();
   const [presets, setPresets] = useState<ReportPresetSummary[] | null>(null);
@@ -317,9 +326,19 @@ export function ReportsListView({
             Cargando plantillas…
           </div>
         ) : presets.length === 0 ? (
-          <div className="rounded-md border border-dashed border-[color:var(--border-subtle)] px-4 py-6 text-[12px] text-[color:var(--text-tertiary)]">
-            Aún no hay reportes disponibles para tu cuenta. Si crees que es un
-            error, contáctanos.
+          <div className="space-y-2 rounded-md border border-dashed border-[color:var(--border-subtle)] px-4 py-6 text-[12px] text-[color:var(--text-tertiary)]">
+            <p>
+              Aún no hay reportes disponibles para tu cuenta. Si crees que es
+              un error, contáctanos.
+            </p>
+            {diagnosticCode ? (
+              <p className="font-mono text-[11px] text-[color:var(--text-tertiary)]">
+                Código de soporte:{" "}
+                <span className="select-all text-[color:var(--text-secondary)]">
+                  {diagnosticCode}
+                </span>
+              </p>
+            ) : null}
           </div>
         ) : (
           // F4 (2026-05-19 visual audit): first preset is the recommended

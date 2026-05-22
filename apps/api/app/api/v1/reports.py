@@ -273,6 +273,18 @@ def get_presets(
         tuple(current.roles),
         is_workspace_owner=actor.is_workspace_owner,
     )
+    # Diagnostic: presets coming back empty in production is almost always
+    # an account-setup gap (no ProviderWorkspace bound to the caller), not
+    # a code bug. Log at INFO so Render's default-level logs capture it —
+    # the empty-state in the UI is intentionally generic, and we need a
+    # paper trail to triage support tickets without DB access.
+    if not presets:
+        logger.info(
+            "reports.presets_empty user_id=%s roles=%s is_workspace_owner=%s",
+            current.user.id,
+            list(current.roles),
+            actor.is_workspace_owner,
+        )
     return ReportPresetList(
         items=[
             ReportPresetSummary(
