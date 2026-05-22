@@ -29,21 +29,24 @@ import type { InvitationRole } from "@/lib/email/welcome";
 export interface ProtectedWorkspaceFields {
   /** Internal workspace handle. */
   workspace_id: string;
-  /** Tenant the workspace lives in. */
-  tenant_id: string;
-  /** Resolved client / provider IDs. */
+  /** Tenant the workspace lives in. Null until the backend exposes it
+   *  in the session payload; the UI must not fabricate one. */
+  tenant_id: string | null;
+  /** Resolved client / provider IDs. Null until the session carries them. */
   client_id: string | null;
   provider_id: string | null;
   /** Canonical role assigned by the invitation / admin, not by UI. */
   role: InvitationRole;
   /** Legal RFC, locked once the workspace is created. */
   rfc: string | null;
-  /** Email anchor of the invitation — used to verify domain matches. */
-  email: string;
+  /** Email anchor of the invitation. Null until the backend surfaces
+   *  the authenticated user's contact email on this surface. */
+  email: string | null;
   /** Canonical legal company name. */
   company_legal_name: string;
-  /** Domain portion of the email (for mismatch checks). */
-  email_domain: string;
+  /** Domain portion of the email (for mismatch checks). Null when
+   *  ``email`` is null. */
+  email_domain: string | null;
 }
 
 /**

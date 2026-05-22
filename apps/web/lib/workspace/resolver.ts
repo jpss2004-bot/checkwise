@@ -1,23 +1,26 @@
 /**
  * Build a snapshot of the authenticated provider's workspace.
  *
- * Phase 6 — the previous ``decideWorkspaceAccess`` routing helper has
- * been removed. Real routing today reads ``session.expediente_status``
- * straight from the backend (``GET /portal/me`` / ``POST /portal/enter``),
- * so the dead V1.6 access-decision branch isn't needed. What remains
- * here is the small ``buildWorkspaceContext`` synthesiser that wraps
- * a ``PortalSession`` (plus an optional activation-time invitation)
- * into the ``WorkspaceContext`` shape the workspace-identity card +
- * the entra-a-tu-espacio confirmation step both render.
+ * The previous version (CheckWise 1.6) fabricated values the session
+ * doesn't actually carry: a "demo@checkwise.mx" placeholder email, a
+ * "tenant-<workspace_id>" synthetic id, first/last-name guesses from
+ * the local part of the placeholder email, and client/provider id
+ * prefixes. Once invitations were retired, those defaults started
+ * showing up verbatim in the UI — every test user saw "Tu próximo
+ * paso, demo" and a locked "demo@checkwise.mx" identity row.
  *
- * TODO[backend-integration]: replace this synthesiser with a real
- *   GET /api/v1/portal/workspace
- * call that returns ``ProtectedWorkspaceFields`` + ``EditableProfileFields``
- * resolved server-side. Never trust the localStorage session for any
- * protected value.
+ * Today the function returns only what the session actually knows.
+ * Fields the backend hasn't surfaced yet (email, tenant id, client
+ * id, provider id, first/last name) come back as null / empty
+ * strings, and the consuming UI (WorkspaceIdentityCard, the
+ * confirmation form) is responsible for branching on absence rather
+ * than rendering a fabricated value.
+ *
+ * TODO[backend-integration]: when ``GET /api/v1/portal/workspace``
+ * lands, replace this synthesiser with the backend call and remove
+ * the null branches from the UI.
  */
 
-import type { Invitation } from "@/lib/mock/invitations";
 import type { PortalSession } from "@/lib/session/portal";
 
 import type {
@@ -26,43 +29,37 @@ import type {
   WorkspaceContext,
 } from "./types";
 
-function domainOf(email: string): string {
-  const at = email.lastIndexOf("@");
-  if (at === -1) return "";
-  return email.slice(at + 1).toLowerCase();
-}
-
 /**
- * Build a workspace snapshot. When ``invitation`` is present the
- * protected fields are seeded from it (tokens carry trusted-enough
- * identifiers for the demo). When absent we derive a best-effort
- * snapshot from the portal session — clearly an interim hack.
- *
- * TODO[backend-integration]: drop this function once the backend
- * returns the same shape from ``GET /api/v1/portal/workspace``.
+ * Build a workspace snapshot from the portal session. No fabricated
+ * values — fields the session doesn't expose come back as null so the
+ * UI can render an empty / "aún no registrado" state instead of an
+ * incorrect placeholder.
  */
-export function buildWorkspaceContext(
-  session: PortalSession,
-  invitation: Invitation | null,
-): WorkspaceContext {
-  const email = invitation?.email ?? "demo@checkwise.mx";
-  const domain = domainOf(email);
-
+export function buildWorkspaceContext(session: PortalSession): WorkspaceContext {
   const protectedFields: ProtectedWorkspaceFields = {
     workspace_id: session.workspace_id,
-    tenant_id: `tenant-${session.workspace_id}`,
-    client_id: invitation?.role === "client" ? `cli-${session.workspace_id}` : null,
-    provider_id: invitation?.role === "provider" ? `prv-${session.workspace_id}` : null,
-    role: invitation?.role ?? "provider",
+    // The session does not yet carry tenant / client / provider ids.
+    // Surfacing fabricated "tenant-<wsid>" / "cli-<wsid>" prefixes was
+    // misleading; the workspace identity card no longer renders them.
+    tenant_id: null,
+    client_id: null,
+    provider_id: null,
+    // Every authenticated portal user is a provider today. When the
+    // session learns to distinguish client_admin / staff entries on
+    // this surface, swap to ``session.role`` here.
+    role: "provider",
     rfc: session.vendor_rfc !== "PENDIENTE" ? session.vendor_rfc : null,
-    email,
+    // The portal session does not currently expose the authenticated
+    // user's email. Returning null is honest; the correction form's
+    // initialCurrentValue branches on this and shows an empty field.
+    email: null,
     company_legal_name: session.vendor_name,
-    email_domain: domain,
+    email_domain: null,
   };
 
   const editable: EditableProfileFields = {
-    first_name: invitation?.email?.split("@")[0]?.split(".")[0] ?? "",
-    last_name: invitation?.email?.split("@")[0]?.split(".")[1] ?? "",
+    first_name: "",
+    last_name: "",
     phone: null,
     job_title: null,
     contact_preference: "email",
@@ -72,8 +69,8 @@ export function buildWorkspaceContext(
     protected: protectedFields,
     editable,
     invitation_hints: {
-      company_hint: invitation?.company_hint ?? null,
-      inviter: invitation?.inviter ?? null,
+      company_hint: null,
+      inviter: null,
     },
     confirmed_at_iso: null,
   };
