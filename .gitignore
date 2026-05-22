@@ -31,6 +31,7 @@ venv/
 apps/api/.venv/
 apps/api/storage/
 apps/api/uploads/
+apps/api/metadata_exports/
 apps/api/*.egg-info/
 
 # Node / Next.js
