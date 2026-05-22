@@ -325,6 +325,12 @@ export type SubmissionDetail = {
   supersedes_submission_id: string | null;
   /** Phase 4 — id of the newer submission that replaced this one, or null. */
   superseded_by_submission_id: string | null;
+  /** Phase 2 / Slice 2B — the reviewer's plain-Spanish reason for the
+   *  most recent decision (reject / clarification / mark-exception),
+   *  or null when no reviewer decision has been applied. The page
+   *  renders this as a hero card for actionable statuses so the
+   *  reviewer's words aren't buried in the timeline. */
+  reviewer_note: string | null;
 };
 
 export async function getSubmissionDetail(

@@ -1746,6 +1746,15 @@ class SubmissionDetailResponse(BaseModel):
     #     declared this one as the prior it replaces.
     supersedes_submission_id: str | None = None
     superseded_by_submission_id: str | None = None
+    # Phase 2 / Slice 2B — the reviewer's plain-Spanish reason for the
+    # most recent decision (reject / clarification / mark-exception),
+    # surfaced so the provider UI can render it as a hero card instead
+    # of burying it inside the timeline. Null when no reviewer
+    # decision has been applied to this submission yet. Sourced from
+    # the same ``_latest_reviewer_note`` helper that already feeds
+    # the calendar and dashboard payloads, so a single notion of
+    # "latest reviewer note" stays canonical.
+    reviewer_note: str | None = None
 
 
 # Statuses that mean "you, the provider, must act now."
@@ -1957,6 +1966,7 @@ def get_workspace_submission(
         history=history,
         previous_attempts=previous_attempts,
         suggested_action=_suggested_action(submission.status),  # type: ignore[arg-type]
+        reviewer_note=_latest_reviewer_note(db, submission.id),
     )
 
 

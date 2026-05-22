@@ -4,14 +4,12 @@ import { use, useCallback, useEffect, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import {
-  WarningCircle,
   Warning,
   ArrowLeft,
   ArrowRight,
   CheckCircle,
   Clock,
   FileText,
-  ShieldCheck,
 } from "@phosphor-icons/react";
 
 import { PortalAppShell } from "@/components/checkwise/portal/portal-app-shell";
@@ -36,7 +34,6 @@ import {
   type SubmissionSuggestedAction,
 } from "@/lib/api/portal";
 import { DocumentStatus } from "@/lib/constants/statuses";
-import { validationLabel } from "@/lib/constants/validation";
 import { fetchCurrentSession, type PortalSession } from "@/lib/session/portal";
 
 type PageProps = {
@@ -156,9 +153,9 @@ export default function SubmissionDetailPage({ params }: PageProps) {
           <div className="grid gap-5 lg:grid-cols-3">
             <div className="space-y-5 lg:col-span-2">
               <StatusHero detail={detail} />
+              <ReviewerNoteCard detail={detail} />
               <SubmissionPreview detail={detail} session={session} />
               <LineageStrip detail={detail} />
-              <ReasonsCard detail={detail} />
               <ContextCard detail={detail} />
             </div>
             <div className="space-y-5">
@@ -311,110 +308,70 @@ function buildReuploadHref(detail: SubmissionDetail): string {
 }
 
 // ---------------------------------------------------------------------------
-// Reasons
+// Phase 2 / Slice 2B — reviewer-note hero card
 // ---------------------------------------------------------------------------
+//
+// Replaces the former ``<ReasonsCard>`` which exposed every
+// prevalidation signal (pdf_encrypted, sha256_hash, vendor_match, …)
+// to providers. The reviewer's plain-Spanish reason is the headline
+// information on an actionable submission; the prevalidation diagnostic
+// signals belong on the admin/reviewer surface, not the provider page.
+//
+// Card renders when the submission is in an actionable state AND
+// either the reviewer left a note OR the automatic detector emitted
+// a ``mismatch_reason``. For ``rechazado`` / ``requiere_aclaracion``
+// the reviewer's words drive the message; for ``posible_mismatch``
+// without a reviewer decision yet, the detector's reason takes over.
 
-function ReasonsCard({ detail }: { detail: SubmissionDetail }) {
-  if (detail.reasons.length === 0 && !detail.document?.mismatch_reason) {
-    return null;
-  }
-  return (
-    <Card>
-      <CardHeader>
-        <CardTitle>Por qué se devolvió</CardTitle>
-        <p className="mt-1 text-sm text-muted-foreground">
-          Estos son los puntos que la revisión humana o las prevalidaciones
-          automáticas marcaron sobre este documento.
-        </p>
-      </CardHeader>
-      <CardContent className="space-y-2">
-        {detail.document?.mismatch_reason ? (
-          <ReasonRow
-            severity="warning"
-            title="Posible mismatch detectado"
-            message={detail.document.mismatch_reason}
-          />
-        ) : null}
-        {detail.reasons.map((reason) => (
-          <ReasonRow
-            key={reason.rule_code}
-            severity={reason.severity}
-            title={titleForReason(reason.rule_code)}
-            ruleCode={reason.rule_code}
-            message={reason.message ?? "Sin detalle adicional."}
-            humanReview={reason.requires_human_review}
-          />
-        ))}
-      </CardContent>
-    </Card>
-  );
-}
+const REVIEWER_NOTE_STATUSES: ReadonlySet<RequirementStatus> = new Set<
+  RequirementStatus
+>([
+  DocumentStatus.RECHAZADO,
+  DocumentStatus.REQUIERE_ACLARACION,
+  DocumentStatus.POSIBLE_MISMATCH,
+]);
 
-// Per-page overrides: a few rules need a more descriptive title than the
-// generic validationLabel() (e.g. "PDF sin contraseña" reads as a
-// success on this surface, where the row is reporting a *failure*).
-// Anything not in this map falls through to validationLabel() which has
-// the canonical Spanish copy for every rule_code emitted by the backend
-// — no raw engineer-dialect strings ever reach the user.
-const REASON_TITLE_OVERRIDES: Record<string, string> = {
-  pdf_encrypted: "PDF protegido con contraseña",
-  pdf_readable_text: "Texto del PDF no es legible",
-  duplicate_hash: "Documento duplicado",
-  vendor_match: "Confirmación de proveedor pendiente",
-  period_match: "Confirmación de periodo pendiente",
-  expired_document: "Documento vencido",
+const REVIEWER_NOTE_HEADINGS: Partial<Record<RequirementStatus, string>> = {
+  rechazado: "Motivo del rechazo",
+  requiere_aclaracion: "Aclaración solicitada",
+  posible_mismatch: "Posible discrepancia",
 };
 
-function titleForReason(ruleCode: string): string {
-  return REASON_TITLE_OVERRIDES[ruleCode] ?? validationLabel(ruleCode);
-}
-
-function ReasonRow({
-  severity,
-  title,
-  message,
-  humanReview,
-  ruleCode,
-}: {
-  severity: string;
-  title: string;
-  message: string;
-  humanReview?: boolean;
-  /** Engineer-dialect code surfaced in title=/aria-label only — QA hook,
-   *  never user-visible. */
-  ruleCode?: string;
-}) {
-  const Icon =
-    severity === "error" ? WarningCircle : severity === "warning" ? Warning : ShieldCheck;
-  const iconColor =
-    severity === "error"
-      ? "text-[color:var(--status-error-text)]"
-      : severity === "warning"
-        ? "text-[color:var(--status-warning-text)]"
-        : "text-[color:var(--text-brand)]";
+function ReviewerNoteCard({ detail }: { detail: SubmissionDetail }) {
+  if (!REVIEWER_NOTE_STATUSES.has(detail.status)) return null;
+  const note =
+    detail.reviewer_note ?? detail.document?.mismatch_reason ?? null;
+  if (!note) return null;
+  const heading =
+    REVIEWER_NOTE_HEADINGS[detail.status] ?? "Nota del revisor";
+  const sourceLabel = detail.reviewer_note
+    ? "Nota del revisor"
+    : "Detectado automáticamente";
   return (
-    <div className="flex items-start gap-3 rounded-md border border-[color:var(--border-default)] bg-[color:var(--surface-raised)] p-3">
-      <Icon
-        className={`mt-0.5 h-4 w-4 shrink-0 ${iconColor}`}
-        weight="fill"
-        aria-hidden="true"
-      />
-      <div className="min-w-0">
-        <p
-          className="text-sm font-medium text-[color:var(--text-primary)]"
-          title={ruleCode}
-          aria-label={ruleCode ? `${title} (${ruleCode})` : title}
-        >
-          {title}
+    <Card
+      role="region"
+      aria-label={heading}
+      className="border-[color:var(--status-warning-border)] bg-[color:var(--status-warning-bg)]"
+    >
+      <CardHeader>
+        <div className="flex items-center gap-2">
+          <Warning
+            className="h-4 w-4 text-[color:var(--status-warning-text)]"
+            weight="fill"
+            aria-hidden="true"
+          />
+          <CardTitle>{heading}</CardTitle>
+        </div>
+        <p className="mt-1 text-xs font-mono uppercase tracking-wide text-[color:var(--text-tertiary)]">
+          {sourceLabel}
         </p>
-        <p className="mt-0.5 text-sm text-[color:var(--text-secondary)]">{message}</p>
-        {humanReview ? (
-          <p className="mt-1 text-xs font-medium uppercase tracking-wide text-[color:var(--text-tertiary)]">
-            Requiere revisión humana
-          </p>
-        ) : null}
-      </div>
-    </div>
+      </CardHeader>
+      <CardContent>
+        <p className="text-[15px] leading-relaxed text-[color:var(--text-primary)]">
+          {note}
+        </p>
+      </CardContent>
+    </Card>
   );
 }
 

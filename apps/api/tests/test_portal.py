@@ -784,3 +784,68 @@ def test_tenant_guard_rejects_path_mismatch(api_client: TestClient) -> None:
     # fresh now holds the cookie for the OTHER workspace.
     cross = fresh.get(f"/api/v1/portal/workspaces/{access_a['workspace_id']}")
     assert cross.status_code == 403
+
+
+# ---------------------------------------------------------------------------
+# Phase 2 / Slice 2B — reviewer_note on submission detail
+# ---------------------------------------------------------------------------
+
+
+def test_submission_detail_reviewer_note_null_when_no_decision(
+    api_client: TestClient,
+) -> None:
+    """Slice 2B — a fresh submission with no reviewer decision has
+    ``reviewer_note=None``. Frontend uses null to decide whether to
+    render the new hero card; this pins the contract.
+    """
+    access = _setup_workspace_session(api_client)
+    submitted = _submit_canonical(api_client, vendor_rfc=access["vendor_rfc"])
+
+    detail = api_client.get(
+        f"/api/v1/portal/workspaces/{access['workspace_id']}"
+        f"/submissions/{submitted['submission_id']}",
+    ).json()
+    assert detail["status"] == "pendiente_revision"
+    assert detail["reviewer_note"] is None
+
+
+def test_submission_detail_carries_reviewer_note_on_rechazado(
+    api_client: TestClient,
+) -> None:
+    """Slice 2B — when a reviewer rejects with a Spanish reason, the
+    detail endpoint surfaces that reason as ``reviewer_note`` so the
+    provider page can render it as the hero instead of burying it in
+    the timeline. Sourced from the same ``_latest_reviewer_note``
+    helper that already feeds calendar/dashboard, so this is a
+    contract-propagation test rather than a new query.
+    """
+    from app.constants.statuses import ReviewerAction
+    from app.models import Submission
+    from app.services.submission_workflow import apply_reviewer_decision
+
+    access = _setup_workspace_session(api_client)
+    submitted = _submit_canonical(api_client, vendor_rfc=access["vendor_rfc"])
+
+    reason = "El RFC del comprobante no coincide con el del proveedor."
+    factory = api_client.app.state.testing_session  # type: ignore[attr-defined]
+    db = factory()
+    try:
+        sub = db.get(Submission, submitted["submission_id"])
+        assert sub is not None
+        apply_reviewer_decision(
+            db,
+            submission=sub,
+            action=ReviewerAction.REJECT,
+            reason=reason,
+            reviewer_user_id="rev-test-user",
+        )
+    finally:
+        db.close()
+
+    detail = api_client.get(
+        f"/api/v1/portal/workspaces/{access['workspace_id']}"
+        f"/submissions/{submitted['submission_id']}",
+    ).json()
+    assert detail["status"] == "rechazado"
+    assert detail["reviewer_note"] == reason
+    assert detail["suggested_action"] == "reupload"
