@@ -31,7 +31,6 @@ import {
 import { DocStateBadge } from "@/components/checkwise/doc-state-badge";
 import { EmptyExpedienteHero } from "@/components/checkwise/portal/empty-expediente-hero";
 import { PortalAppShell } from "@/components/checkwise/portal/portal-app-shell";
-import { WiseDock } from "@/components/checkwise/portal/wise-dock";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -56,7 +55,6 @@ import {
 import { withOnboardingGate } from "@/lib/session/with-onboarding-gate";
 import type { PortalSession } from "@/lib/session/portal";
 import type { DocumentStateCode } from "@/lib/types";
-import { buildWiseMessages } from "@/lib/wise/messages";
 
 /**
  * Provider dashboard — visual REPSE compliance command center.
@@ -173,15 +171,9 @@ function DashboardInner({ session }: { session: PortalSession }) {
   // initial expediente, replace the chart-rich layout with the
   // guided checklist hero. Charts of mostly-zero data read as broken
   // to a brand-new vendor; the checklist gives them a concrete
-  // first move. The Wise dock mounts in both branches so the
-  // copilot is available whether they are in the empty-state or
-  // chart-rich world.
-  const wise = buildWiseMessages({
-    session,
-    dashboard,
-    onboarding: onboardingPayload,
-    limit: 4,
-  });
+  // first move. The Wise dock lives at the PortalAppShell level
+  // (Phase 4) so it follows the user across every portal page —
+  // we no longer mount it from inside the dashboard.
 
   const header = (
     <PageHeader
@@ -227,13 +219,6 @@ function DashboardInner({ session }: { session: PortalSession }) {
             onboarding={onboardingPayload}
           />
         </main>
-        <WiseDock
-          session={session}
-          audience={wise.audience}
-          messages={wise.messages}
-          dashboard={dashboard}
-          onboarding={onboardingPayload}
-        />
       </PortalAppShell>
     );
   }
@@ -324,13 +309,6 @@ function DashboardInner({ session }: { session: PortalSession }) {
           </div>
         </section>
       </main>
-      <WiseDock
-        session={session}
-        audience={wise.audience}
-        messages={wise.messages}
-        dashboard={dashboard}
-        onboarding={onboardingPayload}
-      />
     </PortalAppShell>
   );
 }

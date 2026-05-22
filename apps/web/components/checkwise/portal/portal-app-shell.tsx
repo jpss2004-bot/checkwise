@@ -18,6 +18,7 @@ import {
 } from "@phosphor-icons/react";
 
 import { BrandLogo } from "@/components/checkwise/brand-logo";
+import { WiseDock } from "@/components/checkwise/portal/wise-dock";
 import { FeedbackLauncher } from "@/components/feedback/feedback-launcher";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -205,6 +206,15 @@ export function PortalAppShell({
         />
         <div className="flex-1">{children}</div>
       </div>
+      {/* Phase 4 (2026-05-21): Wise lives at the shell level so the
+          copilot is available on every portal page. The dock self-
+          fetches the dashboard + onboarding payloads on first open
+          and derives its page context from the current URL, so
+          individual pages don't need to wire it up. The dashboard
+          page still passes ``dashboard`` + ``onboarding`` as props
+          to avoid a redundant refetch — every other page lets the
+          dock manage its own data. */}
+      <WiseDock session={session} />
       <FeedbackLauncher />
     </div>
   );

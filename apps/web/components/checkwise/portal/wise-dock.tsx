@@ -2,6 +2,7 @@
 
 import * as React from "react";
 import Link from "next/link";
+import { usePathname, useSearchParams } from "next/navigation";
 import {
   ArrowRight,
   CaretDown,
@@ -15,11 +16,14 @@ import {
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 import {
+  getDashboard,
+  getOnboarding,
   postWiseAsk,
   postWiseEvent,
   type DashboardPayload,
   type OnboardingSummary,
   type WiseAskCta,
+  type WisePageContext,
 } from "@/lib/api/portal";
 import type { PortalSession } from "@/lib/session/portal";
 import {
@@ -27,7 +31,11 @@ import {
   answerIntent,
   classifyIntent,
 } from "@/lib/wise/intents";
-import type { WiseAudience, WiseMessage } from "@/lib/wise/messages";
+import {
+  buildWiseMessages,
+  type WiseAudience,
+  type WiseMessage,
+} from "@/lib/wise/messages";
 
 /**
  * Wise — provider-portal copilot dock.
@@ -81,15 +89,15 @@ const TONE_TEXT: Record<NonNullable<WiseMessage["tone"]>, string> = {
 
 interface WiseDockProps {
   session: PortalSession;
-  audience: WiseAudience;
-  /** Initial messages — the welcome line + suggestions surfaced
-   *  when the dock first opens, before any conversation. */
-  messages: WiseMessage[];
-  /** Live dashboard + onboarding payloads so the chat-layer
-   *  intent matcher can answer questions against the current
-   *  state (next-action, deadline, rejection, status). */
-  dashboard: DashboardPayload;
-  onboarding: OnboardingSummary | null;
+  /** Phase 4: ALL of the following are optional. When the dock is
+   *  mounted on a page that already has the dashboard payload (the
+   *  dashboard itself), the page can hand them down to avoid a
+   *  redundant fetch. On every other portal page the dock self-
+   *  fetches on first open. */
+  audience?: WiseAudience;
+  messages?: WiseMessage[];
+  dashboard?: DashboardPayload;
+  onboarding?: OnboardingSummary | null;
   className?: string;
 }
 
@@ -99,18 +107,93 @@ type ChatTurn =
 
 export function WiseDock({
   session,
-  audience,
-  messages,
-  dashboard,
-  onboarding,
+  audience: audienceProp,
+  messages: messagesProp,
+  dashboard: dashboardProp,
+  onboarding: onboardingProp,
   className,
 }: WiseDockProps) {
   const [collapsed, setCollapsed] = React.useState<boolean>(true);
   const [hydrated, setHydrated] = React.useState(false);
+  // Phase 4: dock self-fetches when the host page doesn't pass these
+  // in (i.e. every page except /portal/dashboard). The fetch defers
+  // until the user actually opens the dock so the chat is fast to
+  // mount on pages where they never engage with it.
+  const [dashboardState, setDashboardState] = React.useState<
+    DashboardPayload | null
+  >(dashboardProp ?? null);
+  const [onboardingState, setOnboardingState] = React.useState<
+    OnboardingSummary | null
+  >(onboardingProp ?? null);
+  const [hasOpenedOnce, setHasOpenedOnce] = React.useState(false);
   const [turns, setTurns] = React.useState<ChatTurn[]>([]);
   const [inputValue, setInputValue] = React.useState("");
   const firedFirstRender = React.useRef(false);
   const scrollRef = React.useRef<HTMLDivElement | null>(null);
+
+  // Page context: derived live from the URL so the dock knows what
+  // screen the user is on without each page having to pass it in.
+  const pageContext = useDerivedPageContext();
+
+  // Keep local state in sync when the host page does provide the
+  // payloads (the dashboard page passes them).
+  React.useEffect(() => {
+    if (dashboardProp) setDashboardState(dashboardProp);
+  }, [dashboardProp]);
+  React.useEffect(() => {
+    if (onboardingProp !== undefined) setOnboardingState(onboardingProp);
+  }, [onboardingProp]);
+
+  // Lazy-fetch dashboard + onboarding the first time the dock opens
+  // on a page that didn't pass them in. Subsequent opens reuse the
+  // already-fetched state.
+  React.useEffect(() => {
+    if (!hasOpenedOnce || dashboardState !== null) return;
+    let cancelled = false;
+    Promise.all([
+      getDashboard(session).catch(() => null),
+      getOnboarding(session).catch(() => null),
+    ]).then(([dash, onb]) => {
+      if (cancelled) return;
+      if (dash) setDashboardState(dash);
+      setOnboardingState(onb);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [hasOpenedOnce, dashboardState, session]);
+
+  // Compute welcome messages + audience whenever the underlying
+  // state changes. When the host page passes ``messagesProp`` we
+  // honor it (lets the dashboard page keep its existing wiring);
+  // otherwise we derive everything from the dock-fetched payloads.
+  const derived = React.useMemo(() => {
+    if (messagesProp && audienceProp) {
+      return { audience: audienceProp, messages: messagesProp };
+    }
+    if (!dashboardState) {
+      // No dashboard yet — show a single generic greeting bubble.
+      return {
+        audience: "mature" as WiseAudience,
+        messages: [
+          {
+            id: "wise-greet-loading",
+            tone: "brand" as const,
+            body: "Hola, soy Wise. Pregúntame lo que quieras del cumplimiento de tu proveedor.",
+          },
+        ],
+      };
+    }
+    return buildWiseMessages({
+      session,
+      dashboard: dashboardState,
+      onboarding: onboardingState,
+      limit: 4,
+    });
+  }, [messagesProp, audienceProp, dashboardState, onboardingState, session]);
+
+  const audience = derived.audience;
+  const messages = derived.messages;
 
   // Seed the conversation with the initial wise messages so the
   // chat-style scrollback shows the welcome + suggestions first.
@@ -152,8 +235,13 @@ export function WiseDock({
         prompt: trimmed.slice(0, 200),
       });
 
-      if (intent !== "unknown") {
-        const reply = answerIntent({ intent, session, dashboard, onboarding });
+      if (intent !== "unknown" && dashboardState) {
+        const reply = answerIntent({
+          intent,
+          session,
+          dashboard: dashboardState,
+          onboarding: onboardingState,
+        });
         const replyTurn: ChatTurn = {
           kind: "wise",
           message: { ...reply, id: `${reply.id}-${userTurnId}` },
@@ -162,7 +250,11 @@ export function WiseDock({
         return;
       }
 
-      // Unknown intent → LLM fallback. Show a placeholder while we wait.
+      // Unknown intent OR dashboard not yet loaded → LLM fallback.
+      // Show a placeholder while we wait. The backend assembles the
+      // full workspace + catalog context from the DB, and we ship
+      // the page context so the model knows what screen the user is
+      // on and what specific task they're in the middle of.
       const placeholderId = `wise-pending-${userTurnId}`;
       const placeholder: ChatTurn = {
         kind: "wise",
@@ -174,13 +266,8 @@ export function WiseDock({
       };
       setTurns((prev) => [...prev, userTurn, placeholder]);
 
-      // Phase 3 (2026-05-21) — the backend assembles the full
-      // workspace + catalog context server-side from the DB, so the
-      // dock only needs to ship the prompt and the allowed-CTA
-      // list. ``buildStateDigest`` was removed from this file with
-      // the same change.
-      const ctas = buildAllowedCtas(dashboard);
-      postWiseAsk(session, trimmed, ctas)
+      const ctas = dashboardState ? buildAllowedCtas(dashboardState) : [];
+      postWiseAsk(session, trimmed, ctas, pageContext)
         .then((response) => {
           setTurns((prev) =>
             prev.map((turn) =>
@@ -216,7 +303,7 @@ export function WiseDock({
           );
         });
     },
-    [audience, dashboard, onboarding, session],
+    [audience, dashboardState, onboardingState, pageContext, session],
   );
 
   // Hydrate from localStorage on mount. First-ever visit:
@@ -236,18 +323,30 @@ export function WiseDock({
     setHydrated(true);
   }, []);
 
-  // Fire wise.first_render once per dock mount.
+  // Fire wise.first_render once per dock mount. Includes the route
+  // so we can later answer "which pages does the dock actually get
+  // seen on?" via the wise_events analytics table.
   React.useEffect(() => {
     if (firedFirstRender.current) return;
     if (!hydrated) return;
     firedFirstRender.current = true;
-    void postWiseEvent(session, "wise.first_render", { audience });
-  }, [session, audience, hydrated]);
+    void postWiseEvent(session, "wise.first_render", {
+      audience,
+      route: pageContext.route,
+    });
+  }, [session, audience, hydrated, pageContext]);
 
   // Persist + emit on toggle.
   const setCollapsedAndPersist = React.useCallback(
     (next: boolean) => {
       setCollapsed(next);
+      if (!next) {
+        // Mark "has opened once" so the lazy-fetch effect for the
+        // dashboard + onboarding payloads kicks in. We defer the
+        // fetch until first open so the chat is fast to mount on
+        // pages where the user never engages with Wise.
+        setHasOpenedOnce(true);
+      }
       try {
         window.localStorage.setItem(STORAGE_KEY, String(next));
       } catch {
@@ -255,9 +354,10 @@ export function WiseDock({
       }
       void postWiseEvent(session, next ? "wise.collapsed" : "wise.opened", {
         audience,
+        route: pageContext.route,
       });
     },
-    [session, audience],
+    [session, audience, pageContext],
   );
 
   // Esc closes when expanded.
@@ -627,4 +727,72 @@ function ctaLabelForAction(
   type: DashboardPayload["suggested_actions"][number]["type"],
 ): string {
   return ACTION_CTA_LABEL_LOCAL[type] ?? "Abrir";
+}
+
+// ─── Helpers: page-context derivation ─────────────────────────────
+
+/** Spanish page labels keyed by portal route. ``/portal/submissions/[id]``
+ *  collapses to "Detalle de carga" so the user-facing label stays
+ *  meaningful even when the id is missing. */
+const PORTAL_PAGE_LABELS: { match: RegExp; label: string }[] = [
+  { match: /^\/portal\/dashboard$/, label: "Dashboard de cumplimiento" },
+  { match: /^\/portal\/onboarding$/, label: "Expediente inicial" },
+  { match: /^\/portal\/calendar$/, label: "Calendario REPSE" },
+  { match: /^\/portal\/upload$/, label: "Cargar documento" },
+  { match: /^\/portal\/submissions\/[^/]+$/, label: "Detalle de carga" },
+  { match: /^\/portal\/submissions$/, label: "Mis cargas" },
+  { match: /^\/portal\/reports\/[^/]+\/print$/, label: "Reporte (impresión)" },
+  { match: /^\/portal\/reports\/[^/]+$/, label: "Reporte" },
+  { match: /^\/portal\/reports$/, label: "Reportes" },
+  { match: /^\/portal\/entra-a-tu-espacio$/, label: "Entrar al portal" },
+];
+
+function labelForRoute(route: string): string {
+  for (const entry of PORTAL_PAGE_LABELS) {
+    if (entry.match.test(route)) return entry.label;
+  }
+  // Default catch-all so the dock always sends a non-empty label
+  // even on an undocumented portal sub-route.
+  return route.startsWith("/portal/") ? "Portal del proveedor" : route;
+}
+
+/**
+ * Derive the per-request page context from the URL. Read live with
+ * Next's ``usePathname`` + ``useSearchParams`` so navigating to a
+ * different page re-derives without re-mounting the dock.
+ *
+ * Pulls common task descriptors out of the search params:
+ *   * ``requirement_code`` + ``requirement`` (the human name)
+ *   * ``period_key``
+ *   * ``replaces`` (a prior submission id when correcting)
+ *
+ * The submission detail page (``/portal/submissions/[id]``) embeds
+ * the id in the path; ``useDerivedPageContext`` extracts it so Wise
+ * knows which submission is on screen.
+ */
+function useDerivedPageContext(): WisePageContext {
+  const pathname = usePathname();
+  const params = useSearchParams();
+  return React.useMemo(() => {
+    const route = pathname || "/portal";
+    const label = labelForRoute(route);
+    const ctx: WisePageContext = { route, page_label: label };
+
+    const reqCode = params.get("requirement_code");
+    const reqName = params.get("requirement");
+    const periodKey = params.get("period_key");
+    if (reqCode) ctx.requirement_code = reqCode;
+    if (reqName) ctx.requirement_name = reqName;
+    if (periodKey) ctx.period_key = periodKey;
+
+    // Submission detail route: /portal/submissions/<id>
+    const submissionMatch = /^\/portal\/submissions\/([^/]+)$/.exec(route);
+    if (submissionMatch) ctx.submission_id = submissionMatch[1];
+    // The "replaces" search param signals a re-upload flow — useful
+    // context for Wise on /portal/upload too.
+    const replaces = params.get("replaces");
+    if (replaces && !ctx.submission_id) ctx.submission_id = replaces;
+
+    return ctx;
+  }, [pathname, params]);
 }

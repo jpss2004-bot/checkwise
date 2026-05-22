@@ -657,6 +657,19 @@ export type WiseAskCta = {
   description?: string;
 };
 
+/** Phase 4 (2026-05-21) — per-page context shipped by the dock so
+ *  the LLM knows which portal screen the user is on and what task
+ *  (requirement / period / submission) they're working on. Matches
+ *  the backend ``WisePageContextIn`` schema one-for-one. */
+export type WisePageContext = {
+  route: string;
+  page_label: string;
+  requirement_code?: string;
+  requirement_name?: string;
+  submission_id?: string;
+  period_key?: string;
+};
+
 export type WiseAskResponse = {
   body: string;
   cta_label: string | null;
@@ -681,12 +694,17 @@ export async function postWiseAsk(
   session: PortalSession,
   prompt: string,
   ctas: WiseAskCta[],
+  page_context?: WisePageContext,
 ): Promise<WiseAskResponse> {
   return await fetchJson<WiseAskResponse>(
     `/api/v1/portal/workspaces/${session.workspace_id}/wise/ask`,
     {
       method: "POST",
-      body: JSON.stringify({ prompt, ctas }),
+      body: JSON.stringify({
+        prompt,
+        ctas,
+        ...(page_context ? { page_context } : {}),
+      }),
     },
     session,
   );
