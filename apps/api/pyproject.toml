@@ -15,6 +15,7 @@ dependencies = [
   "jsonschema>=4.21",
   "boto3>=1.35",
   "fastapi>=0.111",
+  "google-cloud-documentai>=2.30",
   "psycopg[binary]>=3.1",
   "pyjwt>=2.8",
   "pypdf>=5.0",

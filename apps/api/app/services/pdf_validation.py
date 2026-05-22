@@ -1,10 +1,17 @@
 from __future__ import annotations
 
-from dataclasses import dataclass, field
+import logging
+from dataclasses import dataclass, field, replace
+from functools import lru_cache
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from pypdf import PdfReader
+
+if TYPE_CHECKING:
+    from app.services.ocr import DocumentAiOcrClient
+
+logger = logging.getLogger(__name__)
 
 
 @dataclass(frozen=True)
@@ -94,3 +101,85 @@ def _safe_metadata(metadata: Any) -> dict[str, str]:
             continue
         result[str(key)] = str(value)[:500]
     return result
+
+
+# ---------------------------------------------------------------------------
+# Phase 3 — OCR fallback for scanned uploads
+# ---------------------------------------------------------------------------
+#
+# ``inspect_pdf`` extracts embedded text via pypdf. When the PDF is a
+# scan (born-image, no text layer) pypdf returns nothing, the detector
+# sees an empty string, and the submission lands in
+# ``pendiente_revision`` with zero signals — even when the file is
+# obviously correct.
+#
+# ``inspect_pdf_with_ocr_fallback`` is the intake-time entrypoint:
+# it runs the pure inspection first and, when ``is_probably_scanned``
+# is True, asks the OCR client for text. On success it replaces
+# ``text_sample`` / ``text_char_count`` / ``has_text`` so the detector
+# can run; ``is_probably_scanned`` is intentionally left True so the
+# reviewer surface knows the text came from OCR rather than pypdf
+# (the audit trail matters for evidence quality).
+#
+# Any OCR failure path (no client configured, no creds, API error,
+# timeout) returns the original ``PdfInspectionResult`` unchanged —
+# OCR never aborts an upload.
+
+
+_PDF_TEXT_MIN_CHARS = 20
+
+
+@lru_cache(maxsize=1)
+def _cached_ocr_client() -> DocumentAiOcrClient | None:
+    """Lazy singleton — build the OCR client on first use, cache thereafter.
+
+    Cached at module level so each worker only pays the SDK / auth
+    setup cost once. ``lru_cache(maxsize=1)`` makes the build idempotent
+    without a manual lock. Returns ``None`` when OCR is disabled or
+    misconfigured; the caller treats that as "no OCR available".
+    """
+    # Local import — avoids importing the Google SDK at module-load
+    # time, which lets the rest of the codebase run in environments
+    # that haven't installed ``google-cloud-documentai``.
+    from app.services.ocr import build_ocr_client_from_settings
+
+    return build_ocr_client_from_settings()
+
+
+def inspect_pdf_with_ocr_fallback(
+    path: Path,
+    *,
+    max_text_pages: int = 3,
+    ocr_client: DocumentAiOcrClient | None | object = ...,
+) -> PdfInspectionResult:
+    """Run ``inspect_pdf`` and OCR the file if it looks like a scan.
+
+    ``ocr_client`` is an injection seam for tests: pass ``None`` to
+    force the no-OCR path, pass a stub client to assert against the
+    OCR-success path, or leave at the sentinel to use the cached
+    production client.
+    """
+    result = inspect_pdf(path, max_text_pages=max_text_pages)
+    if not result.is_probably_scanned:
+        return result
+
+    client = _cached_ocr_client() if ocr_client is ... else ocr_client
+    if client is None:
+        return result
+
+    ocr_result = client.extract_text(path)
+    text = (ocr_result.text or "").strip()
+    if not text:
+        # OCR ran but produced nothing usable — keep the original
+        # result so the row still records "scanned, no text" and lands
+        # in pendiente_revision.
+        return result
+
+    return replace(
+        result,
+        text_sample=text[:5000],
+        text_char_count=len(text),
+        has_text=len(text) >= _PDF_TEXT_MIN_CHARS,
+        # is_probably_scanned stays True — the audit trail records
+        # that text came from OCR, not from the original PDF.
+    )

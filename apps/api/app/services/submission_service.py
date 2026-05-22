@@ -43,7 +43,11 @@ from app.services.client_notifications import (
 )
 from app.services.document_intelligence import DocumentSignals, analyze_document_text
 from app.services.metadata_export import export_metadata_table_after_upload
-from app.services.pdf_validation import PdfInspectionResult, inspect_pdf
+from app.services.pdf_validation import (
+    PdfInspectionResult,
+    inspect_pdf,  # noqa: F401 — re-exported for legacy tools/scripts
+    inspect_pdf_with_ocr_fallback,
+)
 from app.services.prevalidation import build_initial_validations
 from app.services.requirement_service import ResolvedPeriod, ResolvedRequirement
 from app.services.storage import StoredFile
@@ -445,7 +449,7 @@ def finalize_intake_submission(
         select(Document).where(Document.sha256 == stored_file.sha256).limit(1)
     )
 
-    pdf_inspection = inspect_pdf(stored_file.path)
+    pdf_inspection = inspect_pdf_with_ocr_fallback(stored_file.path)
     document_signals = analyze_document_text(
         pdf_inspection.text_sample,
         expected_requirement=resolved_requirement.canonical_name,
@@ -868,7 +872,7 @@ def finalize_multi_document_submission(
         duplicate = db.scalar(
             select(Document).where(Document.sha256 == stored.sha256).limit(1)
         )
-        pdf_inspection = inspect_pdf(stored.path)
+        pdf_inspection = inspect_pdf_with_ocr_fallback(stored.path)
         document_signals = analyze_document_text(
             pdf_inspection.text_sample,
             expected_requirement=resolved_requirement.canonical_name,

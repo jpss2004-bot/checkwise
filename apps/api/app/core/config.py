@@ -150,6 +150,26 @@ class Settings(BaseSettings):
     AUTH_LOGIN_RATE_LIMIT_PER_MINUTE: int = 10
     AUTH_FORGOT_PASSWORD_RATE_LIMIT_PER_HOUR: int = 5
 
+    # Phase 3 — Google Document AI OCR fallback for scanned uploads.
+    # OCR runs synchronously during intake when ``inspect_pdf`` reports
+    # ``is_probably_scanned=True``. Default OFF so the backend boots
+    # cleanly in CI / dev environments that have no GCP credentials —
+    # scans fall through to ``pendiente_revision`` exactly as today.
+    # See ``apps/api/docs/PHASE3_DOCUMENTAI_SETUP.md`` for provisioning.
+    OCR_ENABLED: bool = False
+    GOOGLE_DOC_AI_PROJECT_ID: str = ""
+    GOOGLE_DOC_AI_LOCATION: str = "us"  # 'us' or 'eu'
+    GOOGLE_DOC_AI_PROCESSOR_ID: str = ""
+    # Render-friendly: paste the full JSON content here. Locally the
+    # standard ``GOOGLE_APPLICATION_CREDENTIALS=/path/to/key.json`` path
+    # also works (the SDK picks it up automatically). The service prefers
+    # the inline JSON if both are set.
+    GOOGLE_APPLICATION_CREDENTIALS_JSON: str = ""
+    # Hard cap on the synchronous OCR call. Document AI usually returns
+    # in 2-6s; 30s is the upload-timeout ceiling so we never block a
+    # provider indefinitely on a slow processor.
+    OCR_TIMEOUT_SECONDS: float = 30.0
+
     model_config = SettingsConfigDict(env_file=".env", env_file_encoding="utf-8", extra="ignore")
 
     # Render (and many hosts) accept env vars set to an empty string as
