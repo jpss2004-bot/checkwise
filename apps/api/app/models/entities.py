@@ -921,6 +921,43 @@ class WiseEvent(Base):
     )
 
 
+class ProviderNotification(Base):
+    """Provider-facing notification generated from reviewer-decision events.
+
+    Phase 4 / Slice 4B — portal-side analogue of
+    ``ClientNotification``. Keyed on ``workspace_id`` (the tenant
+    boundary on the portal side) so the inbox naturally scopes to a
+    single provider. Severity is in the schema from day 1 so the
+    semáforo treatment ships without a follow-up evolution.
+    """
+
+    __tablename__ = "provider_notifications"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=new_id)
+    workspace_id: Mapped[str] = mapped_column(
+        ForeignKey("provider_workspaces.id"), nullable=False, index=True
+    )
+    submission_id: Mapped[str | None] = mapped_column(
+        ForeignKey("submissions.id"), nullable=True, index=True
+    )
+    notification_type: Mapped[str] = mapped_column(
+        String(80), nullable=False, index=True
+    )
+    severity: Mapped[str] = mapped_column(
+        String(20), default="info", nullable=False
+    )
+    title: Mapped[str] = mapped_column(String(180), nullable=False)
+    body: Mapped[str] = mapped_column(Text, nullable=False)
+    action_url: Mapped[str | None] = mapped_column(String(512))
+    payload: Mapped[dict | None] = mapped_column(JSON)
+    read_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), index=True
+    )
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=utc_now, nullable=False, index=True
+    )
+
+
 class ClientNotification(Base):
     """Client-facing notification generated from provider/document events."""
 

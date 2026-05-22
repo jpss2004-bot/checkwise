@@ -2,8 +2,9 @@
 
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import {
+  Bell,
   CalendarBlank,
   ChartLineUp,
   ClipboardText,
@@ -24,6 +25,7 @@ import { FeedbackLauncher } from "@/components/feedback/feedback-launcher";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
+import { getProviderNotificationSummary } from "@/lib/api/portal";
 import { clearPortalSession, type PortalSession } from "@/lib/session/portal";
 
 /**
@@ -83,6 +85,12 @@ const PRIMARY_NAV: NavItem[] = [
     icon: ChartLineUp,
     hint: "Resúmenes ejecutivos",
   },
+  {
+    href: "/portal/notifications",
+    label: "Notificaciones",
+    icon: Bell,
+    hint: "Decisiones del revisor",
+  },
 ];
 
 const SECONDARY_NAV: NavItem[] = [
@@ -105,6 +113,33 @@ export function PortalAppShell({
   children,
 }: PortalAppShellProps) {
   const [mobileOpen, setMobileOpen] = useState(false);
+  // Phase 4 / Slice 4B — unread-count for the Notificaciones nav
+  // badge. Best-effort: a fetch failure leaves the badge hidden
+  // rather than blocking the shell. Auto-refreshes every 60 s so the
+  // badge tracks reviewer decisions that land while the tab is open.
+  const [notifUnread, setNotifUnread] = useState<number>(0);
+  useEffect(() => {
+    let cancelled = false;
+    function refresh() {
+      getProviderNotificationSummary(session)
+        .then((s) => {
+          if (!cancelled) setNotifUnread(s.unread_count);
+        })
+        .catch(() => undefined);
+    }
+    refresh();
+    const handle = window.setInterval(refresh, 60_000);
+    return () => {
+      cancelled = true;
+      window.clearInterval(handle);
+    };
+  }, [session]);
+  const primaryNav = PRIMARY_NAV.map((item) =>
+    item.href === "/portal/notifications"
+      ? { ...item, badge: notifUnread > 0 ? notifUnread : undefined }
+      : item,
+  );
+
   const router = useRouter();
   const pathname = usePathname();
 
@@ -137,7 +172,7 @@ export function PortalAppShell({
           <WorkspaceCard session={session} />
         </div>
 
-        <SidebarNav pathname={pathname ?? ""} items={PRIMARY_NAV} title="Operación" />
+        <SidebarNav pathname={pathname ?? ""} items={primaryNav} title="Operación" />
         <SidebarNav
           pathname={pathname ?? ""}
           items={SECONDARY_NAV}
@@ -182,7 +217,7 @@ export function PortalAppShell({
             </div>
             <SidebarNav
               pathname={pathname ?? ""}
-              items={PRIMARY_NAV}
+              items={primaryNav}
               title="Operación"
               onNavigate={() => setMobileOpen(false)}
             />

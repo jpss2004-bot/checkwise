@@ -809,6 +809,199 @@ def test_submission_detail_reviewer_note_null_when_no_decision(
     assert detail["reviewer_note"] is None
 
 
+def test_reviewer_decision_writes_provider_notification_with_severity(
+    api_client: TestClient,
+) -> None:
+    """Slice 4B — every reviewer decision fires a provider-side
+    notification with the right semáforo severity. The reviewer
+    note round-trips into the body so the provider sees the
+    explanation in the inbox without click-through.
+    """
+    from app.constants.statuses import ReviewerAction
+    from app.models import Submission
+    from app.services.submission_workflow import apply_reviewer_decision
+
+    access = _setup_workspace_session(api_client)
+
+    # Helper: seed a fresh submission, apply the given reviewer
+    # decision against it, return the submission id.
+    def _decide(action: ReviewerAction, reason: str | None) -> str:
+        submitted = _submit_canonical(api_client, vendor_rfc=access["vendor_rfc"])
+        sub_id = submitted["submission_id"]
+        factory = api_client.app.state.testing_session  # type: ignore[attr-defined]
+        db = factory()
+        try:
+            sub = db.get(Submission, sub_id)
+            assert sub is not None
+            apply_reviewer_decision(
+                db,
+                submission=sub,
+                action=action,
+                reason=reason,
+                reviewer_user_id="rev-test-user",
+            )
+        finally:
+            db.close()
+        return sub_id
+
+    sub_approved = _decide(ReviewerAction.APPROVE, None)
+    sub_rejected = _decide(
+        ReviewerAction.REJECT, "El RFC no coincide con el del proveedor."
+    )
+    sub_clarif = _decide(
+        ReviewerAction.REQUEST_CLARIFICATION, "Aclara el periodo cubierto."
+    )
+    sub_exception = _decide(
+        ReviewerAction.MARK_EXCEPTION, "Aplicada por excepción legal."
+    )
+
+    resp = api_client.get(
+        f"/api/v1/portal/workspaces/{access['workspace_id']}/notifications?limit=200"
+    )
+    assert resp.status_code == 200, resp.text
+    body = resp.json()
+    by_sub: dict[str, dict] = {
+        item["submission_id"]: item for item in body["items"]
+    }
+
+    assert by_sub[sub_approved]["severity"] == "green"
+    assert by_sub[sub_approved]["notification_type"] == "document_approve"
+
+    assert by_sub[sub_rejected]["severity"] == "red"
+    # Reason round-trips into the body so the provider sees it inline.
+    assert "El RFC no coincide" in by_sub[sub_rejected]["body"]
+
+    assert by_sub[sub_clarif]["severity"] == "yellow"
+    assert "Aclara el periodo" in by_sub[sub_clarif]["body"]
+
+    assert by_sub[sub_exception]["severity"] == "green"
+
+    # Summary endpoint reports the same unread count.
+    summary = api_client.get(
+        f"/api/v1/portal/workspaces/{access['workspace_id']}/notifications/summary"
+    ).json()
+    assert summary["unread_count"] == 4
+
+
+def test_provider_notifications_enforce_tenant_isolation(
+    api_client: TestClient,
+) -> None:
+    """Slice 4B — workspace B's session cannot read workspace A's
+    notification inbox via a crafted path id.
+
+    Setup: seed A, then seed B (the ``_setup_workspace_session``
+    helper leaves the cookie pointing at B). Apply a reject against
+    A's submission so A's inbox has a row. With the B-session cookie
+    active, GET A's notifications endpoint: ``current_portal_workspace``
+    matches the path id against the resolved-session workspace and
+    must return 404 (never confirm A's existence to B).
+    """
+    from app.constants.statuses import ReviewerAction
+    from app.models import Submission
+    from app.services.submission_workflow import apply_reviewer_decision
+
+    access_a = _setup_workspace_session(api_client)
+    # Capture A's submission BEFORE switching cookies to B.
+    submitted_a = _submit_canonical(api_client, vendor_rfc=access_a["vendor_rfc"])
+    workspace_a = access_a["workspace_id"]
+
+    factory = api_client.app.state.testing_session  # type: ignore[attr-defined]
+    db = factory()
+    try:
+        sub_a = db.get(Submission, submitted_a["submission_id"])
+        assert sub_a is not None
+        apply_reviewer_decision(
+            db,
+            submission=sub_a,
+            action=ReviewerAction.REJECT,
+            reason="Documento ilegible.",
+            reviewer_user_id="rev-test-user",
+        )
+    finally:
+        db.close()
+
+    # Sanity: with A's cookie active, A sees the row.
+    own = api_client.get(
+        f"/api/v1/portal/workspaces/{workspace_a}/notifications"
+    ).json()
+    assert any(
+        item.get("submission_id") == submitted_a["submission_id"]
+        for item in own["items"]
+    )
+
+    # Swap to B's session — the helper rebinds the cookie.
+    _setup_workspace_session(
+        api_client,
+        payload=_access_payload(
+            vendor_name="Otro Proveedor SA",
+            vendor_rfc="OTR250101AB1",
+        ),
+    )
+
+    # B's session attempts to read A's inbox via a crafted path id.
+    cross = api_client.get(
+        f"/api/v1/portal/workspaces/{workspace_a}/notifications"
+    )
+    assert cross.status_code in (403, 404), cross.text
+    # Same guarantee for the summary route.
+    cross_summary = api_client.get(
+        f"/api/v1/portal/workspaces/{workspace_a}/notifications/summary"
+    )
+    assert cross_summary.status_code in (403, 404), cross_summary.text
+
+
+def test_provider_notification_mark_read_is_idempotent(
+    api_client: TestClient,
+) -> None:
+    """Slice 4B — a second mark-read on an already-read notification
+    must NOT move the timestamp and must not 500."""
+    from app.constants.statuses import ReviewerAction
+    from app.models import Submission
+    from app.services.submission_workflow import apply_reviewer_decision
+
+    access = _setup_workspace_session(api_client)
+    submitted = _submit_canonical(api_client, vendor_rfc=access["vendor_rfc"])
+    factory = api_client.app.state.testing_session  # type: ignore[attr-defined]
+    db = factory()
+    try:
+        sub = db.get(Submission, submitted["submission_id"])
+        assert sub is not None
+        apply_reviewer_decision(
+            db,
+            submission=sub,
+            action=ReviewerAction.APPROVE,
+            reason=None,
+            reviewer_user_id="rev-test-user",
+        )
+    finally:
+        db.close()
+
+    listing = api_client.get(
+        f"/api/v1/portal/workspaces/{access['workspace_id']}/notifications"
+    ).json()
+    assert listing["unread_count"] == 1
+    notification_id = listing["items"][0]["id"]
+
+    first = api_client.post(
+        f"/api/v1/portal/workspaces/{access['workspace_id']}"
+        f"/notifications/{notification_id}/read"
+    )
+    assert first.status_code == 200
+    first_read_at = first.json()["read_at"]
+
+    second = api_client.post(
+        f"/api/v1/portal/workspaces/{access['workspace_id']}"
+        f"/notifications/{notification_id}/read"
+    )
+    assert second.status_code == 200
+    assert second.json()["read_at"] == first_read_at  # unchanged
+
+    summary = api_client.get(
+        f"/api/v1/portal/workspaces/{access['workspace_id']}/notifications/summary"
+    ).json()
+    assert summary["unread_count"] == 0
+
+
 def test_submission_detail_carries_reviewer_note_on_rechazado(
     api_client: TestClient,
 ) -> None:

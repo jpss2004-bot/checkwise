@@ -56,6 +56,9 @@ from app.models import Document, DocumentStatusHistory, Submission
 from app.models.entities import utc_now
 from app.services.audit_log import add_audit_event
 from app.services.client_notifications import notify_reviewer_decision
+from app.services.provider_notifications import (
+    notify_provider_of_reviewer_decision,
+)
 from app.services.validation_events import add_validation_event
 
 # Reviewer actions that demand a free-text reason from the user. Approve
@@ -286,6 +289,18 @@ def apply_reviewer_decision(
     )
 
     notify_reviewer_decision(
+        db,
+        submission=submission,
+        action=action_enum,
+        reason=cleaned_reason,
+    )
+    # Phase 4 / Slice 4B — also fire a provider-side notification so
+    # the inbox at /portal/notifications surfaces the decision next
+    # to the existing /client/notifications row. Returns None and
+    # short-circuits silently when no workspace matches the
+    # (client_id, vendor_id) — protects the reviewer flow against
+    # legacy or partial-seed submissions.
+    notify_provider_of_reviewer_decision(
         db,
         submission=submission,
         action=action_enum,

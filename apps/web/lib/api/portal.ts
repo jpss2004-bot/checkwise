@@ -803,3 +803,86 @@ export async function postWiseAsk(
     session,
   );
 }
+
+// ---------------------------------------------------------------------------
+// Phase 4 / Slice 4B — provider notifications
+// ---------------------------------------------------------------------------
+//
+// Mirrors the client-side notification API. Severity is the shared
+// ``NotificationSeverity`` literal (re-exported from
+// ``lib/api/client``) so the portal page can reuse the same
+// severity-tone tokens. All four routes are workspace-scoped under
+// ``/api/v1/portal/workspaces/{id}/notifications`` and gated by the
+// existing ``current_portal_workspace`` tenant guard.
+
+export type ProviderNotificationItem = {
+  id: string;
+  notification_type: string;
+  severity: "green" | "yellow" | "red" | "info";
+  title: string;
+  body: string;
+  action_url: string | null;
+  submission_id: string | null;
+  payload: Record<string, unknown> | null;
+  read_at: string | null;
+  created_at: string;
+};
+
+export type ProviderNotificationsResponse = {
+  workspace_id: string;
+  items: ProviderNotificationItem[];
+  total: number;
+  unread_count: number;
+  limit: number;
+};
+
+export type ProviderNotificationSummary = {
+  workspace_id: string;
+  unread_count: number;
+};
+
+export async function getProviderNotificationSummary(
+  session: PortalSession,
+): Promise<ProviderNotificationSummary> {
+  return await fetchJson<ProviderNotificationSummary>(
+    `/api/v1/portal/workspaces/${session.workspace_id}/notifications/summary`,
+    { method: "GET" },
+    session,
+  );
+}
+
+export async function listProviderNotifications(
+  session: PortalSession,
+  params: { unread_only?: boolean; limit?: number } = {},
+): Promise<ProviderNotificationsResponse> {
+  const search = new URLSearchParams();
+  if (params.unread_only) search.set("unread_only", "true");
+  if (params.limit !== undefined) search.set("limit", String(params.limit));
+  const qs = search.toString();
+  return await fetchJson<ProviderNotificationsResponse>(
+    `/api/v1/portal/workspaces/${session.workspace_id}/notifications${qs ? `?${qs}` : ""}`,
+    { method: "GET" },
+    session,
+  );
+}
+
+export async function markProviderNotificationRead(
+  session: PortalSession,
+  notificationId: string,
+): Promise<ProviderNotificationItem> {
+  return await fetchJson<ProviderNotificationItem>(
+    `/api/v1/portal/workspaces/${session.workspace_id}/notifications/${encodeURIComponent(notificationId)}/read`,
+    { method: "POST" },
+    session,
+  );
+}
+
+export async function markAllProviderNotificationsRead(
+  session: PortalSession,
+): Promise<ProviderNotificationSummary> {
+  return await fetchJson<ProviderNotificationSummary>(
+    `/api/v1/portal/workspaces/${session.workspace_id}/notifications/read-all`,
+    { method: "POST" },
+    session,
+  );
+}

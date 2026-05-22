@@ -47,7 +47,7 @@ from fastapi import (
     status,
 )
 from pydantic import BaseModel, Field
-from sqlalchemy import select
+from sqlalchemy import and_, func, select
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import Session
 
@@ -84,6 +84,7 @@ from app.models import (
     Document,
     DocumentInspection,
     DocumentStatusHistory,
+    ProviderNotification,
     ProviderWorkspace,
     Submission,
     User,
@@ -3726,4 +3727,177 @@ def ask_wise_endpoint(
         cta_label=result.cta_label,
         cta_href=result.cta_href,
         source=result.source,
+    )
+
+
+# ---------------------------------------------------------------------------
+# Phase 4 / Slice 4B — provider notifications inbox
+# ---------------------------------------------------------------------------
+#
+# Endpoints under ``/api/v1/portal/workspaces/{id}/notifications`` —
+# four routes mirror the client-side notification surface:
+#
+#   GET  /summary               → unread_count for the bell badge
+#   GET  /                      → paginated list (with ?unread_only)
+#   POST /{notification_id}/read → mark one
+#   POST /read-all              → mark all + return refreshed counter
+#
+# Every route runs through ``current_portal_workspace`` so the path
+# workspace_id is matched against the resolved session. Cross-tenant
+# notification ids therefore return 404 (never confirm existence).
+
+
+class ProviderNotificationItem(BaseModel):
+    id: str
+    notification_type: str
+    severity: Literal["green", "yellow", "red", "info"]
+    title: str
+    body: str
+    action_url: str | None
+    submission_id: str | None
+    payload: dict | None
+    read_at: str | None
+    created_at: str
+
+
+class ProviderNotificationsResponse(BaseModel):
+    workspace_id: str
+    items: list[ProviderNotificationItem]
+    total: int
+    unread_count: int
+    limit: int
+
+
+class ProviderNotificationSummary(BaseModel):
+    workspace_id: str
+    unread_count: int
+
+
+def _provider_notification_item(
+    row: ProviderNotification,
+) -> ProviderNotificationItem:
+    return ProviderNotificationItem(
+        id=row.id,
+        notification_type=row.notification_type,
+        severity=row.severity if row.severity in {"green", "yellow", "red", "info"} else "info",  # type: ignore[arg-type]
+        title=row.title,
+        body=row.body,
+        action_url=row.action_url,
+        submission_id=row.submission_id,
+        payload=row.payload,
+        read_at=row.read_at.isoformat() if row.read_at else None,
+        created_at=row.created_at.isoformat(),
+    )
+
+
+def _provider_unread_count(db: Session, workspace_id: str) -> int:
+    return int(
+        db.scalar(
+            select(func.count(ProviderNotification.id)).where(
+                ProviderNotification.workspace_id == workspace_id,
+                ProviderNotification.read_at.is_(None),
+            )
+        )
+        or 0
+    )
+
+
+@router.get(
+    "/workspaces/{workspace_id}/notifications/summary",
+    response_model=ProviderNotificationSummary,
+)
+def get_provider_notification_summary(
+    workspace_id: str,
+    db: DbSession,
+    workspace: Annotated[ProviderWorkspace, Depends(current_portal_workspace)],
+) -> ProviderNotificationSummary:
+    _ = workspace_id  # tenant guard already enforced by dependency
+    return ProviderNotificationSummary(
+        workspace_id=workspace.id,
+        unread_count=_provider_unread_count(db, workspace.id),
+    )
+
+
+@router.get(
+    "/workspaces/{workspace_id}/notifications",
+    response_model=ProviderNotificationsResponse,
+)
+def list_provider_notifications(
+    workspace_id: str,
+    db: DbSession,
+    workspace: Annotated[ProviderWorkspace, Depends(current_portal_workspace)],
+    unread_only: bool = False,
+    limit: Annotated[int, Query(ge=1, le=200)] = 50,
+) -> ProviderNotificationsResponse:
+    _ = workspace_id  # tenant guard already enforced by dependency
+    filters = [ProviderNotification.workspace_id == workspace.id]
+    if unread_only:
+        filters.append(ProviderNotification.read_at.is_(None))
+    rows = list(
+        db.scalars(
+            select(ProviderNotification)
+            .where(and_(*filters))
+            .order_by(ProviderNotification.created_at.desc())
+            .limit(limit)
+        )
+    )
+    return ProviderNotificationsResponse(
+        workspace_id=workspace.id,
+        items=[_provider_notification_item(row) for row in rows],
+        total=len(rows),
+        unread_count=_provider_unread_count(db, workspace.id),
+        limit=limit,
+    )
+
+
+@router.post(
+    "/workspaces/{workspace_id}/notifications/{notification_id}/read",
+    response_model=ProviderNotificationItem,
+)
+def mark_provider_notification_read(
+    workspace_id: str,
+    notification_id: str,
+    db: DbSession,
+    workspace: Annotated[ProviderWorkspace, Depends(current_portal_workspace)],
+) -> ProviderNotificationItem:
+    _ = workspace_id  # tenant guard already enforced by dependency
+    row = db.get(ProviderNotification, notification_id)
+    if row is None or row.workspace_id != workspace.id:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Notificación no encontrada.",
+        )
+    if row.read_at is None:
+        row.read_at = utc_now()
+        db.commit()
+        db.refresh(row)
+    return _provider_notification_item(row)
+
+
+@router.post(
+    "/workspaces/{workspace_id}/notifications/read-all",
+    response_model=ProviderNotificationSummary,
+)
+def mark_all_provider_notifications_read(
+    workspace_id: str,
+    db: DbSession,
+    workspace: Annotated[ProviderWorkspace, Depends(current_portal_workspace)],
+) -> ProviderNotificationSummary:
+    _ = workspace_id  # tenant guard already enforced by dependency
+    unread = list(
+        db.scalars(
+            select(ProviderNotification).where(
+                ProviderNotification.workspace_id == workspace.id,
+                ProviderNotification.read_at.is_(None),
+            )
+        )
+    )
+    if unread:
+        now = utc_now()
+        for row in unread:
+            row.read_at = now
+        db.commit()
+    return ProviderNotificationSummary(
+        workspace_id=workspace.id,
+        unread_count=_provider_unread_count(db, workspace.id),
     )
