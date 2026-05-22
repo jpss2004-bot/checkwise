@@ -1636,6 +1636,76 @@ def get_workspace_submission(
     )
 
 
+@router.get(
+    "/workspaces/{workspace_id}/submissions/{submission_id}/document",
+    summary="Stream the PDF stored for a submission",
+)
+def get_workspace_submission_document(
+    workspace_id: str,
+    submission_id: str,
+    db: DbSession,
+    workspace: Annotated[ProviderWorkspace, Depends(current_portal_workspace)],
+) -> Response:
+    """Inline-stream the PDF a provider uploaded for a given submission.
+
+    Used by the submission detail page's preview iframe (Jorge feedback
+    2026-05-21: "esta pagina debe arrojar … una vista previa del
+    documento que se cargó"). The detail metadata route already enforces
+    the tenant guard; this endpoint mirrors that gate, then routes the
+    storage-key lookup through the same StorageService backend the
+    upload pipeline uses so local-disk and S3 deployments both work.
+
+    Returns the bytes with ``Content-Disposition: inline`` so browsers
+    render them via the PDF plugin rather than triggering a download.
+    """
+    _ = workspace_id  # tenant guard already enforced by dependency
+    submission = db.scalar(
+        select(Submission).where(Submission.id == submission_id).limit(1)
+    )
+    if (
+        submission is None
+        or submission.client_id != workspace.client_id
+        or submission.vendor_id != workspace.vendor_id
+    ):
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Submission no encontrado para este workspace.",
+        )
+    document = db.scalar(
+        select(Document).where(Document.submission_id == submission.id).limit(1)
+    )
+    if document is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Documento no encontrado para este envío.",
+        )
+
+    storage = get_storage_service()
+    # Prefer a presigned URL when the backend supports it (S3/R2) —
+    # smaller egress on the API node, no need to proxy bytes through
+    # FastAPI. Local-disk backends return None here and we fall back
+    # to streaming via FileResponse.
+    presigned = storage.presigned_download_url(document.storage_key)
+    if presigned is not None:
+        from fastapi.responses import RedirectResponse
+
+        return RedirectResponse(presigned, status_code=status.HTTP_302_FOUND)
+
+    from fastapi.responses import FileResponse
+
+    path = storage.open_for_read(document.storage_key)
+    return FileResponse(
+        path,
+        media_type="application/pdf",
+        filename=document.original_filename,
+        headers={
+            "Content-Disposition": (
+                f'inline; filename="{document.original_filename}"'
+            ),
+        },
+    )
+
+
 # ---------------------------------------------------------------------------
 # Duplicate pre-check (Guided upload — Patch 4)
 # ---------------------------------------------------------------------------
@@ -2968,6 +3038,38 @@ def _compute_recent_uploads(
             )
         )
     return rows
+
+
+class WorkspaceSubmissionsListResponse(BaseModel):
+    """Full submission history for a workspace.
+
+    Returns the same shape as the dashboard's recent-uploads strip, but
+    without the 30-row cap so the frontend can group every upload by
+    institution / año / mes (Jorge feedback 2026-05-21: "ver los
+    documentos que se llevan cargados … ordenados por Institución, Mes
+    y Año"). Read-only — no edit affordances on the index page.
+    """
+
+    items: list[DashboardRecentUpload]
+    total: int
+
+
+@router.get(
+    "/workspaces/{workspace_id}/submissions",
+    response_model=WorkspaceSubmissionsListResponse,
+    summary="List every submission for the workspace",
+)
+def list_workspace_submissions(
+    workspace_id: str,
+    db: DbSession,
+    workspace: Annotated[ProviderWorkspace, Depends(current_portal_workspace)],
+) -> WorkspaceSubmissionsListResponse:
+    _ = workspace_id  # tenant guard enforced by dependency
+    # No cap intentionally — the index page wants the full history. A
+    # workspace with a runaway submission count is itself a signal worth
+    # surfacing, not silently truncating.
+    rows = _compute_recent_uploads(db, workspace, limit=10_000)
+    return WorkspaceSubmissionsListResponse(items=rows, total=len(rows))
 
 
 @router.get(

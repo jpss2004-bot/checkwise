@@ -338,6 +338,46 @@ export async function getSubmissionDetail(
   );
 }
 
+/**
+ * Absolute URL the submission detail iframe should point at to render
+ * the uploaded PDF inline. Cookie auth piggybacks on same-site
+ * credentials when the frontend is colocated with the API, and on
+ * ``SameSite=None; Secure`` in production deploys (Vercel ↔ Render).
+ */
+export function submissionDocumentUrl(
+  session: PortalSession,
+  submissionId: string,
+): string {
+  return `${API_BASE_URL}/api/v1/portal/workspaces/${session.workspace_id}/submissions/${submissionId}/document`;
+}
+
+export type WorkspaceSubmissionListItem = {
+  submission_id: string;
+  requirement_code: string | null;
+  requirement_name: string;
+  institution: string;
+  period_key: string | null;
+  status: string;
+  submitted_at: string;
+  filename: string | null;
+  href: string;
+};
+
+export type WorkspaceSubmissionsList = {
+  items: WorkspaceSubmissionListItem[];
+  total: number;
+};
+
+export async function listWorkspaceSubmissions(
+  session: PortalSession,
+): Promise<WorkspaceSubmissionsList> {
+  return await fetchJson<WorkspaceSubmissionsList>(
+    `/api/v1/portal/workspaces/${session.workspace_id}/submissions`,
+    { method: "GET" },
+    session,
+  );
+}
+
 export type CompleteOnboardingResponse = {
   workspace_id: string;
   onboarding_completed_at: string;

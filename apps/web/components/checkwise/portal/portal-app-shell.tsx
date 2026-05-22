@@ -8,6 +8,7 @@ import {
   ChartLineUp,
   ClipboardText,
   CloudArrowUp,
+  Files,
   House,
   IdentificationCard,
   List,
@@ -69,6 +70,12 @@ const PRIMARY_NAV: NavItem[] = [
     label: "Subir documento",
     icon: CloudArrowUp,
     hint: "Carga guiada",
+  },
+  {
+    href: "/portal/submissions",
+    label: "Documentos",
+    icon: Files,
+    hint: "Historial por institución",
   },
   {
     href: "/portal/reports",

@@ -30,12 +30,14 @@ import {
   getSubmissionDetail,
   INSTITUTION_LABELS,
   PortalApiError,
+  submissionDocumentUrl,
   type RequirementStatus,
   type SubmissionDetail,
   type SubmissionPreviousAttempt,
   type SubmissionSuggestedAction,
 } from "@/lib/api/portal";
 import { DocumentStatus } from "@/lib/constants/statuses";
+import { validationLabel } from "@/lib/constants/validation";
 import { fetchCurrentSession, type PortalSession } from "@/lib/session/portal";
 
 type PageProps = {
@@ -155,6 +157,7 @@ export default function SubmissionDetailPage({ params }: PageProps) {
           <div className="grid gap-5 lg:grid-cols-3">
             <div className="space-y-5 lg:col-span-2">
               <StatusHero detail={detail} />
+              <SubmissionPreview detail={detail} session={session} />
               <LineageStrip detail={detail} />
               <ReasonsCard detail={detail} />
               <ContextCard detail={detail} />
@@ -338,7 +341,8 @@ function ReasonsCard({ detail }: { detail: SubmissionDetail }) {
           <ReasonRow
             key={reason.rule_code}
             severity={reason.severity}
-            title={REASON_TITLES[reason.rule_code] ?? reason.rule_code}
+            title={titleForReason(reason.rule_code)}
+            ruleCode={reason.rule_code}
             message={reason.message ?? "Sin detalle adicional."}
             humanReview={reason.requires_human_review}
           />
@@ -348,28 +352,39 @@ function ReasonsCard({ detail }: { detail: SubmissionDetail }) {
   );
 }
 
-const REASON_TITLES: Record<string, string> = {
+// Per-page overrides: a few rules need a more descriptive title than the
+// generic validationLabel() (e.g. "PDF sin contraseña" reads as a
+// success on this surface, where the row is reporting a *failure*).
+// Anything not in this map falls through to validationLabel() which has
+// the canonical Spanish copy for every rule_code emitted by the backend
+// — no raw engineer-dialect strings ever reach the user.
+const REASON_TITLE_OVERRIDES: Record<string, string> = {
   pdf_encrypted: "PDF protegido con contraseña",
   pdf_readable_text: "Texto del PDF no es legible",
   duplicate_hash: "Documento duplicado",
   vendor_match: "Confirmación de proveedor pendiente",
   period_match: "Confirmación de periodo pendiente",
-  requirement_match: "Coincidencia con requisito",
-  document_intelligence: "Señales documentales automáticas",
-  human_review_required: "Revisión humana requerida",
   expired_document: "Documento vencido",
 };
+
+function titleForReason(ruleCode: string): string {
+  return REASON_TITLE_OVERRIDES[ruleCode] ?? validationLabel(ruleCode);
+}
 
 function ReasonRow({
   severity,
   title,
   message,
   humanReview,
+  ruleCode,
 }: {
   severity: string;
   title: string;
   message: string;
   humanReview?: boolean;
+  /** Engineer-dialect code surfaced in title=/aria-label only — QA hook,
+   *  never user-visible. */
+  ruleCode?: string;
 }) {
   const Icon =
     severity === "error" ? WarningCircle : severity === "warning" ? Warning : ShieldCheck;
@@ -387,7 +402,13 @@ function ReasonRow({
         aria-hidden="true"
       />
       <div className="min-w-0">
-        <p className="text-sm font-medium text-[color:var(--text-primary)]">{title}</p>
+        <p
+          className="text-sm font-medium text-[color:var(--text-primary)]"
+          title={ruleCode}
+          aria-label={ruleCode ? `${title} (${ruleCode})` : title}
+        >
+          {title}
+        </p>
         <p className="mt-0.5 text-sm text-[color:var(--text-secondary)]">{message}</p>
         {humanReview ? (
           <p className="mt-1 text-xs font-medium uppercase tracking-wide text-[color:var(--text-tertiary)]">
@@ -552,6 +573,53 @@ function TraceabilityCard({ detail }: { detail: SubmissionDetail }) {
             </span>
           </p>
         ) : null}
+      </CardContent>
+    </Card>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Inline PDF preview (Jorge feedback 2026-05-21)
+// ---------------------------------------------------------------------------
+
+function SubmissionPreview({
+  detail,
+  session,
+}: {
+  detail: SubmissionDetail;
+  session: PortalSession;
+}) {
+  if (!detail.document) return null;
+  const src = submissionDocumentUrl(session, detail.submission_id);
+  return (
+    <Card>
+      <CardHeader>
+        <div className="flex items-center gap-2">
+          <FileText className="h-4 w-4 text-muted-foreground" aria-hidden="true" />
+          <CardTitle>Vista previa del documento</CardTitle>
+        </div>
+        <p className="mt-1 text-sm text-muted-foreground">
+          {detail.document.filename} · cargado el {formatDate(detail.submitted_at)}
+        </p>
+      </CardHeader>
+      <CardContent>
+        <iframe
+          src={src}
+          title={`Vista previa de ${detail.document.filename}`}
+          className="h-[640px] w-full rounded-md border border-border bg-white"
+        />
+        <p className="mt-2 text-xs text-muted-foreground">
+          Si la vista previa no carga,{" "}
+          <a
+            href={src}
+            target="_blank"
+            rel="noreferrer"
+            className="text-primary hover:underline"
+          >
+            ábrelo en una pestaña nueva
+          </a>
+          .
+        </p>
       </CardContent>
     </Card>
   );
