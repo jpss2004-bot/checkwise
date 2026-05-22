@@ -78,6 +78,11 @@ class Vendor(TimestampMixin, Base):
     rfc: Mapped[str] = mapped_column(String(13), nullable=False)
     contact_name: Mapped[str | None] = mapped_column(String(255))
     contact_email: Mapped[str | None] = mapped_column(String(255))
+    # Vendor-level contact phone. Added in migration 0017 so the
+    # admin correction-request approval flow can auto-apply a
+    # provider's contact_phone change to the canonical row instead
+    # of leaving the admin to copy-paste from Slack.
+    contact_phone: Mapped[str | None] = mapped_column(String(30))
     repse_id: Mapped[str | None] = mapped_column(String(120))
     persona_type: Mapped[str | None] = mapped_column(String(20))
     status: Mapped[str] = mapped_column(String(40), default="active", nullable=False)
