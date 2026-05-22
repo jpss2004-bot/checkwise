@@ -1,0 +1,1048 @@
+{
+  "_about": "Phase 2 fixture manifest. Every entry is a real-world sample PDF from the 'Banco Docs Sample' set provided 2026-05-22. The detector is run against each fixture with input_requirement / input_institution / period_key as inputs; current_status pins today's pipeline verdict. Phase 4 changes that shift any verdict must update current_status here in the same commit.",
+  "_invariants": {
+    "no_false_mismatch": "No fixture should ever land in 'posible_mismatch' or 'requiere_aclaracion' — those are reserved for legitimately wrong files. The test enforces this via acceptable_statuses."
+  },
+  "fixtures": [
+    {
+      "file": "angel-elias-acuses-acuse-icsoe-2025-09.pdf",
+      "vendor": "angel-elias",
+      "category": "acuses",
+      "doctype": "acuse-icsoe",
+      "period_key": "2025-M09",
+      "input_requirement": "Acuse ICSOE",
+      "input_institution": "stps_repse",
+      "current_status": "pendiente_revision",
+      "acceptable_statuses": [
+        "prevalidado",
+        "pendiente_revision"
+      ],
+      "current_signals": {
+        "detected_institution": "imss",
+        "detected_document_type": null,
+        "requirement_match_confidence": 0.35,
+        "mismatch_reason": "La institución detectada 'imss' no coincide con 'stps_repse'.",
+        "anomaly_codes": [
+          "possible_institution_mismatch"
+        ],
+        "is_probably_scanned": false,
+        "has_text": true,
+        "page_count": 1
+      }
+    },
+    {
+      "file": "angel-elias-acuses-acuse-sisub-2025-09.pdf",
+      "vendor": "angel-elias",
+      "category": "acuses",
+      "doctype": "acuse-sisub",
+      "period_key": "2025-M09",
+      "input_requirement": "Acuse SISUB",
+      "input_institution": "stps_repse",
+      "current_status": "prevalidado",
+      "acceptable_statuses": [
+        "prevalidado",
+        "pendiente_revision"
+      ],
+      "current_signals": {
+        "detected_institution": null,
+        "detected_document_type": null,
+        "requirement_match_confidence": 1.0,
+        "mismatch_reason": null,
+        "anomaly_codes": [
+          "period_not_confirmed"
+        ],
+        "is_probably_scanned": false,
+        "has_text": true,
+        "page_count": 1
+      }
+    },
+    {
+      "file": "angel-elias-imss-cfdi-pago-cuotas-2025-03.pdf",
+      "vendor": "angel-elias",
+      "category": "imss",
+      "doctype": "cfdi-pago-cuotas",
+      "period_key": "2025-M03",
+      "input_requirement": "CFDI de pago de cuotas",
+      "input_institution": "imss",
+      "current_status": "pendiente_revision",
+      "acceptable_statuses": [
+        "prevalidado",
+        "pendiente_revision"
+      ],
+      "current_signals": {
+        "detected_institution": "sat",
+        "detected_document_type": "factura_cfdi",
+        "requirement_match_confidence": 0.0,
+        "mismatch_reason": "La institución detectada 'sat' no coincide con 'imss'.",
+        "anomaly_codes": [
+          "possible_institution_mismatch"
+        ],
+        "is_probably_scanned": false,
+        "has_text": true,
+        "page_count": 1
+      }
+    },
+    {
+      "file": "angel-elias-imss-cuotas-obrero-patronales-2025-03.pdf",
+      "vendor": "angel-elias",
+      "category": "imss",
+      "doctype": "cuotas-obrero-patronales",
+      "period_key": "2025-M03",
+      "input_requirement": "Cuotas obrero patronales",
+      "input_institution": "imss",
+      "current_status": "prevalidado",
+      "acceptable_statuses": [
+        "prevalidado",
+        "pendiente_revision"
+      ],
+      "current_signals": {
+        "detected_institution": null,
+        "detected_document_type": null,
+        "requirement_match_confidence": 1.0,
+        "mismatch_reason": null,
+        "anomaly_codes": [
+          "period_not_confirmed"
+        ],
+        "is_probably_scanned": false,
+        "has_text": true,
+        "page_count": 2
+      }
+    },
+    {
+      "file": "angel-elias-imss-resumen-liquidacion-2025-03.pdf",
+      "vendor": "angel-elias",
+      "category": "imss",
+      "doctype": "resumen-liquidacion",
+      "period_key": "2025-M03",
+      "input_requirement": "Resumen de liquidación",
+      "input_institution": "imss",
+      "current_status": "prevalidado",
+      "acceptable_statuses": [
+        "prevalidado",
+        "pendiente_revision"
+      ],
+      "current_signals": {
+        "detected_institution": null,
+        "detected_document_type": "infonavit_pago",
+        "requirement_match_confidence": 1.0,
+        "mismatch_reason": null,
+        "anomaly_codes": [
+          "period_not_confirmed"
+        ],
+        "is_probably_scanned": false,
+        "has_text": true,
+        "page_count": 1
+      }
+    },
+    {
+      "file": "angel-elias-infonavit-cuotas-obrero-patronales-2025-07.pdf",
+      "vendor": "angel-elias",
+      "category": "infonavit",
+      "doctype": "cuotas-obrero-patronales",
+      "period_key": "2025-M07",
+      "input_requirement": "Cuotas obrero patronales",
+      "input_institution": "infonavit",
+      "current_status": "prevalidado",
+      "acceptable_statuses": [
+        "prevalidado",
+        "pendiente_revision"
+      ],
+      "current_signals": {
+        "detected_institution": null,
+        "detected_document_type": null,
+        "requirement_match_confidence": 1.0,
+        "mismatch_reason": null,
+        "anomaly_codes": [
+          "period_not_confirmed"
+        ],
+        "is_probably_scanned": false,
+        "has_text": true,
+        "page_count": 1
+      }
+    },
+    {
+      "file": "angel-elias-infonavit-resumen-liquidacion-2025-07.pdf",
+      "vendor": "angel-elias",
+      "category": "infonavit",
+      "doctype": "resumen-liquidacion",
+      "period_key": "2025-M07",
+      "input_requirement": "Resumen de liquidación",
+      "input_institution": "infonavit",
+      "current_status": "prevalidado",
+      "acceptable_statuses": [
+        "prevalidado",
+        "pendiente_revision"
+      ],
+      "current_signals": {
+        "detected_institution": null,
+        "detected_document_type": "infonavit_pago",
+        "requirement_match_confidence": 1.0,
+        "mismatch_reason": null,
+        "anomaly_codes": [
+          "period_not_confirmed"
+        ],
+        "is_probably_scanned": false,
+        "has_text": true,
+        "page_count": 1
+      }
+    },
+    {
+      "file": "angel-elias-sat-comp-entero-isr-2025-09.pdf",
+      "vendor": "angel-elias",
+      "category": "sat",
+      "doctype": "comp-entero-isr",
+      "period_key": "2025-M09",
+      "input_requirement": "Comprobante entero pago ISR",
+      "input_institution": "sat",
+      "current_status": "pendiente_revision",
+      "acceptable_statuses": [
+        "prevalidado",
+        "pendiente_revision"
+      ],
+      "current_signals": {
+        "detected_institution": null,
+        "detected_document_type": null,
+        "requirement_match_confidence": 0.0,
+        "mismatch_reason": null,
+        "anomaly_codes": [
+          "period_not_confirmed"
+        ],
+        "is_probably_scanned": false,
+        "has_text": true,
+        "page_count": 1
+      }
+    },
+    {
+      "file": "angel-elias-sat-declaracion-isr-retencion-2025-09.pdf",
+      "vendor": "angel-elias",
+      "category": "sat",
+      "doctype": "declaracion-isr-retencion",
+      "period_key": "2025-M09",
+      "input_requirement": "Declaración ISR por retención sueldos y salarios",
+      "input_institution": "sat",
+      "current_status": "prevalidado",
+      "acceptable_statuses": [
+        "prevalidado",
+        "pendiente_revision"
+      ],
+      "current_signals": {
+        "detected_institution": "sat",
+        "detected_document_type": null,
+        "requirement_match_confidence": 0.82,
+        "mismatch_reason": null,
+        "anomaly_codes": [
+          "period_not_confirmed"
+        ],
+        "is_probably_scanned": false,
+        "has_text": true,
+        "page_count": 3
+      }
+    },
+    {
+      "file": "humese-acuses-acuse-icsoe-2025-05.pdf",
+      "vendor": "humese",
+      "category": "acuses",
+      "doctype": "acuse-icsoe",
+      "period_key": "2025-M05",
+      "input_requirement": "Acuse ICSOE",
+      "input_institution": "stps_repse",
+      "current_status": "pendiente_revision",
+      "acceptable_statuses": [
+        "prevalidado",
+        "pendiente_revision"
+      ],
+      "current_signals": {
+        "detected_institution": "imss",
+        "detected_document_type": null,
+        "requirement_match_confidence": 0.35,
+        "mismatch_reason": "La institución detectada 'imss' no coincide con 'stps_repse'.",
+        "anomaly_codes": [
+          "possible_institution_mismatch"
+        ],
+        "is_probably_scanned": false,
+        "has_text": true,
+        "page_count": 1
+      }
+    },
+    {
+      "file": "humese-acuses-acuse-icsoe-2025-09.pdf",
+      "vendor": "humese",
+      "category": "acuses",
+      "doctype": "acuse-icsoe",
+      "period_key": "2025-M09",
+      "input_requirement": "Acuse ICSOE",
+      "input_institution": "stps_repse",
+      "current_status": "pendiente_revision",
+      "acceptable_statuses": [
+        "prevalidado",
+        "pendiente_revision"
+      ],
+      "current_signals": {
+        "detected_institution": "imss",
+        "detected_document_type": null,
+        "requirement_match_confidence": 0.35,
+        "mismatch_reason": "La institución detectada 'imss' no coincide con 'stps_repse'.",
+        "anomaly_codes": [
+          "possible_institution_mismatch"
+        ],
+        "is_probably_scanned": false,
+        "has_text": true,
+        "page_count": 2
+      }
+    },
+    {
+      "file": "humese-acuses-acuse-sisub-2025-05.pdf",
+      "vendor": "humese",
+      "category": "acuses",
+      "doctype": "acuse-sisub",
+      "period_key": "2025-M05",
+      "input_requirement": "Acuse SISUB",
+      "input_institution": "stps_repse",
+      "current_status": "prevalidado",
+      "acceptable_statuses": [
+        "prevalidado",
+        "pendiente_revision"
+      ],
+      "current_signals": {
+        "detected_institution": null,
+        "detected_document_type": null,
+        "requirement_match_confidence": 1.0,
+        "mismatch_reason": null,
+        "anomaly_codes": [
+          "period_not_confirmed"
+        ],
+        "is_probably_scanned": false,
+        "has_text": true,
+        "page_count": 1
+      }
+    },
+    {
+      "file": "humese-acuses-acuse-sisub-2025-09.pdf",
+      "vendor": "humese",
+      "category": "acuses",
+      "doctype": "acuse-sisub",
+      "period_key": "2025-M09",
+      "input_requirement": "Acuse SISUB",
+      "input_institution": "stps_repse",
+      "current_status": "prevalidado",
+      "acceptable_statuses": [
+        "prevalidado",
+        "pendiente_revision"
+      ],
+      "current_signals": {
+        "detected_institution": null,
+        "detected_document_type": null,
+        "requirement_match_confidence": 1.0,
+        "mismatch_reason": null,
+        "anomaly_codes": [
+          "period_not_confirmed"
+        ],
+        "is_probably_scanned": false,
+        "has_text": true,
+        "page_count": 1
+      }
+    },
+    {
+      "file": "humese-imss-cfdi-pago-cuotas-2025-09.pdf",
+      "vendor": "humese",
+      "category": "imss",
+      "doctype": "cfdi-pago-cuotas",
+      "period_key": "2025-M09",
+      "input_requirement": "CFDI de pago de cuotas",
+      "input_institution": "imss",
+      "current_status": "prevalidado",
+      "acceptable_statuses": [
+        "prevalidado",
+        "pendiente_revision"
+      ],
+      "current_signals": {
+        "detected_institution": null,
+        "detected_document_type": null,
+        "requirement_match_confidence": 1.0,
+        "mismatch_reason": null,
+        "anomaly_codes": [
+          "period_not_confirmed"
+        ],
+        "is_probably_scanned": false,
+        "has_text": true,
+        "page_count": 1
+      }
+    },
+    {
+      "file": "humese-imss-comp-pago-bancario-2025-09.pdf",
+      "vendor": "humese",
+      "category": "imss",
+      "doctype": "comp-pago-bancario",
+      "period_key": "2025-M09",
+      "input_requirement": "Comprobante de pago bancario",
+      "input_institution": "imss",
+      "current_status": "pendiente_revision",
+      "acceptable_statuses": [
+        "prevalidado",
+        "pendiente_revision"
+      ],
+      "current_signals": {
+        "detected_institution": null,
+        "detected_document_type": "infonavit_pago",
+        "requirement_match_confidence": 0.65,
+        "mismatch_reason": null,
+        "anomaly_codes": [
+          "period_not_confirmed"
+        ],
+        "is_probably_scanned": false,
+        "has_text": true,
+        "page_count": 1
+      }
+    },
+    {
+      "file": "humese-imss-cuotas-obrero-patronales-2025-09.pdf",
+      "vendor": "humese",
+      "category": "imss",
+      "doctype": "cuotas-obrero-patronales",
+      "period_key": "2025-M09",
+      "input_requirement": "Cuotas obrero patronales",
+      "input_institution": "imss",
+      "current_status": "pendiente_revision",
+      "acceptable_statuses": [
+        "prevalidado",
+        "pendiente_revision"
+      ],
+      "current_signals": {
+        "detected_institution": "imss",
+        "detected_document_type": "imss_pago",
+        "requirement_match_confidence": 0.53,
+        "mismatch_reason": null,
+        "anomaly_codes": [
+          "period_not_confirmed"
+        ],
+        "is_probably_scanned": false,
+        "has_text": true,
+        "page_count": 8
+      }
+    },
+    {
+      "file": "humese-imss-resumen-liquidacion-2025-09.pdf",
+      "vendor": "humese",
+      "category": "imss",
+      "doctype": "resumen-liquidacion",
+      "period_key": "2025-M09",
+      "input_requirement": "Resumen de liquidación",
+      "input_institution": "imss",
+      "current_status": "prevalidado",
+      "acceptable_statuses": [
+        "prevalidado",
+        "pendiente_revision"
+      ],
+      "current_signals": {
+        "detected_institution": null,
+        "detected_document_type": "infonavit_pago",
+        "requirement_match_confidence": 1.0,
+        "mismatch_reason": null,
+        "anomaly_codes": [
+          "period_not_confirmed"
+        ],
+        "is_probably_scanned": false,
+        "has_text": true,
+        "page_count": 1
+      }
+    },
+    {
+      "file": "humese-infonavit-cfdi-pago-cuotas-2025-09.pdf",
+      "vendor": "humese",
+      "category": "infonavit",
+      "doctype": "cfdi-pago-cuotas",
+      "period_key": "2025-M09",
+      "input_requirement": "CFDI de pago de cuotas",
+      "input_institution": "infonavit",
+      "current_status": "pendiente_revision",
+      "acceptable_statuses": [
+        "prevalidado",
+        "pendiente_revision"
+      ],
+      "current_signals": {
+        "detected_institution": "sat",
+        "detected_document_type": null,
+        "requirement_match_confidence": 0.0,
+        "mismatch_reason": "La institución detectada 'sat' no coincide con 'infonavit'.",
+        "anomaly_codes": [
+          "possible_institution_mismatch"
+        ],
+        "is_probably_scanned": false,
+        "has_text": true,
+        "page_count": 1
+      }
+    },
+    {
+      "file": "humese-infonavit-comp-pago-bancario-2025-09.pdf",
+      "vendor": "humese",
+      "category": "infonavit",
+      "doctype": "comp-pago-bancario",
+      "period_key": "2025-M09",
+      "input_requirement": "Comprobante de pago bancario",
+      "input_institution": "infonavit",
+      "current_status": "pendiente_revision",
+      "acceptable_statuses": [
+        "prevalidado",
+        "pendiente_revision"
+      ],
+      "current_signals": {
+        "detected_institution": null,
+        "detected_document_type": "infonavit_pago",
+        "requirement_match_confidence": 0.65,
+        "mismatch_reason": null,
+        "anomaly_codes": [
+          "period_not_confirmed"
+        ],
+        "is_probably_scanned": false,
+        "has_text": true,
+        "page_count": 1
+      }
+    },
+    {
+      "file": "humese-infonavit-cuotas-obrero-patronales-2025-09.pdf",
+      "vendor": "humese",
+      "category": "infonavit",
+      "doctype": "cuotas-obrero-patronales",
+      "period_key": "2025-M09",
+      "input_requirement": "Cuotas obrero patronales",
+      "input_institution": "infonavit",
+      "current_status": "pendiente_revision",
+      "acceptable_statuses": [
+        "prevalidado",
+        "pendiente_revision"
+      ],
+      "current_signals": {
+        "detected_institution": "imss",
+        "detected_document_type": "imss_pago",
+        "requirement_match_confidence": 0.45,
+        "mismatch_reason": "La institución detectada 'imss' no coincide con 'infonavit'.",
+        "anomaly_codes": [
+          "possible_institution_mismatch"
+        ],
+        "is_probably_scanned": false,
+        "has_text": true,
+        "page_count": 10
+      }
+    },
+    {
+      "file": "humese-infonavit-resumen-liquidacion-2025-09.pdf",
+      "vendor": "humese",
+      "category": "infonavit",
+      "doctype": "resumen-liquidacion",
+      "period_key": "2025-M09",
+      "input_requirement": "Resumen de liquidación",
+      "input_institution": "infonavit",
+      "current_status": "prevalidado",
+      "acceptable_statuses": [
+        "prevalidado",
+        "pendiente_revision"
+      ],
+      "current_signals": {
+        "detected_institution": null,
+        "detected_document_type": "infonavit_pago",
+        "requirement_match_confidence": 1.0,
+        "mismatch_reason": null,
+        "anomaly_codes": [
+          "period_not_confirmed"
+        ],
+        "is_probably_scanned": false,
+        "has_text": true,
+        "page_count": 1
+      }
+    },
+    {
+      "file": "humese-sat-comp-entero-isr-2025-09.pdf",
+      "vendor": "humese",
+      "category": "sat",
+      "doctype": "comp-entero-isr",
+      "period_key": "2025-M09",
+      "input_requirement": "Comprobante entero pago ISR",
+      "input_institution": "sat",
+      "current_status": "pendiente_revision",
+      "acceptable_statuses": [
+        "prevalidado",
+        "pendiente_revision"
+      ],
+      "current_signals": {
+        "detected_institution": null,
+        "detected_document_type": null,
+        "requirement_match_confidence": 0.0,
+        "mismatch_reason": null,
+        "anomaly_codes": [
+          "period_not_confirmed"
+        ],
+        "is_probably_scanned": false,
+        "has_text": true,
+        "page_count": 1
+      }
+    },
+    {
+      "file": "humese-sat-comp-entero-iva-2025-09.pdf",
+      "vendor": "humese",
+      "category": "sat",
+      "doctype": "comp-entero-iva",
+      "period_key": "2025-M09",
+      "input_requirement": "Comprobante entero pago IVA",
+      "input_institution": "sat",
+      "current_status": "pendiente_revision",
+      "acceptable_statuses": [
+        "prevalidado",
+        "pendiente_revision"
+      ],
+      "current_signals": {
+        "detected_institution": null,
+        "detected_document_type": null,
+        "requirement_match_confidence": 0.0,
+        "mismatch_reason": null,
+        "anomaly_codes": [
+          "period_not_confirmed"
+        ],
+        "is_probably_scanned": false,
+        "has_text": true,
+        "page_count": 1
+      }
+    },
+    {
+      "file": "humese-sat-declaracion-isr-retencion-2025-09.pdf",
+      "vendor": "humese",
+      "category": "sat",
+      "doctype": "declaracion-isr-retencion",
+      "period_key": "2025-M09",
+      "input_requirement": "Declaración ISR por retención sueldos y salarios",
+      "input_institution": "sat",
+      "current_status": "prevalidado",
+      "acceptable_statuses": [
+        "prevalidado",
+        "pendiente_revision"
+      ],
+      "current_signals": {
+        "detected_institution": "sat",
+        "detected_document_type": null,
+        "requirement_match_confidence": 0.82,
+        "mismatch_reason": null,
+        "anomaly_codes": [
+          "period_not_confirmed"
+        ],
+        "is_probably_scanned": false,
+        "has_text": true,
+        "page_count": 3
+      }
+    },
+    {
+      "file": "humese-sat-declaracion-iva-2025-09.pdf",
+      "vendor": "humese",
+      "category": "sat",
+      "doctype": "declaracion-iva",
+      "period_key": "2025-M09",
+      "input_requirement": "Declaración IVA",
+      "input_institution": "sat",
+      "current_status": "prevalidado",
+      "acceptable_statuses": [
+        "prevalidado",
+        "pendiente_revision"
+      ],
+      "current_signals": {
+        "detected_institution": "sat",
+        "detected_document_type": null,
+        "requirement_match_confidence": 1.0,
+        "mismatch_reason": null,
+        "anomaly_codes": [
+          "period_not_confirmed"
+        ],
+        "is_probably_scanned": false,
+        "has_text": true,
+        "page_count": 3
+      }
+    },
+    {
+      "file": "masterclean-acuses-acuse-icsoe-2025-09.pdf",
+      "vendor": "masterclean",
+      "category": "acuses",
+      "doctype": "acuse-icsoe",
+      "period_key": "2025-M09",
+      "input_requirement": "Acuse ICSOE",
+      "input_institution": "stps_repse",
+      "current_status": "pendiente_revision",
+      "acceptable_statuses": [
+        "prevalidado",
+        "pendiente_revision"
+      ],
+      "current_signals": {
+        "detected_institution": "imss",
+        "detected_document_type": null,
+        "requirement_match_confidence": 0.35,
+        "mismatch_reason": "La institución detectada 'imss' no coincide con 'stps_repse'.",
+        "anomaly_codes": [
+          "possible_institution_mismatch"
+        ],
+        "is_probably_scanned": false,
+        "has_text": true,
+        "page_count": 2
+      }
+    },
+    {
+      "file": "masterclean-acuses-acuse-sisub-2025-09.pdf",
+      "vendor": "masterclean",
+      "category": "acuses",
+      "doctype": "acuse-sisub",
+      "period_key": "2025-M09",
+      "input_requirement": "Acuse SISUB",
+      "input_institution": "stps_repse",
+      "current_status": "prevalidado",
+      "acceptable_statuses": [
+        "prevalidado",
+        "pendiente_revision"
+      ],
+      "current_signals": {
+        "detected_institution": null,
+        "detected_document_type": null,
+        "requirement_match_confidence": 1.0,
+        "mismatch_reason": null,
+        "anomaly_codes": [
+          "period_not_confirmed"
+        ],
+        "is_probably_scanned": false,
+        "has_text": true,
+        "page_count": 1
+      }
+    },
+    {
+      "file": "masterclean-imss-cfdi-pago-cuotas-2025-09.pdf",
+      "vendor": "masterclean",
+      "category": "imss",
+      "doctype": "cfdi-pago-cuotas",
+      "period_key": "2025-M09",
+      "input_requirement": "CFDI de pago de cuotas",
+      "input_institution": "imss",
+      "current_status": "prevalidado",
+      "acceptable_statuses": [
+        "prevalidado",
+        "pendiente_revision"
+      ],
+      "current_signals": {
+        "detected_institution": null,
+        "detected_document_type": null,
+        "requirement_match_confidence": 1.0,
+        "mismatch_reason": null,
+        "anomaly_codes": [
+          "period_not_confirmed"
+        ],
+        "is_probably_scanned": false,
+        "has_text": true,
+        "page_count": 1
+      }
+    },
+    {
+      "file": "masterclean-imss-comp-pago-bancario-2025-09.pdf",
+      "vendor": "masterclean",
+      "category": "imss",
+      "doctype": "comp-pago-bancario",
+      "period_key": "2025-M09",
+      "input_requirement": "Comprobante de pago bancario",
+      "input_institution": "imss",
+      "current_status": "pendiente_revision",
+      "acceptable_statuses": [
+        "prevalidado",
+        "pendiente_revision"
+      ],
+      "current_signals": {
+        "detected_institution": null,
+        "detected_document_type": null,
+        "requirement_match_confidence": 0.0,
+        "mismatch_reason": null,
+        "anomaly_codes": [
+          "pdf_without_readable_text"
+        ],
+        "is_probably_scanned": true,
+        "has_text": false,
+        "page_count": 1
+      }
+    },
+    {
+      "file": "masterclean-imss-cuotas-obrero-patronales-2025-09.pdf",
+      "vendor": "masterclean",
+      "category": "imss",
+      "doctype": "cuotas-obrero-patronales",
+      "period_key": "2025-M09",
+      "input_requirement": "Cuotas obrero patronales",
+      "input_institution": "imss",
+      "current_status": "pendiente_revision",
+      "acceptable_statuses": [
+        "prevalidado",
+        "pendiente_revision"
+      ],
+      "current_signals": {
+        "detected_institution": "imss",
+        "detected_document_type": "imss_pago",
+        "requirement_match_confidence": 0.53,
+        "mismatch_reason": null,
+        "anomaly_codes": [
+          "period_not_confirmed"
+        ],
+        "is_probably_scanned": false,
+        "has_text": true,
+        "page_count": 21
+      }
+    },
+    {
+      "file": "masterclean-imss-resumen-liquidacion-2025-09.pdf",
+      "vendor": "masterclean",
+      "category": "imss",
+      "doctype": "resumen-liquidacion",
+      "period_key": "2025-M09",
+      "input_requirement": "Resumen de liquidación",
+      "input_institution": "imss",
+      "current_status": "prevalidado",
+      "acceptable_statuses": [
+        "prevalidado",
+        "pendiente_revision"
+      ],
+      "current_signals": {
+        "detected_institution": null,
+        "detected_document_type": "infonavit_pago",
+        "requirement_match_confidence": 1.0,
+        "mismatch_reason": null,
+        "anomaly_codes": [
+          "period_not_confirmed"
+        ],
+        "is_probably_scanned": false,
+        "has_text": true,
+        "page_count": 1
+      }
+    },
+    {
+      "file": "masterclean-infonavit-cfdi-pago-cuotas-2025-09.pdf",
+      "vendor": "masterclean",
+      "category": "infonavit",
+      "doctype": "cfdi-pago-cuotas",
+      "period_key": "2025-M09",
+      "input_requirement": "CFDI de pago de cuotas",
+      "input_institution": "infonavit",
+      "current_status": "pendiente_revision",
+      "acceptable_statuses": [
+        "prevalidado",
+        "pendiente_revision"
+      ],
+      "current_signals": {
+        "detected_institution": "sat",
+        "detected_document_type": null,
+        "requirement_match_confidence": 0.0,
+        "mismatch_reason": "La institución detectada 'sat' no coincide con 'infonavit'.",
+        "anomaly_codes": [
+          "possible_institution_mismatch"
+        ],
+        "is_probably_scanned": false,
+        "has_text": true,
+        "page_count": 1
+      }
+    },
+    {
+      "file": "masterclean-infonavit-comp-pago-bancario-2025-09.pdf",
+      "vendor": "masterclean",
+      "category": "infonavit",
+      "doctype": "comp-pago-bancario",
+      "period_key": "2025-M09",
+      "input_requirement": "Comprobante de pago bancario",
+      "input_institution": "infonavit",
+      "current_status": "pendiente_revision",
+      "acceptable_statuses": [
+        "prevalidado",
+        "pendiente_revision"
+      ],
+      "current_signals": {
+        "detected_institution": null,
+        "detected_document_type": "imss_pago",
+        "requirement_match_confidence": 0.65,
+        "mismatch_reason": null,
+        "anomaly_codes": [
+          "period_not_confirmed"
+        ],
+        "is_probably_scanned": false,
+        "has_text": true,
+        "page_count": 1
+      }
+    },
+    {
+      "file": "masterclean-infonavit-cuotas-obrero-patronales-2025-09.pdf",
+      "vendor": "masterclean",
+      "category": "infonavit",
+      "doctype": "cuotas-obrero-patronales",
+      "period_key": "2025-M09",
+      "input_requirement": "Cuotas obrero patronales",
+      "input_institution": "infonavit",
+      "current_status": "pendiente_revision",
+      "acceptable_statuses": [
+        "prevalidado",
+        "pendiente_revision"
+      ],
+      "current_signals": {
+        "detected_institution": "imss",
+        "detected_document_type": "imss_pago",
+        "requirement_match_confidence": 0.45,
+        "mismatch_reason": "La institución detectada 'imss' no coincide con 'infonavit'.",
+        "anomaly_codes": [
+          "possible_institution_mismatch"
+        ],
+        "is_probably_scanned": false,
+        "has_text": true,
+        "page_count": 20
+      }
+    },
+    {
+      "file": "masterclean-infonavit-resumen-liquidacion-2025-09.pdf",
+      "vendor": "masterclean",
+      "category": "infonavit",
+      "doctype": "resumen-liquidacion",
+      "period_key": "2025-M09",
+      "input_requirement": "Resumen de liquidación",
+      "input_institution": "infonavit",
+      "current_status": "prevalidado",
+      "acceptable_statuses": [
+        "prevalidado",
+        "pendiente_revision"
+      ],
+      "current_signals": {
+        "detected_institution": null,
+        "detected_document_type": "infonavit_pago",
+        "requirement_match_confidence": 1.0,
+        "mismatch_reason": null,
+        "anomaly_codes": [
+          "period_not_confirmed"
+        ],
+        "is_probably_scanned": false,
+        "has_text": true,
+        "page_count": 1
+      }
+    },
+    {
+      "file": "masterclean-sat-comp-entero-isr-2025-09.pdf",
+      "vendor": "masterclean",
+      "category": "sat",
+      "doctype": "comp-entero-isr",
+      "period_key": "2025-M09",
+      "input_requirement": "Comprobante entero pago ISR",
+      "input_institution": "sat",
+      "current_status": "pendiente_revision",
+      "acceptable_statuses": [
+        "prevalidado",
+        "pendiente_revision"
+      ],
+      "current_signals": {
+        "detected_institution": null,
+        "detected_document_type": null,
+        "requirement_match_confidence": 0.35,
+        "mismatch_reason": null,
+        "anomaly_codes": [
+          "period_not_confirmed"
+        ],
+        "is_probably_scanned": false,
+        "has_text": true,
+        "page_count": 1
+      }
+    },
+    {
+      "file": "masterclean-sat-comp-entero-iva-2025-09.pdf",
+      "vendor": "masterclean",
+      "category": "sat",
+      "doctype": "comp-entero-iva",
+      "period_key": "2025-M09",
+      "input_requirement": "Comprobante entero pago IVA",
+      "input_institution": "sat",
+      "current_status": "pendiente_revision",
+      "acceptable_statuses": [
+        "prevalidado",
+        "pendiente_revision"
+      ],
+      "current_signals": {
+        "detected_institution": null,
+        "detected_document_type": null,
+        "requirement_match_confidence": 0.35,
+        "mismatch_reason": null,
+        "anomaly_codes": [
+          "period_not_confirmed"
+        ],
+        "is_probably_scanned": false,
+        "has_text": true,
+        "page_count": 1
+      }
+    },
+    {
+      "file": "masterclean-sat-comps-nomina-2025-09.pdf",
+      "vendor": "masterclean",
+      "category": "sat",
+      "doctype": "comps-nomina",
+      "period_key": "2025-M09",
+      "input_requirement": "Comprobantes de nómina de los trabajadores",
+      "input_institution": "sat",
+      "current_status": "pendiente_revision",
+      "acceptable_statuses": [
+        "prevalidado",
+        "pendiente_revision"
+      ],
+      "current_signals": {
+        "detected_institution": "sat",
+        "detected_document_type": null,
+        "requirement_match_confidence": 0.53,
+        "mismatch_reason": null,
+        "anomaly_codes": [
+          "period_not_confirmed"
+        ],
+        "is_probably_scanned": false,
+        "has_text": true,
+        "page_count": 36
+      }
+    },
+    {
+      "file": "masterclean-sat-declaracion-isr-retencion-2025-09.pdf",
+      "vendor": "masterclean",
+      "category": "sat",
+      "doctype": "declaracion-isr-retencion",
+      "period_key": "2025-M09",
+      "input_requirement": "Declaración ISR por retención sueldos y salarios",
+      "input_institution": "sat",
+      "current_status": "pendiente_revision",
+      "acceptable_statuses": [
+        "prevalidado",
+        "pendiente_revision"
+      ],
+      "current_signals": {
+        "detected_institution": null,
+        "detected_document_type": null,
+        "requirement_match_confidence": 0.17,
+        "mismatch_reason": null,
+        "anomaly_codes": [
+          "period_not_confirmed"
+        ],
+        "is_probably_scanned": false,
+        "has_text": true,
+        "page_count": 29
+      }
+    },
+    {
+      "file": "masterclean-sat-declaracion-iva-2025-09.pdf",
+      "vendor": "masterclean",
+      "category": "sat",
+      "doctype": "declaracion-iva",
+      "period_key": "2025-M09",
+      "input_requirement": "Declaración IVA",
+      "input_institution": "sat",
+      "current_status": "prevalidado",
+      "acceptable_statuses": [
+        "prevalidado",
+        "pendiente_revision"
+      ],
+      "current_signals": {
+        "detected_institution": null,
+        "detected_document_type": null,
+        "requirement_match_confidence": 0.7,
+        "mismatch_reason": null,
+        "anomaly_codes": [
+          "period_not_confirmed"
+        ],
+        "is_probably_scanned": false,
+        "has_text": true,
+        "page_count": 29
+      }
+    }
+  ]
+}
