@@ -16,6 +16,7 @@ severity without retrofitting a global mapping.
 
 from __future__ import annotations
 
+from datetime import date
 from typing import Literal
 
 from sqlalchemy.orm import Session
@@ -155,6 +156,105 @@ def notify_reviewer_decision(
             "status": submission.status,
             "requirement_code": submission.requirement_code,
             "period_key": submission.period_key,
+        },
+    )
+
+
+def notify_client_of_renewal_due_soon(
+    db: Session,
+    *,
+    client_id: str,
+    vendor: Vendor,
+    requirement_code: str,
+    requirement_name: str,
+    due: date,
+    threshold_days: int,
+    cycle_anchor_date: date,
+) -> ClientNotification:
+    """Yellow client notification for an upcoming renewal threshold.
+
+    Phase 6 / Slice 6B. Emitted by ``renewal_dispatch`` when a
+    ``due_soon`` threshold (30, 14, or 7 days) is crossed for the
+    first time on the current renewal cycle. The dispatcher inserts a
+    ``RenewalReminder`` row before calling this so a retry on the same
+    day does not re-emit. ``threshold_days`` is the cadence step that
+    fired (positive int); ``due`` is the absolute renewal date so the
+    client UI can render either ``"faltan 7 días"`` (from threshold)
+    or the exact date.
+    """
+    days_left = threshold_days
+    body = (
+        f"Faltan {days_left} día(s) para renovar {requirement_name} de "
+        f"{vendor.name}. Fecha de vencimiento: {due.isoformat()}."
+    )
+    return add_client_notification(
+        db,
+        client_id=client_id,
+        vendor_id=vendor.id,
+        notification_type="renewal_due_soon",
+        severity="yellow",
+        title=f"{vendor.name}: renueva {requirement_name} en {days_left} día(s)",
+        body=body,
+        action_url=f"/client/submissions?vendor_id={vendor.id}",
+        payload={
+            "requirement_code": requirement_code,
+            "requirement_name": requirement_name,
+            "threshold_days": threshold_days,
+            "due_date": due.isoformat(),
+            "cycle_anchor_date": cycle_anchor_date.isoformat(),
+        },
+    )
+
+
+def notify_client_of_renewal_overdue(
+    db: Session,
+    *,
+    client_id: str,
+    vendor: Vendor,
+    requirement_code: str,
+    requirement_name: str,
+    due: date,
+    threshold_days: int,
+    cycle_anchor_date: date,
+) -> ClientNotification:
+    """Red client notification for the day-of and weekly overdue nags.
+
+    Phase 6 / Slice 6B. Threshold values are 0 (day of vencimiento),
+    -7, -14, -21, -28 (weekly nags). Past -28 the dispatcher stops
+    emitting — the slot stays "overdue" on the dashboard forever, but
+    further nags would only be noise.
+    """
+    if threshold_days == 0:
+        title = f"{vendor.name}: vence {requirement_name} hoy"
+        body = (
+            f"Hoy vence la renovación de {requirement_name} de {vendor.name}. "
+            f"Pídele al proveedor que suba el documento actualizado."
+        )
+    else:
+        days_overdue = -threshold_days
+        title = (
+            f"{vendor.name}: {requirement_name} vencido hace "
+            f"{days_overdue} día(s)"
+        )
+        body = (
+            f"La renovación de {requirement_name} de {vendor.name} venció el "
+            f"{due.isoformat()} (hace {days_overdue} día(s))."
+        )
+    return add_client_notification(
+        db,
+        client_id=client_id,
+        vendor_id=vendor.id,
+        notification_type="renewal_overdue",
+        severity="red",
+        title=title,
+        body=body,
+        action_url=f"/client/submissions?vendor_id={vendor.id}",
+        payload={
+            "requirement_code": requirement_code,
+            "requirement_name": requirement_name,
+            "threshold_days": threshold_days,
+            "due_date": due.isoformat(),
+            "cycle_anchor_date": cycle_anchor_date.isoformat(),
         },
     )
 

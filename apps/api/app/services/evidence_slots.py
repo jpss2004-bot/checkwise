@@ -250,6 +250,39 @@ def current_submission_for_slot(
     return _pick_current_submission(candidates)
 
 
+def current_onboarding_submission_for_workspace(
+    db: Session,
+    *,
+    workspace: ProviderWorkspace,
+    requirement_code: str,
+) -> Submission | None:
+    """Return the current onboarding submission for ``requirement_code``.
+
+    Onboarding slots are keyed by ``(client_id, vendor_id,
+    requirement_code)`` only — they have no period (the catalog row
+    carries ``period_key=None``). The canonical
+    :func:`current_submission_for_slot` lookup requires *both*
+    ``requirement_code`` and ``period_key``, so it always returns
+    ``None`` for onboarding rows. This helper plugs that gap by
+    matching on ``requirement_code`` alone, then walking the same
+    supersession lineage rules :func:`_pick_current_submission` uses.
+
+    Returns the leaf of the supersession chain — the latest
+    submission that no other submission supersedes. ``None`` when no
+    submission exists for the slot.
+    """
+    candidates = list(
+        db.scalars(
+            select(Submission).where(
+                Submission.client_id == workspace.client_id,
+                Submission.vendor_id == workspace.vendor_id,
+                Submission.requirement_code == requirement_code,
+            )
+        )
+    )
+    return _pick_current_submission(candidates)
+
+
 def _slot_view_from_candidates(
     *,
     slot_key: SlotKey,
@@ -570,6 +603,7 @@ __all__ = [
     "SlotView",
     "classify_slot_state",
     "current_submission_for_slot",
+    "current_onboarding_submission_for_workspace",
     "build_workspace_onboarding_slots",
     "build_workspace_calendar_slots",
     # Phase 6 renewal helpers.

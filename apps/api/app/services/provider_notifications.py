@@ -23,6 +23,7 @@ Locked behavior (Phase 4B):
 
 from __future__ import annotations
 
+from datetime import date
 from typing import Literal
 
 from sqlalchemy import select
@@ -111,6 +112,96 @@ def notify_provider_of_reviewer_decision(
             "status": submission.status,
             "requirement_code": submission.requirement_code,
             "period_key": submission.period_key,
+        },
+    )
+
+
+def notify_provider_of_renewal_due_soon(
+    db: Session,
+    *,
+    workspace_id: str,
+    requirement_code: str,
+    requirement_name: str,
+    due: date,
+    threshold_days: int,
+    cycle_anchor_date: date,
+) -> ProviderNotification:
+    """Yellow provider notification for an upcoming renewal threshold.
+
+    Phase 6 / Slice 6B. Direct address — the provider IS the actor
+    here, so the copy is imperative ("renueva tu CSF") rather than
+    third-person like the client-side equivalent. ``action_url``
+    points straight at the upload wizard pre-filled with the
+    requirement code so the next click is the upload.
+    """
+    days_left = threshold_days
+    title = f"Renueva {requirement_name} — faltan {days_left} día(s)"
+    body = (
+        f"Tu {requirement_name} vence el {due.isoformat()} "
+        f"(faltan {days_left} día(s)). Sube la versión actualizada para "
+        f"mantener tu expediente al corriente."
+    )
+    return add_provider_notification(
+        db,
+        workspace_id=workspace_id,
+        notification_type="renewal_due_soon",
+        severity="yellow",
+        title=title,
+        body=body,
+        action_url=f"/portal/upload?requirement_code={requirement_code}",
+        payload={
+            "requirement_code": requirement_code,
+            "requirement_name": requirement_name,
+            "threshold_days": threshold_days,
+            "due_date": due.isoformat(),
+            "cycle_anchor_date": cycle_anchor_date.isoformat(),
+        },
+    )
+
+
+def notify_provider_of_renewal_overdue(
+    db: Session,
+    *,
+    workspace_id: str,
+    requirement_code: str,
+    requirement_name: str,
+    due: date,
+    threshold_days: int,
+    cycle_anchor_date: date,
+) -> ProviderNotification:
+    """Red provider notification for the day-of and weekly overdue nags.
+
+    Threshold values are 0 (day of vencimiento), -7, -14, -21, -28.
+    Past -28 the dispatcher stops emitting.
+    """
+    if threshold_days == 0:
+        title = f"Vence {requirement_name} hoy — renuévalo"
+        body = (
+            f"Tu {requirement_name} vence hoy. Sube la versión actualizada "
+            f"para que tu cliente no marque el expediente como vencido."
+        )
+    else:
+        days_overdue = -threshold_days
+        title = f"{requirement_name} vencido hace {days_overdue} día(s)"
+        body = (
+            f"Tu {requirement_name} venció el {due.isoformat()} (hace "
+            f"{days_overdue} día(s)). Sube la versión actualizada lo antes "
+            f"posible para regularizar tu expediente."
+        )
+    return add_provider_notification(
+        db,
+        workspace_id=workspace_id,
+        notification_type="renewal_overdue",
+        severity="red",
+        title=title,
+        body=body,
+        action_url=f"/portal/upload?requirement_code={requirement_code}",
+        payload={
+            "requirement_code": requirement_code,
+            "requirement_name": requirement_name,
+            "threshold_days": threshold_days,
+            "due_date": due.isoformat(),
+            "cycle_anchor_date": cycle_anchor_date.isoformat(),
         },
     )
 

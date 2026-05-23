@@ -47,7 +47,7 @@ from app.core.compliance_catalog import (  # noqa: E402
 from app.db.session import SessionLocal  # noqa: E402
 from app.models import ProviderWorkspace, Vendor  # noqa: E402
 from app.services.evidence_slots import (  # noqa: E402
-    current_submission_for_slot,
+    current_onboarding_submission_for_workspace,
     next_renewal_due_date,
     renewal_anchor_date,
     renewal_status,
@@ -102,12 +102,10 @@ def main() -> int:
             for req in expediente_for_persona(persona):
                 if req.renewal_frequency_days is None:
                     continue
-                current = current_submission_for_slot(
+                current = current_onboarding_submission_for_workspace(
                     db,
-                    client_id=ws.client_id,
-                    vendor_id=ws.vendor_id,
+                    workspace=ws,
                     requirement_code=req.code,
-                    period_key=None,
                 )
                 anchor = renewal_anchor_date(current)
                 due = next_renewal_due_date(
