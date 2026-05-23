@@ -993,3 +993,49 @@ class ClientNotification(Base):
     )
 
     client: Mapped[Client] = relationship(back_populates="notifications")
+
+
+class RenewalReminder(Base):
+    """Per-cycle, per-threshold idempotency anchor for renewal notifications.
+
+    Phase 6 / Slice 6B. One row per
+    ``(workspace_id, requirement_code, cycle_anchor_date, threshold_days)``.
+    The unique constraint is the entire dedupe mechanism — the
+    renewal dispatcher inserts first and uses ``IntegrityError`` to
+    detect "already emitted, skip". The dispatcher writes both the
+    client and the provider notification only after the
+    ``RenewalReminder`` insert succeeds, so the two notification
+    surfaces stay in lockstep.
+
+    ``cycle_anchor_date`` is the day the standing approved submission
+    became evidence (the value returned by
+    :func:`app.services.evidence_slots.renewal_anchor_date`). A
+    follow-up approved upload changes the anchor → new cycle → all
+    threshold slots reset under the new anchor and fire again as that
+    cycle progresses. The historical reminders for the prior cycle
+    stay on the table as the audit record of what was sent.
+    """
+
+    __tablename__ = "renewal_reminders"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=new_id)
+    workspace_id: Mapped[str] = mapped_column(
+        ForeignKey("provider_workspaces.id"), nullable=False
+    )
+    requirement_code: Mapped[str] = mapped_column(String(80), nullable=False)
+    cycle_anchor_date: Mapped[date] = mapped_column(Date, nullable=False)
+    threshold_days: Mapped[int] = mapped_column(Integer, nullable=False)
+    severity: Mapped[str] = mapped_column(String(20), nullable=False)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=utc_now, nullable=False, index=True
+    )
+
+    __table_args__ = (
+        UniqueConstraint(
+            "workspace_id",
+            "requirement_code",
+            "cycle_anchor_date",
+            "threshold_days",
+            name="uq_renewal_reminders_cycle_threshold",
+        ),
+    )
