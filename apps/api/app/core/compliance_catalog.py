@@ -144,6 +144,15 @@ class OnboardingRequirement:
     anatomy: str = ""
     where_to_obtain: str = ""
     common_errors: tuple[str, ...] = ()
+    # Phase 6 — renewal cadence for onboarding docs that lose validity
+    # over time (CSF every 90 days, REPSE every ~3 years, registro
+    # patronal every ~3 years). ``None`` means the requirement is a
+    # one-time onboarding piece with no scheduled renewal — that is
+    # still the default for every onboarding row that doesn't carry an
+    # explicit cadence, including the opt-in ``-002`` / ``-003``
+    # "updates" / "renewals" rows for REPSE and patronal (those are
+    # provider-driven uploads, not schedule-driven).
+    renewal_frequency_days: int | None = None
 
 
 @dataclass(frozen=True)
@@ -294,6 +303,7 @@ _ONBOARDING_MORAL: tuple[OnboardingRequirement, ...] = (
         section="Documentación Corporativa",
         institution="sat",
         persona_types=("moral",),
+        renewal_frequency_days=90,
         anatomy=(
             "La Constancia de Situación Fiscal vigente emitida por el "
             "SAT. Debe estar a nombre de la empresa proveedora y mostrar "
@@ -336,6 +346,7 @@ _ONBOARDING_MORAL: tuple[OnboardingRequirement, ...] = (
         section="Documentación Corporativa",
         institution="sat",
         persona_types=("fisica",),
+        renewal_frequency_days=90,
         anatomy=(
             "La Constancia de Situación Fiscal vigente emitida por el "
             "SAT a tu nombre como persona física. Debe mostrar tu RFC, "
@@ -371,6 +382,7 @@ _ONBOARDING_MORAL: tuple[OnboardingRequirement, ...] = (
         section="Registro REPSE",
         institution="stps_repse",
         persona_types=("moral", "fisica"),
+        renewal_frequency_days=1095,
         anatomy=(
             "El acuse oficial del Registro de Prestadoras de Servicios "
             "Especializados u Obras Especializadas (REPSE) emitido por "
@@ -425,6 +437,7 @@ _ONBOARDING_MORAL: tuple[OnboardingRequirement, ...] = (
         section="Registro Patronal",
         institution="imss",
         persona_types=("moral", "fisica"),
+        renewal_frequency_days=1095,
     ),
     OnboardingRequirement(
         code="ONB-PATR-002",
@@ -1087,6 +1100,17 @@ def onboarding_common_errors(req: OnboardingRequirement) -> tuple[str, ...]:
     )
 
 
+def onboarding_renewal_frequency_days(req: OnboardingRequirement) -> int | None:
+    """Return the renewal cadence in days for an onboarding requirement.
+
+    ``None`` for one-time onboarding rows (the default). A positive int
+    for documents that lose validity over time — CSF (90), REPSE (1095),
+    registro patronal (1095). The Phase 6 renewal helpers in
+    :mod:`app.services.evidence_slots` consume this value.
+    """
+    return req.renewal_frequency_days
+
+
 def recurring_required_document(req: RecurringRequirement) -> str:
     """Return the document the provider is expected to upload.
 
@@ -1510,6 +1534,7 @@ __all__ = [
     "onboarding_anatomy",
     "onboarding_where_to_obtain",
     "onboarding_common_errors",
+    "onboarding_renewal_frequency_days",
     "recurring_required_document",
     "recurring_anatomy",
     "recurring_where_to_obtain",

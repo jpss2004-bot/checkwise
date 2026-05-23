@@ -29,7 +29,9 @@ Out of scope here:
 from __future__ import annotations
 
 from dataclasses import dataclass
+from datetime import date, timedelta
 from enum import StrEnum
+from typing import Literal
 
 from sqlalchemy import select
 from sqlalchemy.orm import Session
@@ -475,6 +477,93 @@ def _build_workspace_calendar_slots_v2(
     return views
 
 
+# ---------------------------------------------------------------------------
+# Phase 6 — renewal rule helpers (Slice 6A foundation)
+# ---------------------------------------------------------------------------
+#
+# These are pure date-math helpers. They never touch the DB. The
+# emit-site (Slice 6B) and the scheduler (Slice 6C) consume them; for
+# now the only caller is ``scripts/run_renewal_audit.py``, which walks
+# real workspaces and prints the computed status so we can verify the
+# rule layer against seed data before wiring notifications.
+#
+# Anchor convention: a renewal cycle starts when a submission becomes
+# the standing evidence — i.e. when a reviewer approved it. The
+# workflow service touches ``Submission.updated_at`` on every status
+# transition, so for an approved submission ``updated_at`` is the
+# approval moment. ``renewal_anchor_date`` enforces this contract so
+# downstream code doesn't have to remember it.
+
+
+RenewalStatus = Literal["ok", "due_soon", "overdue"]
+
+
+def renewal_anchor_date(submission: Submission | None) -> date | None:
+    """Return the day a renewal cycle should be measured from.
+
+    The anchor is the day the submission became the standing approved
+    evidence for its slot. Returns ``None`` when there is no submission
+    or when the submission is not (yet) approved — a rejected or
+    in-review submission cannot anchor a renewal cycle.
+    """
+    if submission is None:
+        return None
+    if submission.status != DocumentStatus.APROBADO.value:
+        return None
+    return submission.updated_at.date()
+
+
+def next_renewal_due_date(
+    *,
+    anchor: date | None,
+    frequency_days: int | None,
+) -> date | None:
+    """Return the date the next renewal is due, or ``None`` when not applicable.
+
+    ``None`` covers two cases the caller must treat differently and is
+    therefore left to the caller to disambiguate:
+
+    * ``frequency_days is None`` — the requirement has no renewal cadence
+      (one-time onboarding piece).
+    * ``anchor is None`` — the requirement has a cadence but no approved
+      submission exists yet, so there is nothing to renew.
+
+    The function does not collapse the two — both rightly produce "no
+    next due date to surface", and disambiguating belongs in the
+    consumer (e.g. the audit CLI shows "never approved" for the second
+    case and skips the first entirely).
+    """
+    if anchor is None or not frequency_days:
+        return None
+    return anchor + timedelta(days=frequency_days)
+
+
+def renewal_status(due: date | None, today: date) -> RenewalStatus | None:
+    """Bucket a renewal due date for downstream UI / notification use.
+
+    Returns ``None`` when there is no due date (frequency not set, or
+    no approved anchor). Otherwise:
+
+    * ``overdue`` — ``due`` is strictly before ``today``.
+    * ``due_soon`` — ``due`` is within 30 days of ``today`` (inclusive).
+    * ``ok`` — otherwise.
+
+    The 30-day window matches the locked Phase 6 cadence (30/14/7/day-of
+    reminders, yellow until day-of, red on day-of and after). The
+    finer-grained 14/7/0 threshold crossings belong in Slice 6B's
+    notification emit-site so each crossing fires exactly once via an
+    idempotency key — they are not the slot consumer's concern.
+    """
+    if due is None:
+        return None
+    delta = (due - today).days
+    if delta < 0:
+        return "overdue"
+    if delta <= 30:
+        return "due_soon"
+    return "ok"
+
+
 __all__ = [
     "SlotState",
     "SlotKey",
@@ -483,6 +572,11 @@ __all__ = [
     "current_submission_for_slot",
     "build_workspace_onboarding_slots",
     "build_workspace_calendar_slots",
+    # Phase 6 renewal helpers.
+    "RenewalStatus",
+    "renewal_anchor_date",
+    "next_renewal_due_date",
+    "renewal_status",
     # Re-exported catalog dataclasses for callers that want to traverse
     # without importing the catalog module directly.
     "OnboardingRequirement",
