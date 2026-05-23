@@ -13,6 +13,7 @@ import {
   Eye,
   Files,
   Funnel,
+  House,
   Scales,
   ShieldCheck,
   Stamp,
@@ -22,6 +23,7 @@ import {
 } from "@phosphor-icons/react";
 
 import { InstitutionRowHeader } from "@/components/checkwise/calendar/institution-row-header";
+import { MobileMonthList } from "@/components/checkwise/calendar/mobile-month-list";
 import { MonthCell } from "@/components/checkwise/calendar/month-cell";
 import {
   CALENDAR_INSTITUTIONS,
@@ -46,10 +48,15 @@ import {
 import { withOnboardingGate } from "@/lib/session/with-onboarding-gate";
 import type { PortalSession } from "@/lib/session/portal";
 
+// Phase 7 / Slice 7A — INFONAVIT was sharing the ``Buildings`` icon
+// with IMSS, which made the two institution rows visually
+// indistinguishable in the calendar header strip. ``House`` reads
+// directly as "instituto de vivienda" — semantically accurate AND
+// visually distinct from IMSS.
 const INSTITUTION_ICON: Record<CalendarInstitutionCode, Icon> = {
   sat: Scales,
   imss: Buildings,
-  infonavit: Buildings,
+  infonavit: House,
   stps_repse: ShieldCheck,
 };
 
@@ -112,12 +119,31 @@ function CalendarInner({ session }: { session: PortalSession }) {
       ? (filterParam as CalendarInstitutionCode)
       : "all";
 
+  // Phase 7 / Slice 7A — pendientes filter. Independent from the
+  // institution filter so "Pendientes IMSS" works (both compose in
+  // ``filteredEvents`` below). URL param ``pend=1`` so the filter
+  // is bookmarkable and survives a reload.
+  const onlyPending = searchParams.get("pend") === "1";
+
   const setFilterInstitution = (v: CalendarInstitutionCode | "all") => {
     const params = new URLSearchParams(searchParams.toString());
     if (v === "all") {
       params.delete("inst");
     } else {
       params.set("inst", v);
+    }
+    const qs = params.toString();
+    router.replace(qs ? `/portal/calendar?${qs}` : "/portal/calendar", {
+      scroll: false,
+    });
+  };
+
+  const setOnlyPending = (next: boolean) => {
+    const params = new URLSearchParams(searchParams.toString());
+    if (next) {
+      params.set("pend", "1");
+    } else {
+      params.delete("pend");
     }
     const qs = params.toString();
     router.replace(qs ? `/portal/calendar?${qs}` : "/portal/calendar", {
@@ -149,9 +175,21 @@ function CalendarInner({ session }: { session: PortalSession }) {
 
   const filteredEvents = useMemo(() => {
     if (!events) return [];
-    if (filterInstitution === "all") return events;
-    return events.filter((e) => e.institution === filterInstitution);
-  }, [filterInstitution, events]);
+    let result = events;
+    if (filterInstitution !== "all") {
+      result = result.filter((e) => e.institution === filterInstitution);
+    }
+    // Slice 7A — "Pendientes" scope. Any state where the provider
+    // must take action OR hasn't taken action yet. Approved /
+    // in_review / uploaded / empty stay hidden so the calendar
+    // collapses to the provider's actual TODO list.
+    if (onlyPending) {
+      result = result.filter((e) =>
+        ["pending", "rejected", "expired", "needs_review"].includes(e.state),
+      );
+    }
+    return result;
+  }, [filterInstitution, onlyPending, events]);
 
   const eventsByCell = useMemo(() => {
     const map = new Map<string, CalendarEntry[]>();
@@ -205,7 +243,7 @@ function CalendarInner({ session }: { session: PortalSession }) {
         <PageHeader
           eyebrow={`Calendario REPSE · ${year}`}
           title="Tu año de cumplimiento de un vistazo"
-          description="Cada celda muestra las obligaciones de ese mes; pasa el cursor para ver el detalle o toca para abrir la siguiente acción."
+          description="Cada celda lista las obligaciones de ese mes: pendientes, entregadas y aprobadas. Toca un mes para ver el detalle o usa el filtro 'Pendientes' para ver solo lo que aún debes."
           actions={
             <Button asChild variant="outline" size="sm">
               <Link href="/portal/dashboard">
@@ -219,12 +257,17 @@ function CalendarInner({ session }: { session: PortalSession }) {
         <FilterChips
           value={filterInstitution}
           onChange={setFilterInstitution}
+          onlyPending={onlyPending}
+          onPendingToggle={setOnlyPending}
           counts={{
             all: totalCount,
             sat: events.filter((e) => e.institution === "sat").length,
             imss: events.filter((e) => e.institution === "imss").length,
             infonavit: events.filter((e) => e.institution === "infonavit").length,
             stps_repse: events.filter((e) => e.institution === "stps_repse").length,
+            pending: events.filter((e) =>
+              ["pending", "rejected", "expired", "needs_review"].includes(e.state),
+            ).length,
           }}
         />
 
@@ -250,14 +293,46 @@ function CalendarInner({ session }: { session: PortalSession }) {
         {totalCount === 0 && !loadError ? (
           <UnexpectedEmpty />
         ) : filteredCount === 0 && !loadError ? (
-          <FilteredEmpty
-            label={INSTITUTION_LABELS[filterInstitution as CalendarInstitutionCode]}
-            onReset={() => setFilterInstitution("all")}
-            canReset
-          />
+          // Slice 7A — the empty state has three flavors now:
+          //   * onlyPending active → "no tienes pendientes" celebratory copy
+          //     with a CTA to clear the filter.
+          //   * institution filter active → existing "no obligaciones de
+          //     <institución>" + reset.
+          //   * both off → UnexpectedEmpty (data drift; matches the
+          //     existing legacy branch above).
+          onlyPending ? (
+            <FilteredEmpty
+              label="Sin pendientes"
+              onReset={() => setOnlyPending(false)}
+              canReset
+              celebratory
+            />
+          ) : (
+            <FilteredEmpty
+              label={INSTITUTION_LABELS[filterInstitution as CalendarInstitutionCode]}
+              onReset={() => setFilterInstitution("all")}
+              canReset
+            />
+          )
         ) : (
+          <>
+          {/* Phase 7 / Slice 7A — mobile-first vertical list. The
+              desktop grid below was ``min-w-[860px]`` + horizontal
+              scroll on small screens, which made tapping the right
+              month impractical on a phone. Below ``lg`` (1024px) we
+              render a per-month list that collapses to "this month +
+              upcoming first", drops empty months, and lets the
+              provider tap an obligation directly. The grid stays for
+              tablet+ as the "year overview". */}
+          <div className="lg:hidden">
+            <MobileMonthList
+              events={filteredEvents}
+              currentMonth={viewingCurrentYear ? currentMonth : 1}
+              onSelect={setSelectedId}
+            />
+          </div>
           <section
-            className="cw-fade-up overflow-x-auto rounded-lg border border-[color:var(--border-default)] bg-[color:var(--surface-raised)] shadow-xs"
+            className="cw-fade-up hidden lg:block overflow-x-auto rounded-lg border border-[color:var(--border-default)] bg-[color:var(--surface-raised)] shadow-xs"
             aria-label="Cuadrícula del calendario"
           >
             {/* Bugfix (2026-05-21) — spacing drift.
@@ -354,6 +429,7 @@ function CalendarInner({ session }: { session: PortalSession }) {
               </tbody>
             </table>
           </section>
+          </>
         )}
 
         <Legend />
@@ -374,10 +450,19 @@ function FilterChips({
   value,
   onChange,
   counts,
+  onlyPending,
+  onPendingToggle,
 }: {
   value: CalendarInstitutionCode | "all";
   onChange: (v: CalendarInstitutionCode | "all") => void;
-  counts: Record<CalendarInstitutionCode | "all", number>;
+  // Phase 7 / Slice 7A — composes orthogonally with the institution
+  // filter so combinations like "Pendientes IMSS" work. Counts.pending
+  // is the lifetime total of actionable obligations across all
+  // institutions; the institution filter further scopes the rendered
+  // grid / list when both are active.
+  counts: Record<CalendarInstitutionCode | "all" | "pending", number>;
+  onlyPending: boolean;
+  onPendingToggle: (next: boolean) => void;
 }) {
   const options: { value: CalendarInstitutionCode | "all"; label: string }[] = [
     { value: "all", label: "Todas" },
@@ -421,6 +506,39 @@ function FilterChips({
           </button>
         );
       })}
+
+      {/* Phase 7 / Slice 7A — Pendientes toggle. Sits separately at
+          the end of the strip so the visual hierarchy reads as
+          "filter by institution, then optionally narrow to actionable
+          obligations". Distinct visual treatment (warning tone when
+          active) to signal it's a different axis from the
+          institution chips. */}
+      <span
+        aria-hidden="true"
+        className="h-4 w-px bg-[color:var(--border-subtle)] mx-1"
+      />
+      <button
+        type="button"
+        aria-pressed={onlyPending}
+        onClick={() => onPendingToggle(!onlyPending)}
+        className={
+          "inline-flex items-center gap-2 rounded-full border px-3 py-1.5 text-xs font-medium transition-colors " +
+          (onlyPending
+            ? "border-[color:var(--status-warning-border)] bg-[color:var(--status-warning-bg)] text-[color:var(--status-warning-text)]"
+            : "border-[color:var(--border-default)] bg-[color:var(--surface-raised)] text-[color:var(--text-secondary)] hover:bg-[color:var(--surface-hover)]")
+        }
+        title="Mostrar solo obligaciones que aún debes (pendientes, rechazadas, vencidas, requieren aclaración)."
+      >
+        <span>Pendientes</span>
+        <span
+          className={
+            "font-mono text-[10px] tabular-nums " +
+            (onlyPending ? "opacity-80" : "text-[color:var(--text-tertiary)]")
+          }
+        >
+          {counts.pending}
+        </span>
+      </button>
     </div>
   );
 }
@@ -431,18 +549,33 @@ function FilteredEmpty({
   label,
   onReset,
   canReset,
+  celebratory = false,
 }: {
   label: string;
   onReset: () => void;
   canReset: boolean;
+  /** Slice 7A — when the Pendientes filter returns zero, this is
+   *  GOOD news for the provider (they're on top of everything).
+   *  Tints the empty card success-toned + uses celebratory copy
+   *  instead of the neutral "no hay obligaciones" framing. */
+  celebratory?: boolean;
 }) {
   return (
-    <section className="rounded-lg border border-dashed border-[color:var(--border-default)] bg-[color:var(--surface-raised)] px-6 py-10 text-center">
+    <section
+      className={
+        "rounded-lg border border-dashed px-6 py-10 text-center " +
+        (celebratory
+          ? "border-[color:var(--status-success-border)] bg-[color:var(--status-success-bg)]"
+          : "border-[color:var(--border-default)] bg-[color:var(--surface-raised)]")
+      }
+    >
       <p className="font-mono text-[10px] uppercase tracking-wide text-[color:var(--text-tertiary)]">
-        Sin obligaciones
+        {celebratory ? "Estás al día" : "Sin obligaciones"}
       </p>
       <p className="mt-2 text-sm text-[color:var(--text-primary)]">
-        No hay obligaciones para {label}.
+        {celebratory
+          ? "No tienes pendientes con los filtros actuales. Te avisaremos cuando aparezca el próximo."
+          : `No hay obligaciones para ${label}.`}
       </p>
       {canReset && (
         <Button
@@ -451,7 +584,7 @@ function FilteredEmpty({
           onClick={onReset}
           className="mt-3"
         >
-          Quitar filtro
+          {celebratory ? "Ver todas" : "Quitar filtro"}
         </Button>
       )}
     </section>
