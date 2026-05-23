@@ -1130,3 +1130,109 @@ def test_document_inline_preview_does_not_audit(
         assert count == 0
     finally:
         db.close()
+
+
+# ---------------------------------------------------------------------------
+# Phase 5 / Slice 5B — expediente ZIP
+# ---------------------------------------------------------------------------
+
+
+def test_expediente_zip_returns_grouped_layout_and_writes_audit(
+    api_client: TestClient,
+) -> None:
+    """The ZIP endpoint streams a valid archive grouped by
+    institution/period and writes a ``provider.expediente_downloaded``
+    audit row with file_count + total_bytes metadata.
+    """
+    import io
+    import zipfile
+
+    from app.models import AuditLog
+
+    access = _setup_workspace_session(api_client)
+    submitted_1 = _submit_canonical(api_client, vendor_rfc=access["vendor_rfc"])
+    submitted_2 = _submit_canonical(api_client, vendor_rfc=access["vendor_rfc"])
+    assert submitted_1 and submitted_2  # quiet F841
+
+    resp = api_client.get(
+        f"/api/v1/portal/workspaces/{access['workspace_id']}/expediente.zip"
+    )
+    assert resp.status_code == 200, resp.text
+    assert resp.headers.get("content-type") == "application/zip"
+    cd = resp.headers.get("content-disposition", "")
+    assert "attachment" in cd.lower()
+    assert ".zip" in cd
+
+    # The archive bytes must parse as a real ZIP and contain entries
+    # grouped under ``imss/2026-M04/...`` (the canonical submission seed
+    # writes IMSS / 2026-M04). Both submissions point at the same slot
+    # so the second file gets a collision-disambiguating suffix.
+    archive = zipfile.ZipFile(io.BytesIO(resp.content))
+    names = archive.namelist()
+    assert len(names) == 2, names
+    assert all(n.startswith("imss/2026-M04/") for n in names), names
+
+    factory = api_client.app.state.testing_session  # type: ignore[attr-defined]
+    db = factory()
+    try:
+        events = (
+            db.query(AuditLog)
+            .filter(
+                AuditLog.action == "provider.expediente_downloaded",
+                AuditLog.entity_id == access["workspace_id"],
+            )
+            .all()
+        )
+        assert len(events) == 1
+        meta = events[0].event_metadata or {}
+        assert meta.get("scope") == "workspace"
+        assert meta.get("file_count") == 2
+        assert meta.get("total_bytes", 0) > 0
+    finally:
+        db.close()
+
+
+def test_expediente_zip_413_when_over_file_cap(
+    api_client: TestClient,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Pre-flight cap check returns 413 before any streaming begins."""
+    import app.services.expediente_zip as zip_service
+
+    access = _setup_workspace_session(api_client)
+    _submit_canonical(api_client, vendor_rfc=access["vendor_rfc"])
+    _submit_canonical(api_client, vendor_rfc=access["vendor_rfc"])
+
+    # Patch the cap to 1 so two submissions exceed it.
+    monkeypatch.setattr(zip_service, "MAX_FILES", 1)
+
+    resp = api_client.get(
+        f"/api/v1/portal/workspaces/{access['workspace_id']}/expediente.zip"
+    )
+    assert resp.status_code == 413, resp.text
+    body = resp.json()
+    assert "límite" in body["detail"].lower()
+    assert "documentos" in body["detail"].lower()
+
+
+def test_expediente_zip_enforces_tenant_isolation(
+    api_client: TestClient,
+) -> None:
+    """Workspace B's session cannot pull workspace A's ZIP via crafted path id."""
+    access_a = _setup_workspace_session(api_client)
+    workspace_a = access_a["workspace_id"]
+    _submit_canonical(api_client, vendor_rfc=access_a["vendor_rfc"])
+
+    # Swap session to B; helper rebinds the cookie.
+    _setup_workspace_session(
+        api_client,
+        payload=_access_payload(
+            vendor_name="Otro Proveedor SA",
+            vendor_rfc="OTR250101AB1",
+        ),
+    )
+
+    resp = api_client.get(
+        f"/api/v1/portal/workspaces/{workspace_a}/expediente.zip"
+    )
+    assert resp.status_code in (403, 404), resp.text

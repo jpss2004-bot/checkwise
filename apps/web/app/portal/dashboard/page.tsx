@@ -8,6 +8,7 @@ import {
   CalendarBlank,
   CheckCircle,
   CloudArrowUp,
+  DownloadSimple,
   FileMagnifyingGlass,
   HourglassHigh,
   Lightning,
@@ -38,6 +39,7 @@ import { MetadataStrip, type MetadataItem } from "@/components/ui/metadata-strip
 import { PageHeader } from "@/components/ui/page-header";
 import { cn } from "@/lib/utils";
 import {
+  expedienteZipUrl,
   getDashboard,
   getOnboarding,
   statusToDocumentStateCode,
@@ -181,12 +183,36 @@ function DashboardInner({ session }: { session: PortalSession }) {
       title={session.vendor_name}
       description="Lo que falta, lo que está en revisión y la próxima acción concreta para mantener tu cumplimiento al día."
       actions={
-        <Button asChild size="sm">
-          <Link href="/portal/upload">
-            <CloudArrowUp className="h-4 w-4" weight="bold" aria-hidden="true" />
-            Subir documento
-          </Link>
-        </Button>
+        <>
+          {/* Phase 5 / Slice 5B — Descargar expediente completo.
+              Backend streams a ZIP of every uploaded document
+              grouped by institución/periodo. Opens in a new tab so
+              cookie auth carries on the top-level navigation. */}
+          <Button asChild size="sm" variant="outline">
+            <a
+              href={expedienteZipUrl(session)}
+              target="_blank"
+              rel="noreferrer"
+            >
+              <DownloadSimple
+                className="h-4 w-4"
+                weight="bold"
+                aria-hidden="true"
+              />
+              Descargar expediente
+            </a>
+          </Button>
+          <Button asChild size="sm">
+            <Link href="/portal/upload">
+              <CloudArrowUp
+                className="h-4 w-4"
+                weight="bold"
+                aria-hidden="true"
+              />
+              Subir documento
+            </Link>
+          </Button>
+        </>
       }
     />
   );

@@ -29,7 +29,7 @@ a new session — the cookie can only be issued by ``/portal/enter``.
 from __future__ import annotations
 
 import secrets
-from datetime import date
+from datetime import UTC, date
 from typing import Annotated, Final, Literal
 
 from fastapi import (
@@ -2097,6 +2097,116 @@ def get_workspace_submission_document(
         filename=document.original_filename,
         headers={"Content-Disposition": disposition_header},
     )
+
+
+# ---------------------------------------------------------------------------
+# Phase 5 / Slice 5B — expediente ZIP
+# ---------------------------------------------------------------------------
+
+
+@router.get(
+    "/workspaces/{workspace_id}/expediente.zip",
+    summary="Stream a ZIP of every uploaded document on the workspace",
+)
+def get_workspace_expediente_zip(
+    workspace_id: str,
+    db: DbSession,
+    workspace: Annotated[ProviderWorkspace, Depends(current_portal_workspace)],
+) -> Response:
+    """Stream a ZIP of the provider's expediente.
+
+    Composition + caps live in
+    :mod:`app.services.expediente_zip`. This endpoint is the thin
+    HTTP shell: tenant guard, pre-flight cap check (so the caller
+    gets 413 before any bytes spool), audit row, ``StreamingResponse``.
+
+    Audit semantics: the row writes BEFORE streaming starts. If the
+    user aborts mid-download the storage keys were still accessed
+    by the streaming service, so the audit row correctly records
+    intent.
+
+    Filename: ``expediente-<vendor-rfc>-<yyyymmdd>.zip``. RFC instead
+    of a UUID keeps the filename grep-friendly for the user.
+    """
+    from datetime import datetime
+
+    from fastapi.responses import StreamingResponse
+
+    from app.services.expediente_zip import (
+        MAX_FILES,
+        MAX_TOTAL_BYTES,
+        ExpedienteTooLargeError,
+        stream_expediente_zip,
+        summarize_expediente,
+    )
+
+    _ = workspace_id  # tenant guard already enforced by dependency
+
+    # Pre-flight cap check — short-circuit with 413 before any
+    # streaming begins so the user gets the failure mode synchronously.
+    summary = summarize_expediente(db, workspace)
+    if summary.file_count > MAX_FILES:
+        raise HTTPException(
+            status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE,
+            detail=(
+                f"Tu expediente tiene {summary.file_count} documentos; "
+                f"el límite por descarga es {MAX_FILES}. Pide al equipo "
+                "de soporte ayuda con una descarga segmentada."
+            ),
+        )
+    if summary.total_bytes > MAX_TOTAL_BYTES:
+        raise HTTPException(
+            status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE,
+            detail=(
+                f"Tu expediente pesa {summary.total_bytes // (1024 * 1024)} MB; "
+                f"el límite por descarga es {MAX_TOTAL_BYTES // (1024 * 1024)} MB. "
+                "Pide al equipo de soporte ayuda con una descarga segmentada."
+            ),
+        )
+
+    # Audit the intent BEFORE streaming. Includes the cap-check
+    # totals so the forensic reader sees what the user was about to
+    # pull, even if they abort mid-download.
+    add_audit_event(
+        db,
+        action="provider.expediente_downloaded",
+        entity_type="provider_workspace",
+        entity_id=workspace.id,
+        actor_type="provider",
+        actor_id=workspace.owner_user_id,
+        metadata={
+            "scope": "workspace",
+            "file_count": summary.file_count,
+            "total_bytes": summary.total_bytes,
+        },
+    )
+    db.commit()
+
+    # Build the iterator now so any error surfaces synchronously
+    # rather than as a corrupted ZIP halfway through the download.
+    iterator = stream_expediente_zip(db, workspace)
+
+    safe_rfc = (workspace.vendor.rfc if workspace.vendor else "expediente").lower()
+    safe_rfc = "".join(ch for ch in safe_rfc if ch.isalnum() or ch in "-_") or "expediente"
+    today = datetime.now(UTC).strftime("%Y%m%d")
+    filename = f"expediente-{safe_rfc}-{today}.zip"
+
+    try:
+        return StreamingResponse(
+            iterator,
+            media_type="application/zip",
+            headers={
+                "Content-Disposition": f'attachment; filename="{filename}"',
+            },
+        )
+    except ExpedienteTooLargeError as exc:  # pragma: no cover — defense in depth
+        # The summary already screened above; this is the belt-and-
+        # suspenders branch in case the underlying data drifted
+        # between summary and stream.
+        raise HTTPException(
+            status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE,
+            detail=str(exc),
+        ) from exc
 
 
 # ---------------------------------------------------------------------------

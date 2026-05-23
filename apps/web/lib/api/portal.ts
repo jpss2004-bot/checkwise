@@ -385,6 +385,21 @@ export function submissionDownloadUrl(
 }
 
 /**
+ * Absolute URL of the workspace's expediente ZIP endpoint.
+ *
+ * Phase 5 / Slice 5B — backend-streamed ZIP of every uploaded
+ * document on the workspace (institution/period folder layout,
+ * 200-file / 500MB caps). The backend writes a
+ * ``provider.expediente_downloaded`` audit row before streaming
+ * begins, so the audit trail records intent even if the user
+ * aborts mid-download. Same cookie-auth navigation pattern as the
+ * single-document download.
+ */
+export function expedienteZipUrl(session: PortalSession): string {
+  return `${API_BASE_URL}/api/v1/portal/workspaces/${session.workspace_id}/expediente.zip`;
+}
+
+/**
  * Fetch the submission's PDF with the same auth pattern as the rest
  * of the portal client (Bearer JWT + cookie fallback) and return a
  * Blob URL the iframe can render.
