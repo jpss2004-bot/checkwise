@@ -65,9 +65,20 @@ class StorageService(Protocol):
         ...
 
     def presigned_download_url(
-        self, storage_key: str, *, ttl_seconds: int | None = None
+        self,
+        storage_key: str,
+        *,
+        ttl_seconds: int | None = None,
+        content_disposition: str | None = None,
     ) -> str | None:  # pragma: no cover - protocol stub
-        """Return a time-limited download URL, or None when the backend serves files directly."""
+        """Return a time-limited download URL, or None when the backend serves files directly.
+
+        Phase 5 / Slice 5A — ``content_disposition`` lets the caller
+        override the response disposition the browser sees. S3 honors
+        it via ``ResponseContentDisposition``; local backend returns
+        None regardless (the API serves files directly with
+        ``FileResponse``, which already controls disposition).
+        """
         ...
 
     def delete(self, storage_key: str) -> None:  # pragma: no cover - protocol stub
@@ -165,9 +176,17 @@ class LocalStorageService:
         return self.base_path / storage_key
 
     def presigned_download_url(
-        self, storage_key: str, *, ttl_seconds: int | None = None
+        self,
+        storage_key: str,
+        *,
+        ttl_seconds: int | None = None,
+        content_disposition: str | None = None,
     ) -> str | None:
-        # Local backend serves files via the application directly, not via signed URLs.
+        # Local backend serves files via the application directly, not
+        # via signed URLs. ``content_disposition`` is unused on this
+        # backend because the API sets disposition via FileResponse
+        # headers in the caller.
+        _ = ttl_seconds, content_disposition
         return None
 
     def delete(self, storage_key: str) -> None:
@@ -283,12 +302,25 @@ class S3StorageService:
         return temp_path
 
     def presigned_download_url(
-        self, storage_key: str, *, ttl_seconds: int | None = None
+        self,
+        storage_key: str,
+        *,
+        ttl_seconds: int | None = None,
+        content_disposition: str | None = None,
     ) -> str | None:
         ttl = ttl_seconds if ttl_seconds is not None else settings.S3_PRESIGNED_URL_TTL_SECONDS
+        params: dict = {"Bucket": self.bucket, "Key": storage_key}
+        # Slice 5A — when the caller wants the browser to save the
+        # bytes as a file (not inline-render in a PDF viewer tab), we
+        # pass ``ResponseContentDisposition`` into the signed URL so
+        # S3 serves the response with the matching header. The
+        # browser respects that even though the URL itself looks like
+        # a plain object link.
+        if content_disposition:
+            params["ResponseContentDisposition"] = content_disposition
         return self._client.generate_presigned_url(
             ClientMethod="get_object",
-            Params={"Bucket": self.bucket, "Key": storage_key},
+            Params=params,
             ExpiresIn=ttl,
         )
 

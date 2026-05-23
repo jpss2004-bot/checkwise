@@ -358,6 +358,33 @@ export function submissionDocumentUrl(
 }
 
 /**
+ * Absolute URL of the PDF download endpoint (attachment disposition).
+ *
+ * Phase 5 / Slice 5A — the same backend endpoint as
+ * ``submissionDocumentUrl`` but with ``?download=1``. When the user
+ * follows this URL the browser triggers a save dialog instead of
+ * inline-rendering the PDF, AND the backend writes a
+ * ``provider.document_downloaded`` audit row. Use this for the
+ * "Descargar PDF" button on the submission detail page; keep the
+ * inline URL for the iframe preview.
+ *
+ * Authentication note: the URL is hit as a top-level navigation
+ * (``window.open`` / ``<a target="_blank">``), so it relies on the
+ * portal session cookie. On dev with same-origin SameSite=Lax the
+ * cookie tags along; on prod with SameSite=None+Secure it also
+ * works. If a deploy ever breaks cookie delivery, the redirect to a
+ * presigned S3 URL would still work (S3 doesn't need the cookie),
+ * and the local fallback would 401 — which the page can surface as
+ * "intenta de nuevo" rather than failing silently.
+ */
+export function submissionDownloadUrl(
+  session: PortalSession,
+  submissionId: string,
+): string {
+  return `${submissionDocumentUrl(session, submissionId)}?download=1`;
+}
+
+/**
  * Fetch the submission's PDF with the same auth pattern as the rest
  * of the portal client (Bearer JWT + cookie fallback) and return a
  * Blob URL the iframe can render.

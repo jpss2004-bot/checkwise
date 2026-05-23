@@ -1042,3 +1042,91 @@ def test_submission_detail_carries_reviewer_note_on_rechazado(
     assert detail["status"] == "rechazado"
     assert detail["reviewer_note"] == reason
     assert detail["suggested_action"] == "reupload"
+
+
+# ---------------------------------------------------------------------------
+# Phase 5 / Slice 5A — document download flow
+# ---------------------------------------------------------------------------
+
+
+def test_document_download_attachment_writes_audit(
+    api_client: TestClient,
+) -> None:
+    """``?download=1`` returns the bytes with attachment disposition AND
+    writes a ``provider.document_downloaded`` audit row. The audit row
+    captures workspace_id, document_id, filename, size, requirement
+    code, and period key so a forensic reader can answer "who pulled
+    what evidence and when".
+    """
+    from app.models import AuditLog
+
+    access = _setup_workspace_session(api_client)
+    submitted = _submit_canonical(api_client, vendor_rfc=access["vendor_rfc"])
+
+    resp = api_client.get(
+        f"/api/v1/portal/workspaces/{access['workspace_id']}"
+        f"/submissions/{submitted['submission_id']}/document?download=1"
+    )
+    assert resp.status_code == 200, resp.text
+    # Local backend serves via FileResponse with the requested
+    # disposition; the test asserts the header rather than the
+    # underlying mechanism.
+    assert "attachment" in resp.headers.get("content-disposition", "").lower()
+
+    factory = api_client.app.state.testing_session  # type: ignore[attr-defined]
+    db = factory()
+    try:
+        events = (
+            db.query(AuditLog)
+            .filter(
+                AuditLog.action == "provider.document_downloaded",
+                AuditLog.entity_id == submitted["submission_id"],
+            )
+            .all()
+        )
+        assert len(events) == 1
+        event = events[0]
+        assert event.actor_type == "provider"
+        meta = event.event_metadata or {}
+        assert meta.get("workspace_id") == access["workspace_id"]
+        assert meta.get("filename") == "imss.pdf"
+        assert meta.get("requirement_code")
+        assert meta.get("period_key") == "2026-M04"
+    finally:
+        db.close()
+
+
+def test_document_inline_preview_does_not_audit(
+    api_client: TestClient,
+) -> None:
+    """Default (inline) requests are NOT audited — they fire on every
+    iframe reload + every 'abrir en nueva pestaña' click. Auditing
+    inline previews would drown the audit log in transient noise; the
+    attachment path is the deliberate intent-to-keep signal.
+    """
+    from app.models import AuditLog
+
+    access = _setup_workspace_session(api_client)
+    submitted = _submit_canonical(api_client, vendor_rfc=access["vendor_rfc"])
+
+    resp = api_client.get(
+        f"/api/v1/portal/workspaces/{access['workspace_id']}"
+        f"/submissions/{submitted['submission_id']}/document"
+    )
+    assert resp.status_code == 200, resp.text
+    assert "inline" in resp.headers.get("content-disposition", "").lower()
+
+    factory = api_client.app.state.testing_session  # type: ignore[attr-defined]
+    db = factory()
+    try:
+        count = (
+            db.query(AuditLog)
+            .filter(
+                AuditLog.action == "provider.document_downloaded",
+                AuditLog.entity_id == submitted["submission_id"],
+            )
+            .count()
+        )
+        assert count == 0
+    finally:
+        db.close()

@@ -9,6 +9,7 @@ import {
   ArrowRight,
   CheckCircle,
   Clock,
+  DownloadSimple,
   FileText,
 } from "@phosphor-icons/react";
 
@@ -28,6 +29,7 @@ import {
   getSubmissionDetail,
   INSTITUTION_LABELS,
   PortalApiError,
+  submissionDownloadUrl,
   type RequirementStatus,
   type SubmissionDetail,
   type SubmissionPreviousAttempt,
@@ -539,12 +541,37 @@ function SubmissionPreview({
   }, [session, submissionId, documentId]);
 
   if (!detail.document) return null;
+  // Phase 5 / Slice 5A — "Descargar PDF" anchor. Points at the same
+  // backend endpoint as the preview iframe but with ?download=1 so
+  // the browser triggers a save dialog AND the backend writes a
+  // ``provider.document_downloaded`` audit row. The anchor is a
+  // top-level navigation (``target=_blank``) so cookie auth carries
+  // even when the iframe Blob path can't (the iframe uses Bearer
+  // JWT via fetch; a plain anchor cannot set headers).
+  const downloadHref = submissionDownloadUrl(session, detail.submission_id);
   return (
     <Card>
       <CardHeader>
-        <div className="flex items-center gap-2">
-          <FileText className="h-4 w-4 text-muted-foreground" aria-hidden="true" />
-          <CardTitle>Vista previa del documento</CardTitle>
+        <div className="flex flex-wrap items-center justify-between gap-2">
+          <div className="flex items-center gap-2">
+            <FileText className="h-4 w-4 text-muted-foreground" aria-hidden="true" />
+            <CardTitle>Vista previa del documento</CardTitle>
+          </div>
+          <Button asChild size="sm" variant="outline">
+            <a
+              href={downloadHref}
+              target="_blank"
+              rel="noreferrer"
+              download={detail.document.filename}
+            >
+              <DownloadSimple
+                className="h-3.5 w-3.5"
+                weight="bold"
+                aria-hidden="true"
+              />
+              Descargar PDF
+            </a>
+          </Button>
         </div>
         <p className="mt-1 text-sm text-muted-foreground">
           {detail.document.filename} · cargado el {formatDate(detail.submitted_at)}

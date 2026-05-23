@@ -1980,18 +1980,34 @@ def get_workspace_submission_document(
     submission_id: str,
     db: DbSession,
     workspace: Annotated[ProviderWorkspace, Depends(current_portal_workspace)],
+    download: bool = False,
 ) -> Response:
-    """Inline-stream the PDF a provider uploaded for a given submission.
+    """Serve the PDF a provider uploaded for a given submission.
 
-    Used by the submission detail page's preview iframe (Jorge feedback
-    2026-05-21: "esta pagina debe arrojar … una vista previa del
-    documento que se cargó"). The detail metadata route already enforces
-    the tenant guard; this endpoint mirrors that gate, then routes the
-    storage-key lookup through the same StorageService backend the
-    upload pipeline uses so local-disk and S3 deployments both work.
+    Two modes, gated by ``?download=1``:
 
-    Returns the bytes with ``Content-Disposition: inline`` so browsers
-    render them via the PDF plugin rather than triggering a download.
+    * **Inline (default)** — used by the submission detail page's
+      preview iframe (Jorge feedback 2026-05-21). Browser
+      PDF-plugin-renders the bytes. NOT audited because every iframe
+      reload would spam the audit log.
+    * **Attachment (``?download=1``)** — used by the "Descargar PDF"
+      button on the submission detail page (Phase 5 / Slice 5A).
+      Browser triggers a save dialog. AUDITED: writes a
+      ``provider.document_downloaded`` row per request so we have a
+      forensic trail of who pulled what evidence and when.
+
+    Backend strategy is identical for both modes:
+      1. Tenant guard via ``current_portal_workspace`` (path
+         workspace_id must match the resolved session).
+      2. Submission tenant check.
+      3. Document lookup.
+      4. Prefer a presigned URL when the storage backend supports it
+         (S3/R2 — zero egress on the API node). Local backends fall
+         back to ``FileResponse``.
+
+    On S3 the disposition is communicated via the signed URL's
+    ``ResponseContentDisposition`` param so the browser honors it
+    even though the URL points at S3 directly.
     """
     _ = workspace_id  # tenant guard already enforced by dependency
     submission = db.scalar(
@@ -2015,12 +2031,44 @@ def get_workspace_submission_document(
             detail="Documento no encontrado para este envío.",
         )
 
+    disposition_kind = "attachment" if download else "inline"
+    disposition_header = (
+        f'{disposition_kind}; filename="{document.original_filename}"'
+    )
+
+    # Phase 5 / Slice 5A — audit ONLY the attachment path. Inline
+    # previews fire on every iframe reload + every "abrir en nueva
+    # pestaña" click; auditing those would drown the audit log in
+    # transient noise. Attachment requests are intentional document
+    # pulls and worth the forensic record.
+    if download:
+        add_audit_event(
+            db,
+            action="provider.document_downloaded",
+            entity_type="submission",
+            entity_id=submission.id,
+            actor_type="provider",
+            actor_id=workspace.owner_user_id,
+            metadata={
+                "workspace_id": workspace.id,
+                "document_id": document.id,
+                "filename": document.original_filename,
+                "size_bytes": document.size_bytes,
+                "requirement_code": submission.requirement_code,
+                "period_key": submission.period_key,
+            },
+        )
+        db.commit()
+
     storage = get_storage_service()
     # Prefer a presigned URL when the backend supports it (S3/R2) —
     # smaller egress on the API node, no need to proxy bytes through
     # FastAPI. Local-disk backends return None here and we fall back
     # to streaming via FileResponse.
-    presigned = storage.presigned_download_url(document.storage_key)
+    presigned = storage.presigned_download_url(
+        document.storage_key,
+        content_disposition=disposition_header,
+    )
     if presigned is not None:
         from fastapi.responses import RedirectResponse
 
@@ -2047,11 +2095,7 @@ def get_workspace_submission_document(
         path,
         media_type="application/pdf",
         filename=document.original_filename,
-        headers={
-            "Content-Disposition": (
-                f'inline; filename="{document.original_filename}"'
-            ),
-        },
+        headers={"Content-Disposition": disposition_header},
     )
 
 
