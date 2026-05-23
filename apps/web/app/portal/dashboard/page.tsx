@@ -35,8 +35,19 @@ import { PortalAppShell } from "@/components/checkwise/portal/portal-app-shell";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+  DialogTrigger,
+} from "@/components/ui/dialog";
+import { Field } from "@/components/ui/field";
 import { MetadataStrip, type MetadataItem } from "@/components/ui/metadata-strip";
 import { PageHeader } from "@/components/ui/page-header";
+import { Select } from "@/components/ui/select";
 import { cn } from "@/lib/utils";
 import {
   expedienteZipUrl,
@@ -184,24 +195,15 @@ function DashboardInner({ session }: { session: PortalSession }) {
       description="Lo que falta, lo que está en revisión y la próxima acción concreta para mantener tu cumplimiento al día."
       actions={
         <>
-          {/* Phase 5 / Slice 5B — Descargar expediente completo.
-              Backend streams a ZIP of every uploaded document
-              grouped by institución/periodo. Opens in a new tab so
-              cookie auth carries on the top-level navigation. */}
-          <Button asChild size="sm" variant="outline">
-            <a
-              href={expedienteZipUrl(session)}
-              target="_blank"
-              rel="noreferrer"
-            >
-              <DownloadSimple
-                className="h-4 w-4"
-                weight="bold"
-                aria-hidden="true"
-              />
-              Descargar expediente
-            </a>
-          </Button>
+          {/* Phase 5 / Slice 5C — Descargar expediente with filter
+              modal. The button opens an in-dialog filter set
+              (institución / periodo / estado); all three default to
+              "Todo". Submit opens the filtered ZIP URL in a new
+              tab so cookie auth carries on the top-level
+              navigation. Slice 5B's plain anchor was replaced
+              because the dashboard is the natural surface for
+              "give me everything OR a scoped slice". */}
+          <ExpedienteDownloadDialog session={session} />
           <Button asChild size="sm">
             <Link href="/portal/upload">
               <CloudArrowUp
@@ -1616,5 +1618,136 @@ function ProvisionalAccessBanner() {
         </Button>
       </AlertDescription>
     </Alert>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Phase 5 / Slice 5C — Expediente download dialog
+// ---------------------------------------------------------------------------
+//
+// Replaces the plain "Descargar expediente" anchor from Slice 5B with
+// a modal that picks institución / periodo / estado before opening
+// the filtered ZIP URL. All three default to "Todo" — submitting
+// without changes preserves the original full-pull behavior.
+//
+// Submission opens the URL in a new tab (cookie-auth navigation,
+// same pattern as Slice 5A/5B). Dialog closes on submit so the user
+// returns to the dashboard with the download fired.
+
+const _ZIP_INSTITUTION_OPTIONS: ReadonlyArray<{ value: string; label: string }> = [
+  { value: "", label: "Todas las instituciones" },
+  { value: "sat", label: "SAT" },
+  { value: "imss", label: "IMSS" },
+  { value: "infonavit", label: "INFONAVIT" },
+  { value: "stps_repse", label: "STPS / REPSE" },
+  { value: "interno_cliente", label: "Interno / Cliente" },
+];
+
+const _ZIP_STATUS_OPTIONS: ReadonlyArray<{ value: string; label: string }> = [
+  { value: "", label: "Todos los estados" },
+  { value: "aprobado", label: "Aprobados" },
+  { value: "pendiente_revision", label: "En revisión" },
+  { value: "requiere_aclaracion", label: "Aclaración" },
+  { value: "rechazado", label: "Rechazados" },
+  { value: "excepcion_legal", label: "Excepción legal" },
+];
+
+function ExpedienteDownloadDialog({ session }: { session: PortalSession }) {
+  const [open, setOpen] = useState(false);
+  const [institution, setInstitution] = useState("");
+  const [periodKey, setPeriodKey] = useState("");
+  const [statusFilter, setStatusFilter] = useState("");
+
+  function handleSubmit() {
+    const url = expedienteZipUrl(session, {
+      institution: institution || null,
+      period_key: periodKey || null,
+      status: statusFilter || null,
+    });
+    window.open(url, "_blank", "noopener,noreferrer");
+    setOpen(false);
+  }
+
+  return (
+    <Dialog open={open} onOpenChange={setOpen}>
+      <DialogTrigger asChild>
+        <Button size="sm" variant="outline">
+          <DownloadSimple
+            className="h-4 w-4"
+            weight="bold"
+            aria-hidden="true"
+          />
+          Descargar expediente
+        </Button>
+      </DialogTrigger>
+      <DialogContent>
+        <DialogHeader>
+          <DialogTitle>Descargar expediente</DialogTitle>
+          <DialogDescription>
+            Te enviamos un ZIP con tus documentos agrupados por
+            institución y periodo. Deja los filtros en &quot;Todo&quot; para
+            una descarga completa o selecciona para acotar.
+          </DialogDescription>
+        </DialogHeader>
+        <div className="grid gap-3 py-2">
+          <Field label="Institución" htmlFor="zip-filter-institution">
+            <Select
+              id="zip-filter-institution"
+              value={institution}
+              onChange={(e) => setInstitution(e.target.value)}
+            >
+              {_ZIP_INSTITUTION_OPTIONS.map((opt) => (
+                <option key={opt.value} value={opt.value}>
+                  {opt.label}
+                </option>
+              ))}
+            </Select>
+          </Field>
+          <Field
+            label="Periodo (opcional)"
+            htmlFor="zip-filter-period"
+            helper="Formato YYYY-MM (ej. 2026-M05) o YYYY-Bn / YYYY-Qn / YYYY-A."
+          >
+            <input
+              id="zip-filter-period"
+              value={periodKey}
+              onChange={(e) => setPeriodKey(e.target.value)}
+              placeholder="2026-M05"
+              className="block w-full rounded-md border border-[color:var(--border-default)] bg-[color:var(--surface-raised)] px-2 py-1.5 text-sm text-[color:var(--text-primary)] focus:outline-none focus-visible:ring-2 focus-visible:ring-[color:var(--border-focus)]/40"
+            />
+          </Field>
+          <Field label="Estado" htmlFor="zip-filter-status">
+            <Select
+              id="zip-filter-status"
+              value={statusFilter}
+              onChange={(e) => setStatusFilter(e.target.value)}
+            >
+              {_ZIP_STATUS_OPTIONS.map((opt) => (
+                <option key={opt.value} value={opt.value}>
+                  {opt.label}
+                </option>
+              ))}
+            </Select>
+          </Field>
+        </div>
+        <DialogFooter>
+          <Button
+            type="button"
+            variant="outline"
+            onClick={() => setOpen(false)}
+          >
+            Cancelar
+          </Button>
+          <Button type="button" onClick={handleSubmit}>
+            <DownloadSimple
+              className="h-4 w-4"
+              weight="bold"
+              aria-hidden="true"
+            />
+            Descargar
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
   );
 }

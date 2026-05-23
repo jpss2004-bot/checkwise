@@ -1236,3 +1236,63 @@ def test_expediente_zip_enforces_tenant_isolation(
         f"/api/v1/portal/workspaces/{workspace_a}/expediente.zip"
     )
     assert resp.status_code in (403, 404), resp.text
+
+
+def test_expediente_zip_filters_by_institution(
+    api_client: TestClient,
+) -> None:
+    """Slice 5C — ``?institution=imss`` scopes the archive to that
+    institution's submissions. The seed canonical helper writes IMSS
+    submissions, so an IMSS filter yields 2 files and a SAT filter
+    yields 0 (and ships an empty but valid ZIP).
+    """
+    import io
+    import zipfile
+
+    access = _setup_workspace_session(api_client)
+    _submit_canonical(api_client, vendor_rfc=access["vendor_rfc"])
+    _submit_canonical(api_client, vendor_rfc=access["vendor_rfc"])
+
+    imss = api_client.get(
+        f"/api/v1/portal/workspaces/{access['workspace_id']}/expediente.zip?institution=imss"
+    )
+    assert imss.status_code == 200, imss.text
+    names_imss = zipfile.ZipFile(io.BytesIO(imss.content)).namelist()
+    assert len(names_imss) == 2
+    assert all(n.startswith("imss/") for n in names_imss)
+
+    sat = api_client.get(
+        f"/api/v1/portal/workspaces/{access['workspace_id']}/expediente.zip?institution=sat"
+    )
+    assert sat.status_code == 200, sat.text
+    # No SAT submissions seeded → empty (but valid) ZIP.
+    names_sat = zipfile.ZipFile(io.BytesIO(sat.content)).namelist()
+    assert names_sat == []
+
+
+def test_expediente_zip_filters_by_status(
+    api_client: TestClient,
+) -> None:
+    """Slice 5C — ``?status=`` scopes the archive to one status. The
+    canonical seed writes ``pendiente_revision`` so the matching
+    filter returns both files; an unmatched filter (``aprobado``)
+    returns an empty ZIP.
+    """
+    import io
+    import zipfile
+
+    access = _setup_workspace_session(api_client)
+    _submit_canonical(api_client, vendor_rfc=access["vendor_rfc"])
+    _submit_canonical(api_client, vendor_rfc=access["vendor_rfc"])
+
+    matches = api_client.get(
+        f"/api/v1/portal/workspaces/{access['workspace_id']}/expediente.zip?status=pendiente_revision"
+    )
+    assert matches.status_code == 200
+    assert len(zipfile.ZipFile(io.BytesIO(matches.content)).namelist()) == 2
+
+    empty = api_client.get(
+        f"/api/v1/portal/workspaces/{access['workspace_id']}/expediente.zip?status=aprobado"
+    )
+    assert empty.status_code == 200
+    assert zipfile.ZipFile(io.BytesIO(empty.content)).namelist() == []

@@ -10,6 +10,7 @@ import {
   Buildings,
   CalendarBlank,
   CloudArrowUp,
+  DownloadSimple,
   Eye,
   Files,
   Funnel,
@@ -38,6 +39,7 @@ import { Button } from "@/components/ui/button";
 import { PageHeader } from "@/components/ui/page-header";
 import { Skeleton } from "@/components/ui/skeleton";
 import {
+  expedienteZipUrl,
   getCalendar,
   INSTITUTION_LABELS,
   MONTH_LABELS_ES,
@@ -245,12 +247,40 @@ function CalendarInner({ session }: { session: PortalSession }) {
           title="Tu año de cumplimiento de un vistazo"
           description="Cada celda lista las obligaciones de ese mes: pendientes, entregadas y aprobadas. Toca un mes para ver el detalle o usa el filtro 'Pendientes' para ver solo lo que aún debes."
           actions={
-            <Button asChild variant="outline" size="sm">
-              <Link href="/portal/dashboard">
-                <ArrowLeft className="h-4 w-4" weight="bold" aria-hidden="true" />
-                Dashboard
-              </Link>
-            </Button>
+            <>
+              {/* Phase 5 / Slice 5C — filter-aware download. Passes
+                  the active institution filter through to the
+                  expediente ZIP endpoint so the provider can pull
+                  just the documents for the institution they're
+                  currently looking at. ``Pendientes`` toggle is
+                  intentionally NOT mapped — the backend filter is
+                  single-status; pendientes is a calendar-only UI
+                  convenience that maps to four DB statuses. */}
+              {filterInstitution !== "all" ? (
+                <Button asChild variant="outline" size="sm">
+                  <a
+                    href={expedienteZipUrl(session, {
+                      institution: filterInstitution,
+                    })}
+                    target="_blank"
+                    rel="noreferrer"
+                  >
+                    <DownloadSimple
+                      className="h-4 w-4"
+                      weight="bold"
+                      aria-hidden="true"
+                    />
+                    Descargar {INSTITUTION_LABELS[filterInstitution]}
+                  </a>
+                </Button>
+              ) : null}
+              <Button asChild variant="outline" size="sm">
+                <Link href="/portal/dashboard">
+                  <ArrowLeft className="h-4 w-4" weight="bold" aria-hidden="true" />
+                  Dashboard
+                </Link>
+              </Button>
+            </>
           }
         />
 

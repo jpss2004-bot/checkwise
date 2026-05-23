@@ -31,14 +31,14 @@ import io
 import re
 import zipfile
 from collections.abc import Iterator
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import NamedTuple
 
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.constants.statuses import DocumentStatus
-from app.models import Document, ProviderWorkspace, Submission
+from app.models import Document, Institution, ProviderWorkspace, Submission
 from app.services.storage import get_storage_service
 
 MAX_FILES = 200
@@ -51,6 +51,62 @@ _NO_BYTES_STATES: frozenset[str] = frozenset({
     DocumentStatus.VENCIDO.value,
     DocumentStatus.NO_APLICA.value,
 })
+
+
+@dataclass(frozen=True)
+class ExpedienteFilters:
+    """Optional filter set for the expediente ZIP composition.
+
+    Slice 5C — passing any combination of ``status``,
+    ``period_key``, and ``institution`` scopes the archive AND the
+    pre-flight cap check. ``None`` on a field means "no filter".
+
+    Filters compose AND-wise. Unknown ``institution`` codes resolve
+    to an empty result (no Institution row → no submission matches),
+    matching the same defensive behavior the client portal already
+    uses.
+
+    ``to_audit_dict`` returns a JSON-safe shape for the audit log
+    metadata — only non-null fields appear, ``None`` when no filter
+    is active (so the audit row reads cleanly).
+    """
+
+    status: str | None = None
+    period_key: str | None = None
+    institution: str | None = None
+
+    @property
+    def is_empty(self) -> bool:
+        return self.status is None and self.period_key is None and self.institution is None
+
+    def to_audit_dict(self) -> dict[str, str] | None:
+        if self.is_empty:
+            return None
+        out: dict[str, str] = {}
+        if self.status:
+            out["status"] = self.status
+        if self.period_key:
+            out["period_key"] = self.period_key
+        if self.institution:
+            out["institution"] = self.institution
+        return out
+
+
+_NO_FILTERS = ExpedienteFilters()
+# Sentinel re-export so callers don't have to construct an empty
+# instance themselves when they want "no filters".
+__all__ = (
+    "ExpedienteFilters",
+    "ExpedienteSummary",
+    "ExpedienteTooLargeError",
+    "MAX_FILES",
+    "MAX_TOTAL_BYTES",
+    "stream_expediente_zip",
+    "summarize_expediente",
+)
+# ``field`` is imported for future filter additions (e.g. date
+# ranges); silence the unused-import warning until then.
+_ = field
 
 
 class ExpedienteTooLargeError(Exception):
@@ -90,15 +146,17 @@ class _ZipEntry:
 
 
 def summarize_expediente(
-    db: Session, workspace: ProviderWorkspace
+    db: Session,
+    workspace: ProviderWorkspace,
+    filters: ExpedienteFilters | None = None,
 ) -> ExpedienteSummary:
     """Count files + total bytes on the workspace without reading bytes.
 
     Pure SQL — joins submissions → documents and filters out the
-    no-byte states. Returns the totals so the endpoint can enforce
-    caps before any bytes leave storage.
+    no-byte states. ``filters`` further scopes the count, so the
+    endpoint can apply the same caps to a filtered subset.
     """
-    rows = list(_iter_workspace_documents(db, workspace))
+    rows = list(_iter_workspace_documents(db, workspace, filters or _NO_FILTERS))
     return ExpedienteSummary(
         file_count=len(rows),
         total_bytes=sum(int(r[2] or 0) for r in rows),
@@ -106,7 +164,9 @@ def summarize_expediente(
 
 
 def stream_expediente_zip(
-    db: Session, workspace: ProviderWorkspace
+    db: Session,
+    workspace: ProviderWorkspace,
+    filters: ExpedienteFilters | None = None,
 ) -> Iterator[bytes]:
     """Yield ZIP bytes for the workspace's expediente, in chunks.
 
@@ -119,8 +179,12 @@ def stream_expediente_zip(
     Filename layout: ``<institution>/<period_key>/<safe_filename>``.
     Identical-name collisions across slots are disambiguated by
     appending an index suffix so the ZIP never silently drops a row.
+
+    Slice 5C — ``filters`` scopes both the cap check and the
+    archive composition. ``None`` (or an empty ``ExpedienteFilters``)
+    behaves identically to the original full-pull semantics.
     """
-    entries = _build_entries(db, workspace)
+    entries = _build_entries(db, workspace, filters or _NO_FILTERS)
     file_count = len(entries)
     total_bytes = sum(e.size_bytes for e in entries)
     if file_count > MAX_FILES:
@@ -159,24 +223,46 @@ def stream_expediente_zip(
 
 
 def _iter_workspace_documents(
-    db: Session, workspace: ProviderWorkspace
+    db: Session,
+    workspace: ProviderWorkspace,
+    filters: ExpedienteFilters = _NO_FILTERS,
 ) -> Iterator[tuple[Submission, Document, int]]:
     """Yield ``(submission, document, size_bytes)`` tuples for the
     workspace's downloadable submissions. Used by both the
     summary and the streaming paths so the filter logic stays in
     one place.
+
+    Slice 5C — when ``filters`` is non-empty, the SQL further
+    scopes the result. ``institution`` resolves via
+    ``Institution.code`` so unknown codes naturally yield zero
+    rows (no Institution row → no submission matches), matching
+    the defensive behavior the client portal uses.
     """
-    submissions = list(
-        db.scalars(
-            select(Submission)
-            .where(
-                Submission.client_id == workspace.client_id,
-                Submission.vendor_id == workspace.vendor_id,
-                Submission.status.notin_(_NO_BYTES_STATES),
-            )
-            .order_by(Submission.created_at.asc())
+    stmt = (
+        select(Submission)
+        .where(
+            Submission.client_id == workspace.client_id,
+            Submission.vendor_id == workspace.vendor_id,
+            Submission.status.notin_(_NO_BYTES_STATES),
         )
+        .order_by(Submission.created_at.asc())
     )
+    if filters.status:
+        stmt = stmt.where(Submission.status == filters.status)
+    if filters.period_key:
+        stmt = stmt.where(Submission.period_key == filters.period_key)
+    if filters.institution:
+        inst_id = db.scalar(
+            select(Institution.id).where(Institution.code == filters.institution)
+        )
+        if inst_id is None:
+            # Unknown institution → empty result. Force-empty rather
+            # than 400 so a future catalog code can ship without
+            # breaking the download flow.
+            return
+        stmt = stmt.where(Submission.institution_id == inst_id)
+
+    submissions = list(db.scalars(stmt))
     for sub in submissions:
         doc = db.scalar(
             select(Document).where(Document.submission_id == sub.id).limit(1)
@@ -187,12 +273,14 @@ def _iter_workspace_documents(
 
 
 def _build_entries(
-    db: Session, workspace: ProviderWorkspace
+    db: Session,
+    workspace: ProviderWorkspace,
+    filters: ExpedienteFilters = _NO_FILTERS,
 ) -> list[_ZipEntry]:
     """Translate workspace submissions into ZIP entries with collision-safe arcnames."""
     seen: dict[str, int] = {}
     entries: list[_ZipEntry] = []
-    for sub, doc, size in _iter_workspace_documents(db, workspace):
+    for sub, doc, size in _iter_workspace_documents(db, workspace, filters):
         institution_code = (
             sub.institution.code if sub.institution else None
         ) or "otros"

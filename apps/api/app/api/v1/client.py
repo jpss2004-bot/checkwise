@@ -29,7 +29,7 @@ from collections import defaultdict
 from datetime import UTC, date, datetime
 from typing import Annotated, Literal
 
-from fastapi import APIRouter, Depends, HTTPException, Query, status
+from fastapi import APIRouter, Depends, HTTPException, Query, Response, status
 from fastapi.responses import FileResponse
 from pydantic import BaseModel
 from sqlalchemy import and_, func, select
@@ -79,6 +79,7 @@ from app.models import (
     ValidationEvent,
     Vendor,
 )
+from app.services.audit_log import add_audit_event
 from app.services.client_metadata import (
     client_master_file_path,
     display_export_path,
@@ -853,6 +854,143 @@ def client_vendor_detail(
         recent_reviewer_notes=_recent_reviewer_notes_for_workspace(
             db, workspace, limit=10
         ),
+    )
+
+
+# ---------------------------------------------------------------------------
+# Phase 5 / Slice 5C — client-scoped vendor expediente ZIP
+# ---------------------------------------------------------------------------
+
+
+@router.get(
+    "/vendors/{vendor_id}/expediente.zip",
+    summary="Stream a ZIP of every uploaded document for one vendor",
+)
+def client_vendor_expediente_zip(
+    vendor_id: str,
+    db: DbSession,
+    current: ClientUser,
+    client_id: str | None = None,
+    status_filter: Annotated[str | None, Query(alias="status")] = None,
+    period_key: str | None = None,
+    institution: str | None = None,
+) -> Response:
+    """Stream a vendor's expediente as a ZIP, scoped to the client_admin's portfolio.
+
+    Mirrors the provider-side endpoint
+    (``/portal/workspaces/{id}/expediente.zip``) but enters through
+    the client portal so a client_admin can pull a vendor's
+    documents without minting a workspace session. Same backend
+    service composes the archive; same caps; same filter shape.
+
+    Authorization chain:
+      1. ``_resolve_client_id`` → the active client scope (raises
+         403/404 on mismatch, same as every other ``/client/*``).
+      2. The requested vendor MUST belong to that client; otherwise
+         404 (never confirms cross-tenant existence).
+      3. The vendor MUST have a ``ProviderWorkspace``; otherwise
+         404 (no workspace → no provider session ever created
+         documents on this vendor).
+
+    Audit: ``client.vendor_expediente_downloaded`` with metadata
+    ``{scope, client_id, vendor_id, workspace_id, file_count,
+    total_bytes, filters}``. Distinguishable from the
+    provider-side ``provider.expediente_downloaded`` action so a
+    forensic reader can answer "did the client_admin pull this, or
+    did the provider?".
+    """
+    from datetime import datetime
+
+    from fastapi.responses import StreamingResponse
+
+    from app.services.expediente_zip import (
+        MAX_FILES,
+        MAX_TOTAL_BYTES,
+        ExpedienteFilters,
+        stream_expediente_zip,
+        summarize_expediente,
+    )
+
+    target_id = _resolve_client_id(db, current, requested=client_id)
+
+    vendor = db.get(Vendor, vendor_id)
+    if vendor is None or vendor.client_id != target_id:
+        raise HTTPException(
+            status.HTTP_404_NOT_FOUND,
+            detail="Proveedor no encontrado para este cliente.",
+        )
+
+    workspace = db.scalar(
+        select(ProviderWorkspace).where(
+            ProviderWorkspace.client_id == target_id,
+            ProviderWorkspace.vendor_id == vendor_id,
+        )
+    )
+    if workspace is None:
+        raise HTTPException(
+            status.HTTP_404_NOT_FOUND,
+            detail=(
+                "Este proveedor no tiene un workspace activo; "
+                "no hay documentos para descargar."
+            ),
+        )
+
+    filters = ExpedienteFilters(
+        status=status_filter,
+        period_key=period_key,
+        institution=institution,
+    )
+
+    summary = summarize_expediente(db, workspace, filters)
+    if summary.file_count > MAX_FILES:
+        raise HTTPException(
+            status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE,
+            detail=(
+                f"El expediente tiene {summary.file_count} documentos; "
+                f"el límite por descarga es {MAX_FILES}. Filtra por "
+                "periodo o institución para reducir el alcance."
+            ),
+        )
+    if summary.total_bytes > MAX_TOTAL_BYTES:
+        raise HTTPException(
+            status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE,
+            detail=(
+                f"El expediente pesa {summary.total_bytes // (1024 * 1024)} MB; "
+                f"el límite por descarga es {MAX_TOTAL_BYTES // (1024 * 1024)} MB. "
+                "Filtra por periodo o institución para reducir el alcance."
+            ),
+        )
+
+    add_audit_event(
+        db,
+        action="client.vendor_expediente_downloaded",
+        entity_type="provider_workspace",
+        entity_id=workspace.id,
+        actor_type="client_admin",
+        actor_id=current.user.id,
+        metadata={
+            "scope": "client_vendor",
+            "client_id": target_id,
+            "vendor_id": vendor_id,
+            "workspace_id": workspace.id,
+            "file_count": summary.file_count,
+            "total_bytes": summary.total_bytes,
+            "filters": filters.to_audit_dict(),
+        },
+    )
+    db.commit()
+
+    iterator = stream_expediente_zip(db, workspace, filters)
+
+    safe_rfc = (vendor.rfc or "expediente").lower()
+    safe_rfc = "".join(ch for ch in safe_rfc if ch.isalnum() or ch in "-_") or "expediente"
+    today = datetime.now(UTC).strftime("%Y%m%d")
+    filename = f"expediente-{safe_rfc}-{today}.zip"
+
+    return StreamingResponse(
+        iterator,
+        media_type="application/zip",
+        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
     )
 
 

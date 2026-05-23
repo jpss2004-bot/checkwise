@@ -454,3 +454,36 @@ export async function downloadClientMetadata(params?: {
   }
   return response.blob();
 }
+
+/**
+ * Phase 5 / Slice 5C — optional filter set passed via query string
+ * to the client-scoped vendor expediente ZIP. Same shape as the
+ * provider-side ``ExpedienteZipFilters``.
+ */
+export type ClientVendorExpedienteFilters = {
+  status?: string | null;
+  period_key?: string | null;
+  institution?: string | null;
+};
+
+/**
+ * Absolute URL of the client-scoped vendor expediente ZIP endpoint.
+ *
+ * Used by the client portal's vendor detail page. A client_admin
+ * resolves a vendor in their portfolio and pulls the expediente
+ * as a single ZIP. Backend audits each request as
+ * ``client.vendor_expediente_downloaded``. Cookie-auth navigation
+ * pattern (open in a new tab so the bearer cookie carries).
+ */
+export function clientVendorExpedienteZipUrl(
+  vendorId: string,
+  filters: ClientVendorExpedienteFilters = {},
+): string {
+  const params = new URLSearchParams();
+  if (filters.status) params.set("status", filters.status);
+  if (filters.period_key) params.set("period_key", filters.period_key);
+  if (filters.institution) params.set("institution", filters.institution);
+  const qs = params.toString();
+  const base = `${API_BASE_URL}/api/v1/client/vendors/${encodeURIComponent(vendorId)}/expediente.zip`;
+  return qs ? `${base}?${qs}` : base;
+}

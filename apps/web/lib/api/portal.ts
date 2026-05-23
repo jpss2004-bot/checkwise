@@ -385,6 +385,18 @@ export function submissionDownloadUrl(
 }
 
 /**
+ * Phase 5 / Slice 5C — optional filter set passed via query string
+ * to the expediente ZIP endpoint. ``null``/empty values omit the
+ * filter — the backend treats no param as "no filter" so the
+ * caller doesn't need to distinguish.
+ */
+export type ExpedienteZipFilters = {
+  status?: string | null;
+  period_key?: string | null;
+  institution?: string | null;
+};
+
+/**
  * Absolute URL of the workspace's expediente ZIP endpoint.
  *
  * Phase 5 / Slice 5B — backend-streamed ZIP of every uploaded
@@ -394,9 +406,25 @@ export function submissionDownloadUrl(
  * begins, so the audit trail records intent even if the user
  * aborts mid-download. Same cookie-auth navigation pattern as the
  * single-document download.
+ *
+ * Slice 5C — accepts optional ``filters`` (status / period_key /
+ * institution). The same backend caps apply to the filtered subset.
  */
-export function expedienteZipUrl(session: PortalSession): string {
-  return `${API_BASE_URL}/api/v1/portal/workspaces/${session.workspace_id}/expediente.zip`;
+export function expedienteZipUrl(
+  session: PortalSession,
+  filters: ExpedienteZipFilters = {},
+): string {
+  const base = `${API_BASE_URL}/api/v1/portal/workspaces/${session.workspace_id}/expediente.zip`;
+  const qs = _buildExpedienteQuery(filters);
+  return qs ? `${base}?${qs}` : base;
+}
+
+function _buildExpedienteQuery(filters: ExpedienteZipFilters): string {
+  const params = new URLSearchParams();
+  if (filters.status) params.set("status", filters.status);
+  if (filters.period_key) params.set("period_key", filters.period_key);
+  if (filters.institution) params.set("institution", filters.institution);
+  return params.toString();
 }
 
 /**

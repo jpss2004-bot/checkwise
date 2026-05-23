@@ -2112,6 +2112,9 @@ def get_workspace_expediente_zip(
     workspace_id: str,
     db: DbSession,
     workspace: Annotated[ProviderWorkspace, Depends(current_portal_workspace)],
+    status_filter: Annotated[str | None, Query(alias="status")] = None,
+    period_key: str | None = None,
+    institution: str | None = None,
 ) -> Response:
     """Stream a ZIP of the provider's expediente.
 
@@ -2135,6 +2138,7 @@ def get_workspace_expediente_zip(
     from app.services.expediente_zip import (
         MAX_FILES,
         MAX_TOTAL_BYTES,
+        ExpedienteFilters,
         ExpedienteTooLargeError,
         stream_expediente_zip,
         summarize_expediente,
@@ -2142,9 +2146,19 @@ def get_workspace_expediente_zip(
 
     _ = workspace_id  # tenant guard already enforced by dependency
 
+    # Slice 5C — compose the filter set up-front so every downstream
+    # branch (cap check, audit metadata, ZIP composition) sees the
+    # same scope. Empty filters preserve the original full-pull
+    # semantics.
+    filters = ExpedienteFilters(
+        status=status_filter,
+        period_key=period_key,
+        institution=institution,
+    )
+
     # Pre-flight cap check — short-circuit with 413 before any
     # streaming begins so the user gets the failure mode synchronously.
-    summary = summarize_expediente(db, workspace)
+    summary = summarize_expediente(db, workspace, filters)
     if summary.file_count > MAX_FILES:
         raise HTTPException(
             status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE,
@@ -2166,7 +2180,9 @@ def get_workspace_expediente_zip(
 
     # Audit the intent BEFORE streaming. Includes the cap-check
     # totals so the forensic reader sees what the user was about to
-    # pull, even if they abort mid-download.
+    # pull, even if they abort mid-download. Slice 5C — filters
+    # land in metadata so the audit row distinguishes a full pull
+    # from a scoped one.
     add_audit_event(
         db,
         action="provider.expediente_downloaded",
@@ -2178,13 +2194,14 @@ def get_workspace_expediente_zip(
             "scope": "workspace",
             "file_count": summary.file_count,
             "total_bytes": summary.total_bytes,
+            "filters": filters.to_audit_dict(),
         },
     )
     db.commit()
 
     # Build the iterator now so any error surfaces synchronously
     # rather than as a corrupted ZIP halfway through the download.
-    iterator = stream_expediente_zip(db, workspace)
+    iterator = stream_expediente_zip(db, workspace, filters)
 
     safe_rfc = (workspace.vendor.rfc if workspace.vendor else "expediente").lower()
     safe_rfc = "".join(ch for ch in safe_rfc if ch.isalnum() or ch in "-_") or "expediente"

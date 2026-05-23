@@ -7,6 +7,7 @@ import {
   ArrowRight,
   ChatTeardrop,
   CheckCircle,
+  DownloadSimple,
   Files,
   Lightning,
   Warning,
@@ -29,6 +30,7 @@ import { Button } from "@/components/ui/button";
 
 import { ClientShell } from "../../_shell";
 import {
+  clientVendorExpedienteZipUrl,
   getClientVendorDetail,
   type ClientVendorDetail,
 } from "@/lib/api/client";
@@ -70,12 +72,35 @@ export default function ClientVendorDetailPage({ params }: PageProps) {
           : "Cargando información del proveedor…"
       }
       actions={
-        <Button asChild size="sm" variant="outline">
-          <Link href="/client/vendors">
-            <ArrowLeft className="h-4 w-4" weight="bold" aria-hidden="true" />
-            Volver
-          </Link>
-        </Button>
+        <>
+          {/* Phase 5 / Slice 5C — client-scoped vendor expediente
+              ZIP. No filter UI here yet (V1) — the modal lives on
+              the provider dashboard. Cookie-auth navigation pattern
+              (target=_blank). The backend audits the request as
+              ``client.vendor_expediente_downloaded`` so the
+              forensic trail distinguishes this from a provider
+              self-pull. */}
+          <Button asChild size="sm" variant="outline">
+            <a
+              href={clientVendorExpedienteZipUrl(vendor_id)}
+              target="_blank"
+              rel="noreferrer"
+            >
+              <DownloadSimple
+                className="h-4 w-4"
+                weight="bold"
+                aria-hidden="true"
+              />
+              Descargar expediente
+            </a>
+          </Button>
+          <Button asChild size="sm" variant="outline">
+            <Link href="/client/vendors">
+              <ArrowLeft className="h-4 w-4" weight="bold" aria-hidden="true" />
+              Volver
+            </Link>
+          </Button>
+        </>
       }
     >
       {error ? (

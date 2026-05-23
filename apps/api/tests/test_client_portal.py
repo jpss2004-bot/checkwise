@@ -845,3 +845,126 @@ def test_client_metadata_endpoint_exposes_master_download_state(
     assert download.headers["content-type"].startswith(
         "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
     )
+
+
+# ---------------------------------------------------------------------------
+# Phase 5 / Slice 5C — client-scoped vendor expediente ZIP
+# ---------------------------------------------------------------------------
+
+
+def test_client_vendor_expediente_zip_returns_documents(
+    api_client: TestClient, db_factory
+) -> None:
+    """A client_admin can stream a vendor's expediente as a ZIP.
+
+    The ZIP is grouped by institution/period (same layout the
+    provider sees) and the response carries an attachment
+    Content-Disposition with the vendor's RFC in the filename so a
+    multi-vendor download set stays grep-friendly.
+    """
+    import io
+    import zipfile
+
+    client_id = _seed_client(db_factory)
+    vendor_id, ws_id = _seed_vendor_with_workspace(db_factory, client_id=client_id)
+    # Drop one real submission into the workspace via the canonical
+    # upload helper; that path writes bytes to LOCAL_STORAGE_PATH so
+    # the ZIP composition has something to read.
+    _seed_submission_for_workspace(api_client, db_factory, ws_id)
+    assert ws_id  # quiet F841
+
+    _, email, pw = _seed_user_with_role(
+        db_factory, role="client_admin", client_id=client_id, email_prefix="ca"
+    )
+    token = _login(api_client, email, pw)
+
+    resp = api_client.get(
+        f"/api/v1/client/vendors/{vendor_id}/expediente.zip",
+        headers=_h(token),
+    )
+    assert resp.status_code == 200, resp.text
+    assert resp.headers.get("content-type") == "application/zip"
+    cd = resp.headers.get("content-disposition", "").lower()
+    assert "attachment" in cd
+    assert ".zip" in cd
+
+    archive = zipfile.ZipFile(io.BytesIO(resp.content))
+    names = archive.namelist()
+    assert len(names) == 1
+    # ``_seed_submission_for_workspace`` defaults to INFONAVIT / 2026-B1.
+    assert names[0].startswith("infonavit/2026-B1/")
+
+
+def test_client_vendor_expediente_zip_enforces_client_isolation(
+    api_client: TestClient, db_factory
+) -> None:
+    """A client_admin from client B must not be able to pull client
+    A's vendor expediente. The endpoint resolves the active client
+    scope first, then 404s when the requested vendor doesn't belong
+    to it — same shape as the existing /client/vendors/{id} guard.
+    """
+    client_a_id = _seed_client(db_factory, name="Cliente A")
+    vendor_a_id, ws_a_id = _seed_vendor_with_workspace(
+        db_factory, client_id=client_a_id
+    )
+    _seed_submission_for_workspace(api_client, db_factory, ws_a_id)
+
+    client_b_id = _seed_client(db_factory, name="Cliente B")
+    _seed_vendor_with_workspace(db_factory, client_id=client_b_id)
+
+    # Mint a client_admin user for client B and try to pull A's
+    # vendor expediente through their session.
+    _, email_b, pw_b = _seed_user_with_role(
+        db_factory, role="client_admin", client_id=client_b_id, email_prefix="cb"
+    )
+    token_b = _login(api_client, email_b, pw_b)
+    resp = api_client.get(
+        f"/api/v1/client/vendors/{vendor_a_id}/expediente.zip",
+        headers=_h(token_b),
+    )
+    assert resp.status_code == 404, resp.text
+
+
+def test_client_vendor_expediente_zip_writes_audit(
+    api_client: TestClient, db_factory
+) -> None:
+    """Audit row distinguishes the client-side pull from the
+    provider-side one. The action name + actor_type let a forensic
+    reader filter to "evidence pulled by the client" without
+    iterating the metadata dict.
+    """
+    from app.models import AuditLog
+
+    client_id = _seed_client(db_factory)
+    vendor_id, ws_id = _seed_vendor_with_workspace(db_factory, client_id=client_id)
+    _seed_submission_for_workspace(api_client, db_factory, ws_id)
+    _, email, pw = _seed_user_with_role(
+        db_factory, role="client_admin", client_id=client_id, email_prefix="ca"
+    )
+    token = _login(api_client, email, pw)
+
+    resp = api_client.get(
+        f"/api/v1/client/vendors/{vendor_id}/expediente.zip",
+        headers=_h(token),
+    )
+    assert resp.status_code == 200
+
+    db = db_factory()
+    try:
+        events = (
+            db.query(AuditLog)
+            .filter(AuditLog.action == "client.vendor_expediente_downloaded")
+            .all()
+        )
+        assert len(events) == 1
+        event = events[0]
+        assert event.actor_type == "client_admin"
+        meta = event.event_metadata or {}
+        assert meta.get("scope") == "client_vendor"
+        assert meta.get("client_id") == client_id
+        assert meta.get("vendor_id") == vendor_id
+        assert meta.get("file_count") == 1
+        # No filters → ``filters`` serializes to ``None``.
+        assert meta.get("filters") is None
+    finally:
+        db.close()
