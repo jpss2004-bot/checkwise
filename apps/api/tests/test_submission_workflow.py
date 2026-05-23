@@ -642,3 +642,119 @@ def test_reviewer_endpoint_routes_through_workflow_and_writes_audit_log(
         assert doc is not None and doc.status == DocumentStatus.RECHAZADO.value
     finally:
         db.close()
+
+
+def test_apply_reviewer_decision_threads_observations(db_factory) -> None:
+    """Phase 9 / Slice 9A — observations land in:
+      * the workflow ``TransitionResult`` (round-trippable to the API
+        response),
+      * ``AuditLog.metadata['observations']`` (forensic trail), and
+      * BOTH the client and provider notification bodies as a
+        distinct "Observación:" line after the formal "Razón:" line.
+
+    The formal reason stays unique in ``DocumentStatusHistory.reason``
+    and ``ValidationEvent.message`` so the audit timeline keeps
+    reading as one clean reason per row.
+    """
+    from app.models import (
+        AuditLog,
+        ClientNotification,
+        DocumentStatusHistory,
+        ProviderNotification,
+        ProviderWorkspace,
+    )
+
+    user_id, _ = _seed_user(db_factory)
+    submission_id = _seed_submission(db_factory)
+
+    # Phase 4B emit needs a workspace matching (client_id, vendor_id);
+    # ``_seed_submission`` doesn't create one. Add it inline so the
+    # provider notification fires.
+    db = db_factory()
+    try:
+        submission = db.get(Submission, submission_id)
+        ws = ProviderWorkspace(
+            client_id=submission.client_id,
+            vendor_id=submission.vendor_id,
+            persona_type="moral",
+            access_token=f"test-token-{submission_id[:8]}",
+        )
+        db.add(ws)
+        db.commit()
+    finally:
+        db.close()
+
+    db = db_factory()
+    try:
+        submission = db.get(Submission, submission_id)
+        result = apply_reviewer_decision(
+            db,
+            submission=submission,
+            action=ReviewerAction.REJECT,
+            reason="Falta firma del representante legal.",
+            observations=(
+                "Recomendamos generar la versión PDF/A para evitar "
+                "rechazo automático del SAT."
+            ),
+            reviewer_user_id=user_id,
+        )
+    finally:
+        db.close()
+
+    # TransitionResult carries observations alongside the reason.
+    assert result.reason == "Falta firma del representante legal."
+    assert result.observations is not None
+    assert "PDF/A" in result.observations
+
+    db = db_factory()
+    try:
+        # AuditLog metadata holds both reason and observations.
+        audit = db.scalar(
+            select(AuditLog).where(
+                AuditLog.entity_id == submission_id,
+                AuditLog.action == "submission.reviewer_decision",
+            )
+        )
+        assert audit is not None
+        meta = audit.event_metadata or {}
+        assert meta.get("reason") == "Falta firma del representante legal."
+        assert "PDF/A" in (meta.get("observations") or "")
+
+        # DocumentStatusHistory.reason stays the FORMAL reason only —
+        # observations are intentionally NOT mirrored here so the
+        # provider-facing timeline reads as a single reason per row.
+        history = db.scalar(
+            select(DocumentStatusHistory).where(
+                DocumentStatusHistory.submission_id == submission_id,
+                DocumentStatusHistory.to_status == DocumentStatus.RECHAZADO.value,
+            )
+        )
+        assert history is not None
+        assert history.reason == "Falta firma del representante legal."
+        assert "PDF/A" not in (history.reason or "")
+
+        # Both notification bodies render observations as a distinct
+        # sentence after the formal reason.
+        client_notif = db.scalar(
+            select(ClientNotification).where(
+                ClientNotification.submission_id == submission_id,
+                ClientNotification.notification_type == "document_reject",
+            )
+        )
+        assert client_notif is not None
+        assert "Razón: Falta firma del representante legal." in client_notif.body
+        assert "Observación: " in client_notif.body
+        assert "PDF/A" in client_notif.body
+
+        provider_notif = db.scalar(
+            select(ProviderNotification).where(
+                ProviderNotification.submission_id == submission_id,
+                ProviderNotification.notification_type == "document_reject",
+            )
+        )
+        assert provider_notif is not None
+        assert "Razón: Falta firma del representante legal." in provider_notif.body
+        assert "Observación: " in provider_notif.body
+        assert "PDF/A" in provider_notif.body
+    finally:
+        db.close()

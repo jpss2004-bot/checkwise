@@ -107,7 +107,11 @@ export default function ReviewerSubmissionPage({ params }: PageProps) {
   const retry = useCallback(() => setReloadKey((k) => k + 1), []);
 
   const handleDecision = useCallback(
-    async (action: ReviewerAction, reason: string | null) => {
+    async (
+      action: ReviewerAction,
+      reason: string | null,
+      observations: string | null,
+    ) => {
       if (!session || !detail) return;
       try {
         const result = await submitDecision(
@@ -115,6 +119,7 @@ export default function ReviewerSubmissionPage({ params }: PageProps) {
           detail.submission_id,
           action,
           reason,
+          observations,
         );
         setDecided({ new_status: result.new_status, action: result.action as ReviewerAction });
         toast.success("Decisión registrada", {

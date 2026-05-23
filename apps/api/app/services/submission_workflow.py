@@ -108,6 +108,10 @@ class TransitionResult:
     new_status: str
     action: str
     reason: str | None
+    # Phase 9 / Slice 9A — optional reviewer observation rendered
+    # alongside (but distinct from) the formal reason. Mirrors the
+    # API contract on ``DecisionResponse``.
+    observations: str | None
     reviewer_user_id: str
     decided_at: datetime
 
@@ -184,6 +188,7 @@ def apply_reviewer_decision(
     action: str | ReviewerAction,
     reason: str | None,
     reviewer_user_id: str,
+    observations: str | None = None,
 ) -> TransitionResult:
     """Apply a reviewer decision to a submission as an atomic transition.
 
@@ -221,6 +226,10 @@ def apply_reviewer_decision(
             status_code=http_status.HTTP_422_UNPROCESSABLE_CONTENT,
             detail=f"'{action_enum.value}' requires a 'reason'.",
         )
+    # Slice 9A — observations are always optional. Whitespace-only
+    # input collapses to None so the notification body doesn't render
+    # a stray "Observación: " heading with empty content.
+    cleaned_observations = (observations or "").strip() or None
 
     _validate_transition(submission, action_enum)
 
@@ -284,6 +293,12 @@ def apply_reviewer_decision(
         metadata={
             "reviewer_action": action_enum.value,
             "reason": cleaned_reason,
+            # Slice 9A — observations are stored only on the audit
+            # log + the notification bodies; intentionally NOT on
+            # DocumentStatusHistory.reason / ValidationEvent.message
+            # so the provider-facing timeline keeps reading as one
+            # clean reason per row.
+            "observations": cleaned_observations,
             "document_id": document_id,
         },
     )
@@ -293,6 +308,7 @@ def apply_reviewer_decision(
         submission=submission,
         action=action_enum,
         reason=cleaned_reason,
+        observations=cleaned_observations,
     )
     # Phase 4 / Slice 4B — also fire a provider-side notification so
     # the inbox at /portal/notifications surfaces the decision next
@@ -305,6 +321,7 @@ def apply_reviewer_decision(
         submission=submission,
         action=action_enum,
         reason=cleaned_reason,
+        observations=cleaned_observations,
     )
 
     db.commit()
@@ -317,6 +334,7 @@ def apply_reviewer_decision(
         new_status=new_status_value,
         action=action_enum.value,
         reason=cleaned_reason,
+        observations=cleaned_observations,
         reviewer_user_id=reviewer_user_id,
         decided_at=submission.updated_at,
     )

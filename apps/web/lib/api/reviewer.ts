@@ -68,6 +68,14 @@ export type QueueResponse = {
   items: QueueItem[];
   total: number;
   next_cursor: string | null;
+  /** Phase 9 / Slice 9A — rolling 7-day count of submissions that
+   *  resolved positively (aprobado + excepción legal). Drives the
+   *  stat strip above the queue. Always present (backend defaults
+   *  to 0). */
+  approved_last_7d_count: number;
+  /** Phase 9 / Slice 9A — rolling 7-day count of submissions
+   *  rejected by the reviewer in the same window. */
+  rejected_last_7d_count: number;
 };
 
 export type QueueFilters = {
@@ -121,6 +129,9 @@ export type DecisionResponse = {
   new_status: string;
   action: DecisionAction;
   reason: string | null;
+  /** Phase 9 / Slice 9A — optional reviewer observation for the
+   *  provider. ``null`` when not sent. */
+  observations: string | null;
   decided_at: string;
   reviewer_user_id: string;
 };
@@ -130,13 +141,14 @@ export async function submitDecision(
   submissionId: string,
   action: DecisionAction,
   reason: string | null,
+  observations: string | null = null,
 ): Promise<DecisionResponse> {
   return await fetchJson<DecisionResponse>(
     `/api/v1/reviewer/submissions/${submissionId}/decision`,
     token,
     {
       method: "POST",
-      body: JSON.stringify({ action, reason }),
+      body: JSON.stringify({ action, reason, observations }),
     },
   );
 }

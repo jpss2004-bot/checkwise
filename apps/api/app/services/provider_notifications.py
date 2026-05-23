@@ -66,12 +66,18 @@ def notify_provider_of_reviewer_decision(
     submission: Submission,
     action: ReviewerAction,
     reason: str | None,
+    observations: str | None = None,
 ) -> ProviderNotification | None:
     """Emit a provider notification for a reviewer decision.
 
     Resolves the workspace via (client_id, vendor_id). Returns the
     inserted row on success, or ``None`` when no workspace matches
     (silent skip per the locked Phase 4B behavior).
+
+    Slice 9A — body renders ``Razón`` and ``Observación`` on
+    distinct lines when present, so the provider sees the formal
+    reason and any operational context as two separate sentences
+    without click-through.
     """
     workspace = db.scalar(
         select(ProviderWorkspace).where(
@@ -87,7 +93,9 @@ def notify_provider_of_reviewer_decision(
     decision_label = _decision_label(action)
     body = f"{decision_label} para {requirement_label}{period_label}."
     if reason:
-        body = f"{body} Nota: {reason}"
+        body = f"{body} Razón: {reason}"
+    if observations:
+        body = f"{body} Observación: {observations}"
 
     return add_provider_notification(
         db,

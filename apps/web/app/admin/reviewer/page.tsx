@@ -5,8 +5,10 @@ import { useRouter } from "next/navigation";
 import {
   Warning,
   ArrowRight,
+  CheckCircle,
   Clock,
   Tray,
+  XCircle,
 } from "@phosphor-icons/react";
 
 import { AdminShell } from "../_shell";
@@ -148,6 +150,30 @@ export default function ReviewerQueuePage() {
           title="Documentos por revisar"
           description="Empieza por lo más viejo. Cada documento espera tu decisión humana. La automatización no aprueba ni rechaza nada."
         />
+
+      {/* Phase 9 / Slice 9A — rolling 7-day stat strip. Renders even
+          when the actionable queue is empty so the reviewer always
+          sees what got cleared this week. Hidden during the initial
+          load so it doesn't flash 0 before the real numbers arrive. */}
+      {queue ? (
+        <section
+          aria-label="Estado de la semana"
+          className="grid gap-3 sm:grid-cols-2"
+        >
+          <CounterCard
+            icon={CheckCircle}
+            tone="success"
+            label="Aprobados (últimos 7 días)"
+            value={queue.approved_last_7d_count}
+          />
+          <CounterCard
+            icon={XCircle}
+            tone="destructive"
+            label="Rechazados (últimos 7 días)"
+            value={queue.rejected_last_7d_count}
+          />
+        </section>
+      ) : null}
 
       {loading ? (
         <QueueTableSkeleton />
@@ -348,4 +374,40 @@ function formatAge(hours: number): string {
   if (hours < 24) return `${hours}h`;
   const days = Math.floor(hours / 24);
   return `${days}d`;
+}
+
+// Phase 9 / Slice 9A — single-counter card for the stat strip above
+// the queue. Reads as a glanceable "this week" indicator without
+// inviting a click — the reviewer's real work still lives in the
+// FIFO queue below.
+function CounterCard({
+  icon: Icon,
+  tone,
+  label,
+  value,
+}: {
+  icon: typeof CheckCircle;
+  tone: "success" | "destructive";
+  label: string;
+  value: number;
+}) {
+  const toneClass =
+    tone === "success"
+      ? "border-[color:var(--status-success-border)] bg-[color:var(--status-success-bg)] text-[color:var(--status-success-text)]"
+      : "border-[color:var(--status-error-border)] bg-[color:var(--status-error-bg)] text-[color:var(--status-error-text)]";
+  return (
+    <div
+      className={
+        "flex items-center gap-3 rounded-lg border p-4 shadow-xs " + toneClass
+      }
+    >
+      <Icon className="h-6 w-6 shrink-0" weight="fill" aria-hidden />
+      <div className="min-w-0">
+        <p className="font-mono text-[10px] uppercase tracking-wide opacity-80">
+          {label}
+        </p>
+        <p className="text-2xl font-semibold tabular-nums">{value}</p>
+      </div>
+    </div>
+  );
 }

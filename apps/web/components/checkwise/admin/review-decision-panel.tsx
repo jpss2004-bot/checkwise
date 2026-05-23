@@ -55,11 +55,40 @@ interface ReviewDecisionPanelProps {
   disabled?: boolean;
   /** Reason behind the disabled state — shown as an Alert. */
   disabledReason?: string;
-  /** Async handler — receives action + trimmed reason. May throw. */
-  onSubmit: (action: ReviewerAction, reason: string | null) => Promise<void>;
+  /**
+   * Async handler — receives action + trimmed reason + trimmed
+   * observations. Phase 9 / Slice 9A added the third argument:
+   * ``observations`` is an optional reviewer-authored note that
+   * lands in the notification body distinct from the formal reason.
+   * May throw.
+   */
+  onSubmit: (
+    action: ReviewerAction,
+    reason: string | null,
+    observations: string | null,
+  ) => Promise<void>;
   /** Optional override of the panel surface className. */
   className?: string;
 }
+
+// Phase 9 / Slice 9A — common rejection reasons. Click a chip to
+// append (or seed) the reason textarea so the reviewer can refine
+// the wording before submitting. Used on the ``reject`` and
+// ``request_clarification`` actions only. Approve / mark_exception
+// have no required reason and these chips would be wrong copy on
+// those paths. Wider operational set per the locked product
+// decision.
+const COMMON_REJECTION_REASONS: ReadonlyArray<string> = [
+  "PDF cortado o ilegible",
+  "RFC no coincide con el proveedor",
+  "Periodo del documento es incorrecto",
+  "Falta firma autorizada",
+  "Versión obsoleta del documento",
+  "Documento incompleto",
+  "Documento duplicado en otro periodo",
+  "Institución emisora incorrecta",
+  "Acuse o sello digital faltante",
+];
 
 const ACTIONS: {
   action: ReviewerAction;
@@ -133,12 +162,32 @@ export function ReviewDecisionPanel({
 }: ReviewDecisionPanelProps) {
   const [action, setAction] = React.useState<ReviewerAction | null>(null);
   const [reason, setReason] = React.useState("");
+  // Phase 9 / Slice 9A — optional reviewer observation. Distinct
+  // from the formal reason; lands in the notification body as a
+  // second sentence so the provider sees both pieces of context.
+  const [observations, setObservations] = React.useState("");
   const [reasonError, setReasonError] = React.useState<string | null>(null);
   const [networkError, setNetworkError] = React.useState<string | null>(null);
   const [confirmOpen, setConfirmOpen] = React.useState(false);
   const [submitting, setSubmitting] = React.useState(false);
 
   const requiresReason = action !== null && action !== "approve";
+  // Common-reason chips only make sense when the action returns the
+  // document to the provider. Approve / mark_exception use the
+  // optional "Nota interna" path, where canned phrases don't fit.
+  const showCommonReasons =
+    action === "reject" || action === "request_clarification";
+
+  function appendCommonReason(phrase: string) {
+    setReason((current) => {
+      const trimmed = current.trim();
+      if (!trimmed) return phrase;
+      // Avoid duplicating a chip the reviewer already clicked.
+      if (trimmed.includes(phrase)) return current;
+      return `${trimmed} ${phrase}`;
+    });
+    setReasonError(null);
+  }
 
   if (disabled) {
     return (
@@ -182,10 +231,20 @@ export function ReviewDecisionPanel({
     setSubmitting(true);
     setNetworkError(null);
     try {
-      await onSubmit(action, requiresReason ? reason.trim() : null);
+      const trimmedObservations = observations.trim();
+      await onSubmit(
+        action,
+        requiresReason ? reason.trim() : null,
+        // Observations are only meaningful when the document is being
+        // returned to the provider — on approve we keep the existing
+        // "Nota interna" semantics (reason field, not surfaced to
+        // provider) and don't send observations.
+        requiresReason && trimmedObservations ? trimmedObservations : null,
+      );
       setConfirmOpen(false);
       setAction(null);
       setReason("");
+      setObservations("");
     } catch (err) {
       const message =
         err instanceof Error
@@ -263,6 +322,24 @@ export function ReviewDecisionPanel({
             }
             error={reasonError ?? undefined}
           >
+            {showCommonReasons ? (
+              <div
+                className="mb-2 flex flex-wrap gap-1.5"
+                role="group"
+                aria-label="Razones comunes"
+              >
+                {COMMON_REJECTION_REASONS.map((phrase) => (
+                  <button
+                    key={phrase}
+                    type="button"
+                    onClick={() => appendCommonReason(phrase)}
+                    className="rounded-full border border-[color:var(--border-default)] bg-[color:var(--surface-raised)] px-2.5 py-1 text-[11px] font-medium text-[color:var(--text-secondary)] transition-colors hover:bg-[color:var(--surface-hover)] hover:text-[color:var(--text-primary)] focus:outline-none focus-visible:ring-2 focus-visible:ring-[color:var(--border-focus)]/40"
+                  >
+                    {phrase}
+                  </button>
+                ))}
+              </div>
+            ) : null}
             <Textarea
               id="reviewer-reason"
               rows={3}
@@ -273,6 +350,22 @@ export function ReviewDecisionPanel({
                   ? "Ejemplo: la opinión IMSS adjuntada corresponde al periodo anterior."
                   : "Nota interna opcional."
               }
+            />
+          </Field>
+        ) : null}
+
+        {action && requiresReason ? (
+          <Field
+            label="Observaciones para el proveedor (opcional)"
+            htmlFor="reviewer-observations"
+            helper="Contexto adicional, recomendaciones o pasos sugeridos. Aparece en la notificación del proveedor en una línea separada de la razón."
+          >
+            <Textarea
+              id="reviewer-observations"
+              rows={2}
+              value={observations}
+              onChange={(e) => setObservations(e.target.value)}
+              placeholder="Ejemplo: regenera el comprobante desde el portal del SAT con la versión actualizada."
             />
           </Field>
         ) : null}
@@ -313,6 +406,14 @@ export function ReviewDecisionPanel({
                   Razón que verá el proveedor
                 </p>
                 <p className="leading-[1.5]">{reason.trim()}</p>
+              </div>
+            ) : null}
+            {requiresReason && observations.trim() ? (
+              <div className="rounded-sm border border-[color:var(--border-subtle)] bg-[color:var(--surface-page)] p-3 text-sm text-[color:var(--text-secondary)]">
+                <p className="mb-1 font-mono text-[10px] uppercase tracking-wide text-[color:var(--text-tertiary)]">
+                  Observación adicional
+                </p>
+                <p className="leading-[1.5]">{observations.trim()}</p>
               </div>
             ) : null}
             {networkError ? (

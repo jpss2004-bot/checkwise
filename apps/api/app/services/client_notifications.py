@@ -126,13 +126,20 @@ def notify_reviewer_decision(
     submission: Submission,
     action: ReviewerAction,
     reason: str | None,
+    observations: str | None = None,
 ) -> ClientNotification:
     vendor = submission.vendor
     vendor_name = vendor.name if vendor else "Proveedor"
     label = _decision_label(action)
     body = f"{label} para {_requirement_label(submission)}{_period_label(submission)}."
     if reason:
-        body = f"{body} Nota: {reason}"
+        body = f"{body} Razón: {reason}"
+    # Slice 9A — observations render as a distinct line so the client
+    # admin can scan reason vs. context separately. Empty string
+    # collapses to None upstream in the workflow service, so a blank
+    # field never renders a stray "Observación:" heading.
+    if observations:
+        body = f"{body} Observación: {observations}"
     return add_client_notification(
         db,
         client_id=submission.client_id,

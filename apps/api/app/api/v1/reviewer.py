@@ -101,6 +101,15 @@ class QueueResponse(BaseModel):
     items: list[QueueItem]
     total: int
     next_cursor: str | None = None
+    # Phase 9 / Slice 9A — terminal-state counters surfaced as a
+    # small stat strip above the actionable queue. Window is a
+    # rolling 7 days against ``Submission.updated_at`` so the
+    # numbers reflect recent reviewer activity (not lifetime
+    # totals). The queue itself stays actionable-only; these are
+    # context for "what got cleared this week", not part of the
+    # filter set.
+    approved_last_7d_count: int = 0
+    rejected_last_7d_count: int = 0
 
 
 DECISION_ACTIONS: tuple[str, ...] = tuple(action.value for action in ReviewerAction)
@@ -109,6 +118,13 @@ DECISION_ACTIONS: tuple[str, ...] = tuple(action.value for action in ReviewerAct
 class DecisionRequest(BaseModel):
     action: Literal["approve", "reject", "request_clarification", "mark_exception"]
     reason: str | None = Field(default=None, max_length=2000)
+    # Phase 9 / Slice 9A — optional "observaciones para el proveedor"
+    # rendered as a distinct line in the notification body alongside
+    # the formal reason. The formal reason stays unique in
+    # DocumentStatusHistory.reason / ValidationEvent.message so the
+    # audit timeline keeps reading cleanly; observations go into
+    # AuditLog.metadata + the notification body only.
+    observations: str | None = Field(default=None, max_length=2000)
 
 
 class DecisionResponse(BaseModel):
@@ -117,6 +133,7 @@ class DecisionResponse(BaseModel):
     new_status: str
     action: str
     reason: str | None
+    observations: str | None = None
     decided_at: datetime
     reviewer_user_id: str
 
@@ -230,7 +247,44 @@ def get_queue(
             )
         )
 
-    return QueueResponse(items=items, total=int(total))
+    # Slice 9A — rolling-7-day counters for the stat strip above the
+    # queue. Counts terminal-state submissions whose ``updated_at`` is
+    # within the window, which under the workflow service tracks the
+    # decision time (``Submission.updated_at`` is bumped on each
+    # transition). Approved + Excepción legal both fold into the
+    # "approved" bucket — they both resolve the slot positively from
+    # the operator's perspective.
+    from datetime import timedelta
+
+    cutoff = utc_now() - timedelta(days=7)
+    approved_count = (
+        db.scalar(
+            select(__import__("sqlalchemy").func.count(Submission.id)).where(
+                Submission.status.in_((
+                    DocumentStatus.APROBADO.value,
+                    DocumentStatus.EXCEPCION_LEGAL.value,
+                )),
+                Submission.updated_at >= cutoff,
+            )
+        )
+        or 0
+    )
+    rejected_count = (
+        db.scalar(
+            select(__import__("sqlalchemy").func.count(Submission.id)).where(
+                Submission.status == DocumentStatus.RECHAZADO.value,
+                Submission.updated_at >= cutoff,
+            )
+        )
+        or 0
+    )
+
+    return QueueResponse(
+        items=items,
+        total=int(total),
+        approved_last_7d_count=int(approved_count),
+        rejected_last_7d_count=int(rejected_count),
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -463,6 +517,7 @@ def submit_decision(
         submission=submission,
         action=payload.action,
         reason=payload.reason,
+        observations=payload.observations,
         reviewer_user_id=current.user.id,
     )
 
@@ -472,6 +527,7 @@ def submit_decision(
         new_status=result.new_status,
         action=result.action,
         reason=result.reason,
+        observations=result.observations,
         decided_at=result.decided_at,
         reviewer_user_id=result.reviewer_user_id,
     )

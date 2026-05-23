@@ -782,3 +782,111 @@ def test_audit_log_filters_and_respects_limit(
         "/api/v1/admin/audit-log?entity_type=client", headers=_h(token)
     ).json()
     assert all(item["entity_type"] == "client" for item in by_type["items"])
+
+
+# ---------------------------------------------------------------------------
+# Phase 9 / Slice 9A — reviewer queue counters
+# ---------------------------------------------------------------------------
+
+
+def test_reviewer_queue_returns_approved_rejected_counts(
+    api_client: TestClient, db_factory
+) -> None:
+    """The queue response carries a rolling 7-day count of approved
+    and rejected submissions so the queue page can render a stat
+    strip above the actionable list. Counts both ``aprobado`` AND
+    ``excepcion_legal`` toward the approved bucket — both resolve
+    the slot positively.
+    """
+    from datetime import timedelta
+
+    from app.models import Submission
+    from app.models.entities import utc_now
+
+    db = db_factory()
+    try:
+        # Seed the minimum scaffold (client, vendor, institution,
+        # period, requirement) for terminal submissions.
+        existing_inst = db.scalar(
+            select(Institution).where(Institution.code == "imss")
+        )
+        institution = existing_inst or Institution(code="imss", name="IMSS")
+        if not existing_inst:
+            db.add(institution)
+            db.flush()
+        client = Client(name="Cliente Counters", rfc="COU260101AB1")
+        db.add(client)
+        db.flush()
+        vendor = Vendor(
+            client_id=client.id,
+            name="Vendor Counters",
+            rfc="VEN260101AB1",
+        )
+        db.add(vendor)
+        db.flush()
+        period = Period(
+            code="2026-M05",
+            period_key="2026-M05",
+            year=2026,
+            month=5,
+            period_type="mensual",
+        )
+        db.add(period)
+        db.flush()
+        requirement = Requirement(
+            code="counters_req",
+            name="Counters Req",
+            institution_id=institution.id,
+            load_type="pdf",
+            frequency="mensual",
+            risk_level="medium",
+            is_active=True,
+            current_version=1,
+        )
+        db.add(requirement)
+        db.flush()
+
+        # Inside the window: 2 approved + 1 excepcion_legal + 3 rejected.
+        # Outside the window: 1 approved + 1 rejected (8 days ago).
+        now = utc_now()
+        recent = now
+        stale = now - timedelta(days=8)
+        seed_specs = [
+            ("aprobado", recent),
+            ("aprobado", recent),
+            ("excepcion_legal", recent),
+            ("rechazado", recent),
+            ("rechazado", recent),
+            ("rechazado", recent),
+            ("aprobado", stale),
+            ("rechazado", stale),
+        ]
+        for idx, (status_value, ts) in enumerate(seed_specs):
+            db.add(
+                Submission(
+                    client_id=client.id,
+                    vendor_id=vendor.id,
+                    institution_id=institution.id,
+                    requirement_id=requirement.id,
+                    period_id=period.id,
+                    status=status_value,
+                    load_type="pdf",
+                    requirement_code=f"counters_req_{idx}",
+                    period_key="2026-M05",
+                    created_at=ts,
+                    updated_at=ts,
+                )
+            )
+        db.commit()
+    finally:
+        db.close()
+
+    token = _reviewer_token(api_client, db_factory)
+    resp = api_client.get("/api/v1/reviewer/queue", headers=_h(token))
+    assert resp.status_code == 200, resp.text
+    body = resp.json()
+
+    # Inside the 7-day window: 2 aprobado + 1 excepcion_legal = 3
+    # approved, 3 rejected. The stale rows are excluded.
+    assert body["approved_last_7d_count"] == 3
+    assert body["rejected_last_7d_count"] == 3
