@@ -432,3 +432,69 @@ export async function downloadReportExport(
   // has time to grab the blob.
   setTimeout(() => URL.revokeObjectURL(url), 1000);
 }
+
+// ─── Shares (Phase 10D) ──────────────────────────────────────────
+//
+// Mint / list / revoke share links. The raw token is returned ONCE
+// from createReportShare and never re-fetched — listReportShares
+// only returns metadata (no token, no hash).
+
+export interface ReportShare {
+  id: string;
+  report_id: string;
+  version_id: string;
+  audience: string;
+  expires_at: string | null;
+  revoked_at: string | null;
+  last_accessed_at: string | null;
+  access_count: number;
+  has_password: boolean;
+  created_at: string;
+}
+
+export interface CreateReportShareResponse {
+  share: ReportShare;
+  /** Raw token. Only returned on mint; never persisted or re-fetched. */
+  token: string;
+  /** Absolute consume URL ready to copy/paste. */
+  url: string;
+}
+
+export function createReportShare(
+  reportId: string,
+  params: { version_id?: string; expires_at?: string; password?: string } = {},
+): Promise<CreateReportShareResponse> {
+  return fetchJson<CreateReportShareResponse>(
+    `/api/v1/reports/${reportId}/shares`,
+    {
+      method: "POST",
+      body: JSON.stringify(params),
+    },
+  );
+}
+
+export function listReportShares(
+  reportId: string,
+): Promise<{ items: ReportShare[] }> {
+  return fetchJson<{ items: ReportShare[] }>(
+    `/api/v1/reports/${reportId}/shares`,
+  );
+}
+
+export async function revokeReportShare(shareId: string): Promise<void> {
+  const session = readAdminSession();
+  const headers: Record<string, string> = {};
+  if (session?.access_token) {
+    headers.Authorization = `Bearer ${session.access_token}`;
+  }
+  const response = await fetch(
+    `${API_BASE_URL}/api/v1/reports/shares/${shareId}`,
+    { method: "DELETE", headers },
+  );
+  if (response.status !== 204) {
+    throw new ReportsApiError(
+      response.status,
+      `No pudimos revocar el enlace (HTTP ${response.status}).`,
+    );
+  }
+}

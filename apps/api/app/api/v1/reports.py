@@ -18,10 +18,18 @@ from __future__ import annotations
 
 import json as _json
 import logging
-from datetime import datetime
+from datetime import UTC, datetime
 from typing import Annotated
 
-from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query, status
+from fastapi import (
+    APIRouter,
+    BackgroundTasks,
+    Depends,
+    HTTPException,
+    Query,
+    Response,
+    status,
+)
 from fastapi.responses import FileResponse, RedirectResponse, StreamingResponse
 from pydantic import BaseModel, Field
 from sqlalchemy import select
@@ -35,7 +43,7 @@ from app.constants.reports import (
     ReportVersionOrigin,
 )
 from app.db.session import SessionLocal, get_db
-from app.models.entities import Report, ReportExport, ReportVersion
+from app.models.entities import Report, ReportExport, ReportShare, ReportVersion
 from app.schemas.reports import (
     CreateFromPresetRequest,
     PlannedBlockResponse,
@@ -84,6 +92,7 @@ from app.services.reports.export import (
 )
 from app.services.reports.llm import LLMError, get_llm_client
 from app.services.reports.planner import plan_report
+from app.services.reports.sharing import mint_share, revoke_share
 from app.services.reports.templates import get_preset, presets_for_roles
 from app.services.storage import get_storage_service
 
@@ -1577,3 +1586,246 @@ def get_report_export_download(
         media_type=media_type,
         filename=download_name,
     )
+
+
+# ──────────────────────────────────────────────────────────────────
+# Phase 10D — Report shares
+# ──────────────────────────────────────────────────────────────────
+#
+# Three bearer-auth endpoints for managing share links:
+#   POST   /reports/{id}/shares      → mint a token (returned once)
+#   GET    /reports/{id}/shares      → list active shares
+#   DELETE /reports/shares/{id}      → revoke a share
+#
+# The PUBLIC consume route lives in app.api.v1.shares (different
+# prefix `/r/`, different security model — no auth, just token).
+# Permission gate here is `get_report`: cross-tenant report ids
+# return 404 (no enumeration), shares listed/revoked by id are
+# always re-checked against the parent report's gate so a leaked
+# share id can't be revoked across tenants.
+
+
+class CreateReportSharePayload(BaseModel):
+    """Body for ``POST /reports/{id}/shares``.
+
+    ``expires_at`` is optional — caller-supplied. The frontend
+    defaults to now + 30 days unless the sender picks "no expiry"
+    or a custom date. Past timestamps return 422; we never mint
+    a pre-expired token.
+
+    ``password`` is also optional. When set, the recipient must
+    present it before the consume endpoint returns the rendered
+    HTML. The password itself is bcrypt-hashed before storage; the
+    raw value never lives anywhere except this request body.
+
+    ``version_id`` is optional — defaults to the report's current
+    version.
+    """
+
+    version_id: str | None = None
+    expires_at: datetime | None = None
+    password: str | None = Field(default=None, min_length=4)
+
+
+class ReportShareRead(BaseModel):
+    """Public shape of a ReportShare row.
+
+    Tokens / password hashes are NEVER returned. The raw token is
+    only available once, in the response to the mint endpoint, via
+    :class:`MintReportShareResponse`.
+    """
+
+    id: str
+    report_id: str
+    version_id: str
+    audience: str
+    expires_at: datetime | None
+    revoked_at: datetime | None
+    last_accessed_at: datetime | None
+    access_count: int
+    has_password: bool
+    created_at: datetime
+
+
+class MintReportShareResponse(BaseModel):
+    """One-time response carrying the freshly-minted raw token.
+
+    ``url`` is the absolute consume URL ready to copy/paste into an
+    email. The frontend should display it and ``token`` in the
+    success modal, then never fetch them again — re-opening the
+    share dialog only ever lists the existing rows via the
+    no-token-fields ``ReportShareRead`` shape.
+    """
+
+    share: ReportShareRead
+    token: str
+    url: str
+
+
+class ReportShareList(BaseModel):
+    items: list[ReportShareRead]
+
+
+def _read_share(row: ReportShare) -> ReportShareRead:
+    return ReportShareRead(
+        id=row.id,
+        report_id=row.report_id,
+        version_id=row.version_id,
+        audience=row.audience,
+        expires_at=row.expires_at,
+        revoked_at=row.revoked_at,
+        last_accessed_at=row.last_accessed_at,
+        access_count=row.access_count,
+        has_password=row.password_hash is not None,
+        created_at=row.created_at,
+    )
+
+
+def _share_consume_url(token: str) -> str:
+    """Build the absolute URL the recipient opens.
+
+    Prefers ``settings.PUBLIC_BASE_URL`` (configured per environment
+    in render.yaml / .env). Falls back to a relative path so dev
+    setups without that var still produce a usable token + path
+    pair — the frontend can prepend window.location.origin.
+    """
+    from app.core.config import settings as cfg
+
+    base = getattr(cfg, "PUBLIC_BASE_URL", None) or getattr(cfg, "API_BASE_URL", None)
+    path = f"/api/v1/r/{token}"
+    if base:
+        return f"{base.rstrip('/')}{path}"
+    return path
+
+
+@router.post(
+    "/{report_id}/shares",
+    response_model=MintReportShareResponse,
+    status_code=status.HTTP_201_CREATED,
+    summary="Mint a public share link for a report version",
+)
+def post_report_share(
+    report_id: str,
+    payload: CreateReportSharePayload,
+    db: DbSession,
+    current: Annotated[CurrentUser, Depends(get_current_user)],
+) -> MintReportShareResponse:
+    """Create a public share link. The raw token is returned ONCE.
+
+    Reuses ``get_report`` for the permission gate so cross-tenant
+    report ids return 404 (no enumeration).
+    """
+    try:
+        report, current_version = get_report(
+            db, actor=_actor_from(current, db), report_id=report_id
+        )
+    except ReportNotFoundError as exc:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, str(exc)) from exc
+
+    if payload.version_id is not None:
+        version = db.get(ReportVersion, payload.version_id)
+        if version is None or version.report_id != report.id:
+            raise HTTPException(
+                status.HTTP_404_NOT_FOUND, detail="Versión no encontrada."
+            )
+    else:
+        version = current_version
+        if version is None:
+            raise HTTPException(
+                status.HTTP_422_UNPROCESSABLE_ENTITY,
+                detail="El reporte no tiene una versión actual para compartir.",
+            )
+
+    if payload.expires_at is not None:
+        # Normalize tz-naive datetimes to UTC so the comparison
+        # against utc_now() (tz-aware) doesn't raise. Past
+        # timestamps are rejected — we never mint a pre-expired
+        # token (frontend would surface it as immediately broken).
+        expires = payload.expires_at
+        if expires.tzinfo is None:
+            expires = expires.replace(tzinfo=UTC)
+        if expires <= datetime.now(UTC):
+            raise HTTPException(
+                status.HTTP_422_UNPROCESSABLE_ENTITY,
+                detail="expires_at debe ser una fecha futura.",
+            )
+    else:
+        expires = None
+
+    row, raw_token = mint_share(
+        db,
+        report=report,
+        version=version,
+        audience=report.audience,
+        requested_by=current.user,
+        expires_at=expires,
+        password=payload.password,
+    )
+    db.commit()
+    db.refresh(row)
+    return MintReportShareResponse(
+        share=_read_share(row),
+        token=raw_token,
+        url=_share_consume_url(raw_token),
+    )
+
+
+@router.get(
+    "/{report_id}/shares",
+    response_model=ReportShareList,
+    summary="List share links for a report (no tokens)",
+)
+def get_report_shares(
+    report_id: str,
+    db: DbSession,
+    current: Annotated[CurrentUser, Depends(get_current_user)],
+) -> ReportShareList:
+    """List shares scoped to the report.
+
+    Both active and revoked rows surface — the UI shows revoked
+    ones grayed out so the sender can see "I shut that one down".
+    Tokens / hashes are never in the response.
+    """
+    try:
+        report, _ = get_report(
+            db, actor=_actor_from(current, db), report_id=report_id
+        )
+    except ReportNotFoundError as exc:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, str(exc)) from exc
+
+    rows = list(
+        db.scalars(
+            select(ReportShare)
+            .where(ReportShare.report_id == report.id)
+            .order_by(ReportShare.created_at.desc())
+        )
+    )
+    return ReportShareList(items=[_read_share(r) for r in rows])
+
+
+@router.delete(
+    "/shares/{share_id}",
+    status_code=status.HTTP_204_NO_CONTENT,
+    summary="Revoke a share link",
+)
+def delete_report_share(
+    share_id: str,
+    db: DbSession,
+    current: Annotated[CurrentUser, Depends(get_current_user)],
+) -> Response:
+    """Revoke a share. Idempotent — re-revoking is also 204.
+
+    Cross-tenant share ids return 404 because the parent report's
+    permission gate fails — no enumeration of share ids across
+    organisations.
+    """
+    share = db.get(ReportShare, share_id)
+    if share is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, detail="Share no encontrado.")
+    try:
+        get_report(db, actor=_actor_from(current, db), report_id=share.report_id)
+    except ReportNotFoundError as exc:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, detail="Share no encontrado.") from exc
+    revoke_share(db, share=share)
+    db.commit()
+    return Response(status_code=status.HTTP_204_NO_CONTENT)

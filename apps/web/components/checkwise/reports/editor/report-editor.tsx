@@ -26,6 +26,7 @@ import {
 import { Canvas } from "@/components/checkwise/reports/canvas";
 import { ChatCopilot } from "@/components/checkwise/reports/chat-copilot";
 import { ExportButton } from "@/components/checkwise/reports/editor/export-button";
+import { ShareDialog } from "@/components/checkwise/reports/editor/share-dialog";
 import { ReportActionsContext } from "@/components/checkwise/reports/freshness-label";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
@@ -468,6 +469,7 @@ export function ReportEditor({
             <ExportButton reportId={reportId} format="html" />
             <ExportButton reportId={reportId} format="pdf" />
             <ExportButton reportId={reportId} format="xlsx" />
+            <ShareDialog reportId={reportId} />
             <Button
               variant="default"
               size="sm"
