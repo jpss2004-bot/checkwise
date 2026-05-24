@@ -94,8 +94,8 @@ const STATE_META: Record<
   rejected: { label: "Rechazado", print: "[Rechazado]", tone: "red" },
   needs_correction: { label: "Por aclarar", print: "[Por aclarar]", tone: "red" },
   possible_mismatch: {
-    label: "Posible mismatch",
-    print: "[Posible mismatch]",
+    label: "Posible inconsistencia",
+    print: "[Posible inconsistencia]",
     tone: "orange",
   },
   expired: { label: "Vencido", print: "[Vencido]", tone: "orange" },

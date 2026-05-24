@@ -336,7 +336,7 @@ const REVIEWER_NOTE_STATUSES: ReadonlySet<RequirementStatus> = new Set<
 const REVIEWER_NOTE_HEADINGS: Partial<Record<RequirementStatus, string>> = {
   rechazado: "Motivo del rechazo",
   requiere_aclaracion: "Aclaración solicitada",
-  posible_mismatch: "Posible discrepancia",
+  posible_mismatch: "Posible inconsistencia",
 };
 
 function ReviewerNoteCard({ detail }: { detail: SubmissionDetail }) {

@@ -516,7 +516,7 @@ function StatusPill({ status }: { status: string }) {
     pendiente_revision: { variant: "info", label: "En revisión" },
     recibido: { variant: "info", label: "Recibido" },
     prevalidado: { variant: "info", label: "Prevalidado" },
-    posible_mismatch: { variant: "warning", label: "Posible mismatch" },
+    posible_mismatch: { variant: "warning", label: "Posible inconsistencia" },
     vencido: { variant: "destructive", label: "Vencido" },
     pendiente: { variant: "secondary", label: "Pendiente" },
   };

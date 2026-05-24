@@ -101,7 +101,7 @@ const INSTITUTION_ORDER: Institution[] = [
 const STATE_LABEL: Record<SlotState, string> = {
   rejected: "Rechazado",
   needs_correction: "Por aclarar",
-  possible_mismatch: "Posible mismatch",
+  possible_mismatch: "Posible inconsistencia",
   expired: "Vencido",
   missing: "Pendiente",
   in_review: "En revisión",

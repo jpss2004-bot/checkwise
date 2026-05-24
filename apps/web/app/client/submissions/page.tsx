@@ -33,7 +33,7 @@ const STATUS_META: Record<
   pendiente_revision: { variant: "info", label: "En revisión" },
   recibido: { variant: "info", label: "Recibido" },
   prevalidado: { variant: "info", label: "Prevalidado" },
-  posible_mismatch: { variant: "warning", label: "Posible discrepancia" },
+  posible_mismatch: { variant: "warning", label: "Posible inconsistencia" },
   vencido: { variant: "destructive", label: "Vencido" },
   pendiente: { variant: "secondary", label: "Pendiente" },
   no_aplica: { variant: "secondary", label: "N/A" },

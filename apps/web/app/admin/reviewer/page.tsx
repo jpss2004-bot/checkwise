@@ -49,7 +49,7 @@ type FilterKey = "all" | "in_review" | "mismatch" | "clarify";
 const FILTER_LABEL: Record<FilterKey, string> = {
   all: "Todos",
   in_review: "Por revisar",
-  mismatch: "Posible mismatch",
+  mismatch: "Posible inconsistencia",
   clarify: "Aclaración",
 };
 
