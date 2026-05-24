@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useState } from "react";
-import { DownloadSimple, FilePdf } from "@phosphor-icons/react";
+import { DownloadSimple, FilePdf, FileXls } from "@phosphor-icons/react";
 
 import { Button } from "@/components/ui/button";
 import { toast } from "@/components/ui/toast";
@@ -53,6 +53,13 @@ const FORMAT_META: Record<
     title:
       "Exportar el reporte como PDF renderizado en el servidor (Playwright). El botón 'Descargar PDF' usa la impresión del navegador como alternativa.",
     icon: FilePdf,
+  },
+  xlsx: {
+    label: "Descargar Excel",
+    busyLabel: "Generando Excel…",
+    title:
+      "Exportar el reporte como libro de Excel. Una hoja por bloque; bloques tabulares (matriz de riesgos, métricas) se exportan como tablas filtrables.",
+    icon: FileXls,
   },
 };
 

@@ -66,8 +66,8 @@ from app.services.storage import get_storage_service
 logger = logging.getLogger(__name__)
 
 
-ReportExportFormat = Literal["html", "pdf"]
-SUPPORTED_FORMATS: tuple[ReportExportFormat, ...] = ("html", "pdf")
+ReportExportFormat = Literal["html", "pdf", "xlsx"]
+SUPPORTED_FORMATS: tuple[ReportExportFormat, ...] = ("html", "pdf", "xlsx")
 
 
 class ReportExportError(Exception):
@@ -156,6 +156,12 @@ def run_report_export(db: Session, export_id: str) -> None:
             artifact = render_report_pdf(report, version)
             content_type = "application/pdf"
             extension = "pdf"
+        elif row.format == "xlsx":
+            artifact = render_report_xlsx(report, version)
+            content_type = (
+                "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+            )
+            extension = "xlsx"
         else:
             # Defensive — start_report_export already validated, but a
             # stale row from a prior schema could carry an unsupported
@@ -274,6 +280,222 @@ def render_report_pdf(report: Report, version: ReportVersion) -> bytes:
             logger.warning(
                 "[reports.export] failed to delete temp file %s", tmp.name
             )
+
+
+def render_report_xlsx(report: Report, version: ReportVersion) -> bytes:
+    """Phase 10C — render the report as an Excel workbook.
+
+    Layout: one "Cover" sheet with the report metadata, then one
+    sheet per block. Each block sheet carries the block's title in
+    A1 and a 2-column key/value dump of ``block.data`` starting in
+    A3. Tabular block payloads (lists of dicts — the typical
+    vendor_risk_matrix shape) get flattened into a proper header
+    row + value rows so the user can sort / filter / pivot like any
+    other Excel table.
+
+    Sheet names are Excel-safe: trimmed to 31 chars, with the
+    illegal chars ``[]:*?/\\`` replaced by underscores, and a
+    numeric suffix on collisions. Empty/divider blocks are skipped
+    (they don't add anything as a separate sheet).
+
+    Pure Python; no native deps. The output bytes are written via
+    ``Workbook.save`` to a ``BytesIO`` so the dispatcher never
+    touches the filesystem — slight win over the PDF path's
+    tempfile dance.
+
+    Import is local so the 10A/10B paths don't pay the openpyxl
+    module-load cost.
+    """
+    from io import BytesIO
+
+    from openpyxl import Workbook
+    from openpyxl.styles import Alignment, Font, PatternFill
+
+    wb = Workbook()
+    cover = wb.active
+    cover.title = "Resumen"
+
+    # Cover sheet ─────────────────────────────────────────────────
+    cover["A1"] = report.title or "Reporte CheckWise"
+    cover["A1"].font = Font(size=18, bold=True)
+    if report.description:
+        cover["A2"] = report.description
+        cover["A2"].alignment = Alignment(wrap_text=True)
+    cover["A4"] = "Audiencia"
+    cover["B4"] = _audience_label(report.audience)
+    cover["A5"] = "Versión"
+    cover["B5"] = f"v{version.version_number}"
+    cover["A6"] = "Generado"
+    cover["B6"] = utc_now().isoformat()
+    blocks = (version.content_json or {}).get("blocks") or []
+    cover["A7"] = "Bloques"
+    cover["B7"] = len(blocks)
+    for row_idx in range(4, 8):
+        cover.cell(row=row_idx, column=1).font = Font(bold=True)
+    cover.column_dimensions["A"].width = 16
+    cover.column_dimensions["B"].width = 60
+
+    # Per-block sheets ────────────────────────────────────────────
+    used_names: set[str] = {cover.title}
+    header_fill = PatternFill(
+        start_color="FF013557", end_color="FF013557", fill_type="solid"
+    )
+    header_font = Font(color="FFFFFFFF", bold=True)
+
+    for index, block in enumerate(blocks, start=1):
+        block_type = str(block.get("type") or "unknown")
+        if block_type == "divider":
+            continue
+        config = block.get("config") or {}
+        data = block.get("data") or {}
+        title = str(config.get("title") or _humanise_type(block_type))
+        sheet_name = _safe_sheet_name(f"{index:02d} {title}", used_names)
+        used_names.add(sheet_name)
+        ws = wb.create_sheet(sheet_name)
+
+        # Title row
+        ws["A1"] = title
+        ws["A1"].font = Font(size=14, bold=True)
+        ws["A2"] = f"type: {block_type}"
+        ws["A2"].font = Font(italic=True, color="FF666666")
+
+        if block_type == "text":
+            body = str(config.get("body") or data.get("body") or "")
+            ws["A4"] = body
+            ws["A4"].alignment = Alignment(wrap_text=True, vertical="top")
+            ws.column_dimensions["A"].width = 100
+            continue
+
+        # Try the tabular shape first — a list of dicts under any
+        # top-level key renders as a real table. ``vendor_risk_matrix``
+        # is the canonical example; ``kpi_strip.resolved`` and
+        # ``attention_list.items`` follow the same shape.
+        rendered_tabular = _try_render_tabular_block(
+            ws, data, header_fill=header_fill, header_font=header_font
+        )
+        if rendered_tabular:
+            continue
+
+        # Generic key/value dump otherwise.
+        _render_keyvalue_block(ws, data)
+        ws.column_dimensions["A"].width = 32
+        ws.column_dimensions["B"].width = 80
+
+    buffer = BytesIO()
+    wb.save(buffer)
+    return buffer.getvalue()
+
+
+def _safe_sheet_name(name: str, used: set[str]) -> str:
+    """Coerce ``name`` into an Excel-legal sheet name, deduping on collision.
+
+    Excel sheet names: max 31 chars, no ``[]:*?/\\``, can't be empty,
+    can't collide. We replace illegal chars with ``_`` and append
+    ``-2``, ``-3``, … to disambiguate.
+    """
+    cleaned = "".join("_" if c in "[]:*?/\\" else c for c in name).strip() or "Bloque"
+    truncated = cleaned[:31]
+    if truncated not in used:
+        return truncated
+    base = truncated[:28]  # leave room for "-NN"
+    for i in range(2, 100):
+        candidate = f"{base}-{i}"
+        if candidate not in used:
+            return candidate
+    return truncated[:31]  # last-resort fallback — caller will warn on dupe
+
+
+def _try_render_tabular_block(
+    ws,
+    data: Any,
+    *,
+    header_fill,
+    header_font,
+) -> bool:
+    """Look for a list of dicts inside ``data`` and render it as a table.
+
+    Returns True if it rendered, False otherwise. The first top-level
+    value that's a non-empty list of dicts wins — most block payloads
+    only carry one tabular surface (``vendor_risk_matrix.vendors``,
+    ``kpi_strip.resolved``, etc).
+    """
+    from openpyxl.styles import Font
+
+    if not isinstance(data, dict):
+        return False
+    for key, value in data.items():
+        if (
+            isinstance(value, list)
+            and value
+            and all(isinstance(item, dict) for item in value)
+        ):
+            ws["A4"] = key
+            ws["A4"].font = Font(bold=True, color="FF02558A")
+            # Stable header order: union of keys, sorted, with common
+            # identity-looking keys first.
+            all_keys: list[str] = []
+            seen: set[str] = set()
+            for item in value:
+                for k in item.keys():
+                    if k not in seen:
+                        seen.add(k)
+                        all_keys.append(str(k))
+            for col_idx, header in enumerate(all_keys, start=1):
+                cell = ws.cell(row=6, column=col_idx, value=header)
+                cell.font = header_font
+                cell.fill = header_fill
+            for row_offset, item in enumerate(_truncate_iter(value), start=7):
+                if not isinstance(item, dict):
+                    continue
+                for col_idx, header in enumerate(all_keys, start=1):
+                    cell_val = item.get(header)
+                    if isinstance(cell_val, (dict, list, tuple)):
+                        cell_val = str(cell_val)
+                    elif cell_val is None:
+                        cell_val = ""
+                    ws.cell(row=row_offset, column=col_idx, value=cell_val)
+            for col_idx in range(1, len(all_keys) + 1):
+                ws.column_dimensions[
+                    ws.cell(row=6, column=col_idx).column_letter
+                ].width = 22
+            return True
+    return False
+
+
+def _render_keyvalue_block(ws, data: Any, *, start_row: int = 4) -> None:
+    """Recursive key/value dump into rows 4+ of ``ws``.
+
+    Dict → one row per key with the value stringified (nested dicts
+    flatten to ``json.dumps``-style strings). Non-dict payloads end
+    up in a single cell so the sheet isn't blank.
+    """
+    from openpyxl.styles import Alignment, Font
+
+    if not isinstance(data, dict):
+        ws["A4"] = str(data) if data is not None else "(sin datos)"
+        return
+    row = start_row
+    for key, value in data.items():
+        ws.cell(row=row, column=1, value=str(key)).font = Font(bold=True)
+        rendered: str
+        if value is None:
+            rendered = "—"
+        elif isinstance(value, bool):
+            rendered = "Sí" if value else "No"
+        elif isinstance(value, (str, int, float)):
+            rendered = str(value)
+        else:
+            # Fall back to a compact JSON-ish repr for nested
+            # structures so the cell stays readable.
+            import json as _json
+
+            try:
+                rendered = _json.dumps(value, ensure_ascii=False, default=str)[:1000]
+            except Exception:
+                rendered = str(value)[:1000]
+        cell = ws.cell(row=row, column=2, value=rendered)
+        cell.alignment = Alignment(wrap_text=True, vertical="top")
+        row += 1
 
 
 def render_report_html(report: Report, version: ReportVersion) -> bytes:
@@ -693,6 +915,7 @@ __all__ = [
     "ReportExportFormat",
     "render_report_html",
     "render_report_pdf",
+    "render_report_xlsx",
     "run_report_export",
     "start_report_export",
 ]

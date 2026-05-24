@@ -25,6 +25,11 @@ dependencies = [
   # time via `playwright install --with-deps chromium` (see
   # render.yaml buildCommand).
   "playwright>=1.40",
+  # Phase 10C — server-side Excel rendering for report exports.
+  # Pure Python, no native deps. Already present as a transitive
+  # dep; pinning explicitly so 10C doesn't break if upstream
+  # tightens.
+  "openpyxl>=3.1",
   "pydantic-settings>=2.2",
   "python-multipart>=0.0.9",
   "sqlalchemy>=2.0",

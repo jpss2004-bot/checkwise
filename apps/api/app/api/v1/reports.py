@@ -1549,6 +1549,9 @@ def get_report_export_download(
     media_type = {
         "html": "text/html; charset=utf-8",
         "pdf": "application/pdf",
+        "xlsx": (
+            "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+        ),
     }.get(row.format, "application/octet-stream")
     download_name = f"checkwise-report-{row.report_id}-v{row.version_id}.{row.format}"
     disposition = f'attachment; filename="{download_name}"'

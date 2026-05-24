@@ -52,6 +52,7 @@ from app.services.reports.export import (
     ReportExportError,
     render_report_html,
     render_report_pdf,
+    render_report_xlsx,
     run_report_export,
     start_report_export,
 )
@@ -227,10 +228,10 @@ def _create_report_with_blocks(api_client: TestClient, token: str) -> str:
 
 
 def test_supported_formats_pin() -> None:
-    """Slice 10A shipped HTML; 10B added PDF. Updating this assertion
-    when 10C (Excel) lands is a deliberate test edit so the new
-    format is intentional, not accidental."""
-    assert SUPPORTED_FORMATS == ("html", "pdf")
+    """Slice 10A shipped HTML; 10B added PDF; 10C added Excel.
+    Updating this assertion is the canonical "I am adding a new
+    format on purpose" gate."""
+    assert SUPPORTED_FORMATS == ("html", "pdf", "xlsx")
 
 
 def test_render_report_html_escapes_user_data(db_factory) -> None:
@@ -422,7 +423,7 @@ def test_start_report_export_rejects_unsupported_format(db_factory) -> None:
                 db,
                 report=report,
                 version=version,
-                format="xlsx",  # not supported until 10C
+                format="docx",  # 10A-C have html/pdf/xlsx; docx remains unsupported
                 requested_by_user_id=user.id,
             )
         # No row created
@@ -568,14 +569,16 @@ def test_post_export_422_for_bad_format(api_client, db_factory) -> None:
     resp = api_client.post(
         f"/api/v1/reports/{report_id}/exports",
         headers=_h(token),
-        json={"format": "xlsx"},  # not supported until 10C
+        json={"format": "docx"},  # 10A-C have html/pdf/xlsx; docx remains unsupported
     )
     assert resp.status_code == 422
-    # The detail string includes the supported-formats list — both
-    # html and pdf should appear so consumers can self-correct.
+    # The detail string includes the supported-formats list so
+    # consumers can self-correct. All three currently-supported
+    # values should appear.
     detail = resp.json()["detail"]
     assert "html" in detail
     assert "pdf" in detail
+    assert "xlsx" in detail
 
 
 def test_post_export_creates_pending_row_and_returns_201(api_client, db_factory) -> None:
@@ -909,3 +912,191 @@ def test_post_pdf_export_creates_pdf_artifact(api_client, db_factory) -> None:
     assert ".pdf" in dl.headers.get("content-disposition", "")
     assert dl.content.startswith(b"%PDF-"), dl.content[:16]
     assert b"%%EOF" in dl.content[-128:]
+
+
+# ─── Phase 10C — Excel rendering ─────────────────────────────────
+
+
+def test_render_report_xlsx_returns_zip_bytes(db_factory) -> None:
+    """The renderer produces a valid .xlsx (which is a ZIP container).
+    Asserts the PK magic header and that openpyxl can re-parse the
+    result back into a workbook with the expected sheet structure.
+    """
+    from io import BytesIO
+
+    from openpyxl import load_workbook
+
+    db = db_factory()
+    try:
+        org = Organization(name="o", kind="internal")
+        db.add(org)
+        db.flush()
+        user = User(email="xlsx@e.test", password_hash="x", full_name="u", status="active")
+        db.add(user)
+        db.flush()
+        report = Report(
+            organization_id=org.id,
+            title="Excel Test",
+            description="Slice 10C coverage",
+            audience="internal_only",
+            created_by_user_id=user.id,
+        )
+        db.add(report)
+        db.flush()
+        version = ReportVersion(
+            report_id=report.id,
+            version_number=1,
+            content_json={
+                "blocks": [
+                    {
+                        "id": "t1",
+                        "type": "text",
+                        "config": {"title": "Resumen", "body": "Cuerpo del texto"},
+                        "data": {},
+                    },
+                    {"id": "d1", "type": "divider", "config": {}, "data": {}},
+                    {
+                        "id": "k1",
+                        "type": "kpi_strip",
+                        "config": {"title": "Métricas"},
+                        "data": {
+                            "resolved": [
+                                {"metric_key": "approved_pct", "value": 73, "trend_pct_vs_prior": -4},
+                                {"metric_key": "vendors_at_risk", "value": 2, "trend_pct_vs_prior": None},
+                            ],
+                            "fetched_at": "2026-05-24T00:00:00Z",
+                        },
+                    },
+                ]
+            },
+            generated_by="manual",
+            created_by_user_id=user.id,
+        )
+        db.add(version)
+        db.commit()
+
+        xlsx = render_report_xlsx(report, version)
+        # ZIP magic header for .xlsx files.
+        assert xlsx[:4] == b"PK\x03\x04", xlsx[:8]
+        assert len(xlsx) > 2_000, f"xlsx only {len(xlsx)} bytes — likely empty"
+
+        # Round-trip the bytes back through openpyxl to confirm the
+        # workbook is structurally valid.
+        wb = load_workbook(BytesIO(xlsx))
+        # Cover + text + kpi_strip (divider is skipped).
+        assert wb.sheetnames[0] == "Resumen"
+        assert len(wb.sheetnames) == 3
+        # The text block sheet carries the body.
+        text_sheet = wb[wb.sheetnames[1]]
+        assert text_sheet["A1"].value == "Resumen"
+        assert "Cuerpo del texto" in text_sheet["A4"].value
+        # The kpi_strip sheet has the table headers in row 6.
+        kpi_sheet = wb[wb.sheetnames[2]]
+        assert kpi_sheet["A1"].value == "Métricas"
+        headers = [kpi_sheet.cell(row=6, column=c).value for c in (1, 2, 3)]
+        assert "metric_key" in headers
+        assert "value" in headers
+        # First row has the approved_pct entry.
+        row7_values = [kpi_sheet.cell(row=7, column=c).value for c in (1, 2, 3)]
+        assert "approved_pct" in row7_values
+        assert 73 in row7_values
+    finally:
+        db.close()
+
+
+def test_render_report_xlsx_sheet_name_dedup(db_factory) -> None:
+    """Two blocks with identical titles should produce distinct
+    sheet names — Excel rejects collisions. ``_safe_sheet_name``
+    dedupes with a numeric suffix."""
+    from io import BytesIO
+
+    from openpyxl import load_workbook
+
+    db = db_factory()
+    try:
+        org = Organization(name="o", kind="internal")
+        db.add(org)
+        db.flush()
+        user = User(email="dup@e.test", password_hash="x", full_name="u", status="active")
+        db.add(user)
+        db.flush()
+        report = Report(
+            organization_id=org.id,
+            title="Dup",
+            audience="internal_only",
+            created_by_user_id=user.id,
+        )
+        db.add(report)
+        db.flush()
+        version = ReportVersion(
+            report_id=report.id,
+            version_number=1,
+            content_json={
+                "blocks": [
+                    {"id": f"b{i}", "type": "text", "config": {"title": "Resumen", "body": str(i)}, "data": {}}
+                    for i in range(3)
+                ]
+            },
+            generated_by="manual",
+            created_by_user_id=user.id,
+        )
+        db.add(version)
+        db.commit()
+
+        xlsx = render_report_xlsx(report, version)
+        wb = load_workbook(BytesIO(xlsx))
+        # Cover + 3 distinct sheets even though all blocks share "Resumen"
+        # as the title (index prefix "01 ", "02 ", "03 " disambiguates).
+        assert len(wb.sheetnames) == 4
+        assert len(set(wb.sheetnames)) == 4
+    finally:
+        db.close()
+
+
+def test_post_xlsx_export_creates_xlsx_artifact(api_client, db_factory) -> None:
+    """Full endpoint chain with format=xlsx: create → poll → download
+    returns a valid xlsx blob via the same plumbing as html/pdf."""
+    pw, email, _ = _seed_user(db_factory, email="xlsx-e2e@exp.test")
+    token = _login(api_client, email, pw)
+    report_id = _create_report_with_blocks(api_client, token)
+
+    create = api_client.post(
+        f"/api/v1/reports/{report_id}/exports",
+        headers=_h(token),
+        json={"format": "xlsx"},
+    )
+    assert create.status_code == 201, create.text
+    body = create.json()
+    assert body["format"] == "xlsx"
+    export_id = body["id"]
+
+    poll = api_client.get(
+        f"/api/v1/reports/exports/{export_id}", headers=_h(token)
+    )
+    assert poll.status_code == 200
+    assert poll.json()["status"] == "ready"
+
+    dl = api_client.get(
+        f"/api/v1/reports/exports/{export_id}/download", headers=_h(token)
+    )
+    assert dl.status_code == 200
+    assert dl.headers["content-type"].startswith(
+        "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+    )
+    assert ".xlsx" in dl.headers.get("content-disposition", "")
+    # PK magic — the xlsx container is a zip.
+    assert dl.content[:4] == b"PK\x03\x04"
+
+
+def test_safe_sheet_name_strips_illegal_chars() -> None:
+    """Excel rejects ``[]:*?/\\`` in sheet names. The helper replaces
+    them and truncates to 31 chars."""
+    from app.services.reports.export import _safe_sheet_name
+
+    used: set[str] = set()
+    assert _safe_sheet_name("OK title", used) == "OK title"
+    assert _safe_sheet_name("a/b:c*d?e[f]g\\h", used) == "a_b_c_d_e_f_g_h"
+    long = "x" * 50
+    assert len(_safe_sheet_name(long, used)) == 31
+    used.add("collide")
+    assert _safe_sheet_name("collide", used) == "collide-2"

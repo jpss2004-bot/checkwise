@@ -467,6 +467,7 @@ export function ReportEditor({
             </Button>
             <ExportButton reportId={reportId} format="html" />
             <ExportButton reportId={reportId} format="pdf" />
+            <ExportButton reportId={reportId} format="xlsx" />
             <Button
               variant="default"
               size="sm"

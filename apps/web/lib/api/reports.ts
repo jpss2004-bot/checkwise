@@ -360,7 +360,7 @@ export function createReportFromPreset(
 // HTML is the only format wired in 10A; PDF (10B) and Excel (10C)
 // will land alongside their renderer choices.
 
-export type ReportExportFormat = "html" | "pdf";
+export type ReportExportFormat = "html" | "pdf" | "xlsx";
 
 export interface ReportExport {
   id: string;
