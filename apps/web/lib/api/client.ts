@@ -499,3 +499,87 @@ export function clientVendorExpedienteZipUrl(
   const base = `${API_BASE_URL}/api/v1/client/vendors/${encodeURIComponent(vendorId)}/expediente.zip`;
   return qs ? `${base}?${qs}` : base;
 }
+
+// ---------------------------------------------------------------------------
+// Junta 2026-05-23 — cross-vendor audit package
+// ---------------------------------------------------------------------------
+
+/**
+ * Filter set sent to the audit-package endpoints. Mirrors the
+ * backend ``AuditPackageFilters`` shape. ``null``/empty values omit
+ * the corresponding query param so the backend defaults apply
+ * (notably: empty ``statuses`` → aprobado-only).
+ */
+export type AuditPackageFilters = {
+  period_from?: string | null;
+  period_to?: string | null;
+  institutions?: string[];
+  requirement_codes?: string[];
+  statuses?: string[];
+  vendor_ids?: string[];
+};
+
+export type AuditPackagePreview = {
+  file_count: number;
+  total_bytes: number;
+  vendor_count: number;
+  institution_breakdown: Array<{ institution: string; file_count: number }>;
+  vendor_breakdown: Array<{ vendor_id: string; file_count: number }>;
+  requirement_breakdown: Array<{ requirement_code: string; file_count: number }>;
+  over_file_cap: boolean;
+  over_bytes_cap: boolean;
+  file_cap: number;
+  bytes_cap: number;
+};
+
+function _appendAuditPackageFilters(
+  params: URLSearchParams,
+  filters: AuditPackageFilters,
+): void {
+  if (filters.period_from) params.set("period_from", filters.period_from);
+  if (filters.period_to) params.set("period_to", filters.period_to);
+  for (const inst of filters.institutions ?? []) {
+    params.append("institutions", inst);
+  }
+  for (const code of filters.requirement_codes ?? []) {
+    params.append("requirement_codes", code);
+  }
+  for (const status of filters.statuses ?? []) {
+    params.append("statuses", status);
+  }
+  for (const vid of filters.vendor_ids ?? []) {
+    params.append("vendor_ids", vid);
+  }
+}
+
+/**
+ * Pre-flight count + breakdowns used by the live counter on
+ * ``/client/auditoria``. Pure read — does not write an audit row.
+ */
+export async function getClientAuditPackagePreview(
+  filters: AuditPackageFilters = {},
+): Promise<AuditPackagePreview> {
+  const params = new URLSearchParams();
+  _appendAuditPackageFilters(params, filters);
+  const qs = params.toString();
+  const suffix = qs ? `?${qs}` : "";
+  return fetchJson<AuditPackagePreview>(
+    `/api/v1/client/audit-package/preview${suffix}`,
+  );
+}
+
+/**
+ * Absolute URL of the cross-vendor audit-package ZIP endpoint. The
+ * caller follows this URL as a top-level navigation (``<a target="_blank">``)
+ * so the bearer cookie carries. Backend renders the INDICE.pdf cover
+ * and writes a ``client.audit_package_downloaded`` audit row.
+ */
+export function clientAuditPackageZipUrl(
+  filters: AuditPackageFilters = {},
+): string {
+  const params = new URLSearchParams();
+  _appendAuditPackageFilters(params, filters);
+  const qs = params.toString();
+  const base = `${API_BASE_URL}/api/v1/client/audit-package.zip`;
+  return qs ? `${base}?${qs}` : base;
+}

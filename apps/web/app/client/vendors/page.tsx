@@ -6,6 +6,7 @@ import {
   ArrowRight,
   CheckCircle,
   MagnifyingGlass,
+  Package,
   Warning,
   WarningOctagon,
   type Icon,
@@ -110,6 +111,35 @@ export default function ClientVendorsPage() {
       description="Lista de proveedores que tienes bajo administración con su semáforo, % de cumplimiento y faltantes."
     >
       <div className="space-y-6">
+        {/* Junta 2026-05-23 — discovery entry point to the audit
+            package builder. Sits at the top of the vendors page so a
+            client_admin under audit-time pressure finds it before
+            they start scrolling. */}
+        <div className="flex flex-wrap items-center justify-between gap-3 rounded-md border border-[color:var(--border-default)] bg-[color:var(--surface-brand-muted)] p-4">
+          <div className="flex items-start gap-3">
+            <Package
+              className="mt-0.5 h-5 w-5 text-[color:var(--text-brand)]"
+              weight="bold"
+              aria-hidden="true"
+            />
+            <div className="min-w-0">
+              <p className="text-sm font-semibold text-[color:var(--text-primary)]">
+                ¿Llega un auditor?
+              </p>
+              <p className="mt-0.5 text-xs text-[color:var(--text-secondary)]">
+                Arma un ZIP con los documentos exactos que te está
+                pidiendo: filtra por periodo, institución y proveedor.
+              </p>
+            </div>
+          </div>
+          <Button asChild size="sm">
+            <Link href="/client/auditoria">
+              Preparar paquete para auditoría
+              <ArrowRight className="h-3.5 w-3.5" weight="bold" aria-hidden="true" />
+            </Link>
+          </Button>
+        </div>
+
         <MetadataStrip
           items={[
             { label: "Proveedores", value: (rows?.length ?? 0).toString(), mono: true },
