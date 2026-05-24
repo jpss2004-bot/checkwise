@@ -92,10 +92,26 @@ export default function AdminClientsPage() {
               initial={editing ?? undefined}
               onSubmit={async (data) => {
                 if (editing) {
-                  await updateClient(editing.id, data);
+                  await updateClient(editing.id, {
+                    name: data.name,
+                    rfc: data.rfc,
+                    email: data.email,
+                    responsible_name: data.responsible_name,
+                    status: data.status,
+                  });
                   setEditing(null);
                 } else {
-                  await createClient(data);
+                  // ``email`` is required on create; the form enforces
+                  // it and the backend ClientCreate schema validates
+                  // EmailStr. Asserting non-null here keeps the
+                  // payload tight without re-prompting the user.
+                  await createClient({
+                    name: data.name,
+                    rfc: data.rfc,
+                    email: data.email ?? "",
+                    responsible_name: data.responsible_name,
+                    status: data.status,
+                  });
                   setCreateOpen(false);
                 }
                 await refresh();
@@ -217,6 +233,7 @@ function ClientForm({
   onSubmit: (data: {
     name: string;
     rfc: string | null;
+    email: string | null;
     responsible_name: string | null;
     status: string;
   }) => Promise<void>;
@@ -224,6 +241,7 @@ function ClientForm({
 }) {
   const [name, setName] = useState(initial?.name ?? "");
   const [rfc, setRfc] = useState(initial?.rfc ?? "");
+  const [email, setEmail] = useState(initial?.email ?? "");
   const [responsible, setResponsible] = useState(initial?.responsible_name ?? "");
   const [status, setStatus] = useState(initial?.status ?? "active");
   const [submitting, setSubmitting] = useState(false);
@@ -237,6 +255,7 @@ function ClientForm({
       await onSubmit({
         name: name.trim(),
         rfc: rfc.trim() || null,
+        email: email.trim() || null,
         responsible_name: responsible.trim() || null,
         status,
       });
@@ -270,6 +289,18 @@ function ClientForm({
           />
         </div>
         <div className="space-y-1">
+          <Label htmlFor="cli-email">Correo</Label>
+          <Input
+            id="cli-email"
+            type="email"
+            value={email}
+            onChange={(e) => setEmail(e.target.value)}
+            required={mode === "create"}
+            autoComplete="email"
+            placeholder="contacto@empresa.com"
+          />
+        </div>
+        <div className="space-y-1">
           <Label htmlFor="cli-resp">Responsable</Label>
           <Input
             id="cli-resp"
@@ -285,8 +316,8 @@ function ClientForm({
             onChange={(e) => setStatus(e.target.value)}
             className="h-9 w-full rounded-md border border-[color:var(--border-default)] bg-[color:var(--surface-raised)] px-2 text-sm"
           >
-            <option value="active">active</option>
-            <option value="inactive">inactive</option>
+            <option value="active">Activo</option>
+            <option value="inactive">Inactivo</option>
           </select>
         </div>
       </div>

@@ -39,7 +39,7 @@ from xml.etree import ElementTree as ET
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from fastapi.responses import FileResponse
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, EmailStr, Field
 from sqlalchemy import and_, func, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
@@ -124,6 +124,7 @@ def _client_to_dict(row: Client) -> dict:
         "id": row.id,
         "name": row.name,
         "rfc": row.rfc,
+        "email": row.email,
         "responsible_name": row.responsible_name,
         "status": row.status,
         "created_at": row.created_at.isoformat() if row.created_at else None,
@@ -326,6 +327,10 @@ def get_overview(db: DbSession, current: AdminUser) -> AdminOverview:
 class ClientCreate(BaseModel):
     name: str = Field(min_length=2, max_length=255)
     rfc: str | None = Field(default=None, max_length=13)
+    # Junta 2026-05-23 — email es uno de los tres datos mínimos al
+    # dar de alta a un cliente nuevo. EmailStr garantiza formato; el
+    # admin form lo marca como requerido en UI.
+    email: EmailStr = Field(...)
     responsible_name: str | None = Field(default=None, max_length=255)
     status: str = "active"
 
@@ -333,6 +338,7 @@ class ClientCreate(BaseModel):
 class ClientUpdate(BaseModel):
     name: str | None = Field(default=None, min_length=2, max_length=255)
     rfc: str | None = Field(default=None, max_length=13)
+    email: EmailStr | None = Field(default=None)
     responsible_name: str | None = Field(default=None, max_length=255)
     status: str | None = None
 
@@ -358,6 +364,7 @@ def create_client(payload: ClientCreate, db: DbSession, current: AdminUser) -> d
     row = Client(
         name=payload.name.strip(),
         rfc=(payload.rfc or "").strip().upper() or None,
+        email=payload.email.strip().lower(),
         responsible_name=(payload.responsible_name or "").strip() or None,
         status=payload.status or "active",
     )
@@ -396,6 +403,8 @@ def update_client(
         row.name = data["name"].strip()
     if "rfc" in data:
         row.rfc = (data["rfc"] or "").strip().upper() or None
+    if "email" in data:
+        row.email = (data["email"] or "").strip().lower() or None
     if "responsible_name" in data:
         row.responsible_name = (data["responsible_name"] or "").strip() or None
     if "status" in data and data["status"] is not None:

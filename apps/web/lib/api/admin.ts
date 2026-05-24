@@ -65,6 +65,7 @@ export type AdminClient = {
   id: string;
   name: string;
   rfc: string | null;
+  email: string | null;
   responsible_name: string | null;
   status: string;
   created_at: string | null;
@@ -84,6 +85,7 @@ export async function getClient(id: string): Promise<AdminClient> {
 export async function createClient(body: {
   name: string;
   rfc?: string | null;
+  email: string;
   responsible_name?: string | null;
   status?: string;
 }): Promise<AdminClient> {
@@ -98,6 +100,7 @@ export async function updateClient(
   body: Partial<{
     name: string;
     rfc: string | null;
+    email: string | null;
     responsible_name: string | null;
     status: string;
   }>,

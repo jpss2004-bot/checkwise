@@ -45,6 +45,11 @@ class Client(TimestampMixin, Base):
     id: Mapped[str] = mapped_column(String(36), primary_key=True, default=new_id)
     name: Mapped[str] = mapped_column(String(255), nullable=False)
     rfc: Mapped[str | None] = mapped_column(String(13), unique=True)
+    # Junta 2026-05-23 — RFC + email + nombre son los tres datos
+    # mínimos al dar de alta un cliente. Nullable a nivel de DB para
+    # que las filas legacy sin email sigan válidas; la API y el
+    # formulario admin lo exigen para nuevos registros.
+    email: Mapped[str | None] = mapped_column(String(254))
     responsible_name: Mapped[str | None] = mapped_column(String(255))
     status: Mapped[str] = mapped_column(String(40), default="active", nullable=False)
 

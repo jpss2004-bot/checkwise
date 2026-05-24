@@ -211,6 +211,7 @@ def test_admin_can_create_client_and_write_audit(
         json={
             "name": "Cliente Admin Test",
             "rfc": "CAT260512AB1",
+            "email": "ada@test.example",
             "responsible_name": "Ada Lovelace",
         },
         headers=_h(token),
@@ -219,6 +220,7 @@ def test_admin_can_create_client_and_write_audit(
     body = resp.json()
     assert body["name"] == "Cliente Admin Test"
     assert body["rfc"] == "CAT260512AB1"
+    assert body["email"] == "ada@test.example"
     _assert_audit_admin(
         db_factory, action="admin.client.created", entity_id=body["id"], before_must_be_none=True
     )
@@ -230,7 +232,7 @@ def test_admin_can_update_client_and_write_audit(
     token = _admin_token(api_client, db_factory)
     created = api_client.post(
         "/api/v1/admin/clients",
-        json={"name": "Cliente A"},
+        json={"name": "Cliente A", "email": "a@test.example"},
         headers=_h(token),
     ).json()
     resp = api_client.patch(
@@ -248,6 +250,37 @@ def test_admin_can_update_client_and_write_audit(
     assert (row.after or {}).get("name") == "Cliente A Renombrado"
 
 
+def test_admin_client_create_requires_email(
+    api_client: TestClient, db_factory
+) -> None:
+    """Junta 2026-05-23 — RFC + email + nombre son los datos mínimos
+    al dar de alta un cliente. Sin email la API responde 422 y no
+    persiste nada.
+    """
+    token = _admin_token(api_client, db_factory)
+    resp = api_client.post(
+        "/api/v1/admin/clients",
+        json={"name": "Sin Email"},
+        headers=_h(token),
+    )
+    assert resp.status_code == 422, resp.text
+
+
+def test_admin_client_email_normalized_and_returned(
+    api_client: TestClient, db_factory
+) -> None:
+    """Email se normaliza a minúsculas y se devuelve en el payload."""
+    token = _admin_token(api_client, db_factory)
+    resp = api_client.post(
+        "/api/v1/admin/clients",
+        json={"name": "Caso Email", "email": "  Mixed.Case@Example.com  "},
+        headers=_h(token),
+    )
+    assert resp.status_code == 201, resp.text
+    body = resp.json()
+    assert body["email"] == "mixed.case@example.com"
+
+
 # ---------------------------------------------------------------------------
 # Vendors
 # ---------------------------------------------------------------------------
@@ -258,7 +291,9 @@ def test_admin_can_create_vendor_for_existing_client(
 ) -> None:
     token = _admin_token(api_client, db_factory)
     client = api_client.post(
-        "/api/v1/admin/clients", json={"name": "Cli"}, headers=_h(token)
+        "/api/v1/admin/clients",
+        json={"name": "Cli", "email": "cli@test.example"},
+        headers=_h(token),
     ).json()
     resp = api_client.post(
         "/api/v1/admin/vendors",
@@ -300,7 +335,9 @@ def test_admin_can_update_vendor_and_write_audit(
 ) -> None:
     token = _admin_token(api_client, db_factory)
     client = api_client.post(
-        "/api/v1/admin/clients", json={"name": "Cli"}, headers=_h(token)
+        "/api/v1/admin/clients",
+        json={"name": "Cli", "email": "cli2@test.example"},
+        headers=_h(token),
     ).json()
     vendor = api_client.post(
         "/api/v1/admin/vendors",
@@ -747,7 +784,7 @@ def test_audit_log_filters_and_respects_limit(
     for i in range(3):
         body = api_client.post(
             "/api/v1/admin/clients",
-            json={"name": f"AuditCli{i}"},
+            json={"name": f"AuditCli{i}", "email": f"audit{i}@test.example"},
             headers=_h(token),
         ).json()
         ids.append(body["id"])
