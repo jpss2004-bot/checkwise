@@ -471,3 +471,293 @@ def test_compute_actions_agrees_with_portal_compute_actions(
                 p.requirement_code, p.period_key)
 
     assert [_t(n) for n in new_items] == [_t(p) for p in portal_items]
+
+
+# ─── Phase 6D — renewal actions slotting ────────────────────────
+
+
+def _renewal_action(priority: str, code: str = "ONB-CORP-M-002") -> dict:
+    """Hand-crafted renewal action dict mirroring
+    ``compute_renewal_actions``' output shape. Tests for the slotting
+    behavior in ``compute_suggested_actions`` don't need the real
+    helper — they just need a dict that walks the same priority gate.
+    """
+    return {
+        "id": f"act-{code}-renewal-{priority}",
+        "type": "renewal",
+        "title": f"Renueva {code} — fixture",
+        "body": "fixture body",
+        "priority": priority,
+        "href": f"/portal/upload?requirement_code={code}&from=renewal",
+        "requirement_code": code,
+        "period_key": None,
+    }
+
+
+def test_compute_actions_back_compat_when_renewal_actions_omitted() -> None:
+    """Callers that don't pass renewal_actions see identical output to
+    pre-6D behavior. This is the back-compat pin.
+    """
+    today = date(2026, 5, 10)
+    onboarding = [_slot(SlotState.MISSING, requirement_code="rfc")]
+    without = compute_suggested_actions(onboarding, [], today)
+    explicit_none = compute_suggested_actions(
+        onboarding, [], today, renewal_actions=None
+    )
+    explicit_empty = compute_suggested_actions(
+        onboarding, [], today, renewal_actions=[]
+    )
+    assert without == explicit_none == explicit_empty
+
+
+def test_compute_actions_includes_high_priority_renewals_alongside_blocking() -> None:
+    """An overdue renewal lands in the same priority tier as expired
+    calendar items (slotted between blocking states and the missing-
+    onboarding pass).
+    """
+    today = date(2026, 5, 10)
+    onboarding = [_slot(SlotState.REJECTED, requirement_code="rfc", submission_id="s1")]
+    renewal = [_renewal_action("high", code="ONB-REPSE-001")]
+    actions = compute_suggested_actions(
+        onboarding, [], today, renewal_actions=renewal
+    )
+    types = [a["type"] for a in actions]
+    priorities = [a["priority"] for a in actions]
+    # Both items high-priority; the renewal lands after the blocking
+    # reupload because the pipeline appends in pass order.
+    assert types == ["reupload", "renewal"]
+    assert priorities == ["high", "high"]
+
+
+def test_compute_actions_includes_medium_renewals_after_upcoming() -> None:
+    """Due-soon renewals share the medium tier with missing-onboarding
+    and the 5-day upcoming window. Both surface in the same list
+    capped at 5.
+    """
+    today = date(2026, 5, 10)
+    renewal = [
+        _renewal_action("medium", code="ONB-CORP-M-002"),
+        _renewal_action("medium", code="ONB-PATR-001"),
+    ]
+    actions = compute_suggested_actions([], [], today, renewal_actions=renewal)
+    assert [a["type"] for a in actions] == ["renewal", "renewal"]
+    assert {a["priority"] for a in actions} == {"medium"}
+    assert {a["requirement_code"] for a in actions} == {
+        "ONB-CORP-M-002",
+        "ONB-PATR-001",
+    }
+
+
+def test_compute_actions_high_priority_renewals_dont_displace_blocking() -> None:
+    """When the cap is reached, blocking-state items come first because
+    they're added first in the pipeline. A high-priority renewal
+    appears only if room remains.
+    """
+    today = date(2026, 5, 10)
+    onboarding = [
+        _slot(SlotState.REJECTED, requirement_code=f"rej-{i}", submission_id=f"s{i}")
+        for i in range(5)
+    ]
+    renewal = [_renewal_action("high")]
+    actions = compute_suggested_actions(
+        onboarding, [], today, renewal_actions=renewal
+    )
+    assert len(actions) == 5
+    assert all(a["type"] == "reupload" for a in actions)
+
+
+def test_compute_actions_separates_renewal_priorities_correctly() -> None:
+    """Mixed-priority renewal_actions: high goes in the 2.6 pass, medium
+    goes in the 3.5 pass. The pipeline order interleaves them with
+    existing actions.
+    """
+    today = date(2026, 5, 10)
+    renewal = [
+        _renewal_action("high", code="ONB-REPSE-001"),
+        _renewal_action("medium", code="ONB-CORP-M-002"),
+    ]
+    actions = compute_suggested_actions([], [], today, renewal_actions=renewal)
+    # Empty slots — only the two renewals fire. High before medium
+    # because pass 2.6 runs before pass 3.5.
+    assert [a["requirement_code"] for a in actions] == [
+        "ONB-REPSE-001",
+        "ONB-CORP-M-002",
+    ]
+    assert [a["priority"] for a in actions] == ["high", "medium"]
+
+
+def test_portal_pydantic_compute_actions_accepts_renewals() -> None:
+    """The Pydantic mirror in app.api.v1.portal must accept and emit
+    the same renewal payloads with type='renewal' on the
+    DashboardSuggestedAction model.
+    """
+    today = date(2026, 5, 10)
+    renewal = [
+        _renewal_action("high", code="ONB-REPSE-001"),
+        _renewal_action("medium", code="ONB-CORP-M-002"),
+    ]
+    out = portal_compute_suggested_actions(
+        [], [], today, renewal_actions=renewal
+    )
+    assert [r.type for r in out] == ["renewal", "renewal"]
+    assert [r.priority for r in out] == ["high", "medium"]
+    assert [r.requirement_code for r in out] == ["ONB-REPSE-001", "ONB-CORP-M-002"]
+    # The Literal["renewal", ...] on DashboardSuggestedAction
+    # accepts the type — no Pydantic ValidationError.
+
+
+# ─── Phase 6D — compute_renewal_actions (DB-backed) ────────────
+
+
+def _seed_approved_csf(db, workspace, *, updated_at):
+    """Insert an approved CSF (ONB-CORP-M-002) for the workspace.
+
+    Mirrors the shape ``test_renewal_dispatch.py`` uses to control
+    the renewal anchor — we set ``updated_at`` directly because the
+    workflow service does so via transition; here we want a
+    deterministic anchor without involving the workflow.
+    """
+    from sqlalchemy import select
+
+    from app.constants.statuses import DocumentStatus
+    from app.models import (
+        Institution,
+        Period,
+        Requirement,
+        RequirementVersion,
+        Submission,
+    )
+
+    inst = db.scalar(select(Institution).where(Institution.code == "sat"))
+    if inst is None:
+        inst = Institution(code="sat", name="SAT")
+        db.add(inst)
+        db.flush()
+    req = Requirement(
+        code="req-ONB-CORP-M-002",
+        name="CSF",
+        institution_id=inst.id,
+        load_type="onboarding",
+        frequency="alta_inicial",
+        risk_level="medium",
+        current_version=1,
+    )
+    db.add(req)
+    db.flush()
+    version = RequirementVersion(requirement_id=req.id, version=1)
+    db.add(version)
+    db.flush()
+    period = db.scalar(select(Period).where(Period.code == "onb-test-pa"))
+    if period is None:
+        period = Period(code="onb-test-pa", period_type="onboarding", period_key="onb-test-pa")
+        db.add(period)
+        db.flush()
+    sub = Submission(
+        client_id=workspace.client_id,
+        vendor_id=workspace.vendor_id,
+        institution_id=inst.id,
+        requirement_id=req.id,
+        requirement_version_id=version.id,
+        period_id=period.id,
+        load_type="onboarding",
+        status=DocumentStatus.APROBADO.value,
+        requirement_code="ONB-CORP-M-002",
+        period_key=None,
+        created_at=updated_at,
+        updated_at=updated_at,
+    )
+    db.add(sub)
+    db.commit()
+
+
+def test_compute_renewal_actions_emits_due_soon_for_csf_approaching(db_factory) -> None:
+    """CSF approved 60 days ago → due in 30 → medium priority renewal."""
+    from datetime import datetime, timedelta
+
+    from sqlalchemy import select
+
+    from app.models import ProviderWorkspace
+    from app.services.dashboard_compute import compute_renewal_actions
+
+    vendor_id = _seed_workspace(db_factory)  # noqa: F841 — ws by side effect
+    today = date(2026, 6, 1)
+    anchor_dt = datetime(2026, 6, 1) - timedelta(days=60)
+
+    db = db_factory()
+    try:
+        ws = db.scalar(select(ProviderWorkspace))
+        assert ws is not None
+        _seed_approved_csf(db, ws, updated_at=anchor_dt)
+    finally:
+        db.close()
+
+    db = db_factory()
+    try:
+        ws = db.scalar(select(ProviderWorkspace))
+        assert ws is not None
+        out = compute_renewal_actions(db, ws, today)
+    finally:
+        db.close()
+
+    assert len(out) == 1
+    item = out[0]
+    assert item["type"] == "renewal"
+    assert item["priority"] == "medium"
+    assert item["requirement_code"] == "ONB-CORP-M-002"
+    assert item["period_key"] is None
+    assert "?requirement_code=ONB-CORP-M-002" in item["href"]
+    assert "from=renewal" in item["href"]
+
+
+def test_compute_renewal_actions_empty_without_approved_submission(db_factory) -> None:
+    """No approved CSF → renewal cycle hasn't started → no actions."""
+    from sqlalchemy import select
+
+    from app.models import ProviderWorkspace
+    from app.services.dashboard_compute import compute_renewal_actions
+
+    _seed_workspace(db_factory)
+    today = date(2026, 6, 1)
+
+    db = db_factory()
+    try:
+        ws = db.scalar(select(ProviderWorkspace))
+        assert ws is not None
+        out = compute_renewal_actions(db, ws, today)
+    finally:
+        db.close()
+    assert out == []
+
+
+def test_compute_renewal_actions_high_priority_when_overdue(db_factory) -> None:
+    """CSF approved 100 days ago → due 10 days ago → high priority."""
+    from datetime import datetime, timedelta
+
+    from sqlalchemy import select
+
+    from app.models import ProviderWorkspace
+    from app.services.dashboard_compute import compute_renewal_actions
+
+    _seed_workspace(db_factory)
+    today = date(2026, 6, 1)
+    anchor_dt = datetime(2026, 6, 1) - timedelta(days=100)
+
+    db = db_factory()
+    try:
+        ws = db.scalar(select(ProviderWorkspace))
+        assert ws is not None
+        _seed_approved_csf(db, ws, updated_at=anchor_dt)
+    finally:
+        db.close()
+
+    db = db_factory()
+    try:
+        ws = db.scalar(select(ProviderWorkspace))
+        assert ws is not None
+        out = compute_renewal_actions(db, ws, today)
+    finally:
+        db.close()
+
+    assert len(out) == 1
+    assert out[0]["priority"] == "high"
+    assert "vencido" in out[0]["title"].lower()

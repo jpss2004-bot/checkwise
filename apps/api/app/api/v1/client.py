@@ -61,6 +61,7 @@ from app.constants.roles import MembershipRole
 from app.constants.statuses import DocumentStatus
 from app.core.compliance_catalog import (
     catalog_metadata,
+    expediente_for_persona,
     normalize_persona_type,
     recurring_for_year,
     recurring_required_document,
@@ -85,11 +86,16 @@ from app.services.client_metadata import (
     display_export_path,
     read_xlsx_preview,
 )
+from app.services.dashboard_compute import compute_renewal_actions
 from app.services.evidence_slots import (
     SlotState,
     SlotView,
     build_workspace_calendar_slots,
     build_workspace_onboarding_slots,
+    current_onboarding_submission_for_workspace,
+    next_renewal_due_date,
+    renewal_anchor_date,
+    renewal_status,
 )
 
 router = APIRouter(prefix="/client", tags=["client"])
@@ -217,6 +223,51 @@ def _vendors_by_id(db: Session, vendor_ids: list[str]) -> dict[str, Vendor]:
 # ---------------------------------------------------------------------------
 
 
+def _next_renewal_for_workspace(
+    db: Session,
+    workspace: ProviderWorkspace,
+    *,
+    today: date,
+) -> ClientVendorNextRenewal | None:
+    """Phase 6D — most urgent renewal-bearing slot for the vendor row.
+
+    Walks the renewal-bearing onboarding requirements (CSF / REPSE /
+    registro patronal), picks the one with the smallest
+    ``days_remaining`` whose ``renewal_status`` is ``due_soon`` or
+    ``overdue``, and packages it as a small structured payload for
+    the client vendor list pill. Returns ``None`` when nothing is in
+    the 30-day window or overdue.
+    """
+    persona = normalize_persona_type(workspace.persona_type)
+    best: ClientVendorNextRenewal | None = None
+
+    for req in expediente_for_persona(persona):
+        if req.renewal_frequency_days is None:
+            continue
+        sub = current_onboarding_submission_for_workspace(
+            db, workspace=workspace, requirement_code=req.code
+        )
+        anchor = renewal_anchor_date(sub)
+        due = next_renewal_due_date(
+            anchor=anchor, frequency_days=req.renewal_frequency_days
+        )
+        status = renewal_status(due, today)
+        if status not in ("due_soon", "overdue") or due is None:
+            continue
+        days_remaining = (due - today).days
+        candidate = ClientVendorNextRenewal(
+            requirement_code=req.code,
+            requirement_name=req.name,
+            due_date=due,
+            status=status,  # type: ignore[arg-type]
+            days_remaining=days_remaining,
+        )
+        # Smallest days_remaining wins (overdue rows are most-negative).
+        if best is None or candidate.days_remaining < best.days_remaining:
+            best = candidate
+    return best
+
+
 def _vendor_compliance(
     db: Session,
     workspace: ProviderWorkspace,
@@ -319,6 +370,23 @@ class ClientOverview(BaseModel):
     last_activity_at: datetime | None
 
 
+class ClientVendorNextRenewal(BaseModel):
+    """Phase 6D — the most urgent renewal-bearing slot for one vendor.
+
+    ``None`` (omitted at the parent row level) when no renewal is in
+    the 30-day window or overdue. ``status`` matches the
+    :func:`app.services.evidence_slots.renewal_status` bucket so the
+    UI can pick a pill color: yellow for ``due_soon``, red for
+    ``overdue``. ``days_remaining`` is signed (negative = overdue).
+    """
+
+    requirement_code: str
+    requirement_name: str
+    due_date: date
+    status: Literal["due_soon", "overdue"]
+    days_remaining: int
+
+
 class ClientVendorRow(BaseModel):
     vendor_id: str
     workspace_id: str
@@ -334,6 +402,7 @@ class ClientVendorRow(BaseModel):
     due_soon_count: int
     last_submission_at: datetime | None
     last_review_at: datetime | None
+    next_renewal: ClientVendorNextRenewal | None = None
 
 
 class ClientVendorListResponse(BaseModel):
@@ -674,6 +743,7 @@ def client_vendors(
                 due_soon_count=summary["due_soon_count"],
                 last_submission_at=last_sub,
                 last_review_at=last_review,
+                next_renewal=_next_renewal_for_workspace(db, ws, today=today),
             )
         )
         if len(rows) >= limit:
@@ -843,6 +913,7 @@ def client_vendor_detail(
             calendar_slots,
             today,
             onboarding_completed=workspace.onboarding_completed_at is not None,
+            renewal_actions=compute_renewal_actions(db, workspace, today),
         ),
         attention_today=_compute_attention_today(
             onboarding_slots, calendar_slots, today

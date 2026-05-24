@@ -26,13 +26,21 @@ from urllib.parse import quote
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from app.core.compliance_catalog import is_v2_recurring_code
+from app.core.compliance_catalog import (
+    expediente_for_persona,
+    is_v2_recurring_code,
+    normalize_persona_type,
+)
 from app.models.entities import ProviderWorkspace
 from app.services.evidence_slots import (
     SlotState,
     SlotView,
     build_workspace_calendar_slots,
     build_workspace_onboarding_slots,
+    current_onboarding_submission_for_workspace,
+    next_renewal_due_date,
+    renewal_anchor_date,
+    renewal_status,
 )
 
 # ─── Slot-state buckets ─────────────────────────────────────────
@@ -698,17 +706,136 @@ def action_body_for_state(view: SlotView) -> str:
     return ""
 
 
+def compute_renewal_actions(
+    db: Session,
+    workspace: ProviderWorkspace,
+    today: date,
+) -> list[dict]:
+    """Phase 6D — renewal-driven action items for the dashboard rail.
+
+    Walks the workspace's renewal-bearing onboarding requirements
+    (CSF / REPSE / registro patronal — the rows that carry
+    ``renewal_frequency_days`` in the catalog), resolves the standing
+    approved submission, and emits one suggested-action dict per
+    requirement whose renewal status is ``due_soon`` or ``overdue``.
+
+    Action shape matches the rest of the suggested-actions pipeline
+    (id / type="renewal" / title / body / priority / href /
+    requirement_code / period_key=None). Overdue items use
+    ``priority="high"`` to compete with blocking/expired actions;
+    due_soon items use ``priority="medium"`` to compete with
+    missing-onboarding and the 5-day upcoming-calendar tier.
+
+    Returns items in this order so callers that simply concatenate
+    get a sensible priority sort:
+      * overdue (most-recently-due first)
+      * due_soon (soonest-due first)
+
+    Read-only. The dispatcher writes notifications + reminders; this
+    function only reads the same state the cron job derives its
+    emit-set from, so the dashboard never lies about what was sent.
+    """
+    persona = normalize_persona_type(workspace.persona_type)
+    overdue: list[tuple[int, dict]] = []
+    due_soon: list[tuple[int, dict]] = []
+
+    for req in expediente_for_persona(persona):
+        if req.renewal_frequency_days is None:
+            continue
+        sub = current_onboarding_submission_for_workspace(
+            db, workspace=workspace, requirement_code=req.code
+        )
+        anchor = renewal_anchor_date(sub)
+        due = next_renewal_due_date(
+            anchor=anchor, frequency_days=req.renewal_frequency_days
+        )
+        status = renewal_status(due, today)
+        if status not in ("due_soon", "overdue") or due is None:
+            continue
+        days_remaining = (due - today).days
+        href = f"/portal/upload?requirement_code={req.code}&from=renewal"
+        if status == "overdue":
+            days_overdue = -days_remaining
+            overdue.append(
+                (
+                    days_remaining,
+                    {
+                        "id": f"act-{req.code}-renewal-overdue",
+                        "type": "renewal",
+                        "title": (
+                            f"Renueva tu {req.name} — vencido"
+                            if days_overdue > 0
+                            else f"Renueva tu {req.name} — vence hoy"
+                        ),
+                        "body": (
+                            f"Tu {req.name} venció el {due.isoformat()} "
+                            f"(hace {days_overdue} día(s)). Sube la versión "
+                            "actualizada lo antes posible para regularizar "
+                            "tu expediente."
+                            if days_overdue > 0
+                            else (
+                                f"Tu {req.name} vence hoy. Sube la versión "
+                                "actualizada para que tu cliente no marque "
+                                "el expediente como vencido."
+                            )
+                        ),
+                        "priority": "high",
+                        "href": href,
+                        "requirement_code": req.code,
+                        "period_key": None,
+                    },
+                )
+            )
+        else:  # due_soon
+            due_soon.append(
+                (
+                    days_remaining,
+                    {
+                        "id": f"act-{req.code}-renewal-due-soon",
+                        "type": "renewal",
+                        "title": (
+                            f"Renueva tu {req.name} — faltan "
+                            f"{days_remaining} día(s)"
+                        ),
+                        "body": (
+                            f"Tu {req.name} vence el {due.isoformat()}. "
+                            "Sube la versión actualizada para mantener tu "
+                            "expediente al corriente."
+                        ),
+                        "priority": "medium",
+                        "href": href,
+                        "requirement_code": req.code,
+                        "period_key": None,
+                    },
+                )
+            )
+
+    # Overdue: most-recently-due first (largest negative days_remaining
+    # is "barely overdue"; smallest negative is "long overdue"). Newer
+    # overdue items go first because they're more actionable —
+    # a 28-day-overdue CSF is past the point a same-day upload can
+    # close.
+    overdue.sort(key=lambda pair: pair[0], reverse=True)
+    # Due-soon: soonest-due first.
+    due_soon.sort(key=lambda pair: pair[0])
+
+    return [item for _, item in overdue] + [item for _, item in due_soon]
+
+
 def compute_suggested_actions(
     onboarding_slots: list[SlotView],
     calendar_slots: list[SlotView],
     today: date,
     *,
     onboarding_completed: bool = False,
+    renewal_actions: list[dict] | None = None,
 ) -> list[dict]:
     """Plain-dict suggested-actions list — mirrors
     ``portal._compute_suggested_actions``.
 
-    Three-pass priority pipeline:
+    Five-pass priority pipeline (the renewal passes were added in
+    Phase 6D; earlier callers that don't pass ``renewal_actions``
+    see identical behavior):
 
     1. Required actionable slots (rejected / needs_correction /
        possible_mismatch) → ``priority="high"``, type matches state.
@@ -718,8 +845,17 @@ def compute_suggested_actions(
        the operator marks the initial expediente complete, surfacing
        onboarding docs as "next steps" misleads the provider into
        thinking their workspace regressed.
+    2.5. Expired (vencido) calendar slots → ``regularize`` / ``high``.
+    2.6. Overdue renewals from ``renewal_actions`` (Phase 6D) →
+         alongside expired, ``priority="high"``.
     3. Required calendar slots due within 14 days, still missing →
        ``upcoming`` / ``medium`` if ≤ 5 days, ``low`` otherwise.
+    3.5. Due-soon renewals from ``renewal_actions`` (Phase 6D) →
+         after upcoming-calendar, ``priority="medium"``.
+
+    The renewal passes preserve the order ``compute_renewal_actions``
+    returned (overdue most-recent first, due_soon soonest first), so
+    callers that pre-sort get a deterministic interleave.
 
     Capped at 5 entries (matches the dashboard hero behaviour).
     """
@@ -798,6 +934,14 @@ def compute_suggested_actions(
                 "period_key": view.period_key,
             }
         )
+    # 2.6. Overdue renewals (Phase 6D) — same priority tier as
+    # expired calendar items. ``compute_renewal_actions`` returns
+    # overdue rows first, so we filter on priority to drop them
+    # in here.
+    if renewal_actions:
+        for action in renewal_actions:
+            if action.get("priority") == "high":
+                actions.append(action)
     # 3. Upcoming calendar (within 14 days).
     for view in calendar_slots:
         if not view.required or view.state is not SlotState.MISSING:
@@ -820,6 +964,12 @@ def compute_suggested_actions(
                 "period_key": view.period_key,
             }
         )
+    # 3.5. Due-soon renewals (Phase 6D) — medium priority, alongside
+    # missing onboarding + 5-day upcoming.
+    if renewal_actions:
+        for action in renewal_actions:
+            if action.get("priority") == "medium":
+                actions.append(action)
     return actions[:5]
 
 
@@ -859,11 +1009,13 @@ def build_suggested_actions_for_vendor(
         db, workspace, target_today.year
     )
 
+    renewal_actions = compute_renewal_actions(db, workspace, target_today)
     items = compute_suggested_actions(
         onboarding_slots,
         calendar_slots,
         target_today,
         onboarding_completed=workspace.onboarding_completed_at is not None,
+        renewal_actions=renewal_actions,
     )
     return {
         "items": items,

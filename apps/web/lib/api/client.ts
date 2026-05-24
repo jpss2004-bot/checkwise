@@ -81,6 +81,17 @@ export type ClientOverview = {
   last_activity_at: string | null;
 };
 
+// Phase 6D — most-urgent renewal-bearing slot for this vendor.
+// ``null`` when nothing is in the 30-day window or overdue.
+// ``days_remaining`` is signed; negative values mean overdue.
+export type ClientVendorNextRenewal = {
+  requirement_code: string;
+  requirement_name: string;
+  due_date: string;
+  status: "due_soon" | "overdue";
+  days_remaining: number;
+};
+
 export type ClientVendorRow = {
   vendor_id: string;
   workspace_id: string;
@@ -96,6 +107,7 @@ export type ClientVendorRow = {
   due_soon_count: number;
   last_submission_at: string | null;
   last_review_at: string | null;
+  next_renewal: ClientVendorNextRenewal | null;
 };
 
 export type ClientVendorListResponse = {

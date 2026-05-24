@@ -110,6 +110,7 @@ from app.services.correction_request_service import (
 from app.services.correction_request_service import (
     slack_payload_snapshot as correction_slack_payload_snapshot,
 )
+from app.services.dashboard_compute import compute_renewal_actions
 from app.services.evidence_slots import (
     SlotState,
     SlotView,
@@ -2813,6 +2814,12 @@ class DashboardSuggestedAction(BaseModel):
         # next step instead of it sitting silently as VENCIDO only on
         # the slot resolver.
         "regularize",
+        # Phase 6D (2026-05-23): renewal-bearing onboarding requirements
+        # (CSF / REPSE / registro patronal) surface a renewal CTA when
+        # the cycle is within 30 days of due or already overdue. Reuses
+        # the same dispatcher state the cron job emits notifications
+        # from, so the dashboard never disagrees with the inbox.
+        "renewal",
     ]
     title: str
     body: str
@@ -3108,6 +3115,7 @@ def _compute_suggested_actions(
     *,
     onboarding_completed: bool = False,
     db: Session | None = None,
+    renewal_actions: list[dict] | None = None,
 ) -> list[DashboardSuggestedAction]:
     """Build the dashboard's prioritized-action list.
 
@@ -3204,6 +3212,26 @@ def _compute_suggested_actions(
                 period_key=view.period_key,
             )
         )
+    # 2.6. Overdue renewals (Phase 6D) — same priority tier as the
+    # expired calendar items above. The dict shape comes from
+    # ``compute_renewal_actions``; we promote each to the Pydantic
+    # response model here.
+    if renewal_actions:
+        for action in renewal_actions:
+            if action.get("priority") != "high":
+                continue
+            actions.append(
+                DashboardSuggestedAction(
+                    id=action["id"],
+                    type="renewal",
+                    title=action["title"],
+                    body=action["body"],
+                    priority="high",
+                    href=action["href"],
+                    requirement_code=action.get("requirement_code"),
+                    period_key=action.get("period_key"),
+                )
+            )
     # 3. Calendar slots due within 14 days — low/medium depending on urgency.
     for view in calendar_slots:
         if not view.required or view.state is not SlotState.MISSING:
@@ -3226,6 +3254,24 @@ def _compute_suggested_actions(
                 period_key=view.period_key,
             )
         )
+    # 3.5. Due-soon renewals (Phase 6D) — medium priority alongside
+    # missing onboarding and the 5-day upcoming-calendar tier.
+    if renewal_actions:
+        for action in renewal_actions:
+            if action.get("priority") != "medium":
+                continue
+            actions.append(
+                DashboardSuggestedAction(
+                    id=action["id"],
+                    type="renewal",
+                    title=action["title"],
+                    body=action["body"],
+                    priority="medium",
+                    href=action["href"],
+                    requirement_code=action.get("requirement_code"),
+                    period_key=action.get("period_key"),
+                )
+            )
     return actions[:5]
 
 
@@ -3634,6 +3680,7 @@ def get_workspace_dashboard(
             today,
             onboarding_completed=workspace.onboarding_completed_at is not None,
             db=db,
+            renewal_actions=compute_renewal_actions(db, workspace, today),
         ),
         attention_today=_compute_attention_today(
             onboarding_slots, calendar_slots, today

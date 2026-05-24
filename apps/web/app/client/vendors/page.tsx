@@ -23,6 +23,7 @@ import { ClientShell } from "../_shell";
 import {
   listClientNotifications,
   listClientVendors,
+  type ClientVendorNextRenewal,
   type ClientVendorRow,
 } from "@/lib/api/client";
 
@@ -305,6 +306,15 @@ function buildVendorColumns(
     ),
   },
   {
+    id: "renewal",
+    header: "Renovación",
+    width: "180px",
+    cell: (row) =>
+      row.next_renewal ? <RenewalPill renewal={row.next_renewal} /> : (
+        <span className="text-[12px] text-[color:var(--text-tertiary)]">—</span>
+      ),
+  },
+  {
     id: "notifications",
     header: "Novedades",
     width: "100px",
@@ -373,6 +383,35 @@ function SemaphorePill({ level }: { level: SemaphoreLevel }) {
     >
       <IconComponent className="h-3 w-3" weight="bold" aria-hidden="true" />
       {meta.label}
+    </span>
+  );
+}
+
+// Phase 6D — renewal urgency pill. Yellow for due_soon (within 30
+// days), red for overdue (past the due date). Shows the requirement
+// short label + the day count so the client_admin can scan the
+// column without clicking through.
+function RenewalPill({ renewal }: { renewal: ClientVendorNextRenewal }) {
+  const overdue = renewal.status === "overdue";
+  const tone = overdue
+    ? "bg-[color:var(--status-error-bg)] text-[color:var(--status-error-text)]"
+    : "bg-[color:var(--status-warning-bg)] text-[color:var(--status-warning-text)]";
+  const short = renewal.requirement_name
+    .replace("Constancia de Situación Fiscal (CSF)", "CSF")
+    .replace("Constancia de Situación Fiscal (CSF) y actualizaciones", "CSF")
+    .replace("Registro REPSE original", "REPSE")
+    .replace("Registro patronal original", "Patronal");
+  const tail = overdue
+    ? `vencido hace ${-renewal.days_remaining}d`
+    : renewal.days_remaining === 0
+      ? "vence hoy"
+      : `en ${renewal.days_remaining}d`;
+  return (
+    <span
+      className={`inline-flex items-center gap-1.5 rounded-full px-2 py-0.5 text-[12px] font-medium ${tone}`}
+      title={`${renewal.requirement_name} · vence ${renewal.due_date}`}
+    >
+      {short} · {tail}
     </span>
   );
 }
