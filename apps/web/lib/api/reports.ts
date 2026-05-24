@@ -354,3 +354,81 @@ export function createReportFromPreset(
     body: JSON.stringify({ preset_id: presetId }),
   });
 }
+
+// ─── Exports (Phase 10A) ─────────────────────────────────────────
+//
+// HTML is the only format wired in 10A; PDF (10B) and Excel (10C)
+// will land alongside their renderer choices.
+
+export type ReportExportFormat = "html";
+
+export interface ReportExport {
+  id: string;
+  report_id: string;
+  version_id: string;
+  format: string;
+  status: "pending" | "rendering" | "ready" | "failed";
+  bytes: number | null;
+  requested_at: string;
+  ready_at: string | null;
+  error_text: string | null;
+}
+
+export function createReportExport(
+  reportId: string,
+  params: { format: ReportExportFormat; version_id?: string },
+): Promise<ReportExport> {
+  return fetchJson<ReportExport>(`/api/v1/reports/${reportId}/exports`, {
+    method: "POST",
+    body: JSON.stringify(params),
+  });
+}
+
+export function getReportExport(exportId: string): Promise<ReportExport> {
+  return fetchJson<ReportExport>(`/api/v1/reports/exports/${exportId}`);
+}
+
+/**
+ * Fetch the rendered artifact as a Blob and trigger a browser
+ * download. ``fetch()`` is used so the bearer token flows through
+ * via the same session helper the rest of this module uses — a
+ * plain ``window.location`` navigation would 401 because the
+ * browser doesn't carry the token on a cross-origin link.
+ *
+ * The anchor-click trick (create an <a download>, click, revoke
+ * object URL) is the standard cross-browser way to land the bytes
+ * on disk without relying on Content-Disposition alone.
+ */
+export async function downloadReportExport(
+  exportId: string,
+  filename: string,
+): Promise<void> {
+  const session = readAdminSession();
+  const headers: Record<string, string> = {
+    Accept: "application/octet-stream, text/html",
+  };
+  if (session?.access_token) {
+    headers.Authorization = `Bearer ${session.access_token}`;
+  }
+  const response = await fetch(
+    `${API_BASE_URL}/api/v1/reports/exports/${exportId}/download`,
+    { headers },
+  );
+  if (!response.ok) {
+    throw new ReportsApiError(
+      response.status,
+      `No pudimos descargar el export (HTTP ${response.status}).`,
+    );
+  }
+  const blob = await response.blob();
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = filename;
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+  // Revoke after a small delay so the browser's download pipeline
+  // has time to grab the blob.
+  setTimeout(() => URL.revokeObjectURL(url), 1000);
+}

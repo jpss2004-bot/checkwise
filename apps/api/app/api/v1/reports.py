@@ -21,8 +21,8 @@ import logging
 from datetime import datetime
 from typing import Annotated
 
-from fastapi import APIRouter, Depends, HTTPException, Query, status
-from fastapi.responses import StreamingResponse
+from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query, status
+from fastapi.responses import FileResponse, RedirectResponse, StreamingResponse
 from pydantic import BaseModel, Field
 from sqlalchemy import select
 from sqlalchemy.orm import Session
@@ -34,8 +34,8 @@ from app.constants.reports import (
     ReportStatus,
     ReportVersionOrigin,
 )
-from app.db.session import get_db
-from app.models.entities import Report, ReportVersion
+from app.db.session import SessionLocal, get_db
+from app.models.entities import Report, ReportExport, ReportVersion
 from app.schemas.reports import (
     CreateFromPresetRequest,
     PlannedBlockResponse,
@@ -77,9 +77,15 @@ from app.services.reports.conversation import (
 )
 from app.services.reports.copilot import chat_completion, explain_block
 from app.services.reports.executor import execute_plan
+from app.services.reports.export import (
+    ReportExportError,
+    run_report_export,
+    start_report_export,
+)
 from app.services.reports.llm import LLMError, get_llm_client
 from app.services.reports.planner import plan_report
 from app.services.reports.templates import get_preset, presets_for_roles
+from app.services.storage import get_storage_service
 
 logger = logging.getLogger(__name__)
 
@@ -1330,4 +1336,237 @@ def post_refresh_report_data(
         version_number=new_version.version_number,
         refreshed_blocks=summary,
         fetched_at=fetched_at,
+    )
+
+
+# ──────────────────────────────────────────────────────────────────
+# Phase 10A — Report exports
+# ──────────────────────────────────────────────────────────────────
+#
+# Three endpoints back the export pipeline:
+#   POST /reports/{report_id}/exports         → create + schedule
+#   GET  /reports/exports/{export_id}         → poll status
+#   GET  /reports/exports/{export_id}/download → stream / redirect
+#
+# All three reuse the existing ``get_report`` permission helper as
+# the authorization gate (no enumeration: cross-tenant ids return
+# 404, never 403). The download endpoint prefers an S3 presigned
+# URL when the backend supports it; LocalStorageService streams the
+# file via ``FileResponse``.
+#
+# Slice 10A ships HTML only. The dispatcher in
+# ``app.services.reports.export.run_report_export`` is the single
+# spot 10B (PDF) and 10C (Excel) will extend.
+
+
+class CreateReportExportPayload(BaseModel):
+    """Request body for ``POST /reports/{report_id}/exports``.
+
+    ``version_id`` is optional — when omitted, the report's current
+    version is used. Pinning a specific version is supported so a
+    future "export this old version" UI can pass an explicit value.
+    """
+
+    format: str = Field(..., description="Export format. 10A supports 'html' only.")
+    version_id: str | None = Field(
+        default=None,
+        description="Version to export. Defaults to the report's current_version_id.",
+    )
+
+
+class ReportExportRead(BaseModel):
+    """Public shape of a ``ReportExport`` row.
+
+    Slice 10A does not expose ``storage_key`` or ``error_text`` to
+    non-staff readers — both can leak internal layout. The status +
+    bytes + timestamps are enough for the polling UI; the actual
+    bytes flow through the dedicated /download endpoint.
+    """
+
+    id: str
+    report_id: str
+    version_id: str
+    format: str
+    status: str
+    bytes: int | None
+    requested_at: datetime
+    ready_at: datetime | None
+    error_text: str | None
+
+
+def _read_export(row: ReportExport) -> ReportExportRead:
+    return ReportExportRead(
+        id=row.id,
+        report_id=row.report_id,
+        version_id=row.version_id,
+        format=row.format,
+        status=row.status,
+        bytes=row.bytes,
+        requested_at=row.requested_at,
+        ready_at=row.ready_at,
+        error_text=row.error_text,
+    )
+
+
+def _run_report_export_with_fresh_session(export_id: str) -> None:
+    """BackgroundTask entry point that owns its own DB session.
+
+    The request session is closed by the time the background task
+    fires (FastAPI's ``get_db`` dependency cleans up on response).
+    A fresh ``SessionLocal()`` keeps the worker's writes independent
+    of the request lifecycle and matches the pattern the existing
+    Slack-delivery and audit-log paths use.
+    """
+    db = SessionLocal()
+    try:
+        run_report_export(db, export_id)
+        db.commit()
+    finally:
+        db.close()
+
+
+@router.post(
+    "/{report_id}/exports",
+    response_model=ReportExportRead,
+    status_code=status.HTTP_201_CREATED,
+    summary="Start an asynchronous export of a report version",
+)
+def post_report_export(
+    report_id: str,
+    payload: CreateReportExportPayload,
+    db: DbSession,
+    background_tasks: BackgroundTasks,
+    current: Annotated[CurrentUser, Depends(get_current_user)],
+) -> ReportExportRead:
+    """Create a ``ReportExport`` row and schedule the renderer.
+
+    The renderer runs as a FastAPI ``BackgroundTask`` so the request
+    returns immediately. Callers should poll
+    ``GET /reports/exports/{export_id}`` until ``status == "ready"``
+    (or ``"failed"``) before requesting the download.
+    """
+    try:
+        report, current_version = get_report(
+            db, actor=_actor_from(current, db), report_id=report_id
+        )
+    except ReportNotFoundError as exc:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, str(exc)) from exc
+
+    # Resolve the version to export. Default = the report's current
+    # version (set on the Report row). Explicit version_id must belong
+    # to this report or we 404 — never confirm cross-report ids.
+    if payload.version_id is not None:
+        version = db.get(ReportVersion, payload.version_id)
+        if version is None or version.report_id != report.id:
+            raise HTTPException(
+                status.HTTP_404_NOT_FOUND,
+                detail="Versión no encontrada.",
+            )
+    else:
+        version = current_version
+        if version is None:
+            raise HTTPException(
+                status.HTTP_422_UNPROCESSABLE_ENTITY,
+                detail="El reporte no tiene una versión actual para exportar.",
+            )
+
+    try:
+        row = start_report_export(
+            db,
+            report=report,
+            version=version,
+            format=payload.format,
+            requested_by_user_id=current.user.id,
+        )
+    except ReportExportError as exc:
+        raise HTTPException(
+            status.HTTP_422_UNPROCESSABLE_ENTITY, detail=str(exc)
+        ) from exc
+    db.commit()
+    db.refresh(row)
+    background_tasks.add_task(_run_report_export_with_fresh_session, row.id)
+    return _read_export(row)
+
+
+def _load_export_for_user(
+    db: Session, *, export_id: str, current: CurrentUser
+) -> ReportExport:
+    """Look up an export and confirm the caller may see it.
+
+    Reuses ``get_report`` so we never have to duplicate the audience
+    / tenant scoping logic. A 404 covers both "row doesn't exist" and
+    "caller can't see the parent report" — no enumeration.
+    """
+    row = db.get(ReportExport, export_id)
+    if row is None:
+        raise HTTPException(
+            status.HTTP_404_NOT_FOUND, detail="Export no encontrado."
+        )
+    try:
+        get_report(db, actor=_actor_from(current, db), report_id=row.report_id)
+    except ReportNotFoundError as exc:
+        raise HTTPException(
+            status.HTTP_404_NOT_FOUND, detail="Export no encontrado."
+        ) from exc
+    return row
+
+
+@router.get(
+    "/exports/{export_id}",
+    response_model=ReportExportRead,
+    summary="Poll the status of an export",
+)
+def get_report_export(
+    export_id: str,
+    db: DbSession,
+    current: Annotated[CurrentUser, Depends(get_current_user)],
+) -> ReportExportRead:
+    row = _load_export_for_user(db, export_id=export_id, current=current)
+    return _read_export(row)
+
+
+@router.get(
+    "/exports/{export_id}/download",
+    summary="Stream (or redirect to) the rendered export artifact",
+)
+def get_report_export_download(
+    export_id: str,
+    db: DbSession,
+    current: Annotated[CurrentUser, Depends(get_current_user)],
+):
+    row = _load_export_for_user(db, export_id=export_id, current=current)
+    if row.status != "ready" or not row.storage_key:
+        raise HTTPException(
+            status.HTTP_409_CONFLICT,
+            detail=(
+                f"Export en estado '{row.status}'. Espera a que sea 'ready'."
+            ),
+        )
+    storage = get_storage_service()
+    media_type = (
+        "text/html; charset=utf-8" if row.format == "html" else "application/octet-stream"
+    )
+    download_name = f"checkwise-report-{row.report_id}-v{row.version_id}.{row.format}"
+    disposition = f'attachment; filename="{download_name}"'
+
+    # Prefer presigned URL when the backend supports it (S3/R2) — same
+    # pattern the document-download path uses. LocalStorageService
+    # returns None here and we stream via FileResponse.
+    presigned = storage.presigned_download_url(
+        row.storage_key, content_disposition=disposition
+    )
+    if presigned is not None:
+        return RedirectResponse(presigned, status_code=status.HTTP_302_FOUND)
+
+    path = storage.open_for_read(row.storage_key)
+    if not path.exists():
+        # Orphaned storage key — clean 404 (matches the document path).
+        raise HTTPException(
+            status.HTTP_404_NOT_FOUND,
+            detail="Artefacto no disponible en almacenamiento.",
+        )
+    return FileResponse(
+        path=str(path),
+        media_type=media_type,
+        filename=download_name,
     )

@@ -25,6 +25,7 @@ import {
 
 import { Canvas } from "@/components/checkwise/reports/canvas";
 import { ChatCopilot } from "@/components/checkwise/reports/chat-copilot";
+import { ExportButton } from "@/components/checkwise/reports/editor/export-button";
 import { ReportActionsContext } from "@/components/checkwise/reports/freshness-label";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
@@ -464,6 +465,7 @@ export function ReportEditor({
                 Descargar PDF
               </Link>
             </Button>
+            <ExportButton reportId={reportId} />
             <Button
               variant="default"
               size="sm"
