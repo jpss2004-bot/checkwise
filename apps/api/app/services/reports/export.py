@@ -1,4 +1,4 @@
-"""Phase 10A — server-side report export pipeline.
+"""Phase 10 — server-side report export pipeline.
 
 Walks ``ReportVersion.content_json``, renders the block list into a
 self-contained artifact, writes the artifact to storage, and updates
@@ -6,9 +6,11 @@ self-contained artifact, writes the artifact to storage, and updates
 docstring promised (pending → rendering → ready | failed) finally
 gets a worker.
 
-Slice 10A ships HTML only. PDF (Slice 10B, planned with Playwright)
-and Excel (10C) reuse the same dispatcher and storage path — the
-format dispatch lives in :func:`run_report_export`.
+Slice 10A ships HTML rendering (pure Python, no deps). Slice 10B
+adds PDF rendering by loading the 10A HTML in headless Chromium via
+Playwright and calling page.pdf(). Slice 10C (Excel) and 10D (signed
+sharing) reuse the same dispatcher and storage path — the format
+dispatch lives in :func:`run_report_export`.
 
 Design choices:
 
@@ -49,7 +51,9 @@ from __future__ import annotations
 
 import html
 import logging
+import tempfile
 from collections.abc import Iterable
+from pathlib import Path
 from typing import Any, Literal
 
 from sqlalchemy.orm import Session
@@ -62,8 +66,8 @@ from app.services.storage import get_storage_service
 logger = logging.getLogger(__name__)
 
 
-ReportExportFormat = Literal["html"]
-SUPPORTED_FORMATS: tuple[ReportExportFormat, ...] = ("html",)
+ReportExportFormat = Literal["html", "pdf"]
+SUPPORTED_FORMATS: tuple[ReportExportFormat, ...] = ("html", "pdf")
 
 
 class ReportExportError(Exception):
@@ -148,6 +152,10 @@ def run_report_export(db: Session, export_id: str) -> None:
             artifact = render_report_html(report, version)
             content_type = "text/html; charset=utf-8"
             extension = "html"
+        elif row.format == "pdf":
+            artifact = render_report_pdf(report, version)
+            content_type = "application/pdf"
+            extension = "pdf"
         else:
             # Defensive — start_report_export already validated, but a
             # stale row from a prior schema could carry an unsupported
@@ -194,6 +202,78 @@ def run_report_export(db: Session, export_id: str) -> None:
 # ---------------------------------------------------------------------------
 # Pure rendering (no DB, no I/O)
 # ---------------------------------------------------------------------------
+
+
+def render_report_pdf(report: Report, version: ReportVersion) -> bytes:
+    """Phase 10B — render the 10A HTML artifact through headless Chromium.
+
+    Approach: render the same self-contained HTML the 10A path produces,
+    write it to a temporary ``.html`` file, load it via ``file://`` in a
+    headless Chromium instance, call ``page.pdf()``. Browser launches
+    fresh per call and closes immediately — no pooling. RAM stays
+    bounded at ~150-300MB peak per render so we can survive on Render's
+    starter plan (512MB) under normal traffic.
+
+    Why a temp file (not a data URL or in-memory content): the artifact
+    is small enough that the temp-file write is sub-millisecond, AND
+    Chromium's ``file://`` loader handles the resulting page exactly
+    like a real browser would handle a saved HTML — same media query
+    layout, same print stylesheet, same fonts. Data URLs cap out around
+    2MB on some Chromium versions and don't trigger the same media
+    handling for embedded ``<style media=print>`` rules.
+
+    PDF settings: US Letter, 0.5in margins all around, ``print_background=True``
+    so the inline CSS gradients / background colors render. These are
+    the conservative defaults that match the existing browser-print
+    flow. Future slices can expose them as request parameters.
+
+    Lifecycle: the Playwright sync context manager guarantees the
+    browser closes even if ``page.pdf`` raises. The temp file is
+    deleted after read via ``Path.unlink`` in the finally — no orphan
+    files in /tmp under repeated failure modes.
+
+    Import is local because ``playwright`` is a heavy import that adds
+    ~150ms to module-load time. The 10A path doesn't pay that cost for
+    the HTML-only consumer.
+    """
+    from playwright.sync_api import sync_playwright
+
+    html_bytes = render_report_html(report, version)
+    # ``delete=False`` so the temp file survives the ``with`` block —
+    # we delete it explicitly in the outer ``finally`` so Chromium has
+    # the file path available throughout the render.
+    tmp = tempfile.NamedTemporaryFile(
+        suffix=".html", delete=False, prefix="cw-report-"
+    )
+    try:
+        tmp.write(html_bytes)
+        tmp.close()
+        tmp_path = Path(tmp.name)
+        with sync_playwright() as p:
+            browser = p.chromium.launch(args=["--no-sandbox"])
+            try:
+                page = browser.new_page()
+                page.goto(f"file://{tmp_path}", wait_until="networkidle")
+                pdf_bytes = page.pdf(
+                    format="Letter",
+                    print_background=True,
+                    margin={
+                        "top": "0.5in",
+                        "right": "0.5in",
+                        "bottom": "0.5in",
+                        "left": "0.5in",
+                    },
+                )
+            finally:
+                browser.close()
+        return pdf_bytes
+    finally:
+        try:
+            Path(tmp.name).unlink(missing_ok=True)
+        except Exception:  # pragma: no cover — defensive cleanup
+            logger.warning(
+                "[reports.export] failed to delete temp file %s", tmp.name
+            )
 
 
 def render_report_html(report: Report, version: ReportVersion) -> bytes:
@@ -612,6 +692,7 @@ __all__ = [
     "ReportExportError",
     "ReportExportFormat",
     "render_report_html",
+    "render_report_pdf",
     "run_report_export",
     "start_report_export",
 ]

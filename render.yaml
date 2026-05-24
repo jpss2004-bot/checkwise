@@ -33,7 +33,13 @@ services:
     rootDir: apps/api
     branch: main
     autoDeploy: true
-    buildCommand: pip install -e .
+    # Phase 10B (2026-05-24) — appended `playwright install --with-deps
+    # chromium` so the report-export PDF renderer has a browser to drive.
+    # `--with-deps` installs Chromium's system fonts/libs via apt on
+    # Render's Ubuntu base. Adds ~2-3 min to each deploy and ~200MB to
+    # the slug; PDF rendering peaks ~150-300MB RAM per render which is
+    # workable on starter (512MB) under normal traffic.
+    buildCommand: pip install -e . && playwright install --with-deps chromium
     preDeployCommand: alembic upgrade head
     startCommand: uvicorn app.main:app --host 0.0.0.0 --port $PORT
     healthCheckPath: /health

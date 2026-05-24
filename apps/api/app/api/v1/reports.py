@@ -1543,9 +1543,13 @@ def get_report_export_download(
             ),
         )
     storage = get_storage_service()
-    media_type = (
-        "text/html; charset=utf-8" if row.format == "html" else "application/octet-stream"
-    )
+    # Per-format media type. Falls back to application/octet-stream
+    # for any unrecognised value so the browser still treats the
+    # response as a file (rather than rendering it inline).
+    media_type = {
+        "html": "text/html; charset=utf-8",
+        "pdf": "application/pdf",
+    }.get(row.format, "application/octet-stream")
     download_name = f"checkwise-report-{row.report_id}-v{row.version_id}.{row.format}"
     disposition = f'attachment; filename="{download_name}"'
 

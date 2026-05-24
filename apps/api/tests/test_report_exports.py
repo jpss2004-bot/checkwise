@@ -51,9 +51,35 @@ from app.services.reports.export import (
     SUPPORTED_FORMATS,
     ReportExportError,
     render_report_html,
+    render_report_pdf,
     run_report_export,
     start_report_export,
 )
+
+
+def _playwright_available() -> bool:
+    """Phase 10B — PDF tests need a real Chromium install.
+
+    CI / lightweight envs that skip ``playwright install chromium``
+    should still pass the rest of the suite. We treat both
+    ``ImportError`` (package missing) and ``RuntimeError`` (browser
+    binary missing — Playwright surfaces this with a helpful
+    "Looks like Playwright was just installed" message) as "skip".
+    """
+    try:
+        from playwright.sync_api import sync_playwright  # noqa: F401
+    except ImportError:
+        return False
+    try:
+        with sync_playwright() as p:
+            browser = p.chromium.launch(args=["--no-sandbox"])
+            browser.close()
+        return True
+    except Exception:
+        return False
+
+
+_PLAYWRIGHT_OK = _playwright_available()
 
 # ─── Fixtures ────────────────────────────────────────────────────
 
@@ -201,9 +227,10 @@ def _create_report_with_blocks(api_client: TestClient, token: str) -> str:
 
 
 def test_supported_formats_pin() -> None:
-    """Slice 10A ships HTML only. A future cadence tweak is a
-    deliberate test edit."""
-    assert SUPPORTED_FORMATS == ("html",)
+    """Slice 10A shipped HTML; 10B added PDF. Updating this assertion
+    when 10C (Excel) lands is a deliberate test edit so the new
+    format is intentional, not accidental."""
+    assert SUPPORTED_FORMATS == ("html", "pdf")
 
 
 def test_render_report_html_escapes_user_data(db_factory) -> None:
@@ -395,7 +422,7 @@ def test_start_report_export_rejects_unsupported_format(db_factory) -> None:
                 db,
                 report=report,
                 version=version,
-                format="pdf",
+                format="xlsx",  # not supported until 10C
                 requested_by_user_id=user.id,
             )
         # No row created
@@ -541,10 +568,14 @@ def test_post_export_422_for_bad_format(api_client, db_factory) -> None:
     resp = api_client.post(
         f"/api/v1/reports/{report_id}/exports",
         headers=_h(token),
-        json={"format": "pdf"},  # not supported in 10A
+        json={"format": "xlsx"},  # not supported until 10C
     )
     assert resp.status_code == 422
-    assert "html" in resp.json()["detail"]
+    # The detail string includes the supported-formats list — both
+    # html and pdf should appear so consumers can self-correct.
+    detail = resp.json()["detail"]
+    assert "html" in detail
+    assert "pdf" in detail
 
 
 def test_post_export_creates_pending_row_and_returns_201(api_client, db_factory) -> None:
@@ -768,3 +799,113 @@ def test_payload_is_valid_json_compatible_html(api_client, db_factory) -> None:
     assert "El cumplimiento bajó 4 puntos." in body
     # Sanity: response is valid bytes (decodable as utf-8) without crashing.
     json.dumps({"len": len(body)})  # just to assert no exception in json layer
+
+
+# ─── Phase 10B — PDF rendering ───────────────────────────────────
+
+
+@pytest.mark.skipif(
+    not _PLAYWRIGHT_OK,
+    reason="Playwright chromium not installed; run 'playwright install chromium' to enable.",
+)
+def test_render_report_pdf_returns_pdf_bytes(db_factory) -> None:
+    """The renderer produces real PDF bytes (PDF magic header + size)."""
+    db = db_factory()
+    try:
+        org = Organization(name="o", kind="internal")
+        db.add(org)
+        db.flush()
+        user = User(
+            email="pdf-test@e.test", password_hash="x", full_name="u", status="active"
+        )
+        db.add(user)
+        db.flush()
+        report = Report(
+            organization_id=org.id,
+            title="PDF Test",
+            description="Slice 10B coverage",
+            audience="internal_only",
+            created_by_user_id=user.id,
+        )
+        db.add(report)
+        db.flush()
+        version = ReportVersion(
+            report_id=report.id,
+            version_number=1,
+            content_json={
+                "blocks": [
+                    {
+                        "id": "t1",
+                        "type": "text",
+                        "config": {"title": "Resumen", "body": "Texto"},
+                        "data": {},
+                    },
+                    {
+                        "id": "k1",
+                        "type": "kpi_strip",
+                        "config": {"title": "Métricas"},
+                        "data": {
+                            "resolved": [
+                                {"metric_key": "approved_pct", "value": 73, "trend_pct_vs_prior": None},
+                            ],
+                            "fetched_at": "2026-05-23T12:00:00Z",
+                        },
+                    },
+                ]
+            },
+            generated_by="manual",
+            created_by_user_id=user.id,
+        )
+        db.add(version)
+        db.commit()
+
+        pdf = render_report_pdf(report, version)
+        # PDF magic header.
+        assert pdf.startswith(b"%PDF-"), pdf[:16]
+        # Non-trivial size — a one-page PDF should be at least ~5KB
+        # once Chromium has embedded fonts + the inline CSS.
+        assert len(pdf) > 5_000, f"PDF only {len(pdf)} bytes — likely empty"
+        # End-of-file marker is present (PDFs end with %%EOF).
+        assert b"%%EOF" in pdf[-128:]
+    finally:
+        db.close()
+
+
+@pytest.mark.skipif(
+    not _PLAYWRIGHT_OK,
+    reason="Playwright chromium not installed; run 'playwright install chromium' to enable.",
+)
+def test_post_pdf_export_creates_pdf_artifact(api_client, db_factory) -> None:
+    """Full endpoint chain with format=pdf: create → poll → download
+    returns a valid PDF blob via the same plumbing as HTML."""
+    pw, email, _ = _seed_user(db_factory, email="pdf-e2e@exp.test")
+    token = _login(api_client, email, pw)
+    report_id = _create_report_with_blocks(api_client, token)
+
+    create = api_client.post(
+        f"/api/v1/reports/{report_id}/exports",
+        headers=_h(token),
+        json={"format": "pdf"},
+    )
+    assert create.status_code == 201, create.text
+    body = create.json()
+    assert body["format"] == "pdf"
+    export_id = body["id"]
+
+    # Poll endpoint should report ready (TestClient drains BackgroundTasks
+    # synchronously after the response — same as the HTML path).
+    poll = api_client.get(
+        f"/api/v1/reports/exports/{export_id}", headers=_h(token)
+    )
+    assert poll.status_code == 200
+    assert poll.json()["status"] == "ready"
+
+    # Download streams the PDF bytes with the right content type.
+    dl = api_client.get(
+        f"/api/v1/reports/exports/{export_id}/download", headers=_h(token)
+    )
+    assert dl.status_code == 200
+    assert dl.headers["content-type"].startswith("application/pdf")
+    assert ".pdf" in dl.headers.get("content-disposition", "")
+    assert dl.content.startswith(b"%PDF-"), dl.content[:16]
+    assert b"%%EOF" in dl.content[-128:]

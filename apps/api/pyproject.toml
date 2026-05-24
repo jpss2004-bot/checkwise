@@ -19,6 +19,12 @@ dependencies = [
   "psycopg[binary]>=3.1",
   "pyjwt>=2.8",
   "pypdf>=5.0",
+  # Phase 10B — server-side PDF rendering for report exports. Drives
+  # headless Chromium via a sync API from within a FastAPI
+  # BackgroundTask. The chromium binary is provisioned at deploy
+  # time via `playwright install --with-deps chromium` (see
+  # render.yaml buildCommand).
+  "playwright>=1.40",
   "pydantic-settings>=2.2",
   "python-multipart>=0.0.9",
   "sqlalchemy>=2.0",
