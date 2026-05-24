@@ -1129,3 +1129,350 @@ def test_admin_vendor_expediente_zip_404_when_no_workspace(
     )
     assert resp.status_code == 404
     assert "workspace" in resp.json()["detail"].lower()
+
+
+# ---------------------------------------------------------------------------
+# Junta 2026-05-23 — audit package (cross-vendor ZIP for inspectors)
+# ---------------------------------------------------------------------------
+
+
+def _seed_approved_submission_for_workspace(
+    api_client: TestClient,
+    db_factory,
+    ws_id: str,
+    **kwargs,
+) -> str:
+    """Wrapper that seeds a submission and flips its status to
+    ``aprobado`` directly. The audit-package endpoint defaults to
+    approved-only, so the test fixtures need at least one approved
+    row to assert the happy path."""
+    return _seed_submission_for_workspace(
+        api_client,
+        db_factory,
+        ws_id,
+        status_value=DocumentStatus.APROBADO.value,
+        **kwargs,
+    )
+
+
+def test_client_audit_package_preview_returns_counts(
+    api_client: TestClient, db_factory
+) -> None:
+    """The /preview endpoint returns aggregated file/byte counts plus
+    breakdowns by vendor and institution; it does NOT write an
+    audit row (cheap read used by the UI live counter)."""
+    from app.models import AuditLog
+
+    client_id = _seed_client(db_factory)
+    _, ws_a = _seed_vendor_with_workspace(
+        db_factory, client_id=client_id, vendor_name="Proveedor A", rfc="AAA260101AB1"
+    )
+    _, ws_b = _seed_vendor_with_workspace(
+        db_factory, client_id=client_id, vendor_name="Proveedor B", rfc="BBB260101AB2"
+    )
+    _seed_approved_submission_for_workspace(api_client, db_factory, ws_a)
+    _seed_approved_submission_for_workspace(api_client, db_factory, ws_b)
+
+    _, email, pw = _seed_user_with_role(
+        db_factory, role="client_admin", client_id=client_id, email_prefix="ca"
+    )
+    token = _login(api_client, email, pw)
+
+    resp = api_client.get(
+        "/api/v1/client/audit-package/preview",
+        headers=_h(token),
+    )
+    assert resp.status_code == 200, resp.text
+    body = resp.json()
+    assert body["file_count"] == 2
+    assert body["vendor_count"] == 2
+    assert body["over_file_cap"] is False
+    assert body["over_bytes_cap"] is False
+    assert body["file_cap"] == 200
+    # Preview must not pollute the audit log.
+    db = db_factory()
+    try:
+        downloads = (
+            db.query(AuditLog)
+            .filter(AuditLog.action == "client.audit_package_downloaded")
+            .count()
+        )
+        assert downloads == 0
+    finally:
+        db.close()
+
+
+def test_client_audit_package_zip_defaults_to_approved_only(
+    api_client: TestClient, db_factory
+) -> None:
+    """With no ``statuses`` filter the ZIP must only contain
+    aprobado documents; pendiente_revision rows are dropped."""
+    import io
+    import zipfile
+
+    client_id = _seed_client(db_factory)
+    _, ws = _seed_vendor_with_workspace(db_factory, client_id=client_id)
+    _seed_approved_submission_for_workspace(api_client, db_factory, ws)
+    # A second submission stays in review (different period) — must
+    # NOT appear in the default approved-only package.
+    _seed_submission_for_workspace(
+        api_client,
+        db_factory,
+        ws,
+        period_key="2026-B2",
+        period_code="2026-B2",
+    )
+
+    _, email, pw = _seed_user_with_role(
+        db_factory, role="client_admin", client_id=client_id, email_prefix="ca"
+    )
+    token = _login(api_client, email, pw)
+
+    resp = api_client.get(
+        "/api/v1/client/audit-package.zip?skip_manifest=true",
+        headers=_h(token),
+    )
+    assert resp.status_code == 200, resp.text
+    assert resp.headers.get("content-type") == "application/zip"
+    cd = resp.headers.get("content-disposition", "").lower()
+    assert "attachment" in cd
+    assert cd.startswith("attachment; filename=\"auditoria-")
+
+    archive = zipfile.ZipFile(io.BytesIO(resp.content))
+    names = archive.namelist()
+    assert len(names) == 1
+    # Layout is vendor/institucion/periodo/filename — three path
+    # segments before the file. INDICE.pdf is suppressed via
+    # skip_manifest so we know each entry is a real document.
+    assert names[0].count("/") == 3
+
+
+def test_client_audit_package_zip_status_override_includes_in_review(
+    api_client: TestClient, db_factory
+) -> None:
+    """Passing ``statuses=pendiente_revision&statuses=aprobado``
+    explicitly should include in-review rows alongside approved."""
+    import io
+    import zipfile
+
+    client_id = _seed_client(db_factory)
+    _, ws = _seed_vendor_with_workspace(db_factory, client_id=client_id)
+    # Two distinct submissions on the same workspace; different
+    # periods so the (requirement_code, period_key) tuple stays
+    # unique.
+    _seed_approved_submission_for_workspace(api_client, db_factory, ws)
+    _seed_submission_for_workspace(
+        api_client,
+        db_factory,
+        ws,
+        period_key="2026-B2",
+        period_code="2026-B2",
+    )
+
+    _, email, pw = _seed_user_with_role(
+        db_factory, role="client_admin", client_id=client_id, email_prefix="ca"
+    )
+    token = _login(api_client, email, pw)
+    resp = api_client.get(
+        "/api/v1/client/audit-package.zip"
+        "?statuses=aprobado&statuses=pendiente_revision&skip_manifest=true",
+        headers=_h(token),
+    )
+    assert resp.status_code == 200, resp.text
+    archive = zipfile.ZipFile(io.BytesIO(resp.content))
+    assert len(archive.namelist()) == 2
+
+
+def test_client_audit_package_zip_cross_vendor_layout(
+    api_client: TestClient, db_factory
+) -> None:
+    """Two vendors → two top-level folders in the archive."""
+    import io
+    import zipfile
+
+    client_id = _seed_client(db_factory)
+    _, ws_a = _seed_vendor_with_workspace(
+        db_factory, client_id=client_id, vendor_name="Proveedor A", rfc="AAA260101AB1"
+    )
+    _, ws_b = _seed_vendor_with_workspace(
+        db_factory, client_id=client_id, vendor_name="Proveedor B", rfc="BBB260101AB2"
+    )
+    _seed_approved_submission_for_workspace(api_client, db_factory, ws_a)
+    _seed_approved_submission_for_workspace(api_client, db_factory, ws_b)
+
+    _, email, pw = _seed_user_with_role(
+        db_factory, role="client_admin", client_id=client_id, email_prefix="ca"
+    )
+    token = _login(api_client, email, pw)
+    resp = api_client.get(
+        "/api/v1/client/audit-package.zip?skip_manifest=true",
+        headers=_h(token),
+    )
+    assert resp.status_code == 200, resp.text
+    names = zipfile.ZipFile(io.BytesIO(resp.content)).namelist()
+    top_folders = {n.split("/", 1)[0] for n in names}
+    assert len(top_folders) == 2
+
+
+def test_client_audit_package_writes_audit_row(
+    api_client: TestClient, db_factory
+) -> None:
+    """Each download writes a ``client.audit_package_downloaded`` row
+    with full filter metadata so a forensic reader can answer who
+    pulled which scope and when."""
+    from app.models import AuditLog
+
+    client_id = _seed_client(db_factory)
+    _, ws = _seed_vendor_with_workspace(db_factory, client_id=client_id)
+    _seed_approved_submission_for_workspace(api_client, db_factory, ws)
+
+    _, email, pw = _seed_user_with_role(
+        db_factory, role="client_admin", client_id=client_id, email_prefix="ca"
+    )
+    token = _login(api_client, email, pw)
+    resp = api_client.get(
+        "/api/v1/client/audit-package.zip?skip_manifest=true&institutions=infonavit",
+        headers=_h(token),
+    )
+    assert resp.status_code == 200
+
+    db = db_factory()
+    try:
+        events = (
+            db.query(AuditLog)
+            .filter(AuditLog.action == "client.audit_package_downloaded")
+            .all()
+        )
+        assert len(events) == 1
+        event = events[0]
+        assert event.actor_type == "client_admin"
+        meta = event.event_metadata or {}
+        assert meta.get("scope") == "client_audit_package"
+        assert meta.get("client_id") == client_id
+        assert meta.get("file_count") == 1
+        assert meta.get("manifest_included") is False
+        filters_meta = meta.get("filters") or {}
+        assert filters_meta.get("institutions") == ["infonavit"]
+        # Default status set is exposed even when caller did not pass
+        # it explicitly.
+        assert filters_meta.get("statuses") == ["aprobado"]
+    finally:
+        db.close()
+
+
+def test_client_audit_package_denies_non_client_admin(
+    api_client: TestClient, db_factory
+) -> None:
+    """Reviewer and unauthenticated callers must be rejected."""
+    client_id = _seed_client(db_factory)
+    _, _ = _seed_vendor_with_workspace(db_factory, client_id=client_id)
+
+    # No auth.
+    resp = api_client.get("/api/v1/client/audit-package.zip")
+    assert resp.status_code == 401
+
+    # Reviewer (wrong role) → 403 from /client/* guard.
+    _, email, pw = _seed_user_with_role(
+        db_factory, role="reviewer", email_prefix="rev"
+    )
+    token = _login(api_client, email, pw)
+    resp = api_client.get(
+        "/api/v1/client/audit-package.zip",
+        headers=_h(token),
+    )
+    assert resp.status_code == 403
+
+
+def test_client_audit_package_preview_filters_by_institution(
+    api_client: TestClient, db_factory
+) -> None:
+    """Passing ``institutions=imss`` must drop INFONAVIT rows from
+    the count."""
+    client_id = _seed_client(db_factory)
+    _, ws = _seed_vendor_with_workspace(db_factory, client_id=client_id)
+    _seed_approved_submission_for_workspace(
+        api_client,
+        db_factory,
+        ws,
+    )
+    _seed_approved_submission_for_workspace(
+        api_client,
+        db_factory,
+        ws,
+        requirement_code="REC-IMSS-2026-05-cuotas-obrero-patronales",
+        period_key="2026-M04",
+        period_code="2026-M04",
+        institution_code="imss",
+        load_type="mensual",
+        requirement_name="Cuotas obrero patronales",
+    )
+
+    _, email, pw = _seed_user_with_role(
+        db_factory, role="client_admin", client_id=client_id, email_prefix="ca"
+    )
+    token = _login(api_client, email, pw)
+    resp = api_client.get(
+        "/api/v1/client/audit-package/preview?institutions=imss",
+        headers=_h(token),
+    )
+    assert resp.status_code == 200, resp.text
+    body = resp.json()
+    assert body["file_count"] == 1
+
+
+def test_audit_manifest_html_renders_with_scope_and_counts(db_factory) -> None:
+    """Pure unit test on the HTML composer — no Playwright needed."""
+    from app.services.audit_package import AuditPackageEntry, AuditPackageFilters
+    from app.services.audit_package_manifest import _render_manifest_html
+
+    db = db_factory()
+    try:
+        client = Client(name="Empresa Demo", rfc="EMP010101AAA")
+        db.add(client)
+        db.commit()
+        client_id = client.id
+        client = db.get(Client, client_id)
+        assert client is not None
+    finally:
+        db.close()
+
+    entry = AuditPackageEntry(
+        arcname="empresa-demo/imss/2026-B1/cuotas.pdf",
+        storage_key="local://demo/x.pdf",
+        size_bytes=200_000,
+        vendor_id="v-1",
+        vendor_name="Proveedor Demo",
+        vendor_rfc="PVD010101AAA",
+        institution_code="imss",
+        institution_name="IMSS",
+        period_key="2026-B1",
+        requirement_code="REC-IMSS-COP",
+        requirement_name="Cuotas obrero-patronales",
+        status="aprobado",
+        filename="cuotas.pdf",
+        submitted_at_iso="2026-04-15T10:00:00+00:00",
+    )
+    filters = AuditPackageFilters(
+        period_from="2026-M01",
+        period_to="2026-M03",
+        institutions=("imss",),
+    )
+
+    from datetime import UTC, datetime
+
+    html_bytes = _render_manifest_html(
+        client=client,
+        filters=filters,
+        entries=[entry],
+        generated_at=datetime(2026, 5, 24, 12, 0, tzinfo=UTC),
+    )
+    html = html_bytes.decode("utf-8")
+    assert "Empresa Demo" in html
+    assert "EMP010101AAA" in html
+    assert "Proveedor Demo" in html
+    assert "Cuotas obrero-patronales" in html
+    assert "2026-M01 a 2026-M03" in html
+    assert "IMSS" in html
+    assert "Aprobado" in html
+    # The counter strip exposes the file count.
+    assert ">1<" in html  # 1 document

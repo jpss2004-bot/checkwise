@@ -1705,3 +1705,274 @@ def _aware(dt: datetime) -> datetime:
     if dt.tzinfo is None:
         return dt.replace(tzinfo=UTC)
     return dt
+
+
+# ---------------------------------------------------------------------------
+# Junta 2026-05-23 — audit package (cross-vendor ZIP for on-site auditors)
+# ---------------------------------------------------------------------------
+
+
+class AuditPackagePreviewResponse(BaseModel):
+    file_count: int
+    total_bytes: int
+    vendor_count: int
+    institution_breakdown: list[dict]
+    vendor_breakdown: list[dict]
+    requirement_breakdown: list[dict]
+    over_file_cap: bool
+    over_bytes_cap: bool
+    file_cap: int
+    bytes_cap: int
+
+
+def _build_audit_filters(
+    period_from: str | None,
+    period_to: str | None,
+    institutions: list[str] | None,
+    requirement_codes: list[str] | None,
+    statuses: list[str] | None,
+    vendor_ids: list[str] | None,
+) -> "AuditPackageFilters":
+    from app.services.audit_package import AuditPackageFilters as _F
+
+    return _F(
+        period_from=period_from or None,
+        period_to=period_to or None,
+        institutions=tuple(institutions or ()),
+        requirement_codes=tuple(requirement_codes or ()),
+        statuses=tuple(statuses or ()),
+        vendor_ids=tuple(vendor_ids or ()),
+    )
+
+
+@router.get(
+    "/audit-package/preview",
+    response_model=AuditPackagePreviewResponse,
+    summary="Pre-flight count + breakdowns for the audit ZIP",
+)
+def client_audit_package_preview(
+    db: DbSession,
+    current: ClientUser,
+    client_id: str | None = None,
+    period_from: str | None = None,
+    period_to: str | None = None,
+    institutions: Annotated[list[str] | None, Query()] = None,
+    requirement_codes: Annotated[list[str] | None, Query()] = None,
+    statuses: Annotated[list[str] | None, Query()] = None,
+    vendor_ids: Annotated[list[str] | None, Query()] = None,
+) -> AuditPackagePreviewResponse:
+    """Return file/byte counts plus breakdowns by vendor, institution
+    and requirement for a given filter set.
+
+    Powers the live counter on ``/client/auditoria``. Pure read — no
+    audit row, no streaming. Same authorization chain as every other
+    ``/client/*`` endpoint: ``_resolve_client_id`` enforces the
+    tenant boundary.
+    """
+    from app.services.audit_package import (
+        MAX_FILES,
+        MAX_TOTAL_BYTES,
+        summarize_audit_package,
+    )
+
+    target_id = _resolve_client_id(db, current, requested=client_id)
+    client_row = db.get(Client, target_id)
+    if client_row is None:  # pragma: no cover — defensive
+        raise HTTPException(
+            status.HTTP_404_NOT_FOUND, detail="Cliente no encontrado."
+        )
+
+    filters = _build_audit_filters(
+        period_from,
+        period_to,
+        institutions,
+        requirement_codes,
+        statuses,
+        vendor_ids,
+    )
+    summary = summarize_audit_package(db, client_row, filters)
+
+    vendor_breakdown = [
+        {"vendor_id": vid, "file_count": count}
+        for vid, count in sorted(
+            summary.vendor_counts.items(), key=lambda kv: -kv[1]
+        )
+    ]
+    institution_breakdown = [
+        {"institution": code, "file_count": count}
+        for code, count in sorted(
+            summary.institution_counts.items(), key=lambda kv: -kv[1]
+        )
+    ]
+    requirement_breakdown = [
+        {"requirement_code": code, "file_count": count}
+        for code, count in sorted(
+            summary.requirement_counts.items(), key=lambda kv: -kv[1]
+        )
+    ]
+
+    return AuditPackagePreviewResponse(
+        file_count=summary.file_count,
+        total_bytes=summary.total_bytes,
+        vendor_count=len(summary.vendor_counts),
+        institution_breakdown=institution_breakdown,
+        vendor_breakdown=vendor_breakdown,
+        requirement_breakdown=requirement_breakdown,
+        over_file_cap=summary.file_count > MAX_FILES,
+        over_bytes_cap=summary.total_bytes > MAX_TOTAL_BYTES,
+        file_cap=MAX_FILES,
+        bytes_cap=MAX_TOTAL_BYTES,
+    )
+
+
+@router.get(
+    "/audit-package.zip",
+    summary="Stream the audit-ready ZIP scoped to the active client",
+)
+def client_audit_package_zip(
+    db: DbSession,
+    current: ClientUser,
+    client_id: str | None = None,
+    period_from: str | None = None,
+    period_to: str | None = None,
+    institutions: Annotated[list[str] | None, Query()] = None,
+    requirement_codes: Annotated[list[str] | None, Query()] = None,
+    statuses: Annotated[list[str] | None, Query()] = None,
+    vendor_ids: Annotated[list[str] | None, Query()] = None,
+    skip_manifest: bool = False,
+) -> Response:
+    """Stream a cross-vendor audit ZIP organized by
+    ``<proveedor>/<institucion>/<periodo>/<archivo>`` with an
+    ``INDICE.pdf`` cover at the root.
+
+    Defaults to approved-only documents; the caller passes
+    ``?statuses=...`` to override. Cap pre-flight returns 413 with
+    a Spanish message guiding the user to narrow filters. Writes a
+    ``client.audit_package_downloaded`` audit row before any bytes
+    are yielded so the forensic trail records intent even if the
+    download is aborted.
+
+    ``skip_manifest=true`` skips the INDICE.pdf rendering. Useful
+    for tests and for environments without Chromium installed
+    (e.g. CI that wants to verify the ZIP contents without the
+    Playwright dependency). The production path always renders the
+    manifest.
+    """
+    from datetime import datetime as _dt
+
+    from fastapi.responses import StreamingResponse
+
+    from app.services.audit_package import (
+        AuditPackageTooLargeError,
+        MAX_FILES,
+        MAX_TOTAL_BYTES,
+        build_entries,
+        stream_audit_package,
+    )
+
+    target_id = _resolve_client_id(db, current, requested=client_id)
+    client_row = db.get(Client, target_id)
+    if client_row is None:  # pragma: no cover — defensive
+        raise HTTPException(
+            status.HTTP_404_NOT_FOUND, detail="Cliente no encontrado."
+        )
+
+    filters = _build_audit_filters(
+        period_from,
+        period_to,
+        institutions,
+        requirement_codes,
+        statuses,
+        vendor_ids,
+    )
+
+    # Resolve entries once so the cap check and the manifest see the
+    # same row set the streaming pass will write.
+    entries = build_entries(db, client_row, filters)
+    file_count = len(entries)
+    total_bytes = sum(e.size_bytes for e in entries)
+    if file_count > MAX_FILES:
+        raise HTTPException(
+            status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE,
+            detail=(
+                f"El paquete tendría {file_count} documentos; el "
+                f"límite por descarga es {MAX_FILES}. Filtra por "
+                "periodo, institución o proveedor para reducir el "
+                "alcance."
+            ),
+        )
+    if total_bytes > MAX_TOTAL_BYTES:
+        raise HTTPException(
+            status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE,
+            detail=(
+                f"El paquete pesaría {total_bytes // (1024 * 1024)} MB; "
+                f"el límite por descarga es {MAX_TOTAL_BYTES // (1024 * 1024)} MB. "
+                "Filtra por periodo, institución o proveedor para "
+                "reducir el alcance."
+            ),
+        )
+
+    # Render the cover. Skipped in tests / Chromium-less envs so the
+    # ZIP composition path can be exercised in CI.
+    manifest_pdf: bytes | None = None
+    if not skip_manifest:
+        try:
+            from app.services.audit_package_manifest import render_audit_manifest
+
+            manifest_pdf = render_audit_manifest(
+                client=client_row,
+                filters=filters,
+                entries=entries,
+            )
+        except Exception:
+            # Don't fail the whole download if the manifest renderer
+            # crashes — the ZIP itself is the legally meaningful
+            # artifact. Log the failure for follow-up; ship the
+            # archive without the cover.
+            import logging
+
+            logging.getLogger("checkwise.audit_package").exception(
+                "[audit_package] manifest rendering failed; serving zip without INDICE.pdf"
+            )
+            manifest_pdf = None
+
+    add_audit_event(
+        db,
+        action="client.audit_package_downloaded",
+        entity_type="client",
+        entity_id=client_row.id,
+        actor_type="client_admin",
+        actor_id=current.user.id,
+        metadata={
+            "scope": "client_audit_package",
+            "client_id": client_row.id,
+            "file_count": file_count,
+            "total_bytes": total_bytes,
+            "filters": filters.to_audit_dict(),
+            "manifest_included": manifest_pdf is not None,
+        },
+    )
+    db.commit()
+
+    try:
+        iterator = stream_audit_package(
+            db, client_row, filters, manifest_pdf=manifest_pdf
+        )
+    except AuditPackageTooLargeError as exc:  # pragma: no cover — we
+        # already pre-checked above, but keep the guard for race
+        # safety.
+        raise HTTPException(
+            status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE,
+            detail=str(exc),
+        ) from exc
+
+    safe_rfc = (client_row.rfc or "auditoria").lower()
+    safe_rfc = "".join(ch for ch in safe_rfc if ch.isalnum() or ch in "-_") or "auditoria"
+    today = _dt.now(UTC).strftime("%Y%m%d")
+    filename = f"auditoria-{safe_rfc}-{today}.zip"
+
+    return StreamingResponse(
+        iterator,
+        media_type="application/zip",
+        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+    )
