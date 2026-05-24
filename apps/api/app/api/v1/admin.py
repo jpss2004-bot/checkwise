@@ -32,12 +32,12 @@ from __future__ import annotations
 import re
 import unicodedata
 import zipfile
-from datetime import date, datetime
+from datetime import UTC, date, datetime
 from pathlib import Path
 from typing import Annotated, Final, Literal
 from xml.etree import ElementTree as ET
 
-from fastapi import APIRouter, Depends, HTTPException, Query, status
+from fastapi import APIRouter, Depends, HTTPException, Query, Response, status
 from fastapi.responses import FileResponse
 from pydantic import BaseModel, EmailStr, Field
 from sqlalchemy import and_, func, select
@@ -2069,3 +2069,128 @@ def list_audit_log(
         for row in rows
     ]
     return AuditLogResponse(items=items, total=len(items), limit=limit)
+
+
+# ---------------------------------------------------------------------------
+# Junta 2026-05-23 — bulk ZIP per vendor desde el control plane admin
+# ---------------------------------------------------------------------------
+
+
+@router.get(
+    "/vendors/{vendor_id}/expediente.zip",
+    summary="Stream a ZIP of a vendor's expediente (internal_admin)",
+)
+def admin_vendor_expediente_zip(
+    vendor_id: str,
+    db: DbSession,
+    current: AdminUser,
+    status_filter: Annotated[str | None, Query(alias="status")] = None,
+    period_key: str | None = None,
+    institution: str | None = None,
+) -> Response:
+    """Stream a vendor's expediente as a ZIP from the admin surface.
+
+    Mirrors :func:`app.api.v1.client.client_vendor_expediente_zip` but
+    with the ``internal_admin`` gate and no per-client scoping —
+    LegalShelf staff need cross-client visibility for audits and
+    incident response. Composition, caps and filter shape come from
+    the shared :mod:`app.services.expediente_zip` service so the three
+    surfaces (provider, client_admin, internal_admin) stay in
+    lockstep.
+
+    Audit: ``admin.vendor_expediente_downloaded`` with metadata
+    ``{scope, vendor_id, client_id, workspace_id, file_count,
+    total_bytes, filters}``. Distinguishable from the
+    provider/client actions so the forensic reader can answer
+    "was this an internal-staff pull?".
+    """
+    from datetime import datetime
+
+    from fastapi.responses import StreamingResponse
+
+    from app.services.expediente_zip import (
+        MAX_FILES,
+        MAX_TOTAL_BYTES,
+        ExpedienteFilters,
+        stream_expediente_zip,
+        summarize_expediente,
+    )
+
+    vendor = db.get(Vendor, vendor_id)
+    if vendor is None:
+        raise HTTPException(
+            status.HTTP_404_NOT_FOUND,
+            detail="Proveedor no encontrado.",
+        )
+
+    workspace = db.scalar(
+        select(ProviderWorkspace).where(
+            ProviderWorkspace.vendor_id == vendor_id,
+        )
+    )
+    if workspace is None:
+        raise HTTPException(
+            status.HTTP_404_NOT_FOUND,
+            detail=(
+                "Este proveedor no tiene un workspace activo; "
+                "no hay documentos para descargar."
+            ),
+        )
+
+    filters = ExpedienteFilters(
+        status=status_filter,
+        period_key=period_key,
+        institution=institution,
+    )
+
+    summary = summarize_expediente(db, workspace, filters)
+    if summary.file_count > MAX_FILES:
+        raise HTTPException(
+            status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE,
+            detail=(
+                f"El expediente tiene {summary.file_count} documentos; "
+                f"el límite por descarga es {MAX_FILES}. Filtra por "
+                "periodo o institución para reducir el alcance."
+            ),
+        )
+    if summary.total_bytes > MAX_TOTAL_BYTES:
+        raise HTTPException(
+            status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE,
+            detail=(
+                f"El expediente pesa {summary.total_bytes // (1024 * 1024)} MB; "
+                f"el límite por descarga es {MAX_TOTAL_BYTES // (1024 * 1024)} MB. "
+                "Filtra por periodo o institución para reducir el alcance."
+            ),
+        )
+
+    add_audit_event(
+        db,
+        action="admin.vendor_expediente_downloaded",
+        entity_type="provider_workspace",
+        entity_id=workspace.id,
+        actor_type="internal_admin",
+        actor_id=current.user.id,
+        metadata={
+            "scope": "admin_vendor",
+            "vendor_id": vendor_id,
+            "client_id": workspace.client_id,
+            "workspace_id": workspace.id,
+            "file_count": summary.file_count,
+            "total_bytes": summary.total_bytes,
+            "filters": filters.to_audit_dict(),
+        },
+    )
+    db.commit()
+
+    iterator = stream_expediente_zip(db, workspace, filters)
+
+    safe_rfc = (vendor.rfc or "expediente").lower()
+    safe_rfc = "".join(ch for ch in safe_rfc if ch.isalnum() or ch in "-_") or "expediente"
+    today = datetime.now(UTC).strftime("%Y%m%d")
+    filename = f"expediente-{safe_rfc}-{today}.zip"
+
+    return StreamingResponse(
+        iterator,
+        media_type="application/zip",
+        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+    )

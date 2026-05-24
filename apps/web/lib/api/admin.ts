@@ -142,6 +142,41 @@ export async function getVendor(id: string): Promise<AdminVendor> {
   return fetchJson(`/api/v1/admin/vendors/${id}`);
 }
 
+/**
+ * Optional filter set passed to the admin-side vendor expediente ZIP
+ * endpoint. Mirrors the client-side ``ClientVendorExpedienteFilters``
+ * so the three surfaces (provider, client_admin, internal_admin)
+ * share the same filter shape.
+ */
+export type AdminVendorExpedienteFilters = {
+  status?: string | null;
+  period_key?: string | null;
+  institution?: string | null;
+};
+
+/**
+ * Absolute URL of the admin-side vendor expediente ZIP endpoint.
+ * Mirrors ``clientVendorExpedienteZipUrl`` but enters through the
+ * /admin/* surface with the ``internal_admin`` gate; LegalShelf
+ * staff need cross-client visibility for audits and incident
+ * response. The URL is followed as a top-level navigation
+ * (``<a target="_blank">``) so the bearer cookie carries; the
+ * backend writes an ``admin.vendor_expediente_downloaded`` audit
+ * row before streaming begins.
+ */
+export function adminVendorExpedienteZipUrl(
+  vendorId: string,
+  filters: AdminVendorExpedienteFilters = {},
+): string {
+  const params = new URLSearchParams();
+  if (filters.status) params.set("status", filters.status);
+  if (filters.period_key) params.set("period_key", filters.period_key);
+  if (filters.institution) params.set("institution", filters.institution);
+  const qs = params.toString();
+  const base = `${API_BASE_URL}/api/v1/admin/vendors/${encodeURIComponent(vendorId)}/expediente.zip`;
+  return qs ? `${base}?${qs}` : base;
+}
+
 export async function createVendor(body: {
   client_id: string;
   name: string;

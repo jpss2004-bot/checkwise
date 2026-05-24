@@ -968,3 +968,164 @@ def test_client_vendor_expediente_zip_writes_audit(
         assert meta.get("filters") is None
     finally:
         db.close()
+
+
+# ---------------------------------------------------------------------------
+# Junta 2026-05-23 — admin bulk ZIP per vendor
+# ---------------------------------------------------------------------------
+
+
+def test_admin_vendor_expediente_zip_returns_documents(
+    api_client: TestClient, db_factory
+) -> None:
+    """An internal_admin can stream a vendor's expediente as a ZIP.
+
+    Mirrors the client-side test but enters through the admin
+    surface — no client_id resolution gate, just the
+    internal_admin membership check. Same ZIP layout
+    (institution/period folders) and same RFC-stamped filename so
+    a multi-vendor download set stays grep-friendly for ops.
+    """
+    import io
+    import zipfile
+
+    client_id = _seed_client(db_factory)
+    vendor_id, ws_id = _seed_vendor_with_workspace(db_factory, client_id=client_id)
+    _seed_submission_for_workspace(api_client, db_factory, ws_id)
+    assert ws_id  # quiet F841
+
+    _, email, pw = _seed_user_with_role(
+        db_factory, role="internal_admin", email_prefix="adm"
+    )
+    token = _login(api_client, email, pw)
+
+    resp = api_client.get(
+        f"/api/v1/admin/vendors/{vendor_id}/expediente.zip",
+        headers=_h(token),
+    )
+    assert resp.status_code == 200, resp.text
+    assert resp.headers.get("content-type") == "application/zip"
+    cd = resp.headers.get("content-disposition", "").lower()
+    assert "attachment" in cd
+    assert ".zip" in cd
+
+    archive = zipfile.ZipFile(io.BytesIO(resp.content))
+    names = archive.namelist()
+    assert len(names) == 1
+    assert names[0].startswith("infonavit/2026-B1/")
+
+
+def test_admin_vendor_expediente_zip_denies_non_admin(
+    api_client: TestClient, db_factory
+) -> None:
+    """Reviewer and client_admin roles must NOT reach the admin ZIP
+    endpoint. ``internal_admin`` is the only role allowed; the
+    audit metadata key ``actor_type=internal_admin`` would be a lie
+    otherwise.
+    """
+    client_id = _seed_client(db_factory)
+    vendor_id, _ = _seed_vendor_with_workspace(db_factory, client_id=client_id)
+
+    for role, prefix in (("reviewer", "rev"), ("client_admin", "ca")):
+        kwargs: dict = {"role": role, "email_prefix": prefix}
+        if role == "client_admin":
+            kwargs["client_id"] = client_id
+        _, email, pw = _seed_user_with_role(db_factory, **kwargs)
+        token = _login(api_client, email, pw)
+        resp = api_client.get(
+            f"/api/v1/admin/vendors/{vendor_id}/expediente.zip",
+            headers=_h(token),
+        )
+        assert resp.status_code == 403, (role, resp.text)
+
+
+def test_admin_vendor_expediente_zip_writes_audit(
+    api_client: TestClient, db_factory
+) -> None:
+    """Audit row distinguishes the admin pull from the client and
+    provider equivalents via ``actor_type=internal_admin`` and
+    ``action=admin.vendor_expediente_downloaded``.
+    """
+    from app.models import AuditLog
+
+    client_id = _seed_client(db_factory)
+    vendor_id, ws_id = _seed_vendor_with_workspace(db_factory, client_id=client_id)
+    _seed_submission_for_workspace(api_client, db_factory, ws_id)
+    _, email, pw = _seed_user_with_role(
+        db_factory, role="internal_admin", email_prefix="adm"
+    )
+    token = _login(api_client, email, pw)
+
+    resp = api_client.get(
+        f"/api/v1/admin/vendors/{vendor_id}/expediente.zip",
+        headers=_h(token),
+    )
+    assert resp.status_code == 200
+
+    db = db_factory()
+    try:
+        events = (
+            db.query(AuditLog)
+            .filter(AuditLog.action == "admin.vendor_expediente_downloaded")
+            .all()
+        )
+        assert len(events) == 1
+        event = events[0]
+        assert event.actor_type == "internal_admin"
+        meta = event.event_metadata or {}
+        assert meta.get("scope") == "admin_vendor"
+        assert meta.get("vendor_id") == vendor_id
+        assert meta.get("client_id") == client_id
+        assert meta.get("file_count") == 1
+        assert meta.get("filters") is None
+    finally:
+        db.close()
+
+
+def test_admin_vendor_expediente_zip_404_for_unknown_vendor(
+    api_client: TestClient, db_factory
+) -> None:
+    _, email, pw = _seed_user_with_role(
+        db_factory, role="internal_admin", email_prefix="adm"
+    )
+    token = _login(api_client, email, pw)
+    resp = api_client.get(
+        "/api/v1/admin/vendors/does-not-exist/expediente.zip",
+        headers=_h(token),
+    )
+    assert resp.status_code == 404
+
+
+def test_admin_vendor_expediente_zip_404_when_no_workspace(
+    api_client: TestClient, db_factory
+) -> None:
+    """A vendor with no ProviderWorkspace cannot produce a ZIP; the
+    endpoint must return 404 with a Spanish message rather than
+    streaming an empty archive."""
+    from app.models import Vendor
+
+    client_id = _seed_client(db_factory)
+    db = db_factory()
+    try:
+        vendor = Vendor(
+            client_id=client_id,
+            name="Sin workspace",
+            rfc="NWS260101AB1",
+            persona_type="moral",
+        )
+        db.add(vendor)
+        db.commit()
+        vendor_id = vendor.id
+    finally:
+        db.close()
+
+    _, email, pw = _seed_user_with_role(
+        db_factory, role="internal_admin", email_prefix="adm"
+    )
+    token = _login(api_client, email, pw)
+    resp = api_client.get(
+        f"/api/v1/admin/vendors/{vendor_id}/expediente.zip",
+        headers=_h(token),
+    )
+    assert resp.status_code == 404
+    assert "workspace" in resp.json()["detail"].lower()

@@ -3,6 +3,7 @@
 import { useEffect, useMemo, useState } from "react";
 import {
   Buildings,
+  DownloadSimple,
   MagnifyingGlass,
   Plus,
   Storefront,
@@ -18,6 +19,7 @@ import { Label } from "@/components/ui/label";
 
 import { AdminShell } from "../_shell";
 import {
+  adminVendorExpedienteZipUrl,
   type AdminClient,
   type AdminVendor,
   createVendor,
@@ -234,19 +236,36 @@ export default function AdminVendorsPage() {
             {
               id: "action",
               header: "",
-              width: "100px",
+              width: "240px",
               align: "right",
               cell: (row) => (
-                <Button
-                  size="sm"
-                  variant="outline"
-                  onClick={() => {
-                    setCreateOpen(false);
-                    setEditing(row);
-                  }}
-                >
-                  Editar
-                </Button>
+                <div className="flex items-center justify-end gap-2">
+                  <Button asChild size="sm" variant="outline">
+                    <a
+                      href={adminVendorExpedienteZipUrl(row.id)}
+                      target="_blank"
+                      rel="noreferrer"
+                      title="Descargar el expediente completo del proveedor"
+                    >
+                      <DownloadSimple
+                        className="h-3.5 w-3.5"
+                        weight="bold"
+                        aria-hidden="true"
+                      />
+                      Descargar expediente
+                    </a>
+                  </Button>
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    onClick={() => {
+                      setCreateOpen(false);
+                      setEditing(row);
+                    }}
+                  >
+                    Editar
+                  </Button>
+                </div>
               ),
             },
           ]}
