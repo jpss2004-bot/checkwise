@@ -129,3 +129,54 @@ services:
         sync: false
       - key: SLACK_FEEDBACK_CHANNEL_ID
         sync: false
+
+  # ──────────────────────────────────────────────────────────────────
+  # Phase 6 / Slice 6C — Renewal reminder cron
+  # ──────────────────────────────────────────────────────────────────
+  #
+  # Runs ``python -m scripts.run_renewal_dispatch`` once a day. The
+  # CLI walks every ProviderWorkspace, finds renewal-bearing onboarding
+  # requirements (CSF 90d, REPSE 1095d, registro patronal 1095d),
+  # computes the threshold crossings since the last successful run, and
+  # inserts a ``renewal_reminders`` row + matching client + provider
+  # notifications per new crossing. Idempotency comes from the unique
+  # constraint on the reminders table — a repeat run on the same day
+  # is a no-op.
+  #
+  # Schedule: ``0 14 * * *`` (every day at 14:00 UTC).
+  #   14:00 UTC = 08:00 America/Mexico_City year-round (Mexico City
+  #   dropped DST in 2022). Picked so first-hour-of-business in CDMX
+  #   sees fresh notifications without paging anyone at night.
+  #
+  # If the cron misses a day, the catch-up semantics in
+  # ``thresholds_crossed`` make the next run emit every threshold that
+  # crossed in the missed interval — no thresholds get silently
+  # dropped. Manual recovery: ``python -m scripts.run_renewal_dispatch
+  # --today YYYY-MM-DD`` from a Render shell or local checkout against
+  # the prod DATABASE_URL.
+  #
+  # Env vars: only DATABASE_URL is required (notifications + reminders
+  # are pure DB writes). The cron does NOT need R2 / Anthropic / Slack
+  # creds because it never touches storage, the LLM, or external
+  # notification surfaces. DATABASE_URL is sourced from the existing
+  # ``checkwise-api`` web service via ``fromService`` so we don't have
+  # to re-paste the secret.
+  - type: cron
+    name: checkwise-renewal-dispatch
+    runtime: python
+    plan: starter
+    rootDir: apps/api
+    branch: main
+    schedule: "0 14 * * *"
+    buildCommand: pip install -e .
+    command: python -m scripts.run_renewal_dispatch
+    envVars:
+      - key: CHECKWISE_ENV
+        value: production
+      - key: PYTHON_VERSION
+        value: "3.11"
+      - key: DATABASE_URL
+        fromService:
+          type: web
+          name: checkwise-api
+          envVarKey: DATABASE_URL
