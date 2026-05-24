@@ -42,11 +42,13 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Select } from "@/components/ui/select";
 import { Textarea } from "@/components/ui/textarea";
+import { RequirementStatusBadge } from "@/components/checkwise/portal/requirement-status-badge";
 import { ValidationSignal, ValidationSummary } from "@/components/checkwise/validation-summary";
 import {
   checkDuplicateBySha256,
   type CalendarAcceptedDocument,
   type DuplicateCheck,
+  type RequirementStatus,
 } from "@/lib/api/portal";
 import { DocumentStatus } from "@/lib/constants/statuses";
 import { readAdminSession } from "@/lib/session/admin";
@@ -1733,7 +1735,7 @@ function ConfirmationStep({
               <p className="mt-1 text-sm text-muted-foreground">{heroSubcopy}</p>
             </div>
           </div>
-          <Badge>{result.status}</Badge>
+          <RequirementStatusBadge status={result.status as RequirementStatus} />
         </div>
       </div>
 
