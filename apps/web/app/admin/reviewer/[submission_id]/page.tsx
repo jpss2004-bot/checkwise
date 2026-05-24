@@ -8,6 +8,7 @@ import {
   Warning,
   ArrowLeft,
   CheckCircle,
+  DownloadSimple,
   FileText,
   ShieldCheck,
 } from "@phosphor-icons/react";
@@ -35,7 +36,9 @@ import {
 } from "@/lib/session/admin";
 import { INSTITUTION_LABELS, type SubmissionDetail } from "@/lib/api/portal";
 import {
+  fetchReviewerSubmissionDocumentBlob,
   getReviewerSubmission,
+  reviewerDocumentDownloadUrl,
   ReviewerApiError,
   submitDecision,
 } from "@/lib/api/reviewer";
@@ -190,6 +193,7 @@ export default function ReviewerSubmissionPage({ params }: PageProps) {
         <div className="grid gap-5 lg:grid-cols-3">
           <div className="space-y-5 lg:col-span-2">
             <StatusHeader detail={detail} decidedHint={decided?.new_status ?? null} />
+            <ReviewerSubmissionPreview detail={detail} session={session} />
             <LineageStrip detail={detail} />
             <ReasonsCard detail={detail} />
             <ProviderCard detail={detail} />
@@ -210,10 +214,10 @@ export default function ReviewerSubmissionPage({ params }: PageProps) {
                 </CardHeader>
                 <CardContent>
                   <p className="text-sm text-[color:var(--text-secondary)]">
-                    Este documento ahora está en{" "}
-                    <span className="font-medium text-[color:var(--text-primary)]">
-                      {decided.new_status}
-                    </span>
+                    Decisión registrada. Estado actual:{" "}
+                    <RequirementStatusBadge
+                      status={decided.new_status as Parameters<typeof RequirementStatusBadge>[0]["status"]}
+                    />
                     . La línea de tiempo refleja tu decisión.
                   </p>
                   <Button asChild className="mt-4">
@@ -346,7 +350,7 @@ function ReasonsCard({ detail }: { detail: SubmissionDetail }) {
         {detail.document?.mismatch_reason ? (
           <SignalRow
             severity="warning"
-            title="Posible mismatch"
+            title="Posible inconsistencia"
             message={detail.document.mismatch_reason}
           />
         ) : null}
@@ -500,4 +504,148 @@ function formatDate(iso: string): string {
   } catch {
     return iso;
   }
+}
+
+// ---------------------------------------------------------------------------
+// Junta 2026-05-23 — visor PDF para el reviewer/admin
+// ---------------------------------------------------------------------------
+//
+// Mirrors the provider-side ``SubmissionPreview`` so Isaac/Paco pueden
+// abrir el documento que están a punto de aprobar/rechazar sin salir
+// de la pantalla. Backend endpoint:
+// ``GET /api/v1/reviewer/submissions/{id}/document`` (gated por rol
+// reviewer/internal_admin). El iframe consume un Blob URL para
+// evitar problemas de cookies cross-site; el botón "Descargar PDF"
+// usa una navegación top-level y dispara ``?download=1`` para el
+// audit row.
+
+function ReviewerSubmissionPreview({
+  detail,
+  session,
+}: {
+  detail: SubmissionDetail;
+  session: AdminSession;
+}) {
+  const [blobUrl, setBlobUrl] = useState<string | null>(null);
+  const [loadError, setLoadError] = useState<string | null>(null);
+
+  const submissionId = detail.submission_id;
+  const documentId = detail.document?.document_id ?? null;
+  const token = session.access_token;
+
+  useEffect(() => {
+    if (!documentId) {
+      setBlobUrl(null);
+      return;
+    }
+    let cancelled = false;
+    let issuedUrl: string | null = null;
+    setLoadError(null);
+    fetchReviewerSubmissionDocumentBlob(token, submissionId)
+      .then((url) => {
+        if (cancelled) {
+          URL.revokeObjectURL(url);
+          return;
+        }
+        issuedUrl = url;
+        setBlobUrl(url);
+      })
+      .catch((err: unknown) => {
+        if (cancelled) return;
+        if (err instanceof ReviewerApiError && err.status === 404) {
+          setLoadError(
+            "El archivo no está disponible en el almacenamiento. Pide al proveedor que vuelva a subirlo.",
+          );
+        } else {
+          setLoadError("No pudimos cargar la vista previa del documento.");
+        }
+      });
+    return () => {
+      cancelled = true;
+      if (issuedUrl) URL.revokeObjectURL(issuedUrl);
+    };
+  }, [token, submissionId, documentId]);
+
+  if (!detail.document) {
+    return (
+      <Card>
+        <CardHeader>
+          <CardTitle>Documento</CardTitle>
+        </CardHeader>
+        <CardContent>
+          <p className="text-sm text-[color:var(--text-secondary)]">
+            Este envío no tiene un archivo asociado.
+          </p>
+        </CardContent>
+      </Card>
+    );
+  }
+
+  const downloadHref = reviewerDocumentDownloadUrl(submissionId);
+
+  return (
+    <Card>
+      <CardHeader>
+        <div className="flex flex-wrap items-center justify-between gap-2">
+          <div className="flex items-center gap-2">
+            <FileText
+              className="h-4 w-4 text-muted-foreground"
+              aria-hidden="true"
+            />
+            <CardTitle>Vista previa del documento</CardTitle>
+          </div>
+          <Button asChild size="sm" variant="outline">
+            <a
+              href={downloadHref}
+              target="_blank"
+              rel="noreferrer"
+              download={detail.document.filename}
+            >
+              <DownloadSimple
+                className="h-3.5 w-3.5"
+                weight="bold"
+                aria-hidden="true"
+              />
+              Descargar PDF
+            </a>
+          </Button>
+        </div>
+        <p className="mt-1 text-sm text-muted-foreground">
+          {detail.document.filename} · cargado el{" "}
+          {formatDate(detail.submitted_at)}
+        </p>
+      </CardHeader>
+      <CardContent>
+        {blobUrl ? (
+          <>
+            <iframe
+              src={blobUrl}
+              title={`Vista previa de ${detail.document.filename}`}
+              className="h-[640px] w-full rounded-md border border-border bg-white"
+            />
+            <p className="mt-2 text-xs text-muted-foreground">
+              Si la vista previa no carga,{" "}
+              <a
+                href={blobUrl}
+                target="_blank"
+                rel="noreferrer"
+                className="text-primary hover:underline"
+              >
+                ábrelo en una pestaña nueva
+              </a>
+              .
+            </p>
+          </>
+        ) : loadError ? (
+          <p className="text-sm text-[color:var(--status-error-text)]">
+            {loadError}
+          </p>
+        ) : (
+          <p className="text-sm text-muted-foreground">
+            Cargando vista previa…
+          </p>
+        )}
+      </CardContent>
+    </Card>
+  );
 }

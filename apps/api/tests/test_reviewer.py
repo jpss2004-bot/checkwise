@@ -529,3 +529,49 @@ def test_decision_requires_reviewer_role(api_client: TestClient, db_factory) -> 
         headers={"Authorization": f"Bearer {token}"},
     )
     assert response.status_code == 403
+
+
+# ---------------------------------------------------------------------------
+# Document preview / download (Junta 2026-05-23 — admin debe poder ver el PDF)
+# ---------------------------------------------------------------------------
+
+
+def test_document_endpoint_requires_reviewer_role(
+    api_client: TestClient, db_factory
+) -> None:
+    """Without reviewer/admin membership the endpoint returns 403."""
+    _seed_user(db_factory, email="outsider@x.mx", role=None)
+    token = _login(api_client, "outsider@x.mx", "Hunter2 Correct horse")
+    submission_id = _seed_submission(db_factory)
+    response = api_client.get(
+        f"/api/v1/reviewer/submissions/{submission_id}/document",
+        headers={"Authorization": f"Bearer {token}"},
+    )
+    assert response.status_code == 403
+
+
+def test_document_endpoint_404_for_unknown_submission(
+    api_client: TestClient, db_factory
+) -> None:
+    _seed_user(db_factory, email="rev@x.mx", role="reviewer")
+    token = _login(api_client, "rev@x.mx", "Hunter2 Correct horse")
+    response = api_client.get(
+        "/api/v1/reviewer/submissions/no-such-thing/document",
+        headers={"Authorization": f"Bearer {token}"},
+    )
+    assert response.status_code == 404
+
+
+def test_document_endpoint_404_when_storage_missing(
+    api_client: TestClient, db_factory
+) -> None:
+    """The seed fixture writes a local:// storage key with no backing
+    file; the endpoint should degrade to 404 instead of crashing."""
+    _seed_user(db_factory, email="rev@x.mx", role="reviewer")
+    token = _login(api_client, "rev@x.mx", "Hunter2 Correct horse")
+    submission_id = _seed_submission(db_factory)
+    response = api_client.get(
+        f"/api/v1/reviewer/submissions/{submission_id}/document",
+        headers={"Authorization": f"Bearer {token}"},
+    )
+    assert response.status_code == 404

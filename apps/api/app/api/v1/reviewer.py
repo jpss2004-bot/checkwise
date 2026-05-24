@@ -18,7 +18,7 @@ from __future__ import annotations
 from datetime import UTC, datetime
 from typing import Annotated, Literal
 
-from fastapi import APIRouter, Depends, HTTPException, Query, status
+from fastapi import APIRouter, Depends, HTTPException, Query, Response, status
 from pydantic import BaseModel, Field
 from sqlalchemy import select
 from sqlalchemy.orm import Session
@@ -39,6 +39,8 @@ from app.models import (
     Vendor,
 )
 from app.models.entities import utc_now
+from app.services.audit_log import add_audit_event
+from app.services.storage import get_storage_service
 from app.services.submission_workflow import apply_reviewer_decision
 
 router = APIRouter(prefix="/reviewer", tags=["reviewer"])
@@ -530,4 +532,90 @@ def submit_decision(
         observations=result.observations,
         decided_at=result.decided_at,
         reviewer_user_id=result.reviewer_user_id,
+    )
+
+
+@router.get(
+    "/submissions/{submission_id}/document",
+    summary="Stream the PDF stored for a submission (reviewer/admin)",
+)
+def get_submission_document(
+    submission_id: str,
+    db: DbSession,
+    current: ReviewerDep,
+    download: bool = False,
+) -> Response:
+    """Serve the PDF a provider uploaded so the reviewer can see it
+    inline before deciding.
+
+    Mirrors :func:`app.api.v1.portal.get_workspace_submission_document`
+    but with a reviewer/admin gate instead of the per-workspace tenant
+    guard. ``?download=1`` emits the attachment disposition and writes
+    a ``reviewer.document_downloaded`` audit row; the default inline
+    mode is unaudited so iframe reloads do not flood the audit log.
+    """
+    submission = db.get(Submission, submission_id)
+    if submission is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Submission no encontrado.",
+        )
+    document = db.scalar(
+        select(Document).where(Document.submission_id == submission.id).limit(1)
+    )
+    if document is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Documento no encontrado para este envío.",
+        )
+
+    disposition_kind = "attachment" if download else "inline"
+    disposition_header = (
+        f'{disposition_kind}; filename="{document.original_filename}"'
+    )
+
+    if download:
+        add_audit_event(
+            db,
+            action="reviewer.document_downloaded",
+            entity_type="submission",
+            entity_id=submission.id,
+            actor_type="reviewer",
+            actor_id=current.user.id,
+            metadata={
+                "document_id": document.id,
+                "filename": document.original_filename,
+                "size_bytes": document.size_bytes,
+                "requirement_code": submission.requirement_code,
+                "period_key": submission.period_key,
+            },
+        )
+        db.commit()
+
+    storage = get_storage_service()
+    presigned = storage.presigned_download_url(
+        document.storage_key,
+        content_disposition=disposition_header,
+    )
+    if presigned is not None:
+        from fastapi.responses import RedirectResponse
+
+        return RedirectResponse(presigned, status_code=status.HTTP_302_FOUND)
+
+    from fastapi.responses import FileResponse
+
+    path = storage.open_for_read(document.storage_key)
+    # Match the portal endpoint: a missing storage artifact (orphaned
+    # key from a seed fixture or a restore drift) degrades to a clean
+    # 404 instead of leaking a 500 stack trace into the iframe.
+    if not path.exists():
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Documento no disponible en almacenamiento.",
+        )
+    return FileResponse(
+        path,
+        media_type="application/pdf",
+        filename=document.original_filename,
+        headers={"Content-Disposition": disposition_header},
     )

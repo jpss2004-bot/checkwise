@@ -152,3 +152,45 @@ export async function submitDecision(
     },
   );
 }
+
+/**
+ * Absolute URL of the reviewer-side PDF streaming endpoint. The
+ * caller follows this URL as a top-level navigation
+ * (``<a target="_blank">``) when the user clicks "Descargar PDF".
+ * The backend writes a ``reviewer.document_downloaded`` audit row
+ * on ``?download=1``.
+ */
+export function reviewerDocumentUrl(submissionId: string): string {
+  return `${API_BASE_URL}/api/v1/reviewer/submissions/${submissionId}/document`;
+}
+
+export function reviewerDocumentDownloadUrl(submissionId: string): string {
+  return `${reviewerDocumentUrl(submissionId)}?download=1`;
+}
+
+/**
+ * Fetch the submission's PDF with the reviewer JWT and return a Blob
+ * URL the iframe can render. Mirrors the portal-side helper but uses
+ * the admin/reviewer token. The caller MUST ``URL.revokeObjectURL``
+ * the returned string when the iframe unmounts.
+ */
+export async function fetchReviewerSubmissionDocumentBlob(
+  token: string,
+  submissionId: string,
+): Promise<string> {
+  const headers = new Headers();
+  headers.set("Authorization", `Bearer ${token}`);
+  const response = await fetch(reviewerDocumentUrl(submissionId), {
+    headers,
+    credentials: "include",
+  });
+  if (!response.ok) {
+    const detail = await response.text().catch(() => "");
+    throw new ReviewerApiError(
+      response.status,
+      detail || response.statusText,
+    );
+  }
+  const blob = await response.blob();
+  return URL.createObjectURL(blob);
+}
