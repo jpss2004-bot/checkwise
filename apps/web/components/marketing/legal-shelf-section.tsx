@@ -22,7 +22,10 @@ export function LegalShelfSection() {
   const { reduced: reduce } = useMotionPreference();
 
   return (
-    <section className="relative isolate overflow-hidden bg-[color:var(--surface-brand)] text-[color:var(--text-inverse)]">
+    <section
+      id="legal-shelf"
+      className="relative isolate overflow-hidden bg-[color:var(--surface-brand)] text-[color:var(--text-inverse)]"
+    >
       {/* Background — quiet horizontal lines, no decorative orbs. */}
       <div
         aria-hidden="true"
@@ -50,8 +53,8 @@ export function LegalShelfSection() {
           </h2>
           <p className="mt-4 max-w-[46ch] text-[15px] leading-[1.6] text-[color:var(--text-inverse)]/82">
             Cada documento crítico pasa por revisión de Legal Shelf.
-            CheckWise nunca firma: registra actor, acción, entidad y diff en
-            un audit log inmutable.
+            CheckWise nunca firma: registra actor, acción, entidad y cambio
+            en un registro de auditoría firmado.
           </p>
 
           {/* Numbered statements — replaces the bullet list. */}
@@ -64,7 +67,7 @@ export function LegalShelfSection() {
             <Statement
               n="02"
               kicker="Firma"
-              body="Cada decisión firma el audit log inmediatamente, con actor, acción y diff antes/después."
+              body="Cada decisión firma el registro de auditoría inmediatamente, con actor, acción y cambio registrado."
             />
             <Statement
               n="03"
@@ -99,7 +102,7 @@ export function LegalShelfSection() {
                 <span className="h-1.5 w-1.5 rounded-full bg-[color:var(--border-strong)]/30" />
               </span>
               <span className="ml-1 truncate font-mono text-[10px] uppercase tracking-[0.18em] text-[color:var(--text-tertiary)]">
-                Audit log · actor · acción · entidad · diff
+                Registro de auditoría · actor · acción · cambio
               </span>
               <span className="ml-auto inline-flex items-center gap-1.5 font-mono text-[10px] uppercase tracking-[0.16em] text-[color:var(--text-teal)]">
                 <span className="cw-pulse-soft inline-block h-1.5 w-1.5 rounded-full bg-[color:var(--text-teal)]" />
@@ -158,10 +161,10 @@ export function LegalShelfSection() {
             />
             <div>
               <p className="font-mono text-[9px] uppercase tracking-[0.18em] text-white/55">
-                Audit log
+                Evento registrado
               </p>
               <p className="text-[12.5px] font-semibold leading-snug">
-                provider.legal_consent_accepted
+                Consentimiento legal aceptado
               </p>
             </div>
           </motion.div>
