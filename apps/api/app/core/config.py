@@ -155,6 +155,19 @@ class Settings(BaseSettings):
     # horizontally (state would be per-worker today).
     AUTH_LOGIN_RATE_LIMIT_PER_MINUTE: int = 10
     AUTH_FORGOT_PASSWORD_RATE_LIMIT_PER_HOUR: int = 5
+    # M3 (2026-05-25) — brute-force protection on the public share-
+    # link password unlock + consume endpoints. 5 attempts per minute
+    # per (ip, token) lets a legitimate user retype a typo; 30 per
+    # hour per IP catches a slow grind across many tokens. Setting
+    # either to 0 disables that bucket.
+    SHARE_UNLOCK_RATE_LIMIT_PER_MINUTE: int = 5
+    SHARE_UNLOCK_RATE_LIMIT_PER_HOUR: int = 30
+    # M3 (2026-05-25) — per-user cap on LLM-backed reports endpoints
+    # and the provider copilot. 15/minute matches interactive use
+    # (one block regenerate every ~4s); 120/hour bounds the cost of
+    # a runaway script or accidental loop. Set 0 to disable.
+    AI_HEAVY_RATE_LIMIT_PER_MINUTE: int = 15
+    AI_HEAVY_RATE_LIMIT_PER_HOUR: int = 120
 
     # Phase 3 — Google Document AI OCR fallback for scanned uploads.
     # OCR runs synchronously during intake when ``inspect_pdf`` reports

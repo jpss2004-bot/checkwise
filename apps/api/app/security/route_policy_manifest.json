@@ -1347,7 +1347,7 @@
       "gate": "provider_workspace",
       "tenant_rule": "current_portal_workspace dependency validates session-vs-path workspace_id",
       "audit_rule": "sampled (WiseEvent on ask)",
-      "rate_limit_rule": "TODO (M3 adds AI-heavy rate limiter)",
+      "rate_limit_rule": "ai_heavy_limiter (per-user AI_HEAVY_RATE_LIMIT_PER_MINUTE + _PER_HOUR; 429 on overflow)",
       "error_lang": "es",
       "must_change_password_allowed": false,
       "notes": ""
@@ -1377,7 +1377,7 @@
       "gate": "signed_token",
       "tenant_rule": "report scoped via signed-token lookup",
       "audit_rule": "sampled (token resolution audited on POST /unlock only)",
-      "rate_limit_rule": "TODO (M3 adds share-unlock brute-force limiter)",
+      "rate_limit_rule": "share_unlock_limiter (per-(ip,token) SHARE_UNLOCK_RATE_LIMIT_PER_MINUTE + per-ip _PER_HOUR; 429 on overflow)",
       "error_lang": "es",
       "must_change_password_allowed": false,
       "notes": ""
@@ -1392,7 +1392,7 @@
       "gate": "signed_token",
       "tenant_rule": "report scoped via signed-token lookup",
       "audit_rule": "sampled (token resolution audited on POST /unlock only)",
-      "rate_limit_rule": "TODO (M3 adds share-unlock brute-force limiter)",
+      "rate_limit_rule": "share_unlock_limiter (per-(ip,token) SHARE_UNLOCK_RATE_LIMIT_PER_MINUTE + per-ip _PER_HOUR; 429 on overflow)",
       "error_lang": "es",
       "must_change_password_allowed": false,
       "notes": ""
@@ -1407,7 +1407,7 @@
       "gate": "signed_token",
       "tenant_rule": "report scoped via signed-token lookup with password unlock check",
       "audit_rule": "logged on unlock success and failure",
-      "rate_limit_rule": "TODO (M3 adds share-unlock brute-force limiter)",
+      "rate_limit_rule": "share_unlock_limiter (per-(ip,token) SHARE_UNLOCK_RATE_LIMIT_PER_MINUTE + per-ip _PER_HOUR; 429 on overflow)",
       "error_lang": "es",
       "must_change_password_allowed": false,
       "notes": ""
@@ -1572,7 +1572,7 @@
       "gate": "authenticated_jwt",
       "tenant_rule": "scoped by report service via _actor_from(current)",
       "audit_rule": "logged for create/patch/version/generate/export/share; AI conversation turns sampled",
-      "rate_limit_rule": "TODO (M3 adds AI-heavy rate limiter)",
+      "rate_limit_rule": "ai_heavy_limiter (per-user AI_HEAVY_RATE_LIMIT_PER_MINUTE + _PER_HOUR; 429 on overflow)",
       "error_lang": "es_partial (raw service exceptions can leak; M2 will normalize)",
       "must_change_password_allowed": false,
       "notes": ""
@@ -1587,7 +1587,7 @@
       "gate": "authenticated_jwt",
       "tenant_rule": "scoped by report service via _actor_from(current)",
       "audit_rule": "logged for create/patch/version/generate/export/share; AI conversation turns sampled",
-      "rate_limit_rule": "TODO (M3 adds AI-heavy rate limiter)",
+      "rate_limit_rule": "ai_heavy_limiter (per-user AI_HEAVY_RATE_LIMIT_PER_MINUTE + _PER_HOUR; 429 on overflow)",
       "error_lang": "es_partial (raw service exceptions can leak; M2 will normalize)",
       "must_change_password_allowed": false,
       "notes": ""
@@ -1617,7 +1617,7 @@
       "gate": "authenticated_jwt",
       "tenant_rule": "scoped by report service via _actor_from(current)",
       "audit_rule": "logged for create/patch/version/generate/export/share; AI conversation turns sampled",
-      "rate_limit_rule": "TODO (M3 adds AI-heavy rate limiter)",
+      "rate_limit_rule": "ai_heavy_limiter (per-user AI_HEAVY_RATE_LIMIT_PER_MINUTE + _PER_HOUR; 429 on overflow)",
       "error_lang": "es_partial (raw service exceptions can leak; M2 will normalize)",
       "must_change_password_allowed": false,
       "notes": ""
@@ -1647,7 +1647,7 @@
       "gate": "authenticated_jwt",
       "tenant_rule": "scoped by report service via _actor_from(current)",
       "audit_rule": "logged for create/patch/version/generate/export/share; AI conversation turns sampled",
-      "rate_limit_rule": "TODO (M3 adds AI-heavy rate limiter)",
+      "rate_limit_rule": "ai_heavy_limiter (per-user AI_HEAVY_RATE_LIMIT_PER_MINUTE + _PER_HOUR; 429 on overflow)",
       "error_lang": "es_partial (raw service exceptions can leak; M2 will normalize)",
       "must_change_password_allowed": false,
       "notes": ""
@@ -1662,7 +1662,7 @@
       "gate": "authenticated_jwt",
       "tenant_rule": "scoped by report service via _actor_from(current)",
       "audit_rule": "logged for create/patch/version/generate/export/share; AI conversation turns sampled",
-      "rate_limit_rule": "none (auth-gated; M3 adds AI-heavy + export limits)",
+      "rate_limit_rule": "ai_heavy_limiter (per-user AI_HEAVY_RATE_LIMIT_PER_MINUTE + _PER_HOUR; 429 on overflow)",
       "error_lang": "es_partial (raw service exceptions can leak; M2 will normalize)",
       "must_change_password_allowed": false,
       "notes": ""
@@ -1677,7 +1677,7 @@
       "gate": "authenticated_jwt",
       "tenant_rule": "scoped by report service via _actor_from(current)",
       "audit_rule": "logged for create/patch/version/generate/export/share; AI conversation turns sampled",
-      "rate_limit_rule": "none (auth-gated; M3 adds AI-heavy + export limits)",
+      "rate_limit_rule": "ai_heavy_limiter (per-user AI_HEAVY_RATE_LIMIT_PER_MINUTE + _PER_HOUR; 429 on overflow)",
       "error_lang": "es_partial (raw service exceptions can leak; M2 will normalize)",
       "must_change_password_allowed": false,
       "notes": ""

@@ -31,6 +31,17 @@ from fastapi import UploadFile
 from app.core.config import settings
 
 
+class UploadTooLargeError(ValueError):
+    """Raised by ``_stream_to_temp`` when the upload exceeds the cap.
+
+    Subclasses ``ValueError`` so existing handlers that catch the bare
+    ``ValueError`` keep working (back-compat). New handlers should
+    catch this dedicated type so they can return HTTP 413 vs 400
+    consistently — that's the M3 (2026-05-25) upload-413
+    normalization contract.
+    """
+
+
 @dataclass(frozen=True)
 class StoredFile:
     storage_key: str
@@ -122,7 +133,10 @@ async def _stream_to_temp(
             size += len(chunk)
             if size > max_bytes:
                 temp_path.unlink(missing_ok=True)
-                raise ValueError("El archivo excede el tamaño máximo permitido.")
+                raise UploadTooLargeError(
+                    f"El archivo excede el tamaño máximo permitido "
+                    f"({max_bytes // (1024 * 1024)} MB)."
+                )
             sha256.update(chunk)
             fh.write(chunk)
 

@@ -42,6 +42,7 @@ from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
 
 from app.core.config import settings
+from app.core.rate_limit import enforce_share_unlock_rate_limit
 from app.db.session import get_db
 from app.models import Report, ReportVersion
 from app.models.entities import utc_now
@@ -70,6 +71,21 @@ COOKIE_PREFIX = "cw_share_unlock_"
 COOKIE_TTL_SECONDS = 60 * 60  # 1 hour — re-prompt on long sessions
 
 NO_STORE = {"Cache-Control": "no-store"}
+
+
+def _throttle_share_consume(request: Request, token: str) -> None:
+    """Apply the M3 share-unlock brute-force cap.
+
+    Same limiter for all three /r/{token}* paths so a probe campaign
+    that mixes info + consume + unlock can't escape budget by
+    bouncing between endpoints.
+    """
+    enforce_share_unlock_rate_limit(
+        request,
+        token,
+        per_minute=settings.SHARE_UNLOCK_RATE_LIMIT_PER_MINUTE,
+        per_hour=settings.SHARE_UNLOCK_RATE_LIMIT_PER_HOUR,
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -271,7 +287,9 @@ def _consume_bypassing_password(db: Session, *, share):
 
 
 @router.get("/{token}/info", response_model=ShareInfo, summary="Share metadata probe")
-def get_share_info(token: str, db: DbSession) -> ShareInfo:
+def get_share_info(
+    token: str, request: Request, db: DbSession
+) -> ShareInfo:
     """Return audience + title + has_password without rendering the body.
 
     Same 404/410 contract as the GET render — so probing this
@@ -279,6 +297,7 @@ def get_share_info(token: str, db: DbSession) -> ShareInfo:
     Password-protected shares return 200 with ``has_password=True``
     so the frontend knows to show the password form.
     """
+    _throttle_share_consume(request, token)
     from sqlalchemy import select
 
     from app.models import ReportShare
@@ -319,6 +338,7 @@ def get_share_info(token: str, db: DbSession) -> ShareInfo:
 def post_share_unlock(
     token: str,
     payload: UnlockPayload,
+    request: Request,
     response: Response,
     db: DbSession,
 ) -> UnlockResponse:
@@ -328,6 +348,7 @@ def post_share_unlock(
     settings-driven). It's scoped to a per-share name so different
     shared links don't share unlock state.
     """
+    _throttle_share_consume(request, token)
     try:
         share = consume_share(db, token=token, password=payload.password)
     except Exception as exc:
@@ -364,6 +385,7 @@ def get_share(token: str, request: Request, db: DbSession) -> Response:
     static alias, so we read the cookie out of ``request.cookies``
     directly using the per-token name we computed.
     """
+    _throttle_share_consume(request, token)
     unlock_cookie = request.cookies.get(_cookie_name_for(token))
     try:
         share = _try_consume_with_unlock_cookie(

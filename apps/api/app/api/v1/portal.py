@@ -74,6 +74,7 @@ from app.core.compliance_catalog import (
     recurring_where_to_obtain,
 )
 from app.core.config import settings
+from app.core.rate_limit import enforce_ai_heavy_rate_limit
 from app.core.period_validation import (
     MAX_YEAR,
     MIN_YEAR,
@@ -123,7 +124,7 @@ from app.services.portal_session import (
     verify_portal_session_token,
 )
 from app.services.requirement_service import resolve_period, resolve_requirement
-from app.services.storage import get_storage_service
+from app.services.storage import UploadTooLargeError, get_storage_service
 from app.services.submission_service import (
     INTAKE_SOURCE_WORKSPACE_PORTAL,
     assert_pdf_upload,
@@ -2533,9 +2534,16 @@ async def create_workspace_submission(
     storage = get_storage_service()
     try:
         stored_file = await storage.save_upload(file)
+    except UploadTooLargeError as exc:
+        # M3 (2026-05-25) — size-cap rejections return 413, not 400.
+        raise HTTPException(
+            status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE,
+            detail=str(exc),
+        ) from exc
     except ValueError as exc:
         raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=str(exc),
         ) from exc
 
     try:
@@ -2707,6 +2715,13 @@ async def create_workspace_submission_batch(
         for upload in files:
             try:
                 stored = await storage.save_upload(upload)
+            except UploadTooLargeError as exc:
+                # M3 (2026-05-25) — size-cap rejections return 413
+                # consistently across single + multi-file flows.
+                raise HTTPException(
+                    status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE,
+                    detail=str(exc),
+                ) from exc
             except ValueError as exc:
                 raise HTTPException(
                     status_code=status.HTTP_400_BAD_REQUEST,
@@ -3953,6 +3968,18 @@ def ask_wise_endpoint(
     workspace: Annotated[ProviderWorkspace, Depends(current_portal_workspace)],
 ) -> WiseAskResponse:
     _ = workspace_id  # tenant guard already enforced by dependency
+    # M3 — per-user LLM budget. The copilot endpoint shares the same
+    # cap as the report-side AI endpoints because both burn Anthropic
+    # tokens. Bucket key is the workspace owner so a runaway dock
+    # client can't keep firing prompts past the per-minute / per-hour
+    # cap. ``workspace.owner_user_id`` is guaranteed non-null on any
+    # active workspace.
+    if workspace.owner_user_id:
+        enforce_ai_heavy_rate_limit(
+            workspace.owner_user_id,
+            per_minute=settings.AI_HEAVY_RATE_LIMIT_PER_MINUTE,
+            per_hour=settings.AI_HEAVY_RATE_LIMIT_PER_HOUR,
+        )
 
     from app.services.wise.ai import WiseCta, WisePageContext, ask_wise
     from app.services.wise.context import (

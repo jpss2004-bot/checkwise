@@ -35,7 +35,7 @@ from app.db.session import get_db
 from app.schemas.catalogs import CatalogResponse
 from app.schemas.submissions import SubmissionResponse
 from app.services.requirement_service import resolve_period, resolve_requirement
-from app.services.storage import get_storage_service
+from app.services.storage import UploadTooLargeError, get_storage_service
 from app.services.submission_service import (
     INTAKE_SOURCE_LEGACY_NATIVE,
     assert_pdf_upload,
@@ -144,8 +144,17 @@ async def create_submission(
     storage = get_storage_service()
     try:
         stored_file = await storage.save_upload(file)
+    except UploadTooLargeError as exc:
+        # M3 (2026-05-25) — size-cap rejections return 413, not 400.
+        raise HTTPException(
+            status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE,
+            detail=str(exc),
+        ) from exc
     except ValueError as exc:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=str(exc),
+        ) from exc
 
     try:
         # LEGACY tenant identity path — browser-posted, not authoritative.

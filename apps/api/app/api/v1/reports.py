@@ -36,6 +36,8 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.api.v1.auth import CurrentUser, get_current_user
+from app.core.config import settings
+from app.core.rate_limit import enforce_ai_heavy_rate_limit
 from app.constants.reports import (
     ConversationRole,
     ReportAudience,
@@ -103,6 +105,25 @@ DbSession = Annotated[Session, Depends(get_db)]
 
 
 # ─── Helpers ─────────────────────────────────────────────────────
+
+
+def _enforce_ai_budget(current: CurrentUser) -> None:
+    """Apply the M3 per-user LLM-budget cap.
+
+    All six AI-heavy POST endpoints (plan, generate, conversation,
+    explain, regenerate, refresh-data) call this before reaching the
+    Anthropic client. Centralised so a future bucket tweak (e.g. a
+    per-role multiplier) lives in one place.
+
+    Both limits come from ``settings``. Either at 0 disables that
+    bucket entirely — useful in tests and as a kill switch if the
+    cap blocks a legitimate batch operation in prod.
+    """
+    enforce_ai_heavy_rate_limit(
+        current.user.id,
+        per_minute=settings.AI_HEAVY_RATE_LIMIT_PER_MINUTE,
+        per_hour=settings.AI_HEAVY_RATE_LIMIT_PER_HOUR,
+    )
 
 
 def _actor_from(current: CurrentUser, db: Session | None = None) -> ReportActor:
@@ -677,6 +698,7 @@ def post_plan(
     3.3b decision (the streaming execution endpoint persists a
     version once the per-block content is generated).
     """
+    _enforce_ai_budget(current)
     actor = _actor_from(current, db)
 
     try:
@@ -755,6 +777,7 @@ def post_generate(
     generation. On `done` the persisted version is canonical and the
     canvas can switch from streaming-mode to editable-mode.
     """
+    _enforce_ai_budget(current)
     actor = _actor_from(current, db)
 
     try:
@@ -894,6 +917,7 @@ def post_conversation(
         event: done          { }
         event: error         { code, message }       (terminal)
     """
+    _enforce_ai_budget(current)
     actor = _actor_from(current, db)
 
     try:
@@ -1010,6 +1034,7 @@ def post_explain_block(
     """Return a short narrative explaining one block of the current
     report version. Synchronous (not SSE) — explanations are short.
     """
+    _enforce_ai_budget(current)
     actor = _actor_from(current, db)
     try:
         report, current_version = get_report(
@@ -1093,6 +1118,7 @@ def post_regenerate_block(
     embedded. The rest of the content is copied from the current
     version. The block must already exist in the current version.
     """
+    _enforce_ai_budget(current)
     from app.services.reports.blocks.ai_summaries import (
         collect_summary,
         has_ai_summary,
@@ -1246,6 +1272,11 @@ def post_refresh_report_data(
     """
     from app.services.reports.blocks.data_fetchers import fetch_for_block
     from app.services.reports.executor import _redact_for_audience
+
+    # Shares the AI-heavy budget because a runaway client can still
+    # drive a lot of DB work per request even though no LLM call is
+    # made (every block re-fetches against today's snapshot).
+    _enforce_ai_budget(current)
 
     actor = _actor_from(current, db)
     try:
