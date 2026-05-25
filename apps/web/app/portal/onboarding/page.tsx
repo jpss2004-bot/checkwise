@@ -4,6 +4,8 @@ import { useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
 import {
   ArrowRight,
+  CaretDown,
+  CaretUp,
   CheckCircle,
   Files,
   Lightbulb,
@@ -216,8 +218,8 @@ function OnboardingInner({ session }: { session: PortalSession }) {
 
         {needsActionOptional.length > 0 && (
           <ExpedienteSection
-            title="Opcionales — puedes hacerlos después"
-            description="No bloquean tu dashboard. Súbelos cuando aplique a tu caso."
+            title="Sugeridos · refuerzan tu expediente"
+            description="No bloquean tu dashboard, pero te dejan más sólido frente a una auditoría. Súbelos cuando apliquen a tu caso."
             tone="info"
             count={needsActionOptional.length}
             collapsible
@@ -482,10 +484,11 @@ function GateHero({
           </div>
           <p className="max-w-prose text-[13px] leading-5 text-[color:var(--text-secondary)]">
             Solo los <strong>{counts.total_required} documentos obligatorios</strong>{" "}
-            desbloquean tu dashboard. Los opcionales puedes subirlos cuando
-            apliquen a tu caso. Una vez que envíes los obligatorios, tu cliente
-            puede contratar tus servicios especializados y empezamos a darle
-            seguimiento mensual a tus obligaciones REPSE.
+            desbloquean tu dashboard. Los sugeridos refuerzan tu expediente y
+            puedes subirlos cuando apliquen a tu caso. Una vez que envíes los
+            obligatorios, tu cliente puede contratar tus servicios
+            especializados y empezamos a darle seguimiento mensual a tus
+            obligaciones REPSE.
           </p>
 
           <Progress
@@ -601,40 +604,85 @@ function ExpedienteSection({
   const badgeVariant =
     tone === "success" ? "success" : tone === "attention" ? "warning" : "info";
 
+  // When the section is collapsible AND closed, render the trigger as a
+  // prominent full-width bar with a tinted background. This solves the
+  // "low visibility" complaint: prior trigger was a 32 px "Ver" button
+  // tucked in the right corner of an otherwise flat header. The
+  // expanded state reverts to a quiet section header so the
+  // requirement cards underneath own the eye.
+  const isCompactTrigger = collapsible && !open;
+  const trigger = isCompactTrigger ? (
+    <button
+      type="button"
+      onClick={() => setOpen(true)}
+      aria-expanded={false}
+      className="group cw-hover-lift flex w-full items-center justify-between gap-3 rounded-lg border border-[color:var(--surface-teal-muted)] bg-[color:var(--surface-teal-muted)] px-4 py-3 text-left transition-colors hover:border-[color:var(--text-teal)]/40 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[color:var(--border-focus)]/40"
+    >
+      <span className="flex min-w-0 items-center gap-3">
+        <IconComponent
+          className={`h-5 w-5 shrink-0 ${iconClass}`}
+          weight="duotone"
+          aria-hidden="true"
+        />
+        <span className="min-w-0">
+          <span className="flex items-center gap-2">
+            <span
+              id={`section-${title}`}
+              className="text-[14.5px] font-semibold text-[color:var(--text-primary)]"
+            >
+              {title}
+            </span>
+            <Badge variant={badgeVariant}>{count}</Badge>
+          </span>
+          <span className="mt-0.5 block text-[12.5px] leading-snug text-[color:var(--text-secondary)]">
+            {description}
+          </span>
+        </span>
+      </span>
+      <span className="inline-flex shrink-0 items-center gap-1.5 font-mono text-[11px] uppercase tracking-[0.16em] text-[color:var(--text-teal)]">
+        <span>Ver</span>
+        <CaretDown className="h-3 w-3" weight="bold" aria-hidden="true" />
+      </span>
+    </button>
+  ) : (
+    <header className="mb-4 flex flex-wrap items-center justify-between gap-3">
+      <div className="flex items-center gap-2">
+        <IconComponent
+          className={`h-5 w-5 ${iconClass}`}
+          weight="duotone"
+          aria-hidden="true"
+        />
+        <h2
+          id={`section-${title}`}
+          className="text-[15px] font-semibold text-[color:var(--text-primary)]"
+        >
+          {title}
+        </h2>
+        <Badge variant={badgeVariant}>{count}</Badge>
+      </div>
+      <div className="flex items-center gap-3">
+        <p className="hidden text-xs text-[color:var(--text-secondary)] sm:block">
+          {description}
+        </p>
+        {collapsible && (
+          <Button
+            type="button"
+            variant="ghost"
+            size="sm"
+            onClick={() => setOpen(false)}
+            aria-expanded
+          >
+            <CaretUp className="mr-1 h-3 w-3" weight="bold" aria-hidden="true" />
+            Ocultar
+          </Button>
+        )}
+      </div>
+    </header>
+  );
+
   return (
     <section aria-labelledby={`section-${title}`} className="cw-fade-up">
-      <header className="mb-4 flex flex-wrap items-center justify-between gap-3">
-        <div className="flex items-center gap-2">
-          <IconComponent
-            className={`h-5 w-5 ${iconClass}`}
-            weight="duotone"
-            aria-hidden="true"
-          />
-          <h2
-            id={`section-${title}`}
-            className="text-[15px] font-semibold text-[color:var(--text-primary)]"
-          >
-            {title}
-          </h2>
-          <Badge variant={badgeVariant}>{count}</Badge>
-        </div>
-        <div className="flex items-center gap-3">
-          <p className="hidden text-xs text-[color:var(--text-secondary)] sm:block">
-            {description}
-          </p>
-          {collapsible && (
-            <Button
-              type="button"
-              variant="ghost"
-              size="sm"
-              onClick={() => setOpen((v) => !v)}
-              aria-expanded={open}
-            >
-              {open ? "Ocultar" : "Ver"}
-            </Button>
-          )}
-        </div>
-      </header>
+      {trigger}
       {open && children}
     </section>
   );

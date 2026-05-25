@@ -162,17 +162,17 @@ export function ExpedienteCard({ requirement, onAction }: ExpedienteCardProps) {
                   "rounded-full border px-2 py-0.5 font-mono text-[10px] uppercase tracking-wide font-semibold",
                   requirement.required
                     ? "border-[color:var(--status-warning-border)] bg-[color:var(--status-warning-bg)] text-[color:var(--status-warning-text)]"
-                    : "border-[color:var(--border-subtle)] bg-[color:var(--surface-sunken)] text-[color:var(--text-tertiary)]",
+                    : "border-[color:var(--border-ai)] bg-[color:var(--surface-teal-muted)] text-[color:var(--text-teal)]",
                 )}
                 title={
                   requirement.required
                     ? "Obligatorio para activar el dashboard"
-                    : "Opcional — puedes subirlo después"
+                    : "Sugerido — refuerza tu expediente"
                 }
               >
                 {requirement.required
                   ? "Obligatorio · activa dashboard"
-                  : "Opcional"}
+                  : "Sugerido"}
               </span>
             </p>
           </div>
