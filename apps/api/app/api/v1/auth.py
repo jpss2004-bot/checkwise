@@ -211,6 +211,27 @@ _RATE_LIMITED_DETAIL = (
 )
 
 
+# Paths that a user with ``must_change_password=True`` is allowed to reach
+# before clearing the flag. Anything else returns 403 from
+# ``get_current_user``. Kept narrow on purpose: the user must be able to
+# (a) read their own identity to render the forced-password screen and
+# (b) submit the new password. Cross-referenced with
+# ``must_change_password_allowed`` in
+# ``app/security/route_policy_manifest.json``; the manifest test fails
+# CI if a new route deviates from this list silently.
+_PASSWORD_GATE_ALLOWED_PATHS = frozenset(
+    {
+        "/api/v1/auth/me",
+        "/api/v1/auth/set-password",
+    }
+)
+
+
+_PASSWORD_RESET_REQUIRED_DETAIL = (
+    "Debes establecer una nueva contraseña antes de continuar."
+)
+
+
 def _enforce_login_rate_limit(request: Request, email: str) -> None:
     """Sliding-window cap on /auth/login. Buckets are (ip, email) so a
     legitimate user typing a typo at a busy IP cannot lock another user
@@ -259,6 +280,7 @@ def _enforce_forgot_password_rate_limit(request: Request, email: str) -> None:
 
 
 def get_current_user(
+    request: Request,
     db: DbSession,
     authorization: Annotated[str | None, Header()] = None,
 ) -> CurrentUser:
@@ -266,6 +288,19 @@ def get_current_user(
     user = db.get(User, claims.user_id)
     if user is None or user.status != "active":
         raise HTTPException(status.HTTP_401_UNAUTHORIZED, detail="User not active")
+
+    # P0 gate: a user flagged ``must_change_password=True`` may only
+    # touch the narrow surface needed to clear the flag. Without this,
+    # a freshly-activated provider whose token was issued before they
+    # set a personal password can read or mutate any route their role
+    # permits. The allow-list is enforced here (one place) rather than
+    # threaded through every router so a missed Depends cannot
+    # accidentally open a hole.
+    if user.must_change_password and request.url.path not in _PASSWORD_GATE_ALLOWED_PATHS:
+        raise HTTPException(
+            status.HTTP_403_FORBIDDEN,
+            detail=_PASSWORD_RESET_REQUIRED_DETAIL,
+        )
 
     return CurrentUser(
         user=UserOut(

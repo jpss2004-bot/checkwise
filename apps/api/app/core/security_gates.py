@@ -18,7 +18,7 @@ from __future__ import annotations
 
 from typing import Annotated
 
-from fastapi import Depends, Header, HTTPException, status
+from fastapi import Depends, Header, HTTPException, Request, status
 from sqlalchemy.orm import Session
 
 from app.api.v1.auth import CurrentUser, get_current_user
@@ -27,6 +27,7 @@ from app.db.session import get_db
 
 
 def require_local_or_internal_admin(
+    request: Request,
     db: Annotated[Session, Depends(get_db)],
     authorization: Annotated[str | None, Header()] = None,
 ) -> CurrentUser | None:
@@ -39,9 +40,11 @@ def require_local_or_internal_admin(
     if settings.is_local_env and authorization is None:
         return None
     # Delegating to get_current_user keeps the JWT decode + active-user
-    # check in one place. It raises 401 on a bad/missing token even in
-    # local when one was attempted, which is the right behavior.
-    current = get_current_user(db, authorization=authorization)
+    # check + must_change_password gate in one place. It raises 401 on
+    # a bad/missing token even in local when one was attempted, and 403
+    # when the caller is on the password-reset gate, which is the right
+    # behavior.
+    current = get_current_user(request, db, authorization=authorization)
     if "internal_admin" not in current.roles:
         raise HTTPException(
             status.HTTP_403_FORBIDDEN,
