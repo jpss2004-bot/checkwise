@@ -34,6 +34,7 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
+from app.api.v1.auth import _PASSWORD_GATE_ALLOWED_PATHS
 from scripts.introspect_routes import introspect
 
 _MANIFEST_PATH = (
@@ -185,6 +186,57 @@ def test_classified_gate_matches_function_dependencies() -> None:
         "intentionally annotate the row with an explanatory ``notes`` "
         "field and add the path to the EXCEPT list in this test.\n"
         + "\n".join(f"  {m}" for m in mismatches)
+    )
+
+
+def test_every_entry_declares_must_change_password_allowed() -> None:
+    """Catches: a new route lands without classifying whether it is
+    reachable by a user whose must_change_password flag is True.
+
+    Default for new entries should be ``false``. The flag must be ``true``
+    only for the narrow surface that lets the user clear the flag
+    (``/auth/me`` + ``/auth/set-password``).
+    """
+    manifest = _load_manifest()
+    bad: list[str] = []
+    for row in manifest["routes"]:
+        key = f"{row['method']:6} {row['path']}"
+        value = row.get("must_change_password_allowed")
+        if not isinstance(value, bool):
+            bad.append(
+                f"{key} | must_change_password_allowed must be a bool, got {value!r}"
+            )
+    assert not bad, (
+        "These manifest entries are missing the boolean field "
+        "`must_change_password_allowed`. Add it (default `false`; "
+        "`true` only for /auth/me + /auth/set-password) and re-run.\n"
+        + "\n".join(f"  {x}" for x in bad)
+    )
+
+
+def test_must_change_password_allowed_matches_runtime_allowlist() -> None:
+    """Catches: the manifest's allow-listed set drifts from the gate
+    enforced at runtime in ``app.api.v1.auth._PASSWORD_GATE_ALLOWED_PATHS``.
+
+    The two must agree: every manifest row flagged ``true`` must appear in
+    the runtime allow-list, and every runtime allow-list entry must be
+    flagged ``true`` in the manifest.
+    """
+    manifest = _load_manifest()
+    manifest_allowed = {
+        row["path"]
+        for row in manifest["routes"]
+        if row.get("must_change_password_allowed") is True
+    }
+    runtime_allowed = set(_PASSWORD_GATE_ALLOWED_PATHS)
+    only_in_manifest = sorted(manifest_allowed - runtime_allowed)
+    only_in_runtime = sorted(runtime_allowed - manifest_allowed)
+    assert not only_in_manifest and not only_in_runtime, (
+        "Manifest `must_change_password_allowed=true` disagrees with "
+        "`app.api.v1.auth._PASSWORD_GATE_ALLOWED_PATHS`. Reconcile both "
+        "sides.\n"
+        f"  only in manifest: {only_in_manifest}\n"
+        f"  only in runtime : {only_in_runtime}"
     )
 
 

@@ -1,6 +1,6 @@
 {
-  "schema_version": 1,
-  "description": "Route policy manifest for the FastAPI backend. Every route in app.api.v1 MUST have an entry here. The pytest at tests/test_route_policy_manifest.py fails on (a) any new route lacking a manifest entry, (b) any manifest entry whose route no longer exists, and (c) any entry with a TBD policy field. Edit by hand; do not auto-regenerate after the M0 seed.",
+  "schema_version": 2,
+  "description": "Route policy manifest for the FastAPI backend. Every route in app.api.v1 MUST have an entry here. The pytest at tests/test_route_policy_manifest.py fails on (a) any new route lacking a manifest entry, (b) any manifest entry whose route no longer exists, (c) any entry with a TBD policy field, and (d) any entry missing the must_change_password_allowed boolean. Edit by hand; do not auto-regenerate after the M0 seed. The must_change_password_allowed flag mirrors the allow-list in app.api.v1.auth._PASSWORD_GATE_ALLOWED_PATHS — only /auth/me and /auth/set-password are reachable while a user's must_change_password flag is True.",
   "routes": [
     {
       "method": "GET",
@@ -14,6 +14,7 @@
       "audit_rule": "not_logged (read-only)",
       "rate_limit_rule": "none (auth-gated)",
       "error_lang": "es",
+      "must_change_password_allowed": false,
       "notes": "Reads the immutable audit_log itself; never mutates."
     },
     {
@@ -28,6 +29,7 @@
       "audit_rule": "not_logged (read-only)",
       "rate_limit_rule": "none (auth-gated)",
       "error_lang": "es",
+      "must_change_password_allowed": false,
       "notes": ""
     },
     {
@@ -42,6 +44,7 @@
       "audit_rule": "not_logged (read-only)",
       "rate_limit_rule": "none (auth-gated)",
       "error_lang": "es",
+      "must_change_password_allowed": false,
       "notes": ""
     },
     {
@@ -56,6 +59,7 @@
       "audit_rule": "logged via _audit_admin",
       "rate_limit_rule": "none (auth-gated)",
       "error_lang": "es",
+      "must_change_password_allowed": false,
       "notes": ""
     },
     {
@@ -70,6 +74,7 @@
       "audit_rule": "not_logged (read-only)",
       "rate_limit_rule": "none (auth-gated)",
       "error_lang": "es",
+      "must_change_password_allowed": false,
       "notes": ""
     },
     {
@@ -84,6 +89,7 @@
       "audit_rule": "logged via _audit_admin",
       "rate_limit_rule": "none (auth-gated)",
       "error_lang": "es",
+      "must_change_password_allowed": false,
       "notes": ""
     },
     {
@@ -98,6 +104,7 @@
       "audit_rule": "not_logged (read-only)",
       "rate_limit_rule": "none (auth-gated)",
       "error_lang": "es",
+      "must_change_password_allowed": false,
       "notes": ""
     },
     {
@@ -112,6 +119,7 @@
       "audit_rule": "not_logged (read-only)",
       "rate_limit_rule": "none (auth-gated)",
       "error_lang": "es",
+      "must_change_password_allowed": false,
       "notes": ""
     },
     {
@@ -126,6 +134,7 @@
       "audit_rule": "logged via _audit_admin",
       "rate_limit_rule": "none (auth-gated)",
       "error_lang": "es",
+      "must_change_password_allowed": false,
       "notes": ""
     },
     {
@@ -140,6 +149,7 @@
       "audit_rule": "not_logged (read-only)",
       "rate_limit_rule": "none (auth-gated)",
       "error_lang": "es",
+      "must_change_password_allowed": false,
       "notes": ""
     },
     {
@@ -154,6 +164,7 @@
       "audit_rule": "logged via _audit_admin",
       "rate_limit_rule": "none (auth-gated)",
       "error_lang": "es",
+      "must_change_password_allowed": false,
       "notes": ""
     },
     {
@@ -168,6 +179,7 @@
       "audit_rule": "logged via _audit_admin",
       "rate_limit_rule": "none (auth-gated)",
       "error_lang": "es",
+      "must_change_password_allowed": false,
       "notes": ""
     },
     {
@@ -182,6 +194,7 @@
       "audit_rule": "not_logged (read-only)",
       "rate_limit_rule": "none (auth-gated)",
       "error_lang": "es",
+      "must_change_password_allowed": false,
       "notes": ""
     },
     {
@@ -196,6 +209,7 @@
       "audit_rule": "not_logged (read-only)",
       "rate_limit_rule": "none (auth-gated)",
       "error_lang": "es",
+      "must_change_password_allowed": false,
       "notes": ""
     },
     {
@@ -210,6 +224,7 @@
       "audit_rule": "logged via _audit_admin",
       "rate_limit_rule": "none (auth-gated)",
       "error_lang": "es",
+      "must_change_password_allowed": false,
       "notes": ""
     },
     {
@@ -224,6 +239,7 @@
       "audit_rule": "not_logged (read-only)",
       "rate_limit_rule": "none (auth-gated)",
       "error_lang": "es",
+      "must_change_password_allowed": false,
       "notes": ""
     },
     {
@@ -238,6 +254,7 @@
       "audit_rule": "not_logged (read-only)",
       "rate_limit_rule": "none (auth-gated)",
       "error_lang": "es",
+      "must_change_password_allowed": false,
       "notes": ""
     },
     {
@@ -252,6 +269,7 @@
       "audit_rule": "not_logged (read-only)",
       "rate_limit_rule": "none (auth-gated)",
       "error_lang": "es",
+      "must_change_password_allowed": false,
       "notes": ""
     },
     {
@@ -266,6 +284,7 @@
       "audit_rule": "not_logged (read-only)",
       "rate_limit_rule": "none (auth-gated)",
       "error_lang": "es",
+      "must_change_password_allowed": false,
       "notes": ""
     },
     {
@@ -280,6 +299,7 @@
       "audit_rule": "not_logged (read-only)",
       "rate_limit_rule": "none (auth-gated)",
       "error_lang": "es",
+      "must_change_password_allowed": false,
       "notes": ""
     },
     {
@@ -294,6 +314,7 @@
       "audit_rule": "not_logged (read-only)",
       "rate_limit_rule": "none (auth-gated)",
       "error_lang": "es",
+      "must_change_password_allowed": false,
       "notes": ""
     },
     {
@@ -308,6 +329,7 @@
       "audit_rule": "not_logged (read-only)",
       "rate_limit_rule": "none (auth-gated)",
       "error_lang": "es",
+      "must_change_password_allowed": false,
       "notes": ""
     },
     {
@@ -322,6 +344,7 @@
       "audit_rule": "not_logged (read-only)",
       "rate_limit_rule": "none (auth-gated)",
       "error_lang": "es",
+      "must_change_password_allowed": false,
       "notes": ""
     },
     {
@@ -336,6 +359,7 @@
       "audit_rule": "logged via _audit_admin",
       "rate_limit_rule": "none (auth-gated)",
       "error_lang": "es",
+      "must_change_password_allowed": false,
       "notes": ""
     },
     {
@@ -350,6 +374,7 @@
       "audit_rule": "not_logged (read-only)",
       "rate_limit_rule": "none (auth-gated)",
       "error_lang": "es",
+      "must_change_password_allowed": false,
       "notes": ""
     },
     {
@@ -364,6 +389,7 @@
       "audit_rule": "logged via _audit_admin",
       "rate_limit_rule": "none (auth-gated)",
       "error_lang": "es",
+      "must_change_password_allowed": false,
       "notes": ""
     },
     {
@@ -378,6 +404,7 @@
       "audit_rule": "not_logged (read-only)",
       "rate_limit_rule": "none (auth-gated)",
       "error_lang": "es",
+      "must_change_password_allowed": false,
       "notes": ""
     },
     {
@@ -392,6 +419,7 @@
       "audit_rule": "logged via _audit_admin",
       "rate_limit_rule": "none (auth-gated)",
       "error_lang": "es",
+      "must_change_password_allowed": false,
       "notes": ""
     },
     {
@@ -406,6 +434,7 @@
       "audit_rule": "not_logged (read-only)",
       "rate_limit_rule": "none (auth-gated)",
       "error_lang": "es",
+      "must_change_password_allowed": false,
       "notes": ""
     },
     {
@@ -420,6 +449,7 @@
       "audit_rule": "logged via _audit_admin",
       "rate_limit_rule": "none (auth-gated)",
       "error_lang": "es",
+      "must_change_password_allowed": false,
       "notes": ""
     },
     {
@@ -434,6 +464,7 @@
       "audit_rule": "logged via admin.vendor_expediente_downloaded",
       "rate_limit_rule": "none (auth-gated)",
       "error_lang": "es",
+      "must_change_password_allowed": false,
       "notes": ""
     },
     {
@@ -448,6 +479,7 @@
       "audit_rule": "not_logged (read-only)",
       "rate_limit_rule": "none (auth-gated)",
       "error_lang": "es",
+      "must_change_password_allowed": false,
       "notes": ""
     },
     {
@@ -462,6 +494,7 @@
       "audit_rule": "not_logged (read-only)",
       "rate_limit_rule": "none (auth-gated)",
       "error_lang": "es",
+      "must_change_password_allowed": false,
       "notes": ""
     },
     {
@@ -476,6 +509,7 @@
       "audit_rule": "logged via _audit_admin",
       "rate_limit_rule": "none (auth-gated)",
       "error_lang": "es",
+      "must_change_password_allowed": false,
       "notes": ""
     },
     {
@@ -490,6 +524,7 @@
       "audit_rule": "logged (password_reset_token row)",
       "rate_limit_rule": "forgot_password_limiter (per-email + per-IP)",
       "error_lang": "es_partial (feedback router has English messages; M2 will normalize)",
+      "must_change_password_allowed": false,
       "notes": ""
     },
     {
@@ -504,6 +539,7 @@
       "audit_rule": "sampled (login failures audited at a lower rate; success not audited in the auth_log table directly)",
       "rate_limit_rule": "login_limiter (per-(IP,email) sliding window)",
       "error_lang": "es_partial (feedback router has English messages; M2 will normalize)",
+      "must_change_password_allowed": false,
       "notes": ""
     },
     {
@@ -518,6 +554,7 @@
       "audit_rule": "not_logged (read-only)",
       "rate_limit_rule": "none (auth-gated)",
       "error_lang": "es_partial (raw service exceptions can leak; M2 will normalize)",
+      "must_change_password_allowed": true,
       "notes": ""
     },
     {
@@ -532,6 +569,7 @@
       "audit_rule": "logged (password_reset_token.used_at + auth event)",
       "rate_limit_rule": "consume-side limiter inherited from token issuance",
       "error_lang": "es_partial (feedback router has English messages; M2 will normalize)",
+      "must_change_password_allowed": false,
       "notes": ""
     },
     {
@@ -546,6 +584,7 @@
       "audit_rule": "logged (auth.password_changed)",
       "rate_limit_rule": "none (auth-gated; M3 adds AI-heavy + export limits)",
       "error_lang": "es_partial (raw service exceptions can leak; M2 will normalize)",
+      "must_change_password_allowed": true,
       "notes": ""
     },
     {
@@ -560,6 +599,7 @@
       "audit_rule": "not_logged (read-only)",
       "rate_limit_rule": "none (read-only public)",
       "error_lang": "es",
+      "must_change_password_allowed": false,
       "notes": ""
     },
     {
@@ -574,6 +614,7 @@
       "audit_rule": "not_logged (read-only)",
       "rate_limit_rule": "none (auth-gated)",
       "error_lang": "es",
+      "must_change_password_allowed": false,
       "notes": ""
     },
     {
@@ -588,6 +629,7 @@
       "audit_rule": "logged via client.audit_package_downloaded",
       "rate_limit_rule": "none (auth-gated)",
       "error_lang": "es",
+      "must_change_password_allowed": false,
       "notes": ""
     },
     {
@@ -602,6 +644,7 @@
       "audit_rule": "not_logged (preview is a hot read; full download writes the audit row)",
       "rate_limit_rule": "none (auth-gated)",
       "error_lang": "es",
+      "must_change_password_allowed": false,
       "notes": ""
     },
     {
@@ -616,6 +659,7 @@
       "audit_rule": "not_logged (read-only)",
       "rate_limit_rule": "none (auth-gated)",
       "error_lang": "es",
+      "must_change_password_allowed": false,
       "notes": ""
     },
     {
@@ -630,6 +674,7 @@
       "audit_rule": "not_logged (read-only)",
       "rate_limit_rule": "none (auth-gated)",
       "error_lang": "es",
+      "must_change_password_allowed": false,
       "notes": ""
     },
     {
@@ -644,6 +689,7 @@
       "audit_rule": "not_logged (read-only)",
       "rate_limit_rule": "none (auth-gated)",
       "error_lang": "es",
+      "must_change_password_allowed": false,
       "notes": ""
     },
     {
@@ -658,6 +704,7 @@
       "audit_rule": "not_logged (read-only)",
       "rate_limit_rule": "none (auth-gated)",
       "error_lang": "es",
+      "must_change_password_allowed": false,
       "notes": ""
     },
     {
@@ -672,6 +719,7 @@
       "audit_rule": "not_logged (read-only)",
       "rate_limit_rule": "none (auth-gated)",
       "error_lang": "es",
+      "must_change_password_allowed": false,
       "notes": ""
     },
     {
@@ -683,9 +731,10 @@
       "lineno": 1712,
       "gate": "client_admin_or_admin",
       "tenant_rule": "scoped via _resolve_client_id() membership check",
-      "audit_rule": "not_logged (P1 GAP — Pass 3 finding P3-01; add add_audit_event)",
+      "audit_rule": "not_logged (P1 GAP \u2014 Pass 3 finding P3-01; add add_audit_event)",
       "rate_limit_rule": "none (auth-gated)",
       "error_lang": "es",
+      "must_change_password_allowed": false,
       "notes": "P1 fix scheduled: write client.notifications_all_read audit row."
     },
     {
@@ -700,6 +749,7 @@
       "audit_rule": "not_logged (read-only)",
       "rate_limit_rule": "none (auth-gated)",
       "error_lang": "es",
+      "must_change_password_allowed": false,
       "notes": ""
     },
     {
@@ -711,9 +761,10 @@
       "lineno": 1693,
       "gate": "client_admin_or_admin",
       "tenant_rule": "scoped via _resolve_client_id() membership check",
-      "audit_rule": "not_logged (P1 GAP — Pass 3 finding P3-01; add add_audit_event)",
+      "audit_rule": "not_logged (P1 GAP \u2014 Pass 3 finding P3-01; add add_audit_event)",
       "rate_limit_rule": "none (auth-gated)",
       "error_lang": "es",
+      "must_change_password_allowed": false,
       "notes": "P1 fix scheduled: write client.notification_read audit row."
     },
     {
@@ -728,6 +779,7 @@
       "audit_rule": "not_logged (read-only)",
       "rate_limit_rule": "none (auth-gated)",
       "error_lang": "es",
+      "must_change_password_allowed": false,
       "notes": ""
     },
     {
@@ -742,6 +794,7 @@
       "audit_rule": "not_logged (read-only)",
       "rate_limit_rule": "none (auth-gated)",
       "error_lang": "es",
+      "must_change_password_allowed": false,
       "notes": ""
     },
     {
@@ -756,6 +809,7 @@
       "audit_rule": "logged",
       "rate_limit_rule": "none (auth-gated)",
       "error_lang": "es",
+      "must_change_password_allowed": false,
       "notes": ""
     },
     {
@@ -770,6 +824,7 @@
       "audit_rule": "not_logged (read-only)",
       "rate_limit_rule": "none (auth-gated)",
       "error_lang": "es",
+      "must_change_password_allowed": false,
       "notes": ""
     },
     {
@@ -784,6 +839,7 @@
       "audit_rule": "not_logged (read-only)",
       "rate_limit_rule": "none (auth-gated)",
       "error_lang": "es",
+      "must_change_password_allowed": false,
       "notes": ""
     },
     {
@@ -798,6 +854,7 @@
       "audit_rule": "not_logged (read-only)",
       "rate_limit_rule": "none (auth-gated)",
       "error_lang": "es",
+      "must_change_password_allowed": false,
       "notes": ""
     },
     {
@@ -812,6 +869,7 @@
       "audit_rule": "logged via client.vendor_expediente_downloaded",
       "rate_limit_rule": "none (auth-gated)",
       "error_lang": "es",
+      "must_change_password_allowed": false,
       "notes": ""
     },
     {
@@ -826,6 +884,7 @@
       "audit_rule": "not_logged (read-only)",
       "rate_limit_rule": "none (read-only public)",
       "error_lang": "es",
+      "must_change_password_allowed": false,
       "notes": ""
     },
     {
@@ -840,6 +899,7 @@
       "audit_rule": "not_logged (read-only)",
       "rate_limit_rule": "none (read-only public)",
       "error_lang": "es",
+      "must_change_password_allowed": false,
       "notes": ""
     },
     {
@@ -854,6 +914,7 @@
       "audit_rule": "not_logged (read-only)",
       "rate_limit_rule": "none (read-only public)",
       "error_lang": "es",
+      "must_change_password_allowed": false,
       "notes": ""
     },
     {
@@ -868,6 +929,7 @@
       "audit_rule": "logged (contact/feedback persistence + auth event)",
       "rate_limit_rule": "contact_limiter (per-IP sliding window)",
       "error_lang": "es_partial (feedback router has English messages; M2 will normalize)",
+      "must_change_password_allowed": false,
       "notes": ""
     },
     {
@@ -882,6 +944,7 @@
       "audit_rule": "logged (feedback_reports row + Slack delivery audit)",
       "rate_limit_rule": "per-user 10/min sliding window",
       "error_lang": "es_partial (raw service exceptions can leak; M2 will normalize)",
+      "must_change_password_allowed": false,
       "notes": ""
     },
     {
@@ -896,6 +959,7 @@
       "audit_rule": "logged (contact/feedback persistence + auth event)",
       "rate_limit_rule": "feedback_limiter (per-IP-hash sliding window)",
       "error_lang": "es_partial (feedback router has English messages; M2 will normalize)",
+      "must_change_password_allowed": false,
       "notes": ""
     },
     {
@@ -910,6 +974,7 @@
       "audit_rule": "not_logged (no mutation)",
       "rate_limit_rule": "none (read-only public)",
       "error_lang": "es",
+      "must_change_password_allowed": false,
       "notes": ""
     },
     {
@@ -924,6 +989,7 @@
       "audit_rule": "not_logged (no mutation)",
       "rate_limit_rule": "none (read-only public)",
       "error_lang": "es",
+      "must_change_password_allowed": false,
       "notes": ""
     },
     {
@@ -938,6 +1004,7 @@
       "audit_rule": "not_logged (dry-run never persists)",
       "rate_limit_rule": "none (gate-restricted)",
       "error_lang": "es_partial (metadata-dry-run technical messages are dev-facing)",
+      "must_change_password_allowed": false,
       "notes": ""
     },
     {
@@ -952,6 +1019,7 @@
       "audit_rule": "logged for create/patch/version/generate/export/share; AI conversation turns sampled",
       "rate_limit_rule": "none (auth-gated; M3 adds AI-heavy + export limits)",
       "error_lang": "es_partial (raw service exceptions can leak; M2 will normalize)",
+      "must_change_password_allowed": false,
       "notes": ""
     },
     {
@@ -966,6 +1034,7 @@
       "audit_rule": "logged for POST /enter; not_logged for POST /logout (no state change)",
       "rate_limit_rule": "none (uses parent auth)",
       "error_lang": "es",
+      "must_change_password_allowed": false,
       "notes": ""
     },
     {
@@ -980,6 +1049,7 @@
       "audit_rule": "not_logged (read-only)",
       "rate_limit_rule": "none (uses parent auth)",
       "error_lang": "es",
+      "must_change_password_allowed": false,
       "notes": ""
     },
     {
@@ -994,6 +1064,7 @@
       "audit_rule": "not_logged (read-only)",
       "rate_limit_rule": "none (auth-gated)",
       "error_lang": "es",
+      "must_change_password_allowed": false,
       "notes": ""
     },
     {
@@ -1008,6 +1079,7 @@
       "audit_rule": "not_logged (read-only)",
       "rate_limit_rule": "none (auth-gated)",
       "error_lang": "es",
+      "must_change_password_allowed": false,
       "notes": ""
     },
     {
@@ -1022,6 +1094,7 @@
       "audit_rule": "logged",
       "rate_limit_rule": "none (auth-gated)",
       "error_lang": "es",
+      "must_change_password_allowed": false,
       "notes": ""
     },
     {
@@ -1036,6 +1109,7 @@
       "audit_rule": "logged",
       "rate_limit_rule": "none (auth-gated)",
       "error_lang": "es",
+      "must_change_password_allowed": false,
       "notes": ""
     },
     {
@@ -1050,6 +1124,7 @@
       "audit_rule": "not_logged (read-only)",
       "rate_limit_rule": "none (auth-gated)",
       "error_lang": "es",
+      "must_change_password_allowed": false,
       "notes": ""
     },
     {
@@ -1064,6 +1139,7 @@
       "audit_rule": "not_logged (read-only)",
       "rate_limit_rule": "none (auth-gated)",
       "error_lang": "es",
+      "must_change_password_allowed": false,
       "notes": ""
     },
     {
@@ -1078,6 +1154,7 @@
       "audit_rule": "logged via provider.expediente_downloaded",
       "rate_limit_rule": "none (auth-gated)",
       "error_lang": "es",
+      "must_change_password_allowed": false,
       "notes": ""
     },
     {
@@ -1092,6 +1169,7 @@
       "audit_rule": "logged via provider.legal_consent_accepted with version + IP + UA metadata",
       "rate_limit_rule": "none (auth-gated)",
       "error_lang": "es",
+      "must_change_password_allowed": false,
       "notes": ""
     },
     {
@@ -1106,6 +1184,7 @@
       "audit_rule": "not_logged (read-only)",
       "rate_limit_rule": "none (auth-gated)",
       "error_lang": "es",
+      "must_change_password_allowed": false,
       "notes": ""
     },
     {
@@ -1117,9 +1196,10 @@
       "lineno": 4104,
       "gate": "provider_workspace",
       "tenant_rule": "current_portal_workspace dependency validates session-vs-path workspace_id",
-      "audit_rule": "not_logged (P1 GAP — same shape as P3-01 on the provider side)",
+      "audit_rule": "not_logged (P1 GAP \u2014 same shape as P3-01 on the provider side)",
       "rate_limit_rule": "none (auth-gated)",
       "error_lang": "es",
+      "must_change_password_allowed": false,
       "notes": "P1 fix scheduled: write provider.notifications_all_read audit row."
     },
     {
@@ -1134,6 +1214,7 @@
       "audit_rule": "not_logged (read-only)",
       "rate_limit_rule": "none (auth-gated)",
       "error_lang": "es",
+      "must_change_password_allowed": false,
       "notes": ""
     },
     {
@@ -1145,9 +1226,10 @@
       "lineno": 4080,
       "gate": "provider_workspace",
       "tenant_rule": "current_portal_workspace dependency validates session-vs-path workspace_id",
-      "audit_rule": "not_logged (P1 GAP — same shape as P3-01 on the provider side)",
+      "audit_rule": "not_logged (P1 GAP \u2014 same shape as P3-01 on the provider side)",
       "rate_limit_rule": "none (auth-gated)",
       "error_lang": "es",
+      "must_change_password_allowed": false,
       "notes": "P1 fix scheduled: write provider.notification_read audit row."
     },
     {
@@ -1162,6 +1244,7 @@
       "audit_rule": "not_logged (read-only)",
       "rate_limit_rule": "none (auth-gated)",
       "error_lang": "es",
+      "must_change_password_allowed": false,
       "notes": ""
     },
     {
@@ -1176,6 +1259,7 @@
       "audit_rule": "logged",
       "rate_limit_rule": "none (auth-gated)",
       "error_lang": "es",
+      "must_change_password_allowed": false,
       "notes": ""
     },
     {
@@ -1190,6 +1274,7 @@
       "audit_rule": "not_logged (read-only)",
       "rate_limit_rule": "none (auth-gated)",
       "error_lang": "es",
+      "must_change_password_allowed": false,
       "notes": ""
     },
     {
@@ -1204,6 +1289,7 @@
       "audit_rule": "logged",
       "rate_limit_rule": "none (auth-gated)",
       "error_lang": "es",
+      "must_change_password_allowed": false,
       "notes": ""
     },
     {
@@ -1218,6 +1304,7 @@
       "audit_rule": "logged",
       "rate_limit_rule": "none (auth-gated)",
       "error_lang": "es",
+      "must_change_password_allowed": false,
       "notes": ""
     },
     {
@@ -1232,6 +1319,7 @@
       "audit_rule": "not_logged (read-only)",
       "rate_limit_rule": "none (auth-gated)",
       "error_lang": "es",
+      "must_change_password_allowed": false,
       "notes": ""
     },
     {
@@ -1246,6 +1334,7 @@
       "audit_rule": "logged on ?download=1 (provider.document_downloaded); inline preview not logged",
       "rate_limit_rule": "none (auth-gated)",
       "error_lang": "es",
+      "must_change_password_allowed": false,
       "notes": ""
     },
     {
@@ -1260,6 +1349,7 @@
       "audit_rule": "sampled (WiseEvent on ask)",
       "rate_limit_rule": "TODO (M3 adds AI-heavy rate limiter)",
       "error_lang": "es",
+      "must_change_password_allowed": false,
       "notes": ""
     },
     {
@@ -1274,6 +1364,7 @@
       "audit_rule": "sampled (WiseEvent table is the canonical store)",
       "rate_limit_rule": "none (auth-gated)",
       "error_lang": "es",
+      "must_change_password_allowed": false,
       "notes": ""
     },
     {
@@ -1288,6 +1379,7 @@
       "audit_rule": "sampled (token resolution audited on POST /unlock only)",
       "rate_limit_rule": "TODO (M3 adds share-unlock brute-force limiter)",
       "error_lang": "es",
+      "must_change_password_allowed": false,
       "notes": ""
     },
     {
@@ -1302,6 +1394,7 @@
       "audit_rule": "sampled (token resolution audited on POST /unlock only)",
       "rate_limit_rule": "TODO (M3 adds share-unlock brute-force limiter)",
       "error_lang": "es",
+      "must_change_password_allowed": false,
       "notes": ""
     },
     {
@@ -1316,6 +1409,7 @@
       "audit_rule": "logged on unlock success and failure",
       "rate_limit_rule": "TODO (M3 adds share-unlock brute-force limiter)",
       "error_lang": "es",
+      "must_change_password_allowed": false,
       "notes": ""
     },
     {
@@ -1330,6 +1424,7 @@
       "audit_rule": "not_logged (read-only)",
       "rate_limit_rule": "none (auth-gated)",
       "error_lang": "es_partial (raw service exceptions can leak; M2 will normalize)",
+      "must_change_password_allowed": false,
       "notes": ""
     },
     {
@@ -1344,6 +1439,7 @@
       "audit_rule": "logged for create/patch/version/generate/export/share; AI conversation turns sampled",
       "rate_limit_rule": "none (auth-gated; M3 adds AI-heavy + export limits)",
       "error_lang": "es_partial (raw service exceptions can leak; M2 will normalize)",
+      "must_change_password_allowed": false,
       "notes": ""
     },
     {
@@ -1358,6 +1454,7 @@
       "audit_rule": "not_logged (read-only)",
       "rate_limit_rule": "none (auth-gated)",
       "error_lang": "es_partial (raw service exceptions can leak; M2 will normalize)",
+      "must_change_password_allowed": false,
       "notes": ""
     },
     {
@@ -1372,6 +1469,7 @@
       "audit_rule": "not_logged (read-only)",
       "rate_limit_rule": "none (auth-gated)",
       "error_lang": "es_partial (raw service exceptions can leak; M2 will normalize)",
+      "must_change_password_allowed": false,
       "notes": ""
     },
     {
@@ -1386,6 +1484,7 @@
       "audit_rule": "not_logged (read-only)",
       "rate_limit_rule": "none (auth-gated)",
       "error_lang": "es_partial (raw service exceptions can leak; M2 will normalize)",
+      "must_change_password_allowed": false,
       "notes": ""
     },
     {
@@ -1400,6 +1499,7 @@
       "audit_rule": "logged on successful redirect to presigned URL",
       "rate_limit_rule": "none (auth-gated)",
       "error_lang": "es_partial (raw service exceptions can leak; M2 will normalize)",
+      "must_change_password_allowed": false,
       "notes": ""
     },
     {
@@ -1414,6 +1514,7 @@
       "audit_rule": "logged for create/patch/version/generate/export/share; AI conversation turns sampled",
       "rate_limit_rule": "none (auth-gated; M3 adds AI-heavy + export limits)",
       "error_lang": "es_partial (raw service exceptions can leak; M2 will normalize)",
+      "must_change_password_allowed": false,
       "notes": ""
     },
     {
@@ -1428,6 +1529,7 @@
       "audit_rule": "logged via reports.share_revoked",
       "rate_limit_rule": "none (auth-gated; M3 adds AI-heavy + export limits)",
       "error_lang": "es_partial (raw service exceptions can leak; M2 will normalize)",
+      "must_change_password_allowed": false,
       "notes": ""
     },
     {
@@ -1442,6 +1544,7 @@
       "audit_rule": "not_logged (read-only)",
       "rate_limit_rule": "none (auth-gated)",
       "error_lang": "es_partial (raw service exceptions can leak; M2 will normalize)",
+      "must_change_password_allowed": false,
       "notes": ""
     },
     {
@@ -1456,6 +1559,7 @@
       "audit_rule": "logged for create/patch/version/generate/export/share; AI conversation turns sampled",
       "rate_limit_rule": "none (auth-gated; M3 adds AI-heavy + export limits)",
       "error_lang": "es_partial (raw service exceptions can leak; M2 will normalize)",
+      "must_change_password_allowed": false,
       "notes": ""
     },
     {
@@ -1470,6 +1574,7 @@
       "audit_rule": "logged for create/patch/version/generate/export/share; AI conversation turns sampled",
       "rate_limit_rule": "TODO (M3 adds AI-heavy rate limiter)",
       "error_lang": "es_partial (raw service exceptions can leak; M2 will normalize)",
+      "must_change_password_allowed": false,
       "notes": ""
     },
     {
@@ -1484,6 +1589,7 @@
       "audit_rule": "logged for create/patch/version/generate/export/share; AI conversation turns sampled",
       "rate_limit_rule": "TODO (M3 adds AI-heavy rate limiter)",
       "error_lang": "es_partial (raw service exceptions can leak; M2 will normalize)",
+      "must_change_password_allowed": false,
       "notes": ""
     },
     {
@@ -1498,6 +1604,7 @@
       "audit_rule": "not_logged (read-only)",
       "rate_limit_rule": "none (auth-gated)",
       "error_lang": "es_partial (raw service exceptions can leak; M2 will normalize)",
+      "must_change_password_allowed": false,
       "notes": ""
     },
     {
@@ -1512,6 +1619,7 @@
       "audit_rule": "logged for create/patch/version/generate/export/share; AI conversation turns sampled",
       "rate_limit_rule": "TODO (M3 adds AI-heavy rate limiter)",
       "error_lang": "es_partial (raw service exceptions can leak; M2 will normalize)",
+      "must_change_password_allowed": false,
       "notes": ""
     },
     {
@@ -1526,6 +1634,7 @@
       "audit_rule": "logged for create/patch/version/generate/export/share; AI conversation turns sampled",
       "rate_limit_rule": "none (auth-gated; M3 adds AI-heavy + export limits)",
       "error_lang": "es_partial (raw service exceptions can leak; M2 will normalize)",
+      "must_change_password_allowed": false,
       "notes": ""
     },
     {
@@ -1540,6 +1649,7 @@
       "audit_rule": "logged for create/patch/version/generate/export/share; AI conversation turns sampled",
       "rate_limit_rule": "TODO (M3 adds AI-heavy rate limiter)",
       "error_lang": "es_partial (raw service exceptions can leak; M2 will normalize)",
+      "must_change_password_allowed": false,
       "notes": ""
     },
     {
@@ -1554,6 +1664,7 @@
       "audit_rule": "logged for create/patch/version/generate/export/share; AI conversation turns sampled",
       "rate_limit_rule": "none (auth-gated; M3 adds AI-heavy + export limits)",
       "error_lang": "es_partial (raw service exceptions can leak; M2 will normalize)",
+      "must_change_password_allowed": false,
       "notes": ""
     },
     {
@@ -1568,6 +1679,7 @@
       "audit_rule": "logged for create/patch/version/generate/export/share; AI conversation turns sampled",
       "rate_limit_rule": "none (auth-gated; M3 adds AI-heavy + export limits)",
       "error_lang": "es_partial (raw service exceptions can leak; M2 will normalize)",
+      "must_change_password_allowed": false,
       "notes": ""
     },
     {
@@ -1582,6 +1694,7 @@
       "audit_rule": "not_logged (read-only)",
       "rate_limit_rule": "none (auth-gated)",
       "error_lang": "es_partial (raw service exceptions can leak; M2 will normalize)",
+      "must_change_password_allowed": false,
       "notes": ""
     },
     {
@@ -1596,6 +1709,7 @@
       "audit_rule": "logged for create/patch/version/generate/export/share; AI conversation turns sampled",
       "rate_limit_rule": "none (auth-gated; M3 adds AI-heavy + export limits)",
       "error_lang": "es_partial (raw service exceptions can leak; M2 will normalize)",
+      "must_change_password_allowed": false,
       "notes": ""
     },
     {
@@ -1610,6 +1724,7 @@
       "audit_rule": "not_logged (read-only)",
       "rate_limit_rule": "none (auth-gated)",
       "error_lang": "es_partial (raw service exceptions can leak; M2 will normalize)",
+      "must_change_password_allowed": false,
       "notes": ""
     },
     {
@@ -1624,6 +1739,7 @@
       "audit_rule": "logged for create/patch/version/generate/export/share; AI conversation turns sampled",
       "rate_limit_rule": "none (auth-gated; M3 adds AI-heavy + export limits)",
       "error_lang": "es_partial (raw service exceptions can leak; M2 will normalize)",
+      "must_change_password_allowed": false,
       "notes": ""
     },
     {
@@ -1638,6 +1754,7 @@
       "audit_rule": "not_logged (read-only)",
       "rate_limit_rule": "none (auth-gated)",
       "error_lang": "es_partial (raw service exceptions can leak; M2 will normalize)",
+      "must_change_password_allowed": false,
       "notes": ""
     },
     {
@@ -1652,6 +1769,7 @@
       "audit_rule": "not_logged (read-only)",
       "rate_limit_rule": "none (auth-gated)",
       "error_lang": "es",
+      "must_change_password_allowed": false,
       "notes": ""
     },
     {
@@ -1666,6 +1784,7 @@
       "audit_rule": "not_logged (read-only)",
       "rate_limit_rule": "none (auth-gated)",
       "error_lang": "es",
+      "must_change_password_allowed": false,
       "notes": ""
     },
     {
@@ -1680,6 +1799,7 @@
       "audit_rule": "logged via submission_workflow.apply_reviewer_decision",
       "rate_limit_rule": "none (auth-gated)",
       "error_lang": "es",
+      "must_change_password_allowed": false,
       "notes": ""
     },
     {
@@ -1694,6 +1814,7 @@
       "audit_rule": "logged on ?download=1 (reviewer.document_downloaded); inline preview not logged",
       "rate_limit_rule": "none (auth-gated)",
       "error_lang": "es",
+      "must_change_password_allowed": false,
       "notes": ""
     },
     {
@@ -1708,6 +1829,7 @@
       "audit_rule": "logged via submission lifecycle",
       "rate_limit_rule": "none (gate-restricted)",
       "error_lang": "es_partial (metadata-dry-run technical messages are dev-facing)",
+      "must_change_password_allowed": false,
       "notes": ""
     }
   ]
