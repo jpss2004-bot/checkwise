@@ -28,17 +28,20 @@ import { cn } from "@/lib/utils";
 
 // Heights in px. The lockup PNG is 455×77 (aspect ≈ 5.91:1); Next/Image
 // derives the rendered width from height × intrinsic aspect ratio.
-const HEIGHT_PX: Record<"sm" | "md" | "lg", number> = {
+// ``xl`` was added in the 2026-05-25 provider-portal UX pass so the
+// sidebar lockup reads as a real brand mark instead of a tiny stripe.
+const HEIGHT_PX: Record<"sm" | "md" | "lg" | "xl", number> = {
   sm: 22,
   md: 30,
   lg: 44,
+  xl: 56,
 };
 
 type Variant = "full" | "compact";
 
 type Props = {
   variant?: Variant;
-  size?: "sm" | "md" | "lg";
+  size?: "sm" | "md" | "lg" | "xl";
   poweredBy?: boolean;
   className?: string;
 };

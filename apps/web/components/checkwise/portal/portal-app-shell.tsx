@@ -5,6 +5,7 @@ import { usePathname, useRouter } from "next/navigation";
 import { useEffect, useState } from "react";
 import {
   Bell,
+  Bug,
   CalendarBlank,
   CaretLeft,
   CaretRight,
@@ -17,6 +18,7 @@ import {
   List,
   Question,
   SignOut,
+  UserCircle,
   X,
   type Icon,
 } from "@phosphor-icons/react";
@@ -101,6 +103,13 @@ const SECONDARY_NAV: NavItem[] = [
     href: "/portal/entra-a-tu-espacio",
     label: "Mi espacio",
     icon: IdentificationCard,
+    hint: "Identidad del workspace",
+  },
+  {
+    href: "/portal/perfil",
+    label: "Mi perfil",
+    icon: UserCircle,
+    hint: "Tus datos de contacto",
   },
 ];
 
@@ -191,14 +200,14 @@ export function PortalAppShell({
       <aside
         className={cn(
           "hidden lg:flex lg:shrink-0 lg:flex-col lg:border-r lg:border-[color:var(--border-subtle)] lg:bg-[color:var(--surface-raised)] lg:transition-[width] lg:duration-200",
-          sidebarCollapsed ? "lg:w-16" : "lg:w-64",
+          sidebarCollapsed ? "lg:w-20" : "lg:w-64",
         )}
         aria-label={sidebarCollapsed ? "Barra lateral colapsada" : "Barra lateral"}
       >
         <div
           className={cn(
-            "flex h-16 items-center",
-            sidebarCollapsed ? "justify-center px-2" : "px-5",
+            "flex items-center",
+            sidebarCollapsed ? "h-20 justify-center px-2" : "h-20 px-5",
           )}
         >
           <Link
@@ -206,7 +215,10 @@ export function PortalAppShell({
             aria-label="CheckWise"
             className="inline-flex items-center"
           >
-            <BrandLogo size="md" variant={sidebarCollapsed ? "compact" : undefined} />
+            <BrandLogo
+              size={sidebarCollapsed ? "lg" : "lg"}
+              variant={sidebarCollapsed ? "compact" : undefined}
+            />
           </Link>
         </div>
 
@@ -233,7 +245,11 @@ export function PortalAppShell({
           {pct !== null && !sidebarCollapsed ? (
             <SidebarProgress pct={pct} complete={isComplete} />
           ) : null}
-          {sidebarCollapsed ? null : <SupportFooter onLogout={onLogout} />}
+          {sidebarCollapsed ? (
+            <SidebarCompactActions onLogout={onLogout} />
+          ) : (
+            <SupportFooter onLogout={onLogout} />
+          )}
           <button
             type="button"
             onClick={toggleSidebar}
@@ -271,7 +287,7 @@ export function PortalAppShell({
           />
           <aside className="relative z-10 flex h-full w-72 flex-col border-r border-[color:var(--border-subtle)] bg-[color:var(--surface-raised)] cw-fade-up">
             <div className="flex items-center justify-between px-5 py-4">
-              <BrandLogo size="md" />
+              <BrandLogo size="lg" />
               <Button
                 variant="ghost"
                 size="icon"
@@ -501,6 +517,11 @@ function SidebarProgress({
   );
 }
 
+function dispatchOpenFeedback() {
+  if (typeof window === "undefined") return;
+  window.dispatchEvent(new CustomEvent("checkwise:open-feedback"));
+}
+
 function SupportFooter({ onLogout }: { onLogout: () => void }) {
   return (
     <div className="rounded-lg border border-[color:var(--border-subtle)] bg-[color:var(--surface-page)] px-3 py-2.5">
@@ -514,11 +535,49 @@ function SupportFooter({ onLogout }: { onLogout: () => void }) {
       </div>
       <button
         type="button"
+        onClick={dispatchOpenFeedback}
+        className="mt-2 inline-flex w-full items-center justify-center gap-1.5 rounded-md border border-[color:var(--border-subtle)] bg-[color:var(--surface-raised)] px-2 py-1.5 text-[11px] font-medium text-[color:var(--text-secondary)] transition-colors hover:bg-[color:var(--surface-hover)] hover:text-[color:var(--text-primary)]"
+      >
+        <Bug className="h-3.5 w-3.5" weight="bold" aria-hidden="true" />
+        Reportar problema
+      </button>
+      <button
+        type="button"
         onClick={onLogout}
         className="mt-2 inline-flex w-full items-center justify-center gap-1.5 rounded-md border border-[color:var(--border-subtle)] bg-[color:var(--surface-raised)] px-2 py-1.5 text-[11px] font-medium text-[color:var(--text-secondary)] transition-colors hover:bg-[color:var(--surface-hover)] hover:text-[color:var(--text-primary)]"
       >
         <SignOut className="h-3.5 w-3.5" weight="bold" aria-hidden="true" />
         Cerrar sesión
+      </button>
+    </div>
+  );
+}
+
+function SidebarCompactActions({ onLogout }: { onLogout: () => void }) {
+  /** Icon-only stack shown in the collapsed sidebar so the report-bug
+   *  and logout affordances stay reachable without forcing the user to
+   *  expand the rail. Tooltips on hover via ``title`` / aria-label.
+   *  Matches the floating launcher's behavior by dispatching a window
+   *  event the launcher listens for. */
+  return (
+    <div className="flex flex-col items-center gap-1">
+      <button
+        type="button"
+        onClick={dispatchOpenFeedback}
+        title="Reportar problema"
+        aria-label="Reportar problema"
+        className="inline-flex h-9 w-9 items-center justify-center rounded-md border border-[color:var(--border-subtle)] bg-[color:var(--surface-raised)] text-[color:var(--text-secondary)] transition-colors hover:bg-[color:var(--surface-hover)] hover:text-[color:var(--text-primary)]"
+      >
+        <Bug className="h-4 w-4" weight="bold" aria-hidden="true" />
+      </button>
+      <button
+        type="button"
+        onClick={onLogout}
+        title="Cerrar sesión"
+        aria-label="Cerrar sesión"
+        className="inline-flex h-9 w-9 items-center justify-center rounded-md border border-[color:var(--border-subtle)] bg-[color:var(--surface-raised)] text-[color:var(--text-secondary)] transition-colors hover:bg-[color:var(--surface-hover)] hover:text-[color:var(--text-primary)]"
+      >
+        <SignOut className="h-4 w-4" weight="bold" aria-hidden="true" />
       </button>
     </div>
   );

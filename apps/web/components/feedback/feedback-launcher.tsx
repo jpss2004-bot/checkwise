@@ -290,6 +290,22 @@ export function FeedbackLauncher({
   // possibility of the dialog re-mounting with the locked
   // ``originalContextRef`` stale.
 
+  // Allow other shell components (e.g. the portal sidebar's compact
+  // "Reportar" entry) to open the launcher dialog via a window event
+  // without having to hold a ref to this component. Custom event:
+  // ``checkwise:open-feedback``. Mounted once globally so every
+  // page-level dispatcher reaches the same instance.
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    const handler = () => {
+      void openWithCapture();
+    };
+    window.addEventListener("checkwise:open-feedback", handler);
+    return () => {
+      window.removeEventListener("checkwise:open-feedback", handler);
+    };
+  }, [openWithCapture]);
+
   const onSubmit = useCallback(
     async (event: React.FormEvent) => {
       event.preventDefault();

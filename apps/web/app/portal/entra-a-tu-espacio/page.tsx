@@ -1,22 +1,23 @@
 "use client";
 
-import { useEffect, useMemo, useState, type FormEvent } from "react";
+import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import {
   ArrowRight,
   CalendarBlank,
-  ChartLineUp,
   CheckCircle,
   ClipboardText,
   IdentificationCard,
   ShieldCheck,
   Sparkle,
+  UserCircle,
   type Icon,
 } from "@phosphor-icons/react";
 
 import { CorrectionRequestForm } from "@/components/checkwise/workspace/correction-request-form";
 import { WorkspaceIdentityCard } from "@/components/checkwise/workspace/workspace-identity-card";
+import { PortalAppShell } from "@/components/checkwise/portal/portal-app-shell";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -28,22 +29,12 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
-import { Field } from "@/components/ui/field";
-import { Input } from "@/components/ui/input";
-import { Select } from "@/components/ui/select";
-import {
-  acceptLegalConsent,
-  patchWorkspaceProfile,
-} from "@/lib/api/portal-session";
+import { acceptLegalConsent } from "@/lib/api/portal-session";
 import { buildWorkspaceContext } from "@/lib/workspace/resolver";
-import type {
-  EditableProfileFields,
-  WorkspaceContext,
-} from "@/lib/workspace/types";
+import type { WorkspaceContext } from "@/lib/workspace/types";
 import { withPortalSession } from "@/lib/session/with-portal-session";
 import {
   setCachedPortalSession,
-  summaryToSession,
   type ExpedienteStatus,
   type PortalSession,
 } from "@/lib/session/portal";
@@ -51,71 +42,42 @@ import {
 /**
  * /portal/entra-a-tu-espacio
  *
- * Post-auth workspace confirmation step + ongoing settings surface.
+ * Workspace entry / preview surface. Shows tenant identity, the
+ * locked RFC + razón social, the expediente status, and a primary
+ * "Entrar a mi espacio" CTA plus a secondary "Mi perfil" CTA.
  *
- *   - First visit (``session.profile_confirmed_at`` is null) — the page
- *     reads as a confirmation gate. The provider reviews tenant
- *     identity, fills in contact info, and presses "Entrar a mi
- *     espacio" to be routed onward to the expediente or dashboard.
- *   - Returning visit (``profile_confirmed_at`` set) — the same form
- *     becomes a quieter settings view. The button reads "Guardar
- *     cambios" and the page does not route away after save.
- *
- * Profile persistence calls ``PATCH /portal/workspaces/{id}/profile``
- * which writes ``full_name`` / ``phone`` / ``job_title`` /
- * ``contact_preference`` on the workspace's User row and bumps
- * ``profile_confirmed_at`` on the workspace itself.
+ * The editable profile form lives on ``/portal/perfil`` after the
+ * 2026-05-25 UX pass — splitting the two intents avoids the
+ * mixed-purpose page the brief flagged. Legal-consent acceptance
+ * remains inline here on first visit (it's a tenant-identity decision,
+ * not a profile-edit one). Correction requests still live in the
+ * dialog below.
  */
 function EntraATuEspacioInner({ session }: { session: PortalSession }) {
   const router = useRouter();
 
-  // The page must respond to in-place session updates after PATCH so
-  // the first-visit / returning-user branch flips immediately. We
-  // shadow the prop in local state and ``setLiveSession`` it after
-  // each successful save.
   const [liveSession, setLiveSession] = useState<PortalSession>(session);
   const isFirstVisit = liveSession.profile_confirmed_at === null;
-  // Phase 1 / Slice 1A — legal-consent gate. The provider cannot
-  // continue until they accept the three legal notices. Slice 1B
-  // broadens the trigger to version mismatches: a future ``v1`` bump
-  // makes ``v0-draft`` acceptors fall back into the gate even though
-  // their ``legal_consent_accepted_at`` is set. The current canonical
-  // version is owned by the backend and surfaced on the session
-  // summary so the comparison stays single-sourced.
   const needsLegalConsent =
     liveSession.legal_consent_accepted_at === null ||
     (liveSession.current_legal_consent_version !== null &&
       liveSession.legal_consent_version !==
         liveSession.current_legal_consent_version);
-  const [legalConsentAccepted, setLegalConsentAccepted] = useState(false);
 
   const workspace = useMemo<WorkspaceContext>(
     () => buildWorkspaceContext(liveSession),
     [liveSession],
   );
 
-  const [profile, setProfile] = useState<EditableProfileFields>({
-    first_name: workspace.editable.first_name,
-    last_name: workspace.editable.last_name,
-    phone: workspace.editable.phone,
-    job_title: workspace.editable.job_title,
-    contact_preference: workspace.editable.contact_preference,
-  });
-  const [submitting, setSubmitting] = useState(false);
-  const [saveError, setSaveError] = useState<string | null>(null);
+  const [legalConsentAccepted, setLegalConsentAccepted] = useState(false);
+  const [acceptingConsent, setAcceptingConsent] = useState(false);
+  const [consentError, setConsentError] = useState<string | null>(null);
 
-  // Correction-request modal state. The dashboard's
-  // <WorkspaceIdentityCard /> footer link still routes here with
-  // ``#correccion`` so existing deep-links don't break; on arrival we
-  // auto-open the dialog and clear the fragment so the URL stays clean
-  // when the user closes it.
   const [correctionOpen, setCorrectionOpen] = useState(false);
   useEffect(() => {
     if (typeof window === "undefined") return;
     if (window.location.hash === "#correccion") {
       setCorrectionOpen(true);
-      // Clear the fragment without scrolling so a second back-and-forth
-      // doesn't keep reopening the dialog.
       window.history.replaceState(
         null,
         "",
@@ -124,342 +86,268 @@ function EntraATuEspacioInner({ session }: { session: PortalSession }) {
     }
   }, []);
 
-  // Inline confirmation that the form persisted before we navigate
-  // away. Without it the button label flipped straight from "Entrar a
-  // mi espacio" to a route change, which felt like the form had been
-  // ignored. ``justSaved`` flips on for ~700ms so the user sees a
-  // "Guardado" affordance before the redirect fires.
-  const [justSaved, setJustSaved] = useState(false);
+  // Route per the existing first-visit logic: providers mid-onboarding
+  // land on /onboarding so they pick up where they left off; completed
+  // expedientes go straight to the dashboard.
+  const nextRouteAfterEntry =
+    liveSession.expediente_status === "complete"
+      ? "/portal/dashboard"
+      : "/portal/onboarding";
 
-  async function handleConfirm(event: FormEvent<HTMLFormElement>) {
-    event.preventDefault();
-    setSubmitting(true);
-    setSaveError(null);
-    // Phase 1 / Slice 1A — record legal consent BEFORE the profile
-    // patch. If the consent POST fails we abort with a clear error
-    // and do not write the profile, so the audit trail and the
-    // profile_confirmed_at marker stay in lockstep.
+  const canEnter = !needsLegalConsent;
+
+  async function handleEnter() {
     if (needsLegalConsent) {
       if (!legalConsentAccepted) {
-        setSubmitting(false);
-        setSaveError(
-          "Para entrar a tu espacio necesitamos que aceptes los avisos legales.",
+        setConsentError(
+          "Marca la casilla para confirmar que aceptas los avisos legales.",
         );
         return;
       }
+      setAcceptingConsent(true);
+      setConsentError(null);
       const consent = await acceptLegalConsent(
         workspace.protected.workspace_id,
       );
+      setAcceptingConsent(false);
       if (!consent) {
-        setSubmitting(false);
-        setSaveError(
-          "No pudimos registrar tu aceptación de los avisos legales. Intenta de nuevo en unos segundos.",
+        setConsentError(
+          "No pudimos registrar tu aceptación. Intenta de nuevo en unos segundos.",
         );
         return;
       }
+      // Merge the consent timestamp + version into the cached session
+      // so the gate flips off without a full /me round-trip. The
+      // backend's LegalConsentResponse is intentionally narrow (just
+      // the consent fields); everything else on the session stays as
+      // it was when this page loaded.
+      const refreshed: PortalSession = {
+        ...liveSession,
+        legal_consent_accepted_at: consent.legal_consent_accepted_at,
+        legal_consent_version: consent.legal_consent_version,
+      };
+      setLiveSession(refreshed);
+      setCachedPortalSession(refreshed);
     }
-    // Persist via PATCH /portal/workspaces/{id}/profile. Backend
-    // recombines first+last into the canonical User.full_name and
-    // bumps profile_confirmed_at so the next session refresh flips
-    // this page into settings mode.
-    const full_name = `${profile.first_name.trim()} ${profile.last_name.trim()}`
-      .trim();
-    const updated = await patchWorkspaceProfile(
-      workspace.protected.workspace_id,
-      {
-        full_name: full_name || undefined,
-        phone: profile.phone ?? undefined,
-        job_title: profile.job_title ?? undefined,
-        contact_preference: profile.contact_preference,
-      },
-    );
-    setSubmitting(false);
-    if (!updated) {
-      setSaveError(
-        "No pudimos guardar tus cambios. Verifica tu conexión e intenta de nuevo.",
-      );
-      return;
-    }
-    // Refresh the cached session so other portal surfaces (and the
-    // ``isFirstVisit`` branch on this page) see the latest data
-    // without a /me round-trip.
-    const refreshed = summaryToSession(updated);
-    setLiveSession(refreshed);
-    setCachedPortalSession(refreshed);
-    setJustSaved(true);
-
-    if (isFirstVisit || needsLegalConsent) {
-      // First-visit gate flow, or a returning user who just satisfied
-      // the legal-consent gate — route them onward to the expediente
-      // or dashboard depending on whether they have an expediente yet.
-      const next =
-        liveSession.expediente_status === "complete"
-          ? "/portal/dashboard"
-          : "/portal/onboarding";
-      window.setTimeout(() => router.push(next), 700);
-      return;
-    }
-    // Returning-user settings save — keep them here and clear the
-    // "Guardado" affordance after a moment so a second edit feels
-    // responsive.
-    window.setTimeout(() => setJustSaved(false), 1800);
+    router.push(nextRouteAfterEntry);
   }
 
-  // Lenient MX phone-format check. Empty is fine (phone is optional);
-  // anything with at least 10 digits passes, anything else is flagged
-  // inline. We do NOT block submit on this — the field is optional and
-  // we don't want to wedge the welcome flow over a format quibble.
-  const phoneError = (() => {
-    if (!profile.phone) return null;
-    const digits = profile.phone.replace(/\D+/g, "");
-    if (digits.length < 10) {
-      return "Captura al menos 10 dígitos (puedes incluir +52).";
-    }
-    return null;
-  })();
-
   return (
-    <main className="relative min-h-[100dvh] overflow-hidden bg-[color:var(--surface-page)]">
-      <div className="relative mx-auto flex max-w-4xl flex-col gap-6 px-5 py-10 lg:py-14">
-        <header className="cw-fade-up flex flex-col gap-2">
-          <Badge variant="teal" className="self-start rounded-full px-3 py-1">
-            <Sparkle className="h-3 w-3" weight="fill" aria-hidden="true" />
-            {isFirstVisit ? "Confirmación de espacio" : "Mi espacio"}
-          </Badge>
-          <h1 className="text-3xl font-semibold tracking-tight text-[color:var(--text-primary)]">
-            {isFirstVisit ? "Entra a tu espacio" : "Tu espacio en CheckWise"}
-          </h1>
-          <p className="max-w-prose text-[15px] text-[color:var(--text-secondary)]">
-            {isFirstVisit
-              ? "Confirma que esta información es correcta antes de continuar. Usamos estos datos para proteger tu expediente y evitar que los documentos se asignen a la empresa incorrecta."
-              : "Tus datos de contacto y la información de tu workspace. Edita los campos cuando lo necesites — los cambios se guardan al instante."}
-          </p>
-        </header>
-
-        <WorkspaceIdentityCard
-          workspace={workspace}
-          showCorrectionLink={false}
-          hideExpedienteLink
-        />
-
-        <form
-          onSubmit={handleConfirm}
-          className="cw-fade-up rounded-xl border border-[color:var(--border-default)] bg-[color:var(--surface-raised)] p-6 shadow-sm sm:p-8"
-        >
-          <header className="mb-5 flex items-center gap-3">
-            <span
-              className="flex h-10 w-10 items-center justify-center rounded-full bg-[color:var(--surface-teal-muted)]"
-              aria-hidden="true"
-            >
-              <ShieldCheck
-                className="h-5 w-5 text-[color:var(--text-teal)]"
-                weight="duotone"
-              />
-            </span>
-            <div>
-              <h2 className="text-base font-semibold text-[color:var(--text-primary)]">
-                {isFirstVisit
-                  ? "Confirma tus datos de contacto"
-                  : "Tus datos de contacto"}
-              </h2>
-              <p className="text-xs text-[color:var(--text-secondary)]">
-                Edita estos campos cuando quieras. Para corregir RFC,
-                razón social o tu correo registrado, usa &quot;Solicitar
-                cambio&quot;.
-              </p>
-            </div>
+    <PortalAppShell session={liveSession}>
+      <main className="relative min-h-[calc(100dvh-3.5rem)] bg-[color:var(--surface-page)]">
+        <div className="mx-auto flex max-w-4xl flex-col gap-6 px-5 py-10 lg:py-14">
+          <header className="cw-fade-up flex flex-col gap-2">
+            <Badge variant="teal" className="self-start rounded-full px-3 py-1">
+              <Sparkle className="h-3 w-3" weight="fill" aria-hidden="true" />
+              {isFirstVisit ? "Bienvenida a tu espacio" : "Mi espacio"}
+            </Badge>
+            <h1 className="text-3xl font-semibold tracking-tight text-[color:var(--text-primary)]">
+              {isFirstVisit ? "Entra a tu espacio" : "Tu espacio en CheckWise"}
+            </h1>
+            <p className="max-w-prose text-[15px] text-[color:var(--text-secondary)]">
+              Esta es la entrada a tu workspace en CheckWise. Revisa tu
+              identidad de proveedor y entra a tu expediente. Si necesitas
+              corregir datos de contacto, abre &quot;Mi perfil&quot;.
+            </p>
           </header>
 
-          <div className="grid gap-4 sm:grid-cols-2">
-            <Field label="Nombre" htmlFor="ws-first-name" required>
-              <Input
-                id="ws-first-name"
-                value={profile.first_name}
-                onChange={(e) => setProfile({ ...profile, first_name: e.target.value })}
-                autoComplete="given-name"
-              />
-            </Field>
-            <Field label="Apellido" htmlFor="ws-last-name" required>
-              <Input
-                id="ws-last-name"
-                value={profile.last_name}
-                onChange={(e) => setProfile({ ...profile, last_name: e.target.value })}
-                autoComplete="family-name"
-              />
-            </Field>
-            <Field
-              label="Teléfono"
-              htmlFor="ws-phone"
-              helper={
-                phoneError ?? "Opcional, para recordatorios."
-              }
-            >
-              <Input
-                id="ws-phone"
-                value={profile.phone ?? ""}
-                onChange={(e) =>
-                  setProfile({
-                    ...profile,
-                    phone: e.target.value || null,
-                  })
-                }
-                autoComplete="tel"
-                inputMode="tel"
-                placeholder="+52 55 1234 5678"
-                aria-invalid={phoneError ? true : undefined}
-              />
-            </Field>
-            <Field label="Cargo o puesto" htmlFor="ws-job-title">
-              <Input
-                id="ws-job-title"
-                value={profile.job_title ?? ""}
-                onChange={(e) => setProfile({ ...profile, job_title: e.target.value || null })}
-                autoComplete="organization-title"
-                placeholder="Responsable de cumplimiento"
-              />
-            </Field>
-            <Field
-              label="Canal preferido"
-              htmlFor="ws-contact-preference"
-              helper="¿Por dónde quieres recibir avisos?"
-              className="sm:col-span-2"
-            >
-              <Select
-                id="ws-contact-preference"
-                value={profile.contact_preference}
-                onChange={(e) =>
-                  setProfile({
-                    ...profile,
-                    contact_preference: e.target.value as EditableProfileFields["contact_preference"],
-                  })
-                }
-              >
-                <option value="email">Correo</option>
-                <option value="whatsapp">WhatsApp</option>
-                <option value="both">Correo + WhatsApp</option>
-              </Select>
-            </Field>
-          </div>
+          <WorkspaceIdentityCard
+            workspace={workspace}
+            showCorrectionLink={false}
+            hideExpedienteLink
+          />
 
-          {isFirstVisit ? (
-            <NextStepPreview
+          <section
+            aria-labelledby="entry-status-heading"
+            className="cw-fade-up rounded-xl border border-[color:var(--border-default)] bg-[color:var(--surface-raised)] p-6 shadow-sm sm:p-8"
+          >
+            <header className="mb-4 flex items-center gap-3">
+              <span
+                className="flex h-10 w-10 items-center justify-center rounded-full bg-[color:var(--surface-brand-muted)]"
+                aria-hidden="true"
+              >
+                <ClipboardText
+                  className="h-5 w-5 text-[color:var(--text-brand)]"
+                  weight="duotone"
+                />
+              </span>
+              <div className="min-w-0">
+                <h2
+                  id="entry-status-heading"
+                  className="text-base font-semibold text-[color:var(--text-primary)]"
+                >
+                  Estado de tu expediente
+                </h2>
+                <p className="text-xs text-[color:var(--text-secondary)]">
+                  Lo que verás cuando entres a tu workspace.
+                </p>
+              </div>
+            </header>
+            <ExpedienteStatusSummary
+              status={liveSession.expediente_status}
               workspace={workspace}
-              expedienteStatus={liveSession.expediente_status}
             />
-          ) : null}
+          </section>
 
           {needsLegalConsent ? (
-            <LegalConsentBlock
-              checked={legalConsentAccepted}
-              onChange={setLegalConsentAccepted}
-            />
-          ) : null}
-
-          {saveError ? (
-            <Alert variant="error" className="mt-4">
-              <AlertTitle>No pudimos guardar tus cambios</AlertTitle>
-              <AlertDescription>{saveError}</AlertDescription>
-            </Alert>
-          ) : null}
-
-          <footer className="mt-6 flex items-center justify-end gap-3 border-t border-[color:var(--border-subtle)] pt-4">
-            {justSaved ? (
-              <p
-                className="inline-flex items-center gap-1.5 text-[12px] font-medium text-[color:var(--status-success-text)]"
-                role="status"
-              >
-                <CheckCircle
-                  className="h-4 w-4"
-                  weight="fill"
-                  aria-hidden="true"
-                />
-                Guardado
-              </p>
-            ) : null}
-            <Button
-              type="submit"
-              loading={submitting}
-              disabled={
-                (justSaved && (isFirstVisit || needsLegalConsent)) ||
-                (needsLegalConsent && !legalConsentAccepted)
-              }
-              size="lg"
+            <section
+              aria-labelledby="legal-consent-title"
+              className="cw-fade-up rounded-xl border border-[color:var(--border-default)] bg-[color:var(--surface-sunken)] p-5"
             >
-              <span>
-                {justSaved && (isFirstVisit || needsLegalConsent)
-                  ? "Continuando…"
-                  : isFirstVisit
-                    ? "Entrar a mi espacio"
-                    : needsLegalConsent
-                      ? "Aceptar y entrar"
-                      : "Guardar cambios"}
-              </span>
-              {!submitting &&
-                !(justSaved && (isFirstVisit || needsLegalConsent)) && (
-                  <ArrowRight
+              <h2
+                id="legal-consent-title"
+                className="text-sm font-semibold text-[color:var(--text-primary)]"
+              >
+                Avisos legales
+              </h2>
+              <p className="mt-1 text-xs text-[color:var(--text-secondary)]">
+                Antes de entrar a tu espacio necesitamos que confirmes que
+                leíste y aceptas estos tres documentos. Tu aceptación queda
+                registrada para auditoría.
+              </p>
+              <label className="mt-4 flex items-start gap-3 text-sm text-[color:var(--text-primary)]">
+                <Checkbox
+                  id="legal-consent-checkbox"
+                  checked={legalConsentAccepted}
+                  onCheckedChange={(value) =>
+                    setLegalConsentAccepted(value === true)
+                  }
+                  aria-describedby="legal-consent-links"
+                />
+                <span>
+                  Acepto el{" "}
+                  <Link
+                    href="/legal/privacidad"
+                    target="_blank"
+                    rel="noopener"
+                    className="font-medium text-[color:var(--text-brand)] hover:underline"
+                  >
+                    aviso de privacidad
+                  </Link>
+                  , los{" "}
+                  <Link
+                    href="/legal/terminos"
+                    target="_blank"
+                    rel="noopener"
+                    className="font-medium text-[color:var(--text-brand)] hover:underline"
+                  >
+                    términos de uso
+                  </Link>
+                  {" y el "}
+                  <Link
+                    href="/legal/consentimiento"
+                    target="_blank"
+                    rel="noopener"
+                    className="font-medium text-[color:var(--text-brand)] hover:underline"
+                  >
+                    aviso de consentimiento
+                  </Link>
+                  {" de CheckWise."}
+                </span>
+              </label>
+              <p
+                id="legal-consent-links"
+                className="mt-3 text-[11px] text-[color:var(--text-tertiary)]"
+              >
+                Cada enlace abre el documento en una pestaña nueva. Versión
+                vigente <code className="font-mono">v1</code> · efectiva desde
+                el 25 de mayo de 2026.
+              </p>
+              {consentError ? (
+                <Alert variant="error" className="mt-4">
+                  <AlertTitle>No pudimos continuar</AlertTitle>
+                  <AlertDescription>{consentError}</AlertDescription>
+                </Alert>
+              ) : null}
+            </section>
+          ) : null}
+
+          <footer className="cw-fade-up flex flex-wrap items-center justify-between gap-3 rounded-xl border border-[color:var(--border-subtle)] bg-[color:var(--surface-raised)] p-4 shadow-sm">
+            <p className="max-w-md text-xs text-[color:var(--text-secondary)]">
+              RFC y razón social se quedan bloqueados al alta. Para
+              corregirlos, usa &quot;Solicitar cambio&quot;.
+            </p>
+            <div className="flex flex-wrap items-center justify-end gap-2">
+              <Button asChild variant="outline" size="sm">
+                <Link href="/portal/perfil">
+                  <UserCircle
                     className="h-4 w-4"
                     weight="bold"
                     aria-hidden="true"
                   />
-                )}
-            </Button>
+                  <span>Mi perfil</span>
+                </Link>
+              </Button>
+              <Button
+                type="button"
+                size="lg"
+                loading={acceptingConsent}
+                disabled={
+                  !canEnter && !legalConsentAccepted
+                }
+                onClick={handleEnter}
+              >
+                <span>
+                  {needsLegalConsent ? "Aceptar y entrar" : "Entrar a mi espacio"}
+                </span>
+                <ArrowRight
+                  className="h-4 w-4"
+                  weight="bold"
+                  aria-hidden="true"
+                />
+              </Button>
+            </div>
           </footer>
-        </form>
 
-        {isFirstVisit ? (
-          <Alert variant="info">
-            <AlertTitle className="flex items-center gap-2">
-              <ShieldCheck className="h-4 w-4" weight="bold" aria-hidden="true" />
-              ¿Por qué pedimos esto?
-            </AlertTitle>
-            <AlertDescription>
-              CheckWise opera tu expediente REPSE y debe garantizar que los
-              documentos se asignen a la empresa correcta. Esta pantalla es
-              la salvaguarda contra accesos cruzados.
-            </AlertDescription>
-          </Alert>
-        ) : null}
-
-        {/* Stage 2.7-a — provider workspace correction-request entry point.
-            The form covers only the locked Tier B fields
-            (contact_email / contact_phone / contact_name). Everything
-            else routes to support per the locked decision in §18 of
-            the experience plan.
-
-            The form now lives inside a Dialog so the page stays focused
-            on the welcome flow. ``id="correccion"`` is the anchor
-            target referenced by <WorkspaceIdentityCard /> on the
-            dashboard; arriving with that fragment auto-opens the
-            dialog via the useEffect at the top of this component. */}
-        <section
-          id="correccion"
-          className="cw-fade-up flex flex-wrap items-center justify-between gap-3 rounded-xl border border-[color:var(--border-default)] bg-[color:var(--surface-raised)] p-5 shadow-sm sm:p-6"
-          aria-label="Solicitar corrección de un dato de contacto"
-        >
-          <div className="min-w-0">
-            <h2 className="text-base font-semibold text-[color:var(--text-primary)]">
-              ¿Necesitas corregir un dato?
-            </h2>
-            <p className="mt-1 max-w-prose text-xs text-[color:var(--text-secondary)]">
-              Pide la actualización de tu correo, teléfono o nombre de
-              contacto. Cada solicitud entra a revisión antes de aplicarse.
-            </p>
-          </div>
-          <Button
-            type="button"
-            variant="outline"
-            onClick={() => setCorrectionOpen(true)}
-            aria-haspopup="dialog"
+          <section
+            id="correccion"
+            className="cw-fade-up flex flex-wrap items-center justify-between gap-3 rounded-xl border border-[color:var(--border-default)] bg-[color:var(--surface-raised)] p-5 shadow-sm sm:p-6"
+            aria-label="Solicitar corrección de un dato de contacto"
           >
-            <IdentificationCard
-              className="h-4 w-4"
-              weight="bold"
-              aria-hidden="true"
-            />
-            <span>Solicitar cambio</span>
-          </Button>
-        </section>
-      </div>
+            <div className="min-w-0">
+              <h2 className="text-base font-semibold text-[color:var(--text-primary)]">
+                ¿Necesitas corregir un dato?
+              </h2>
+              <p className="mt-1 max-w-prose text-xs text-[color:var(--text-secondary)]">
+                Para corregir RFC, razón social o tu correo registrado, pide
+                la actualización aquí. Cada solicitud entra a revisión antes
+                de aplicarse.
+              </p>
+            </div>
+            <Button
+              type="button"
+              variant="outline"
+              onClick={() => setCorrectionOpen(true)}
+              aria-haspopup="dialog"
+            >
+              <IdentificationCard
+                className="h-4 w-4"
+                weight="bold"
+                aria-hidden="true"
+              />
+              <span>Solicitar cambio</span>
+            </Button>
+          </section>
+
+          {isFirstVisit ? (
+            <Alert variant="info">
+              <AlertTitle className="flex items-center gap-2">
+                <ShieldCheck
+                  className="h-4 w-4"
+                  weight="bold"
+                  aria-hidden="true"
+                />
+                ¿Por qué pedimos esto?
+              </AlertTitle>
+              <AlertDescription>
+                CheckWise opera tu expediente REPSE y debe garantizar que
+                los documentos se asignen a la empresa correcta. Esta
+                pantalla es la salvaguarda contra accesos cruzados.
+              </AlertDescription>
+            </Alert>
+          ) : null}
+        </div>
+      </main>
 
       <Dialog open={correctionOpen} onOpenChange={setCorrectionOpen}>
         <DialogContent className="max-w-2xl">
@@ -479,44 +367,29 @@ function EntraATuEspacioInner({ session }: { session: PortalSession }) {
           />
         </DialogContent>
       </Dialog>
-    </main>
+    </PortalAppShell>
   );
 }
 
 export default withPortalSession(EntraATuEspacioInner);
 
-// ─── Next-step preview ──────────────────────────────────────────
+// ─── Expediente status summary ──────────────────────────────────
 
 type StepState = "primary" | "default" | "done";
 type Step = { icon: Icon; title: string; body: string; state: StepState };
 
 function buildSteps(expedienteStatus: ExpedienteStatus): Step[] {
-  // Stage 2.7 (audit follow-up G, 2026-05-22) — the rail used to render
-  // the same 4 items in the same order regardless of state, so a user
-  // with a complete expediente saw "Completar expediente inicial" as
-  // step 1 and the system looked like it had forgotten what they did.
-  // Now the lead item adapts:
-  //   not_started → "Empieza tu expediente" (primary)
-  //   in_progress → "Continúa tu expediente" (primary)
-  //   complete    → "Expediente completo" (done) with dashboard first
   const yearLabel = `Calendario REPSE ${new Date().getFullYear()}: SAT mensual, IMSS bimestral, INFONAVIT, acuses STPS.`;
   const dashboard: Step = {
     icon: CheckCircle,
     title: "Revisar dashboard",
-    body:
-      "Tu semáforo de cumplimiento, acciones sugeridas y atención del día — todo en una vista.",
+    body: "Tu semáforo de cumplimiento, acciones sugeridas y atención del día — todo en una vista.",
     state: "default",
   };
   const calendar: Step = {
     icon: CalendarBlank,
     title: "Ver próximos vencimientos",
     body: yearLabel,
-    state: "default",
-  };
-  const reports: Step = {
-    icon: ChartLineUp,
-    title: "Revisar reportes",
-    body: "Reportes ejecutivos por periodo, proveedor, faltantes y riesgos.",
     state: "default",
   };
 
@@ -530,7 +403,6 @@ function buildSteps(expedienteStatus: ExpedienteStatus): Step[] {
       },
       { ...dashboard, state: "primary" },
       calendar,
-      reports,
     ];
   }
 
@@ -548,30 +420,23 @@ function buildSteps(expedienteStatus: ExpedienteStatus): Step[] {
           body: "Una checklist guiada con cada documento que necesitas para arrancar tu alta REPSE.",
           state: "primary",
         };
-  return [expediente, dashboard, calendar, reports];
+  return [expediente, dashboard, calendar];
 }
 
-function NextStepPreview({
+function ExpedienteStatusSummary({
+  status,
   workspace,
-  expedienteStatus,
 }: {
+  status: ExpedienteStatus;
   workspace: WorkspaceContext;
-  expedienteStatus: ExpedienteStatus;
 }) {
-  const items = buildSteps(expedienteStatus);
-
-  // V2.x: replaces the previous 2×2 tile grid with a numbered
-  // vertical rail. The audit (AUDIT_2_X.md §"Provider portal") flagged
-  // the 4 tiles as at risk of being an identical-card-grid anti-
-  // pattern. The vertical rail keeps the same content but turns it
-  // into an ordered "what happens next" sequence, which is closer to
-  // the operator's mental model.
+  const items = buildSteps(status);
   return (
-    <section className="mt-6">
+    <div>
       <p className="cw-eyebrow mb-3 text-[color:var(--text-teal)]">
         {workspace.editable.first_name
-          ? `Tu próximo paso, ${workspace.editable.first_name}`
-          : "Tu próximo paso"}
+          ? `Próximo paso, ${workspace.editable.first_name}`
+          : "Próximo paso"}
       </p>
       <ol className="border-t border-b border-[color:var(--border-subtle)] divide-y divide-[color:var(--border-subtle)]">
         {items.map(({ icon: IconComponent, title, body, state }, idx) => {
@@ -619,89 +484,6 @@ function NextStepPreview({
           );
         })}
       </ol>
-    </section>
+    </div>
   );
 }
-
-// V2.x: BackgroundOrnaments removed. The previous radial-blob
-// gradients (navy + teal) violated §"Color strategy — Restrained".
-// The page now uses the standard --surface-page background; if more
-// texture is needed in a future polish, add cw-grid-pattern instead.
-
-// ---------------------------------------------------------------------------
-// Phase 1 / Slice 1A — legal-consent gate UI
-// ---------------------------------------------------------------------------
-
-function LegalConsentBlock({
-  checked,
-  onChange,
-}: {
-  checked: boolean;
-  onChange: (next: boolean) => void;
-}) {
-  return (
-    <section
-      aria-labelledby="legal-consent-title"
-      className="mt-6 rounded-xl border border-[color:var(--border-default)] bg-[color:var(--surface-sunken)] p-5"
-    >
-      <h2
-        id="legal-consent-title"
-        className="text-sm font-semibold text-[color:var(--text-primary)]"
-      >
-        Avisos legales
-      </h2>
-      <p className="mt-1 text-xs text-[color:var(--text-secondary)]">
-        Antes de entrar a tu espacio necesitamos que confirmes que leíste y
-        aceptas estos tres documentos. Tu aceptación queda registrada
-        para auditoría.
-      </p>
-      <label className="mt-4 flex items-start gap-3 text-sm text-[color:var(--text-primary)]">
-        <Checkbox
-          id="legal-consent-checkbox"
-          checked={checked}
-          onCheckedChange={(value) => onChange(value === true)}
-          aria-describedby="legal-consent-links"
-        />
-        <span>
-          Acepto el{" "}
-          <Link
-            href="/legal/privacidad"
-            target="_blank"
-            rel="noopener"
-            className="font-medium text-[color:var(--text-brand)] hover:underline"
-          >
-            aviso de privacidad
-          </Link>
-          , los{" "}
-          <Link
-            href="/legal/terminos"
-            target="_blank"
-            rel="noopener"
-            className="font-medium text-[color:var(--text-brand)] hover:underline"
-          >
-            términos de uso
-          </Link>
-          {" y el "}
-          <Link
-            href="/legal/consentimiento"
-            target="_blank"
-            rel="noopener"
-            className="font-medium text-[color:var(--text-brand)] hover:underline"
-          >
-            aviso de consentimiento
-          </Link>
-          {" de CheckWise."}
-        </span>
-      </label>
-      <p
-        id="legal-consent-links"
-        className="mt-3 text-[11px] text-[color:var(--text-tertiary)]"
-      >
-        Cada enlace abre el documento en una pestaña nueva. Versión
-        vigente <code className="font-mono">v1</code> · efectiva desde el
-        25 de mayo de 2026.
-      </p>
-    </section>
-  );
-}
-
