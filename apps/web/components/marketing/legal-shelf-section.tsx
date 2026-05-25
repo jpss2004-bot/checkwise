@@ -33,7 +33,7 @@ export function LegalShelfSection() {
         }}
       />
 
-      <div className="relative mx-auto grid max-w-[1320px] grid-cols-1 gap-12 px-5 py-20 lg:grid-cols-[minmax(0,1fr)_minmax(0,1.15fr)] lg:gap-16 lg:py-28">
+      <div className="relative mx-auto grid max-w-[1320px] grid-cols-1 gap-12 px-5 py-24 lg:grid-cols-[minmax(0,1fr)_minmax(0,1.15fr)] lg:gap-16 lg:py-28">
         {/* Statement column. */}
         <Reveal className="flex min-w-0 flex-col">
           <p className="cw-eyebrow text-[hsl(var(--brand-teal))]">
