@@ -71,6 +71,29 @@ class Settings(BaseSettings):
     EMAIL_SMTP_PASSWORD: str = ""
     EMAIL_FROM: str = ""
 
+    # WhatsApp outbound (Meta Cloud API direct). Off by default so a
+    # missing template approval can't cause the renewal cron to fire
+    # blank messages.
+    #
+    # Setup (operator):
+    #   1. Create a Meta WhatsApp Business Account, verify a sender
+    #      phone number, and submit the templates in
+    #      docs/runbooks/whatsapp_templates.json. Wait for Meta to
+    #      approve (24-48 hr typically).
+    #   2. Mint a long-lived System User access token with the
+    #      ``whatsapp_business_messaging`` permission.
+    #   3. Set the env vars below + flip WHATSAPP_ENABLED=true.
+    #
+    # WHATSAPP_DRY_RUN=true logs what would be sent without calling
+    # Meta — useful during template review and CI tests.
+    WHATSAPP_ENABLED: bool = False
+    WHATSAPP_DRY_RUN: bool = False
+    WHATSAPP_PHONE_NUMBER_ID: str = ""
+    WHATSAPP_ACCESS_TOKEN: str = ""
+    WHATSAPP_API_VERSION: str = "v21.0"
+    WHATSAPP_DEFAULT_LANGUAGE_CODE: str = "es_MX"
+    WHATSAPP_DEFAULT_COUNTRY_CODE: str = "52"  # MX
+
     # Portal session cookie (CheckWise 1.7). Provider portal moves off
     # localStorage and onto an httpOnly signed cookie. Cookie is
     # `Secure` automatically when CHECKWISE_ENV != "local" so dev still
