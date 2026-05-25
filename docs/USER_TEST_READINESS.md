@@ -112,7 +112,7 @@ These cannot be verified from inside the repo. They are the only true gates betw
 
 ### 6.1 Confirm the production database does **not** still hold the documented demo accounts
 
-Background: `docs/PROD_AUDIT_2026-05-18.md` recorded a P0 where `ada@legalshelf.mx` / `demo1234` was reachable on the prod API. The audit was marked "closed by operator" — confirm that closure is still in effect.
+Background: `docs/PROD_AUDIT_2026-05-18.md` recorded a P0 where `ada@legalshelf.mx` / `(rotated 2026-05-18 · ask operator)` was reachable on the prod API. The audit was marked "closed by operator" — confirm that closure is still in effect.
 
 ```
 Run from the Render shell (or any psql with prod DATABASE_URL):

@@ -331,7 +331,7 @@ Verification after edits: ruff clean · pytest **427/427** · `tsc --noEmit` cle
 
 None at the code level. Two notes for ongoing hygiene:
 
-1. **Production demo accounts** — `docs/PROD_AUDIT_2026-05-18.md` documented a P0 where `ada@legalshelf.mx` / `demo1234` was reachable on the prod backend. The audit records that as **closed** by the operator (the dev_seed.py P0 guard now refuses to run against non-local hosts). Confirm separately that the prod seed user was rotated/deleted on the Render side — the code-level guard prevents recurrence but doesn't backfill state that existed before it was added.
+1. **Production demo accounts** — `docs/PROD_AUDIT_2026-05-18.md` documented a P0 where `ada@legalshelf.mx` / `(rotated 2026-05-18 · ask operator)` was reachable on the prod backend. The audit records that as **closed** by the operator (the dev_seed.py P0 guard now refuses to run against non-local hosts). Confirm separately that the prod seed user was rotated/deleted on the Render side — the code-level guard prevents recurrence but doesn't backfill state that existed before it was added.
 2. **`AUTH_JWT_SECRET`** default in `core/config.py:43` is `checkwise-local-dev-secret-change-me-please-min-32-chars`. `render.yaml` declares the env var with `sync: false` so the deployed value comes from the Render dashboard. Confirm it is rotated and is not the default — a quick `gh secret list` or Render-dashboard check.
 
 ---

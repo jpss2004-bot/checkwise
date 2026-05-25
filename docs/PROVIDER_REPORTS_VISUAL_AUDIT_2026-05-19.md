@@ -159,7 +159,7 @@ Lower-effort alternative: remove the raw type-code monospace span (`{type}` next
 
 **What you see:** the top of /portal/reports renders 4 equal-width cards (ESTADO GENERAL · ATENCIÓN REQUERIDA · PRÓXIMOS VENCIMIENTOS · ACCIONES PRIORITARIAS). Each is a bordered box of equal weight.
 
-**Note:** [docs/CHECKWISE_2_0.md](CHECKWISE_2_0.md) explicitly called out and removed F2 "identical-card grids" elsewhere ("All F2 identical-card grids killed (`/admin/dashboard` 4-up, `/client/dashboard` 4-up, `/portal/onboarding` 2×2)"). The CompliancePulseStrip on `/portal/reports` is the same anti-pattern that survived the V2.1 sweep.
+**Note:** [docs/CHECKWISE_2_0.md](_archive/CHECKWISE_2_0.md) explicitly called out and removed F2 "identical-card grids" elsewhere ("All F2 identical-card grids killed (`/admin/dashboard` 4-up, `/client/dashboard` 4-up, `/portal/onboarding` 2×2)"). The CompliancePulseStrip on `/portal/reports` is the same anti-pattern that survived the V2.1 sweep.
 
 **Source:** the strip component shipped in P1.6 (commit `464b2ba`).
 

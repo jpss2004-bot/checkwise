@@ -176,10 +176,10 @@ for email in ada@legalshelf.mx cliente.demo@checkwise.mx \
              boss.demo@checkwise.mx proveedor.demo@checkwise.mx; do
   echo "=== $email ==="
   case $email in
-    ada@legalshelf.mx) pw='demo1234' ;;
-    cliente.demo@checkwise.mx) pw='ClienteDemo!2026' ;;
-    boss.demo@checkwise.mx) pw='BossDemo!2026' ;;
-    proveedor.demo@checkwise.mx) pw='CheckWiseDemo!2026' ;;
+    ada@legalshelf.mx) pw='(rotated 2026-05-18 · ask operator)' ;;
+    cliente.demo@checkwise.mx) pw='(rotated 2026-05-18 · ask operator)' ;;
+    boss.demo@checkwise.mx) pw='(rotated 2026-05-18 · ask operator)' ;;
+    proveedor.demo@checkwise.mx) pw='(rotated 2026-05-18 · ask operator)' ;;
   esac
   curl -sS -X POST https://checkwise-api.onrender.com/api/v1/auth/login \
     -H "Content-Type: application/json" \

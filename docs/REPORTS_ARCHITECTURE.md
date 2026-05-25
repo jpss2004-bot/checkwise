@@ -3,7 +3,7 @@
 Status: **Phase 3.0 deliverable.** Architecture lock for the AI-orchestrated Reports workspace. Read first; the block catalog lives in [REPORTS_BLOCK_REGISTRY.md](REPORTS_BLOCK_REGISTRY.md).
 Locked: 2026-05-17, on `design/reports-architecture` branch.
 
-Companion docs: [CHECKWISE_2_0.md](CHECKWISE_2_0.md), [DATA_MODEL.md](DATA_MODEL.md), [design-system/VISUAL_DIRECTION_2_X.md](design-system/VISUAL_DIRECTION_2_X.md).
+Companion docs: [CHECKWISE_2_0.md](_archive/CHECKWISE_2_0.md), [DATA_MODEL.md](DATA_MODEL.md), [design-system/VISUAL_DIRECTION_2_X.md](design-system/VISUAL_DIRECTION_2_X.md).
 
 ---
 

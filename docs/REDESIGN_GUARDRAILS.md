@@ -2,7 +2,7 @@
 
 What the upcoming CheckWise redesign must respect. Read this
 **before** opening any frontend file. Companion to
-[PRE_REDESIGN_SYSTEM_MAP.md](PRE_REDESIGN_SYSTEM_MAP.md) and
+[PRE_REDESIGN_SYSTEM_MAP.md](_archive/PRE_REDESIGN_SYSTEM_MAP.md) and
 [API_CONTRACT_MAP.md](API_CONTRACT_MAP.md).
 
 ## 1. Product principle
@@ -142,7 +142,7 @@ its shape:
 
 Some surfaces still run on `lib/mock/*` because the backing
 endpoint hasn't shipped. These are documented in
-[PRE_REDESIGN_SYSTEM_MAP.md](PRE_REDESIGN_SYSTEM_MAP.md). The
+[PRE_REDESIGN_SYSTEM_MAP.md](_archive/PRE_REDESIGN_SYSTEM_MAP.md). The
 redesign should label them visibly as previews ("Próximamente",
 "Vista preliminar", etc.) so a stakeholder doesn't mistake the
 demo for production:

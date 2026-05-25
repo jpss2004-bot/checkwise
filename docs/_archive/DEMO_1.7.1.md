@@ -11,9 +11,9 @@ already-set-up dashboard view (Account B).
 
 | Account | Email | Password | What it shows |
 |---|---|---|---|
-| **A — First-login provider** | `proveedor.demo@checkwise.mx` | `CheckWiseDemo!2026` | Forced password change → guided initial expediente → manual dashboard activation. Demonstrates the gate. |
-| **B — Returning provider** | `boss.demo@checkwise.mx` | `BossDemo!2026` | Login lands directly on the dashboard. Demonstrates the post-onboarding workspace. |
-| Reviewer / admin | `ada@legalshelf.mx` | `demo1234` | Internal-staff login → reviewer queue. Optional, only needed to demo the back-office angle. |
+| **A — First-login provider** | `proveedor.demo@checkwise.mx` | `(rotated 2026-05-18 · ask operator)` | Forced password change → guided initial expediente → manual dashboard activation. Demonstrates the gate. |
+| **B — Returning provider** | `boss.demo@checkwise.mx` | `(rotated 2026-05-18 · ask operator)` | Login lands directly on the dashboard. Demonstrates the post-onboarding workspace. |
+| Reviewer / admin | `ada@legalshelf.mx` | `(rotated 2026-05-18 · ask operator)` | Internal-staff login → reviewer queue. Optional, only needed to demo the back-office angle. |
 
 Both provider accounts own independent workspaces so they never collide
 during a side-by-side demo.
@@ -34,7 +34,7 @@ during a side-by-side demo.
 
 1. Open https://checkwise-six.vercel.app in **incognito** (no stale cookies).
 2. Click **Iniciar sesión** in the top-right.
-3. Log in with `proveedor.demo@checkwise.mx` / `CheckWiseDemo!2026`.
+3. Log in with `proveedor.demo@checkwise.mx` / `(rotated 2026-05-18 · ask operator)`.
 4. **Expected:** redirected to `/activate` with the heading
    *"Tu contraseña actual es temporal."* Set any 12+ character password
    (e.g. `MiNuevaPass2026!`).
@@ -64,7 +64,7 @@ during a side-by-side demo.
 ### Account B — Direct dashboard
 
 1. Log out (top-right *Cerrar sesión*) or open another incognito tab.
-2. Log in with `boss.demo@checkwise.mx` / `BossDemo!2026`.
+2. Log in with `boss.demo@checkwise.mx` / `(rotated 2026-05-18 · ask operator)`.
 3. **Expected:** redirected to `/portal/entra-a-tu-espacio` showing
    *"Servicios Especializados Aurora · Demo"*. No password change
    forced (`must_change_password = false`).

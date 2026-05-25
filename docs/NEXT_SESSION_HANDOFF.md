@@ -85,10 +85,10 @@ bash apps/api/scripts/dev_reset.sh           # drop → migrate → seed
 
 | Role | Email | Password | Reaches |
 |---|---|---|---|
-| internal_admin · reviewer | `ada@legalshelf.mx` | `demo1234` | `/admin/*` + `/portal/*` (gate bypass) |
-| provider (full expediente, boss demo) | `boss.demo@checkwise.mx` | `BossDemo!2026` | `/portal/*` |
-| provider (first login, expediente pending) | `proveedor.demo@checkwise.mx` | `CheckWiseDemo!2026` (temp) | `/activate` → `/portal/onboarding` |
-| client_admin (V2.1) | `cliente.demo@checkwise.mx` | `ClienteDemo!2026` | `/client/*` (3-vendor portfolio) |
+| internal_admin · reviewer | `ada@legalshelf.mx` | `(rotated 2026-05-18 · ask operator)` | `/admin/*` + `/portal/*` (gate bypass) |
+| provider (full expediente, boss demo) | `boss.demo@checkwise.mx` | `(rotated 2026-05-18 · ask operator)` | `/portal/*` |
+| provider (first login, expediente pending) | `proveedor.demo@checkwise.mx` | `(rotated 2026-05-18 · ask operator)` (temp) | `/activate` → `/portal/onboarding` |
+| client_admin (V2.1) | `cliente.demo@checkwise.mx` | `(rotated 2026-05-18 · ask operator)` | `/client/*` (3-vendor portfolio) |
 
 Demo provider workspace token: `demo-token` (workspace `ws-demo-0001`).
 

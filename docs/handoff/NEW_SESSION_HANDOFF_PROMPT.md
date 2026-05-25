@@ -59,10 +59,10 @@ state already captured there.
 
 These work against `localhost` only. All four are confirmed dead on prod.
 
-- `ada@legalshelf.mx` / `demo1234` — internal_admin + reviewer → `/admin/*`.
-- `cliente.demo@checkwise.mx` / `ClienteDemo!2026` — client_admin → `/client/*`.
-- `boss.demo@checkwise.mx` / `BossDemo!2026` — provider (full expediente) → `/portal/*`.
-- `proveedor.demo@checkwise.mx` / `CheckWiseDemo!2026` — provider (first login) → `/activate` → `/portal/onboarding`.
+- `ada@legalshelf.mx` / `(rotated 2026-05-18 · ask operator)` — internal_admin + reviewer → `/admin/*`.
+- `cliente.demo@checkwise.mx` / `(rotated 2026-05-18 · ask operator)` — client_admin → `/client/*`.
+- `boss.demo@checkwise.mx` / `(rotated 2026-05-18 · ask operator)` — provider (full expediente) → `/portal/*`.
+- `proveedor.demo@checkwise.mx` / `(rotated 2026-05-18 · ask operator)` — provider (first login) → `/activate` → `/portal/onboarding`.
 
 ## What the previous session left as the next single best step
 

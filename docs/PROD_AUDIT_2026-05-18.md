@@ -17,7 +17,7 @@
 ```
 $ curl -s -X POST https://checkwise-api.onrender.com/api/v1/auth/login \
     -H "Content-Type: application/json" \
-    -d '{"email":"ada@legalshelf.mx","password":"demo1234"}'
+    -d '{"email":"ada@legalshelf.mx","password":"(rotated 2026-05-18 · ask operator)"}'
 HTTP 200
 {"access_token": "<JWT>", "expires_at": "…", "user": {…},
  "roles": ["internal_admin", "reviewer"], …}
@@ -39,7 +39,7 @@ Three other demo accounts — `cliente.demo@checkwise.mx`, `boss.demo@checkwise.
 
 ### Why this is P0
 
-Ada's password (`demo1234`) is documented openly in:
+Ada's password (`(rotated 2026-05-18 · ask operator)`) is documented openly in:
 
 - `README.md` (table on line 91)
 - `docs/CREDENTIALS.md`
@@ -53,7 +53,7 @@ Anyone who reads the public repo can authenticate to live production as `interna
 `apps/api/scripts/dev_seed.py` was at some point run with `DATABASE_URL` pointing at the production Neon instance. Confirmed by:
 
 - `render.yaml.preDeployCommand` is `alembic upgrade head` — does NOT run `dev_seed.py`.
-- `grep -rn "ada@legalshelf\|Ada Reyes\|demo1234"` across `apps/api/alembic/` returns nothing — no migration seeds her.
+- `grep -rn "ada@legalshelf\|Ada Reyes\|(rotated 2026-05-18 · ask operator)"` across `apps/api/alembic/` returns nothing — no migration seeds her.
 - `last_login_at: None` means nobody has ever used the account through normal auth — it's a freshly-seeded row.
 
 ### Why only ada (not the other three)
@@ -217,7 +217,7 @@ The operator chose a clean-slate path instead of surgical DELETEs (the FK orderi
 
 | Probe | Before | After |
 |---|---|---|
-| `POST /auth/login` with `ada@legalshelf.mx` / `demo1234` | HTTP 200 + JWT (P0) | HTTP 401 `"Invalid credentials"` ✓ |
+| `POST /auth/login` with `ada@legalshelf.mx` / `(rotated 2026-05-18 · ask operator)` | HTTP 200 + JWT (P0) | HTTP 401 `"Invalid credentials"` ✓ |
 | Same for `cliente.demo` / `boss.demo` / `proveedor.demo` | HTTP 401 | HTTP 401 ✓ |
 | Same with a random email | n/a | HTTP 401 ✓ |
 | `GET /_engine` unauthenticated | HTTP 401 | HTTP 401 ✓ |

@@ -4,9 +4,9 @@
 > P1.9 (authenticated print-route smoke + zero-dep print-contract test).
 
 Concise resume note. Companion to
-[PROVIDER_REPORTS_REDESIGN_PLAN.md](PROVIDER_REPORTS_REDESIGN_PLAN.md)
+[PROVIDER_REPORTS_REDESIGN_PLAN.md](_archive/PROVIDER_REPORTS_REDESIGN_PLAN.md)
 (the full design plan) and
-[PROVIDER_REPORTS_REDESIGN_AUDIT.md](PROVIDER_REPORTS_REDESIGN_AUDIT.md)
+[PROVIDER_REPORTS_REDESIGN_AUDIT.md](_archive/PROVIDER_REPORTS_REDESIGN_AUDIT.md)
 (the audit that motivated the slice).
 
 ---
@@ -75,7 +75,7 @@ prerequisite that blocked P1.6/P1.7/P1.8 in-browser verification.
 - Postgres up via Docker (volume reset to clear stale FK violation
   from a prior partial seed; see "Known caveats").
 - Backend `uvicorn app.main:app` boots cleanly, `/docs` 200.
-- `/api/v1/auth/login` accepts `ada@legalshelf.mx / demo1234`,
+- `/api/v1/auth/login` accepts `ada@legalshelf.mx / (rotated 2026-05-18 · ask operator)`,
   returns JWT.
 - `/api/v1/reports/` lists 3 seeded reports (1 internal_only,
   1 client_facing, 1 vendor_facing draft).

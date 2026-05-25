@@ -20,10 +20,10 @@ otherwise (empty roles)                         → /portal/entra-a-tu-espacio
 
 | User type | Email | Password | Roles (Membership.role) | Landing route | What to test |
 |---|---|---|---|---|---|
-| **Admin / reviewer** | `ada@legalshelf.mx` | `demo1234` | `internal_admin`, `reviewer` | `/admin/reviewer` | review queue, audit log, clients, vendors, requirements, calendar, **all R1.0 reports presets** at `/admin/reports` |
-| **Client admin** | `cliente.demo@checkwise.mx` | `ClienteDemo!2026` | `client_admin` | `/client/dashboard` | client portfolio view, 3 seeded vendors, vendor risk surface, seeded `client_facing` reports at `/portal/reports` |
-| **Provider — onboarded** | `boss.demo@checkwise.mx` | `BossDemo!2026` | *(none)* | `/portal/entra-a-tu-espacio` → `/portal/dashboard` | post-onboarding provider workspace, seeded submissions, calendar |
-| **Provider — first login** | `proveedor.demo@checkwise.mx` | `CheckWiseDemo!2026` | *(none)* | `/activate` (forced password change) | activation flow, `/portal/onboarding` gate |
+| **Admin / reviewer** | `ada@legalshelf.mx` | `(rotated 2026-05-18 · ask operator)` | `internal_admin`, `reviewer` | `/admin/reviewer` | review queue, audit log, clients, vendors, requirements, calendar, **all R1.0 reports presets** at `/admin/reports` |
+| **Client admin** | `cliente.demo@checkwise.mx` | `(rotated 2026-05-18 · ask operator)` | `client_admin` | `/client/dashboard` | client portfolio view, 3 seeded vendors, vendor risk surface, seeded `client_facing` reports at `/portal/reports` |
+| **Provider — onboarded** | `boss.demo@checkwise.mx` | `(rotated 2026-05-18 · ask operator)` | *(none)* | `/portal/entra-a-tu-espacio` → `/portal/dashboard` | post-onboarding provider workspace, seeded submissions, calendar |
+| **Provider — first login** | `proveedor.demo@checkwise.mx` | `(rotated 2026-05-18 · ask operator)` | *(none)* | `/activate` (forced password change) | activation flow, `/portal/onboarding` gate |
 
 ## Notes per account
 

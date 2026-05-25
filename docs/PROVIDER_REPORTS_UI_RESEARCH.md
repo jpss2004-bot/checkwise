@@ -5,7 +5,7 @@ vendor-portal, and AI-report-builder space, plus the in-repo design
 skills, to inform the Provider Reports redesign. No code. No commitments.
 Patterns and judgement, with explicit "use this / skip this" calls.
 
-Companion: [PROVIDER_REPORTS_REDESIGN_AUDIT.md](PROVIDER_REPORTS_REDESIGN_AUDIT.md).
+Companion: [PROVIDER_REPORTS_REDESIGN_AUDIT.md](_archive/PROVIDER_REPORTS_REDESIGN_AUDIT.md).
 
 ---
 

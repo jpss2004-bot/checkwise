@@ -81,7 +81,7 @@ Out-of-tenant read-only view for `client_admin`. Shipped.
 - `WorkspaceIdentityCard` on the vendor dashboard.
 - `blocked` + `unavailable` states added to `/portal/reports`.
 - Tenant-isolation rules tightened: backend is the source of truth for every protected field; client-side display values are hints only.
-- Full detail: [CHECKWISE_1_6.md](CHECKWISE_1_6.md).
+- Full detail: [CHECKWISE_1_6.md](_archive/CHECKWISE_1_6.md).
 
 ### V2.0 — Unified visual language across portals
 
@@ -94,7 +94,7 @@ Frontend redesign pass that lifts vendor, client, and admin portals onto one com
 - `lib/api/portal-adapters.ts` — bridge from real backend payloads to UX-curated UI shapes.
 - 20 routes redesigned across `/admin/*`, `/client/*`, `/portal/*`.
 - Removed: orphan `access-decision-banner.tsx` (referenced a deleted type, zero consumers).
-- Full detail: [CHECKWISE_2_0.md](CHECKWISE_2_0.md).
+- Full detail: [CHECKWISE_2_0.md](_archive/CHECKWISE_2_0.md).
 
 ### V2.x — Visual rework + Reports flagship (in progress)
 

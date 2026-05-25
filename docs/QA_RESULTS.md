@@ -17,10 +17,10 @@ Companion to `docs/FULL_SYSTEM_AUDIT.md`. Records exactly what was tested, how, 
 
 | Account | Login result | Roles | Routes to |
 |---|---|---|---|
-| `ada@legalshelf.mx` / `demo1234` | **200** | `internal_admin`, `reviewer` | `/admin/reviewer` |
-| `cliente.demo@checkwise.mx` / `ClienteDemo!2026` | **200** | `client_admin` | `/client/dashboard` |
-| `boss.demo@checkwise.mx` / `BossDemo!2026` | **200** | *(none)* | `/portal/entra-a-tu-espacio` |
-| `proveedor.demo@checkwise.mx` / `CheckWiseDemo!2026` | **200** (must_change_password=true) | *(none)* | `/activate` |
+| `ada@legalshelf.mx` / `(rotated 2026-05-18 · ask operator)` | **200** | `internal_admin`, `reviewer` | `/admin/reviewer` |
+| `cliente.demo@checkwise.mx` / `(rotated 2026-05-18 · ask operator)` | **200** | `client_admin` | `/client/dashboard` |
+| `boss.demo@checkwise.mx` / `(rotated 2026-05-18 · ask operator)` | **200** | *(none)* | `/portal/entra-a-tu-espacio` |
+| `proveedor.demo@checkwise.mx` / `(rotated 2026-05-18 · ask operator)` | **200** (must_change_password=true) | *(none)* | `/activate` |
 
 ### Backend API surface — verified via curl
 
