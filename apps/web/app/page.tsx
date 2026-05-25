@@ -8,7 +8,6 @@ import { FeedbackLauncher } from "@/components/feedback/feedback-launcher";
 import { ContactForm } from "@/components/marketing/contact-form";
 import { FeaturesSection } from "@/components/marketing/features-section";
 import { HeroSection } from "@/components/marketing/hero-section";
-import { HowItWorksSection } from "@/components/marketing/how-it-works-section";
 import { JourneySection } from "@/components/marketing/journey-section";
 import { LegalShelfSection } from "@/components/marketing/legal-shelf-section";
 import { MarketingNav } from "@/components/marketing/marketing-nav";
@@ -22,9 +21,8 @@ export default function PublicHome() {
       <main className="min-h-[100dvh] bg-[color:var(--surface-page)]">
         <MarketingNav />
         <HeroSection />
-        <JourneySection />
         <FeaturesSection />
-        <HowItWorksSection />
+        <JourneySection />
         <LegalShelfSection />
         <RequestInformation />
         <MarketingFooter />
@@ -38,9 +36,9 @@ export default function PublicHome() {
 
 function RequestInformation() {
   const bullets = [
-    "Demo guiada del portal proveedor + cliente",
-    "Recorrido por reportes ejecutivos",
-    "Mapa de implementación para tu operación",
+    "Demo guiada del portal proveedor y la vista cliente",
+    "Recorrido por reportes, copilot LLM y descargas de auditoría",
+    "Mapa de implementación para tu operación REPSE",
   ];
   return (
     <section id="contacto" className="bg-[color:var(--surface-page)]">

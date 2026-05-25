@@ -8,8 +8,8 @@ import { BrandLogo } from "@/components/checkwise/brand-logo";
 import { Button } from "@/components/ui/button";
 
 const NAV_ITEMS = [
-  { href: "#producto", label: "Producto" },
-  { href: "#como-funciona", label: "Cómo funciona" },
+  { href: "#features", label: "Producto" },
+  { href: "#producto", label: "Recorrido" },
   { href: "#contacto", label: "Contacto" },
 ] as const;
 
