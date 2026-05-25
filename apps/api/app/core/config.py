@@ -335,6 +335,10 @@ def _validate_boot_security(settings: Settings) -> None:
     (``CHECKWISE_ENV=local``) the guard is a no-op so the placeholder
     keeps dev workflows fast; outside local it raises before any
     request can be served.
+
+    Also emits soft warnings — non-fatal, log-only — for configuration
+    that's wrong but won't break boot. Today: a non-local deploy whose
+    ``FRONTEND_BASE_URL`` still points at localhost (audit P2-05).
     """
     if settings.is_local_env:
         return
@@ -344,6 +348,24 @@ def _validate_boot_security(settings: Settings) -> None:
             "in-code placeholder. Set AUTH_JWT_SECRET to a fresh 32+ char "
             "random string in the Render dashboard (openssl rand -hex 32) "
             "before redeploying."
+        )
+    # Soft warning — FRONTEND_BASE_URL is what every transactional
+    # email CTA links to. A non-local deploy that still points at
+    # localhost will send password-reset / reviewer-decision /
+    # renewal-reminder emails whose links lead nowhere. Doesn't
+    # block boot (a deploy might intentionally test without
+    # outbound email), but logs loudly so it's visible in Render
+    # logs on first start.
+    import logging
+
+    if settings.FRONTEND_BASE_URL.startswith("http://localhost"):
+        logging.getLogger("checkwise.config").warning(
+            "FRONTEND_BASE_URL is still '%s' on a non-local deploy "
+            "(CHECKWISE_ENV=%s). Email CTAs will link to localhost — "
+            "set FRONTEND_BASE_URL to the production hostname (e.g. "
+            "https://app.checkwise.mx) in the Render dashboard.",
+            settings.FRONTEND_BASE_URL,
+            settings.CHECKWISE_ENV,
         )
 
 

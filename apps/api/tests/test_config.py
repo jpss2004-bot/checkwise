@@ -145,3 +145,39 @@ def test_boot_guard_passes_with_real_secret_in_production() -> None:
         AUTH_JWT_SECRET="a1b2c3d4e5f6a7b8c9d0e1f2a3b4c5d6e7f8a9b0c1d2e3f4",
     )
     _validate_boot_security(s)
+
+
+def test_boot_guard_warns_on_localhost_frontend_url_in_production(caplog) -> None:
+    """A non-local deploy that still points FRONTEND_BASE_URL at
+    localhost gets a loud warning so it shows up on first start —
+    audit P2-05 (2026-05-25). Soft warning, not a fatal error, so a
+    deploy intentionally running without outbound email still boots."""
+    import logging
+
+    from app.core.config import Settings, _validate_boot_security
+
+    s = Settings(
+        CHECKWISE_ENV="production",
+        AUTH_JWT_SECRET="a1b2c3d4e5f6a7b8c9d0e1f2a3b4c5d6",
+        FRONTEND_BASE_URL="http://localhost:3000",
+    )
+    with caplog.at_level(logging.WARNING, logger="checkwise.config"):
+        _validate_boot_security(s)
+    messages = [r.getMessage() for r in caplog.records]
+    assert any("FRONTEND_BASE_URL" in m for m in messages)
+
+
+def test_boot_guard_silent_on_production_frontend_url(caplog) -> None:
+    """A real production URL must not trigger the warning."""
+    import logging
+
+    from app.core.config import Settings, _validate_boot_security
+
+    s = Settings(
+        CHECKWISE_ENV="production",
+        AUTH_JWT_SECRET="a1b2c3d4e5f6a7b8c9d0e1f2a3b4c5d6",
+        FRONTEND_BASE_URL="https://app.checkwise.mx",
+    )
+    with caplog.at_level(logging.WARNING, logger="checkwise.config"):
+        _validate_boot_security(s)
+    assert all("FRONTEND_BASE_URL" not in r.getMessage() for r in caplog.records)

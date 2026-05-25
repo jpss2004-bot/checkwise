@@ -29,12 +29,28 @@ def create_app() -> FastAPI:
 
     allowed_origins = settings.cors_origins_list
 
+    # Audit P3-03 (2026-05-25) — tightened from ``["*"]`` to explicit
+    # allowlists. Permissive wildcards weren't exploitable (every
+    # state-changing endpoint enforces auth) but a buyer-audit
+    # rightly flags them. Headers list covers every header any
+    # CheckWise frontend (admin / client / portal) actually sends —
+    # ``Authorization`` for JWT, ``X-Workspace-Token`` for the legacy
+    # portal token path, plus the standard fetch / form-data headers.
     app.add_middleware(
         CORSMiddleware,
         allow_origins=allowed_origins,
         allow_credentials=True,
-        allow_methods=["*"],
-        allow_headers=["*"],
+        allow_methods=["GET", "POST", "PATCH", "PUT", "DELETE", "OPTIONS"],
+        allow_headers=[
+            "Accept",
+            "Accept-Language",
+            "Authorization",
+            "Content-Language",
+            "Content-Type",
+            "Origin",
+            "X-Requested-With",
+            "X-Workspace-Token",
+        ],
     )
 
     @app.exception_handler(Exception)
