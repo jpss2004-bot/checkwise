@@ -7,7 +7,7 @@ from io import BytesIO
 import pytest
 from fastapi.testclient import TestClient
 from pypdf import PdfWriter
-from sqlalchemy import create_engine
+from sqlalchemy import create_engine, select
 from sqlalchemy.orm import Session, sessionmaker
 from sqlalchemy.pool import StaticPool
 
@@ -15,7 +15,14 @@ from app.core.config import settings
 from app.db.base import Base
 from app.db.session import get_db
 from app.main import app
-from app.models import Client, ProviderWorkspace, User, Vendor, entities  # noqa: F401
+from app.models import (
+    AuditLog,
+    Client,
+    ProviderWorkspace,
+    User,
+    Vendor,
+    entities,  # noqa: F401
+)
 from app.services.auth import hash_password, issue_access_token
 
 
@@ -1296,3 +1303,158 @@ def test_expediente_zip_filters_by_status(
     )
     assert empty.status_code == 200
     assert zipfile.ZipFile(io.BytesIO(empty.content)).namelist() == []
+
+
+# ---------------------------------------------------------------------------
+# Notification mark-read — audit-log fills (M4 partial)
+# ---------------------------------------------------------------------------
+
+
+def _notify_audit_rows(api_client: TestClient, action: str) -> list[AuditLog]:
+    factory = api_client.app.state.testing_session  # type: ignore[attr-defined]
+    db = factory()
+    try:
+        return list(
+            db.scalars(select(AuditLog).where(AuditLog.action == action))
+        )
+    finally:
+        db.close()
+
+
+def _workspace_owner_id(api_client: TestClient, workspace_id: str) -> str | None:
+    factory = api_client.app.state.testing_session  # type: ignore[attr-defined]
+    db = factory()
+    try:
+        ws = db.get(ProviderWorkspace, workspace_id)
+        return ws.owner_user_id if ws else None
+    finally:
+        db.close()
+
+
+def test_mark_provider_notification_read_writes_audit_event(
+    api_client: TestClient,
+) -> None:
+    """First unread→read transition writes an audit_log row tying the
+    notification to the workspace owner. Replays stay silent."""
+    from app.constants.statuses import ReviewerAction
+    from app.models import Submission
+    from app.services.submission_workflow import apply_reviewer_decision
+
+    access = _setup_workspace_session(api_client)
+    submitted = _submit_canonical(api_client, vendor_rfc=access["vendor_rfc"])
+
+    factory = api_client.app.state.testing_session  # type: ignore[attr-defined]
+    db = factory()
+    try:
+        sub = db.get(Submission, submitted["submission_id"])
+        assert sub is not None
+        apply_reviewer_decision(
+            db,
+            submission=sub,
+            action=ReviewerAction.APPROVE,
+            reason=None,
+            reviewer_user_id="rev-prov-audit",
+        )
+    finally:
+        db.close()
+
+    listing = api_client.get(
+        f"/api/v1/portal/workspaces/{access['workspace_id']}/notifications"
+    ).json()
+    assert listing["unread_count"] == 1
+    notification_id = listing["items"][0]["id"]
+
+    first = api_client.post(
+        f"/api/v1/portal/workspaces/{access['workspace_id']}"
+        f"/notifications/{notification_id}/read"
+    )
+    assert first.status_code == 200
+
+    events = _notify_audit_rows(api_client, "provider.notification_marked_read")
+    assert len(events) == 1
+    event = events[0]
+    assert event.entity_type == "provider_notification"
+    assert event.entity_id == notification_id
+    assert event.actor_type == "provider"
+    assert event.actor_id == _workspace_owner_id(
+        api_client, access["workspace_id"]
+    )
+    assert (event.after or {}).get("workspace_id") == access["workspace_id"]
+
+    # Idempotent replay writes nothing more.
+    second = api_client.post(
+        f"/api/v1/portal/workspaces/{access['workspace_id']}"
+        f"/notifications/{notification_id}/read"
+    )
+    assert second.status_code == 200
+    after_replay = _notify_audit_rows(
+        api_client, "provider.notification_marked_read"
+    )
+    assert len(after_replay) == 1
+
+
+def test_mark_all_provider_notifications_read_writes_audit_event(
+    api_client: TestClient,
+) -> None:
+    """Bulk mark-read writes a single audit row capturing the flipped
+    notification ids. A no-op replay writes nothing."""
+    from app.constants.statuses import ReviewerAction
+    from app.models import Submission
+    from app.services.submission_workflow import apply_reviewer_decision
+
+    access = _setup_workspace_session(api_client)
+    submitted = _submit_canonical(api_client, vendor_rfc=access["vendor_rfc"])
+
+    factory = api_client.app.state.testing_session  # type: ignore[attr-defined]
+    db = factory()
+    try:
+        sub = db.get(Submission, submitted["submission_id"])
+        assert sub is not None
+        apply_reviewer_decision(
+            db,
+            submission=sub,
+            action=ReviewerAction.APPROVE,
+            reason=None,
+            reviewer_user_id="rev-prov-bulk",
+        )
+    finally:
+        db.close()
+
+    listing = api_client.get(
+        f"/api/v1/portal/workspaces/{access['workspace_id']}/notifications"
+    ).json()
+    unread_ids = sorted(
+        item["id"] for item in listing["items"] if item["read_at"] is None
+    )
+    assert len(unread_ids) >= 1
+
+    bulk = api_client.post(
+        f"/api/v1/portal/workspaces/{access['workspace_id']}/notifications/read-all"
+    )
+    assert bulk.status_code == 200
+    assert bulk.json()["unread_count"] == 0
+
+    events = _notify_audit_rows(
+        api_client, "provider.notifications_marked_all_read"
+    )
+    assert len(events) == 1
+    event = events[0]
+    assert event.entity_type == "provider_workspace"
+    assert event.entity_id == access["workspace_id"]
+    assert event.actor_type == "provider"
+    assert event.actor_id == _workspace_owner_id(
+        api_client, access["workspace_id"]
+    )
+    payload = event.after or {}
+    assert payload.get("marked_count") == len(unread_ids)
+    assert sorted(payload.get("notification_ids") or []) == unread_ids
+
+    # No-op replay stays silent.
+    noop = api_client.post(
+        f"/api/v1/portal/workspaces/{access['workspace_id']}/notifications/read-all"
+    )
+    assert noop.status_code == 200
+    after_noop = _notify_audit_rows(
+        api_client, "provider.notifications_marked_all_read"
+    )
+    assert len(after_noop) == 1

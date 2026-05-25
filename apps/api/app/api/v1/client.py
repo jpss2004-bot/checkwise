@@ -1703,6 +1703,25 @@ def mark_client_notification_read(
         raise HTTPException(status.HTTP_404_NOT_FOUND, detail="Notificacion no encontrada.")
     if row.read_at is None:
         row.read_at = datetime.now(UTC)
+        # Only audit the first transition unread→read. Idempotent
+        # re-calls (notification already marked read) are intentionally
+        # silent so a client UI that polls or replays does not flood
+        # the audit log.
+        add_audit_event(
+            db,
+            action="client.notification_marked_read",
+            entity_type="client_notification",
+            entity_id=row.id,
+            actor_type="client_admin",
+            actor_id=current.user.id,
+            after={
+                "client_id": target_id,
+                "notification_type": row.notification_type,
+                "vendor_id": row.vendor_id,
+                "submission_id": row.submission_id,
+                "read_at": row.read_at.isoformat(),
+            },
+        )
         db.commit()
         db.refresh(row)
     vendor = db.get(Vendor, row.vendor_id) if row.vendor_id else None
@@ -1727,6 +1746,23 @@ def mark_all_client_notifications_read(
     now = datetime.now(UTC)
     for row in rows:
         row.read_at = now
+    if rows:
+        # Audit only when at least one notification was actually flipped.
+        # A no-op call (everything already read) is intentionally silent
+        # — see the per-notification handler above for the same rationale.
+        add_audit_event(
+            db,
+            action="client.notifications_marked_all_read",
+            entity_type="client",
+            entity_id=target_id,
+            actor_type="client_admin",
+            actor_id=current.user.id,
+            after={
+                "marked_count": len(rows),
+                "notification_ids": [row.id for row in rows],
+                "read_at": now.isoformat(),
+            },
+        )
     db.commit()
     return ClientNotificationSummary(client_id=target_id, unread_count=0)
 

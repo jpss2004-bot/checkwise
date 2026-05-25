@@ -24,6 +24,7 @@ from app.db.base import Base
 from app.db.session import get_db
 from app.main import app
 from app.models import (
+    AuditLog,
     Client,
     Membership,
     Organization,
@@ -1684,3 +1685,137 @@ def test_client_profile_denies_non_client_admin(
         headers=_h(token),
     )
     assert resp.status_code == 403
+
+
+# ---------------------------------------------------------------------------
+# Notification mark-read — audit-log fills (M4 partial)
+# ---------------------------------------------------------------------------
+
+
+def _notify_audit_rows(db_factory, action: str) -> list[AuditLog]:
+    db = db_factory()
+    try:
+        return list(
+            db.scalars(
+                select(AuditLog).where(AuditLog.action == action)
+            )
+        )
+    finally:
+        db.close()
+
+
+def test_mark_client_notification_read_writes_audit_event(
+    api_client: TestClient, db_factory
+) -> None:
+    """First unread→read transition writes an audit_log row tying the
+    notification to the acting client_admin. A no-op replay writes
+    nothing more, so polling clients do not flood the log.
+    """
+    client_id = _seed_client(db_factory)
+    _, ws_id = _seed_vendor_with_workspace(db_factory, client_id=client_id)
+    sub_id = _seed_submission_for_workspace(api_client, db_factory, ws_id)
+
+    db = db_factory()
+    try:
+        sub = db.get(Submission, sub_id)
+        assert sub is not None
+        apply_reviewer_decision(
+            db,
+            submission=sub,
+            action=ReviewerAction.APPROVE,
+            reason=None,
+            reviewer_user_id="rev-user-audit",
+        )
+    finally:
+        db.close()
+
+    user_id, email, pw = _seed_user_with_role(
+        db_factory, role="client_admin", client_id=client_id, email_prefix="ca-audit"
+    )
+    token = _login(api_client, email, pw)
+
+    listing = api_client.get("/api/v1/client/notifications", headers=_h(token))
+    assert listing.status_code == 200, listing.text
+    notification_id = listing.json()["items"][0]["id"]
+
+    first = api_client.post(
+        f"/api/v1/client/notifications/{notification_id}/read", headers=_h(token)
+    )
+    assert first.status_code == 200, first.text
+
+    events = _notify_audit_rows(db_factory, "client.notification_marked_read")
+    assert len(events) == 1
+    event = events[0]
+    assert event.entity_type == "client_notification"
+    assert event.entity_id == notification_id
+    assert event.actor_type == "client_admin"
+    assert event.actor_id == user_id
+    assert (event.after or {}).get("client_id") == client_id
+
+    # Idempotent replay must not log a second row.
+    second = api_client.post(
+        f"/api/v1/client/notifications/{notification_id}/read", headers=_h(token)
+    )
+    assert second.status_code == 200
+    after_replay = _notify_audit_rows(db_factory, "client.notification_marked_read")
+    assert len(after_replay) == 1
+
+
+def test_mark_all_client_notifications_read_writes_audit_event(
+    api_client: TestClient, db_factory
+) -> None:
+    """Bulk mark-read writes a single audit row capturing the flipped
+    notification ids. A no-op call (everything already read) writes
+    nothing.
+    """
+    client_id = _seed_client(db_factory)
+    _, ws_id = _seed_vendor_with_workspace(db_factory, client_id=client_id)
+    sub_id = _seed_submission_for_workspace(api_client, db_factory, ws_id)
+
+    db = db_factory()
+    try:
+        sub = db.get(Submission, sub_id)
+        assert sub is not None
+        apply_reviewer_decision(
+            db,
+            submission=sub,
+            action=ReviewerAction.APPROVE,
+            reason=None,
+            reviewer_user_id="rev-user-audit-bulk",
+        )
+    finally:
+        db.close()
+
+    user_id, email, pw = _seed_user_with_role(
+        db_factory, role="client_admin", client_id=client_id, email_prefix="ca-bulk"
+    )
+    token = _login(api_client, email, pw)
+
+    # Capture the unread set so we can compare against the audit payload.
+    listing = api_client.get("/api/v1/client/notifications", headers=_h(token))
+    assert listing.status_code == 200, listing.text
+    unread_ids = sorted(
+        item["id"] for item in listing.json()["items"] if item["read_at"] is None
+    )
+    assert len(unread_ids) >= 1
+
+    bulk = api_client.post("/api/v1/client/notifications/read-all", headers=_h(token))
+    assert bulk.status_code == 200, bulk.text
+    assert bulk.json()["unread_count"] == 0
+
+    events = _notify_audit_rows(db_factory, "client.notifications_marked_all_read")
+    assert len(events) == 1
+    event = events[0]
+    assert event.entity_type == "client"
+    assert event.entity_id == client_id
+    assert event.actor_type == "client_admin"
+    assert event.actor_id == user_id
+    payload = event.after or {}
+    assert payload.get("marked_count") == len(unread_ids)
+    assert sorted(payload.get("notification_ids") or []) == unread_ids
+
+    # No-op replay must not log a second row.
+    noop = api_client.post("/api/v1/client/notifications/read-all", headers=_h(token))
+    assert noop.status_code == 200
+    after_noop = _notify_audit_rows(db_factory, "client.notifications_marked_all_read")
+    assert len(after_noop) == 1

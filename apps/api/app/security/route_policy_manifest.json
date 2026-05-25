@@ -1,6 +1,6 @@
 {
   "schema_version": 2,
-  "description": "Route policy manifest for the FastAPI backend. Every route in app.api.v1 MUST have an entry here. The pytest at tests/test_route_policy_manifest.py fails on (a) any new route lacking a manifest entry, (b) any manifest entry whose route no longer exists, (c) any entry with a TBD policy field, and (d) any entry missing the must_change_password_allowed boolean. Edit by hand; do not auto-regenerate after the M0 seed. The must_change_password_allowed flag mirrors the allow-list in app.api.v1.auth._PASSWORD_GATE_ALLOWED_PATHS — only /auth/me and /auth/set-password are reachable while a user's must_change_password flag is True.",
+  "description": "Route policy manifest for the FastAPI backend. Every route in app.api.v1 MUST have an entry here. The pytest at tests/test_route_policy_manifest.py fails on (a) any new route lacking a manifest entry, (b) any manifest entry whose route no longer exists, (c) any entry with a TBD policy field, and (d) any entry missing the must_change_password_allowed boolean. Edit by hand; do not auto-regenerate after the M0 seed. The must_change_password_allowed flag mirrors the allow-list in app.api.v1.auth._PASSWORD_GATE_ALLOWED_PATHS \u2014 only /auth/me and /auth/set-password are reachable while a user's must_change_password flag is True.",
   "routes": [
     {
       "method": "GET",
@@ -731,7 +731,7 @@
       "lineno": 1712,
       "gate": "client_admin_or_admin",
       "tenant_rule": "scoped via _resolve_client_id() membership check",
-      "audit_rule": "not_logged (P1 GAP \u2014 Pass 3 finding P3-01; add add_audit_event)",
+      "audit_rule": "logged as client.notifications_marked_all_read when at least one notification flipped (no-op replays silent)",
       "rate_limit_rule": "none (auth-gated)",
       "error_lang": "es",
       "must_change_password_allowed": false,
@@ -761,7 +761,7 @@
       "lineno": 1693,
       "gate": "client_admin_or_admin",
       "tenant_rule": "scoped via _resolve_client_id() membership check",
-      "audit_rule": "not_logged (P1 GAP \u2014 Pass 3 finding P3-01; add add_audit_event)",
+      "audit_rule": "logged as client.notification_marked_read on first unread\u2192read transition (idempotent re-calls silent)",
       "rate_limit_rule": "none (auth-gated)",
       "error_lang": "es",
       "must_change_password_allowed": false,
@@ -1196,7 +1196,7 @@
       "lineno": 4104,
       "gate": "provider_workspace",
       "tenant_rule": "current_portal_workspace dependency validates session-vs-path workspace_id",
-      "audit_rule": "not_logged (P1 GAP \u2014 same shape as P3-01 on the provider side)",
+      "audit_rule": "logged as provider.notifications_marked_all_read when at least one notification flipped (no-op replays silent)",
       "rate_limit_rule": "none (auth-gated)",
       "error_lang": "es",
       "must_change_password_allowed": false,
@@ -1226,7 +1226,7 @@
       "lineno": 4080,
       "gate": "provider_workspace",
       "tenant_rule": "current_portal_workspace dependency validates session-vs-path workspace_id",
-      "audit_rule": "not_logged (P1 GAP \u2014 same shape as P3-01 on the provider side)",
+      "audit_rule": "logged as provider.notification_marked_read on first unread\u2192read transition (idempotent re-calls silent)",
       "rate_limit_rule": "none (auth-gated)",
       "error_lang": "es",
       "must_change_password_allowed": false,

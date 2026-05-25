@@ -4096,6 +4096,22 @@ def mark_provider_notification_read(
         )
     if row.read_at is None:
         row.read_at = utc_now()
+        # Only audit the first transition unread→read. Idempotent
+        # re-calls (e.g. polling clients) are intentionally silent.
+        add_audit_event(
+            db,
+            action="provider.notification_marked_read",
+            entity_type="provider_notification",
+            entity_id=row.id,
+            actor_type="provider",
+            actor_id=workspace.owner_user_id,
+            after={
+                "workspace_id": workspace.id,
+                "notification_type": row.notification_type,
+                "submission_id": row.submission_id,
+                "read_at": row.read_at.isoformat(),
+            },
+        )
         db.commit()
         db.refresh(row)
     return _provider_notification_item(row)
@@ -4123,6 +4139,20 @@ def mark_all_provider_notifications_read(
         now = utc_now()
         for row in unread:
             row.read_at = now
+        # Audit only on the bulk transition. No-op replays stay silent.
+        add_audit_event(
+            db,
+            action="provider.notifications_marked_all_read",
+            entity_type="provider_workspace",
+            entity_id=workspace.id,
+            actor_type="provider",
+            actor_id=workspace.owner_user_id,
+            after={
+                "marked_count": len(unread),
+                "notification_ids": [row.id for row in unread],
+                "read_at": now.isoformat(),
+            },
+        )
         db.commit()
     return ProviderNotificationSummary(
         workspace_id=workspace.id,
