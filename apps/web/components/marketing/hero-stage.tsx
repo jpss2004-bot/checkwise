@@ -2,7 +2,7 @@
 
 import Image from "next/image";
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { AnimatePresence, motion } from "motion/react";
+import { motion } from "motion/react";
 import {
   Buildings,
   ClipboardText,
@@ -23,44 +23,62 @@ type Layer = {
   chrome: string;
   caption: string;
   chip: { label: string; value: string };
+  /**
+   * Focal-point zoom applied when this layer is the front (active).
+   * - ``zoom``: CSS scale value (1 = no zoom, 1.2 = 20 % closer)
+   * - ``originX``/``originY``: CSS background-style position, in %.
+   *
+   * The Frame component honors these to highlight the screenshot's
+   * single most insightful element. Back-stack layers stay at zoom 1.
+   */
+  focus: { zoom: number; originX: string; originY: string };
 };
 
 const LAYERS: Layer[] = [
   {
     id: "provider",
     src: "/marketing/product/portal-dashboard.png",
-    alt: "Dashboard del proveedor con cumplimiento, próximas acciones y copilot Wise abierto.",
+    alt: "Vista del proveedor con cumplimiento, próximas acciones y asistente Wise.",
     icon: ClipboardText,
-    chrome: "Portal proveedor",
+    chrome: "Vista del proveedor",
     caption: "Servicios Especializados Aurora · expediente activo",
     chip: { label: "Siguiente acción", value: "Corregir declaración IVA" },
+    // Zoom to the right-hand "Tu siguiente acción" card so the buyer
+    // immediately sees the actionable next-step pattern.
+    focus: { zoom: 1.15, originX: "68%", originY: "30%" },
   },
   {
     id: "review",
-    src: "/marketing/product/admin-reviewer-queue.png",
-    alt: "Bandeja de Legal Shelf con documentos en cola, edad y estado de revisión.",
+    src: "/marketing/product/admin-audit-log.png",
+    alt: "Registro de auditoría firmado con actor, acción y entidad.",
     icon: Gavel,
-    chrome: "Bandeja Legal Shelf",
-    caption: "Documentos por revisar · institución, periodo, proveedor",
-    chip: { label: "Decisión humana", value: "Ada Reyes · FIFO" },
+    chrome: "Registro de auditoría",
+    caption: "Eventos firmados · actor · acción · entidad",
+    chip: { label: "Decisión humana", value: "Ada Reyes · firmada" },
+    // Zoom to the table rows where actor/action/entity columns live.
+    focus: { zoom: 1.18, originX: "50%", originY: "55%" },
   },
   {
     id: "client",
     src: "/marketing/product/client-dashboard.png",
-    alt: "Resumen del cliente con portafolio en semáforo y faltantes obligatorios.",
+    alt: "Vista cliente con portafolio en semáforo y faltantes obligatorios.",
     icon: Buildings,
-    chrome: "Portal cliente",
+    chrome: "Vista del cliente",
     caption: "Portafolio Operadora Multinacional · 3 proveedores",
     chip: { label: "Faltantes", value: "387 obligatorios" },
+    // Zoom to the "Tienes 3 proveedores en rojo" + 387 faltantes card.
+    focus: { zoom: 1.15, originX: "50%", originY: "28%" },
   },
   {
     id: "report",
     src: "/marketing/product/admin-report-editor.png",
-    alt: "Editor de reportes con copilot, exportación PDF y Excel.",
+    alt: "Editor de reportes con asistente, exportación PDF, Excel y HTML.",
     icon: Sparkle,
-    chrome: "Reportes + copilot LLM",
-    caption: "Reporte ejecutivo · versión v2 · listo para compartir",
-    chip: { label: "Copilot", value: "Generar · Refrescar · Exportar" },
+    chrome: "Reporte ejecutivo",
+    caption: "Versión publicada · lista para compartir",
+    chip: { label: "Asistente de reportes", value: "Generar · Refrescar · Exportar" },
+    // Zoom to the action toolbar ("Generar con IA · Copiloto · ...").
+    focus: { zoom: 1.18, originX: "50%", originY: "22%" },
   },
 ];
 
@@ -186,37 +204,6 @@ export function HeroStage() {
           })}
         </div>
 
-        {/* Floating context chips — tied to the active layer's chip data
-            so the chip content rotates with the cycle. */}
-        <AnimatePresence mode="wait">
-          <motion.div
-            key={`chip-${active}`}
-            className="absolute right-[8%] top-[14%] hidden items-center gap-2 rounded-md border border-[color:var(--border-default)] bg-[color:var(--surface-raised)]/95 px-3 py-2 shadow-[0_18px_44px_-22px_hsl(var(--brand-navy)/0.45)] backdrop-blur-sm lg:inline-flex"
-            initial={reduce ? false : { opacity: 0, y: -6 }}
-            animate={reduce ? { opacity: 1 } : { opacity: 1, y: 0 }}
-            exit={reduce ? { opacity: 0 } : { opacity: 0, y: -4 }}
-            transition={{ duration: 0.45, ease: EASE_ENTER }}
-          >
-            <span
-              className="flex h-7 w-7 items-center justify-center rounded-md bg-[color:var(--surface-teal-muted)] text-[color:var(--text-teal)]"
-              aria-hidden="true"
-            >
-              {(() => {
-                const I = LAYERS[active].icon;
-                return <I className="h-3.5 w-3.5" weight="duotone" />;
-              })()}
-            </span>
-            <div className="min-w-0">
-              <p className="font-mono text-[9px] uppercase tracking-[0.18em] text-[color:var(--text-tertiary)]">
-                {LAYERS[active].chip.label}
-              </p>
-              <p className="text-[12.5px] font-semibold leading-snug text-[color:var(--text-primary)]">
-                {LAYERS[active].chip.value}
-              </p>
-            </div>
-          </motion.div>
-        </AnimatePresence>
-
         {/* Stage controls — dot rail that doubles as a tap target. */}
         <div className="pointer-events-auto absolute bottom-[6%] right-[8%] hidden items-center gap-2 lg:flex">
           {order.map((i) => {
@@ -281,16 +268,70 @@ function Frame({
           </span>
         ) : null}
       </div>
-      <div className="relative aspect-[16/9.4] w-full">
-        <Image
-          src={layer.src}
-          alt={layer.alt}
-          fill
-          priority={priority}
-          sizes="(min-width: 1280px) 56vw, 70vw"
-          className="object-cover object-top"
-        />
+      <div className="relative aspect-[16/9.4] w-full overflow-hidden">
+        <div
+          className="absolute inset-0 transition-transform duration-700 ease-[cubic-bezier(0.16,1,0.3,1)]"
+          style={
+            active
+              ? {
+                  transform: `scale(${layer.focus.zoom})`,
+                  transformOrigin: `${layer.focus.originX} ${layer.focus.originY}`,
+                }
+              : { transform: "scale(1)", transformOrigin: "center top" }
+          }
+        >
+          <Image
+            src={layer.src}
+            alt={layer.alt}
+            fill
+            priority={priority}
+            sizes="(min-width: 1280px) 56vw, 70vw"
+            className="object-cover object-top"
+          />
+        </div>
+
+        {/* Focal-point chip — sits ON the active layer (not next to it)
+            so the takeaway reads as part of the system surface. Only
+            renders on active layers; back-stack layers stay clean. */}
+        {active ? <FocalChip layer={layer} /> : null}
       </div>
     </div>
+  );
+}
+
+function FocalChip({ layer }: { layer: Layer }) {
+  // Each layer places its focal chip somewhere that mirrors the
+  // focal-area zoom: provider's "siguiente acción" is on the right, so
+  // the chip sits in the right area; the audit log's actor column is
+  // mid-frame, so the chip sits lower-left, etc.
+  const positions: Record<string, string> = {
+    provider: "right-3 top-[58%] -translate-y-1/2",
+    review: "left-3 bottom-3",
+    client: "right-3 top-3",
+    report: "left-3 bottom-3",
+  };
+  const Icon = layer.icon;
+  return (
+    <motion.div
+      initial={{ opacity: 0, y: 6, scale: 0.97 }}
+      animate={{ opacity: 1, y: 0, scale: 1 }}
+      transition={{ duration: 0.55, ease: EASE_ENTER, delay: 0.35 }}
+      className={`pointer-events-none absolute z-10 inline-flex items-center gap-2 rounded-md border border-[color:var(--border-default)] bg-[color:var(--surface-raised)]/95 px-3 py-2 shadow-[0_18px_36px_-18px_hsl(var(--brand-navy)/0.45)] backdrop-blur-sm ${positions[layer.id] ?? "right-3 top-3"}`}
+    >
+      <span
+        aria-hidden="true"
+        className="flex h-6 w-6 items-center justify-center rounded-md bg-[color:var(--surface-teal-muted)] text-[color:var(--text-teal)]"
+      >
+        <Icon className="h-3 w-3" weight="duotone" />
+      </span>
+      <div className="min-w-0">
+        <p className="font-mono text-[9px] uppercase tracking-[0.18em] text-[color:var(--text-tertiary)]">
+          {layer.chip.label}
+        </p>
+        <p className="text-[12px] font-semibold leading-snug text-[color:var(--text-primary)]">
+          {layer.chip.value}
+        </p>
+      </div>
+    </motion.div>
   );
 }
