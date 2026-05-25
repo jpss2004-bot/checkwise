@@ -15,7 +15,6 @@ import {
   List,
   ListMagnifyingGlass,
   PencilSimple,
-  SignOut,
   Storefront,
   X,
   type Icon,
@@ -23,7 +22,7 @@ import {
 
 import { BrandLogo } from "@/components/checkwise/brand-logo";
 import { FeedbackLauncher } from "@/components/feedback/feedback-launcher";
-import { Button } from "@/components/ui/button";
+import { UserMenu } from "@/components/checkwise/user-menu";
 import { MetadataStrip } from "@/components/ui/metadata-strip";
 import { cn } from "@/lib/utils";
 import {
@@ -132,19 +131,13 @@ export function AdminShell({
             Operaciones internas
           </p>
           <div className="ml-auto flex items-center gap-2">
-            <span className="hidden font-mono text-[11px] text-[color:var(--text-tertiary)] md:inline">
-              {session.user.email}
-            </span>
-            <Button
-              type="button"
-              variant="outline"
-              size="sm"
-              onClick={onLogout}
-              aria-label="Cerrar sesión"
-            >
-              <SignOut className="h-3.5 w-3.5" weight="bold" aria-hidden="true" />
-              <span className="hidden sm:inline">Cerrar sesión</span>
-            </Button>
+            <UserMenu
+              name={session.user.full_name || session.user.email}
+              email={session.user.email}
+              roles={session.roles}
+              profileHref={null}
+              onSignOut={onLogout}
+            />
             <button
               type="button"
               aria-label={drawerOpen ? "Cerrar menú" : "Abrir menú"}

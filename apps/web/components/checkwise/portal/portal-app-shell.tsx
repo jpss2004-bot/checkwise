@@ -6,6 +6,8 @@ import { useEffect, useState } from "react";
 import {
   Bell,
   CalendarBlank,
+  CaretLeft,
+  CaretRight,
   ChartLineUp,
   ClipboardText,
   CloudArrowUp,
@@ -21,6 +23,7 @@ import {
 
 import { BrandLogo } from "@/components/checkwise/brand-logo";
 import { WiseDock } from "@/components/checkwise/portal/wise-dock";
+import { UserMenu } from "@/components/checkwise/user-menu";
 import { FeedbackLauncher } from "@/components/feedback/feedback-launcher";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -113,6 +116,34 @@ export function PortalAppShell({
   children,
 }: PortalAppShellProps) {
   const [mobileOpen, setMobileOpen] = useState(false);
+  // Junta 2026-05-23 — desktop sidebar can collapse to an icon-only
+  // rail so the operator gets more canvas. Persisted to localStorage
+  // so the choice survives reloads. Mobile stays drawer-based; this
+  // toggle is hidden under lg.
+  const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    try {
+      const raw = window.localStorage.getItem("checkwise.portal.sidebar.collapsed");
+      if (raw === "1") setSidebarCollapsed(true);
+    } catch {
+      // Storage blocked → stay expanded, no-op.
+    }
+  }, []);
+  function toggleSidebar() {
+    setSidebarCollapsed((prev) => {
+      const next = !prev;
+      try {
+        window.localStorage.setItem(
+          "checkwise.portal.sidebar.collapsed",
+          next ? "1" : "0",
+        );
+      } catch {
+        // Best-effort only.
+      }
+      return next;
+    });
+  }
   // Phase 4 / Slice 4B — unread-count for the Notificaciones nav
   // badge. Best-effort: a fetch failure leaves the badge hidden
   // rather than blocking the shell. Auto-refreshes every 60 s so the
@@ -157,33 +188,71 @@ export function PortalAppShell({
   return (
     <div className="min-h-screen lg:flex">
       {/* ── Sidebar (lg+) ─────────────────────────────────────── */}
-      <aside className="hidden lg:flex lg:w-64 lg:shrink-0 lg:flex-col lg:border-r lg:border-[color:var(--border-subtle)] lg:bg-[color:var(--surface-raised)]">
-        <div className="flex h-16 items-center px-5">
+      <aside
+        className={cn(
+          "hidden lg:flex lg:shrink-0 lg:flex-col lg:border-r lg:border-[color:var(--border-subtle)] lg:bg-[color:var(--surface-raised)] lg:transition-[width] lg:duration-200",
+          sidebarCollapsed ? "lg:w-16" : "lg:w-64",
+        )}
+        aria-label={sidebarCollapsed ? "Barra lateral colapsada" : "Barra lateral"}
+      >
+        <div
+          className={cn(
+            "flex h-16 items-center",
+            sidebarCollapsed ? "justify-center px-2" : "px-5",
+          )}
+        >
           <Link
             href="/portal/dashboard"
             aria-label="CheckWise"
             className="inline-flex items-center"
           >
-            <BrandLogo size="md" />
+            <BrandLogo size="md" variant={sidebarCollapsed ? "compact" : undefined} />
           </Link>
         </div>
 
-        <div className="px-3 pt-1 pb-3">
-          <WorkspaceCard session={session} />
-        </div>
+        {sidebarCollapsed ? null : (
+          <div className="px-3 pt-1 pb-3">
+            <WorkspaceCard session={session} />
+          </div>
+        )}
 
-        <SidebarNav pathname={pathname ?? ""} items={primaryNav} title="Operación" />
+        <SidebarNav
+          pathname={pathname ?? ""}
+          items={primaryNav}
+          title="Operación"
+          collapsed={sidebarCollapsed}
+        />
         <SidebarNav
           pathname={pathname ?? ""}
           items={SECONDARY_NAV}
           title="Cuenta"
+          collapsed={sidebarCollapsed}
         />
 
-        <div className="mt-auto p-3">
-          {pct !== null ? (
+        <div className={cn("mt-auto", sidebarCollapsed ? "p-2" : "p-3")}>
+          {pct !== null && !sidebarCollapsed ? (
             <SidebarProgress pct={pct} complete={isComplete} />
           ) : null}
-          <SupportFooter onLogout={onLogout} />
+          {sidebarCollapsed ? null : <SupportFooter onLogout={onLogout} />}
+          <button
+            type="button"
+            onClick={toggleSidebar}
+            aria-label={sidebarCollapsed ? "Expandir barra lateral" : "Colapsar barra lateral"}
+            aria-pressed={sidebarCollapsed}
+            className={cn(
+              "mt-2 inline-flex w-full items-center justify-center gap-1.5 rounded-md border border-[color:var(--border-subtle)] bg-[color:var(--surface-raised)] py-1.5 text-[11px] font-medium text-[color:var(--text-secondary)] transition-colors hover:bg-[color:var(--surface-hover)] hover:text-[color:var(--text-primary)]",
+              sidebarCollapsed ? "px-1" : "px-2",
+            )}
+          >
+            {sidebarCollapsed ? (
+              <CaretRight className="h-3.5 w-3.5" weight="bold" aria-hidden="true" />
+            ) : (
+              <>
+                <CaretLeft className="h-3.5 w-3.5" weight="bold" aria-hidden="true" />
+                <span>Colapsar</span>
+              </>
+            )}
+          </button>
         </div>
       </aside>
 
@@ -293,15 +362,23 @@ function SidebarNav({
   pathname,
   title,
   onNavigate,
+  collapsed = false,
 }: {
   items: NavItem[];
   pathname: string;
   title?: string;
   onNavigate?: () => void;
+  /** Junta 2026-05-23 — when true, the nav renders as an icon-only
+   *  rail. Label + badge are hidden visually but kept on
+   *  ``title`` / ``aria-label`` so the row stays accessible. */
+  collapsed?: boolean;
 }) {
   return (
-    <nav className="px-3 py-2" aria-label={title}>
-      {title ? (
+    <nav
+      className={collapsed ? "px-2 py-2" : "px-3 py-2"}
+      aria-label={title}
+    >
+      {title && !collapsed ? (
         <p className="px-2 pb-1.5 font-mono text-[10px] uppercase tracking-wide text-[color:var(--text-tertiary)]">
           {title}
         </p>
@@ -316,8 +393,13 @@ function SidebarNav({
               <Link
                 href={item.href}
                 onClick={onNavigate}
+                title={collapsed ? item.label : undefined}
+                aria-label={collapsed ? item.label : undefined}
                 className={cn(
-                  "group relative flex items-center gap-2.5 rounded-md px-2.5 py-2 text-[13px] transition-colors duration-fast",
+                  "group relative flex items-center rounded-md text-[13px] transition-colors duration-fast",
+                  collapsed
+                    ? "justify-center px-2 py-2"
+                    : "gap-2.5 px-2.5 py-2",
                   isActive
                     ? "bg-[color:var(--surface-brand-muted)] font-semibold text-[color:var(--text-brand)]"
                     : "text-[color:var(--text-secondary)] hover:bg-[color:var(--surface-hover)] hover:text-[color:var(--text-primary)]",
@@ -338,11 +420,21 @@ function SidebarNav({
                   )}
                   weight={isActive ? "fill" : "duotone"}
                 />
-                <span className="min-w-0 flex-1 truncate">{item.label}</span>
-                {item.badge ? (
-                  <span className="rounded-full bg-[color:var(--surface-brand)] px-1.5 font-mono text-[10px] tabular-nums text-[color:var(--text-inverse)]">
-                    {item.badge}
-                  </span>
+                {collapsed ? null : (
+                  <>
+                    <span className="min-w-0 flex-1 truncate">{item.label}</span>
+                    {item.badge ? (
+                      <span className="rounded-full bg-[color:var(--surface-brand)] px-1.5 font-mono text-[10px] tabular-nums text-[color:var(--text-inverse)]">
+                        {item.badge}
+                      </span>
+                    ) : null}
+                  </>
+                )}
+                {collapsed && item.badge ? (
+                  <span
+                    aria-hidden="true"
+                    className="absolute right-1 top-1 h-2 w-2 rounded-full bg-[color:var(--surface-brand)]"
+                  />
                 ) : null}
               </Link>
             </li>
@@ -490,16 +582,13 @@ function TopBar({
               <span className="font-mono font-semibold tabular-nums">{pct}%</span>
             </span>
           ) : null}
-          <Button
-            type="button"
-            variant="outline"
-            size="sm"
-            onClick={onLogout}
-            className="hidden sm:inline-flex"
-          >
-            <SignOut className="h-4 w-4" aria-hidden="true" />
-            Salir
-          </Button>
+          <UserMenu
+            name={session.full_name || session.vendor_name}
+            email={session.contact_email || ""}
+            profileHref="/portal/entra-a-tu-espacio"
+            profileLabel="Mi espacio"
+            onSignOut={onLogout}
+          />
         </div>
       </div>
     </header>
