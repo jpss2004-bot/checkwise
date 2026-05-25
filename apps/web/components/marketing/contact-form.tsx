@@ -97,11 +97,11 @@ export function ContactForm() {
   return (
     <form
       onSubmit={handleSubmit}
-      className="flex flex-col gap-4"
+      className="flex flex-col gap-6"
       noValidate
       aria-label="Formulario de contacto"
     >
-      <div className="grid gap-4 sm:grid-cols-2">
+      <div className="grid gap-6 sm:grid-cols-2">
         <Field
           label="Nombre"
           htmlFor="contact-name"

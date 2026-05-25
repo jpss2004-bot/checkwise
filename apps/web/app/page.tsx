@@ -48,7 +48,7 @@ function RequestInformation() {
       id="contacto"
       className="relative isolate border-t border-[color:var(--border-subtle)] bg-[color:var(--surface-page)]"
     >
-      <div className="mx-auto grid max-w-[1320px] grid-cols-1 gap-12 px-5 py-20 lg:grid-cols-[minmax(0,5fr)_minmax(0,7fr)] lg:gap-16 lg:py-28">
+      <div className="mx-auto grid max-w-[1320px] grid-cols-1 gap-12 px-5 py-24 lg:grid-cols-[minmax(0,5fr)_minmax(0,7fr)] lg:gap-20 lg:py-28">
         <Reveal className="flex min-w-0 flex-col">
           <p className="cw-eyebrow text-[color:var(--text-teal)]">
             Solicitar información
@@ -109,7 +109,7 @@ function RequestInformation() {
                 En línea
               </span>
             </div>
-            <div className="rounded-b-[10px] border border-[color:var(--border-default)] bg-[color:var(--surface-raised)] p-6 shadow-[0_22px_50px_-32px_hsl(var(--brand-navy)/0.22)] sm:p-8">
+            <div className="rounded-b-[10px] border border-[color:var(--border-default)] border-t-0 bg-[color:var(--surface-raised)] px-6 py-8 shadow-[0_22px_50px_-32px_hsl(var(--brand-navy)/0.22)] sm:px-10 sm:py-10">
               <ContactForm />
             </div>
           </div>
