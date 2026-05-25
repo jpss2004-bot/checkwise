@@ -207,11 +207,13 @@ export function IntakeWizard({
   );
   const demoModeEnabled = process.env.NEXT_PUBLIC_DEMO_MODE === "true";
   // Stage 2.7-b — multi-file upload feature flag. Mirrors the backend
-  // ``settings.MULTI_FILE_UPLOAD_ENABLED`` setting. When false (default)
-  // the wizard behaves exactly as the legacy single-file path; when
-  // true, providers may attach up to ``MULTI_FILE_MAX_ADDITIONAL``
-  // additional files (annexes) alongside the primary PDF.
-  const multiFileEnabledRaw = process.env.NEXT_PUBLIC_MULTI_FILE_UPLOAD_ENABLED === "true";
+  // ``settings.MULTI_FILE_UPLOAD_ENABLED`` setting. Default flipped to
+  // ON on 2026-05-25 ahead of the first paying pilot because contract
+  // + anexo uploads are material for REPSE evidence. Set
+  // ``NEXT_PUBLIC_MULTI_FILE_UPLOAD_ENABLED=false`` to roll back to
+  // the legacy single-file path without redeploying.
+  const multiFileEnabledRaw =
+    process.env.NEXT_PUBLIC_MULTI_FILE_UPLOAD_ENABLED !== "false";
   // Session 3 (2026-05-21) — catalog v2 alternatives mode hides the
   // multi-file annex picker. The Stage 2.7-b "primary + annexes"
   // framing implies a hierarchy that doesn't fit v2's peer-evidence

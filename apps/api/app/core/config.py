@@ -111,10 +111,13 @@ class Settings(BaseSettings):
     # Stage 2.7 — Multi-file upload feature flag.
     # When True, the provider /submissions endpoint accepts up to 5
     # files per submission (≤ 30 MB total) and the intake wizard shows
-    # the multi-file dropzone. When False (default), the legacy
-    # single-file path is the only one available. Flag-gated so the new
-    # path can be rolled back without redeploying.
-    MULTI_FILE_UPLOAD_ENABLED: bool = False
+    # the multi-file dropzone for contract + annex uploads. Default
+    # changed to True on 2026-05-25 ahead of the first paying pilot
+    # because contract + anexo uploads are material for REPSE
+    # evidence. The legacy single-file path still works when a
+    # provider uploads only one file. Override to False via env to
+    # roll back without redeploying.
+    MULTI_FILE_UPLOAD_ENABLED: bool = True
 
     # Catalog v2 (2026-05-20) — collapsed recurring catalog feature flag.
     # When True, ``recurring_for_year_v2`` is the authoritative
