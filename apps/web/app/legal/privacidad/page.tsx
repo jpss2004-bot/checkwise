@@ -14,7 +14,8 @@ export const metadata: Metadata = {
 /**
  * /legal/privacidad — Aviso de Privacidad Integral.
  *
- * DRAFT (v0-draft). Pendiente de revisión final por Paco/Beko.
+ * v1 (vigente desde 25 de mayo de 2026). Approved copy promoted from
+ * the v0-draft set after Paco/Beko sign-off on 2026-05-25.
  * Estructurado para cumplir los elementos mínimos del artículo 16 de
  * la LFPDPPP y los lineamientos del INAI para avisos integrales.
  */
@@ -23,8 +24,8 @@ export default function PrivacidadPage() {
     <LegalDocShell
       eyebrow="Documento legal · CheckWise"
       title="Aviso de privacidad integral"
-      effectiveDate="22 de mayo de 2026"
-      version="v0-draft"
+      effectiveDate="25 de mayo de 2026"
+      version="v1"
     >
       <LegalSection heading="1. Identidad y domicilio del responsable">
         <p>

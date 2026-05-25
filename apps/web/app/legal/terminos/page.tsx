@@ -14,7 +14,8 @@ export const metadata: Metadata = {
 /**
  * /legal/terminos — Términos de Uso.
  *
- * DRAFT (v0-draft). Pendiente de revisión final por Paco/Beko.
+ * v1 (vigente desde 25 de mayo de 2026). Approved copy promoted from
+ * the v0-draft set after Paco/Beko sign-off on 2026-05-25.
  * Estructurado como contrato de adhesión de uso aceptable; redactado
  * para alinearse con la operación REPSE y la naturaleza de servicio
  * de cumplimiento de CheckWise.
@@ -24,8 +25,8 @@ export default function TerminosPage() {
     <LegalDocShell
       eyebrow="Documento legal · CheckWise"
       title="Términos de uso"
-      effectiveDate="22 de mayo de 2026"
-      version="v0-draft"
+      effectiveDate="25 de mayo de 2026"
+      version="v1"
     >
       <LegalSection heading="1. Aceptación de los términos">
         <p>

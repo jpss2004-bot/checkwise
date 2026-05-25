@@ -1,15 +1,14 @@
 import Link from "next/link";
 import type { ReactNode } from "react";
-import { ArrowLeft, WarningCircle } from "@phosphor-icons/react/dist/ssr";
+import { ArrowLeft } from "@phosphor-icons/react/dist/ssr";
 
 /**
  * Shared shell for the three legal documents under ``/legal/*``.
  *
- * Phase 1 / Slice 1A — these documents ship as DRAFTS pending review
- * by Paco/Beko. The shell renders a prominent banner so neither the
- * provider nor an auditor can mistake the content for final legal
- * copy. The ``version`` prop is the same canonical string the backend
- * stores on the workspace row at acceptance time.
+ * The ``version`` prop is the same canonical string the backend
+ * stores on the workspace row at acceptance time so a forensic
+ * reader can recreate the exact copy the provider accepted on
+ * any given date.
  */
 export function LegalDocShell({
   eyebrow,
@@ -34,28 +33,6 @@ export function LegalDocShell({
           <ArrowLeft className="h-4 w-4" weight="bold" aria-hidden="true" />
           Regresar
         </Link>
-
-        <div
-          role="note"
-          className="flex items-start gap-3 rounded-md border border-[color:var(--status-warning-border)] bg-[color:var(--status-warning-bg)] px-4 py-3"
-        >
-          <WarningCircle
-            className="mt-0.5 h-5 w-5 shrink-0 text-[color:var(--status-warning-text)]"
-            weight="fill"
-            aria-hidden="true"
-          />
-          <div className="text-sm text-[color:var(--text-primary)]">
-            <p className="font-semibold">
-              BORRADOR — pendiente de revisión legal
-            </p>
-            <p className="mt-1 text-[color:var(--text-secondary)]">
-              Este documento se publicó como referencia inicial. La
-              versión definitiva debe ser validada por el equipo legal
-              de LegalShelf antes de operar en producción. La versión
-              que estás aceptando es <code className="font-mono">{version}</code>.
-            </p>
-          </div>
-        </div>
 
         <header className="flex flex-col gap-2">
           <p className="font-mono text-[11px] uppercase tracking-wide text-[color:var(--text-tertiary)]">

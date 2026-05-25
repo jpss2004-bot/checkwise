@@ -14,7 +14,8 @@ export const metadata: Metadata = {
 /**
  * /legal/consentimiento — Aviso de Consentimiento Informado.
  *
- * DRAFT (v0-draft). Pendiente de revisión final por Paco/Beko.
+ * v1 (vigente desde 25 de mayo de 2026). Approved copy promoted from
+ * the v0-draft set after Paco/Beko sign-off on 2026-05-25.
  * Cubre específicamente el consentimiento del proveedor para que la
  * empresa contratante reciba y revise su evidencia de cumplimiento
  * REPSE a través de CheckWise.
@@ -24,8 +25,8 @@ export default function ConsentimientoPage() {
     <LegalDocShell
       eyebrow="Documento legal · CheckWise"
       title="Aviso de consentimiento informado"
-      effectiveDate="22 de mayo de 2026"
-      version="v0-draft"
+      effectiveDate="25 de mayo de 2026"
+      version="v1"
     >
       <LegalSection heading="1. Propósito de este aviso">
         <p>

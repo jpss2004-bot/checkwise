@@ -205,13 +205,23 @@ def test_consent_version_bump_writes_new_audit_row(
 ) -> None:
     """Slice 1B — a document version bump invalidates the prior accept.
 
-    When ``CURRENT_LEGAL_CONSENT_VERSION`` advances from ``v0-draft`` to
-    a new value, a returning provider's next POST must NOT be treated
-    as idempotent. The workspace row + a fresh audit event must record
-    the re-acceptance at the new version, with ``before`` carrying the
-    prior state so the audit trail tells the full story.
+    When ``CURRENT_LEGAL_CONSENT_VERSION`` advances, a returning
+    provider's next POST must NOT be treated as idempotent. The
+    workspace row + a fresh audit event must record the re-acceptance
+    at the new version, with ``before`` carrying the prior state so
+    the audit trail tells the full story.
+
+    The test pins both versions explicitly via ``monkeypatch`` so it
+    stays meaningful regardless of which version is the current
+    production canonical (the constant has bumped v0-draft → v1 on
+    2026-05-25 and may bump again).
     """
     import app.api.v1.portal as portal_module
+
+    # Pin the "old" version for the first acceptance.
+    monkeypatch.setattr(
+        portal_module, "CURRENT_LEGAL_CONSENT_VERSION", "v0-test"
+    )
 
     access = _setup_workspace_session(api_client)
     workspace_id = access["workspace_id"]
@@ -221,7 +231,7 @@ def test_consent_version_bump_writes_new_audit_row(
     )
     assert first.status_code == 200
     first_body = first.json()
-    assert first_body["legal_consent_version"] == "v0-draft"
+    assert first_body["legal_consent_version"] == "v0-test"
     first_at = first_body["legal_consent_accepted_at"]
 
     # Simulate the legal team republishing the document set.
@@ -236,8 +246,8 @@ def test_consent_version_bump_writes_new_audit_row(
     # Timestamp MUST advance — this is a fresh acceptance, not idempotent.
     assert second_body["legal_consent_accepted_at"] != first_at
 
-    # Two audit rows total: v0-draft accept + v1-test re-accept. The
-    # second carries ``before.legal_consent_version="v0-draft"`` so a
+    # Two audit rows total: v0-test accept + v1-test re-accept. The
+    # second carries ``before.legal_consent_version="v0-test"`` so a
     # forensic reader can replay the sequence.
     factory = _testing_session_factory(api_client)
     db = factory()
@@ -255,14 +265,14 @@ def test_consent_version_bump_writes_new_audit_row(
         first_event, second_event = events
         assert first_event.before is None
         assert (
-            first_event.event_metadata["version"] == "v0-draft"
+            first_event.event_metadata["version"] == "v0-test"
         )
         assert second_event.before == {
             "legal_consent_accepted_at": first_at,
-            "legal_consent_version": "v0-draft",
+            "legal_consent_version": "v0-test",
         }
         assert second_event.event_metadata["version"] == "v1-test"
-        assert second_event.event_metadata["previous_version"] == "v0-draft"
+        assert second_event.event_metadata["previous_version"] == "v0-test"
     finally:
         db.close()
 
@@ -272,7 +282,13 @@ def test_consent_surfaces_current_version_on_summary(
 ) -> None:
     """Slice 1B — ``/me`` carries the canonical current version so the
     frontend can compute the version-mismatch arm of the gate without
-    hardcoding the version client-side."""
+    hardcoding the version client-side.
+
+    The assertion reads the constant rather than a literal so the test
+    survives any future version bump without manual updates.
+    """
+    from app.api.v1.portal import CURRENT_LEGAL_CONSENT_VERSION
+
     _setup_workspace_session(api_client)
     body = api_client.get("/api/v1/portal/me").json()
-    assert body["current_legal_consent_version"] == "v0-draft"
+    assert body["current_legal_consent_version"] == CURRENT_LEGAL_CONSENT_VERSION

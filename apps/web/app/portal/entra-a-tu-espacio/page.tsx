@@ -697,9 +697,9 @@ function LegalConsentBlock({
         id="legal-consent-links"
         className="mt-3 text-[11px] text-[color:var(--text-tertiary)]"
       >
-        Cada enlace abre el documento en una pestaña nueva. Documentos
-        en versión <code className="font-mono">v0-draft</code> pendientes
-        de revisión legal.
+        Cada enlace abre el documento en una pestaña nueva. Versión
+        vigente <code className="font-mono">v1</code> · efectiva desde el
+        25 de mayo de 2026.
       </p>
     </section>
   );
