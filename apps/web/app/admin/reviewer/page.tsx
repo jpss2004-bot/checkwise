@@ -23,6 +23,7 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { Select } from "@/components/ui/select";
 import { RequirementStatusBadge } from "@/components/checkwise/portal/requirement-status-badge";
 import {
   EmptyState,
@@ -74,6 +75,11 @@ export default function ReviewerQueuePage() {
   const [error, setError] = useState<string | null>(null);
   const [reloadKey, setReloadKey] = useState(0);
   const [filter, setFilter] = useState<FilterKey>("all");
+  // Institution filter — empty string means "all institutions" and
+  // omits the query param so the backend returns every row. The
+  // dropdown options are driven by INSTITUTION_LABELS so they stay in
+  // sync with portal/calendar and client/submissions.
+  const [institution, setInstitution] = useState<string>("");
 
   useEffect(() => {
     const current = readAdminSession();
@@ -93,7 +99,9 @@ export default function ReviewerQueuePage() {
     let cancelled = false;
     setLoading(true);
     setError(null);
-    getReviewerQueue(session.access_token)
+    getReviewerQueue(session.access_token, {
+      institution: institution || undefined,
+    })
       .then((payload) => {
         if (!cancelled) setQueue(payload);
       })
@@ -112,7 +120,7 @@ export default function ReviewerQueuePage() {
     return () => {
       cancelled = true;
     };
-  }, [session, reloadKey, router]);
+  }, [session, reloadKey, router, institution]);
 
   const retry = useCallback(() => setReloadKey((k) => k + 1), []);
 
@@ -150,6 +158,43 @@ export default function ReviewerQueuePage() {
           title="Documentos por revisar"
           description="Empieza por lo más viejo. Cada documento espera tu decisión humana. La automatización no aprueba ni rechaza nada."
         />
+
+      {/* Institution scope filter. Sits above the status tabs so the
+          reviewer narrows by authority (SAT / IMSS / INFONAVIT / STPS)
+          before drilling into Por revisar / Inconsistencia / Aclaración.
+          Default "" means all institutions; the API call drops the
+          query param entirely in that case. */}
+      <div className="flex flex-wrap items-center gap-3">
+        <label
+          htmlFor="reviewer-institution"
+          className="font-mono text-[10px] uppercase tracking-[0.2em] text-[color:var(--text-tertiary)]"
+        >
+          Institución
+        </label>
+        <Select
+          id="reviewer-institution"
+          value={institution}
+          onChange={(e) => setInstitution(e.target.value)}
+          className="h-9 max-w-[260px] text-[13px]"
+          aria-label="Filtrar bandeja por institución"
+        >
+          <option value="">Todas las instituciones</option>
+          {Object.entries(INSTITUTION_LABELS).map(([code, label]) => (
+            <option key={code} value={code}>
+              {label}
+            </option>
+          ))}
+        </Select>
+        {institution ? (
+          <button
+            type="button"
+            onClick={() => setInstitution("")}
+            className="font-mono text-[10px] uppercase tracking-[0.18em] text-[color:var(--text-teal)] underline-offset-2 hover:underline"
+          >
+            Limpiar
+          </button>
+        ) : null}
+      </div>
 
       {/* Phase 9 / Slice 9A — rolling 7-day stat strip. Renders even
           when the actionable queue is empty so the reviewer always
