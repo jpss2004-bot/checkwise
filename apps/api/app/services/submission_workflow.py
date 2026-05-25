@@ -59,6 +59,9 @@ from app.services.client_notifications import notify_reviewer_decision
 from app.services.provider_notifications import (
     notify_provider_of_reviewer_decision,
 )
+from app.services.transactional_email import (
+    email_provider_of_reviewer_decision,
+)
 from app.services.validation_events import add_validation_event
 
 # Reviewer actions that demand a free-text reason from the user. Approve
@@ -323,6 +326,28 @@ def apply_reviewer_decision(
         reason=cleaned_reason,
         observations=cleaned_observations,
     )
+    # Junta 2026-05-25 — transactional email outbound. Best-effort: a
+    # SMTP failure or a user with ``contact_preference="whatsapp"``
+    # returns a "skipped"/"failed" result without raising, so the
+    # reviewer's decision still commits cleanly. The in-app
+    # ProviderNotification above is the canonical delivery.
+    from app.core.config import settings as _settings
+
+    try:
+        email_provider_of_reviewer_decision(
+            db,
+            submission=submission,
+            action=action_enum.value,
+            reason=cleaned_reason,
+            observations=cleaned_observations,
+            portal_base_url=_settings.FRONTEND_BASE_URL,
+        )
+    except Exception:  # pragma: no cover — defensive
+        import logging as _logging
+
+        _logging.getLogger("checkwise.submission_workflow").exception(
+            "[submission_workflow] outbound email crashed; decision still committed"
+        )
 
     db.commit()
     db.refresh(submission)

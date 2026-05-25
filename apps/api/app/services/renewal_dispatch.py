@@ -58,6 +58,9 @@ from app.services.provider_notifications import (
     notify_provider_of_renewal_due_soon,
     notify_provider_of_renewal_overdue,
 )
+from app.services.transactional_email import (
+    email_renewal_threshold_crossed,
+)
 
 # Locked Phase 6 cadence (gate question answered 2026-05-23).
 # Order matters: descending so the dispatcher fires more-urgent
@@ -272,6 +275,37 @@ def dispatch_renewals_for_workspace(
                     threshold_days=threshold,
                     cycle_anchor_date=anchor,
                 )
+
+            # Junta 2026-05-25 — also email the provider AND the
+            # client_admin. Best-effort: skipped/failed returns don't
+            # raise, the in-app notifications above are the canonical
+            # delivery. Imported lazily inside the dispatcher so an
+            # import-time failure (no SMTP config, missing module)
+            # never breaks the cron.
+            try:
+                from app.core.config import settings as _settings
+
+                email_renewal_threshold_crossed(
+                    db,
+                    workspace=workspace,
+                    vendor=vendor,
+                    requirement_code=req.code,
+                    requirement_name=req.name,
+                    due_date=due,
+                    days_remaining=threshold,
+                    severity=severity,
+                    portal_base_url=_settings.FRONTEND_BASE_URL,
+                    client_portal_base_url=_settings.FRONTEND_BASE_URL,
+                )
+            except Exception:  # pragma: no cover — defensive
+                import logging as _logging
+
+                _logging.getLogger(
+                    "checkwise.renewal_dispatch"
+                ).exception(
+                    "[renewal_dispatch] outbound email crashed; reminder still fired"
+                )
+
             fired.append(threshold)
 
         outcomes.append(
