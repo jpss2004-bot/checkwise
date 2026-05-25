@@ -13,6 +13,23 @@ from app.core.config import settings
 log = logging.getLogger("checkwise.unhandled")
 
 
+def _assert_critical_routes(app: FastAPI) -> None:
+    """Fail boot if a deploy is missing routes the frontend depends on."""
+    critical = {
+        ("GET", f"{settings.API_V1_PREFIX}/portal/me"),
+        ("POST", f"{settings.API_V1_PREFIX}/portal/enter"),
+    }
+    registered = {
+        (method, getattr(route, "path", ""))
+        for route in app.routes
+        for method in (getattr(route, "methods", None) or set())
+    }
+    missing = sorted(critical - registered)
+    if missing:
+        rendered = ", ".join(f"{method} {path}" for method, path in missing)
+        raise RuntimeError(f"Critical API route(s) not registered: {rendered}")
+
+
 def create_app() -> FastAPI:
     # /docs, /redoc, /openapi.json leak the entire API surface to
     # anonymous callers. Off by default outside `CHECKWISE_ENV=local`;
@@ -91,6 +108,7 @@ def create_app() -> FastAPI:
         return {"status": "ok", "service": "checkwise-api", "environment": settings.CHECKWISE_ENV}
 
     app.include_router(api_router, prefix=settings.API_V1_PREFIX)
+    _assert_critical_routes(app)
     return app
 
 

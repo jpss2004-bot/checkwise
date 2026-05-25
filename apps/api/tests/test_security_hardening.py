@@ -405,6 +405,25 @@ def test_forgot_password_rate_limit_returns_429(
 
 
 # ---------------------------------------------------------------------------
+# App boot contract
+# ---------------------------------------------------------------------------
+
+
+def test_create_app_registers_portal_bootstrap_routes() -> None:
+    route_app = create_app()
+    route_pairs = {
+        (method, getattr(route, "path", ""))
+        for route in route_app.routes
+        for method in (getattr(route, "methods", None) or set())
+    }
+    assert ("POST", "/api/v1/portal/enter") in route_pairs
+    assert ("GET", "/api/v1/portal/me") in route_pairs
+
+    response = TestClient(route_app).post("/api/v1/portal/enter", json={})
+    assert response.status_code != 404, response.text
+
+
+# ---------------------------------------------------------------------------
 # API docs gating
 # ---------------------------------------------------------------------------
 
