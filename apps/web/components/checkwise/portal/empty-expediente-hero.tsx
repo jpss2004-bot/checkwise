@@ -164,7 +164,16 @@ function StepRow({ step, index }: { step: OnboardingItem; index: number }) {
   // document the provider actually clicked on. Without the name, the
   // wizard would fall back to an arbitrary catalog default (see the
   // intake-wizard 2026-05-21 fix).
-  const href = `/portal/upload?requirement_code=${encodeURIComponent(step.code)}&requirement=${encodeURIComponent(step.name)}&from=onboarding`;
+  // Provider-portal UX pass (2026-05-25) — include ``institution`` so
+  // the upload wizard's Step 1 locks the institution field instead of
+  // falling back to its hardcoded "sat" default. ``OnboardingItem``
+  // exposes the field; the calendar/onboarding href builders on the
+  // backend received the matching fix.
+  const href =
+    `/portal/upload?requirement_code=${encodeURIComponent(step.code)}` +
+    `&requirement=${encodeURIComponent(step.name)}` +
+    `&institution=${encodeURIComponent(step.institution)}` +
+    `&from=onboarding`;
 
   return (
     <Link

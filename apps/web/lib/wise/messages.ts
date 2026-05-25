@@ -138,7 +138,7 @@ function welcomeMessage(args: {
       // without the name the wizard silently defaults to a
       // different requirement (see intake-wizard 2026-05-21 fix).
       ctaHref: firstStep
-        ? `/portal/upload?requirement_code=${encodeURIComponent(firstStep.code)}&requirement=${encodeURIComponent(firstStep.name)}&from=onboarding`
+        ? `/portal/upload?requirement_code=${encodeURIComponent(firstStep.code)}&requirement=${encodeURIComponent(firstStep.name)}&institution=${encodeURIComponent(firstStep.institution)}&from=onboarding`
         : undefined,
       meta: firstStep?.code,
     };

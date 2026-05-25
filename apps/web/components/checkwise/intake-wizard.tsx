@@ -121,15 +121,23 @@ const MULTI_FILE_MAX_TOTAL_FILES = 5;
 const MULTI_FILE_MAX_ADDITIONAL = MULTI_FILE_MAX_TOTAL_FILES - 1; // primary + N annexes
 const MULTI_FILE_TOTAL_BYTES_CAP = 30 * 1024 * 1024;
 
+// Provider-portal UX pass (2026-05-25) — every field defaults to an
+// empty string. Previously the wizard pre-filled fake-looking values
+// (``period_code: "2026-05"``, ``load_type: "mensual"``,
+// ``institution_code: "sat"``, ``requirement_name: requirements[5]``)
+// so a URL that didn't carry the full context surfaced as "wrong but
+// plausible". With the calendar/onboarding/dashboard URL builders
+// now threading the full triad, the prefill path is the single
+// source of truth; the wizard no longer needs invented defaults.
 const initialForm: IntakeForm = {
   client_name: "",
   vendor_name: "",
   vendor_rfc: "",
   contract_reference: "",
-  period_code: "2026-05",
-  load_type: "mensual",
-  institution_code: "sat",
-  requirement_name: requirements[5] ?? requirements[0],
+  period_code: "",
+  load_type: "",
+  institution_code: "",
+  requirement_name: "",
   comments: "",
   requirement_code: "",
   period_key: "",

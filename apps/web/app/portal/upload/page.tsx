@@ -3,7 +3,7 @@
 import { Suspense, useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
-import { ArrowLeft } from "@phosphor-icons/react";
+import { ArrowLeft, ArrowRight, CalendarBlank, Info } from "@phosphor-icons/react";
 
 import {
   IntakeWizard,
@@ -12,6 +12,7 @@ import {
 } from "@/components/checkwise/intake-wizard";
 import { PortalAppShell } from "@/components/checkwise/portal/portal-app-shell";
 import { UploadWizardSkeleton } from "@/components/checkwise/portal/state-surfaces";
+import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
 import { PageHeader } from "@/components/ui/page-header";
 import {
@@ -171,6 +172,88 @@ function PortalUploadInner() {
     return null;
   }
 
+  // Provider-portal UX pass (2026-05-25) — when /portal/upload is
+  // opened without a ``requirement_code`` in the URL, we used to drop
+  // the user straight into the wizard with the intake form's hardcoded
+  // defaults (sat / mensual / 6th catalog entry) pre-filled. That
+  // surfaced as plausible-but-wrong context. Now the page renders a
+  // safe empty state that bounces the user to the calendar instead.
+  if (!requirementCode) {
+    return (
+      <PortalAppShell session={session}>
+        <main className="mx-auto max-w-3xl space-y-5 px-5 py-6">
+          <PageHeader
+            eyebrow="Carga guiada"
+            title="Carga documental"
+            description="Antes de subir un archivo necesitamos saber a qué documento corresponde."
+            actions={
+              <Button asChild variant="outline" size="sm">
+                <Link href="/portal/dashboard">
+                  <ArrowLeft className="h-4 w-4" aria-hidden="true" />
+                  Volver al inicio
+                </Link>
+              </Button>
+            }
+          />
+          <section
+            className="rounded-xl border border-[color:var(--border-default)] bg-[color:var(--surface-raised)] p-6 shadow-sm sm:p-8"
+            aria-label="Selecciona un requisito antes de subir"
+          >
+            <header className="mb-3 flex items-start gap-3">
+              <span
+                className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-[color:var(--surface-brand-muted)]"
+                aria-hidden="true"
+              >
+                <CalendarBlank
+                  className="h-5 w-5 text-[color:var(--text-brand)]"
+                  weight="duotone"
+                />
+              </span>
+              <div className="min-w-0">
+                <h2 className="text-base font-semibold text-[color:var(--text-primary)]">
+                  No hay un requisito seleccionado
+                </h2>
+                <p className="mt-1 text-[13px] text-[color:var(--text-secondary)]">
+                  Para evitar errores, selecciona primero el documento que
+                  quieres cargar desde el calendario. Así tu archivo queda
+                  asignado al cliente, periodo, institución y requisito
+                  correctos.
+                </p>
+              </div>
+            </header>
+            <div className="mt-5 flex flex-wrap items-center justify-end gap-2 border-t border-[color:var(--border-subtle)] pt-4">
+              <Button asChild variant="outline" size="sm">
+                <Link href="/portal/onboarding">Ir al expediente</Link>
+              </Button>
+              <Button asChild size="lg">
+                <Link href="/portal/calendar">
+                  <span>Seleccionar desde calendario</span>
+                  <ArrowRight
+                    className="h-4 w-4"
+                    weight="bold"
+                    aria-hidden="true"
+                  />
+                </Link>
+              </Button>
+            </div>
+          </section>
+          <Alert variant="info">
+            <AlertTitle className="flex items-center gap-2">
+              <Info className="h-4 w-4" weight="bold" aria-hidden="true" />
+              ¿Por qué no muestro un formulario?
+            </AlertTitle>
+            <AlertDescription>
+              Cargar un documento sin contexto puede dejarlo asignado al
+              cliente, periodo o institución equivocados. Pasar por el
+              calendario te garantiza que el archivo entra al expediente
+              que esperas.
+            </AlertDescription>
+          </Alert>
+        </main>
+      </PortalAppShell>
+    );
+  }
+
   return (
     <PortalAppShell session={session}>
       <main className="mx-auto max-w-7xl space-y-5 px-5 py-6">
@@ -190,10 +273,6 @@ function PortalUploadInner() {
                   Expediente
                 </Link>
               </Button>
-              {/* Stage 1 (BL-Stage1, 2026-05-20): this back-link button
-                  was labeled "Calendario" but routed to /portal/dashboard.
-                  Re-targeted to the actual calendar so the label and the
-                  destination agree. */}
               <Button asChild variant="outline" size="sm">
                 <Link href="/portal/calendar">
                   <ArrowLeft className="h-4 w-4" aria-hidden="true" />
@@ -202,6 +281,9 @@ function PortalUploadInner() {
               </Button>
             </>
           }
+        />
+        <UploadContextSummary
+          cameFromOnboarding={cameFromOnboarding}
         />
         <IntakeWizard
           prefill={prefill}
@@ -212,6 +294,50 @@ function PortalUploadInner() {
         />
       </main>
     </PortalAppShell>
+  );
+}
+
+function UploadContextSummary({
+  cameFromOnboarding,
+}: {
+  cameFromOnboarding: boolean;
+}) {
+  const sourceLabel = cameFromOnboarding ? "expediente" : "calendario";
+  return (
+    <section
+      aria-labelledby="upload-context-summary-title"
+      className="rounded-xl border border-[color:var(--border-default)] bg-[color:var(--surface-raised)] p-5 shadow-sm sm:p-6"
+    >
+      <header className="flex items-start gap-3">
+        <span
+          className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-[color:var(--surface-brand-muted)]"
+          aria-hidden="true"
+        >
+          <Info
+            className="h-4 w-4 text-[color:var(--text-brand)]"
+            weight="duotone"
+          />
+        </span>
+        <div className="min-w-0">
+          <h2
+            id="upload-context-summary-title"
+            className="text-[14px] font-semibold text-[color:var(--text-primary)]"
+          >
+            Contexto rellenado automáticamente
+          </h2>
+          <p className="mt-1 text-[12.5px] leading-relaxed text-[color:var(--text-secondary)]">
+            Estos datos vienen del documento que seleccionaste en el{" "}
+            {sourceLabel}. Así evitamos errores de cliente, periodo,
+            institución o requisito.
+          </p>
+          <p className="mt-1.5 text-[11.5px] text-[color:var(--text-tertiary)]">
+            Si esta información no corresponde al documento que quieres
+            subir, vuelve al {sourceLabel} y selecciona el requisito
+            correcto.
+          </p>
+        </div>
+      </header>
+    </section>
   );
 }
 

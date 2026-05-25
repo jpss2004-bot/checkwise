@@ -177,7 +177,7 @@ function answerNextAction(
       ctaLabel: "Subir documento",
       // Pass both code and human name so the intake wizard renders
       // the requested document (see intake-wizard 2026-05-21 fix).
-      ctaHref: `/portal/upload?requirement_code=${encodeURIComponent(firstOnboardingStep.code)}&requirement=${encodeURIComponent(firstOnboardingStep.name)}&from=onboarding`,
+      ctaHref: `/portal/upload?requirement_code=${encodeURIComponent(firstOnboardingStep.code)}&requirement=${encodeURIComponent(firstOnboardingStep.name)}&institution=${encodeURIComponent(firstOnboardingStep.institution)}&from=onboarding`,
       meta: firstOnboardingStep.code,
     });
   }
@@ -338,12 +338,18 @@ function ctaLabelFor(action: DashboardSuggestedAction): string {
 
 function pickFirstPendingRequired(
   onboarding: OnboardingSummary | null,
-): { code: string; name: string } | null {
+): { code: string; name: string; institution: string } | null {
   if (!onboarding) return null;
   for (const section of onboarding.sections) {
     for (const item of section.items) {
       if (!item.required) continue;
-      if (item.status === "pendiente") return { code: item.code, name: item.name };
+      if (item.status === "pendiente") {
+        return {
+          code: item.code,
+          name: item.name,
+          institution: item.institution,
+        };
+      }
     }
   }
   return null;
