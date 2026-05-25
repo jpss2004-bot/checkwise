@@ -34,6 +34,16 @@ dependencies = [
   "python-multipart>=0.0.9",
   "sqlalchemy>=2.0",
   "uvicorn[standard]>=0.30",
+
+  # ---- Transitive floor pins for known CVEs (M5 — 2026-05-25) ----
+  # These packages arrive as transitives (idna via anyio/httpx/etc.;
+  # starlette via fastapi). Pinning the floor here forces every
+  # ``pip install -e .`` to resolve to the patched version even when
+  # the parent dep's range still allows the vulnerable one. Move the
+  # floor up when the next CVE lands; remove entirely once every
+  # parent dep tightens its own constraint.
+  "idna>=3.15",        # GHSA-65pc-fj4g-8rjx — fixed in 3.15
+  "starlette>=1.0.1",  # PYSEC-2026-161 — fixed in 1.0.1
 ]
 
 [project.optional-dependencies]

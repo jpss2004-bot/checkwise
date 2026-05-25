@@ -1,0 +1,44 @@
+# Gitleaks config — CheckWise.
+#
+# Inherits the default ruleset. Only narrow allowlists for known-safe
+# strings live here so the default scanner stays as tight as upstream.
+#
+# Audit context (M5 — 2026-05-25): the only string in this repo that
+# looks like a secret is the in-code ``AUTH_JWT_SECRET`` placeholder
+# used for local dev. The P4-01 boot guard refuses to start with this
+# value in any non-local environment (see ``apps/api/app/core/config.py``
+# ``_validate_boot_security``), so leaking it has no production impact
+# — but gitleaks would still flag it on every scan without this
+# allowlist.
+
+[extend]
+useDefault = true
+
+[allowlist]
+description = "CheckWise allowlisted strings"
+
+# The committed AUTH_JWT_SECRET placeholder. Hard-coded in
+# ``apps/api/app/core/config.py`` so local dev works without env
+# files; the boot guard refuses to use it outside CHECKWISE_ENV=local.
+# Tracked in the audit findings doc as P4-01 (closed by commit
+# db4aa98).
+regexes = [
+  '''checkwise-local-dev-secret-change-me-please-min-32-chars''',
+]
+
+# Test fixture passwords and JWT-like blobs in pytest snapshots live
+# under apps/api/tests and never reach production. Skip the whole
+# tests tree to keep noise out of the report.
+paths = [
+  '''apps/api/tests/.*''',
+  '''apps/api/scripts/dev_seed\.py''',
+  '''scripts/.*''',
+  # Historical session export / audit scratch docs hold descriptive
+  # examples of the rotation marker that look like credentials at a
+  # glance. Frozen by design (see P4-04 commit 2a301ef).
+  '''docs/handoff/SESSION_EXPORT_.*\.md''',
+  '''docs/audits/SALE_READINESS_AUDIT_SCRATCH\.md''',
+  '''docs/codex-route-workflow-audit/.*''',
+  # Archived legacy docs.
+  '''docs/_archive/.*''',
+]
