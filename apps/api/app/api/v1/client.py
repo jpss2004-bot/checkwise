@@ -81,6 +81,7 @@ from app.models import (
     Vendor,
 )
 from app.services.audit_log import add_audit_event
+from app.services.search_service import SearchHit, search_submissions
 from app.services.client_metadata import (
     client_master_file_path,
     display_export_path,
@@ -2152,4 +2153,66 @@ def client_audit_package_zip(
         iterator,
         media_type="application/zip",
         headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+    )
+
+
+# ───────────────────────────────────────────────────────────────────
+# Global search · client scope
+# ───────────────────────────────────────────────────────────────────
+
+
+class ClientSearchHitOut(BaseModel):
+    submission_id: str
+    vendor_id: str
+    vendor_name: str
+    vendor_rfc: str | None
+    client_id: str
+    client_name: str
+    client_rfc: str | None
+    period_key: str | None
+    institution_code: str | None
+    institution_label: str | None
+    requirement_name: str | None
+    status: str
+    contract_folio: str | None
+    matched_by: str
+    created_at: str
+
+
+class ClientSearchResponse(BaseModel):
+    query: str
+    matched_by: str
+    total: int
+    items: list[ClientSearchHitOut]
+
+
+@router.get("/search", response_model=ClientSearchResponse)
+def client_search(
+    q: Annotated[str, Query(min_length=1, max_length=120)],
+    db: DbSession,
+    current: ClientUser,
+    limit: Annotated[int, Query(ge=1, le=100)] = 50,
+) -> ClientSearchResponse:
+    """Search submissions visible to this client_admin user.
+
+    Scope: every client_id reachable through the user's
+    ``client_admin`` memberships (or internal_admin memberships, which
+    /client/me already promotes to a primary client). Empty
+    membership set short-circuits to zero results — the endpoint
+    never leaks data outside the caller's scope.
+    """
+
+    client_ids = _visible_client_ids_for_user(db, current.user.id)
+    if not client_ids:
+        return ClientSearchResponse(
+            query=q, matched_by="folio", total=0, items=[]
+        )
+    hits: list[SearchHit] = search_submissions(
+        db, q, client_ids=client_ids, limit=limit
+    )
+    return ClientSearchResponse(
+        query=q,
+        matched_by=(hits[0].matched_by if hits else "folio"),
+        total=len(hits),
+        items=[ClientSearchHitOut(**h.__dict__) for h in hits],
     )

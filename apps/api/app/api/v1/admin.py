@@ -72,6 +72,7 @@ from app.models import (
     Vendor,
 )
 from app.services.audit_log import add_audit_event
+from app.services.search_service import SearchHit, search_submissions
 
 router = APIRouter(prefix="/admin", tags=["admin"])
 DbSession = Annotated[Session, Depends(get_db)]
@@ -2203,3 +2204,63 @@ def admin_vendor_expediente_zip(
         media_type="application/zip",
         headers={"Content-Disposition": f'attachment; filename="{filename}"'},
     )
+
+
+# ───────────────────────────────────────────────────────────────────
+# Global search · admin scope (sees every submission)
+# ───────────────────────────────────────────────────────────────────
+
+
+class SearchHitOut(BaseModel):
+    submission_id: str
+    vendor_id: str
+    vendor_name: str
+    vendor_rfc: str | None
+    client_id: str
+    client_name: str
+    client_rfc: str | None
+    period_key: str | None
+    institution_code: str | None
+    institution_label: str | None
+    requirement_name: str | None
+    status: str
+    contract_folio: str | None
+    matched_by: str
+    created_at: str
+
+
+class SearchResponse(BaseModel):
+    query: str
+    matched_by: str
+    total: int
+    items: list[SearchHitOut]
+
+
+def _hits_to_response(query: str, hits: list[SearchHit]) -> SearchResponse:
+    return SearchResponse(
+        query=query,
+        # Even an empty result reports the detected query type so the
+        # UI can render a "we treated this as a periodo" hint.
+        matched_by=(hits[0].matched_by if hits else "folio"),
+        total=len(hits),
+        items=[SearchHitOut(**hit.__dict__) for hit in hits],
+    )
+
+
+@router.get("/search", response_model=SearchResponse)
+def admin_search(
+    q: Annotated[str, Query(min_length=1, max_length=120)],
+    db: DbSession,
+    current: AdminUser,
+    limit: Annotated[int, Query(ge=1, le=100)] = 50,
+) -> SearchResponse:
+    """Search every submission CheckWise stores by RFC, periodo or folio.
+
+    Reviewers triage across all clients/vendors, so this endpoint
+    intentionally has no scope filter. The frontend search bar in the
+    admin shell calls this; the result page links each row to the
+    /admin/reviewer/{submission_id} detail view.
+    """
+    _ = current  # auth handled by AdminUser dependency
+    hits = search_submissions(db, q, limit=limit)
+    return _hits_to_response(q, hits)

@@ -96,6 +96,7 @@ from app.models import (
 from app.models.entities import utc_now
 from app.schemas.submissions import MultiSubmissionResponse, SubmissionResponse
 from app.services.audit_log import add_audit_event
+from app.services.search_service import SearchHit, search_submissions
 from app.services.contact_service import hash_ip
 from app.services.correction_request_service import (
     TIER_B_FIELD_LABEL_ES,
@@ -4223,4 +4224,59 @@ def mark_all_provider_notifications_read(
     return ProviderNotificationSummary(
         workspace_id=workspace.id,
         unread_count=_provider_unread_count(db, workspace.id),
+    )
+
+
+# ───────────────────────────────────────────────────────────────────
+# Global search · portal scope (single workspace's vendor)
+# ───────────────────────────────────────────────────────────────────
+
+
+class PortalSearchHitOut(BaseModel):
+    submission_id: str
+    vendor_id: str
+    vendor_name: str
+    vendor_rfc: str | None
+    client_id: str
+    client_name: str
+    client_rfc: str | None
+    period_key: str | None
+    institution_code: str | None
+    institution_label: str | None
+    requirement_name: str | None
+    status: str
+    contract_folio: str | None
+    matched_by: str
+    created_at: str
+
+
+class PortalSearchResponse(BaseModel):
+    query: str
+    matched_by: str
+    total: int
+    items: list[PortalSearchHitOut]
+
+
+@router.get("/search", response_model=PortalSearchResponse)
+def portal_search(
+    q: Annotated[str, Query(min_length=1, max_length=120)],
+    db: DbSession,
+    workspace: Annotated[ProviderWorkspace, Depends(current_portal_workspace)],
+    limit: Annotated[int, Query(ge=1, le=100)] = 50,
+) -> PortalSearchResponse:
+    """Search submissions belonging to the active portal workspace.
+
+    Scope: ``vendor_ids=[workspace.vendor_id]``. A provider can never
+    see other vendors' rows through this endpoint regardless of what
+    query they paste — the scope filter runs unconditionally.
+    """
+
+    hits: list[SearchHit] = search_submissions(
+        db, q, vendor_ids=[workspace.vendor_id], limit=limit
+    )
+    return PortalSearchResponse(
+        query=q,
+        matched_by=(hits[0].matched_by if hits else "folio"),
+        total=len(hits),
+        items=[PortalSearchHitOut(**h.__dict__) for h in hits],
     )
