@@ -10,6 +10,7 @@ import {
   CheckCircle,
   Files,
   HourglassHigh,
+  IdentificationCard,
   Storefront,
   Warning,
   WarningOctagon,
@@ -32,6 +33,7 @@ import { ClientShell } from "../_shell";
 import {
   getClientMe,
   getClientOverview,
+  getClientProfile,
   listClientNotifications,
   listClientActivity,
   listClientSubmissions,
@@ -39,6 +41,7 @@ import {
   type ClientMe,
   type ClientNotificationItem,
   type ClientOverview,
+  type ClientProfile,
   type ClientSubmissionItem,
 } from "@/lib/api/client";
 
@@ -60,6 +63,26 @@ export default function ClientDashboardPage() {
   const [unreadCount, setUnreadCount] = useState(0);
   const [clientId, setClientId] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [profile, setProfile] = useState<ClientProfile | null>(null);
+
+  // Profile fetch is independent from overview so a late return on
+  // the heavier overview query doesn't block the "termina tu alta"
+  // banner from rendering. Failures are silent — the banner just
+  // stays hidden.
+  useEffect(() => {
+    let cancelled = false;
+    getClientProfile()
+      .then((p) => {
+        if (cancelled) return;
+        setProfile(p);
+      })
+      .catch(() => {
+        // Silent — the dashboard still works without the banner.
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   useEffect(() => {
     let cancelled = false;
@@ -128,6 +151,9 @@ export default function ClientDashboardPage() {
         <DashboardSkeleton />
       ) : (
         <div className="space-y-7">
+          {profile && profile.onboarding_completed_at === null ? (
+            <OnboardingPromptBanner clientName={profile.name} />
+          ) : null}
           <ClientHero overview={overview} />
           <ClientKpiStrip overview={overview} />
           <div className="cw-stagger grid gap-5 lg:grid-cols-3">
@@ -245,6 +271,39 @@ function summaryDescription(o: ClientOverview): string {
 }
 
 // ─── KPI strip ────────────────────────────────────────────────────
+
+// Junta 2026-05-23 — soft banner that prompts the client_admin to
+// finish their self-service alta on /client/onboarding. Hidden once
+// ``onboarding_completed_at`` is set on the row.
+function OnboardingPromptBanner({ clientName }: { clientName: string }) {
+  return (
+    <div className="flex flex-wrap items-center justify-between gap-3 rounded-md border border-[color:var(--status-warning-border)] bg-[color:var(--status-warning-bg)] p-4">
+      <div className="flex items-start gap-3">
+        <IdentificationCard
+          className="mt-0.5 h-5 w-5 text-[color:var(--status-warning-text)]"
+          weight="bold"
+          aria-hidden="true"
+        />
+        <div className="min-w-0">
+          <p className="text-sm font-semibold text-[color:var(--text-primary)]">
+            Termina tu alta, {clientName}
+          </p>
+          <p className="mt-0.5 text-xs text-[color:var(--text-secondary)]">
+            Nuestro equipo precargó tus datos básicos. Completa el
+            sector, domicilio fiscal y teléfono para activar tu
+            portafolio. No te pediremos archivos.
+          </p>
+        </div>
+      </div>
+      <Button asChild size="sm">
+        <Link href="/client/onboarding">
+          Completar mi alta
+          <ArrowRight className="h-3.5 w-3.5" weight="bold" aria-hidden="true" />
+        </Link>
+      </Button>
+    </div>
+  );
+}
 
 function ClientKpiStrip({ overview }: { overview: ClientOverview }) {
   const rows: {

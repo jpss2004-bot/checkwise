@@ -501,6 +501,44 @@ export function clientVendorExpedienteZipUrl(
 }
 
 // ---------------------------------------------------------------------------
+// Junta 2026-05-23 — client onboarding profile
+// ---------------------------------------------------------------------------
+
+export type ClientProfile = {
+  id: string;
+  name: string;
+  rfc: string | null;
+  email: string | null;
+  responsible_name: string | null;
+  industry: string | null;
+  fiscal_address: string | null;
+  phone: string | null;
+  notes: string | null;
+  onboarding_completed_at: string | null;
+};
+
+export type ClientProfileUpdate = {
+  responsible_name?: string | null;
+  industry?: string | null;
+  fiscal_address?: string | null;
+  phone?: string | null;
+  notes?: string | null;
+};
+
+export async function getClientProfile(): Promise<ClientProfile> {
+  return fetchJson<ClientProfile>("/api/v1/client/profile");
+}
+
+export async function updateClientProfile(
+  body: ClientProfileUpdate,
+): Promise<ClientProfile> {
+  return fetchJson<ClientProfile>("/api/v1/client/profile", {
+    method: "PATCH",
+    body: JSON.stringify(body),
+  });
+}
+
+// ---------------------------------------------------------------------------
 // Junta 2026-05-23 — cross-vendor audit package
 // ---------------------------------------------------------------------------
 
