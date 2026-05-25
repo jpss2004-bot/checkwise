@@ -44,6 +44,9 @@ class Settings(BaseSettings):
 
     # Auth + RBAC (Patch 6). The default secret is for local dev only;
     # any non-local environment must override AUTH_JWT_SECRET via env.
+    # ``_AUTH_JWT_PLACEHOLDER`` below holds the same string so the
+    # boot-time validator can refuse to start when this default leaks
+    # into a non-local deploy (audit P4-01 — 2026-05-25).
     AUTH_JWT_SECRET: str = "checkwise-local-dev-secret-change-me-please-min-32-chars"
     AUTH_JWT_ALGORITHM: str = "HS256"
     AUTH_JWT_EXPIRES_MINUTES: int = 60 * 24
@@ -296,9 +299,46 @@ def _normalize_pg_url(url: str) -> str:
     return url
 
 
+_AUTH_JWT_PLACEHOLDER = (
+    "checkwise-local-dev-secret-change-me-please-min-32-chars"
+)
+
+
+class InsecureBootError(RuntimeError):
+    """Raised when boot config would silently expose a security risk.
+
+    Today: the in-code ``AUTH_JWT_SECRET`` placeholder leaking into a
+    non-local environment (audit P4-01 — 2026-05-25). The placeholder
+    is committed to a public repo, so any process running with it
+    would accept JWTs minted by anyone reading the source.
+    """
+
+
+def _validate_boot_security(settings: Settings) -> None:
+    """Refuse to boot the API with an unsafe security configuration.
+
+    Called once from :func:`get_settings` so the check fires the first
+    time anything in the codebase imports ``settings``. In local
+    (``CHECKWISE_ENV=local``) the guard is a no-op so the placeholder
+    keeps dev workflows fast; outside local it raises before any
+    request can be served.
+    """
+    if settings.is_local_env:
+        return
+    if settings.AUTH_JWT_SECRET == _AUTH_JWT_PLACEHOLDER:
+        raise InsecureBootError(
+            "Refusing to start: AUTH_JWT_SECRET is still set to the public "
+            "in-code placeholder. Set AUTH_JWT_SECRET to a fresh 32+ char "
+            "random string in the Render dashboard (openssl rand -hex 32) "
+            "before redeploying."
+        )
+
+
 @lru_cache
 def get_settings() -> Settings:
-    return Settings()
+    s = Settings()
+    _validate_boot_security(s)
+    return s
 
 
 settings = get_settings()

@@ -4,10 +4,12 @@ Used by the auth router (login, forgot-password). Conservative defaults
 trade a small UX cost for protection against credential stuffing and
 reset-link enumeration / mail-bombing.
 
-TODO: replace with Redis (or another shared store) before scaling beyond
-a single worker. Today each worker keeps its own counters, so the
-effective per-cluster cap scales with worker count and a multi-worker
-deploy is more permissive than the configured values imply.
+Scaling note (audit P4-13 — 2026-05-25): the limiter is process-local.
+Each worker keeps its own counters, so the effective per-cluster cap
+scales with worker count — a multi-worker deploy is more permissive
+than the configured values imply. Acceptable on Render's single-
+worker starter tier; before horizontal scale, swap this for Redis
+(or another shared store) so the limit is enforced across workers.
 """
 
 from __future__ import annotations

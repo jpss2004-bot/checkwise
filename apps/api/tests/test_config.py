@@ -95,3 +95,53 @@ def test_empty_str_env_stays_empty(monkeypatch: pytest.MonkeyPatch) -> None:
     assert s.CORS_ORIGINS == ""
     assert s.cors_origins_list == []
     assert s.ANTHROPIC_API_KEY == ""
+
+
+# ---------------------------------------------------------------------------
+# Audit P4-01 (2026-05-25) — AUTH_JWT_SECRET placeholder boot guard
+# ---------------------------------------------------------------------------
+
+
+def test_boot_guard_passes_in_local_with_placeholder() -> None:
+    """The placeholder secret is fine in local — the validator's
+    contract is "non-local must override" and local stays unblocked
+    so dev workflows keep working without env files."""
+    from app.core.config import Settings, _validate_boot_security
+
+    s = Settings(
+        CHECKWISE_ENV="local",
+        AUTH_JWT_SECRET="checkwise-local-dev-secret-change-me-please-min-32-chars",
+    )
+    # No raise.
+    _validate_boot_security(s)
+
+
+def test_boot_guard_raises_on_placeholder_in_production() -> None:
+    """The committed placeholder cannot reach a non-local deploy.
+    Refusing to boot is correct here — silently shipping the public
+    secret would let anyone mint admin JWTs."""
+    from app.core.config import (
+        InsecureBootError,
+        Settings,
+        _validate_boot_security,
+    )
+
+    s = Settings(
+        CHECKWISE_ENV="production",
+        AUTH_JWT_SECRET="checkwise-local-dev-secret-change-me-please-min-32-chars",
+    )
+    with pytest.raises(InsecureBootError):
+        _validate_boot_security(s)
+
+
+def test_boot_guard_passes_with_real_secret_in_production() -> None:
+    """A secret that isn't the in-code placeholder is allowed even in
+    production — the guard intentionally trips on the *known* leaked
+    string only, not on every weak value."""
+    from app.core.config import Settings, _validate_boot_security
+
+    s = Settings(
+        CHECKWISE_ENV="production",
+        AUTH_JWT_SECRET="a1b2c3d4e5f6a7b8c9d0e1f2a3b4c5d6e7f8a9b0c1d2e3f4",
+    )
+    _validate_boot_security(s)
