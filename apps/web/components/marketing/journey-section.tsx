@@ -73,10 +73,10 @@ const ACTS: ReadonlyArray<Act> = [
     title: "Legal Shelf decide en cola priorizada",
     who: "Ada Reyes · revisión humana",
     doing: "Aprueba, rechaza, pide aclaración o registra excepción legal",
-    evidence: "Audit log firmado con actor, acción y diff",
+    evidence: "Registro firmado con actor, acción y cambio",
     icon: Gavel,
     image: "/marketing/product/admin-audit-log.png",
-    chrome: "Audit log · actor · acción · entidad",
+    chrome: "Registro de auditoría · actor · acción · entidad",
   },
   {
     id: 4,
@@ -130,13 +130,13 @@ export function JourneySection() {
       <div className="mx-auto max-w-[1320px] px-5 py-24 lg:py-28">
         <Reveal className="max-w-3xl">
           <p className="cw-eyebrow text-[color:var(--text-teal)]">
-            El recorrido
+            Cómo funciona
           </p>
           <h2
             className="mt-3 font-semibold tracking-[-0.022em] text-[color:var(--text-primary)] [text-wrap:balance]"
             style={{ fontSize: "clamp(1.85rem, 2.9vw, 2.55rem)", lineHeight: 1.06 }}
           >
-            Cuatro actos sobre el mismo expediente, de la carga al auditor.
+            Del calendario al reporte ejecutivo, sobre el mismo expediente.
           </h2>
         </Reveal>
 
