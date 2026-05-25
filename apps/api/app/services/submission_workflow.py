@@ -349,6 +349,37 @@ def apply_reviewer_decision(
             "[submission_workflow] outbound email crashed; decision still committed"
         )
 
+    # M-WA (2026-05-25) — WhatsApp delivery for users on
+    # contact_preference={"whatsapp","both"}. Independent of email
+    # above: failure on one channel never blocks the other or the
+    # underlying decision. The reviewer's display name (if found via
+    # the reviewer_user_id) becomes the "by {{4}}" slot in the
+    # template — defaults to "Legal Shelf" when absent.
+    try:
+        from app.models import User as _User
+        from app.services.transactional_whatsapp import (
+            whatsapp_provider_of_reviewer_decision,
+        )
+
+        reviewer_name: str | None = None
+        if reviewer_user_id:
+            reviewer_user = db.get(_User, reviewer_user_id)
+            if reviewer_user is not None:
+                reviewer_name = reviewer_user.full_name or reviewer_user.email
+
+        whatsapp_provider_of_reviewer_decision(
+            db,
+            submission=submission,
+            action=action_enum.value,
+            reviewer_name=reviewer_name,
+        )
+    except Exception:  # pragma: no cover — defensive
+        import logging as _logging
+
+        _logging.getLogger("checkwise.submission_workflow").exception(
+            "[submission_workflow] outbound whatsapp crashed; decision still committed"
+        )
+
     db.commit()
     db.refresh(submission)
 

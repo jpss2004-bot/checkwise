@@ -306,6 +306,34 @@ def dispatch_renewals_for_workspace(
                     "[renewal_dispatch] outbound email crashed; reminder still fired"
                 )
 
+            # M-WA (2026-05-25) — WhatsApp delivery for users on
+            # contact_preference={"whatsapp","both"}. Independent of
+            # email above: a failure on one channel never blocks the
+            # other. Lazy import so a missing module / broken Meta
+            # token can never break the cron at import time.
+            try:
+                from app.services.transactional_whatsapp import (
+                    whatsapp_renewal_threshold_crossed,
+                )
+
+                whatsapp_renewal_threshold_crossed(
+                    db,
+                    workspace=workspace,
+                    vendor=vendor,
+                    requirement_name=req.name,
+                    due_date=due,
+                    days_remaining=threshold,
+                    severity=severity,
+                )
+            except Exception:  # pragma: no cover — defensive
+                import logging as _logging
+
+                _logging.getLogger(
+                    "checkwise.renewal_dispatch"
+                ).exception(
+                    "[renewal_dispatch] outbound whatsapp crashed; reminder still fired"
+                )
+
             fired.append(threshold)
 
         outcomes.append(
