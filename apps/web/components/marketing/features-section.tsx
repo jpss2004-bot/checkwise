@@ -1,7 +1,7 @@
 "use client";
 
 import Image from "next/image";
-import { useEffect, useState } from "react";
+import { useState } from "react";
 import { AnimatePresence, motion } from "motion/react";
 import {
   Archive,
@@ -109,45 +109,23 @@ const ROLES: ReadonlyArray<Role> = [
   },
 ];
 
-const CYCLE_MS = 5200;
-
 /**
  * Role switcher — replaces the previous 6-card grid.
  *
- * Left rail lists the five product personas. The right side renders the
- * active role's screenshot at full width with a chromed frame, a stack
- * of inline chips for proof bullets, and a small surface identifier
- * (route + icon).
- *
- * The active role auto-cycles every CYCLE_MS, paused on hover so users
- * can read. Click or focus to override.
+ * Left rail is a flat typographic list of five product personas. The
+ * canvas to the right carries the live-system chrome (the one section
+ * signature) so the rail itself stays quiet and doesn't compete with a
+ * second chrome system. Roles are manual — no auto-rotate — so the page
+ * has only one moving clock (the hero stage).
  */
 export function FeaturesSection() {
   const { reduced: reduce } = useMotionPreference();
   const [activeId, setActiveId] = useState<string>(ROLES[0].id);
-  const [paused, setPaused] = useState(false);
-
-  useEffect(() => {
-    if (reduce || paused) return;
-    const id = window.setInterval(() => {
-      setActiveId((current) => {
-        const idx = ROLES.findIndex((r) => r.id === current);
-        return ROLES[(idx + 1) % ROLES.length].id;
-      });
-    }, CYCLE_MS);
-    return () => window.clearInterval(id);
-  }, [reduce, paused]);
-
   const active = ROLES.find((r) => r.id === activeId) ?? ROLES[0];
 
   return (
-    <section
-      id="features"
-      className="relative bg-[color:var(--surface-raised)]"
-      onMouseEnter={() => setPaused(true)}
-      onMouseLeave={() => setPaused(false)}
-    >
-      <div className="mx-auto max-w-[1320px] px-5 py-20 lg:py-28">
+    <section id="features" className="relative bg-[color:var(--surface-raised)]">
+      <div className="mx-auto max-w-[1320px] px-5 py-24 lg:py-28">
         {/* Section header — small, deliberate. The product carries the page. */}
         <Reveal className="grid gap-6 md:grid-cols-[minmax(0,2fr)_minmax(0,1fr)] md:items-end">
           <div>
@@ -171,13 +149,8 @@ export function FeaturesSection() {
         </Reveal>
 
         {/* Stage — left rail + right canvas. */}
-        <div className="mt-12 grid grid-cols-1 gap-10 lg:mt-16 lg:grid-cols-[minmax(0,300px)_minmax(0,1fr)] lg:gap-12 xl:grid-cols-[minmax(0,340px)_minmax(0,1fr)]">
-          <RoleRail
-            roles={ROLES}
-            activeId={active.id}
-            onSelect={setActiveId}
-            paused={paused}
-          />
+        <div className="mt-14 grid grid-cols-1 gap-12 lg:mt-16 lg:grid-cols-[minmax(0,260px)_minmax(0,1fr)] lg:gap-16">
+          <RoleRail roles={ROLES} activeId={active.id} onSelect={setActiveId} />
           <RoleCanvas active={active} reduce={reduce} />
         </div>
       </div>
@@ -189,19 +162,16 @@ function RoleRail({
   roles,
   activeId,
   onSelect,
-  paused,
 }: {
   roles: ReadonlyArray<Role>;
   activeId: string;
   onSelect: (id: string) => void;
-  paused: boolean;
 }) {
   return (
-    <div className="flex flex-col">
-      <p className="cw-eyebrow">Roles del sistema</p>
-      <ul className="mt-3 flex flex-col divide-y divide-[color:var(--border-subtle)] overflow-hidden rounded-[10px] border border-[color:var(--border-subtle)] bg-[color:var(--surface-page)]">
+    <div className="lg:sticky lg:top-24 lg:self-start">
+      <p className="cw-eyebrow">Roles</p>
+      <ul className="mt-4 flex flex-col">
         {roles.map((role) => {
-          const Icon = role.icon;
           const active = role.id === activeId;
           return (
             <li key={role.id}>
@@ -209,65 +179,43 @@ function RoleRail({
                 type="button"
                 aria-pressed={active}
                 onClick={() => onSelect(role.id)}
-                className={`group relative flex w-full items-center gap-3 px-4 py-3 text-left transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[color:var(--border-focus)]/40 ${
-                  active
-                    ? "bg-[color:var(--surface-raised)]"
-                    : "hover:bg-[color:var(--surface-raised)]/60"
-                }`}
+                className="group relative flex w-full items-baseline gap-3 py-3 text-left focus-visible:outline-none"
               >
+                {/* Left edge accent — teal hairline on active, hairline
+                    track underneath for the others. */}
                 <span
                   aria-hidden="true"
-                  className={`flex h-9 w-9 shrink-0 items-center justify-center rounded-md transition-colors ${
+                  className={`absolute left-0 top-1/2 h-[18px] w-[2px] -translate-y-1/2 rounded-full transition-colors ${
                     active
-                      ? "bg-[color:var(--surface-brand)] text-[color:var(--text-inverse)]"
-                      : "bg-[color:var(--surface-teal-muted)] text-[color:var(--text-teal)]"
+                      ? "bg-[color:var(--text-teal)]"
+                      : "bg-[color:var(--border-subtle)] group-hover:bg-[color:var(--border-strong)]"
                   }`}
-                >
-                  <Icon className="h-4 w-4" weight="duotone" />
-                </span>
-                <div className="min-w-0 flex-1">
+                />
+                <div className="pl-4">
                   <p
-                    className={`text-[14.5px] font-semibold leading-tight transition-colors ${
+                    className={`text-[18px] font-semibold leading-tight tracking-[-0.012em] transition-colors ${
                       active
                         ? "text-[color:var(--text-primary)]"
-                        : "text-[color:var(--text-secondary)] group-hover:text-[color:var(--text-primary)]"
+                        : "text-[color:var(--text-tertiary)] group-hover:text-[color:var(--text-secondary)]"
                     }`}
                   >
                     {role.label}
                   </p>
-                  <p className="mt-0.5 font-mono text-[10px] uppercase tracking-[0.16em] text-[color:var(--text-tertiary)]">
+                  <p
+                    className={`mt-0.5 font-mono text-[10px] uppercase tracking-[0.18em] transition-colors ${
+                      active
+                        ? "text-[color:var(--text-teal)]"
+                        : "text-[color:var(--text-tertiary)]"
+                    }`}
+                  >
                     {role.pillar.value}
                   </p>
                 </div>
-                {/* Right edge: active progress slice, otherwise a quiet caret. */}
-                {active ? (
-                  <span
-                    aria-hidden="true"
-                    className="ml-2 inline-flex items-center gap-1.5"
-                  >
-                    <span
-                      className={`inline-block h-1.5 w-1.5 rounded-full bg-[color:var(--text-teal)] ${
-                        paused ? "" : "cw-pulse-soft"
-                      }`}
-                    />
-                  </span>
-                ) : (
-                  <span
-                    aria-hidden="true"
-                    className="ml-2 font-mono text-[10px] uppercase tracking-[0.16em] text-[color:var(--text-tertiary)] opacity-0 group-hover:opacity-100"
-                  >
-                    ↵
-                  </span>
-                )}
               </button>
             </li>
           );
         })}
       </ul>
-
-      <p className="mt-5 font-mono text-[10px] uppercase tracking-[0.18em] text-[color:var(--text-tertiary)]">
-        {paused ? "En pausa · hover" : "Avance automático cada 5 s"}
-      </p>
     </div>
   );
 }
