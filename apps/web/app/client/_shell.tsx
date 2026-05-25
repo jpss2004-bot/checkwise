@@ -17,6 +17,7 @@ import {
   type Icon,
 } from "@phosphor-icons/react";
 
+import { BackBar } from "@/components/checkwise/back-bar";
 import { BrandLogo } from "@/components/checkwise/brand-logo";
 import { FeedbackLauncher } from "@/components/feedback/feedback-launcher";
 import { UserMenu } from "@/components/checkwise/user-menu";
@@ -236,6 +237,11 @@ export function ClientShell({
           </nav>
         </div>
       ) : null}
+
+      <BackBar
+        homeHref="/client/dashboard"
+        hiddenOn={["/client/onboarding"]}
+      />
 
       <main
         className={cn(

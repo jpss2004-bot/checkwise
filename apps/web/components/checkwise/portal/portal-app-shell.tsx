@@ -23,6 +23,7 @@ import {
   type Icon,
 } from "@phosphor-icons/react";
 
+import { BackBar } from "@/components/checkwise/back-bar";
 import { BrandLogo } from "@/components/checkwise/brand-logo";
 import { WiseDock } from "@/components/checkwise/portal/wise-dock";
 import { UserMenu } from "@/components/checkwise/user-menu";
@@ -330,6 +331,10 @@ export function PortalAppShell({
           isComplete={isComplete}
           onToggleMobile={() => setMobileOpen((v) => !v)}
           onLogout={onLogout}
+        />
+        <BackBar
+          homeHref="/portal/dashboard"
+          hiddenOn={["/portal/entra-a-tu-espacio", "/portal/onboarding"]}
         />
         <div className="flex-1">{children}</div>
       </div>
