@@ -8,15 +8,19 @@ import { BrandLogo } from "@/components/checkwise/brand-logo";
 import { Button } from "@/components/ui/button";
 
 const NAV_ITEMS = [
-  { href: "#features", label: "Producto" },
+  { href: "#features", label: "Cómo funciona" },
   { href: "#producto", label: "Recorrido" },
-  { href: "#contacto", label: "Contacto" },
+  { href: "#legal-shelf", label: "Legal Shelf" },
 ] as const;
 
 /**
  * Sticky marketing nav. Picks up a subtle elevation + tighter padding
  * once the user scrolls past the hero's first viewport, which is a
  * small detail that makes the page feel premium without being noisy.
+ *
+ * Action priority — one primary CTA. "Solicitar demo" is the only
+ * commercial conversion path; "Iniciar sesión" stays as a quiet utility
+ * link for existing users.
  */
 export function MarketingNav() {
   const [elevated, setElevated] = useState(false);
@@ -46,7 +50,7 @@ export function MarketingNav() {
         </Link>
         <nav
           aria-label="Navegación principal"
-          className="hidden items-center gap-6 text-[13px] md:flex"
+          className="hidden items-center gap-7 text-[13px] md:flex"
         >
           {NAV_ITEMS.map((item) => (
             <a
@@ -59,16 +63,18 @@ export function MarketingNav() {
           ))}
         </nav>
         <div className="flex items-center gap-2">
-          <Button asChild variant="ghost" size="sm">
-            <Link href="/login">
-              <span className="sm:hidden">Entrar</span>
-              <span className="hidden sm:inline">Iniciar sesión</span>
-            </Link>
+          <Button
+            asChild
+            variant="ghost"
+            size="sm"
+            className="hidden text-[color:var(--text-secondary)] sm:inline-flex"
+          >
+            <Link href="/login">Iniciar sesión</Link>
           </Button>
           <Button asChild size="sm" className="rounded-full">
             <Link href="#contacto">
               <span className="sm:hidden">Demo</span>
-              <span className="hidden sm:inline">Solicitar información</span>
+              <span className="hidden sm:inline">Solicitar demo</span>
               <ArrowRight className="h-3.5 w-3.5" weight="bold" aria-hidden="true" />
             </Link>
           </Button>
