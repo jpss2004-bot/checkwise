@@ -76,7 +76,8 @@ const STATUS_LABEL: Record<string, string> = {
   prevalidado: "Prevalidado",
   posible_mismatch: "Posible inconsistencia",
   aprobado: "Aprobado",
-  rechazado: "Rechazado",
+  // Audit P1-02 — softer copy on provider-facing timeline.
+  rechazado: "Requiere corrección",
   vencido: "Vencido",
   no_aplica: "No aplica",
   requiere_aclaracion: "Requiere aclaración",

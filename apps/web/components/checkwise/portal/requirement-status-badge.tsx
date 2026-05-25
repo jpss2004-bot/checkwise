@@ -8,7 +8,13 @@ const STATUS_LABELS: Record<RequirementStatus, string> = {
   prevalidado: "Prevalidado",
   posible_mismatch: "Posible inconsistencia",
   aprobado: "Aprobado",
-  rechazado: "Rechazado",
+  // Audit P1-02 (2026-05-25) — softened from "Rechazado" so the
+  // badge invites the provider to act rather than feel rejected.
+  // Backend status code stays ``rechazado``; this is a UX-copy-only
+  // change. The longer status detail (STATUS_DESCRIPTIONS) keeps
+  // the verb form "fue rechazado" which is correct in narrative
+  // context but reads harsh as a noun on a pill.
+  rechazado: "Requiere corrección",
   vencido: "Vencido",
   no_aplica: "No aplica",
   requiere_aclaracion: "Necesita aclaración",
@@ -42,7 +48,8 @@ const STATUS_DESCRIPTIONS: Record<RequirementStatus, string> = {
   posible_mismatch:
     "El archivo parece no coincidir con el requisito, periodo o RFC esperado. Verifica antes de continuar.",
   aprobado: "Aprobado por la revisión humana. No requiere más acción.",
-  rechazado: "Rechazado en revisión. Revisa los comentarios y vuelve a cargar el documento correcto.",
+  rechazado:
+    "Necesita corrección. Revisa los comentarios del revisor y vuelve a cargar el documento correcto.",
   vencido: "El documento ya no cubre el periodo vigente. Sube la versión actualizada.",
   no_aplica: "Este requisito no aplica para tu caso.",
   requiere_aclaracion:

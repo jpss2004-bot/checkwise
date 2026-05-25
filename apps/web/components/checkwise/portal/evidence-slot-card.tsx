@@ -51,7 +51,8 @@ const STATE_LABEL_FALLBACK: Record<DocumentStateCode, string> = {
   uploaded: "Recibido",
   in_review: "En revisión",
   approved: "Aprobado",
-  rejected: "Rechazado",
+  // Audit P1-02 — softer copy on provider-facing slot cards.
+  rejected: "Requiere corrección",
   expired: "Vencido",
   needs_review: "Requiere atención",
 };
