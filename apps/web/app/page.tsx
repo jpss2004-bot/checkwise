@@ -51,7 +51,7 @@ function RequestInformation() {
       <div className="mx-auto grid max-w-[1320px] grid-cols-1 gap-12 px-5 py-24 lg:grid-cols-[minmax(0,5fr)_minmax(0,7fr)] lg:gap-20 lg:py-28">
         <Reveal className="flex min-w-0 flex-col">
           <p className="cw-eyebrow text-[color:var(--text-teal)]">
-            Solicitar información
+            Solicitar demo
           </p>
           <h2
             className="mt-3 font-semibold tracking-[-0.022em] text-[color:var(--text-primary)] [text-wrap:balance]"
@@ -71,17 +71,17 @@ function RequestInformation() {
             <DemoStep
               n="01"
               kicker="Recorrido"
-              body="Portal proveedor, vista cliente y bandeja Legal Shelf sobre un mismo expediente real."
+              body="Vista del proveedor, vista cliente y bandeja Legal Shelf sobre un mismo expediente real."
             />
             <DemoStep
               n="02"
               kicker="Reportes"
-              body="Editor con copilot LLM, generación, exportación PDF, Excel y HTML en vivo."
+              body="Editor con asistente de reportes, generación, exportación PDF, Excel y HTML en vivo."
             />
             <DemoStep
               n="03"
               kicker="Auditoría"
-              body="Audit log firmado, paquete ZIP con índice y metadata exportable a tu auditor."
+              body="Registro firmado, paquete ZIP con índice y datos exportables a tu auditor."
             />
           </ol>
 
@@ -93,20 +93,16 @@ function RequestInformation() {
 
         <Reveal>
           <div className="relative">
-            {/* Chrome bar above the form — matches the live-system
-                signature used on every other section. */}
-            <div className="flex items-center gap-2 border-x border-t border-[color:var(--border-default)] bg-[color:var(--surface-raised)] px-3 py-2 rounded-t-[10px]">
-              <span className="flex gap-1.5" aria-hidden="true">
-                <span className="h-1.5 w-1.5 rounded-full bg-[color:var(--border-strong)]/70" />
-                <span className="h-1.5 w-1.5 rounded-full bg-[color:var(--border-strong)]/45" />
-                <span className="h-1.5 w-1.5 rounded-full bg-[color:var(--border-strong)]/30" />
-              </span>
-              <span className="ml-1 truncate font-mono text-[10px] uppercase tracking-[0.18em] text-[color:var(--text-tertiary)]">
-                POST · /api/v1/contact
+            {/* Chrome bar above the form — public-friendly framing.
+                Names what this is (a demo request) instead of leaking
+                the underlying API endpoint. */}
+            <div className="flex items-center gap-2 rounded-t-[10px] border-x border-t border-[color:var(--border-default)] bg-[color:var(--surface-raised)] px-4 py-2.5">
+              <span className="font-mono text-[10px] uppercase tracking-[0.2em] text-[color:var(--text-tertiary)]">
+                Solicitud de demo
               </span>
               <span className="ml-auto inline-flex items-center gap-1.5 font-mono text-[10px] uppercase tracking-[0.16em] text-[color:var(--text-teal)]">
                 <span className="cw-pulse-soft inline-block h-1.5 w-1.5 rounded-full bg-[color:var(--text-teal)]" />
-                En línea
+                Respuesta el mismo día hábil
               </span>
             </div>
             <div className="rounded-b-[10px] border border-[color:var(--border-default)] border-t-0 bg-[color:var(--surface-raised)] px-6 py-8 shadow-[0_22px_50px_-32px_hsl(var(--brand-navy)/0.22)] sm:px-10 sm:py-10">
@@ -166,31 +162,35 @@ function MarketingFooter() {
           </p>
         </div>
 
-        {/* Nav column */}
+        {/* Nav column — mirrors the top-nav anchors so labels stay
+            consistent across the page. */}
         <FooterColumn
           label="Producto"
           links={[
-            { label: "Recorrido", href: "#features" },
-            { label: "Cuatro actos", href: "#producto" },
+            { label: "Cómo funciona", href: "#features" },
+            { label: "Recorrido", href: "#producto" },
+            { label: "Legal Shelf", href: "#legal-shelf" },
             { label: "Iniciar sesión", href: "/login" },
             { label: "Solicitar demo", href: "#contacto" },
           ]}
         />
 
-        {/* Signature column */}
-        <div className="flex flex-col gap-3 md:items-end md:text-right">
+        {/* Signature column. Build metadata stays in the title
+            attribute for support diagnostics but is no longer visible
+            text on the public landing. */}
+        <div
+          className="flex flex-col gap-3 md:items-end md:text-right"
+          title={`CheckWise v${APP_VERSION} · ${BUILD_SHA}`}
+        >
           <p className="font-mono text-[10px] uppercase tracking-[0.2em] text-[color:var(--text-tertiary)]">
             Powered by Legal Shelf
           </p>
           <p className="text-[13px] text-[color:var(--text-secondary)]">
             Hecho en Ciudad de México.
           </p>
-          <span
-            className="font-mono text-[10px] uppercase tracking-[0.18em] text-[color:var(--text-tertiary)]"
-            title={`Build ${BUILD_SHA}`}
-          >
-            v{APP_VERSION} · {BUILD_SHA}
-          </span>
+          <p className="text-[12px] text-[color:var(--text-tertiary)]">
+            © {new Date().getFullYear()} CheckWise. Todos los derechos reservados.
+          </p>
         </div>
       </div>
     </footer>
