@@ -160,13 +160,22 @@ _DUMMY_HASH = "$2b$12$C6UzMDM.H6dfI/f/IKxGhuJ5xQk/Q0qfgY7r5y4Qx0K3qj1l6Q0aS"
 
 def _bearer_token(authorization: str | None) -> str:
     if not authorization:
-        raise HTTPException(status.HTTP_401_UNAUTHORIZED, detail="Missing Authorization header")
+        raise HTTPException(
+            status.HTTP_401_UNAUTHORIZED,
+            detail="Falta el encabezado de autorización.",
+        )
     parts = authorization.split(None, 1)
     if len(parts) != 2 or parts[0].lower() != "bearer":
-        raise HTTPException(status.HTTP_401_UNAUTHORIZED, detail="Invalid Authorization header")
+        raise HTTPException(
+            status.HTTP_401_UNAUTHORIZED,
+            detail="Encabezado de autorización inválido.",
+        )
     token = parts[1].strip()
     if not token:
-        raise HTTPException(status.HTTP_401_UNAUTHORIZED, detail="Empty bearer token")
+        raise HTTPException(
+            status.HTTP_401_UNAUTHORIZED,
+            detail="El token de autorización está vacío.",
+        )
     return token
 
 
@@ -287,7 +296,7 @@ def get_current_user(
     claims = _claims_from_header(authorization)
     user = db.get(User, claims.user_id)
     if user is None or user.status != "active":
-        raise HTTPException(status.HTTP_401_UNAUTHORIZED, detail="User not active")
+        raise HTTPException(status.HTTP_401_UNAUTHORIZED, detail="Tu sesión ya no está activa.")
 
     # P0 gate: a user flagged ``must_change_password=True`` may only
     # touch the narrow surface needed to clear the flag. Without this,
@@ -325,7 +334,8 @@ def require_role(role: str) -> Callable[..., CurrentUser]:
     ) -> CurrentUser:
         if role not in current.roles:
             raise HTTPException(
-                status.HTTP_403_FORBIDDEN, detail=f"Role '{role}' required"
+                status.HTTP_403_FORBIDDEN,
+                detail=f"Necesitas el rol '{role}' para esta acción.",
             )
         return current
 
@@ -348,7 +358,10 @@ def require_any_role(*roles: str) -> Callable[..., CurrentUser]:
         if not any(role in current.roles for role in accepted):
             raise HTTPException(
                 status.HTTP_403_FORBIDDEN,
-                detail=f"One of roles {list(accepted)} required",
+                detail=(
+                    "Necesitas alguno de estos roles para esta acción: "
+                    f"{list(accepted)}."
+                ),
             )
         return current
 
@@ -370,7 +383,8 @@ def require_org_role(role: str) -> Callable[..., CurrentUser]:
     ) -> CurrentUser:
         if organization_id not in current.organization_ids:
             raise HTTPException(
-                status.HTTP_403_FORBIDDEN, detail="Not a member of this organization"
+                status.HTTP_403_FORBIDDEN,
+                detail="No perteneces a esta organización.",
             )
         membership = db.execute(
             select(Membership).where(
@@ -383,7 +397,7 @@ def require_org_role(role: str) -> Callable[..., CurrentUser]:
         if membership is None:
             raise HTTPException(
                 status.HTTP_403_FORBIDDEN,
-                detail=f"Role '{role}' required in this organization",
+                detail=f"Necesitas el rol '{role}' en esta organización.",
             )
         return current
 
@@ -409,9 +423,9 @@ def login(payload: LoginRequest, request: Request, db: DbSession) -> LoginRespon
     # still runs to keep timing roughly comparable.
     if user is None or user.status != "active":
         verify_password(payload.password, _DUMMY_HASH)
-        raise HTTPException(status.HTTP_401_UNAUTHORIZED, detail="Invalid credentials")
+        raise HTTPException(status.HTTP_401_UNAUTHORIZED, detail="Credenciales inválidas.")
     if not verify_password(payload.password, user.password_hash):
-        raise HTTPException(status.HTTP_401_UNAUTHORIZED, detail="Invalid credentials")
+        raise HTTPException(status.HTTP_401_UNAUTHORIZED, detail="Credenciales inválidas.")
 
     memberships = (
         db.execute(
@@ -630,7 +644,7 @@ def set_password(
     """
     user = db.get(User, current.user.id)
     if user is None or user.status != "active":
-        raise HTTPException(status.HTTP_401_UNAUTHORIZED, detail="User not active")
+        raise HTTPException(status.HTTP_401_UNAUTHORIZED, detail="Tu sesión ya no está activa.")
 
     user.password_hash = hash_password(payload.new_password)
     user.must_change_password = False

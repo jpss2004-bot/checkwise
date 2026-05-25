@@ -60,18 +60,18 @@ async def create_pdf_metadata_dry_run(
     if advertised and advertised.isdigit() and int(advertised) > max_bytes:
         raise HTTPException(
             status_code=413,
-            detail=f"Upload exceeds {max_bytes} bytes.",
+            detail=f"El archivo no puede pesar más de {max_bytes} bytes.",
         )
     content = await file.read(max_bytes + 1)
     if len(content) > max_bytes:
         raise HTTPException(
             status_code=413,
-            detail=f"Upload exceeds {max_bytes} bytes.",
+            detail=f"El archivo no puede pesar más de {max_bytes} bytes.",
         )
     if not content:
         raise HTTPException(
             status_code=422,
-            detail="Uploaded PDF is empty.",
+            detail="El PDF está vacío.",
         )
 
     with tempfile.TemporaryDirectory(prefix="checkwise-metadata-dry-run-") as temp_dir:
@@ -86,9 +86,13 @@ async def create_pdf_metadata_dry_run(
                 enable_ocr=enable_ocr,
             )
         except UnknownDocumentTypeError as exc:
+            # Echo the offending code so the operator / n8n integration
+            # sees which value was rejected. Field names like
+            # ``document_type_code`` stay verbatim — they're API
+            # contracts, not user-facing copy.
             raise HTTPException(
                 status_code=422,
-                detail=str(exc),
+                detail=f"Tipo de documento desconocido: {document_type_code}.",
             ) from exc
 
 
@@ -100,11 +104,11 @@ def _parse_context_json(context_json: str | None) -> dict[str, Any]:
     except json.JSONDecodeError as exc:
         raise HTTPException(
             status_code=422,
-            detail=f"context_json must be valid JSON: {exc.msg}",
+            detail=f"El campo context_json debe ser JSON válido: {exc.msg}.",
         ) from exc
     if not isinstance(parsed, dict):
         raise HTTPException(
             status_code=422,
-            detail="context_json must be a JSON object.",
+            detail="El campo context_json debe ser un objeto JSON.",
         )
     return parsed

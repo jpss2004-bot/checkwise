@@ -115,15 +115,18 @@ async def post_feedback(
         raise HTTPException(
             status_code=422,
             detail=(
-                f"description must contain at least {MIN_DESCRIPTION_CHARS} "
-                "non-whitespace characters"
+                f"La descripción debe tener al menos {MIN_DESCRIPTION_CHARS} "
+                "caracteres (excluyendo espacios)."
             ),
         )
 
     if not record_and_check_rate(current.user.id):
         raise HTTPException(
             status_code=status.HTTP_429_TOO_MANY_REQUESTS,
-            detail="Too many feedback reports — wait a minute and try again.",
+            detail=(
+                "Demasiados reportes de este usuario. "
+                "Espera un minuto e inténtalo de nuevo."
+            ),
         )
 
     screenshot_bytes: bytes | None = None
@@ -196,12 +199,15 @@ async def _read_and_validate_screenshot(file: UploadFile) -> bytes:
         # don't pick up the deprecation warning either way.
         raise HTTPException(
             status_code=413,
-            detail=f"Screenshot exceeds {MAX_SCREENSHOT_BYTES // (1024 * 1024)} MB",
+            detail=(
+                f"La captura no puede pesar más de "
+                f"{MAX_SCREENSHOT_BYTES // (1024 * 1024)} MB."
+            ),
         )
     if not raw.startswith(PNG_MAGIC):
         raise HTTPException(
             status_code=status.HTTP_415_UNSUPPORTED_MEDIA_TYPE,
-            detail="Screenshot must be a PNG image",
+            detail="La captura debe ser una imagen PNG válida.",
         )
     return raw
 
@@ -260,8 +266,8 @@ async def post_public_feedback(
         raise HTTPException(
             status_code=422,
             detail=(
-                f"description must contain at least {MIN_DESCRIPTION_CHARS} "
-                "non-whitespace characters"
+                f"La descripción debe tener al menos {MIN_DESCRIPTION_CHARS} "
+                "caracteres (excluyendo espacios)."
             ),
         )
 

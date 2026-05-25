@@ -325,7 +325,7 @@ def get_submission(
 
     submission = db.get(Submission, submission_id)
     if submission is None:
-        raise HTTPException(status.HTTP_404_NOT_FOUND, detail="Submission not found")
+        raise HTTPException(status.HTTP_404_NOT_FOUND, detail="Envío no encontrado.")
 
     document = db.scalar(
         select(Document).where(Document.submission_id == submission.id).limit(1)
@@ -512,7 +512,7 @@ def submit_decision(
     """
     submission = db.get(Submission, submission_id)
     if submission is None:
-        raise HTTPException(status.HTTP_404_NOT_FOUND, detail="Submission not found")
+        raise HTTPException(status.HTTP_404_NOT_FOUND, detail="Envío no encontrado.")
 
     result = apply_reviewer_decision(
         db,
@@ -558,7 +558,7 @@ def get_submission_document(
     if submission is None:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
-            detail="Submission no encontrado.",
+            detail="Envío no encontrado.",
         )
     document = db.scalar(
         select(Document).where(Document.submission_id == submission.id).limit(1)

@@ -198,8 +198,11 @@ def test_login_unknown_email_returns_401_with_generic_detail(
         json={"email": "ghost@legalshelf.mx", "password": "anything"},
     )
     assert response.status_code == 401
-    # Must not reveal whether the user exists.
-    assert response.json()["detail"] == "Invalid credentials"
+    # Must not reveal whether the user exists. Localized after the
+    # 2026-05-25 M2 Spanish-error-normalization pass; the
+    # indistinguishability contract is preserved — the same Spanish
+    # message returns for unknown-email and bad-password.
+    assert response.json()["detail"] == "Credenciales inválidas."
 
 
 def test_login_disabled_user_returns_401(api_client: TestClient, db_factory) -> None:

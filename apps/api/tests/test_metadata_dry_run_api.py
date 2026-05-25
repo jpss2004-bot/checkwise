@@ -103,7 +103,8 @@ def test_metadata_dry_run_pdf_endpoint_rejects_bad_context_json() -> None:
     )
 
     assert response.status_code == 422
-    assert "context_json must be valid JSON" in response.json()["detail"]
+    assert "context_json" in response.json()["detail"]
+    assert "JSON válido" in response.json()["detail"]
 
 
 def test_metadata_dry_run_pdf_endpoint_rejects_unknown_document_type() -> None:

@@ -1509,13 +1509,13 @@ def _load_export_for_user(
     row = db.get(ReportExport, export_id)
     if row is None:
         raise HTTPException(
-            status.HTTP_404_NOT_FOUND, detail="Export no encontrado."
+            status.HTTP_404_NOT_FOUND, detail="Exportación no encontrada."
         )
     try:
         get_report(db, actor=_actor_from(current, db), report_id=row.report_id)
     except ReportNotFoundError as exc:
         raise HTTPException(
-            status.HTTP_404_NOT_FOUND, detail="Export no encontrado."
+            status.HTTP_404_NOT_FOUND, detail="Exportación no encontrada."
         ) from exc
     return row
 
@@ -1821,11 +1821,11 @@ def delete_report_share(
     """
     share = db.get(ReportShare, share_id)
     if share is None:
-        raise HTTPException(status.HTTP_404_NOT_FOUND, detail="Share no encontrado.")
+        raise HTTPException(status.HTTP_404_NOT_FOUND, detail="Enlace compartido no encontrado.")
     try:
         get_report(db, actor=_actor_from(current, db), report_id=share.report_id)
     except ReportNotFoundError as exc:
-        raise HTTPException(status.HTTP_404_NOT_FOUND, detail="Share no encontrado.") from exc
+        raise HTTPException(status.HTTP_404_NOT_FOUND, detail="Enlace compartido no encontrado.") from exc
     revoke_share(db, share=share)
     db.commit()
     return Response(status_code=status.HTTP_204_NO_CONTENT)
