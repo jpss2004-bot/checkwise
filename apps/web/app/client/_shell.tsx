@@ -20,6 +20,7 @@ import {
 import { BackBar } from "@/components/checkwise/back-bar";
 import { BrandLogo } from "@/components/checkwise/brand-logo";
 import { FeedbackLauncher } from "@/components/feedback/feedback-launcher";
+import { SearchBar } from "@/components/checkwise/search-bar";
 import { UserMenu } from "@/components/checkwise/user-menu";
 import { MetadataStrip } from "@/components/ui/metadata-strip";
 import { cn } from "@/lib/utils";
@@ -121,6 +122,7 @@ export function ClientShell({
             Vista cliente · cumplimiento del portafolio
           </p>
           <div className="ml-auto flex items-center gap-2">
+            <SearchBar resultsHref="/client/buscar" />
             <Link
               href="/client/notifications"
               aria-label={

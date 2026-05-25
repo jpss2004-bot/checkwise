@@ -26,6 +26,7 @@ import {
 import { BackBar } from "@/components/checkwise/back-bar";
 import { BrandLogo } from "@/components/checkwise/brand-logo";
 import { WiseDock } from "@/components/checkwise/portal/wise-dock";
+import { SearchBar } from "@/components/checkwise/search-bar";
 import { UserMenu } from "@/components/checkwise/user-menu";
 import { FeedbackLauncher } from "@/components/feedback/feedback-launcher";
 import { Badge } from "@/components/ui/badge";
@@ -632,6 +633,7 @@ function TopBar({
         </div>
 
         <div className="ml-auto flex items-center gap-2">
+          <SearchBar resultsHref="/portal/buscar" />
           {pct !== null ? (
             <span
               className={cn(
