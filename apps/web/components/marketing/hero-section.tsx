@@ -1,17 +1,10 @@
 "use client";
 
+import Image from "next/image";
 import Link from "next/link";
 import { motion } from "motion/react";
-import {
-  ArrowRight,
-  Files,
-  Gavel,
-  Lock,
-  ShieldCheck,
-  Sparkle,
-} from "@phosphor-icons/react";
+import { ArrowRight, Lock } from "@phosphor-icons/react";
 
-import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 
 import { HeroStage } from "./hero-stage";
@@ -20,12 +13,12 @@ import { useMotionPreference } from "./motion-preference";
 const EASE_ENTER = [0.16, 1, 0.3, 1] as const;
 
 /**
- * Public landing hero.
+ * Hero — typographic column anchors a layered product stage.
  *
- * Editorial split: a precise typographic column on the left, an
- * animated screenshot stage on the right ([[hero-stage]]). The hero
- * makes "what CheckWise actually looks like" the first thing the
- * visitor sees, instead of an invented cockpit.
+ * The page opens with a single sentence carrying the product thesis, two
+ * shorter context lines, and a paired CTA. The stage to the right
+ * carries the proof: layered live screenshots that auto-rotate so the
+ * visitor sees provider, review, client, and reports without scrolling.
  */
 export function HeroSection() {
   const { reduced: reduce } = useMotionPreference();
@@ -39,51 +32,39 @@ export function HeroSection() {
         } as const);
 
   return (
-    <section className="relative isolate overflow-hidden">
-      <HeroAmbient />
+    <section className="relative isolate min-h-[calc(100dvh-64px)] overflow-hidden bg-[color:var(--surface-page)]">
+      <HeroStage />
 
-      <div className="relative mx-auto grid max-w-[1320px] grid-cols-1 items-center gap-12 px-5 pb-12 pt-14 sm:pt-16 lg:grid-cols-[minmax(0,1fr)_minmax(0,1.05fr)] lg:gap-14 lg:pb-16 lg:pt-20 xl:gap-20">
-        {/* ── Left rail: editorial type column ──────────────────── */}
-        <div className="min-w-0">
+      <div className="relative mx-auto flex min-h-[calc(100dvh-64px)] max-w-[1320px] items-center px-5 py-14 lg:py-20">
+        <div className="max-w-[560px] min-w-0">
           <motion.div
             {...fade(0)}
-            className="flex flex-wrap items-center gap-3"
+            className="inline-flex items-center gap-2 rounded-full border border-[color:var(--border-default)] bg-[color:var(--surface-raised)]/85 px-2.5 py-1 font-mono text-[10px] uppercase tracking-[0.2em] text-[color:var(--text-secondary)] backdrop-blur-sm"
           >
-            <Badge variant="teal" className="rounded-full px-3 py-1">
-              <Sparkle className="h-3 w-3" weight="fill" aria-hidden="true" />
-              Plataforma de cumplimiento REPSE
-            </Badge>
-            <span
-              aria-hidden="true"
-              className="hidden h-px w-8 bg-[color:var(--border-default)] sm:block"
-            />
-            <span className="hidden font-mono text-[10px] uppercase tracking-[0.2em] text-[color:var(--text-tertiary)] sm:inline">
-              {`México · ${new Date().getFullYear()}`}
-            </span>
+            <span className="cw-pulse-soft inline-block h-1.5 w-1.5 rounded-full bg-[color:var(--text-teal)]" />
+            CheckWise · Sistema operativo REPSE
           </motion.div>
 
           <motion.h1
             {...fade(0.06)}
-            className="mt-6 break-words font-semibold tracking-[-0.024em] text-[color:var(--text-primary)] [text-wrap:balance]"
+            className="mt-6 font-semibold tracking-[-0.025em] text-[color:var(--text-primary)] [text-wrap:balance]"
             style={{
-              fontSize: "clamp(2.1rem, 4.1vw, 3.4rem)",
-              lineHeight: "1.04",
+              fontSize: "clamp(2.2rem, 4.4vw, 3.6rem)",
+              lineHeight: "1.02",
             }}
           >
-            El expediente REPSE de cada proveedor,{" "}
+            Una sola operación REPSE para{" "}
             <span className="text-[color:var(--text-teal)]">
-              en una sola plataforma operada con tu cliente.
+              proveedor, cliente y Legal Shelf.
             </span>
           </motion.h1>
 
           <motion.p
             {...fade(0.12)}
-            className="mt-6 max-w-[48ch] text-[15px] leading-[1.65] text-[color:var(--text-secondary)] sm:text-[16.5px]"
+            className="mt-5 max-w-[40ch] text-[16px] leading-[1.55] text-[color:var(--text-secondary)]"
           >
-            CheckWise centraliza la evidencia REPSE, el calendario recurrente
-            de SAT, IMSS, INFONAVIT y STPS, y los reportes ejecutivos para tu
-            cliente. Cargas guiadas para proveedores, revisión humana de Legal
-            Shelf y trazabilidad documental de extremo a extremo.
+            Portales propios, revisión humana, copilot de reportes y
+            paquetes listos para auditoría. Todo sobre el mismo expediente.
           </motion.p>
 
           <motion.div
@@ -96,7 +77,7 @@ export function HeroSection() {
               className="group cw-hover-lift gap-2 rounded-full pl-6 pr-2 shadow-[0_12px_30px_-12px_hsl(var(--brand-navy)/0.50)]"
             >
               <Link href="#contacto">
-                <span>Solicitar información</span>
+                <span>Agendar demo</span>
                 <span
                   aria-hidden="true"
                   className="ml-1 inline-flex h-8 w-8 items-center justify-center rounded-full bg-white/15 transition-transform duration-300 ease-nudge group-hover:translate-x-0.5"
@@ -107,9 +88,9 @@ export function HeroSection() {
             </Button>
             <Button
               asChild
-              variant="outline"
+              variant="ghost"
               size="lg"
-              className="cw-hover-lift gap-2 rounded-full px-5"
+              className="cw-hover-lift gap-2 rounded-full px-4 text-[color:var(--text-secondary)]"
             >
               <Link href="/login">
                 <Lock className="h-4 w-4" weight="bold" aria-hidden="true" />
@@ -118,103 +99,60 @@ export function HeroSection() {
             </Button>
           </motion.div>
 
-          {/* Product DNA caption */}
+          {/* Mobile-only inline screenshot — shows the product on small
+              screens where the desktop stage is hidden. */}
           <motion.div
-            {...fade(0.24)}
-            className="mt-7 flex flex-wrap items-center gap-x-3 gap-y-1.5 font-mono text-[10px] uppercase tracking-[0.22em] text-[color:var(--text-tertiary)]"
+            {...fade(0.22)}
+            className="mt-9 overflow-hidden rounded-[12px] border border-[color:var(--border-default)] bg-[color:var(--surface-raised)] shadow-[0_24px_60px_-36px_hsl(var(--brand-navy)/0.35)] md:hidden"
           >
-            <span>Obligación</span>
-            <span aria-hidden="true" className="text-[color:var(--text-teal)]">
-              ×
-            </span>
-            <span>Evidencia</span>
-            <span aria-hidden="true" className="text-[color:var(--text-teal)]">
-              ×
-            </span>
-            <span>Período</span>
-            <span aria-hidden="true" className="text-[color:var(--border-default)]">
-              →
-            </span>
-            <span className="text-[color:var(--text-secondary)]">
-              Estado actual
-            </span>
+            <div className="flex items-center gap-1.5 border-b border-[color:var(--border-subtle)] bg-[color:var(--surface-page)] px-3 py-2">
+              <span className="h-1.5 w-1.5 rounded-full bg-[color:var(--border-strong)]/70" />
+              <span className="h-1.5 w-1.5 rounded-full bg-[color:var(--border-strong)]/45" />
+              <span className="h-1.5 w-1.5 rounded-full bg-[color:var(--border-strong)]/30" />
+              <span className="ml-2 font-mono text-[9px] uppercase tracking-[0.16em] text-[color:var(--text-tertiary)]">
+                Portal proveedor · en vivo
+              </span>
+            </div>
+            <Image
+              src="/marketing/product/portal-dashboard.png"
+              alt="Dashboard del proveedor con cumplimiento y próximas acciones."
+              width={1920}
+              height={1080}
+              priority
+              className="block h-auto w-full"
+              sizes="92vw"
+            />
           </motion.div>
 
-          {/* Inline trust strip — folds into the same viewport */}
-          <motion.ul
-            {...fade(0.32)}
-            className="mt-8 grid grid-cols-1 gap-3 border-t border-[color:var(--border-subtle)] pt-6 sm:grid-cols-3"
+          {/* Compact line of proof — replaces the trust-strip row. */}
+          <motion.div
+            {...fade(0.28)}
+            className="mt-9 flex flex-wrap items-center gap-x-5 gap-y-2 font-mono text-[10px] uppercase tracking-[0.2em] text-[color:var(--text-tertiary)]"
           >
-            {[
-              {
-                icon: ShieldCheck,
-                label: `REPSE ${new Date().getFullYear()}`,
-                value: "SAT · IMSS · INFONAVIT · STPS",
-              },
-              {
-                icon: Gavel,
-                label: "Revisión humana",
-                value: "Legal Shelf como respaldo",
-              },
-              {
-                icon: Files,
-                label: "Trazabilidad",
-                value: "Hash · revisor · período",
-              },
-            ].map(({ icon: Icon, label, value }) => (
-              <li key={label} className="flex items-start gap-2.5">
-                <span
-                  aria-hidden="true"
-                  className="mt-0.5 flex h-7 w-7 shrink-0 items-center justify-center rounded-md bg-[color:var(--surface-teal-muted)]"
-                >
-                  <Icon
-                    className="h-3.5 w-3.5 text-[color:var(--text-teal)]"
-                    weight="duotone"
-                  />
-                </span>
-                <div className="min-w-0">
-                  <p className="font-mono text-[9px] uppercase tracking-[0.18em] text-[color:var(--text-tertiary)]">
-                    {label}
-                  </p>
-                  <p className="mt-0.5 text-[12.5px] font-medium leading-snug text-[color:var(--text-primary)]">
-                    {value}
-                  </p>
-                </div>
-              </li>
-            ))}
-          </motion.ul>
+            <span>Portal proveedor</span>
+            <Dot />
+            <span>Portal cliente</span>
+            <Dot />
+            <span>Revisión Legal Shelf</span>
+            <Dot />
+            <span>Reportes con copilot</span>
+            <Dot />
+            <span>Paquete auditor</span>
+          </motion.div>
         </div>
-
-        {/* ── Right canvas: animated screenshot stage ───────────── */}
-        <motion.div
-          className="relative min-w-0"
-          initial={reduce ? false : { opacity: 0 }}
-          animate={reduce ? { opacity: 1 } : { opacity: 1 }}
-          transition={{ duration: 0.6, ease: EASE_ENTER }}
-        >
-          <HeroStage />
-        </motion.div>
       </div>
 
-      {/* Scroll hint — confirms there is more below the fold */}
       <ScrollHint />
     </section>
   );
 }
 
-function HeroAmbient() {
+function Dot() {
   return (
-    <div
+    <span
       aria-hidden="true"
-      className="pointer-events-none absolute inset-0 -z-10 overflow-hidden"
-    >
-      {/* Navy 56px grid, masked toward center-top. Provides texture
-          without introducing a third color (per Restrained palette). */}
-      <div className="cw-grid-pattern absolute inset-0" />
-      {/* Single soft teal halo at the upper-right shoulder of the
-          stage — caps under 10% surface coverage. */}
-      <div className="absolute -right-32 top-[-12%] hidden h-[480px] w-[480px] rounded-full bg-[color:var(--surface-teal-muted)] opacity-60 blur-3xl lg:block" />
-    </div>
+      className="inline-block h-1 w-1 rounded-full bg-[color:var(--text-teal)]/70"
+    />
   );
 }
 
@@ -223,9 +161,9 @@ function ScrollHint() {
   return (
     <motion.div
       aria-hidden="true"
-      className="pointer-events-none absolute inset-x-0 bottom-2 z-0 flex justify-center"
+      className="pointer-events-none absolute inset-x-0 bottom-3 z-0 flex justify-center"
       initial={reduce ? false : { opacity: 0 }}
-      animate={reduce ? { opacity: 1 } : { opacity: 1 }}
+      animate={{ opacity: 1 }}
       transition={{ duration: 0.4, delay: 1.6 }}
     >
       <motion.span
