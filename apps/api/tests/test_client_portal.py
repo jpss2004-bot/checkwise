@@ -1476,3 +1476,147 @@ def test_audit_manifest_html_renders_with_scope_and_counts(db_factory) -> None:
     assert "Aprobado" in html
     # The counter strip exposes the file count.
     assert ">1<" in html  # 1 document
+
+
+# ---------------------------------------------------------------------------
+# Junta 2026-05-23 — /client/profile (self-service onboarding)
+# ---------------------------------------------------------------------------
+
+
+def test_client_profile_returns_preloaded_alta_fields(
+    api_client: TestClient, db_factory
+) -> None:
+    """First GET returns the columns the admin populated on alta plus
+    the still-null onboarding fields. ``onboarding_completed_at`` is
+    null when the client_admin has not saved the form yet."""
+    client_id = _seed_client(db_factory)
+    # Populate admin-side fields directly on the row to mimic the
+    # admin alta flow.
+    db = db_factory()
+    try:
+        row = db.get(Client, client_id)
+        assert row is not None
+        row.email = "alta@empresa.example"
+        row.responsible_name = "Ada Reyes"
+        db.commit()
+    finally:
+        db.close()
+
+    _, email, pw = _seed_user_with_role(
+        db_factory, role="client_admin", client_id=client_id, email_prefix="ca"
+    )
+    token = _login(api_client, email, pw)
+    resp = api_client.get(
+        "/api/v1/client/profile",
+        headers=_h(token),
+    )
+    assert resp.status_code == 200, resp.text
+    body = resp.json()
+    assert body["id"] == client_id
+    assert body["email"] == "alta@empresa.example"
+    assert body["responsible_name"] == "Ada Reyes"
+    assert body["industry"] is None
+    assert body["fiscal_address"] is None
+    assert body["onboarding_completed_at"] is None
+
+
+def test_client_profile_patch_sets_onboarding_completed_at(
+    api_client: TestClient, db_factory
+) -> None:
+    """First PATCH saves the editable fields and stamps
+    ``onboarding_completed_at``; subsequent PATCHes preserve the
+    original timestamp so revisiting the page doesn't re-trigger
+    the dashboard banner."""
+    client_id = _seed_client(db_factory)
+    _, email, pw = _seed_user_with_role(
+        db_factory, role="client_admin", client_id=client_id, email_prefix="ca"
+    )
+    token = _login(api_client, email, pw)
+
+    first = api_client.patch(
+        "/api/v1/client/profile",
+        json={
+            "industry": "Construcción",
+            "fiscal_address": "Av Reforma 100, CDMX",
+            "phone": "+52 55 1234 5678",
+            "notes": "Cliente prioritario en Q2.",
+        },
+        headers=_h(token),
+    )
+    assert first.status_code == 200, first.text
+    body = first.json()
+    assert body["industry"] == "Construcción"
+    assert body["fiscal_address"] == "Av Reforma 100, CDMX"
+    assert body["phone"] == "+52 55 1234 5678"
+    assert body["notes"] == "Cliente prioritario en Q2."
+    initial_completed = body["onboarding_completed_at"]
+    assert initial_completed is not None
+
+    # A second patch with a different field must not reset the
+    # timestamp.
+    second = api_client.patch(
+        "/api/v1/client/profile",
+        json={"phone": "+52 55 9999 0000"},
+        headers=_h(token),
+    )
+    assert second.status_code == 200, second.text
+    body2 = second.json()
+    assert body2["phone"] == "+52 55 9999 0000"
+    assert body2["onboarding_completed_at"] == initial_completed
+
+
+def test_client_profile_patch_writes_audit_row(
+    api_client: TestClient, db_factory
+) -> None:
+    """The PATCH writes a ``client.profile_updated`` audit row with a
+    before/after diff plus a ``just_completed_onboarding`` flag so a
+    forensic reader can answer who finished the alta and when."""
+    from app.models import AuditLog
+
+    client_id = _seed_client(db_factory)
+    _, email, pw = _seed_user_with_role(
+        db_factory, role="client_admin", client_id=client_id, email_prefix="ca"
+    )
+    token = _login(api_client, email, pw)
+    resp = api_client.patch(
+        "/api/v1/client/profile",
+        json={"industry": "Servicios"},
+        headers=_h(token),
+    )
+    assert resp.status_code == 200, resp.text
+
+    db = db_factory()
+    try:
+        events = (
+            db.query(AuditLog)
+            .filter(AuditLog.action == "client.profile_updated")
+            .all()
+        )
+        assert len(events) == 1
+        event = events[0]
+        assert event.actor_type == "client_admin"
+        assert (event.before or {}).get("industry") is None
+        assert (event.after or {}).get("industry") == "Servicios"
+        assert (event.event_metadata or {}).get(
+            "just_completed_onboarding"
+        ) is True
+    finally:
+        db.close()
+
+
+def test_client_profile_denies_non_client_admin(
+    api_client: TestClient, db_factory
+) -> None:
+    """Reviewer and unauthenticated callers must be rejected."""
+    resp = api_client.get("/api/v1/client/profile")
+    assert resp.status_code == 401
+
+    _, email, pw = _seed_user_with_role(
+        db_factory, role="reviewer", email_prefix="rev"
+    )
+    token = _login(api_client, email, pw)
+    resp = api_client.get(
+        "/api/v1/client/profile",
+        headers=_h(token),
+    )
+    assert resp.status_code == 403

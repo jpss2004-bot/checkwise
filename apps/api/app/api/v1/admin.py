@@ -126,6 +126,15 @@ def _client_to_dict(row: Client) -> dict:
         "rfc": row.rfc,
         "email": row.email,
         "responsible_name": row.responsible_name,
+        "industry": row.industry,
+        "fiscal_address": row.fiscal_address,
+        "phone": row.phone,
+        "notes": row.notes,
+        "onboarding_completed_at": (
+            row.onboarding_completed_at.isoformat()
+            if row.onboarding_completed_at
+            else None
+        ),
         "status": row.status,
         "created_at": row.created_at.isoformat() if row.created_at else None,
         "updated_at": row.updated_at.isoformat() if row.updated_at else None,

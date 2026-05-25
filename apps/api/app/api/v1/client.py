@@ -31,7 +31,7 @@ from typing import Annotated, Literal
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Response, status
 from fastapi.responses import FileResponse
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 from sqlalchemy import and_, func, select
 from sqlalchemy.orm import Session
 
@@ -587,6 +587,144 @@ def client_me(db: DbSession, current: ClientUser) -> ClientMe:
         visible_client_ids=visible,
         default_client_id=visible[0] if visible else None,
     )
+
+
+# ---------------------------------------------------------------------------
+# Junta 2026-05-23 — client onboarding profile
+# ---------------------------------------------------------------------------
+
+
+class ClientProfile(BaseModel):
+    id: str
+    name: str
+    rfc: str | None
+    email: str | None
+    responsible_name: str | None
+    industry: str | None
+    fiscal_address: str | None
+    phone: str | None
+    notes: str | None
+    onboarding_completed_at: str | None
+
+
+class ClientProfileUpdate(BaseModel):
+    """Fields a client_admin can edit on /client/onboarding.
+
+    Identity columns (``name``/``rfc``/``email``) stay read-only —
+    those are set by the admin preload on alta. The page renders
+    them above the form as confirmation, not as editable inputs.
+    """
+
+    responsible_name: str | None = Field(default=None, max_length=255)
+    industry: str | None = Field(default=None, max_length=120)
+    fiscal_address: str | None = None
+    phone: str | None = Field(default=None, max_length=30)
+    notes: str | None = None
+
+
+def _client_profile_payload(row: Client) -> ClientProfile:
+    return ClientProfile(
+        id=row.id,
+        name=row.name,
+        rfc=row.rfc,
+        email=row.email,
+        responsible_name=row.responsible_name,
+        industry=row.industry,
+        fiscal_address=row.fiscal_address,
+        phone=row.phone,
+        notes=row.notes,
+        onboarding_completed_at=(
+            row.onboarding_completed_at.isoformat()
+            if row.onboarding_completed_at
+            else None
+        ),
+    )
+
+
+@router.get("/profile", response_model=ClientProfile)
+def client_profile(
+    db: DbSession,
+    current: ClientUser,
+    client_id: str | None = None,
+) -> ClientProfile:
+    """Return the active client's profile.
+
+    Preloaded fields (name / rfc / email) come from the admin alta;
+    the editable fields drive the /client/onboarding page. The
+    frontend reads ``onboarding_completed_at`` to decide whether to
+    show the soft prompt on the dashboard.
+    """
+    target_id = _resolve_client_id(db, current, requested=client_id)
+    row = db.get(Client, target_id)
+    if row is None:  # pragma: no cover — defensive
+        raise HTTPException(
+            status.HTTP_404_NOT_FOUND, detail="Cliente no encontrado."
+        )
+    return _client_profile_payload(row)
+
+
+@router.patch("/profile", response_model=ClientProfile)
+def update_client_profile(
+    payload: ClientProfileUpdate,
+    db: DbSession,
+    current: ClientUser,
+    client_id: str | None = None,
+) -> ClientProfile:
+    """Update the editable onboarding fields on the active client.
+
+    Sets ``onboarding_completed_at`` the first time the endpoint is
+    hit so the dashboard banner clears. Subsequent edits do NOT
+    reset the timestamp — the page can be revisited to refine the
+    profile without re-triggering the "termina tu alta" prompt.
+
+    Writes an ``client.profile_updated`` audit row with a
+    before/after diff so a forensic reader can answer who changed
+    what and when (the columns can carry operational signals like
+    a new compliance officer, so the trail matters).
+    """
+    target_id = _resolve_client_id(db, current, requested=client_id)
+    row = db.get(Client, target_id)
+    if row is None:  # pragma: no cover — defensive
+        raise HTTPException(
+            status.HTTP_404_NOT_FOUND, detail="Cliente no encontrado."
+        )
+
+    before = _client_profile_payload(row).model_dump()
+    data = payload.model_dump(exclude_unset=True)
+    if "responsible_name" in data:
+        row.responsible_name = (data["responsible_name"] or "").strip() or None
+    if "industry" in data:
+        row.industry = (data["industry"] or "").strip() or None
+    if "fiscal_address" in data:
+        row.fiscal_address = (data["fiscal_address"] or "").strip() or None
+    if "phone" in data:
+        row.phone = (data["phone"] or "").strip() or None
+    if "notes" in data:
+        row.notes = (data["notes"] or "").strip() or None
+
+    just_completed = row.onboarding_completed_at is None
+    if just_completed:
+        row.onboarding_completed_at = datetime.now(UTC)
+
+    db.flush()
+    after = _client_profile_payload(row).model_dump()
+
+    add_audit_event(
+        db,
+        action="client.profile_updated",
+        entity_type="client",
+        entity_id=row.id,
+        actor_type="client_admin",
+        actor_id=current.user.id,
+        before=before,
+        after=after,
+        metadata={
+            "just_completed_onboarding": just_completed,
+        },
+    )
+    db.commit()
+    db.refresh(row)
+    return _client_profile_payload(row)
 
 
 # ---------------------------------------------------------------------------

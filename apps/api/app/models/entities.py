@@ -51,6 +51,18 @@ class Client(TimestampMixin, Base):
     # formulario admin lo exigen para nuevos registros.
     email: Mapped[str | None] = mapped_column(String(254))
     responsible_name: Mapped[str | None] = mapped_column(String(255))
+    # Junta 2026-05-23 — el cliente_admin completa estos campos en
+    # /client/onboarding después de que el admin hace el preload con
+    # RFC/email/nombre. ``onboarding_completed_at`` se setea en el
+    # primer guardado para apagar el banner de "termina tu alta" en
+    # el dashboard.
+    industry: Mapped[str | None] = mapped_column(String(120))
+    fiscal_address: Mapped[str | None] = mapped_column(Text)
+    phone: Mapped[str | None] = mapped_column(String(30))
+    notes: Mapped[str | None] = mapped_column(Text)
+    onboarding_completed_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True)
+    )
     status: Mapped[str] = mapped_column(String(40), default="active", nullable=False)
 
     vendors: Mapped[list[Vendor]] = relationship(back_populates="client")
