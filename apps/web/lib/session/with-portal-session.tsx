@@ -4,7 +4,7 @@ import { useEffect, useState, type ComponentType } from "react";
 import { usePathname, useRouter } from "next/navigation";
 
 import { enterPortal } from "@/lib/api/auth";
-import { readAdminSession } from "@/lib/session/admin";
+import { clearAdminSession, readAdminSession } from "@/lib/session/admin";
 import {
   fetchCurrentSession,
   readPortalSession,
@@ -52,12 +52,30 @@ function legalConsentRequired(session: {
  * Falls back to ``/login`` when no pathname is available (SSR) or
  * when the pathname is already ``/login`` itself.
  */
-function loginUrlForCurrentPath(pathname: string | null): string {
-  if (!pathname || pathname === "/login") return "/login";
+function loginUrlForCurrentPath(pathname: string | null, reason?: string): string {
+  const params = new URLSearchParams();
+  if (reason) params.set("reason", reason);
+  if (!pathname || pathname === "/login") {
+    const qs = params.toString();
+    return qs ? `/login?${qs}` : "/login";
+  }
   const search =
     typeof window !== "undefined" ? window.location.search : "";
   const next = `${pathname}${search}`;
-  return `/login?next=${encodeURIComponent(next)}`;
+  params.set("next", next);
+  return `/login?${params.toString()}`;
+}
+
+function markPortalBootstrapFailed(): void {
+  if (typeof window === "undefined") return;
+  try {
+    window.sessionStorage.setItem(
+      "checkwise.portal.bootstrap_failed",
+      "1",
+    );
+  } catch {
+    /* ignore */
+  }
 }
 
 /**
@@ -107,7 +125,11 @@ export function withPortalSession<P extends { session: PortalSession }>(
           try {
             await enterPortal(admin.access_token);
           } catch {
-            router.replace(loginUrlForCurrentPath(pathname));
+            markPortalBootstrapFailed();
+            clearAdminSession();
+            router.replace(
+              loginUrlForCurrentPath(pathname, "portal_session_unavailable"),
+            );
             return;
           }
           resolved = await fetchCurrentSession();
@@ -119,14 +141,8 @@ export function withPortalSession<P extends { session: PortalSession }>(
           // always a cross-origin SameSite/Secure mismatch. Don't loop:
           // surface the problem and force the user back to /login with
           // a flag so the login page can warn instead of bouncing.
-          try {
-            window.sessionStorage.setItem(
-              "checkwise.portal.bootstrap_failed",
-              "1",
-            );
-          } catch {
-            /* ignore */
-          }
+          markPortalBootstrapFailed();
+          clearAdminSession();
           router.replace("/login?reason=portal_session_unavailable");
           return;
         }

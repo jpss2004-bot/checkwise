@@ -14,6 +14,7 @@ import { PasswordInput } from "@/components/ui/password-input";
 import { Skeleton } from "@/components/ui/skeleton";
 import { AuthApiError, login } from "@/lib/api/auth";
 import {
+  clearAdminSession,
   readAdminSession,
   writeAdminSession,
   type AdminSession,
@@ -51,6 +52,7 @@ function LoginInner() {
   const router = useRouter();
   const searchParams = useSearchParams();
   const nextParam = sanitizeNext(searchParams?.get("next"));
+  const reasonParam = searchParams?.get("reason");
   const [bootChecked, setBootChecked] = useState(false);
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
@@ -58,6 +60,15 @@ function LoginInner() {
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
+    if (reasonParam === "portal_session_unavailable") {
+      clearAdminSession();
+      setError(
+        "Tu sesión del portal no pudo iniciar. Vuelve a entrar; si se repite, el API todavía no terminó de desplegarse.",
+      );
+      setBootChecked(true);
+      return;
+    }
+
     const session = readAdminSession();
     if (session) {
       // Security fix (CW-AUD-P1-01): honor must_change_password on
@@ -70,7 +81,7 @@ function LoginInner() {
       return;
     }
     setBootChecked(true);
-  }, [router, nextParam]);
+  }, [router, nextParam, reasonParam]);
 
   async function onSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
