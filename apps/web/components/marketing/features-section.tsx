@@ -36,76 +36,76 @@ const ROLES: ReadonlyArray<Role> = [
     id: "provider",
     label: "Proveedor",
     icon: ClipboardText,
-    headline: "Workspace propio con la próxima acción a la vista",
-    body: "Cada proveedor entra a un espacio precargado con cliente, RFC y contacto. El copilot Wise responde dudas del expediente sin abrir otra pestaña.",
+    headline: "Espacio propio con la próxima acción a la vista",
+    body: "Cada proveedor entra a una vista precargada con cliente, RFC y contacto. El asistente Wise resuelve dudas del expediente sin salir de la pantalla.",
     image: "/marketing/product/portal-dashboard.png",
-    chrome: "Portal proveedor · dashboard",
+    chrome: "Vista del proveedor",
     bullets: [
       "Cumplimiento, faltantes y vencimientos en una sola vista",
       "Carga guiada con requisito, periodo e institución",
-      "Wise · copilot LLM para resolver dudas del expediente",
+      "Asistente de cumplimiento para dudas del expediente",
     ],
-    pillar: { label: "Surface", value: "/portal/dashboard" },
+    pillar: { label: "Audiencia", value: "Equipo del proveedor" },
   },
   {
     id: "client",
     label: "Cliente",
     icon: Buildings,
     headline: "Portafolio en semáforo, sin pedir cortes manuales",
-    body: "Operación cliente con riesgo, faltantes y proveedores listos para ser auditados. La vista cliente vive en su propio dominio, no es un subdash del admin.",
+    body: "Vista cliente con riesgo, faltantes y proveedores listos para ser auditados. Vive en su propio dominio, no es un subdash del admin.",
     image: "/marketing/product/client-dashboard.png",
-    chrome: "Portal cliente · resumen",
+    chrome: "Vista del cliente",
     bullets: [
       "Proveedores en verde, amarillo o rojo según evidencia",
       "Faltantes obligatorios y próximas renovaciones",
       "Acceso de auditor con paquete descargable",
     ],
-    pillar: { label: "Surface", value: "/client/dashboard" },
+    pillar: { label: "Audiencia", value: "Operación del cliente" },
   },
   {
     id: "legalshelf",
     label: "Legal Shelf",
     icon: Gavel,
     headline: "Cola priorizada de revisión humana, no automatización ciega",
-    body: "Los documentos críticos pasan por Ada Reyes y el equipo legal. Cada decisión deja firma, motivo y diff antes de aprobar o rechazar.",
+    body: "Los documentos críticos pasan por Ada Reyes y el equipo legal. Cada decisión queda firmada, con motivo y cambio registrado antes de aprobar o rechazar.",
     image: "/marketing/product/admin-reviewer-queue.png",
-    chrome: "Bandeja Legal Shelf · documentos por revisar",
+    chrome: "Bandeja Legal Shelf",
     bullets: [
       "FIFO por edad del documento, con desempate humano",
       "Estado por inconsistencia, aclaración o decisión",
-      "Cada acción firma el audit log inmediatamente",
+      "Cada acción firma el registro de auditoría",
     ],
-    pillar: { label: "Surface", value: "/admin/reviewer" },
+    pillar: { label: "Audiencia", value: "Equipo legal" },
   },
   {
     id: "reports",
     label: "Reportes",
     icon: ChartLineUp,
-    headline: "Editor de reportes con copilot LLM y exportación nativa",
+    headline: "Editor de reportes con asistente y exportación nativa",
     body: "El reporte ejecutivo se redacta, regenera y exporta en el mismo canvas. Bloques editables, versiones, IA explicativa, y descarga en PDF, Excel o HTML.",
     image: "/marketing/product/admin-report-editor.png",
-    chrome: "Reporte · Mi estado de cumplimiento",
+    chrome: "Reporte ejecutivo",
     bullets: [
-      "Generar · Copiloto · Refrescar datos · Vista previa",
+      "Generar · Asistir · Refrescar datos · Vista previa",
       "Versiones con borrador, publicado y firmado",
       "Exportación PDF, Excel, HTML y vista para impresión",
     ],
-    pillar: { label: "Surface", value: "/admin/reports" },
+    pillar: { label: "Audiencia", value: "Dirección y dueños" },
   },
   {
     id: "audit",
     label: "Auditoría",
     icon: Archive,
     headline: "Paquete listo para auditor, filtrado por periodo e institución",
-    body: "Llega un inspector y CheckWise arma el ZIP exacto: documentos filtrados, índice firmado y audit log de toda la operación.",
+    body: "Llega un inspector y CheckWise arma el ZIP exacto: documentos filtrados, índice firmado y registro de auditoría de toda la operación.",
     image: "/marketing/product/client-auditoria.png",
-    chrome: "Paquete para auditoría · constructor",
+    chrome: "Paquete para auditoría",
     bullets: [
       "Filtros por periodo (mes, trimestre, año fiscal)",
       "Selección por institución y proveedor",
-      "ÍNDICE.pdf firmado más audit log exportable",
+      "ÍNDICE.pdf firmado más registro exportable",
     ],
-    pillar: { label: "Surface", value: "/client/auditoria" },
+    pillar: { label: "Audiencia", value: "Auditor externo" },
   },
 ];
 
@@ -201,15 +201,6 @@ function RoleRail({
                   >
                     {role.label}
                   </p>
-                  <p
-                    className={`mt-0.5 font-mono text-[10px] uppercase tracking-[0.18em] transition-colors ${
-                      active
-                        ? "text-[color:var(--text-teal)]"
-                        : "text-[color:var(--text-tertiary)]"
-                    }`}
-                  >
-                    {role.pillar.value}
-                  </p>
                 </div>
               </button>
             </li>
@@ -298,12 +289,12 @@ function RoleCanvas({ active, reduce }: { active: Role; reduce: boolean }) {
             ))}
           </ul>
 
-          {/* Bottom strip — gentle proof of what surface this is. */}
+          {/* Bottom strip — quiet identifier of the audience this serves. */}
           <div className="flex flex-wrap items-baseline gap-x-5 gap-y-1 border-t border-[color:var(--border-subtle)] pt-4">
             <span className="font-mono text-[10px] uppercase tracking-[0.2em] text-[color:var(--text-tertiary)]">
               {active.pillar.label}
             </span>
-            <span className="font-mono text-[11px] font-semibold tracking-[0.04em] text-[color:var(--text-primary)]">
+            <span className="text-[13px] font-medium text-[color:var(--text-primary)]">
               {active.pillar.value}
             </span>
             <span aria-hidden="true" className="text-[color:var(--border-default)]">
@@ -311,7 +302,7 @@ function RoleCanvas({ active, reduce }: { active: Role; reduce: boolean }) {
             </span>
             <span className="inline-flex items-center gap-1.5 font-mono text-[10px] uppercase tracking-[0.18em] text-[color:var(--text-teal)]">
               <Sparkle className="h-3 w-3" weight="fill" aria-hidden="true" />
-              Pantalla real del sistema
+              Vista actual del sistema
             </span>
           </div>
         </motion.div>
