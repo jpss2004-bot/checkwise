@@ -9,6 +9,7 @@ entrar a su espacio.
 | Aviso de privacidad integral | `/legal/privacidad` | [aviso-de-privacidad-v1.md](./aviso-de-privacidad-v1.md) | `v1` | `apps/web/app/legal/privacidad/page.tsx` |
 | Términos de uso | `/legal/terminos` | [terminos-de-uso-v1.md](./terminos-de-uso-v1.md) | `v1` | `apps/web/app/legal/terminos/page.tsx` |
 | Aviso de consentimiento informado | `/legal/consentimiento` | [aviso-de-consentimiento-v1.md](./aviso-de-consentimiento-v1.md) | `v1` | `apps/web/app/legal/consentimiento/page.tsx` |
+| **Referencias jurídicas (fuentes y leyes citadas)** | — | [references.md](./references.md) | aplica a v1 | — |
 
 ## Cómo se versiona
 
@@ -32,6 +33,24 @@ pantalla de consent en su siguiente entrada al portal y la nueva
 aceptación quedará registrada en `audit_log` con
 `action='provider.legal_consent_accepted'` y la versión nueva en
 `metadata.version`.
+
+## Para el equipo legal
+
+Cuando compartas estos cuatro documentos con un abogado externo,
+manda el paquete completo:
+
+1. [aviso-de-privacidad-v1.md](./aviso-de-privacidad-v1.md)
+2. [terminos-de-uso-v1.md](./terminos-de-uso-v1.md)
+3. [aviso-de-consentimiento-v1.md](./aviso-de-consentimiento-v1.md)
+4. [references.md](./references.md) — leyes, artículos y portales
+   oficiales que sustentan cada sección de los tres documentos.
+
+El archivo de referencias mapea sección por sección con el
+fundamento jurídico mexicano correspondiente (LFPDPPP, LFT 2021,
+CFF, LSS, INFONAVIT, Código Civil Federal, Código de Comercio,
+Ley Federal del Derecho de Autor) y enumera los portales oficiales
+(INAI, DOF, SAT, STPS, REPSE, IMSS, INFONAVIT) para verificación
+independiente.
 
 ## Historial de versiones
 
