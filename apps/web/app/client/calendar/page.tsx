@@ -1,7 +1,18 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
-import { CalendarBlank } from "@phosphor-icons/react";
+import Link from "next/link";
+import {
+  Buildings,
+  CalendarBlank,
+  CaretDown,
+  CaretRight,
+  House,
+  Package,
+  Scales,
+  ShieldCheck,
+  type Icon,
+} from "@phosphor-icons/react";
 
 import {
   MiniBars,
@@ -9,6 +20,8 @@ import {
   type ChartSegment,
 } from "@/components/checkwise/charts";
 import { Surface } from "@/components/checkwise/dashboard/stat-card";
+import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { MetadataStrip } from "@/components/ui/metadata-strip";
 import {
@@ -17,7 +30,13 @@ import {
 } from "@/components/checkwise/portal/state-surfaces";
 
 import { ClientShell } from "../_shell";
-import { getClientCalendar, type ClientCalendar } from "@/lib/api/client";
+import {
+  getClientCalendar,
+  type ClientCalendar,
+  type ClientCalendarItem,
+  type ClientCalendarMonth,
+} from "@/lib/api/client";
+import { INSTITUTION_LABELS } from "@/lib/api/portal";
 
 const MONTH_SHORT = [
   "Ene",
@@ -34,10 +53,58 @@ const MONTH_SHORT = [
   "Dic",
 ];
 
+// Junta 2026-05-23 — institution icons mirror the portal calendar
+// so the client view reads with the same visual vocabulary the
+// provider already uses. House (vivienda) for INFONAVIT is the
+// disambiguator from IMSS (Buildings) per the audit follow-up.
+const INSTITUTION_ICON: Record<string, Icon> = {
+  sat: Scales,
+  imss: Buildings,
+  infonavit: House,
+  stps_repse: ShieldCheck,
+};
+
+const INSTITUTION_ORDER = ["sat", "imss", "infonavit", "stps_repse"] as const;
+
+// Spanish labels for the status enum used inside the expanded row.
+// Centralised here so any future status surface on this page stays
+// in lockstep with the rest of the product.
+const STATUS_LABEL: Record<string, string> = {
+  aprobado: "Aprobado",
+  rechazado: "Requiere corrección",
+  requiere_aclaracion: "Necesita aclaración",
+  pendiente_revision: "En revisión",
+  posible_mismatch: "Posible inconsistencia",
+  prevalidado: "Prevalidado",
+  recibido: "Recibido",
+  vencido: "Vencido",
+  no_aplica: "No aplica",
+  pendiente: "Pendiente",
+  excepcion_legal: "Excepción legal",
+};
+
+function statusVariant(
+  status: string,
+): "success" | "warning" | "destructive" | "info" | "secondary" {
+  if (status === "aprobado" || status === "excepcion_legal") return "success";
+  if (status === "rechazado" || status === "vencido") return "destructive";
+  if (
+    status === "requiere_aclaracion" ||
+    status === "posible_mismatch" ||
+    status === "pendiente_revision" ||
+    status === "prevalidado" ||
+    status === "recibido"
+  ) {
+    return "warning";
+  }
+  return "secondary";
+}
+
 export default function ClientCalendarPage() {
   const [year, setYear] = useState(new Date().getFullYear() || 2026);
   const [data, setData] = useState<ClientCalendar | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [expandedMonth, setExpandedMonth] = useState<number | null>(null);
 
   useEffect(() => {
     let cancelled = false;
@@ -162,59 +229,241 @@ export default function ClientCalendarPage() {
 
           <Surface
             title="Detalle por mes"
+            description="Toca una fila para ver el detalle por proveedor y empaquetarlo para auditoría."
             bodyClassName="p-0 overflow-x-auto"
           >
             <table className="w-full text-sm">
               <thead className="border-b border-[color:var(--border-subtle)] bg-[color:var(--surface-page)] text-left font-mono text-[10px] uppercase tracking-wide text-[color:var(--text-tertiary)]">
                 <tr>
                   <th className="px-4 py-2.5">Mes</th>
+                  <th className="px-3 py-2.5">Instituciones</th>
                   <th className="px-3 py-2.5 text-right">Proveedores</th>
                   <th className="px-3 py-2.5 text-right">Total</th>
                   <th className="px-3 py-2.5">Distribución</th>
                   <th className="px-3 py-2.5 text-right">Vencen ≤14d</th>
+                  <th className="px-3 py-2.5 text-right" aria-label="Acciones" />
                 </tr>
               </thead>
               <tbody>
-                {data.months.map((m) => {
-                  const segments: ChartSegment[] = [
-                    { label: "Aprobados", value: m.approved_total, tone: "success" },
-                    { label: "Pendientes", value: m.pending_total, tone: "info" },
-                    {
-                      label: "Rechazos",
-                      value: m.rejected_or_correction_total,
-                      tone: "error",
-                    },
-                    { label: "Faltantes", value: m.missing_total, tone: "warning" },
-                  ];
-                  return (
-                    <tr
-                      key={m.month}
-                      className="border-b border-[color:var(--border-subtle)] last:border-0 hover:bg-[color:var(--surface-hover)]"
-                    >
-                      <td className="px-4 py-3 font-medium text-[color:var(--text-primary)]">
-                        {m.month_label}
-                      </td>
-                      <td className="px-3 py-3 text-right font-mono tabular-nums text-[color:var(--text-primary)]">
-                        {m.vendors_total}
-                      </td>
-                      <td className="px-3 py-3 text-right font-mono tabular-nums text-[color:var(--text-primary)]">
-                        {m.due_total}
-                      </td>
-                      <td className="min-w-[260px] px-3 py-3">
-                        <StackedBars segments={segments} height={10} />
-                      </td>
-                      <td className="px-3 py-3 text-right font-mono tabular-nums text-[color:var(--text-primary)]">
-                        {m.due_soon_total}
-                      </td>
-                    </tr>
-                  );
-                })}
+                {data.months.map((m) => (
+                  <MonthRow
+                    key={m.month}
+                    month={m}
+                    year={data.year}
+                    expanded={expandedMonth === m.month}
+                    onToggle={() =>
+                      setExpandedMonth((prev) =>
+                        prev === m.month ? null : m.month,
+                      )
+                    }
+                  />
+                ))}
               </tbody>
             </table>
           </Surface>
         </div>
       )}
     </ClientShell>
+  );
+}
+
+function MonthRow({
+  month,
+  year,
+  expanded,
+  onToggle,
+}: {
+  month: ClientCalendarMonth;
+  year: number;
+  expanded: boolean;
+  onToggle: () => void;
+}) {
+  const segments: ChartSegment[] = [
+    { label: "Aprobados", value: month.approved_total, tone: "success" },
+    { label: "Pendientes", value: month.pending_total, tone: "info" },
+    { label: "Rechazos", value: month.rejected_or_correction_total, tone: "error" },
+    { label: "Faltantes", value: month.missing_total, tone: "warning" },
+  ];
+
+  // Per-institution count for the month. Built off ``items[]`` so it
+  // stays in sync with the same data driving the expanded panel.
+  const institutionCounts = useMemo(() => {
+    const counts: Record<string, number> = {};
+    for (const item of month.items) {
+      counts[item.institution] = (counts[item.institution] ?? 0) + 1;
+    }
+    return counts;
+  }, [month.items]);
+
+  const periodKey = `${year}-M${String(month.month).padStart(2, "0")}`;
+  const auditUrl = `/client/auditoria?period_from=${periodKey}&period_to=${periodKey}`;
+  const Caret = expanded ? CaretDown : CaretRight;
+
+  return (
+    <>
+      <tr
+        className="cursor-pointer border-b border-[color:var(--border-subtle)] last:border-0 hover:bg-[color:var(--surface-hover)]"
+        onClick={onToggle}
+        aria-expanded={expanded}
+        role="button"
+      >
+        <td className="px-4 py-3 font-medium text-[color:var(--text-primary)]">
+          <span className="inline-flex items-center gap-2">
+            <Caret
+              className="h-3.5 w-3.5 text-[color:var(--text-tertiary)]"
+              weight="bold"
+              aria-hidden="true"
+            />
+            {month.month_label}
+          </span>
+        </td>
+        <td className="px-3 py-3">
+          <div className="flex flex-wrap items-center gap-1.5">
+            {INSTITUTION_ORDER.map((code) => {
+              const count = institutionCounts[code] ?? 0;
+              if (count === 0) return null;
+              const IconComponent = INSTITUTION_ICON[code];
+              return (
+                <span
+                  key={code}
+                  className="inline-flex items-center gap-1 rounded-full border border-[color:var(--border-subtle)] bg-[color:var(--surface-page)] px-2 py-0.5 text-[11px] font-medium text-[color:var(--text-secondary)]"
+                  title={`${INSTITUTION_LABELS[code] ?? code} · ${count}`}
+                >
+                  {IconComponent ? (
+                    <IconComponent
+                      className="h-3 w-3 text-[color:var(--text-brand)]"
+                      weight="bold"
+                      aria-hidden="true"
+                    />
+                  ) : null}
+                  <span>{INSTITUTION_LABELS[code] ?? code}</span>
+                  <span className="font-mono tabular-nums text-[10px] text-[color:var(--text-tertiary)]">
+                    {count}
+                  </span>
+                </span>
+              );
+            })}
+            {Object.keys(institutionCounts).length === 0 ? (
+              <span className="text-[11px] text-[color:var(--text-tertiary)]">
+                Sin obligaciones este mes
+              </span>
+            ) : null}
+          </div>
+        </td>
+        <td className="px-3 py-3 text-right font-mono tabular-nums text-[color:var(--text-primary)]">
+          {month.vendors_total}
+        </td>
+        <td className="px-3 py-3 text-right font-mono tabular-nums text-[color:var(--text-primary)]">
+          {month.due_total}
+        </td>
+        <td className="min-w-[260px] px-3 py-3">
+          <StackedBars segments={segments} height={10} />
+        </td>
+        <td className="px-3 py-3 text-right font-mono tabular-nums text-[color:var(--text-primary)]">
+          {month.due_soon_total}
+        </td>
+        <td className="px-3 py-3 text-right">
+          <Button
+            asChild
+            size="sm"
+            variant="outline"
+            onClick={(e) => e.stopPropagation()}
+            disabled={month.due_total === 0}
+          >
+            <Link
+              href={auditUrl}
+              title="Pre-llena la página de paquete para auditoría con este mes"
+            >
+              <Package className="h-3 w-3" weight="bold" aria-hidden="true" />
+              Paquete
+            </Link>
+          </Button>
+        </td>
+      </tr>
+      {expanded ? (
+        <tr className="border-b border-[color:var(--border-subtle)] last:border-0 bg-[color:var(--surface-sunken)]">
+          <td colSpan={7} className="px-4 py-3">
+            <ExpandedDetail items={month.items} />
+          </td>
+        </tr>
+      ) : null}
+    </>
+  );
+}
+
+function ExpandedDetail({ items }: { items: ClientCalendarItem[] }) {
+  if (items.length === 0) {
+    return (
+      <p className="text-xs text-[color:var(--text-tertiary)]">
+        Este mes no tiene obligaciones registradas en el calendario.
+      </p>
+    );
+  }
+  // Group by vendor so the expanded section reads "proveedor X tiene
+  // estos requisitos" — the mental model an auditor walks through.
+  const byVendor = new Map<string, { vendor_name: string; rows: ClientCalendarItem[] }>();
+  for (const item of items) {
+    const key = item.vendor_id;
+    if (!byVendor.has(key)) {
+      byVendor.set(key, { vendor_name: item.vendor_name, rows: [] });
+    }
+    byVendor.get(key)!.rows.push(item);
+  }
+  const groups = Array.from(byVendor.values()).sort((a, b) =>
+    a.vendor_name.localeCompare(b.vendor_name, "es"),
+  );
+  return (
+    <div className="space-y-4">
+      {groups.map((g) => (
+        <div key={g.vendor_name}>
+          <div className="mb-2 flex items-center justify-between">
+            <p className="text-xs font-semibold uppercase tracking-wide text-[color:var(--text-secondary)]">
+              {g.vendor_name}
+            </p>
+            <Link
+              href={`/client/vendors/${g.rows[0].vendor_id}`}
+              className="text-[11px] font-medium text-[color:var(--text-brand)] hover:underline"
+              title="Abrir el expediente del proveedor"
+            >
+              Ver expediente →
+            </Link>
+          </div>
+          <ul className="divide-y divide-[color:var(--border-subtle)] rounded-md border border-[color:var(--border-subtle)] bg-[color:var(--surface-raised)]">
+            {g.rows.map((row) => {
+              const inst = INSTITUTION_LABELS[row.institution] ?? row.institution;
+              const IconComponent = INSTITUTION_ICON[row.institution];
+              const statusText = STATUS_LABEL[row.status] ?? row.status;
+              return (
+                <li
+                  key={`${row.vendor_id}-${row.requirement_code ?? row.requirement_name}-${row.period_key ?? ""}`}
+                  className="flex flex-wrap items-center justify-between gap-3 px-3 py-2 text-xs"
+                >
+                  <div className="flex min-w-0 items-center gap-2">
+                    {IconComponent ? (
+                      <IconComponent
+                        className="h-3.5 w-3.5 shrink-0 text-[color:var(--text-brand)]"
+                        weight="bold"
+                        aria-hidden="true"
+                      />
+                    ) : null}
+                    <span className="font-medium text-[color:var(--text-primary)]">
+                      {row.requirement_name}
+                    </span>
+                    <span className="text-[color:var(--text-tertiary)]">·</span>
+                    <span className="text-[color:var(--text-secondary)]">{inst}</span>
+                    <span className="text-[color:var(--text-tertiary)]">·</span>
+                    <span className="font-mono text-[10px] text-[color:var(--text-tertiary)]">
+                      {row.period_label}
+                    </span>
+                  </div>
+                  <Badge variant={statusVariant(row.status)}>{statusText}</Badge>
+                </li>
+              );
+            })}
+          </ul>
+        </div>
+      ))}
+    </div>
   );
 }
 
