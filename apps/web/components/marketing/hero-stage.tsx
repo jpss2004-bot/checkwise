@@ -104,14 +104,19 @@ export function HeroStage() {
   return (
     <div
       className="absolute inset-0 -z-10 overflow-hidden"
-      aria-hidden="true"
       onMouseEnter={() => setPaused(true)}
       onMouseLeave={() => setPaused(false)}
     >
       {/* Quiet grid texture, masked to the right half so the typographic
           column stays calm. */}
-      <div className="cw-grid-pattern pointer-events-none absolute inset-y-0 right-0 w-[58%] opacity-[0.55]" />
-      <div className="pointer-events-none absolute inset-y-0 left-0 w-[46%] bg-gradient-to-r from-[color:var(--surface-page)] via-[color:var(--surface-page)] to-transparent" />
+      <div
+        aria-hidden="true"
+        className="cw-grid-pattern pointer-events-none absolute inset-y-0 right-0 w-[58%] opacity-[0.55]"
+      />
+      <div
+        aria-hidden="true"
+        className="pointer-events-none absolute inset-y-0 left-0 w-[46%] bg-gradient-to-r from-[color:var(--surface-page)] via-[color:var(--surface-page)] to-transparent"
+      />
 
       {/* Desktop stage. Mobile users get the inline mini-screenshot in
           hero-section.tsx instead — saving them from a heavy stage they
@@ -134,9 +139,19 @@ export function HeroStage() {
             const t = offsets[Math.min(depth, offsets.length - 1)];
 
             return (
-              <motion.div
+              <motion.button
                 key={layer.id}
-                className="absolute inset-0 origin-center"
+                type="button"
+                aria-label={
+                  settled
+                    ? `${layer.chrome} (vista activa)`
+                    : `Mostrar ${layer.chrome}`
+                }
+                aria-pressed={settled}
+                onClick={() => setActive(i)}
+                className={`absolute inset-0 origin-center rounded-[14px] text-left transition-shadow focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[color:var(--text-teal)]/40 focus-visible:ring-offset-2 focus-visible:ring-offset-[color:var(--surface-page)] ${
+                  settled ? "cursor-default" : "cursor-pointer"
+                }`}
                 style={{ zIndex: 100 - depth }}
                 initial={false}
                 animate={
@@ -151,13 +166,21 @@ export function HeroStage() {
                         filter: `blur(${t.blur}px) saturate(${settled ? 1 : 0.85})`,
                       }
                 }
-                transition={{
-                  duration: 0.85,
-                  ease: EASE_ENTER,
-                }}
+                whileHover={
+                  reduce || settled
+                    ? undefined
+                    : {
+                        x: t.x + 14,
+                        y: t.y - 4,
+                        scale: t.scale + 0.015,
+                        opacity: Math.min(1, t.opacity + 0.12),
+                        filter: `blur(${Math.max(0, t.blur - 2)}px) saturate(0.95)`,
+                      }
+                }
+                transition={{ duration: 0.55, ease: EASE_ENTER }}
               >
                 <Frame layer={layer} active={settled} priority={i === 0} />
-              </motion.div>
+              </motion.button>
             );
           })}
         </div>

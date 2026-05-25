@@ -32,10 +32,10 @@ export function HeroSection() {
         } as const);
 
   return (
-    <section className="relative isolate min-h-[calc(100dvh-64px)] overflow-hidden bg-[color:var(--surface-page)]">
+    <section className="relative isolate min-h-[640px] overflow-hidden bg-[color:var(--surface-page)] md:min-h-[min(88vh,860px)]">
       <HeroStage />
 
-      <div className="relative mx-auto flex min-h-[calc(100dvh-64px)] max-w-[1320px] items-center px-5 py-14 lg:py-20">
+      <div className="relative mx-auto flex min-h-[640px] max-w-[1320px] items-center px-5 py-16 md:min-h-[min(88vh,860px)] md:py-20">
         <div className="max-w-[560px] min-w-0">
           <motion.div
             {...fade(0)}
