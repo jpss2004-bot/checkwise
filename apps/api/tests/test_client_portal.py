@@ -1283,6 +1283,70 @@ def test_client_audit_package_zip_status_override_includes_in_review(
     assert len(archive.namelist()) == 2
 
 
+def test_client_audit_package_includes_bimestral_under_monthly_range(
+    api_client: TestClient, db_factory
+) -> None:
+    """Regression — Junta 2026-05-25 bug.
+
+    Before the fix the audit-package endpoint compared period_keys
+    lexicographically, so a bimestral row (``2026-B1`` = Jan-Feb)
+    was silently dropped whenever the user picked a monthly range
+    (e.g. ``period_from=2026-M01`` / ``period_to=2026-M01``)
+    because ``B`` lexically sorts before ``M``. This test seeds one
+    monthly and one bimestral submission, applies a January-only
+    filter, and asserts BOTH rows make it into the ZIP.
+    """
+    import io
+    import zipfile
+
+    client_id = _seed_client(db_factory)
+    _, ws = _seed_vendor_with_workspace(db_factory, client_id=client_id)
+    # Monthly Jan 2026 (INFONAVIT default uses 2026-B1, so override
+    # to a SAT monthly row).
+    _seed_approved_submission_for_workspace(
+        api_client,
+        db_factory,
+        ws,
+        requirement_code="REC-SAT-2026-05-declaracion-iva",
+        period_key="2026-M01",
+        period_code="2026-M01",
+        institution_code="sat",
+        load_type="mensual",
+        requirement_name="Declaración IVA",
+    )
+    # Bimestral B1 = Jan-Feb 2026. The default seed already produces
+    # an INFONAVIT bimestral; explicit period_key just for clarity.
+    _seed_approved_submission_for_workspace(
+        api_client,
+        db_factory,
+        ws,
+        period_key="2026-B1",
+        period_code="2026-B1",
+    )
+
+    _, email, pw = _seed_user_with_role(
+        db_factory, role="client_admin", client_id=client_id, email_prefix="ca"
+    )
+    token = _login(api_client, email, pw)
+
+    # Filter for January 2026 only. Pre-fix this dropped the
+    # bimestral row entirely because "2026-B1" < "2026-M01"
+    # lexically.
+    resp = api_client.get(
+        "/api/v1/client/audit-package.zip"
+        "?period_from=2026-M01&period_to=2026-M01&skip_manifest=true",
+        headers=_h(token),
+    )
+    assert resp.status_code == 200, resp.text
+    archive = zipfile.ZipFile(io.BytesIO(resp.content))
+    names = archive.namelist()
+    assert len(names) == 2, f"Expected both rows, got: {names}"
+    # The folder layout is vendor/institucion/periodo/filename — both
+    # institutions should be present.
+    institutions_present = {n.split("/")[1] for n in names}
+    assert institutions_present == {"sat", "infonavit"}
+
+
 def test_client_audit_package_zip_cross_vendor_layout(
     api_client: TestClient, db_factory
 ) -> None:

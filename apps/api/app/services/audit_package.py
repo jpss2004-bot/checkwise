@@ -40,6 +40,10 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.constants.statuses import DocumentStatus
+from app.core.period_range import (
+    filter_period_from_to_range,
+    period_overlaps_range,
+)
 from app.models import (
     Client,
     Document,
@@ -317,9 +321,16 @@ def build_entries(
       tenancy unit for documents).
     * Optionally narrow to ``filters.vendor_ids``.
     * Submission scoped to the client + vendor pair, status in the
-      effective set, period_key in ``[period_from, period_to]``
-      when bounds are given, institution + requirement code matching
-      when those are set.
+      effective set, institution + requirement code matching when
+      those are set.
+    * Period range applied semantically via
+      :func:`app.core.period_range.period_overlaps_range` — a
+      bimestral (``YYYY-Bx``), cuatrimestral (``YYYY-Qx``) or
+      annual (``YYYY-A``) row is INCLUDED whenever its calendar
+      window overlaps the user's monthly range. Lexicographic
+      ``period_key`` comparison is intentionally NOT used because
+      mixed formats sort wrong (``2026-Q1`` lexically > ``2026-M12``
+      even though Q1 starts in January).
     * ``_NO_BYTES_STATES`` excluded unconditionally — including them
       would yield a 404 mid-stream.
     """
@@ -400,16 +411,21 @@ def build_entries(
             sub_stmt = sub_stmt.where(
                 Submission.requirement_code.in_(filters.requirement_codes)
             )
-        if filters.period_from:
-            sub_stmt = sub_stmt.where(
-                Submission.period_key >= filters.period_from
-            )
-        if filters.period_to:
-            sub_stmt = sub_stmt.where(
-                Submission.period_key <= filters.period_to
-            )
+        # Period range is applied in Python (not SQL) so the test
+        # is a date-range overlap rather than a string comparison
+        # on ``period_key``. See ``app.core.period_range`` for the
+        # full rationale; the short version is that lexicographic
+        # ``period_key`` ordering breaks when bimestral / cuatrimestral
+        # / annual keys mix with monthly keys.
+        range_start, range_end = filter_period_from_to_range(
+            filters.period_from, filters.period_to
+        )
         submissions = list(db.scalars(sub_stmt))
         for sub in submissions:
+            if not period_overlaps_range(
+                sub.period_key, range_start, range_end
+            ):
+                continue
             doc = db.scalar(
                 select(Document).where(Document.submission_id == sub.id).limit(1)
             )
