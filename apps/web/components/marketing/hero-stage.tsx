@@ -122,19 +122,20 @@ export function HeroStage() {
           hero-section.tsx instead — saving them from a heavy stage they
           can't read. */}
       <div className="hidden h-full md:block">
-        <div className="absolute right-[-4%] top-1/2 h-[78%] w-[58%] -translate-y-1/2 xl:right-[-2%] xl:w-[56%]">
+        <div className="absolute right-[2%] top-1/2 h-[74%] w-[52%] -translate-y-1/2 xl:right-[3%] xl:w-[50%]">
           {LAYERS.map((layer, i) => {
             const depth = stackIndex(i); // 0 = front
             const settled = depth === 0;
             // Fanned arrangement: each layer behind the front sits a bit
             // higher, a touch smaller, slightly rotated, and progressively
-            // softened by blur. Values stay tight to keep the composition
-            // calm rather than gimmicky.
+            // softened by blur. Back layers are heavily dimmed so the
+            // front screen owns the eye; they remain clickable affordances
+            // for the visitor who wants to bring one forward.
             const offsets = [
               { x: 0, y: 0, scale: 1, rot: 0, blur: 0, opacity: 1 },
-              { x: -54, y: -38, scale: 0.94, rot: -2.4, blur: 4, opacity: 0.85 },
-              { x: -98, y: -68, scale: 0.88, rot: -4.2, blur: 8, opacity: 0.6 },
-              { x: -132, y: -92, scale: 0.82, rot: -5.6, blur: 12, opacity: 0.38 },
+              { x: -48, y: -34, scale: 0.94, rot: -2.4, blur: 6, opacity: 0.55 },
+              { x: -88, y: -62, scale: 0.88, rot: -4.2, blur: 10, opacity: 0.35 },
+              { x: -120, y: -86, scale: 0.83, rot: -5.6, blur: 14, opacity: 0.2 },
             ];
             const t = offsets[Math.min(depth, offsets.length - 1)];
 
