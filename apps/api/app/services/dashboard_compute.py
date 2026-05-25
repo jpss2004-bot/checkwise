@@ -267,19 +267,16 @@ def build_compliance_state_for_vendor(
 def onboarding_reupload_href(view: SlotView) -> str:
     """Build the ``/portal/upload`` URL for an onboarding slot.
 
-    When the slot is in an actionable state and already carries a
-    submission, the URL appends ``replaces=<submission_id>`` so the
-    upload wizard creates a supersession link automatically.
-
-    Carries the human ``requirement`` name alongside the canonical
-    code so the intake wizard renders the document the provider
-    actually clicked on (matches the portal-layer fix from
-    2026-05-21 — see ``_onboarding_reupload_href`` in
-    ``app.api.v1.portal``).
+    Mirrors ``_onboarding_reupload_href`` in ``app.api.v1.portal``.
+    Threads requirement name + institution so the wizard locks Step 1
+    instead of falling back to its hardcoded defaults
+    (provider-portal UX pass, 2026-05-25).
     """
-    parts = [f"requirement_code={view.requirement_code}"]
+    parts = [f"requirement_code={quote(view.requirement_code or '')}"]
     if view.requirement_name:
         parts.append(f"requirement={quote(view.requirement_name)}")
+    if view.institution:
+        parts.append(f"institution={quote(view.institution)}")
     if view.current_submission_id and view.state in ACTIONABLE_SLOT_STATES:
         parts.append(f"replaces={view.current_submission_id}")
     parts.append("from=onboarding")
@@ -289,30 +286,28 @@ def onboarding_reupload_href(view: SlotView) -> str:
 def calendar_reupload_href(view: SlotView) -> str:
     """Build the ``/portal/upload`` URL for a calendar (periodic) slot.
 
-    Carries ``requirement_code`` + ``requirement`` (human name) +
-    ``period_key`` + ``period_label`` so the upload wizard preselects
-    the right slot. ``replaces=`` is appended when the slot is
-    actionable and has a submission.
+    Mirrors ``_calendar_reupload_href`` in ``app.api.v1.portal``.
+    Threads requirement name + institution + load_type so the upload
+    wizard locks every Step 1 field instead of falling back to its
+    hardcoded ``sat`` / ``mensual`` / arbitrary-6th-catalog-entry
+    defaults (provider-portal UX pass, 2026-05-25).
 
     Session 3 (2026-05-21) — when ``requirement_code`` matches the v2
     shape, appends ``&v2=1`` so the wizard switches to the
-    alternatives radio picker. Without this, dashboard suggested-
-    action CTAs that route v2 slots through this builder would mount
-    the wizard in v1 mode against a collapsed code → broken submit.
-
-    Side-fix (2026-05-22) — the ``requirement=<name>`` parameter
-    matches the portal-layer fix from 2026-05-21. Without it the
-    reports attention-list links rendered through this helper would
-    drop into the wizard without a preselected document.
+    alternatives radio picker.
     """
     parts: list[str] = []
     if view.requirement_code:
-        parts.append(f"requirement_code={view.requirement_code}")
+        parts.append(f"requirement_code={quote(view.requirement_code)}")
     if view.requirement_name:
         parts.append(f"requirement={quote(view.requirement_name)}")
+    if view.institution:
+        parts.append(f"institution={quote(view.institution)}")
+    if view.load_type:
+        parts.append(f"load_type={quote(view.load_type)}")
     if view.period_key:
-        parts.append(f"period_key={view.period_key}")
-        parts.append(f"period_label={view.period_key}")
+        parts.append(f"period_key={quote(view.period_key)}")
+        parts.append(f"period_label={quote(view.period_key)}")
     if view.current_submission_id and view.state in ACTIONABLE_SLOT_STATES:
         parts.append(f"replaces={view.current_submission_id}")
     if view.requirement_code and is_v2_recurring_code(view.requirement_code):

@@ -515,12 +515,25 @@ def _calendar_upload_href(
     year: int,
     code: str,
     period_key: str,
+    name: str | None = None,
+    institution: str | None = None,
+    load_type: str | None = None,
     v2_mode: bool = False,
 ) -> str:
     """Build the canonical upload URL for a calendar item.
 
     Keeps the frontend stable: every calendar entry can offer a
     "Subir" link without inventing a URL convention per surface.
+
+    The canonical lookup key inside the slot service is the
+    ``(requirement_code, period_key)`` pair. The other three params
+    (``requirement`` name, ``institution``, ``load_type``) are the
+    human-readable + categorical fields the upload wizard needs to
+    render Step 1 without falling back to its hardcoded ``initialForm``
+    defaults (``sat`` / ``mensual`` / arbitrary 6th catalog entry) —
+    the missing-context bug fix from the 2026-05-25 provider-portal
+    UX pass. All three are optional so older callers stay stable;
+    new code should always pass them.
 
     Session 3 (2026-05-21) — when ``v2_mode`` is True (the catalog
     row carries an ``accepts_documents`` list), the URL appends
@@ -529,14 +542,22 @@ def _calendar_upload_href(
     in the URL rather than in a fetch-on-mount roundtrip so v1
     behavior stays a zero-fetch path.
     """
-    href = (
-        f"/portal/upload?requirement_code={code}"
-        f"&period_key={period_key}"
-        f"&period_label={year}-{period_key.split('-', 1)[-1] if '-' in period_key else period_key}"
-    )
+    from urllib.parse import quote
+
+    parts: list[str] = [
+        f"requirement_code={quote(code)}",
+        f"period_key={quote(period_key)}",
+        f"period_label={year}-{period_key.split('-', 1)[-1] if '-' in period_key else period_key}",
+    ]
+    if name:
+        parts.append(f"requirement={quote(name)}")
+    if institution:
+        parts.append(f"institution={quote(institution)}")
+    if load_type:
+        parts.append(f"load_type={quote(load_type)}")
     if v2_mode:
-        href = f"{href}&v2=1"
-    return href
+        parts.append("v2=1")
+    return "/portal/upload?" + "&".join(parts)
 
 
 # Phase 4 — the legacy ``_match_submission`` fuzzy matcher was removed
@@ -1589,6 +1610,9 @@ def get_workspace_calendar(
             year=year,
             code=req.code,
             period_key=req.period_key,
+            name=req.name,
+            institution=req.institution,
+            load_type=req.frequency,
             v2_mode=bool(req.accepts_documents),
         )
         # Session 2 — when this is a v2 row, surface the rich
@@ -3073,17 +3097,22 @@ def _compute_semaphore(
 
 
 def _onboarding_reupload_href(view: SlotView) -> str:
+    """Build the upload URL for an onboarding (initial expediente) row.
+
+    Onboarding slots do not carry ``period_key`` / ``load_type`` —
+    those are recurring-only concepts. We still thread ``institution``
+    so the wizard locks the institution field and doesn't surface its
+    hardcoded default. The 2026-05-25 provider-portal UX pass closed
+    the equivalent gap on the calendar side; this builder is its
+    sibling for the onboarding rail.
+    """
     from urllib.parse import quote
 
-    parts = [f"requirement_code={view.requirement_code}"]
-    # Bug fix (2026-05-21): include the human ``requirement`` name
-    # alongside the canonical code so the intake wizard renders the
-    # document the provider actually clicked on. Without the name,
-    # the wizard falls back to an arbitrary 6th catalog entry (the
-    # intake-wizard guard now blanks the field instead, but passing
-    # the real name keeps the form pre-filled correctly).
+    parts = [f"requirement_code={quote(view.requirement_code or '')}"]
     if view.requirement_name:
         parts.append(f"requirement={quote(view.requirement_name)}")
+    if view.institution:
+        parts.append(f"institution={quote(view.institution)}")
     if view.current_submission_id and view.state in _ACTIONABLE_SLOT_STATES:
         parts.append(f"replaces={view.current_submission_id}")
     parts.append("from=onboarding")
@@ -3091,18 +3120,28 @@ def _onboarding_reupload_href(view: SlotView) -> str:
 
 
 def _calendar_reupload_href(view: SlotView) -> str:
+    """Build the upload URL for a calendar reupload action.
+
+    Used by the dashboard suggested-action CTAs. Mirrors
+    ``_calendar_upload_href`` so the wizard receives the full
+    ``(requirement, institution, load_type)`` triad on top of the
+    canonical ``(requirement_code, period_key)`` pair and does not
+    fall back to its hardcoded defaults.
+    """
     from urllib.parse import quote
 
     parts: list[str] = []
     if view.requirement_code:
-        parts.append(f"requirement_code={view.requirement_code}")
-    # Bug fix (2026-05-21): pass the human ``requirement`` name so the
-    # wizard renders the right document.
+        parts.append(f"requirement_code={quote(view.requirement_code)}")
     if view.requirement_name:
         parts.append(f"requirement={quote(view.requirement_name)}")
+    if view.institution:
+        parts.append(f"institution={quote(view.institution)}")
+    if view.load_type:
+        parts.append(f"load_type={quote(view.load_type)}")
     if view.period_key:
-        parts.append(f"period_key={view.period_key}")
-        parts.append(f"period_label={view.period_key}")
+        parts.append(f"period_key={quote(view.period_key)}")
+        parts.append(f"period_label={quote(view.period_key)}")
     if view.current_submission_id and view.state in _ACTIONABLE_SLOT_STATES:
         parts.append(f"replaces={view.current_submission_id}")
     # Session 3 audit fix (2026-05-21) — dashboard suggested-action

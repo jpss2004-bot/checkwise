@@ -113,6 +113,14 @@ class SlotView:
     # Lineage hint: how many prior attempts (superseded rows) are on
     # this slot. ``0`` for a brand-new upload, ``1+`` after a replacement.
     superseded_count: int
+    # Catalog frequency for recurring slots — "mensual" / "bimestral"
+    # / "cuatrimestral" / "anual". ``None`` on onboarding slots, which
+    # are non-periodic by definition. Surfaces in upload-URL builders
+    # so the wizard's "Tipo de carga" field locks correctly instead of
+    # falling back to the hardcoded "mensual" default. Defaults to None
+    # for back-compat with tests that built SlotView via positional
+    # ordering before this field existed.
+    load_type: str | None = None
 
 
 # ---------------------------------------------------------------------------
@@ -288,6 +296,7 @@ def _slot_view_from_candidates(
     slot_key: SlotKey,
     requirement_name: str | None,
     institution: str | None,
+    load_type: str | None = None,
     required: bool,
     candidates: list[Submission],
 ) -> SlotView:
@@ -302,6 +311,7 @@ def _slot_view_from_candidates(
         period_key=slot_key.period_key,
         requirement_name=requirement_name,
         institution=institution,
+        load_type=load_type,
         required=required,
         current_submission_id=current.id if current is not None else None,
         current_status=current.status if current is not None else None,
@@ -431,6 +441,7 @@ def build_workspace_calendar_slots(
                 slot_key=slot_key,
                 requirement_name=req.name,
                 institution=req.institution,
+                load_type=req.frequency,
                 required=True,
                 candidates=candidates,
             )
@@ -503,6 +514,7 @@ def _build_workspace_calendar_slots_v2(
                 slot_key=slot_key,
                 requirement_name=req.name,
                 institution=req.institution,
+                load_type=req.frequency,
                 required=True,
                 candidates=candidates,
             )

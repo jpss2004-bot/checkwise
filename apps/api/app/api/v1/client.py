@@ -1277,6 +1277,9 @@ def client_calendar(
                 year=year,
                 code=req.code,
                 period_key=req.period_key,
+                name=req.name,
+                institution=req.institution,
+                load_type=req.frequency,
                 v2_mode=bool(req.accepts_documents),
             )
             months[req.due_month].append(
