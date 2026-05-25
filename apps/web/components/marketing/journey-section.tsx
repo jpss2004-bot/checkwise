@@ -127,7 +127,7 @@ export function JourneySection() {
         className="cw-grid-pattern pointer-events-none absolute inset-x-0 top-0 -z-10 h-[40%] opacity-[0.55]"
       />
 
-      <div className="mx-auto max-w-[1320px] px-5 py-20 lg:py-28">
+      <div className="mx-auto max-w-[1320px] px-5 py-24 lg:py-28">
         <Reveal className="max-w-3xl">
           <p className="cw-eyebrow text-[color:var(--text-teal)]">
             El recorrido
@@ -140,7 +140,7 @@ export function JourneySection() {
           </h2>
         </Reveal>
 
-        <div className="mt-12 grid grid-cols-1 gap-10 lg:mt-16 lg:grid-cols-[minmax(0,380px)_minmax(0,1fr)] lg:gap-14">
+        <div className="mt-14 grid grid-cols-1 gap-12 lg:mt-16 lg:grid-cols-[minmax(0,360px)_minmax(0,1fr)] lg:gap-16">
           {/* Sticky narrative rail. */}
           <div className="lg:sticky lg:top-24 lg:self-start">
             <div className="space-y-1.5">
@@ -251,7 +251,7 @@ export function JourneySection() {
                       initial={reduce ? false : { opacity: 0, x: -4 }}
                       animate={{ opacity: 1, x: 0 }}
                       exit={reduce ? { opacity: 0 } : { opacity: 0, x: 4 }}
-                      transition={{ duration: 0.35, ease: EASE_ENTER }}
+                      transition={{ duration: 0.25, ease: EASE_ENTER }}
                       className="ml-1 truncate font-mono text-[10px] uppercase tracking-[0.18em] text-[color:var(--text-tertiary)]"
                     >
                       {ACTS[active].chrome}
@@ -267,10 +267,10 @@ export function JourneySection() {
                     <motion.div
                       key={`shot-${active}`}
                       className="absolute inset-0"
-                      initial={reduce ? false : { opacity: 0, scale: 1.02 }}
+                      initial={reduce ? false : { opacity: 0, scale: 1.015 }}
                       animate={{ opacity: 1, scale: 1 }}
-                      exit={reduce ? { opacity: 0 } : { opacity: 0, scale: 0.99 }}
-                      transition={{ duration: 0.6, ease: EASE_ENTER }}
+                      exit={reduce ? { opacity: 0 } : { opacity: 0, scale: 0.995 }}
+                      transition={{ duration: 0.4, ease: EASE_ENTER }}
                     >
                       <Image
                         src={ACTS[active].image}
@@ -289,10 +289,10 @@ export function JourneySection() {
               <AnimatePresence mode="wait">
                 <motion.dl
                   key={`story-${active}`}
-                  initial={reduce ? false : { opacity: 0, y: 8 }}
+                  initial={reduce ? false : { opacity: 0, y: 6 }}
                   animate={{ opacity: 1, y: 0 }}
-                  exit={reduce ? { opacity: 0 } : { opacity: 0, y: -4 }}
-                  transition={{ duration: 0.4, ease: EASE_ENTER }}
+                  exit={reduce ? { opacity: 0 } : { opacity: 0, y: -3 }}
+                  transition={{ duration: 0.28, ease: EASE_ENTER }}
                   className="mt-6 grid grid-cols-1 gap-4 md:grid-cols-3"
                 >
                   <StoryItem label="Quién" value={ACTS[active].who} />
@@ -302,11 +302,13 @@ export function JourneySection() {
               </AnimatePresence>
             </div>
 
-            {/* Spacer that creates the scroll budget per act so the sticky
-                stage can crossfade through all four acts. */}
+            {/* Spacer creates the scroll budget per act so the sticky stage
+                can crossfade through all four acts. Tightened from 70vh
+                to 38vh per act so the section doesn't dominate page
+                rhythm. */}
             <div
               aria-hidden="true"
-              style={{ height: `${ACTS.length * 70}vh` }}
+              style={{ height: `${ACTS.length * 38}vh` }}
             />
           </div>
         </div>
