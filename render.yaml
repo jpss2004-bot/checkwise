@@ -83,7 +83,37 @@ services:
 
       # ---- Auth ----
       # 32+ char random secret. Generate with: openssl rand -hex 32
+      # The API now refuses to boot if this is the in-code placeholder
+      # (audit P4-01, 2026-05-25) — paste the real value before the
+      # first deploy or the service will fail health checks.
       - key: AUTH_JWT_SECRET
+        sync: false
+
+      # ---- Frontend base URL (audit P4-03, 2026-05-25) ----
+      # The hostname every outbound transactional email links to —
+      # password-reset CTAs, reviewer-decision notifications, renewal
+      # reminders. Without this, email links default to the in-code
+      # ``http://localhost:3000`` and break for any pilot user. Paste
+      # the production hostname (e.g. https://app.checkwise.mx or the
+      # current Vercel preview URL) in the Render dashboard.
+      - key: FRONTEND_BASE_URL
+        sync: false
+
+      # ---- Transactional email (audit P4-02, 2026-05-25) ----
+      # All four must be set for outbound email to leave the box.
+      # When any are empty, ``send_*_email`` in
+      # ``app/services/email_delivery.py`` short-circuits and writes
+      # ``delivery_status="smtp_not_configured"`` to the audit row —
+      # the row exists but no email leaves. SMTP_PORT defaults to 587
+      # (STARTTLS); override only if the provider needs 465 (SSL) or
+      # a custom port.
+      - key: SMTP_HOST
+        sync: false
+      - key: SMTP_USERNAME
+        sync: false
+      - key: SMTP_PASSWORD
+        sync: false
+      - key: SMTP_FROM_EMAIL
         sync: false
 
       # ---- Support links (optional; populate when finalized) ----

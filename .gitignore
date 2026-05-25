@@ -110,3 +110,12 @@ CodexConvo.txt
 docs/audit-screenshots/**/_raw_demo/
 docs/audit-screenshots/**/demo.silent.mp4
 docs/audit-screenshots/**/*.webm
+
+# Local printables / generated PDFs (audit P4-08, 2026-05-25). The
+# audit and legal packages are rendered locally for sharing; the
+# definitive sources live elsewhere (audit Markdown + the legal
+# document repository) so the PDFs themselves don't need version
+# control. Pattern matches both the dated artifacts the audit
+# flagged and any future date-stamped re-renders.
+docs/audits/security/BACKEND_HARDENING_PASS_*.pdf
+docs/legal/checkwise-paquete-legal-simple-v*-*.pdf

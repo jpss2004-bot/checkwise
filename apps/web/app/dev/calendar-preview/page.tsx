@@ -1,5 +1,6 @@
 "use client";
 
+import { notFound } from "next/navigation";
 import { useMemo, useState } from "react";
 import {
   ArrowLeft,
@@ -172,6 +173,16 @@ const LEGEND_STATES: DocumentStateCode[] = [
 const VALID: ReadonlySet<string> = new Set(["sat", "imss", "infonavit", "stps_repse"]);
 
 export default function CalendarPreviewPage() {
+  // Audit P4-05 (2026-05-25) — the calendar preview is a designer
+  // sandbox that should never be reachable in production. Gated by
+  // ``NEXT_PUBLIC_DEV_ROUTES=true`` so it stays available in local
+  // development (and any explicitly opted-in staging tier) but
+  // returns 404 everywhere else. NEXT_PUBLIC_* vars are inlined at
+  // build time, so the production bundle naturally excludes this
+  // branch once the env stays unset.
+  if (process.env.NEXT_PUBLIC_DEV_ROUTES !== "true") {
+    notFound();
+  }
   const events = useMemo(() => buildMockEvents(), []);
   const [filterInstitution, setFilterInstitution] = useState<
     CalendarInstitutionCode | "all"
