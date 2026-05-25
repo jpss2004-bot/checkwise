@@ -300,7 +300,7 @@
           "parameters": [
             {
               "name": "x-api-key",
-              "value": "={{ $env.CHECKWISE_ANTHROPIC_API_KEY || 'apikey_01Rj2N8SVvo6BePZj99NhmiT' }}"
+              "value": "={{ $env.CHECKWISE_ANTHROPIC_API_KEY || 'REPLACE_ME_WITH_ANTHROPIC_API_KEY_VIA_N8N_ENV' }}"
             },
             {
               "name": "anthropic-version",
