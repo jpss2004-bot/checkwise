@@ -1,0 +1,52 @@
+[
+  {
+    "name": "cw_renewal_threshold",
+    "category": "UTILITY",
+    "language": "es_MX",
+    "components": [
+      {
+        "type": "BODY",
+        "text": "*{{1}}* — {{2}} vence el {{3}} ({{4}}). Sube la versión vigente antes de la fecha para mantener tu expediente en regla.",
+        "example": {
+          "body_text": [
+            [
+              "Servicios Especializados Aurora",
+              "Constancia REPSE",
+              "30/05/2026",
+              "Próximo a vencer · faltan 7 d"
+            ]
+          ]
+        }
+      },
+      {
+        "type": "FOOTER",
+        "text": "CheckWise · cumplimiento REPSE"
+      }
+    ]
+  },
+  {
+    "name": "cw_reviewer_decision",
+    "category": "UTILITY",
+    "language": "es_MX",
+    "components": [
+      {
+        "type": "BODY",
+        "text": "*{{1}}* — Documento «{{2}}» {{3}} por {{4}}. Abre tu expediente en CheckWise para ver el detalle.",
+        "example": {
+          "body_text": [
+            [
+              "Servicios Especializados Aurora",
+              "Declaración IVA",
+              "Aprobado",
+              "Ada Reyes"
+            ]
+          ]
+        }
+      },
+      {
+        "type": "FOOTER",
+        "text": "CheckWise · revisión Legal Shelf"
+      }
+    ]
+  }
+]
