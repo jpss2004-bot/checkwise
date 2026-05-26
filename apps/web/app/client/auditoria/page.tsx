@@ -18,11 +18,19 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import {
+  CaretDown,
+  CaretRight,
+} from "@phosphor-icons/react";
+import {
   clientAuditPackageZipUrl,
+  downloadClientAuditPackageZipPost,
   getClientAuditPackagePreview,
+  getClientAuditPackageTree,
   listClientVendors,
   type AuditPackageFilters,
   type AuditPackagePreview,
+  type AuditPackageTreeNode,
+  type AuditPackageTreeResponse,
   type ClientVendorListResponse,
 } from "@/lib/api/client";
 import { INSTITUTION_LABELS } from "@/lib/api/portal";
@@ -110,6 +118,18 @@ export default function ClientAuditoriaPage() {
   const [previewLoading, setPreviewLoading] = useState(false);
   const [previewError, setPreviewError] = useState<string | null>(null);
 
+  // Item 2 — tree picker state. ``tree`` is the candidate set the
+  // filters resolved to; ``selectedIds`` is the user's whitelist. A
+  // null whitelist means "ship everything in the tree" (legacy filter
+  // mode); an empty Set means "user explicitly deselected
+  // everything"; otherwise we POST the explicit subset.
+  const [tree, setTree] = useState<AuditPackageTreeResponse | null>(null);
+  const [treeLoading, setTreeLoading] = useState(false);
+  const [treeError, setTreeError] = useState<string | null>(null);
+  const [selectedIds, setSelectedIds] = useState<Set<string> | null>(null);
+  const [downloading, setDownloading] = useState(false);
+  const [downloadError, setDownloadError] = useState<string | null>(null);
+
   // Vendor catalog — fetched once, used for the multi-select chips
   // and to map vendor_id → vendor_name on the preview breakdown.
   useEffect(() => {
@@ -130,13 +150,16 @@ export default function ClientAuditoriaPage() {
     };
   }, []);
 
-  // Live preview — refetch whenever any filter changes. Debounce is
-  // not necessary because the user interacts via discrete clicks
-  // (chips / toggles) rather than free typing.
+  // Live preview + tree fetch — refetch whenever any filter changes.
+  // ``selectedIds`` is reset to null (= "all in tree") on every
+  // re-fetch so a stale whitelist from the previous filter set never
+  // leaks into the next composition.
   useEffect(() => {
     let cancelled = false;
     setPreviewLoading(true);
     setPreviewError(null);
+    setTreeLoading(true);
+    setTreeError(null);
     const filters: AuditPackageFilters = {
       period_from: periodFrom || null,
       period_to: periodTo || null,
@@ -160,11 +183,32 @@ export default function ClientAuditoriaPage() {
       .finally(() => {
         if (!cancelled) setPreviewLoading(false);
       });
+    getClientAuditPackageTree(filters)
+      .then((data) => {
+        if (cancelled) return;
+        setTree(data);
+        setSelectedIds(null);
+      })
+      .catch((err: unknown) => {
+        if (cancelled) return;
+        setTreeError(
+          err instanceof Error
+            ? err.message
+            : "No pudimos cargar la lista de documentos.",
+        );
+        setTree(null);
+      })
+      .finally(() => {
+        if (!cancelled) setTreeLoading(false);
+      });
     return () => {
       cancelled = true;
     };
   }, [periodFrom, periodTo, institutions, vendorIds, statuses]);
 
+  // Filter-only fallback URL (GET) used when the user has NOT tweaked
+  // the per-document selection. The tree picker submits via POST so
+  // the bearer header carries and the body can hold hundreds of ids.
   const downloadUrl = clientAuditPackageZipUrl({
     period_from: periodFrom || null,
     period_to: periodTo || null,
@@ -173,12 +217,76 @@ export default function ClientAuditoriaPage() {
     vendor_ids: vendorIds,
   });
 
+  // Effective selection: when the user has touched the tree, use the
+  // explicit Set; otherwise treat "no selection state" as "all from
+  // the tree".
+  const treeAllIds = useMemo(
+    () => new Set((tree?.items ?? []).map((i) => i.submission_id)),
+    [tree],
+  );
+  const effectiveSelection: Set<string> = selectedIds ?? treeAllIds;
+  const selectionCount = effectiveSelection.size;
+  // Bytes only for the selected subset so the cap message is honest.
+  const selectionBytes = useMemo(() => {
+    if (!tree) return 0;
+    let total = 0;
+    for (const item of tree.items) {
+      if (effectiveSelection.has(item.submission_id)) total += item.size_bytes;
+    }
+    return total;
+  }, [tree, effectiveSelection]);
+  const overFileCap = tree ? selectionCount > tree.file_cap : false;
+  const overBytesCap = tree ? selectionBytes > tree.bytes_cap : false;
+
   const downloadDisabled =
     previewLoading ||
-    !preview ||
-    preview.file_count === 0 ||
-    preview.over_file_cap ||
-    preview.over_bytes_cap;
+    treeLoading ||
+    downloading ||
+    selectionCount === 0 ||
+    overFileCap ||
+    overBytesCap;
+
+  async function onDownloadClick() {
+    if (downloadDisabled || !tree) return;
+    // If the user did not touch the tree, fall back to the legacy
+    // filter-only GET so bookmarks and old behaviour stay live.
+    const everythingSelected =
+      selectedIds === null ||
+      (selectedIds.size === treeAllIds.size &&
+        Array.from(treeAllIds).every((id) => selectedIds.has(id)));
+    if (everythingSelected) {
+      window.open(downloadUrl, "_blank", "noopener,noreferrer");
+      return;
+    }
+    setDownloading(true);
+    setDownloadError(null);
+    try {
+      const { blob, filename } = await downloadClientAuditPackageZipPost({
+        period_from: periodFrom || null,
+        period_to: periodTo || null,
+        institutions,
+        statuses,
+        vendor_ids: vendorIds,
+        submission_ids: Array.from(effectiveSelection),
+      });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = filename;
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      setTimeout(() => URL.revokeObjectURL(url), 60_000);
+    } catch (err) {
+      setDownloadError(
+        err instanceof Error
+          ? err.message
+          : "No pudimos preparar la descarga.",
+      );
+    } finally {
+      setDownloading(false);
+    }
+  }
 
   function toggleInst(code: string) {
     setInstitutions((prev) =>
@@ -437,6 +545,53 @@ export default function ClientAuditoriaPage() {
           ) : null}
         </Surface>
 
+        <Surface
+          title="Selecciona los documentos"
+          icon={Info}
+          description="Los filtros de arriba acotan la lista. Aquí puedes ticar o destacar cada documento individualmente — todo lo seleccionado entra al ZIP."
+          actions={
+            tree && tree.items.length > 0 ? (
+              <div className="flex gap-2 text-xs">
+                <button
+                  type="button"
+                  className="font-medium text-[color:var(--text-brand)] hover:underline"
+                  onClick={() => setSelectedIds(new Set(treeAllIds))}
+                >
+                  Seleccionar todo
+                </button>
+                <span className="text-[color:var(--text-tertiary)]">·</span>
+                <button
+                  type="button"
+                  className="font-medium text-[color:var(--text-secondary)] hover:underline"
+                  onClick={() => setSelectedIds(new Set())}
+                >
+                  Limpiar
+                </button>
+              </div>
+            ) : null
+          }
+        >
+          {treeLoading ? (
+            <p className="text-sm text-[color:var(--text-tertiary)]">
+              Cargando documentos…
+            </p>
+          ) : treeError ? (
+            <p className="text-sm text-[color:var(--status-error-text)]">
+              {treeError}
+            </p>
+          ) : !tree || tree.items.length === 0 ? (
+            <p className="text-sm text-[color:var(--text-tertiary)]">
+              Ningún documento coincide con los filtros aplicados.
+            </p>
+          ) : (
+            <DocumentTree
+              tree={tree}
+              selected={effectiveSelection}
+              setSelected={(next) => setSelectedIds(new Set(next))}
+            />
+          )}
+        </Surface>
+
         <div className="flex flex-wrap items-center justify-between gap-3 rounded-md border border-[color:var(--border-default)] bg-[color:var(--surface-raised)] p-5 shadow-sm">
           <div className="min-w-0">
             <p className="text-sm font-semibold text-[color:var(--text-primary)]">
@@ -448,25 +603,303 @@ export default function ClientAuditoriaPage() {
               periodo.
             </p>
           </div>
-          <Button asChild disabled={downloadDisabled} size="lg">
-            <a
-              href={downloadDisabled ? "#" : downloadUrl}
-              target="_blank"
-              rel="noreferrer"
-              aria-disabled={downloadDisabled}
-              tabIndex={downloadDisabled ? -1 : undefined}
-              onClick={(e) => {
-                if (downloadDisabled) e.preventDefault();
-              }}
+          <div className="flex flex-col items-end gap-1">
+            <Button
+              type="button"
+              disabled={downloadDisabled}
+              size="lg"
+              onClick={onDownloadClick}
             >
-              <DownloadSimple className="h-4 w-4" weight="bold" aria-hidden="true" />
-              Descargar paquete para auditoría
+              <DownloadSimple
+                className="h-4 w-4"
+                weight="bold"
+                aria-hidden="true"
+              />
+              {downloading
+                ? "Preparando…"
+                : `Descargar ${selectionCount} documento${selectionCount === 1 ? "" : "s"}`}
               <ArrowRight className="h-4 w-4" weight="bold" aria-hidden="true" />
-            </a>
-          </Button>
+            </Button>
+            {downloadError ? (
+              <p className="text-[11px] text-[color:var(--status-error-text)]">
+                {downloadError}
+              </p>
+            ) : null}
+            {overFileCap ? (
+              <p className="text-[11px] text-[color:var(--status-error-text)]">
+                Supera el límite de {tree?.file_cap} documentos. Deselecciona algunos.
+              </p>
+            ) : null}
+            {overBytesCap ? (
+              <p className="text-[11px] text-[color:var(--status-error-text)]">
+                Supera el límite de {Math.round((tree?.bytes_cap ?? 0) / (1024 * 1024))} MB.
+              </p>
+            ) : null}
+          </div>
         </div>
       </div>
     </ClientShell>
+  );
+}
+
+// ─── Tree picker (item 2) ────────────────────────────────────────
+
+type TreeNode = AuditPackageTreeNode;
+
+type GroupedTree = Array<{
+  vendor_id: string;
+  vendor_name: string;
+  institutions: Array<{
+    institution_code: string;
+    institution_name: string;
+    periods: Array<{ period_key: string; docs: TreeNode[] }>;
+  }>;
+}>;
+
+function buildGroupedTree(items: TreeNode[]): GroupedTree {
+  const byVendor = new Map<string, TreeNode[]>();
+  for (const it of items) {
+    const arr = byVendor.get(it.vendor_id) ?? [];
+    arr.push(it);
+    byVendor.set(it.vendor_id, arr);
+  }
+  const vendors = Array.from(byVendor.entries())
+    .map(([vid, rows]) => {
+      const name = rows[0]?.vendor_name ?? vid;
+      const byInst = new Map<string, TreeNode[]>();
+      for (const r of rows) {
+        const arr = byInst.get(r.institution_code) ?? [];
+        arr.push(r);
+        byInst.set(r.institution_code, arr);
+      }
+      const institutions = Array.from(byInst.entries())
+        .map(([code, instRows]) => {
+          const instName = instRows[0]?.institution_name ?? code;
+          const byPeriod = new Map<string, TreeNode[]>();
+          for (const r of instRows) {
+            const k = r.period_key || "sin-periodo";
+            const arr = byPeriod.get(k) ?? [];
+            arr.push(r);
+            byPeriod.set(k, arr);
+          }
+          const periods = Array.from(byPeriod.entries())
+            .map(([period_key, docs]) => ({ period_key, docs }))
+            .sort((a, b) => a.period_key.localeCompare(b.period_key));
+          return {
+            institution_code: code,
+            institution_name: instName,
+            periods,
+          };
+        })
+        .sort((a, b) =>
+          a.institution_name.localeCompare(b.institution_name, "es"),
+        );
+      return { vendor_id: vid, vendor_name: name, institutions };
+    })
+    .sort((a, b) => a.vendor_name.localeCompare(b.vendor_name, "es"));
+  return vendors;
+}
+
+function DocumentTree({
+  tree,
+  selected,
+  setSelected,
+}: {
+  tree: AuditPackageTreeResponse;
+  selected: Set<string>;
+  setSelected: (next: Set<string>) => void;
+}) {
+  const grouped = useMemo(() => buildGroupedTree(tree.items), [tree.items]);
+
+  function toggleIds(ids: string[], next: boolean) {
+    const out = new Set(selected);
+    if (next) {
+      for (const id of ids) out.add(id);
+    } else {
+      for (const id of ids) out.delete(id);
+    }
+    setSelected(out);
+  }
+
+  return (
+    <ul className="space-y-1.5">
+      {grouped.map((vendor) => {
+        const vendorDocIds = vendor.institutions.flatMap((i) =>
+          i.periods.flatMap((p) => p.docs.map((d) => d.submission_id)),
+        );
+        const allOn = vendorDocIds.every((id) => selected.has(id));
+        const someOn =
+          !allOn && vendorDocIds.some((id) => selected.has(id));
+        return (
+          <TreeBranch
+            key={vendor.vendor_id}
+            label={vendor.vendor_name}
+            count={vendorDocIds.length}
+            checkedState={allOn ? "checked" : someOn ? "indeterminate" : "off"}
+            onToggle={() => toggleIds(vendorDocIds, !allOn)}
+            level={0}
+          >
+            {vendor.institutions.map((inst) => {
+              const instDocIds = inst.periods.flatMap((p) =>
+                p.docs.map((d) => d.submission_id),
+              );
+              const iAll = instDocIds.every((id) => selected.has(id));
+              const iSome = !iAll && instDocIds.some((id) => selected.has(id));
+              return (
+                <TreeBranch
+                  key={inst.institution_code}
+                  label={inst.institution_name}
+                  count={instDocIds.length}
+                  checkedState={iAll ? "checked" : iSome ? "indeterminate" : "off"}
+                  onToggle={() => toggleIds(instDocIds, !iAll)}
+                  level={1}
+                >
+                  {inst.periods.map((p) => {
+                    const pIds = p.docs.map((d) => d.submission_id);
+                    const pAll = pIds.every((id) => selected.has(id));
+                    const pSome = !pAll && pIds.some((id) => selected.has(id));
+                    return (
+                      <TreeBranch
+                        key={p.period_key}
+                        label={p.period_key}
+                        count={p.docs.length}
+                        checkedState={
+                          pAll ? "checked" : pSome ? "indeterminate" : "off"
+                        }
+                        onToggle={() => toggleIds(pIds, !pAll)}
+                        level={2}
+                        defaultExpanded={false}
+                      >
+                        {p.docs.map((d) => (
+                          <TreeLeaf
+                            key={d.submission_id}
+                            doc={d}
+                            checked={selected.has(d.submission_id)}
+                            onToggle={() =>
+                              toggleIds([d.submission_id], !selected.has(d.submission_id))
+                            }
+                          />
+                        ))}
+                      </TreeBranch>
+                    );
+                  })}
+                </TreeBranch>
+              );
+            })}
+          </TreeBranch>
+        );
+      })}
+    </ul>
+  );
+}
+
+function TriCheckbox({
+  state,
+  onChange,
+}: {
+  state: "off" | "checked" | "indeterminate";
+  onChange: () => void;
+}) {
+  // A native checkbox with the indeterminate property reflected via
+  // a ref-effect; keeps native keyboard semantics for accessibility.
+  return (
+    <input
+      type="checkbox"
+      aria-checked={state === "indeterminate" ? "mixed" : state === "checked"}
+      checked={state === "checked"}
+      onChange={onChange}
+      ref={(el) => {
+        if (el) el.indeterminate = state === "indeterminate";
+      }}
+      className="h-3.5 w-3.5 cursor-pointer accent-[color:var(--interactive-primary)]"
+    />
+  );
+}
+
+function TreeBranch({
+  label,
+  count,
+  checkedState,
+  onToggle,
+  children,
+  level,
+  defaultExpanded = true,
+}: {
+  label: string;
+  count: number;
+  checkedState: "off" | "checked" | "indeterminate";
+  onToggle: () => void;
+  children: React.ReactNode;
+  level: number;
+  defaultExpanded?: boolean;
+}) {
+  const [open, setOpen] = useState(defaultExpanded);
+  const Caret = open ? CaretDown : CaretRight;
+  const indent = level * 16;
+  return (
+    <li>
+      <div
+        className="flex items-center gap-2 rounded-sm px-1.5 py-1 text-[13px] hover:bg-[color:var(--surface-hover)]"
+        style={{ paddingLeft: indent + 6 }}
+      >
+        <button
+          type="button"
+          onClick={() => setOpen((o) => !o)}
+          aria-expanded={open}
+          aria-label={open ? `Contraer ${label}` : `Expandir ${label}`}
+          className="inline-flex h-5 w-5 items-center justify-center rounded text-[color:var(--text-tertiary)] hover:text-[color:var(--text-primary)]"
+        >
+          <Caret className="h-3 w-3" weight="bold" aria-hidden="true" />
+        </button>
+        <TriCheckbox state={checkedState} onChange={onToggle} />
+        <span
+          className={
+            level === 0
+              ? "font-medium text-[color:var(--text-primary)]"
+              : level === 1
+                ? "text-[color:var(--text-primary)]"
+                : "font-mono text-[12px] text-[color:var(--text-secondary)]"
+          }
+        >
+          {label}
+        </span>
+        <span className="font-mono text-[10px] text-[color:var(--text-tertiary)]">
+          ({count})
+        </span>
+      </div>
+      {open ? <ul className="space-y-0.5">{children}</ul> : null}
+    </li>
+  );
+}
+
+function TreeLeaf({
+  doc,
+  checked,
+  onToggle,
+}: {
+  doc: AuditPackageTreeNode;
+  checked: boolean;
+  onToggle: () => void;
+}) {
+  return (
+    <li>
+      <label
+        className="flex items-center gap-2 rounded-sm px-1.5 py-1 text-[12px] hover:bg-[color:var(--surface-hover)]"
+        style={{ paddingLeft: 3 * 16 + 26 }}
+      >
+        <TriCheckbox
+          state={checked ? "checked" : "off"}
+          onChange={onToggle}
+        />
+        <span className="min-w-0 truncate text-[color:var(--text-primary)]">
+          {doc.requirement_name}
+        </span>
+        <span className="ml-auto flex shrink-0 items-center gap-2 text-[color:var(--text-tertiary)]">
+          <span className="font-mono text-[10px]">{formatBytes(doc.size_bytes)}</span>
+          <Badge variant="outline">{doc.status}</Badge>
+        </span>
+      </label>
+    </li>
   );
 }
 

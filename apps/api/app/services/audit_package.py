@@ -97,6 +97,14 @@ class AuditPackageFilters:
     requirement_codes: tuple[str, ...] = ()
     statuses: tuple[str, ...] = ()
     vendor_ids: tuple[str, ...] = ()
+    # Item 2 — when non-empty, the resolved entry set is further
+    # narrowed to exactly these submission ids. The other filters
+    # still apply first (they shape the candidate set the tree picker
+    # showed to the user); ``submission_ids`` is the explicit
+    # whitelist the user ticked. An empty tuple keeps the legacy
+    # filter-only behaviour intact, so the GET endpoint stays
+    # backward-compatible.
+    submission_ids: tuple[str, ...] = ()
 
     @property
     def effective_statuses(self) -> tuple[str, ...]:
@@ -110,9 +118,9 @@ class AuditPackageFilters:
             return self.statuses
         return tuple(sorted(DEFAULT_STATUSES))
 
-    def to_audit_dict(self) -> dict[str, list[str] | str]:
+    def to_audit_dict(self) -> dict[str, list[str] | str | int]:
         """JSON-safe shape for the audit log metadata."""
-        out: dict[str, list[str] | str] = {}
+        out: dict[str, list[str] | str | int] = {}
         if self.period_from:
             out["period_from"] = self.period_from
         if self.period_to:
@@ -124,6 +132,12 @@ class AuditPackageFilters:
         out["statuses"] = list(self.effective_statuses)
         if self.vendor_ids:
             out["vendor_ids"] = list(self.vendor_ids)
+        if self.submission_ids:
+            # Record the count + a stable hash rather than dumping
+            # every id into the audit log; the actual whitelist can be
+            # reconstructed from the per-submission rows the same
+            # audit event references.
+            out["submission_ids_count"] = len(self.submission_ids)
         return out
 
 
@@ -174,6 +188,11 @@ class AuditPackageEntry:
     status: str
     filename: str
     submitted_at_iso: str | None
+    # Item 2 — the underlying Submission id so the tree picker can
+    # build a (vendor → institution → period → submission) hierarchy
+    # and round-trip the user's selection back into
+    # ``AuditPackageFilters.submission_ids``.
+    submission_id: str = ""
 
 
 class AuditPackageSummary(NamedTuple):
@@ -421,7 +440,19 @@ def build_entries(
             filters.period_from, filters.period_to
         )
         submissions = list(db.scalars(sub_stmt))
+        # Materialise the whitelist once per workspace pass; a missing
+        # filter is a no-op (every submission passes the membership
+        # check below). Using ``frozenset`` keeps the lookup O(1) even
+        # when the user ticks hundreds of rows.
+        submission_id_whitelist: frozenset[str] | None = (
+            frozenset(filters.submission_ids) if filters.submission_ids else None
+        )
         for sub in submissions:
+            if (
+                submission_id_whitelist is not None
+                and sub.id not in submission_id_whitelist
+            ):
+                continue
             if not period_overlaps_range(
                 sub.period_key, range_start, range_end
             ):
@@ -467,6 +498,7 @@ def build_entries(
                     submitted_at_iso=(
                         sub.created_at.isoformat() if sub.created_at else None
                     ),
+                    submission_id=sub.id,
                 )
             )
     return entries
