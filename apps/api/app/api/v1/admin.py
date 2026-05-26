@@ -74,11 +74,11 @@ from app.models import (
     ValidationEvent,
     Vendor,
 )
+from app.services.audit_log import add_audit_event
 from app.services.auth import (
     generate_temp_password,
     hash_password,
 )
-from app.services.audit_log import add_audit_event
 from app.services.email_delivery import send_welcome_with_temp_password_email
 from app.services.search_service import SearchHit, search_submissions
 
@@ -631,6 +631,31 @@ def provision_user(
             "email_delivery_status": delivery.status,
         },
     )
+
+    # Phase 7 cutover (Slice C) — emit through the unified fabric so
+    # the in-app bell + SMS path light up alongside the legacy
+    # welcome email. The legacy email above is the user-visible
+    # primary delivery; this emit is the audit + SMS companion.
+    # ``user.id`` is the dedupe key suffix so retries / duplicate
+    # provisions never double-fire.
+    try:
+        import logging
+
+        from app.services.notifications import emit_invitation_sent
+
+        emit_invitation_sent(
+            db,
+            user=user,
+            invitation_token_id=user.id,
+            invitation_url=login_url,
+            mode="active",
+        )
+        db.flush()
+    except Exception:  # pragma: no cover — defensive during cutover
+        logging.getLogger("checkwise.admin").exception(
+            "notif_emit_failed event=account.invitation_sent user=%s", user.id
+        )
+
     db.commit()
 
     return ProvisionUserResponse(

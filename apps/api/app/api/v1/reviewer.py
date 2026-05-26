@@ -531,6 +531,31 @@ def submit_decision(
         reviewer_user_id=current.user.id,
     )
 
+    # Phase 7 cutover (Slice C) — fire the unified-fabric envelope
+    # alongside the legacy notifications the workflow service
+    # already wrote. The emit handles its own idempotency via
+    # ``notification_dispatch`` so a retry against the same
+    # submission+action is a no-op. Failures never break the
+    # decision response — the workflow row + history already landed.
+    try:
+        import logging
+
+        from app.services.notifications import emit_reviewer_decision
+
+        emit_reviewer_decision(
+            db,
+            submission=submission,
+            action=payload.action,
+            reason=payload.reason,
+            mode="active",
+        )
+        db.flush()
+    except Exception:  # pragma: no cover — defensive during cutover
+        logging.getLogger("checkwise.reviewer").exception(
+            "notif_emit_failed event=submission.reviewer_decision submission=%s",
+            submission_id,
+        )
+
     return DecisionResponse(
         submission_id=result.submission_id,
         previous_status=result.previous_status,

@@ -114,6 +114,26 @@ def main() -> int:
                 )
                 continue
 
+            # Phase 7 cutover (Slice C) — also fire the unified-fabric
+            # emitter in active mode alongside the legacy dispatcher.
+            # The new path writes notification_dispatch idempotency
+            # rows + sends SMS via Twilio (and WhatsApp when Meta
+            # approval lands). The legacy path remains responsible for
+            # in-app rows + email during the soak; this companion emit
+            # is the audit + SMS half. Failure here NEVER unwinds the
+            # legacy commit.
+            try:
+                from app.services.notifications import (
+                    emit_renewals_for_workspace,
+                )
+
+                emit_renewals_for_workspace(db, ws, today=today, mode="active")
+            except Exception as exc:  # pragma: no cover — operational guard
+                print(
+                    f"# {vendor_label}: notif_emit_failed ({exc})",
+                    file=sys.stderr,
+                )
+
             for o in outcomes:
                 print(_fmt_outcome(vendor_label, o))
                 total_fired += len(o.thresholds_fired)
