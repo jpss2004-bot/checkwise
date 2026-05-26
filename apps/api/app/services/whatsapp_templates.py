@@ -31,6 +31,11 @@ from typing import Literal
 # a renamed template we update once here.
 RENEWAL_TEMPLATE = "cw_renewal_threshold"
 DECISION_TEMPLATE = "cw_reviewer_decision"
+# Phase 7 / Slice N8 — phone-verification OTP. Approval pending at
+# Meta; until live, ``send_whatsapp_template`` returns ``failed``
+# with Meta's "template not found" body and the OTP flow falls
+# back to logging the code for dev/staging.
+PHONE_OTP_TEMPLATE = "cw_phone_otp"
 
 # Severity → display label used in the renewal template body. The body
 # text on Meta's side reads "{{1}} de {{2}} vence en {{3}} ({{4}})";
@@ -129,3 +134,16 @@ def build_reviewer_decision_components(
             _text(reviewer),
         ]
     )
+
+
+def build_phone_otp_components(*, code: str) -> list[dict]:
+    """Return the ``components`` array for ``cw_phone_otp``.
+
+    The Meta template body reads:
+        "Tu código de verificación de CheckWise es *{{1}}*. Expira en
+         10 minutos. Si no lo solicitaste, ignora este mensaje."
+
+    Parameter order:
+        {{1}} 6-digit numeric code (plaintext — sent out-of-band only).
+    """
+    return _body_components([_text(code)])

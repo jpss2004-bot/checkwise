@@ -78,6 +78,11 @@ share_unlock_limiter = SlidingWindowRateLimiter()
 # costs unbounded. Per-user buckets so one heavy user can't
 # starve another tenant.
 ai_heavy_limiter = SlidingWindowRateLimiter()
+# Phase 7 / Slice N8 — cap on phone-verification OTP issuance.
+# Buckets keyed by ``user_id`` so a single user cannot brute-force
+# the WhatsApp send pipeline (each issuance is a paid Meta API
+# call). Defaults configured at the call site in ``app.api.v1.me``.
+phone_verify_limiter = SlidingWindowRateLimiter()
 
 
 def hash_identifier(value: str) -> str:
