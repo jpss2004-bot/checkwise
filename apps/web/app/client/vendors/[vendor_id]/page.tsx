@@ -10,7 +10,6 @@ import {
   DownloadSimple,
   Eye,
   FileText,
-  Files,
   Lightning,
   Warning,
   WarningOctagon,
@@ -122,7 +121,6 @@ export default function ClientVendorDetailPage({ params }: PageProps) {
               <ContractDocumentsCard detail={detail} />
               <SuggestedActionsCard detail={detail} />
               <AttentionTodayCard detail={detail} />
-              <RecentSubmissionsCard detail={detail} />
             </div>
             <div className="space-y-5">
               <DocumentBreakdownCard detail={detail} />
@@ -458,66 +456,6 @@ function AttentionTodayCard({ detail }: { detail: ClientVendorDetail }) {
   );
 }
 
-// ─── Recent submissions ──────────────────────────────────────────
-
-function RecentSubmissionsCard({ detail }: { detail: ClientVendorDetail }) {
-  return (
-    <Surface
-      title={`Entregas recientes (${detail.recent_submissions.length})`}
-      icon={Files}
-    >
-      {detail.recent_submissions.length === 0 ? (
-        <EmptyState
-          icon={Files}
-          title="Sin entregas registradas"
-          description="Cuando el proveedor suba documentos, aparecerán aquí."
-        />
-      ) : (
-        <div className="overflow-x-auto">
-          <table className="w-full text-xs">
-            <thead className="border-b border-[color:var(--border-subtle)] text-left font-mono uppercase tracking-wide text-[color:var(--text-tertiary)]">
-              <tr>
-                <th className="px-2 py-2">Fecha</th>
-                <th className="px-2 py-2">Requisito</th>
-                <th className="px-2 py-2">Periodo</th>
-                <th className="px-2 py-2">Estado</th>
-                <th className="px-2 py-2">Archivo</th>
-              </tr>
-            </thead>
-            <tbody>
-              {detail.recent_submissions.map((s) => (
-                <tr
-                  key={s.submission_id}
-                  className="border-b border-[color:var(--border-subtle)] last:border-0 hover:bg-[color:var(--surface-hover)]"
-                >
-                  <td className="px-2 py-2 font-mono text-[11px]">
-                    {new Date(s.submitted_at).toLocaleString("es-MX", {
-                      day: "2-digit",
-                      month: "short",
-                      hour: "2-digit",
-                      minute: "2-digit",
-                    })}
-                  </td>
-                  <td className="px-2 py-2">
-                    {s.requirement_name ?? s.requirement_code ?? "—"}
-                  </td>
-                  <td className="px-2 py-2 font-mono">{s.period_key ?? "—"}</td>
-                  <td className="px-2 py-2">
-                    <Badge variant="outline">{s.status}</Badge>
-                  </td>
-                  <td className="px-2 py-2 truncate text-[color:var(--text-secondary)]">
-                    {s.filename ?? "—"}
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
-      )}
-    </Surface>
-  );
-}
-
 // ─── Document breakdown ──────────────────────────────────────────
 
 function DocumentBreakdownCard({ detail }: { detail: ClientVendorDetail }) {
@@ -529,7 +467,13 @@ function DocumentBreakdownCard({ detail }: { detail: ClientVendorDetail }) {
     { label: "Necesitan acción", value: c.needs_review, tone: "warning" },
     { label: "Rechazados", value: c.rejected, tone: "error" },
     { label: "Vencidos", value: c.expired, tone: "error" },
-    { label: "Pendientes", value: c.pending, tone: "neutral" },
+    // D6 — was "Pendientes", which collided with the Dashboard KPI
+    // "Faltantes obligatorios" (same numeric definition, different
+    // label) and with the calendar's "Pendientes" (an active
+    // ``pendiente_revision`` reviewer-queue state, NOT this). Renamed
+    // to "Sin iniciar" — same word ExpedienteMicroBar above uses for
+    // the same set, so the two charts on this page now agree.
+    { label: "Sin iniciar", value: c.pending, tone: "neutral" },
   ];
   const segments: ChartSegment[] = all.filter((s) => s.value > 0);
   const total = segments.reduce((sum, s) => sum + s.value, 0);

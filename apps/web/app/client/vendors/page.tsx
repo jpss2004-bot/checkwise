@@ -12,7 +12,6 @@ import {
   type Icon,
 } from "@phosphor-icons/react";
 
-import { StackedBars, type ChartSegment } from "@/components/checkwise/charts";
 import { Surface } from "@/components/checkwise/dashboard/stat-card";
 import { Button } from "@/components/ui/button";
 import { DataTable, type DataTableColumn } from "@/components/ui/data-table";
@@ -96,11 +95,6 @@ export default function ClientVendorsPage() {
     );
   }, [rows]);
 
-  const segments: ChartSegment[] = [
-    { label: "Verde", value: counts.green, tone: "success" },
-    { label: "Amarillo", value: counts.yellow, tone: "warning" },
-    { label: "Rojo", value: counts.red, tone: "error" },
-  ];
   const columns = useMemo(
     () => buildVendorColumns(unreadByVendor),
     [unreadByVendor],
@@ -152,13 +146,10 @@ export default function ClientVendorsPage() {
           ]}
         />
 
-        {/* Distribution bar */}
-        <Surface
-          title="Distribución de riesgo"
-          description="Composición visual del portafolio en el filtro actual."
-        >
-          <StackedBars segments={segments} height={14} />
-        </Surface>
+        {/* D4 — "Distribución de riesgo" StackedBars removed; the
+            Dashboard donut + the MetadataStrip above already convey
+            this distribution. The page kept the bar and the strip
+            side-by-side which was visually redundant. */}
 
         {/* Filters */}
         <Surface title="Buscar y filtrar">
