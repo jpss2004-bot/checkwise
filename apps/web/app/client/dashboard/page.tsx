@@ -30,6 +30,7 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 
 import { ClientShell } from "../_shell";
+import { VendorRef } from "@/components/checkwise/vendor-ref";
 import {
   getClientMe,
   getClientOverview,
@@ -542,7 +543,7 @@ function RecentSubmissionsCard({ rows }: { rows: ClientSubmissionItem[] }) {
             >
               <div className="min-w-0">
                 <p className="truncate text-[13px] font-medium text-[color:var(--text-primary)]">
-                  {row.vendor_name}
+                  <VendorRef vendorId={row.vendor_id} vendorName={row.vendor_name} />
                 </p>
                 <p className="truncate text-[12px] text-[color:var(--text-secondary)]">
                   {row.requirement_name ?? row.requirement_code ?? "—"}
@@ -630,7 +631,16 @@ function NotificationCard({
                   {row.body}
                 </p>
                 <p className="mt-1 font-mono text-[10px] text-[color:var(--text-tertiary)]">
-                  {row.vendor_name ?? "Cliente"} · {timeAgo(row.created_at)}
+                  {row.vendor_id && row.vendor_name ? (
+                    <VendorRef
+                      vendorId={row.vendor_id}
+                      vendorName={row.vendor_name}
+                      muted
+                    />
+                  ) : (
+                    row.vendor_name ?? "Cliente"
+                  )}{" "}
+                  · {timeAgo(row.created_at)}
                 </p>
               </div>
             </li>
@@ -737,8 +747,16 @@ function RecentActivityCard({ rows }: { rows: ClientActivityItem[] }) {
                   {row.summary}
                 </p>
                 <p className="mt-0.5 truncate font-mono text-[10px] text-[color:var(--text-tertiary)]">
-                  {row.vendor_name ?? "—"} · {row.action} ·{" "}
-                  {timeAgo(row.occurred_at)}
+                  {row.vendor_id && row.vendor_name ? (
+                    <VendorRef
+                      vendorId={row.vendor_id}
+                      vendorName={row.vendor_name}
+                      muted
+                    />
+                  ) : (
+                    row.vendor_name ?? "—"
+                  )}{" "}
+                  · {row.action} · {timeAgo(row.occurred_at)}
                 </p>
               </div>
             </li>

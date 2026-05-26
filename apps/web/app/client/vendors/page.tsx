@@ -21,6 +21,7 @@ import { MetadataStrip } from "@/components/ui/metadata-strip";
 import { Progress } from "@/components/ui/progress";
 
 import { ClientShell } from "../_shell";
+import { VendorRef } from "@/components/checkwise/vendor-ref";
 import {
   listClientNotifications,
   listClientVendors,
@@ -260,7 +261,7 @@ function buildVendorColumns(
     cell: (row) => (
       <div className="min-w-0">
         <p className="font-medium text-[color:var(--text-primary)]">
-          {row.vendor_name}
+          <VendorRef vendorId={row.vendor_id} vendorName={row.vendor_name} />
         </p>
         <p className="font-mono text-[11px] tabular-nums text-[color:var(--text-tertiary)]">
           {row.vendor_rfc ?? "—"}

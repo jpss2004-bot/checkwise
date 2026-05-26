@@ -23,6 +23,7 @@ import {
 } from "@/components/checkwise/portal/state-surfaces";
 
 import { ClientShell } from "../_shell";
+import { VendorRef } from "@/components/checkwise/vendor-ref";
 import {
   listClientActivity,
   type ClientActivityItem,
@@ -130,7 +131,11 @@ function ActivityRow({ row }: { row: ClientActivityItem }) {
           <span className="font-mono text-[10px] text-[color:var(--text-tertiary)]">
             {row.action}
           </span>
-          {row.vendor_name ? (
+          {row.vendor_id && row.vendor_name ? (
+            <VendorRef vendorId={row.vendor_id} vendorName={row.vendor_name}>
+              <Badge variant="brand">{row.vendor_name}</Badge>
+            </VendorRef>
+          ) : row.vendor_name ? (
             <Badge variant="brand">{row.vendor_name}</Badge>
           ) : null}
         </div>

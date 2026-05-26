@@ -8,6 +8,8 @@ import {
   ChatTeardrop,
   CheckCircle,
   DownloadSimple,
+  Eye,
+  FileText,
   Files,
   Lightning,
   Warning,
@@ -30,8 +32,11 @@ import { Button } from "@/components/ui/button";
 
 import { ClientShell } from "../../_shell";
 import {
+  clientSubmissionDocumentUrl,
   clientVendorExpedienteZipUrl,
+  fetchClientSubmissionDocumentBlob,
   getClientVendorDetail,
+  type ClientVendorContractDoc,
   type ClientVendorDetail,
 } from "@/lib/api/client";
 
@@ -114,6 +119,7 @@ export default function ClientVendorDetailPage({ params }: PageProps) {
           <VendorHero detail={detail} />
           <div className="grid gap-5 lg:grid-cols-3">
             <div className="space-y-5 lg:col-span-2">
+              <ContractDocumentsCard detail={detail} />
               <SuggestedActionsCard detail={detail} />
               <AttentionTodayCard detail={detail} />
               <RecentSubmissionsCard detail={detail} />
@@ -209,6 +215,124 @@ function ExpedienteMicroBar({ detail }: { detail: ClientVendorDetail }) {
       </div>
       <StackedBars segments={segments} height={10} showLegend={false} />
     </div>
+  );
+}
+
+// ─── Contracts (item 1) ──────────────────────────────────────────
+
+function ContractDocumentsCard({ detail }: { detail: ClientVendorDetail }) {
+  // Sorted newest-first on the backend (created_at DESC). Surface the
+  // entire history so the client_admin can see the chain: original
+  // contract, modifications, service orders. Each row offers an
+  // inline "Ver" (Blob URL → window.open) plus a "Descargar" link.
+  const contracts = detail.contracts ?? [];
+  return (
+    <Surface
+      title="Contratos del proveedor"
+      icon={FileText}
+      description="Contrato firmado, modificaciones y órdenes de servicio. Aquí puedes consultarlos o descargarlos directamente."
+    >
+      {contracts.length === 0 ? (
+        <EmptyState
+          icon={FileText}
+          title="Sin contratos registrados"
+          description="Cuando el proveedor suba el contrato firmado y sus anexos, aparecerán aquí."
+        />
+      ) : (
+        <ul className="divide-y divide-[color:var(--border-subtle)]">
+          {contracts.map((c) => (
+            <ContractRow key={c.submission_id} contract={c} />
+          ))}
+        </ul>
+      )}
+    </Surface>
+  );
+}
+
+function ContractRow({ contract }: { contract: ClientVendorContractDoc }) {
+  const [viewing, setViewing] = useState(false);
+  const [viewError, setViewError] = useState<string | null>(null);
+
+  async function onView() {
+    setViewing(true);
+    setViewError(null);
+    try {
+      const url = await fetchClientSubmissionDocumentBlob(contract.submission_id);
+      const win = window.open(url, "_blank", "noopener,noreferrer");
+      // Revoke a few seconds later — the new tab has already loaded
+      // the PDF by then, but we don't want the Blob URL to leak.
+      setTimeout(() => URL.revokeObjectURL(url), 60_000);
+      if (!win) {
+        setViewError("Permite ventanas emergentes para ver el contrato.");
+      }
+    } catch {
+      setViewError("No pudimos abrir el contrato. Intenta descargarlo.");
+    } finally {
+      setViewing(false);
+    }
+  }
+
+  const downloadHref = clientSubmissionDocumentUrl(contract.submission_id, {
+    download: true,
+  });
+
+  const sizeText =
+    contract.size_bytes != null
+      ? contract.size_bytes >= 1024 * 1024
+        ? `${(contract.size_bytes / (1024 * 1024)).toFixed(1)} MB`
+        : `${Math.max(1, Math.round(contract.size_bytes / 1024))} KB`
+      : null;
+
+  return (
+    <li className="flex flex-wrap items-center justify-between gap-3 py-3 first:pt-0 last:pb-0">
+      <div className="min-w-0 flex-1">
+        <p className="truncate text-[13px] font-medium text-[color:var(--text-primary)]">
+          {contract.requirement_name}
+        </p>
+        <p className="mt-0.5 font-mono text-[10px] uppercase tracking-wide text-[color:var(--text-tertiary)]">
+          {new Date(contract.submitted_at).toLocaleString("es-MX", {
+            day: "2-digit",
+            month: "short",
+            year: "numeric",
+          })}
+          {sizeText ? ` · ${sizeText}` : ""}
+          {contract.filename ? ` · ${contract.filename}` : ""}
+        </p>
+        {viewError ? (
+          <p className="mt-1 text-[11px] text-[color:var(--status-error-text)]">
+            {viewError}
+          </p>
+        ) : null}
+      </div>
+      <div className="flex items-center gap-2">
+        <Badge variant="outline">{contract.status}</Badge>
+        <Button
+          type="button"
+          size="sm"
+          variant="outline"
+          onClick={onView}
+          disabled={viewing}
+        >
+          <Eye className="h-3.5 w-3.5" weight="bold" aria-hidden="true" />
+          {viewing ? "Abriendo…" : "Ver"}
+        </Button>
+        <Button asChild size="sm" variant="outline">
+          <a
+            href={downloadHref}
+            target="_blank"
+            rel="noreferrer"
+            download={contract.filename ?? undefined}
+          >
+            <DownloadSimple
+              className="h-3.5 w-3.5"
+              weight="bold"
+              aria-hidden="true"
+            />
+            Descargar
+          </a>
+        </Button>
+      </div>
+    </li>
   );
 }
 

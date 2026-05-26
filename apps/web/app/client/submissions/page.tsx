@@ -11,6 +11,7 @@ import { Input } from "@/components/ui/input";
 import { Select } from "@/components/ui/select";
 
 import { ClientShell } from "../_shell";
+import { VendorRef } from "@/components/checkwise/vendor-ref";
 import {
   listClientSubmissions,
   listClientVendors,
@@ -273,7 +274,7 @@ const SUBMISSIONS_COLUMNS: DataTableColumn<ClientSubmissionItem>[] = [
     header: "Proveedor",
     cell: (row) => (
       <p className="text-[13px] font-medium text-[color:var(--text-primary)]">
-        {row.vendor_name}
+        <VendorRef vendorId={row.vendor_id} vendorName={row.vendor_name} />
       </p>
     ),
   },

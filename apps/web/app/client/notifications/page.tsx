@@ -25,6 +25,7 @@ import {
 } from "@/lib/api/client";
 
 import { ClientShell } from "../_shell";
+import { VendorRef } from "@/components/checkwise/vendor-ref";
 
 // Phase 4 / Slice 4A — render the semáforo per row. Every notification
 // carries an explicit ``severity`` set by the backend emitter; the
@@ -199,51 +200,70 @@ function NotificationRow({
   const Icon = iconForType(row.notification_type);
   const unread = row.read_at === null;
   const tone = TONE_BY_SEVERITY[row.severity] ?? TONE_BY_SEVERITY.info;
-  const content = (
-    <div
-      className={
-        "flex gap-3 rounded-md border p-3 transition-colors " +
-        (unread ? tone.unreadClass : tone.readClass)
-      }
-    >
-      <span
-        className={
-          "flex h-8 w-8 shrink-0 items-center justify-center rounded-md " +
-          tone.iconBg
-        }
-      >
-        <Icon className="h-4 w-4" weight="bold" aria-hidden />
-      </span>
-      <div className="min-w-0 flex-1">
-        <div className="flex flex-wrap items-center gap-2">
-          <p className="text-[13px] font-semibold text-[color:var(--text-primary)]">
-            {row.title}
-          </p>
-          <Badge variant={tone.badge}>{tone.label}</Badge>
-          {unread ? <Badge variant="brand">Nueva</Badge> : null}
-          {row.vendor_name ? <Badge variant="outline">{row.vendor_name}</Badge> : null}
-        </div>
-        <p className="mt-1 text-[12px] leading-relaxed text-[color:var(--text-secondary)]">
-          {row.body}
-        </p>
-        <p className="mt-2 font-mono text-[10px] text-[color:var(--text-tertiary)]">
-          {new Date(row.created_at).toLocaleString("es-MX")}
-        </p>
-      </div>
-    </div>
-  );
 
+  // Item 5 — when the notification is tied to a vendor, the vendor
+  // badge becomes its own link to the expediente. The rest of the
+  // card still navigates to ``action_url`` (typically the filtered
+  // submissions list) so the dual destinations live side-by-side
+  // without nesting anchors.
   return (
     <li>
-      {row.action_url ? (
-        <Link href={row.action_url} onClick={onRead} className="block">
-          {content}
-        </Link>
-      ) : (
-        <button type="button" onClick={onRead} className="block w-full text-left">
-          {content}
-        </button>
-      )}
+      <div
+        className={
+          "flex gap-3 rounded-md border p-3 transition-colors " +
+          (unread ? tone.unreadClass : tone.readClass)
+        }
+      >
+        <span
+          className={
+            "flex h-8 w-8 shrink-0 items-center justify-center rounded-md " +
+            tone.iconBg
+          }
+        >
+          <Icon className="h-4 w-4" weight="bold" aria-hidden />
+        </span>
+        <div className="min-w-0 flex-1">
+          <div className="flex flex-wrap items-center gap-2">
+            <p className="text-[13px] font-semibold text-[color:var(--text-primary)]">
+              {row.action_url ? (
+                <Link
+                  href={row.action_url}
+                  onClick={onRead}
+                  className="hover:underline"
+                >
+                  {row.title}
+                </Link>
+              ) : (
+                <button
+                  type="button"
+                  onClick={onRead}
+                  className="text-left hover:underline"
+                >
+                  {row.title}
+                </button>
+              )}
+            </p>
+            <Badge variant={tone.badge}>{tone.label}</Badge>
+            {unread ? <Badge variant="brand">Nueva</Badge> : null}
+            {row.vendor_id && row.vendor_name ? (
+              <VendorRef
+                vendorId={row.vendor_id}
+                vendorName={row.vendor_name}
+              >
+                <Badge variant="outline">{row.vendor_name}</Badge>
+              </VendorRef>
+            ) : row.vendor_name ? (
+              <Badge variant="outline">{row.vendor_name}</Badge>
+            ) : null}
+          </div>
+          <p className="mt-1 text-[12px] leading-relaxed text-[color:var(--text-secondary)]">
+            {row.body}
+          </p>
+          <p className="mt-2 font-mono text-[10px] text-[color:var(--text-tertiary)]">
+            {new Date(row.created_at).toLocaleString("es-MX")}
+          </p>
+        </div>
+      </div>
     </li>
   );
 }
