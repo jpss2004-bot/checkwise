@@ -74,12 +74,12 @@ from app.core.compliance_catalog import (
     recurring_where_to_obtain,
 )
 from app.core.config import settings
-from app.core.rate_limit import enforce_ai_heavy_rate_limit
 from app.core.period_validation import (
     MAX_YEAR,
     MIN_YEAR,
     validate_period_key,
 )
+from app.core.rate_limit import enforce_ai_heavy_rate_limit
 from app.db.session import get_db
 from app.models import (
     Document,
@@ -96,7 +96,6 @@ from app.models import (
 from app.models.entities import utc_now
 from app.schemas.submissions import MultiSubmissionResponse, SubmissionResponse
 from app.services.audit_log import add_audit_event
-from app.services.search_service import SearchHit, search_submissions
 from app.services.contact_service import hash_ip
 from app.services.correction_request_service import (
     TIER_B_FIELD_LABEL_ES,
@@ -125,6 +124,7 @@ from app.services.portal_session import (
     verify_portal_session_token,
 )
 from app.services.requirement_service import resolve_period, resolve_requirement
+from app.services.search_service import SearchHit, search_submissions
 from app.services.storage import UploadTooLargeError, get_storage_service
 from app.services.submission_service import (
     INTAKE_SOURCE_WORKSPACE_PORTAL,
@@ -4045,6 +4045,15 @@ class ProviderNotificationItem(BaseModel):
     id: str
     notification_type: str
     severity: Literal["green", "yellow", "red", "info"]
+    # Phase 7 / Slice N9b — see ClientNotificationItem.category.
+    category: Literal[
+        "renewal",
+        "reporting",
+        "verification",
+        "account",
+        "admin",
+        "other",
+    ]
     title: str
     body: str
     action_url: str | None
@@ -4059,21 +4068,33 @@ class ProviderNotificationsResponse(BaseModel):
     items: list[ProviderNotificationItem]
     total: int
     unread_count: int
+    unread_actionable_count: int
     limit: int
 
 
 class ProviderNotificationSummary(BaseModel):
     workspace_id: str
     unread_count: int
+    unread_actionable_count: int
 
 
 def _provider_notification_item(
     row: ProviderNotification,
 ) -> ProviderNotificationItem:
+    severity = (
+        row.severity if row.severity in {"green", "yellow", "red", "info"} else "info"
+    )
+    category = (
+        row.category
+        if row.category
+        in {"renewal", "reporting", "verification", "account", "admin", "other"}
+        else "other"
+    )
     return ProviderNotificationItem(
         id=row.id,
         notification_type=row.notification_type,
-        severity=row.severity if row.severity in {"green", "yellow", "red", "info"} else "info",  # type: ignore[arg-type]
+        severity=severity,  # type: ignore[arg-type]
+        category=category,  # type: ignore[arg-type]
         title=row.title,
         body=row.body,
         action_url=row.action_url,
@@ -4096,6 +4117,24 @@ def _provider_unread_count(db: Session, workspace_id: str) -> int:
     )
 
 
+def _provider_unread_actionable_count(
+    db: Session, workspace_id: str
+) -> int:
+    """Subset of unread restricted to severity ∈ {red, yellow}.
+    Drives the portal sidebar bell so info-tier rows never inflate
+    the badge (parity with the client side, N9b)."""
+    return int(
+        db.scalar(
+            select(func.count(ProviderNotification.id)).where(
+                ProviderNotification.workspace_id == workspace_id,
+                ProviderNotification.read_at.is_(None),
+                ProviderNotification.severity.in_(("red", "yellow")),
+            )
+        )
+        or 0
+    )
+
+
 @router.get(
     "/workspaces/{workspace_id}/notifications/summary",
     response_model=ProviderNotificationSummary,
@@ -4109,6 +4148,9 @@ def get_provider_notification_summary(
     return ProviderNotificationSummary(
         workspace_id=workspace.id,
         unread_count=_provider_unread_count(db, workspace.id),
+        unread_actionable_count=_provider_unread_actionable_count(
+            db, workspace.id
+        ),
     )
 
 
@@ -4140,6 +4182,9 @@ def list_provider_notifications(
         items=[_provider_notification_item(row) for row in rows],
         total=len(rows),
         unread_count=_provider_unread_count(db, workspace.id),
+        unread_actionable_count=_provider_unread_actionable_count(
+            db, workspace.id
+        ),
         limit=limit,
     )
 
@@ -4224,6 +4269,9 @@ def mark_all_provider_notifications_read(
     return ProviderNotificationSummary(
         workspace_id=workspace.id,
         unread_count=_provider_unread_count(db, workspace.id),
+        unread_actionable_count=_provider_unread_actionable_count(
+            db, workspace.id
+        ),
     )
 
 

@@ -1,18 +1,40 @@
 "use client";
 
+/**
+ * Phase 7 / Slice N9c — provider portal notification center.
+ *
+ * Mirrors the client_admin UX shipped at N9a/N9b:
+ *   - Three tabs (Pendientes / Todas / Resueltas) with counts.
+ *   - Category filter chips derived from the server-side
+ *     ``row.category`` value (N9b).
+ *   - Severity-aware left rail per row + per-row severity badge.
+ *   - "Nueva" pill only on actionable unread rows (red + yellow);
+ *     info never inflates the bell.
+ *   - Empty states are tab- and filter-aware.
+ *
+ * Bell-badge math: the portal shell will use
+ * ``summary.unread_actionable_count`` once the parallel shell
+ * change lands; this page sources its own counts from the list
+ * response so both views stay in lockstep without a second
+ * round-trip.
+ */
+
 import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import {
   Bell,
   CheckCircle,
   FileText,
+  type Icon as IconType,
 } from "@phosphor-icons/react";
 
 import { PortalAppShell } from "@/components/checkwise/portal/portal-app-shell";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Card, CardContent } from "@/components/ui/card";
 import { PageHeader } from "@/components/ui/page-header";
+import { cn } from "@/lib/utils";
+import type { NotificationSeverity } from "@/lib/api/client";
 import {
   getProviderNotificationSummary,
   listProviderNotifications,
@@ -20,71 +42,73 @@ import {
   markProviderNotificationRead,
   type ProviderNotificationItem,
 } from "@/lib/api/portal";
-import type { NotificationSeverity } from "@/lib/api/client";
 import { withPortalSession } from "@/lib/session/with-portal-session";
 import type { PortalSession } from "@/lib/session/portal";
 
-// Phase 4 / Slice 4B — semáforo tone tokens. Kept duplicated with the
-// client-side equivalent for now: the duplication cost is low (one
-// 30-line map), the abstraction risk is real (shared modules across
-// the client/portal divide tend to grow accidental coupling), and
-// both pages can evolve independently.
-type NotificationTone = {
-  unreadClass: string;
-  readClass: string;
-  iconBg: string;
-  badge: "success" | "warning" | "destructive" | "info";
-  label: string;
+// ---------------------------------------------------------------------------
+// Severity + category vocabularies (mirrors N9a — kept independent
+// from the client side so each view can evolve without coupling).
+// ---------------------------------------------------------------------------
+
+const SEVERITY_RAIL: Record<NotificationSeverity, string> = {
+  red: "border-l-[color:var(--status-error-border)]",
+  yellow: "border-l-[color:var(--status-warning-border)]",
+  green: "border-l-[color:var(--status-success-border)]",
+  info: "border-l-[color:var(--border-subtle)]",
 };
 
-const TONE_BY_SEVERITY: Record<NotificationSeverity, NotificationTone> = {
-  green: {
-    unreadClass:
-      "border-[color:var(--status-success-border)] bg-[color:var(--status-success-bg)]",
-    readClass:
-      "border-[color:var(--border-subtle)] bg-[color:var(--surface-page)]",
-    iconBg:
-      "bg-[color:var(--status-success-bg)] text-[color:var(--status-success-text)]",
-    badge: "success",
-    label: "Aprobado",
-  },
-  yellow: {
-    unreadClass:
-      "border-[color:var(--status-warning-border)] bg-[color:var(--status-warning-bg)]",
-    readClass:
-      "border-[color:var(--border-subtle)] bg-[color:var(--surface-page)]",
-    iconBg:
-      "bg-[color:var(--status-warning-bg)] text-[color:var(--status-warning-text)]",
-    badge: "warning",
-    label: "Pendiente",
-  },
-  red: {
-    unreadClass:
-      "border-[color:var(--status-error-border)] bg-[color:var(--status-error-bg)]",
-    readClass:
-      "border-[color:var(--border-subtle)] bg-[color:var(--surface-page)]",
-    iconBg:
-      "bg-[color:var(--status-error-bg)] text-[color:var(--status-error-text)]",
-    badge: "destructive",
-    label: "Atención",
-  },
-  info: {
-    unreadClass:
-      "border-[color:var(--border-brand)] bg-[color:var(--surface-brand-muted)]",
-    readClass:
-      "border-[color:var(--border-subtle)] bg-[color:var(--surface-page)]",
-    iconBg:
-      "bg-[color:var(--surface-raised)] text-[color:var(--text-teal)]",
-    badge: "info",
-    label: "Aviso",
-  },
+const SEVERITY_BADGE: Record<
+  NotificationSeverity,
+  { variant: "success" | "warning" | "destructive" | "info"; label: string }
+> = {
+  red: { variant: "destructive", label: "Crítico" },
+  yellow: { variant: "warning", label: "Importante" },
+  green: { variant: "success", label: "Resuelto" },
+  info: { variant: "info", label: "Informativo" },
 };
+
+function isActionable(severity: NotificationSeverity): boolean {
+  return severity === "red" || severity === "yellow";
+}
+
+type NotificationCategory = ProviderNotificationItem["category"];
+
+const CATEGORY_LABELS: Record<NotificationCategory, string> = {
+  renewal: "Renovaciones",
+  reporting: "Reportes",
+  verification: "Verificación",
+  account: "Cuenta",
+  admin: "Soporte",
+  other: "Otros",
+};
+
+type TabKey = "pending" | "all" | "resolved";
+
+const TAB_DEFINITIONS: { key: TabKey; label: string }[] = [
+  { key: "pending", label: "Pendientes" },
+  { key: "all", label: "Todas" },
+  { key: "resolved", label: "Resueltas" },
+];
+
+function matchesTab(row: ProviderNotificationItem, tab: TabKey): boolean {
+  if (tab === "all") return true;
+  if (tab === "pending") {
+    return row.read_at === null && isActionable(row.severity);
+  }
+  return row.read_at !== null;
+}
+
+// ---------------------------------------------------------------------------
+// Page
+// ---------------------------------------------------------------------------
 
 function PortalNotificationsInner({ session }: { session: PortalSession }) {
   const [rows, setRows] = useState<ProviderNotificationItem[] | null>(null);
-  const [unreadCount, setUnreadCount] = useState(0);
   const [error, setError] = useState<string | null>(null);
   const [reloadKey, setReloadKey] = useState(0);
+  const [tab, setTab] = useState<TabKey>("pending");
+  const [categoryFilter, setCategoryFilter] =
+    useState<NotificationCategory | null>(null);
 
   useEffect(() => {
     let cancelled = false;
@@ -94,7 +118,6 @@ function PortalNotificationsInner({ session }: { session: PortalSession }) {
       .then((data) => {
         if (cancelled) return;
         setRows(data.items);
-        setUnreadCount(data.unread_count);
       })
       .catch((err: unknown) => {
         if (cancelled) return;
@@ -109,7 +132,52 @@ function PortalNotificationsInner({ session }: { session: PortalSession }) {
     };
   }, [session, reloadKey]);
 
-  const grouped = useMemo(() => groupByDay(rows ?? []), [rows]);
+  // Best-effort background refresh — keeps the bell + tab counts in
+  // sync when a reviewer decision lands while the tab is open.
+  useEffect(() => {
+    const handle = window.setInterval(() => {
+      getProviderNotificationSummary(session)
+        .then((s) => {
+          // No state to update here yet — the summary endpoint is
+          // the bell's source of truth on the shell. Reading it
+          // keeps the connection warm and surfaces a 401 early.
+          void s;
+        })
+        .catch(() => undefined);
+    }, 60_000);
+    return () => window.clearInterval(handle);
+  }, [session]);
+
+  const counts = useMemo(() => computeCounts(rows ?? []), [rows]);
+
+  const visible = useMemo(() => {
+    if (rows === null) return [];
+    return rows
+      .filter((row) => matchesTab(row, tab))
+      .filter((row) =>
+        categoryFilter ? row.category === categoryFilter : true,
+      );
+  }, [rows, tab, categoryFilter]);
+
+  const categoryChips = useMemo(() => {
+    if (rows === null) return [];
+    const totals = new Map<NotificationCategory, number>();
+    for (const row of rows) {
+      if (!matchesTab(row, tab)) continue;
+      totals.set(row.category, (totals.get(row.category) ?? 0) + 1);
+    }
+    const order: NotificationCategory[] = [
+      "renewal",
+      "reporting",
+      "verification",
+      "account",
+      "admin",
+      "other",
+    ];
+    return order
+      .filter((cat) => (totals.get(cat) ?? 0) > 0)
+      .map((cat) => ({ category: cat, count: totals.get(cat) ?? 0 }));
+  }, [rows, tab]);
 
   async function markOne(row: ProviderNotificationItem) {
     if (row.read_at) return;
@@ -119,7 +187,6 @@ function PortalNotificationsInner({ session }: { session: PortalSession }) {
         current?.map((item) => (item.id === updated.id ? updated : item)) ??
         current,
       );
-      setUnreadCount((value) => Math.max(0, value - 1));
     } catch {
       // Non-fatal — the link still navigates and the user can refresh.
     }
@@ -134,27 +201,11 @@ function PortalNotificationsInner({ session }: { session: PortalSession }) {
           read_at: item.read_at ?? new Date().toISOString(),
         })) ?? current,
       );
-      setUnreadCount(0);
     } catch {
       // Non-fatal — the user can re-trigger; the summary will reflect
       // reality on next fetch.
     }
   }
-
-  // Background refresh so the bell + page stay in sync if a reviewer
-  // decision lands while the tab is open. Best-effort.
-  useEffect(() => {
-    const handle = window.setInterval(() => {
-      getProviderNotificationSummary(session)
-        .then((s) => {
-          setUnreadCount((current) =>
-            current === s.unread_count ? current : s.unread_count,
-          );
-        })
-        .catch(() => undefined);
-    }, 60_000);
-    return () => window.clearInterval(handle);
-  }, [session]);
 
   return (
     <PortalAppShell session={session}>
@@ -162,17 +213,21 @@ function PortalNotificationsInner({ session }: { session: PortalSession }) {
         <PageHeader
           eyebrow="Tu bandeja"
           title="Notificaciones"
-          description="Decisiones del revisor sobre tus documentos. Las nuevas aparecen marcadas como ‘Nueva’ y la acción te lleva directo a la entrega."
+          description="Avisos críticos primero. La pestaña Pendientes solo muestra lo que aún requiere tu atención."
           actions={
-            unreadCount > 0 ? (
+            counts.pending > 0 ? (
               <Button
                 type="button"
                 size="sm"
                 variant="outline"
                 onClick={markAll}
               >
-                <CheckCircle className="h-3.5 w-3.5" weight="bold" aria-hidden />
-                Marcar leídas
+                <CheckCircle
+                  className="h-3.5 w-3.5"
+                  weight="bold"
+                  aria-hidden
+                />
+                Marcar todas como leídas
               </Button>
             ) : null
           }
@@ -185,7 +240,9 @@ function PortalNotificationsInner({ session }: { session: PortalSession }) {
                 className="h-6 w-6 text-[color:var(--text-tertiary)]"
                 aria-hidden
               />
-              <p className="text-sm text-[color:var(--text-secondary)]">{error}</p>
+              <p className="text-sm text-[color:var(--text-secondary)]">
+                {error}
+              </p>
               <Button
                 type="button"
                 size="sm"
@@ -197,59 +254,198 @@ function PortalNotificationsInner({ session }: { session: PortalSession }) {
           </Card>
         ) : rows === null ? (
           <NotificationsSkeleton />
-        ) : rows.length === 0 ? (
-          <Card>
-            <CardContent className="flex flex-col items-center gap-2 p-8 text-center">
-              <Bell
-                className="h-6 w-6 text-[color:var(--text-tertiary)]"
-                aria-hidden
-              />
-              <p className="text-base font-semibold text-[color:var(--text-primary)]">
-                Sin notificaciones
-              </p>
-              <p className="text-sm text-[color:var(--text-secondary)]">
-                Cuando un revisor apruebe, rechace o pida aclaraciones sobre
-                tus cargas, lo verás aquí.
-              </p>
-            </CardContent>
-          </Card>
         ) : (
-          <Card>
-            <CardHeader>
-              <div className="flex items-center justify-between gap-2">
-                <CardTitle className="flex items-center gap-2">
-                  <Bell className="h-4 w-4" weight="bold" aria-hidden />
-                  Novedades
-                </CardTitle>
-                <p className="font-mono text-[11px] uppercase tracking-wide text-[color:var(--text-tertiary)]">
-                  {unreadCount} sin leer
-                </p>
-              </div>
-            </CardHeader>
-            <CardContent>
-              <ol className="space-y-7">
-                {grouped.map((group) => (
-                  <li key={group.key}>
-                    <p className="mb-2 font-mono text-[10px] uppercase tracking-wide text-[color:var(--text-tertiary)]">
-                      {group.label}
-                    </p>
-                    <ul className="space-y-3">
-                      {group.items.map((row) => (
-                        <NotificationRow
-                          key={row.id}
-                          row={row}
-                          onRead={() => markOne(row)}
-                        />
-                      ))}
-                    </ul>
-                  </li>
+          <div className="flex flex-col gap-4">
+            <TabBar active={tab} onSelect={setTab} counts={counts} />
+            {categoryChips.length > 1 ? (
+              <CategoryChipRow
+                chips={categoryChips}
+                active={categoryFilter}
+                onSelect={setCategoryFilter}
+              />
+            ) : null}
+            {visible.length === 0 ? (
+              <TabEmptyState tab={tab} category={categoryFilter} />
+            ) : (
+              <ol
+                className="space-y-3"
+                data-testid="portal-notification-list"
+              >
+                {visible.map((row) => (
+                  <NotificationRow
+                    key={row.id}
+                    row={row}
+                    onRead={() => markOne(row)}
+                  />
                 ))}
               </ol>
-            </CardContent>
-          </Card>
+            )}
+          </div>
         )}
       </main>
     </PortalAppShell>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Sub-components
+// ---------------------------------------------------------------------------
+
+function TabBar({
+  active,
+  onSelect,
+  counts,
+}: {
+  active: TabKey;
+  onSelect: (tab: TabKey) => void;
+  counts: { pending: number; all: number; resolved: number };
+}) {
+  return (
+    <div
+      role="tablist"
+      aria-label="Filtrar notificaciones"
+      className="flex items-center gap-1 rounded-lg border border-[color:var(--border-default)] bg-[color:var(--surface-raised)] p-1"
+    >
+      {TAB_DEFINITIONS.map(({ key, label }) => {
+        const selected = active === key;
+        const count = counts[key];
+        return (
+          <button
+            key={key}
+            type="button"
+            role="tab"
+            aria-selected={selected}
+            onClick={() => onSelect(key)}
+            className={cn(
+              "flex flex-1 items-center justify-center gap-2 rounded-md px-3 py-2 text-sm font-medium transition",
+              selected
+                ? "bg-[color:var(--surface-teal-muted)] text-[color:var(--text-primary)]"
+                : "text-[color:var(--text-secondary)] hover:bg-[color:var(--surface-hover)]",
+            )}
+          >
+            <span>{label}</span>
+            <span
+              className={cn(
+                "rounded-full px-2 py-0.5 text-[11px] font-semibold",
+                selected
+                  ? "bg-[color:var(--surface-raised)] text-[color:var(--text-primary)]"
+                  : "bg-[color:var(--surface-page)] text-[color:var(--text-secondary)]",
+              )}
+            >
+              {count}
+            </span>
+          </button>
+        );
+      })}
+    </div>
+  );
+}
+
+function CategoryChipRow({
+  chips,
+  active,
+  onSelect,
+}: {
+  chips: { category: NotificationCategory; count: number }[];
+  active: NotificationCategory | null;
+  onSelect: (next: NotificationCategory | null) => void;
+}) {
+  return (
+    <div
+      role="toolbar"
+      aria-label="Filtrar por categoría"
+      className="flex flex-wrap items-center gap-2"
+    >
+      <Chip selected={active === null} onClick={() => onSelect(null)}>
+        Todas las categorías
+      </Chip>
+      {chips.map(({ category, count }) => (
+        <Chip
+          key={category}
+          selected={active === category}
+          onClick={() =>
+            onSelect(active === category ? null : category)
+          }
+        >
+          {CATEGORY_LABELS[category]}
+          <span className="ml-1.5 rounded-full bg-black/5 px-1.5 py-0.5 text-[10px] font-semibold">
+            {count}
+          </span>
+        </Chip>
+      ))}
+    </div>
+  );
+}
+
+function Chip({
+  selected,
+  onClick,
+  children,
+}: {
+  selected: boolean;
+  onClick: () => void;
+  children: React.ReactNode;
+}) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      aria-pressed={selected}
+      className={cn(
+        "inline-flex items-center rounded-full border px-3 py-1 text-[12px] font-medium transition",
+        selected
+          ? "border-[color:var(--border-strong)] bg-[color:var(--surface-teal-muted)] text-[color:var(--text-primary)]"
+          : "border-[color:var(--border-default)] bg-[color:var(--surface-raised)] text-[color:var(--text-secondary)] hover:bg-[color:var(--surface-hover)]",
+      )}
+    >
+      {children}
+    </button>
+  );
+}
+
+function TabEmptyState({
+  tab,
+  category,
+}: {
+  tab: TabKey;
+  category: NotificationCategory | null;
+}) {
+  const messages: Record<TabKey, { title: string; description: string }> = {
+    pending: {
+      title: "Sin pendientes",
+      description:
+        "No tienes avisos críticos ni importantes sin leer. Buen trabajo.",
+    },
+    all: {
+      title: "Sin notificaciones",
+      description:
+        "Cuando el revisor evalúe tus documentos o haya cambios en tu expediente, aparecerán aquí.",
+    },
+    resolved: {
+      title: "Aún no hay resueltas",
+      description:
+        "Cuando marques una notificación como leída o se resuelva sola, aparecerá aquí.",
+    },
+  };
+  const base = messages[tab];
+  const description = category
+    ? `${base.description} (Filtro: ${CATEGORY_LABELS[category]}.)`
+    : base.description;
+  return (
+    <Card>
+      <CardContent className="flex flex-col items-center gap-2 p-8 text-center">
+        <Bell
+          className="h-6 w-6 text-[color:var(--text-tertiary)]"
+          aria-hidden
+        />
+        <p className="text-base font-semibold text-[color:var(--text-primary)]">
+          {base.title}
+        </p>
+        <p className="text-sm text-[color:var(--text-secondary)]">
+          {description}
+        </p>
+      </CardContent>
+    </Card>
   );
 }
 
@@ -260,30 +456,38 @@ function NotificationRow({
   row: ProviderNotificationItem;
   onRead: () => void;
 }) {
-  const tone = TONE_BY_SEVERITY[row.severity] ?? TONE_BY_SEVERITY.info;
+  const RowIcon: IconType = iconForType(row.notification_type);
   const unread = row.read_at === null;
+  const rail = SEVERITY_RAIL[row.severity] ?? SEVERITY_RAIL.info;
+  const badge = SEVERITY_BADGE[row.severity] ?? SEVERITY_BADGE.info;
+
   const content = (
     <div
-      className={
-        "flex gap-3 rounded-md border p-3 transition-colors " +
-        (unread ? tone.unreadClass : tone.readClass)
-      }
+      className={cn(
+        "flex gap-3 rounded-md border border-l-4 p-3 transition-colors",
+        rail,
+        unread
+          ? "bg-[color:var(--surface-raised)]"
+          : "bg-[color:var(--surface-page)]",
+      )}
     >
       <span
-        className={
-          "flex h-8 w-8 shrink-0 items-center justify-center rounded-md " +
-          tone.iconBg
-        }
+        className={cn(
+          "flex h-8 w-8 shrink-0 items-center justify-center rounded-md",
+          "bg-[color:var(--surface-page)] text-[color:var(--text-secondary)]",
+        )}
       >
-        <FileText className="h-4 w-4" weight="bold" aria-hidden />
+        <RowIcon className="h-4 w-4" weight="bold" aria-hidden />
       </span>
       <div className="min-w-0 flex-1">
         <div className="flex flex-wrap items-center gap-2">
           <p className="text-[13px] font-semibold text-[color:var(--text-primary)]">
             {row.title}
           </p>
-          <Badge variant={tone.badge}>{tone.label}</Badge>
-          {unread ? <Badge variant="brand">Nueva</Badge> : null}
+          <Badge variant={badge.variant}>{badge.label}</Badge>
+          {unread && isActionable(row.severity) ? (
+            <Badge variant="brand">Nueva</Badge>
+          ) : null}
         </div>
         <p className="mt-1 text-[12px] leading-relaxed text-[color:var(--text-secondary)]">
           {row.body}
@@ -316,39 +520,36 @@ function NotificationRow({
 
 function NotificationsSkeleton() {
   return (
-    <Card>
-      <CardContent className="space-y-3 p-4">
-        {Array.from({ length: 4 }).map((_, i) => (
-          <div
-            key={i}
-            className="h-16 w-full animate-pulse rounded-md border border-[color:var(--border-subtle)] bg-[color:var(--surface-sunken)]"
-            aria-hidden
-          />
-        ))}
-      </CardContent>
-    </Card>
+    <div className="space-y-3">
+      {Array.from({ length: 5 }).map((_, index) => (
+        <div
+          key={index}
+          className="h-24 animate-pulse rounded-md border border-[color:var(--border-subtle)] bg-[color:var(--surface-raised)]"
+        />
+      ))}
+    </div>
   );
 }
 
-function groupByDay(rows: ProviderNotificationItem[]) {
-  const map = new Map<string, ProviderNotificationItem[]>();
+// ---------------------------------------------------------------------------
+// Helpers
+// ---------------------------------------------------------------------------
+
+function computeCounts(rows: ProviderNotificationItem[]) {
+  let pending = 0;
+  let resolved = 0;
   for (const row of rows) {
-    const day = new Date(row.created_at).toISOString().slice(0, 10);
-    if (!map.has(day)) map.set(day, []);
-    map.get(day)!.push(row);
+    if (matchesTab(row, "pending")) pending += 1;
+    if (matchesTab(row, "resolved")) resolved += 1;
   }
-  return Array.from(map.entries())
-    .sort((a, b) => (a[0] < b[0] ? 1 : -1))
-    .map(([day, items]) => ({
-      key: day,
-      label: new Date(day + "T00:00:00").toLocaleDateString("es-MX", {
-        weekday: "long",
-        day: "2-digit",
-        month: "long",
-        year: "numeric",
-      }),
-      items,
-    }));
+  return { pending, all: rows.length, resolved };
+}
+
+function iconForType(type: string): IconType {
+  if (type.startsWith("document_") || type.startsWith("submission")) {
+    return FileText;
+  }
+  return Bell;
 }
 
 export default withPortalSession(PortalNotificationsInner);

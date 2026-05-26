@@ -29,7 +29,12 @@ def _reset_auth_rate_limiters() -> None:
     flip otherwise-deterministic tests into 429. The reset is cheap and
     keeps each test fully isolated from the others.
     """
-    from app.core.rate_limit import forgot_password_limiter, login_limiter
+    from app.core.rate_limit import (
+        forgot_password_limiter,
+        login_limiter,
+        phone_verify_limiter,
+    )
 
     login_limiter.reset()
     forgot_password_limiter.reset()
+    phone_verify_limiter.reset()

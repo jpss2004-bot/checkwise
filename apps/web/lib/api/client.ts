@@ -303,10 +303,22 @@ export type ClientActivityResponse = {
  *  expired), ``info`` (background automation). */
 export type NotificationSeverity = "green" | "yellow" | "red" | "info";
 
+/** Phase 7 / Slice N9b — canonical category vocabulary. Derived
+ *  server-side from notification_type at insert time. ``other`` is
+ *  the catch-all for legacy types that don't match a known prefix. */
+export type NotificationCategory =
+  | "renewal"
+  | "reporting"
+  | "verification"
+  | "account"
+  | "admin"
+  | "other";
+
 export type ClientNotificationItem = {
   id: string;
   notification_type: string;
   severity: NotificationSeverity;
+  category: NotificationCategory;
   title: string;
   body: string;
   action_url: string | null;
@@ -323,12 +335,16 @@ export type ClientNotificationsResponse = {
   items: ClientNotificationItem[];
   total: number;
   unread_count: number;
+  /** Phase 7 / Slice N9b — subset of ``unread_count`` whose
+   *  severity is ``red`` or ``yellow``. Drives the sidebar bell. */
+  unread_actionable_count: number;
   limit: number;
 };
 
 export type ClientNotificationSummary = {
   client_id: string;
   unread_count: number;
+  unread_actionable_count: number;
 };
 
 export type ClientMetadataDocument = {

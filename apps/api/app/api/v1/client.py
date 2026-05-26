@@ -32,8 +32,8 @@ from typing import Annotated, Literal
 from fastapi import APIRouter, Depends, HTTPException, Query, Response, status
 from fastapi.responses import FileResponse
 from pydantic import BaseModel, EmailStr, Field
-from sqlalchemy.exc import IntegrityError
 from sqlalchemy import and_, func, select
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from app.api.v1.auth import CurrentUser, require_any_role
@@ -83,7 +83,6 @@ from app.models import (
     Vendor,
 )
 from app.services.audit_log import add_audit_event
-from app.services.search_service import SearchHit, search_submissions
 from app.services.client_metadata import (
     client_master_file_path,
     display_export_path,
@@ -100,6 +99,7 @@ from app.services.evidence_slots import (
     renewal_anchor_date,
     renewal_status,
 )
+from app.services.search_service import SearchHit, search_submissions
 
 router = APIRouter(prefix="/client", tags=["client"])
 DbSession = Annotated[Session, Depends(get_db)]
@@ -508,6 +508,17 @@ class ClientNotificationItem(BaseModel):
     # purely on this value, so a future severity-mapping change
     # ships without coordinated UI code.
     severity: Literal["green", "yellow", "red", "info"]
+    # Phase 7 / Slice N9b — canonical category for chip filtering.
+    # Derived from notification_type at insert time. ``other``
+    # is the catch-all when the type doesn't match any known prefix.
+    category: Literal[
+        "renewal",
+        "reporting",
+        "verification",
+        "account",
+        "admin",
+        "other",
+    ]
     title: str
     body: str
     action_url: str | None
@@ -524,12 +535,17 @@ class ClientNotificationsResponse(BaseModel):
     items: list[ClientNotificationItem]
     total: int
     unread_count: int
+    # Phase 7 / Slice N9b — subset of ``unread_count`` whose severity
+    # is ``red`` or ``yellow``. Drives the sidebar bell badge so
+    # info-tier rows never inflate it.
+    unread_actionable_count: int
     limit: int
 
 
 class ClientNotificationSummary(BaseModel):
     client_id: str
     unread_count: int
+    unread_actionable_count: int
 
 
 class ClientMetadataDocument(BaseModel):
@@ -1297,6 +1313,29 @@ def client_add_provider(
             "email_delivery_status": delivery.status,
         },
     )
+
+    # Phase 7 cutover (Slice C) — same companion-emit as
+    # ``admin.provision_user``. Legacy welcome email already landed;
+    # this emit fires the in-app row + SMS confirmation through the
+    # unified fabric and never breaks the response on failure.
+    try:
+        import logging
+
+        from app.services.notifications import emit_invitation_sent
+
+        emit_invitation_sent(
+            db,
+            user=user,
+            invitation_token_id=user.id,
+            invitation_url=login_url,
+            mode="active",
+        )
+        db.flush()
+    except Exception:  # pragma: no cover — defensive during cutover
+        logging.getLogger("checkwise.client").exception(
+            "notif_emit_failed event=account.invitation_sent user=%s", user.id
+        )
+
     db.commit()
 
     return ClientProviderCreateResponse(
@@ -2067,7 +2106,24 @@ def client_notification_summary(
         )
         or 0
     )
-    return ClientNotificationSummary(client_id=target_id, unread_count=unread_count)
+    # Bell badge math (N9b): only red+yellow contribute. Info-tier
+    # and green-tier unread rows are visible in the in-app feed but
+    # never inflate the badge.
+    unread_actionable_count = int(
+        db.scalar(
+            select(func.count(ClientNotification.id)).where(
+                ClientNotification.client_id == target_id,
+                ClientNotification.read_at.is_(None),
+                ClientNotification.severity.in_(("red", "yellow")),
+            )
+        )
+        or 0
+    )
+    return ClientNotificationSummary(
+        client_id=target_id,
+        unread_count=unread_count,
+        unread_actionable_count=unread_actionable_count,
+    )
 
 
 @router.get("/notifications", response_model=ClientNotificationsResponse)
@@ -2100,6 +2156,16 @@ def client_notifications(
         )
         or 0
     )
+    unread_actionable_count = int(
+        db.scalar(
+            select(func.count(ClientNotification.id)).where(
+                ClientNotification.client_id == target_id,
+                ClientNotification.read_at.is_(None),
+                ClientNotification.severity.in_(("red", "yellow")),
+            )
+        )
+        or 0
+    )
     return ClientNotificationsResponse(
         client_id=target_id,
         items=[
@@ -2108,6 +2174,7 @@ def client_notifications(
         ],
         total=len(rows),
         unread_count=unread_count,
+        unread_actionable_count=unread_actionable_count,
         limit=limit,
     )
 
@@ -2186,20 +2253,34 @@ def mark_all_client_notifications_read(
             },
         )
     db.commit()
-    return ClientNotificationSummary(client_id=target_id, unread_count=0)
+    return ClientNotificationSummary(
+        client_id=target_id,
+        unread_count=0,
+        unread_actionable_count=0,
+    )
 
 
 def _notification_item(
     row: ClientNotification, vendor: Vendor | None
 ) -> ClientNotificationItem:
+    # Defensive fallback for both severity and category — N9b's
+    # migration backfilled existing rows, but a Literal mismatch
+    # would 500 the endpoint, so we coerce any drift to a safe
+    # sentinel.
+    severity = (
+        row.severity if row.severity in {"green", "yellow", "red", "info"} else "info"
+    )
+    category = (
+        row.category
+        if row.category
+        in {"renewal", "reporting", "verification", "account", "admin", "other"}
+        else "other"
+    )
     return ClientNotificationItem(
         id=row.id,
         notification_type=row.notification_type,
-        # Fallback defensively to ``info`` in case an older row
-        # somehow predates the migration default (shouldn't happen,
-        # but ``Literal`` validation will 500 if a bad value sneaks
-        # in).
-        severity=row.severity if row.severity in {"green", "yellow", "red", "info"} else "info",  # type: ignore[arg-type]
+        severity=severity,  # type: ignore[arg-type]
+        category=category,  # type: ignore[arg-type]
         title=row.title,
         body=row.body,
         action_url=row.action_url,
@@ -2329,7 +2410,7 @@ def _build_audit_filters(
     statuses: list[str] | None,
     vendor_ids: list[str] | None,
     submission_ids: list[str] | None = None,
-) -> "AuditPackageFilters":
+) -> AuditPackageFilters:
     from app.services.audit_package import AuditPackageFilters as _F
 
     return _F(
@@ -2641,9 +2722,9 @@ def _stream_audit_package_zip(
     from fastapi.responses import StreamingResponse
 
     from app.services.audit_package import (
-        AuditPackageTooLargeError,
         MAX_FILES,
         MAX_TOTAL_BYTES,
+        AuditPackageTooLargeError,
         build_entries,
         stream_audit_package,
     )

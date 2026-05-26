@@ -894,6 +894,14 @@ export type ProviderNotificationItem = {
   id: string;
   notification_type: string;
   severity: "green" | "yellow" | "red" | "info";
+  /** Phase 7 / Slice N9b — canonical category for chip filtering. */
+  category:
+    | "renewal"
+    | "reporting"
+    | "verification"
+    | "account"
+    | "admin"
+    | "other";
   title: string;
   body: string;
   action_url: string | null;
@@ -908,12 +916,16 @@ export type ProviderNotificationsResponse = {
   items: ProviderNotificationItem[];
   total: number;
   unread_count: number;
+  /** Phase 7 / Slice N9b — subset of ``unread_count`` whose
+   *  severity is ``red`` or ``yellow``. Drives the portal bell. */
+  unread_actionable_count: number;
   limit: number;
 };
 
 export type ProviderNotificationSummary = {
   workspace_id: string;
   unread_count: number;
+  unread_actionable_count: number;
 };
 
 export async function getProviderNotificationSummary(

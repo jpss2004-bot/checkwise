@@ -91,8 +91,12 @@ export function ClientShell({
     }
     setSession(current);
     setReady(true);
+    // Phase 7 / Slice N9b — bell badge counts only red+yellow
+    // unread rows. Info-tier and green-tier unreads are visible in
+    // the in-app feed but never inflate the count, keeping the
+    // badge as a "you need to act on this" signal.
     getClientNotificationSummary()
-      .then((summary) => setUnreadCount(summary.unread_count))
+      .then((summary) => setUnreadCount(summary.unread_actionable_count))
       .catch(() => setUnreadCount(0));
   }, [router]);
 
