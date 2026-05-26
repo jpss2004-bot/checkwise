@@ -3,6 +3,7 @@
 import { useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import {
+  ArrowsLeftRight,
   CaretDown,
   IdentificationCard,
   SignOut,
@@ -44,6 +45,17 @@ export type UserMenuProps = {
   profileHref: string | null;
   /** Label for the profile link. Defaults to "Mi perfil". */
   profileLabel?: string;
+  /**
+   * Shell switcher — when set, renders a "Cambiar a X" row above
+   * the sign-out action. Used by the AdminShell ↔ PlatformShell
+   * pair so the same internal_admin can flip between the
+   * compliance and IT views without leaving the page. ``null``
+   * hides the row entirely.
+   */
+  shellSwitch?: {
+    href: string;
+    label: string;
+  } | null;
   onSignOut: () => void;
   /** Optional className applied to the trigger button. */
   className?: string;
@@ -55,6 +67,7 @@ export function UserMenu({
   roles,
   profileHref,
   profileLabel = "Mi perfil",
+  shellSwitch,
   onSignOut,
   className,
 }: UserMenuProps) {
@@ -147,6 +160,23 @@ export function UserMenu({
                     aria-hidden="true"
                   />
                   {profileLabel}
+                </Link>
+              </li>
+            ) : null}
+            {shellSwitch ? (
+              <li role="none">
+                <Link
+                  href={shellSwitch.href}
+                  role="menuitem"
+                  className="flex items-center gap-2 px-4 py-2 text-sm text-[color:var(--text-primary)] hover:bg-[color:var(--surface-hover)]"
+                  onClick={() => setOpen(false)}
+                >
+                  <ArrowsLeftRight
+                    className="h-4 w-4 text-[color:var(--text-tertiary)]"
+                    weight="bold"
+                    aria-hidden="true"
+                  />
+                  {shellSwitch.label}
                 </Link>
               </li>
             ) : null}

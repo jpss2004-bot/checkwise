@@ -9,7 +9,7 @@ import { DataTable, type DataTableColumn } from "@/components/ui/data-table";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 
-import { AdminShell } from "../_shell";
+import { PlatformShell } from "../_shell";
 import {
   type AdminAuditLogItem,
   listAuditLog,
@@ -107,7 +107,7 @@ export default function AdminAuditLogPage() {
   ];
 
   return (
-    <AdminShell
+    <PlatformShell
       title="Audit log"
       description="Bitácora completa de eventos del sistema. Cada cambio firma el actor, la acción, la entidad y el diff antes/después."
     >
@@ -203,7 +203,7 @@ export default function AdminAuditLogPage() {
           skeletonRows={8}
         />
       </div>
-    </AdminShell>
+    </PlatformShell>
   );
 }
 

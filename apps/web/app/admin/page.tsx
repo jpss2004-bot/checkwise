@@ -169,7 +169,7 @@ export default function AdminHomePage() {
                 { href: "/admin/vendors", label: "Proveedores", desc: "Alta, edición y status." },
                 { href: "/admin/requirements", label: "Requisitos", desc: "Catálogo regulatorio." },
                 { href: "/admin/calendar", label: "Calendario", desc: "Periodos y obligaciones." },
-                { href: "/admin/audit-log", label: "Audit log", desc: "Explorador de eventos." },
+                { href: "/platform/audit-log", label: "Audit log", desc: "Explorador de eventos." },
                 {
                   href: "/client/dashboard",
                   label: "Portal del cliente (preview)",

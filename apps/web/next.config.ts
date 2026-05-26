@@ -63,6 +63,30 @@ const nextConfig: NextConfig = {
     NEXT_PUBLIC_APP_VERSION: appVersion,
     NEXT_PUBLIC_GIT_SHA: gitSha,
   },
+  // Operaciones ↔ Plataforma split (2026-05-26). The three IT-side
+  // pages moved from /admin/* to /platform/*. Permanent 308 redirects
+  // keep old emails, bookmarks, and audit-log links pointing at the
+  // legacy URLs working. Drop these once we have telemetry showing
+  // zero hits for a month.
+  async redirects() {
+    return [
+      {
+        source: "/admin/users/new",
+        destination: "/platform/users/new",
+        permanent: true,
+      },
+      {
+        source: "/admin/audit-log",
+        destination: "/platform/audit-log",
+        permanent: true,
+      },
+      {
+        source: "/admin/feedback-reports",
+        destination: "/platform/feedback-reports",
+        permanent: true,
+      },
+    ];
+  },
 };
 
 export default nextConfig;

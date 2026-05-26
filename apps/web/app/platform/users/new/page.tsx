@@ -18,7 +18,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 
-import { AdminShell } from "../../_shell";
+import { PlatformShell } from "../../_shell";
 import {
   listClients,
   provisionUser,
@@ -129,7 +129,7 @@ export default function AdminNewUserPage() {
   }
 
   return (
-    <AdminShell
+    <PlatformShell
       title="Nuevo usuario"
       description="Crea una cuenta nueva de cliente o proveedor. CheckWise genera una contraseña temporal, la muestra una vez en pantalla y la envía por correo."
       actions={
@@ -367,7 +367,7 @@ export default function AdminNewUserPage() {
           </Surface>
         ) : null}
       </div>
-    </AdminShell>
+    </PlatformShell>
   );
 }
 

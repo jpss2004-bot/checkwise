@@ -4,16 +4,11 @@ import { useEffect, useState } from "react";
 import Link from "next/link";
 import { useRouter, usePathname } from "next/navigation";
 import {
-  Books,
-  CalendarBlank,
-  ChartLineUp,
-  ClipboardText,
-  EnvelopeSimple,
+  Bug,
   Gauge,
-  IdentificationCard,
   List,
-  PencilSimple,
-  Storefront,
+  ListMagnifyingGlass,
+  UserPlus,
   X,
   type Icon,
 } from "@phosphor-icons/react";
@@ -32,36 +27,33 @@ import {
 } from "@/lib/session/admin";
 
 /**
- * AdminShell — premium-dense operations console shell (V2.1).
+ * PlatformShell — IT/platform-admin surface (V2.6).
  *
- * Density: dense (per VISUAL_DIRECTION_2_X tier lock).
- * Header: brand mark + horizontal nav + user chip on desktop, drawer
- * on mobile (<1024px). Page header carries title + MetadataStrip
- * (workspace identity demoted from greeting block to mono metadata).
+ * Sibling of ``AdminShell`` introduced when the unified admin
+ * console got muddled past ~10 nav items. This shell carries the
+ * surfaces a platform admin uses occasionally: user provisioning,
+ * audit log, feedback reports, system status. AdminShell keeps the
+ * compliance / day-to-day operations work.
+ *
+ * Auth: same ``internal_admin`` role gates both shells for now —
+ * the split is UX-only. A future ``platform_admin`` role can layer
+ * on top without changing the route structure (see the sprint
+ * memory note 2026-05-26).
  */
 
-// Operaciones nav. The IT-side actions (user provisioning, audit
-// log, feedback reports) live in the sibling /platform/* shell —
-// see ``apps/web/app/platform/_shell.tsx``. ``UserMenu`` carries a
-// switcher so the same internal_admin can flip between the two
-// surfaces without leaving the page.
+// A ``/platform/users`` listing surface would be useful but requires
+// a new ``GET /api/v1/admin/users`` backend endpoint we don't have
+// yet. Left out of the nav for now; ``/platform/users/new`` is the
+// only user-management action surfaced. When the listing lands,
+// insert it here between ``Resumen`` and ``Nuevo usuario``.
 const NAV: { href: string; label: string; icon: Icon }[] = [
-  { href: "/admin/dashboard", label: "Resumen", icon: Gauge },
-  { href: "/admin/clients", label: "Clientes", icon: IdentificationCard },
-  { href: "/admin/vendors", label: "Proveedores", icon: Storefront },
-  { href: "/admin/requirements", label: "Requisitos", icon: Books },
-  { href: "/admin/calendar", label: "Calendario", icon: CalendarBlank },
-  { href: "/admin/reviewer", label: "Bandeja", icon: ClipboardText },
-  { href: "/admin/reports", label: "Reportes", icon: ChartLineUp },
-  { href: "/admin/contact-requests", label: "Solicitudes", icon: EnvelopeSimple },
-  {
-    href: "/admin/correction-requests",
-    label: "Correcciones",
-    icon: PencilSimple,
-  },
+  { href: "/platform/dashboard", label: "Resumen", icon: Gauge },
+  { href: "/platform/users/new", label: "Nuevo usuario", icon: UserPlus },
+  { href: "/platform/audit-log", label: "Audit log", icon: ListMagnifyingGlass },
+  { href: "/platform/feedback-reports", label: "Feedback", icon: Bug },
 ];
 
-export function AdminShell({
+export function PlatformShell({
   title,
   description,
   actions,
@@ -72,13 +64,6 @@ export function AdminShell({
   description?: React.ReactNode;
   actions?: React.ReactNode;
   children: React.ReactNode;
-  /**
-   * When true, skip the shell's internal page header (eyebrow,
-   * title, description, actions, MetadataStrip). Use this when the
-   * page renders its own complete header — e.g. the shared
-   * <ReportEditor>. Defaults to false so existing pages keep their
-   * current chrome.
-   */
   unframed?: boolean;
 }) {
   const router = useRouter();
@@ -93,15 +78,14 @@ export function AdminShell({
       router.replace("/login");
       return;
     }
-    // Accept either internal_admin or reviewer. Earlier this gated
-    // strictly on internal_admin and locked out reviewer-only users,
-    // even though /admin/reviewer is the reviewer role's primary
-    // landing surface per decideDestination() in /login.
+    // For now both shells gate on the same role set as the legacy
+    // /admin namespace. When ``platform_admin`` lands as a real
+    // role, switch this to require it specifically.
     if (
       !current.roles.includes("internal_admin") &&
       !current.roles.includes("reviewer")
     ) {
-      router.replace("/admin");
+      router.replace("/login");
       return;
     }
     setSession(current);
@@ -126,12 +110,12 @@ export function AdminShell({
     >
       <header className="sticky top-0 z-30 border-b border-[color:var(--border-subtle)] bg-[color:var(--surface-raised)]/95 backdrop-blur supports-[backdrop-filter]:bg-[color:var(--surface-raised)]/85">
         <div className="mx-auto flex max-w-7xl items-center gap-3 px-5 py-2.5">
-          <Link href="/admin" aria-label="CheckWise admin">
+          <Link href="/platform/dashboard" aria-label="CheckWise plataforma">
             <BrandLogo size="md" />
           </Link>
           <span className="hidden h-6 w-px bg-[color:var(--border-subtle)] lg:block" />
           <p className="hidden font-mono text-[10px] uppercase tracking-[0.18em] text-[color:var(--text-teal)] lg:block">
-            Operaciones internas
+            Plataforma · TI
           </p>
           <div className="ml-auto flex items-center gap-2">
             <SearchBar resultsHref="/admin/buscar" />
@@ -141,8 +125,8 @@ export function AdminShell({
               roles={session.roles}
               profileHref={null}
               shellSwitch={{
-                href: "/platform/dashboard",
-                label: "Cambiar a Plataforma",
+                href: "/admin/dashboard",
+                label: "Cambiar a Operaciones",
               }}
               onSignOut={onLogout}
             />
@@ -162,7 +146,7 @@ export function AdminShell({
           </div>
         </div>
         <nav
-          aria-label="Operaciones admin"
+          aria-label="Plataforma"
           className="mx-auto hidden max-w-7xl gap-1 overflow-x-auto px-3 pb-2 lg:flex"
         >
           {NAV.map((item) => {
@@ -196,7 +180,7 @@ export function AdminShell({
       {drawerOpen ? (
         <div
           role="dialog"
-          aria-label="Menú admin"
+          aria-label="Menú plataforma"
           className="fixed inset-0 z-40 flex lg:hidden"
         >
           <button
@@ -206,7 +190,7 @@ export function AdminShell({
             className="absolute inset-0 bg-[color:var(--text-primary)]/40 backdrop-blur-sm"
           />
           <nav
-            aria-label="Operaciones admin"
+            aria-label="Plataforma"
             className="relative ml-auto flex h-full w-72 max-w-[85vw] flex-col gap-1 border-l border-[color:var(--border-subtle)] bg-[color:var(--surface-raised)] p-4 shadow-lg"
           >
             <p className="cw-eyebrow mb-2">Navegación</p>
@@ -239,7 +223,7 @@ export function AdminShell({
         </div>
       ) : null}
 
-      <BackBar homeHref="/admin" />
+      <BackBar homeHref="/platform/dashboard" />
 
       <main
         className={cn(
@@ -251,7 +235,7 @@ export function AdminShell({
           <header className="cw-fade-up space-y-3">
             <div className="flex flex-wrap items-end justify-between gap-3">
               <div className="min-w-0 space-y-1">
-                <p className="cw-eyebrow">Admin · CheckWise</p>
+                <p className="cw-eyebrow">Plataforma · CheckWise</p>
                 {title ? (
                   <h1 className="text-[26px] font-semibold leading-tight tracking-tight text-[color:var(--text-primary)]">
                     {title}
@@ -287,7 +271,7 @@ export function AdminShell({
       </main>
 
       <footer className="mx-auto max-w-7xl px-5 py-6 text-center font-mono text-[10px] uppercase tracking-wide text-[color:var(--text-tertiary)]">
-        Internal operations · Legal Shelf · CheckWise
+        Plataforma interna · Legal Shelf · CheckWise
       </footer>
       <FeedbackLauncher />
     </div>

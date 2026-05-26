@@ -221,7 +221,7 @@ function AdminSignals({ data }: { data: AdminOverview }) {
       value: data.recent_submissions_total,
     },
     {
-      href: "/admin/audit-log",
+      href: "/platform/audit-log",
       icon: ListMagnifyingGlass,
       label: "Eventos audit log",
       caption: "Trazabilidad reciente del sistema.",
@@ -341,7 +341,7 @@ function OperationsLauncher() {
       helper: "Cola de revisión humana.",
     },
     {
-      href: "/admin/audit-log",
+      href: "/platform/audit-log",
       icon: ListMagnifyingGlass,
       label: "Audit log",
       helper: "Eventos del sistema.",
