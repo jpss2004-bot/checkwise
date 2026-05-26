@@ -691,9 +691,18 @@ function buildGroupedTree(items: TreeNode[]): GroupedTree {
             periods,
           };
         })
-        .sort((a, b) =>
-          a.institution_name.localeCompare(b.institution_name, "es"),
-        );
+        .sort((a, b) => {
+          // Item 1 follow-up — pin the synthetic "Contrato" group to
+          // the top of each vendor's subtree. The auditor expects to
+          // see the contract first; alphabetical order happens to
+          // place it there too, but the pin makes the intent
+          // explicit so a future copy change can't silently bury it.
+          const aIsContract = a.institution_code === "contrato";
+          const bIsContract = b.institution_code === "contrato";
+          if (aIsContract && !bIsContract) return -1;
+          if (bIsContract && !aIsContract) return 1;
+          return a.institution_name.localeCompare(b.institution_name, "es");
+        });
       return { vendor_id: vid, vendor_name: name, institutions };
     })
     .sort((a, b) => a.vendor_name.localeCompare(b.vendor_name, "es"));

@@ -577,6 +577,142 @@ def test_audit_package_tree_returns_candidate_set(
     assert returned_ids == set(sub_ids)
 
 
+def test_audit_package_tree_groups_contracts_under_synthetic_institution(
+    api_client: TestClient, db_factory
+) -> None:
+    """Contract-coded submissions surface in the tree response under
+    a synthetic ``contrato`` institution code so the picker can show
+    them as a dedicated group — not buried inside ``interno_cliente``
+    next to the rest of the catalog."""
+    client_id = _seed_client(db_factory)
+    vendor_id, _ = _seed_vendor_with_workspace(
+        db_factory, client_id=client_id
+    )
+    inst_id = _seed_institution(db_factory, code="interno_cliente")
+    req_contract = _seed_requirement(
+        db_factory,
+        code="ONB-CONT-001",
+        name="Contrato",
+        institution_id=inst_id,
+    )
+    req_other = _seed_requirement(
+        db_factory,
+        code="ONB-CORP-M-001",
+        name="Acta constitutiva",
+        institution_id=inst_id,
+    )
+    _seed_submission(
+        db_factory,
+        client_id=client_id,
+        vendor_id=vendor_id,
+        requirement_id=req_contract,
+        requirement_code="ONB-CONT-001",
+        institution_id=inst_id,
+        storage_subpath="contrato.pdf",
+    )
+    _seed_submission(
+        db_factory,
+        client_id=client_id,
+        vendor_id=vendor_id,
+        requirement_id=req_other,
+        requirement_code="ONB-CORP-M-001",
+        institution_id=inst_id,
+        storage_subpath="acta.pdf",
+    )
+    email, pw = _seed_user(
+        db_factory, role="client_admin", client_id=client_id, email_prefix="ca"
+    )
+    token = _login(api_client, email, pw)
+
+    resp = api_client.get(
+        "/api/v1/client/audit-package/tree", headers=_h(token)
+    )
+    assert resp.status_code == 200, resp.text
+    items = resp.json()["items"]
+    by_code: dict[str, list[dict]] = {}
+    for it in items:
+        by_code.setdefault(it["institution_code"], []).append(it)
+    # The contract submission moved to the synthetic group; the acta
+    # constitutiva stayed under the real institution. The auditor's
+    # tree picker now shows two distinct top-level groups for this
+    # vendor, not one ``interno_cliente`` group mixing both.
+    assert "contrato" in by_code
+    assert len(by_code["contrato"]) == 1
+    assert by_code["contrato"][0]["institution_name"] == "Contrato"
+    assert "interno_cliente" in by_code
+    assert len(by_code["interno_cliente"]) == 1
+    assert by_code["interno_cliente"][0]["requirement_code"] == "ONB-CORP-M-001"
+
+
+def test_audit_package_zip_puts_contracts_in_dedicated_folder(
+    api_client: TestClient, db_factory
+) -> None:
+    """Streaming the ZIP routes contract submissions into a
+    ``<vendor>/contratos/<file>`` path; non-contract submissions
+    keep the historical ``<vendor>/<institution>/<period>/<file>``
+    layout. This is the auditor-facing artefact, not just the
+    picker UI — pinning it explicitly."""
+    client_id = _seed_client(db_factory, "Audit Client")
+    vendor_id, _ = _seed_vendor_with_workspace(
+        db_factory, client_id=client_id, vendor_name="ZipTest"
+    )
+    inst_id = _seed_institution(db_factory, code="interno_cliente")
+    req_contract = _seed_requirement(
+        db_factory,
+        code="ONB-CONT-001",
+        name="Contrato",
+        institution_id=inst_id,
+    )
+    req_other = _seed_requirement(
+        db_factory,
+        code="ONB-CORP-M-001",
+        name="Acta",
+        institution_id=inst_id,
+    )
+    sub_contract = _seed_submission(
+        db_factory,
+        client_id=client_id,
+        vendor_id=vendor_id,
+        requirement_id=req_contract,
+        requirement_code="ONB-CONT-001",
+        institution_id=inst_id,
+        storage_subpath="contrato.pdf",
+    )
+    sub_acta = _seed_submission(
+        db_factory,
+        client_id=client_id,
+        vendor_id=vendor_id,
+        requirement_id=req_other,
+        requirement_code="ONB-CORP-M-001",
+        institution_id=inst_id,
+        storage_subpath="acta.pdf",
+    )
+    email, pw = _seed_user(
+        db_factory, role="client_admin", client_id=client_id, email_prefix="ca"
+    )
+    token = _login(api_client, email, pw)
+
+    resp = api_client.post(
+        "/api/v1/client/audit-package.zip",
+        json={
+            "submission_ids": [sub_contract, sub_acta],
+            "skip_manifest": True,
+        },
+        headers=_h(token),
+    )
+    assert resp.status_code == 200, resp.text
+    archive = zipfile.ZipFile(BytesIO(resp.content))
+    names = archive.namelist()
+    contract_paths = [n for n in names if "/contratos/" in n]
+    other_paths = [n for n in names if "/contratos/" not in n]
+    # The contract artefact lives under the dedicated folder; nothing
+    # else does, and the contract is NOT also under interno_cliente.
+    assert len(contract_paths) == 1
+    assert contract_paths[0].endswith("contrato.pdf")
+    assert all("/interno_cliente/" in p for p in other_paths)
+    assert all("/contratos/" not in p for p in other_paths)
+
+
 def test_audit_package_zip_post_with_submission_ids_narrows_set(
     api_client: TestClient, db_factory
 ) -> None:

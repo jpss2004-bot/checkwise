@@ -689,6 +689,11 @@ export const INSTITUTION_LABELS: Record<string, string> = {
   infonavit: "INFONAVIT",
   stps_repse: "STPS / REPSE",
   interno_cliente: "Interno / Cliente",
+  // Synthetic code the audit-package backend mints for contract-type
+  // submissions (item 1 follow-up). Lets the auditoria preview chip,
+  // the tree picker group label, and any future surface that reads
+  // these labels render "Contrato" consistently.
+  contrato: "Contrato",
 };
 
 export const MONTH_LABELS_ES: Record<number, string> = {

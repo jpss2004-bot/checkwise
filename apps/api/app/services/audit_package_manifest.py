@@ -38,6 +38,11 @@ _INSTITUTION_LABELS: dict[str, str] = {
     "infonavit": "INFONAVIT",
     "stps_repse": "STPS / REPSE",
     "interno_cliente": "Interno cliente",
+    # Synthetic code minted by ``audit_package.build_entries`` for
+    # contract-type submissions (ONB-CONT-001/002/003). Keeps the
+    # INDICE.pdf row labelling consistent with the dedicated
+    # ``contratos/`` folder the ZIP now uses for these documents.
+    "contrato": "Contrato",
 }
 
 # Spanish labels for the canonical document statuses. Mirrors the

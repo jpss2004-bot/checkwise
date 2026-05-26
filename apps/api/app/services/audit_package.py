@@ -64,6 +64,23 @@ MAX_TOTAL_BYTES = 500 * 1024 * 1024
 # explicitly opts in.
 DEFAULT_STATUSES: frozenset[str] = frozenset({DocumentStatus.APROBADO.value})
 
+# Onboarding contract requirement codes. Sourced from
+# ``app.core.compliance_catalog._ONBOARDING_MORAL`` (section
+# "Contrato"). Submissions whose ``requirement_code`` lands in this
+# set are rewritten at entry-time to live under a dedicated
+# ``contratos`` folder (and a synthetic ``contrato`` institution
+# code) so an auditor unzipping the package finds the contract
+# package as its own first-class group rather than buried inside
+# ``interno_cliente/sin-periodo/``. The folder shape and the synthetic
+# code thread through the ZIP layout, the INDICE.pdf manifest and the
+# tree picker's grouping automatically.
+CONTRACT_REQUIREMENT_CODES: frozenset[str] = frozenset(
+    {"ONB-CONT-001", "ONB-CONT-002", "ONB-CONT-003"}
+)
+CONTRACT_INSTITUTION_CODE: str = "contrato"
+CONTRACT_INSTITUTION_NAME: str = "Contrato"
+CONTRACT_FOLDER: str = "contratos"
+
 # Statuses that have no bytes on disk. Excluded from every audit
 # package regardless of explicit selection so the ZIP never hits a
 # 404 mid-stream.
@@ -472,7 +489,24 @@ def build_entries(
                 doc.original_filename or f"documento-{doc.id}.pdf"
             )
             vendor_slug = _vendor_folder(vendor)
-            base_arc = f"{vendor_slug}/{institution_code}/{period}/{safe_name}"
+            # Item 1 follow-up — contracts get their own first-class
+            # folder so an auditor unzipping the package finds the
+            # contract artefacts immediately instead of digging into
+            # ``interno_cliente/sin-periodo/``. The synthetic
+            # ``contrato`` institution code threads through the
+            # manifest label (``_INSTITUTION_LABELS`` in
+            # audit_package_manifest.py) and the tree picker grouping
+            # — three surfaces shifted by one constant.
+            is_contract = (
+                sub.requirement_code is not None
+                and sub.requirement_code in CONTRACT_REQUIREMENT_CODES
+            )
+            if is_contract:
+                institution_code = CONTRACT_INSTITUTION_CODE
+                institution_name = CONTRACT_INSTITUTION_NAME
+                base_arc = f"{vendor_slug}/{CONTRACT_FOLDER}/{safe_name}"
+            else:
+                base_arc = f"{vendor_slug}/{institution_code}/{period}/{safe_name}"
             count = seen_arc.get(base_arc, 0)
             seen_arc[base_arc] = count + 1
             arcname = base_arc if count == 0 else _suffix_arcname(base_arc, count)
