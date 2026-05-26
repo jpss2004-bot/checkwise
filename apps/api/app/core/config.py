@@ -94,6 +94,18 @@ class Settings(BaseSettings):
     WHATSAPP_DEFAULT_LANGUAGE_CODE: str = "es_MX"
     WHATSAPP_DEFAULT_COUNTRY_CODE: str = "52"  # MX
 
+    # SMS via Twilio (Phase 7 cutover). Used as the messaging
+    # transport until Meta approves CheckWise's WhatsApp templates;
+    # see :mod:`app.services.messaging_delivery` for the selection
+    # logic. ``MESSAGING_ENABLED`` is the master gate covering both
+    # WhatsApp + Twilio paths.
+    MESSAGING_ENABLED: bool = False
+    TWILIO_ENABLED: bool = False
+    TWILIO_DRY_RUN: bool = False
+    TWILIO_ACCOUNT_SID: str = ""
+    TWILIO_AUTH_TOKEN: str = ""
+    TWILIO_FROM_NUMBER: str = ""
+
     # Portal session cookie (CheckWise 1.7). Provider portal moves off
     # localStorage and onto an httpOnly signed cookie. Cookie is
     # `Secure` automatically when CHECKWISE_ENV != "local" so dev still
