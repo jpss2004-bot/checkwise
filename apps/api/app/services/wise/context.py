@@ -27,8 +27,8 @@ DB session does. Trivially unit-testable.
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field
-from datetime import date, datetime, timezone
+from dataclasses import dataclass
+from datetime import UTC, date, datetime
 
 from sqlalchemy import select
 from sqlalchemy.orm import Session
@@ -56,7 +56,6 @@ from app.services.evidence_slots import (
     build_workspace_calendar_slots,
     build_workspace_onboarding_slots,
 )
-
 
 # ───────────────────────────────────────────────────────────────────
 # Dataclasses
@@ -618,7 +617,7 @@ def _render_catalog_entry(entry: WiseCatalogEntry) -> str:
 
 def _iso(dt: datetime) -> str:
     if dt.tzinfo is None:
-        dt = dt.replace(tzinfo=timezone.utc)
+        dt = dt.replace(tzinfo=UTC)
     return dt.isoformat()
 
 
