@@ -127,11 +127,19 @@ function ActivateInner() {
           },
         });
         setSuccess(true);
+        // Item 8 v2 — route a freshly-activated client_admin straight
+        // to /client/onboarding (their "create client account" page
+        // per the spec) instead of /client/dashboard. The first save
+        // there sets ``onboarding_completed_at`` and bounces them to
+        // the dashboard; subsequent visits to /activate (e.g., forced
+        // password rotation later) land on the dashboard directly.
         const dest = stored.roles.includes("internal_admin")
           ? "/admin/dashboard"
           : stored.roles.includes("reviewer")
             ? "/admin/reviewer"
-            : "/portal/entra-a-tu-espacio";
+            : stored.roles.includes("client_admin")
+              ? "/client/onboarding"
+              : "/portal/entra-a-tu-espacio";
         setTimeout(() => router.replace(dest), 1200);
       } catch (err) {
         if (err instanceof AuthApiError && err.status === 401) {

@@ -82,19 +82,6 @@ export async function getClient(id: string): Promise<AdminClient> {
   return fetchJson(`/api/v1/admin/clients/${id}`);
 }
 
-export async function createClient(body: {
-  name: string;
-  rfc?: string | null;
-  email: string;
-  responsible_name?: string | null;
-  status?: string;
-}): Promise<AdminClient> {
-  return fetchJson("/api/v1/admin/clients", {
-    method: "POST",
-    body: JSON.stringify(body),
-  });
-}
-
 export async function updateClient(
   id: string,
   body: Partial<{
@@ -112,32 +99,50 @@ export async function updateClient(
 }
 
 /**
- * Item 8 — provision a new client end-to-end: create the Client row,
- * the matching Organization, the first client_admin User (locked
- * until first login), a single-use reset token, and send the
- * onboarding email. The response carries the raw onboarding URL so
- * the admin can copy/paste it as a fallback when SMTP is skipped
- * (typical in dev) or when the recipient says the email never
- * arrived.
+ * Item 8 v2 — unified user provisioning. Replaces the older
+ * createClient + provisionClient pair. One endpoint mints a temp
+ * password, bcrypts it onto a fresh User, sends the welcome email,
+ * and wires up either:
+ *   * role=client → Client + Organization + Membership(client_admin)
+ *   * role=provider → Vendor + ProviderWorkspace anchored under
+ *     ``parent_client_id``
+ * The ``temp_password`` plaintext is returned ONCE for the admin
+ * confirmation screen. Email-delivery status surfaces so the UI
+ * can warn when SMTP skipped.
  */
-export type ProvisionClientResponse = {
-  client_id: string;
-  organization_id: string;
-  user_id: string;
-  email_status: string;
-  email_error: string | null;
-  onboarding_url: string;
-  expires_at: string;
+export type ProvisionUserBody = {
+  full_name: string;
+  email: string;
+  role: "client" | "provider";
+  // client-only
+  client_name?: string;
+  client_rfc?: string | null;
+  // provider-only
+  vendor_name?: string;
+  vendor_rfc?: string;
+  persona_type?: "moral" | "fisica";
+  contact_phone?: string | null;
+  parent_client_id?: string;
 };
 
-export async function provisionClient(body: {
-  client_name: string;
-  rfc?: string | null;
-  client_email: string;
-  admin_full_name: string;
-  admin_user_email?: string | null;
-}): Promise<ProvisionClientResponse> {
-  return fetchJson("/api/v1/admin/clients/provision", {
+export type ProvisionUserResponse = {
+  user_id: string;
+  role: "client" | "provider";
+  email: string;
+  temp_password: string;
+  login_url: string;
+  email_status: string;
+  email_error: string | null;
+  client_id: string | null;
+  organization_id: string | null;
+  vendor_id: string | null;
+  workspace_id: string | null;
+};
+
+export async function provisionUser(
+  body: ProvisionUserBody,
+): Promise<ProvisionUserResponse> {
+  return fetchJson("/api/v1/admin/users", {
     method: "POST",
     body: JSON.stringify(body),
   });

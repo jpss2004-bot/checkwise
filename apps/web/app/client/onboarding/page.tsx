@@ -18,10 +18,14 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
+import { VendorRef } from "@/components/checkwise/vendor-ref";
 import {
+  createClientProvider,
   getClientProfile,
+  listClientVendors,
   updateClientProfile,
   type ClientProfile,
+  type ClientVendorRow,
 } from "@/lib/api/client";
 
 /**
@@ -343,6 +347,8 @@ export default function ClientOnboardingPage() {
                 ) : null}
               </Button>
             </div>
+
+            {!isFirstTime ? <MyProvidersSection /> : null}
           </>
         ) : null}
       </div>
@@ -378,5 +384,262 @@ function ReadOnlyField({
         {children}
       </div>
     </div>
+  );
+}
+
+
+// ---------------------------------------------------------------------------
+// Item 8 v2 — providers section
+// ---------------------------------------------------------------------------
+
+function MyProvidersSection() {
+  const [providers, setProviders] = useState<ClientVendorRow[] | null>(null);
+  const [loadError, setLoadError] = useState<string | null>(null);
+  const [showForm, setShowForm] = useState(false);
+  const [reloadKey, setReloadKey] = useState(0);
+  const [lastInviteEmail, setLastInviteEmail] = useState<string | null>(null);
+  const [lastInviteStatus, setLastInviteStatus] = useState<string | null>(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    listClientVendors({ limit: 100 })
+      .then((data) => {
+        if (!cancelled) setProviders(data.items);
+      })
+      .catch((err: unknown) => {
+        if (cancelled) return;
+        setLoadError(
+          err instanceof Error
+            ? err.message
+            : "No pudimos cargar tus proveedores.",
+        );
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [reloadKey]);
+
+  return (
+    <Surface
+      title="Mis proveedores"
+      icon={IdentificationCard}
+      description="Agrega los proveedores REPSE que CheckWise va a monitorear por ti. Al agregar uno, le enviaremos automáticamente un correo con sus credenciales para que entre y empiece a subir documentos."
+      actions={
+        <Button
+          type="button"
+          size="sm"
+          onClick={() => setShowForm((v) => !v)}
+        >
+          {showForm ? "Cancelar" : "Agregar proveedor"}
+        </Button>
+      }
+    >
+      {lastInviteEmail ? (
+        <div
+          className={
+            "mb-4 rounded-md border p-3 text-sm " +
+            (lastInviteStatus === "sent"
+              ? "border-[color:var(--status-success-border)] bg-[color:var(--status-success-bg)] text-[color:var(--status-success-text)]"
+              : "border-[color:var(--status-warning-border)] bg-[color:var(--status-warning-bg)] text-[color:var(--status-warning-text)]")
+          }
+        >
+          {lastInviteStatus === "sent"
+            ? `Invitación enviada a ${lastInviteEmail}.`
+            : `Proveedor creado, pero el correo a ${lastInviteEmail} no se envió (${lastInviteStatus}). Pídenos ayuda si no llega.`}
+        </div>
+      ) : null}
+
+      {showForm ? (
+        <AddProviderForm
+          onCreated={(result) => {
+            setShowForm(false);
+            setLastInviteEmail(result.contact_email);
+            setLastInviteStatus(result.email_status);
+            setReloadKey((k) => k + 1);
+          }}
+        />
+      ) : null}
+
+      <div className="mt-4">
+        {loadError ? (
+          <p className="text-sm text-[color:var(--status-error-text)]">
+            {loadError}
+          </p>
+        ) : providers === null ? (
+          <p className="text-sm text-[color:var(--text-tertiary)]">
+            Cargando proveedores…
+          </p>
+        ) : providers.length === 0 ? (
+          <p className="text-sm text-[color:var(--text-tertiary)]">
+            Aún no tienes proveedores. Agrega uno arriba para empezar.
+          </p>
+        ) : (
+          <ul className="divide-y divide-[color:var(--border-subtle)]">
+            {providers.map((p) => (
+              <li
+                key={p.vendor_id}
+                className="flex items-center justify-between gap-3 py-2.5"
+              >
+                <div className="min-w-0">
+                  <p className="text-sm font-medium text-[color:var(--text-primary)]">
+                    <VendorRef
+                      vendorId={p.vendor_id}
+                      vendorName={p.vendor_name}
+                    />
+                  </p>
+                  <p className="font-mono text-[10px] uppercase tracking-wide text-[color:var(--text-tertiary)]">
+                    {p.vendor_rfc ?? "—"}
+                    {p.persona_type ? ` · ${p.persona_type}` : ""}
+                  </p>
+                </div>
+                <Badge
+                  variant={
+                    p.semaphore_level === "green"
+                      ? "success"
+                      : p.semaphore_level === "yellow"
+                        ? "warning"
+                        : "destructive"
+                  }
+                >
+                  {p.compliance_pct}%
+                </Badge>
+              </li>
+            ))}
+          </ul>
+        )}
+      </div>
+    </Surface>
+  );
+}
+
+function AddProviderForm({
+  onCreated,
+}: {
+  onCreated: (result: { contact_email: string; email_status: string }) => void;
+}) {
+  const [vendorName, setVendorName] = useState("");
+  const [vendorRfc, setVendorRfc] = useState("");
+  const [personaType, setPersonaType] = useState<"moral" | "fisica">("moral");
+  const [contactName, setContactName] = useState("");
+  const [contactEmail, setContactEmail] = useState("");
+  const [contactPhone, setContactPhone] = useState("");
+  const [submitting, setSubmitting] = useState(false);
+  const [err, setErr] = useState<string | null>(null);
+
+  async function handle(e: FormEvent) {
+    e.preventDefault();
+    setSubmitting(true);
+    setErr(null);
+    try {
+      const result = await createClientProvider({
+        vendor_name: vendorName.trim(),
+        vendor_rfc: vendorRfc.trim().toUpperCase(),
+        persona_type: personaType,
+        contact_name: contactName.trim(),
+        contact_email: contactEmail.trim().toLowerCase(),
+        contact_phone: contactPhone.trim() || null,
+      });
+      onCreated(result);
+      // Reset for the next entry — operators often add several in a row.
+      setVendorName("");
+      setVendorRfc("");
+      setContactName("");
+      setContactEmail("");
+      setContactPhone("");
+    } catch (error) {
+      setErr(
+        error instanceof Error
+          ? error.message
+          : "No pudimos agregar al proveedor.",
+      );
+    } finally {
+      setSubmitting(false);
+    }
+  }
+
+  return (
+    <form onSubmit={handle} className="space-y-3 rounded-md border border-[color:var(--border-subtle)] bg-[color:var(--surface-page)] p-3">
+      <div className="grid gap-3 sm:grid-cols-2">
+        <div className="space-y-1">
+          <Label htmlFor="ap-name">Razón social del proveedor</Label>
+          <Input
+            id="ap-name"
+            value={vendorName}
+            onChange={(e) => setVendorName(e.target.value)}
+            required
+            placeholder="Servicios Especializados, S.A."
+          />
+        </div>
+        <div className="space-y-1">
+          <Label htmlFor="ap-rfc">RFC</Label>
+          <Input
+            id="ap-rfc"
+            value={vendorRfc}
+            onChange={(e) => setVendorRfc(e.target.value.toUpperCase())}
+            minLength={12}
+            maxLength={13}
+            required
+            className="font-mono"
+            placeholder="ABC123456XYZ"
+          />
+        </div>
+        <div className="space-y-1">
+          <Label htmlFor="ap-persona">Tipo de persona</Label>
+          <select
+            id="ap-persona"
+            value={personaType}
+            onChange={(e) => setPersonaType(e.target.value as "moral" | "fisica")}
+            className="h-9 w-full rounded-md border border-[color:var(--border-default)] bg-[color:var(--surface-raised)] px-2 text-sm"
+          >
+            <option value="moral">Persona moral</option>
+            <option value="fisica">Persona física</option>
+          </select>
+        </div>
+        <div className="space-y-1">
+          <Label htmlFor="ap-contact-phone">Teléfono (opcional)</Label>
+          <Input
+            id="ap-contact-phone"
+            type="tel"
+            value={contactPhone}
+            onChange={(e) => setContactPhone(e.target.value)}
+            autoComplete="tel"
+            placeholder="+52 55 1234 5678"
+          />
+        </div>
+        <div className="space-y-1">
+          <Label htmlFor="ap-contact-name">Nombre de contacto</Label>
+          <Input
+            id="ap-contact-name"
+            value={contactName}
+            onChange={(e) => setContactName(e.target.value)}
+            required
+            placeholder="Juan García"
+          />
+        </div>
+        <div className="space-y-1">
+          <Label htmlFor="ap-contact-email">Correo del contacto</Label>
+          <Input
+            id="ap-contact-email"
+            type="email"
+            value={contactEmail}
+            onChange={(e) => setContactEmail(e.target.value)}
+            required
+            autoComplete="email"
+            placeholder="juan@proveedor.com"
+          />
+          <p className="text-[10px] text-[color:var(--text-tertiary)]">
+            Aquí le enviaremos su invitación y credenciales temporales.
+          </p>
+        </div>
+      </div>
+      {err ? (
+        <p className="text-xs text-[color:var(--status-error-text)]">{err}</p>
+      ) : null}
+      <div className="flex justify-end">
+        <Button type="submit" loading={submitting} size="sm">
+          Agregar y enviar invitación
+        </Button>
+      </div>
+    </form>
   );
 }

@@ -16,6 +16,7 @@ import {
   ListMagnifyingGlass,
   PencilSimple,
   Storefront,
+  UserPlus,
   X,
   type Icon,
 } from "@phosphor-icons/react";
@@ -44,6 +45,7 @@ import {
 
 const NAV: { href: string; label: string; icon: Icon }[] = [
   { href: "/admin/dashboard", label: "Resumen", icon: Gauge },
+  { href: "/admin/users/new", label: "Nuevo usuario", icon: UserPlus },
   { href: "/admin/clients", label: "Clientes", icon: IdentificationCard },
   { href: "/admin/vendors", label: "Proveedores", icon: Storefront },
   { href: "/admin/requirements", label: "Requisitos", icon: Books },

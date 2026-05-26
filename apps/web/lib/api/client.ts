@@ -380,6 +380,40 @@ export async function listClientVendors(params?: {
   return fetchJson<ClientVendorListResponse>(`/api/v1/client/vendors${qs(params)}`);
 }
 
+/**
+ * Item 8 v2 — a client_admin invites a provider directly from their
+ * profile page. The backend builds the full provider stack (User +
+ * Vendor + ProviderWorkspace) and emails the invitation
+ * automatically. The temp password is NEVER returned to the client
+ * — only the email-delivery status surfaces.
+ */
+export type ClientProviderCreateBody = {
+  vendor_name: string;
+  vendor_rfc: string;
+  persona_type: "moral" | "fisica";
+  contact_name: string;
+  contact_email: string;
+  contact_phone?: string | null;
+};
+
+export type ClientProviderCreateResponse = {
+  vendor_id: string;
+  workspace_id: string;
+  user_id: string;
+  contact_email: string;
+  email_status: string;
+  email_error: string | null;
+};
+
+export async function createClientProvider(
+  body: ClientProviderCreateBody,
+): Promise<ClientProviderCreateResponse> {
+  return fetchJson<ClientProviderCreateResponse>("/api/v1/client/providers", {
+    method: "POST",
+    body: JSON.stringify(body),
+  });
+}
+
 export async function getClientVendorDetail(
   vendor_id: string,
   params?: { client_id?: string; year?: number },
