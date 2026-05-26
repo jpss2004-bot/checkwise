@@ -30,11 +30,14 @@ import {
 } from "@/components/checkwise/portal/state-surfaces";
 
 import { ClientShell } from "../_shell";
+import { VendorRef } from "@/components/checkwise/vendor-ref";
 import {
   getClientCalendar,
+  listClientVendors,
   type ClientCalendar,
   type ClientCalendarItem,
   type ClientCalendarMonth,
+  type ClientVendorListResponse,
 } from "@/lib/api/client";
 import { INSTITUTION_LABELS } from "@/lib/api/portal";
 
@@ -105,11 +108,29 @@ export default function ClientCalendarPage() {
   const [data, setData] = useState<ClientCalendar | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [expandedMonth, setExpandedMonth] = useState<number | null>(null);
+  // Item 3 — vendor multi-select. Empty list = portfolio-wide view.
+  const [vendorFilter, setVendorFilter] = useState<string[]>([]);
+  const [vendorsList, setVendorsList] =
+    useState<ClientVendorListResponse | null>(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    listClientVendors()
+      .then((res) => {
+        if (!cancelled) setVendorsList(res);
+      })
+      .catch(() => {
+        if (!cancelled) setVendorsList({ items: [], total: 0 } as never);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   useEffect(() => {
     let cancelled = false;
     setError(null);
-    getClientCalendar({ year })
+    getClientCalendar({ year, vendor_ids: vendorFilter })
       .then((cal) => {
         if (!cancelled) setData(cal);
       })
@@ -120,7 +141,13 @@ export default function ClientCalendarPage() {
     return () => {
       cancelled = true;
     };
-  }, [year]);
+  }, [year, vendorFilter]);
+
+  function toggleVendor(id: string) {
+    setVendorFilter((prev) =>
+      prev.includes(id) ? prev.filter((v) => v !== id) : [...prev, id],
+    );
+  }
 
   const totals = useMemo(() => {
     if (!data) return { due: 0, approved: 0, pending: 0, missing: 0, rejected: 0, dueSoon: 0 };
@@ -210,6 +237,53 @@ export default function ClientCalendarPage() {
               { label: "Vencen ≤14d", value: totals.dueSoon.toString(), mono: true, tone: totals.dueSoon > 0 ? "warning" : "default" },
             ]}
           />
+
+          <Surface
+            title="Filtrar por proveedor"
+            description={
+              vendorFilter.length === 0
+                ? "Mostrando todos los proveedores del portafolio. Toca un proveedor para acotar el calendario a sus obligaciones."
+                : `Filtrando por ${vendorFilter.length} proveedor${vendorFilter.length === 1 ? "" : "es"}.`
+            }
+            actions={
+              vendorFilter.length > 0 ? (
+                <button
+                  type="button"
+                  className="text-xs font-medium text-[color:var(--text-brand)] hover:underline"
+                  onClick={() => setVendorFilter([])}
+                >
+                  Limpiar filtro
+                </button>
+              ) : null
+            }
+          >
+            <div className="flex flex-wrap gap-2">
+              {(vendorsList?.items ?? []).map((v) => {
+                const active = vendorFilter.includes(v.vendor_id);
+                return (
+                  <button
+                    type="button"
+                    key={v.vendor_id}
+                    onClick={() => toggleVendor(v.vendor_id)}
+                    aria-pressed={active}
+                    className={
+                      "rounded-full border px-3 py-1.5 text-xs font-medium transition " +
+                      (active
+                        ? "border-[color:var(--interactive-primary)] bg-[color:var(--surface-brand-muted)] text-[color:var(--text-brand)]"
+                        : "border-[color:var(--border-default)] bg-[color:var(--surface-raised)] text-[color:var(--text-secondary)] hover:border-[color:var(--border-strong)]")
+                    }
+                  >
+                    {v.vendor_name}
+                  </button>
+                );
+              })}
+              {vendorsList && vendorsList.items.length === 0 ? (
+                <p className="text-xs text-[color:var(--text-tertiary)]">
+                  Aún no tienes proveedores registrados.
+                </p>
+              ) : null}
+            </div>
+          </Surface>
 
           <Surface
             title="Ritmo anual"
@@ -418,7 +492,10 @@ function ExpandedDetail({ items }: { items: ClientCalendarItem[] }) {
         <div key={g.vendor_name}>
           <div className="mb-2 flex items-center justify-between">
             <p className="text-xs font-semibold uppercase tracking-wide text-[color:var(--text-secondary)]">
-              {g.vendor_name}
+              <VendorRef
+                vendorId={g.rows[0].vendor_id}
+                vendorName={g.vendor_name}
+              />
             </p>
             <Link
               href={`/client/vendors/${g.rows[0].vendor_id}`}
