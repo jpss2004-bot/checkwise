@@ -47,11 +47,16 @@ def add_provider_notification(
     action_url: str | None = None,
     payload: dict | None = None,
 ) -> ProviderNotification:
+    from app.services.notifications.categorize import derive_category
+
     row = ProviderNotification(
         workspace_id=workspace_id,
         submission_id=submission_id,
         notification_type=notification_type,
         severity=severity,
+        # Phase 7 / Slice N9b — derive category at insert time so the
+        # row carries it forward without depending on a backfill.
+        category=derive_category(notification_type),
         title=title,
         body=body,
         action_url=action_url,
