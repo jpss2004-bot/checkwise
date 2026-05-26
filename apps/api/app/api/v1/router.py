@@ -4,12 +4,14 @@ from fastapi import APIRouter
 
 from app.api.v1 import (
     admin,
+    admin_notification_templates,
     auth,
     client,
     compliance,
     contact,
     endpoints,
     feedback,
+    me,
     metadata_dry_run,
     portal,
     reports,
@@ -31,3 +33,7 @@ api_router.include_router(reports.router)
 api_router.include_router(shares.router)
 api_router.include_router(contact.router)
 api_router.include_router(feedback.router)
+# Phase 7 / Slice N2 — per-user notification preferences.
+api_router.include_router(me.router)
+# Phase 7 / Slice N3 — admin CRUD for versioned templates.
+api_router.include_router(admin_notification_templates.router)
