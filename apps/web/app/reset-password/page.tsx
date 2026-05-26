@@ -2,6 +2,7 @@
 
 import {
   Suspense,
+  useEffect,
   useMemo,
   useState,
   type FormEvent,
@@ -22,7 +23,11 @@ import { Button } from "@/components/ui/button";
 import { Field } from "@/components/ui/field";
 import { PasswordInput } from "@/components/ui/password-input";
 import { Skeleton } from "@/components/ui/skeleton";
-import { AuthApiError, resetPassword } from "@/lib/api/auth";
+import {
+  AuthApiError,
+  previewResetPassword,
+  resetPassword,
+} from "@/lib/api/auth";
 import { evaluatePassword } from "@/lib/email-inference";
 import { clearAdminSession } from "@/lib/session/admin";
 
@@ -46,10 +51,52 @@ function ResetPasswordInner() {
   const [error, setError] = useState<string | null>(null);
   const [confirmError, setConfirmError] = useState<string | null>(null);
 
+  // Audit-finding #5 — resolve the token on mount to surface the
+  // recipient email at the top of the form. Failure modes:
+  //   * tokenStatus="valid" → render the form with the email header.
+  //   * tokenStatus="invalid" → render only the error alert; the form
+  //     stays hidden so the user doesn't waste effort typing a
+  //     password the backend would refuse to accept (audit-finding #4).
+  //   * tokenStatus="checking" → show a skeleton; happens for ~200ms
+  //     in normal network conditions.
+  const [tokenStatus, setTokenStatus] = useState<
+    "checking" | "valid" | "invalid"
+  >(token ? "checking" : "invalid");
+  const [recipientEmail, setRecipientEmail] = useState<string | null>(null);
+  const [previewError, setPreviewError] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (!token) return;
+    let cancelled = false;
+    previewResetPassword(token)
+      .then((res) => {
+        if (cancelled) return;
+        setRecipientEmail(res.email);
+        setTokenStatus("valid");
+      })
+      .catch((err: unknown) => {
+        if (cancelled) return;
+        if (err instanceof AuthApiError && err.status === 400) {
+          setPreviewError(
+            "El enlace ya venció o no es válido. Solicita uno nuevo.",
+          );
+        } else {
+          setPreviewError(
+            "No pudimos validar el enlace. Solicita uno nuevo o intenta más tarde.",
+          );
+        }
+        setTokenStatus("invalid");
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [token]);
+
   const rules = useMemo(() => evaluatePassword(password), [password]);
   const allRulesPassed = rules.every((rule) => rule.passed);
   const passwordsMatch = password.length > 0 && password === confirm;
-  const canSubmit = Boolean(token) && allRulesPassed && passwordsMatch;
+  const canSubmit =
+    tokenStatus === "valid" && allRulesPassed && passwordsMatch;
 
   async function onSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -113,115 +160,144 @@ function ResetPasswordInner() {
             </p>
           </div>
 
-          {!token && (
-            <Alert variant="error">
-              <AlertTitle>Enlace incompleto</AlertTitle>
-              <AlertDescription>
-                Solicita un nuevo enlace desde la pantalla de recuperación.
-              </AlertDescription>
-            </Alert>
+          {tokenStatus === "invalid" && (
+            <section className="rounded-md border border-[color:var(--border-default)] bg-[color:var(--surface-raised)] p-6 shadow-[var(--shadow-sm)]">
+              <Alert variant="error">
+                <AlertTitle>
+                  {token ? "Enlace inválido o vencido" : "Enlace incompleto"}
+                </AlertTitle>
+                <AlertDescription>
+                  {previewError ??
+                    "Solicita un nuevo enlace desde la pantalla de recuperación."}
+                </AlertDescription>
+              </Alert>
+              <Button asChild size="lg" className="mt-4 w-full">
+                <Link href="/forgot-password">
+                  Solicitar un nuevo enlace
+                  <ArrowRight className="h-4 w-4" weight="bold" aria-hidden="true" />
+                </Link>
+              </Button>
+            </section>
           )}
 
-          <section className="rounded-md border border-[color:var(--border-default)] bg-[color:var(--surface-raised)] p-6 shadow-[var(--shadow-sm)]">
-            {success ? (
-              <SuccessStep />
-            ) : (
-              <form onSubmit={onSubmit} className="flex flex-col gap-5" noValidate>
-                <div className="flex items-center gap-3">
-                  <span className="flex h-10 w-10 items-center justify-center rounded-full bg-[color:var(--surface-teal-muted)]">
-                    <ShieldCheck
-                      className="h-5 w-5 text-[color:var(--text-teal)]"
-                      weight="duotone"
-                      aria-hidden="true"
-                    />
-                  </span>
-                  <div>
-                    <h2 className="text-lg font-semibold text-[color:var(--text-primary)]">
-                      Restablecer acceso
-                    </h2>
-                    <p className="text-[13px] text-[color:var(--text-secondary)]">
-                      Mínimo 12 caracteres con mayúscula, minúscula y número.
-                    </p>
+          {tokenStatus === "checking" && (
+            <section className="rounded-md border border-[color:var(--border-default)] bg-[color:var(--surface-raised)] p-6 shadow-[var(--shadow-sm)]">
+              <Skeleton className="h-10 w-3/4" />
+              <Skeleton className="mt-4 h-32 w-full" />
+            </section>
+          )}
+
+          {tokenStatus === "valid" && (
+            <section className="rounded-md border border-[color:var(--border-default)] bg-[color:var(--surface-raised)] p-6 shadow-[var(--shadow-sm)]">
+              {success ? (
+                <SuccessStep />
+              ) : (
+                <form onSubmit={onSubmit} className="flex flex-col gap-5" noValidate>
+                  <div className="flex items-center gap-3">
+                    <span className="flex h-10 w-10 items-center justify-center rounded-full bg-[color:var(--surface-teal-muted)]">
+                      <ShieldCheck
+                        className="h-5 w-5 text-[color:var(--text-teal)]"
+                        weight="duotone"
+                        aria-hidden="true"
+                      />
+                    </span>
+                    <div>
+                      <h2 className="text-lg font-semibold text-[color:var(--text-primary)]">
+                        Restablecer acceso
+                      </h2>
+                      <p className="text-[13px] text-[color:var(--text-secondary)]">
+                        Mínimo 12 caracteres con mayúscula, minúscula y número.
+                      </p>
+                    </div>
                   </div>
-                </div>
 
-                {error && (
-                  <Alert variant="error">
-                    <AlertTitle>No pudimos completar el cambio</AlertTitle>
-                    <AlertDescription>{error}</AlertDescription>
-                  </Alert>
-                )}
+                  {recipientEmail ? (
+                    <div className="rounded-md border border-[color:var(--border-subtle)] bg-[color:var(--surface-page)] p-3">
+                      <p className="font-mono text-[10px] uppercase tracking-wide text-[color:var(--text-tertiary)]">
+                        Cambiando contraseña de
+                      </p>
+                      <p className="mt-1 break-all text-sm font-semibold text-[color:var(--text-primary)]">
+                        {recipientEmail}
+                      </p>
+                    </div>
+                  ) : null}
 
-                <Field label="Nueva contraseña" htmlFor="reset-password" required>
-                  <PasswordInput
-                    id="reset-password"
-                    value={password}
-                    onChange={(e) => setPassword(e.target.value)}
-                    autoComplete="new-password"
-                    autoFocus
-                    disabled={!token}
-                  />
-                </Field>
-
-                <ul
-                  className="grid gap-2 sm:grid-cols-2"
-                  aria-label="Requisitos de la contraseña"
-                >
-                  {rules.map(({ rule, passed }) => (
-                    <li
-                      key={rule.label}
-                      className={
-                        "flex items-center gap-2 rounded-sm border px-3 py-2 text-xs " +
-                        (passed
-                          ? "border-[color:var(--status-success-border)] bg-[color:var(--status-success-bg)] text-[color:var(--status-success-text)]"
-                          : "border-[color:var(--border-subtle)] bg-[color:var(--surface-sunken)] text-[color:var(--text-secondary)]")
-                      }
-                    >
-                      {passed ? (
-                        <Check className="h-3.5 w-3.5" weight="bold" aria-hidden="true" />
-                      ) : (
-                        <span
-                          className="h-3.5 w-3.5 rounded-full border border-current opacity-50"
-                          aria-hidden="true"
-                        />
-                      )}
-                      <span>{rule.label}</span>
-                    </li>
-                  ))}
-                </ul>
-
-                <Field
-                  label="Confirma tu contraseña"
-                  htmlFor="reset-confirm-password"
-                  required
-                  error={confirmError}
-                >
-                  <PasswordInput
-                    id="reset-confirm-password"
-                    value={confirm}
-                    onChange={(e) => {
-                      setConfirm(e.target.value);
-                      setConfirmError(null);
-                    }}
-                    autoComplete="new-password"
-                    disabled={!token}
-                  />
-                </Field>
-
-                <Button
-                  type="submit"
-                  loading={submitting}
-                  size="lg"
-                  disabled={!canSubmit && !submitting}
-                >
-                  <span>{submitting ? "Guardando…" : "Guardar contraseña"}</span>
-                  {!submitting && (
-                    <ArrowRight className="h-4 w-4" weight="bold" aria-hidden="true" />
+                  {error && (
+                    <Alert variant="error">
+                      <AlertTitle>No pudimos completar el cambio</AlertTitle>
+                      <AlertDescription>{error}</AlertDescription>
+                    </Alert>
                   )}
-                </Button>
-              </form>
-            )}
-          </section>
+
+                  <Field label="Nueva contraseña" htmlFor="reset-password" required>
+                    <PasswordInput
+                      id="reset-password"
+                      value={password}
+                      onChange={(e) => setPassword(e.target.value)}
+                      autoComplete="new-password"
+                      autoFocus
+                    />
+                  </Field>
+
+                  <ul
+                    className="grid gap-2 sm:grid-cols-2"
+                    aria-label="Requisitos de la contraseña"
+                  >
+                    {rules.map(({ rule, passed }) => (
+                      <li
+                        key={rule.label}
+                        className={
+                          "flex items-center gap-2 rounded-sm border px-3 py-2 text-xs " +
+                          (passed
+                            ? "border-[color:var(--status-success-border)] bg-[color:var(--status-success-bg)] text-[color:var(--status-success-text)]"
+                            : "border-[color:var(--border-subtle)] bg-[color:var(--surface-sunken)] text-[color:var(--text-secondary)]")
+                        }
+                      >
+                        {passed ? (
+                          <Check className="h-3.5 w-3.5" weight="bold" aria-hidden="true" />
+                        ) : (
+                          <span
+                            className="h-3.5 w-3.5 rounded-full border border-current opacity-50"
+                            aria-hidden="true"
+                          />
+                        )}
+                        <span>{rule.label}</span>
+                      </li>
+                    ))}
+                  </ul>
+
+                  <Field
+                    label="Confirma tu contraseña"
+                    htmlFor="reset-confirm-password"
+                    required
+                    error={confirmError}
+                  >
+                    <PasswordInput
+                      id="reset-confirm-password"
+                      value={confirm}
+                      onChange={(e) => {
+                        setConfirm(e.target.value);
+                        setConfirmError(null);
+                      }}
+                      autoComplete="new-password"
+                    />
+                  </Field>
+
+                  <Button
+                    type="submit"
+                    loading={submitting}
+                    size="lg"
+                    disabled={!canSubmit && !submitting}
+                  >
+                    <span>{submitting ? "Guardando…" : "Guardar contraseña"}</span>
+                    {!submitting && (
+                      <ArrowRight className="h-4 w-4" weight="bold" aria-hidden="true" />
+                    )}
+                  </Button>
+                </form>
+              )}
+            </section>
+          )}
         </section>
       </div>
     </main>

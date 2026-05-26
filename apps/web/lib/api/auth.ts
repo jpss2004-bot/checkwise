@@ -118,6 +118,26 @@ export async function resetPassword(
   });
 }
 
+export type ResetPasswordPreview = {
+  email: string;
+};
+
+/**
+ * Audit-finding #5 — resolve a reset token to the recipient email
+ * so /reset-password can show "Cambiando contraseña para X" before
+ * the user invests effort typing a new password. Errors with the
+ * same 400 shape as the POST handler when the token is bad/used/
+ * expired; callers should treat any failure as "ask for a new link".
+ */
+export async function previewResetPassword(
+  token: string,
+): Promise<ResetPasswordPreview> {
+  const qs = new URLSearchParams({ token });
+  return await fetchJson<ResetPasswordPreview>(
+    `/api/v1/auth/reset-password/preview?${qs.toString()}`,
+  );
+}
+
 type EnterResponse = {
   workspace_id: string;
   persona_type: string;

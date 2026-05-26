@@ -169,6 +169,20 @@ class ResetPasswordResponse(BaseModel):
     message: str
 
 
+class ResetPasswordPreviewResponse(BaseModel):
+    """Audit-finding #5 — lightweight preview lets ``/reset-password``
+    show the user *which* account they are about to reset.
+
+    Returning the full email is acceptable: the recipient already
+    possesses the secret token, so they already have authorization
+    over the account. The endpoint cannot be used to enumerate
+    accounts without first holding a valid (unexpired, unused)
+    token issued by ``/auth/forgot-password``.
+    """
+
+    email: str
+
+
 class CurrentUser(BaseModel):
     """Hydrated request principal — what every protected endpoint sees."""
 
@@ -593,6 +607,51 @@ def forgot_password(
     db.commit()
 
     return generic
+
+
+@router.get(
+    "/reset-password/preview",
+    response_model=ResetPasswordPreviewResponse,
+)
+def reset_password_preview(
+    token: str,
+    db: DbSession,
+) -> ResetPasswordPreviewResponse:
+    """Audit-finding #5 — return the recipient email tied to a reset
+    token so ``/reset-password`` can show which account the form is
+    about to update.
+
+    Same validity rules as the POST handler: invalid / used / expired
+    tokens are all 400. The endpoint deliberately uses the same
+    Spanish error copy as ``reset_password`` to avoid an oracle that
+    distinguishes "token never existed" from "token already used"
+    from "token expired" — for an attacker probing tokens, all three
+    look identical.
+    """
+    token_hash = hash_password_reset_token(token)
+    reset_token = db.execute(
+        select(PasswordResetToken).where(PasswordResetToken.token_hash == token_hash)
+    ).scalar_one_or_none()
+
+    if reset_token is None or reset_token.used_at is not None:
+        raise HTTPException(
+            status.HTTP_400_BAD_REQUEST,
+            detail="El enlace para restablecer la contraseña no es válido.",
+        )
+    if _as_utc(reset_token.expires_at) <= utc_now():
+        raise HTTPException(
+            status.HTTP_400_BAD_REQUEST,
+            detail="El enlace para restablecer la contraseña ya venció.",
+        )
+
+    user = db.get(User, reset_token.user_id)
+    if user is None or user.status != "active":
+        raise HTTPException(
+            status.HTTP_400_BAD_REQUEST,
+            detail="El enlace para restablecer la contraseña no es válido.",
+        )
+
+    return ResetPasswordPreviewResponse(email=user.email)
 
 
 @router.post("/reset-password", response_model=ResetPasswordResponse)

@@ -777,3 +777,112 @@ def test_generate_temp_password_rejects_lengths_under_minimum() -> None:
 
     with pytest.raises(ValueError):
         generate_temp_password(length=8)
+
+
+# ---------------------------------------------------------------------------
+# Audit-finding #5 — token-preview endpoint
+# ---------------------------------------------------------------------------
+
+
+def test_reset_password_preview_returns_email_for_valid_token(
+    api_client: TestClient, db_factory
+) -> None:
+    """Audit finding #5 — ``GET /auth/reset-password/preview?token=...``
+    returns the email the token was issued to. Lets /reset-password
+    render "Cambiando contraseña de X" so the user can verify the
+    target account before typing a new password (key when the same
+    machine has multiple CheckWise accounts)."""
+    user_id, _, _ = _seed_user(
+        db_factory, email="preview-ok@legalshelf.mx"
+    )
+    raw_token = "preview-ok-token-1234567890ab"
+    db = db_factory()
+    try:
+        db.add(
+            PasswordResetToken(
+                user_id=user_id,
+                email="preview-ok@legalshelf.mx",
+                token_hash=hash_password_reset_token(raw_token),
+                expires_at=utc_now() + timedelta(minutes=30),
+                delivery_status="sent",
+            )
+        )
+        db.commit()
+    finally:
+        db.close()
+    response = api_client.get(
+        f"/api/v1/auth/reset-password/preview?token={raw_token}"
+    )
+    assert response.status_code == 200, response.text
+    assert response.json()["email"] == "preview-ok@legalshelf.mx"
+
+
+def test_reset_password_preview_rejects_unknown_token(
+    api_client: TestClient,
+) -> None:
+    """Unknown tokens 400 with the same generic copy the POST handler
+    uses — no oracle that distinguishes "never existed" from "used"
+    from "expired"."""
+    response = api_client.get(
+        "/api/v1/auth/reset-password/preview?token=does-not-exist-anywhere"
+    )
+    assert response.status_code == 400
+    assert "válido" in response.json()["detail"]
+
+
+def test_reset_password_preview_rejects_used_token(
+    api_client: TestClient, db_factory
+) -> None:
+    """A consumed token must not leak its associated email — the
+    preview path mirrors the POST guard against ``used_at``."""
+    user_id, _, _ = _seed_user(
+        db_factory, email="preview-used@legalshelf.mx"
+    )
+    raw_token = "preview-used-token-1234567890"
+    db = db_factory()
+    try:
+        db.add(
+            PasswordResetToken(
+                user_id=user_id,
+                email="preview-used@legalshelf.mx",
+                token_hash=hash_password_reset_token(raw_token),
+                expires_at=utc_now() + timedelta(minutes=30),
+                used_at=utc_now() - timedelta(minutes=5),
+                delivery_status="sent",
+            )
+        )
+        db.commit()
+    finally:
+        db.close()
+    response = api_client.get(
+        f"/api/v1/auth/reset-password/preview?token={raw_token}"
+    )
+    assert response.status_code == 400
+
+
+def test_reset_password_preview_rejects_expired_token(
+    api_client: TestClient, db_factory
+) -> None:
+    user_id, _, _ = _seed_user(
+        db_factory, email="preview-expired@legalshelf.mx"
+    )
+    raw_token = "preview-expired-token-12345678"
+    db = db_factory()
+    try:
+        db.add(
+            PasswordResetToken(
+                user_id=user_id,
+                email="preview-expired@legalshelf.mx",
+                token_hash=hash_password_reset_token(raw_token),
+                expires_at=utc_now() - timedelta(minutes=1),
+                delivery_status="sent",
+            )
+        )
+        db.commit()
+    finally:
+        db.close()
+    response = api_client.get(
+        f"/api/v1/auth/reset-password/preview?token={raw_token}"
+    )
+    assert response.status_code == 400
+    assert "venció" in response.json()["detail"]

@@ -105,6 +105,14 @@ function LoginInner() {
         setError("Correo o contraseña incorrectos.");
       } else if (err instanceof AuthApiError && err.status === 422) {
         setError("Formato de correo inválido.");
+      } else if (err instanceof AuthApiError && err.status === 429) {
+        // Audit-finding #6 — distinguish the rate-limit hit from a
+        // generic failure. The backend per-(IP, email) bucket caps
+        // bad-password floods; telling the user to "intenta de nuevo"
+        // is misleading because the next attempt would also 429.
+        setError(
+          "Demasiados intentos. Espera unos minutos antes de volver a intentar.",
+        );
       } else {
         setError("No pudimos iniciar sesión. Intenta de nuevo.");
       }
@@ -204,6 +212,13 @@ function LoginInner() {
               loading={submitting}
               size="lg"
               className="mt-6 w-full"
+              // Audit-finding #7 — the form was ``noValidate`` and
+              // accepted empty submits, which then surfaced as the
+              // backend's 422 "Formato de correo inválido" — confusing
+              // because the real problem was nothing was typed. Disable
+              // up front so the user gets the obvious "fill the fields"
+              // visual signal instead.
+              disabled={!email.trim() || !password || submitting}
             >
               {!submitting && (
                 <SignIn className="h-4 w-4" weight="bold" aria-hidden="true" />

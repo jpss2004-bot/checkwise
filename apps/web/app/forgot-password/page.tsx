@@ -27,6 +27,14 @@ export default function ForgotPasswordPage() {
     } catch (err) {
       if (err instanceof AuthApiError && err.status === 422) {
         setError("Escribe un correo válido.");
+      } else if (err instanceof AuthApiError && err.status === 429) {
+        // Audit-finding #6 — surface the rate-limit specifically.
+        // Without this branch the user saw a generic "intenta de
+        // nuevo" message that told them to do exactly the thing the
+        // server is throttling.
+        setError(
+          "Ya enviamos demasiadas solicitudes para este correo. Espera unos minutos antes de pedir otro enlace.",
+        );
       } else {
         setError("No pudimos enviar las instrucciones. Intenta de nuevo.");
       }
