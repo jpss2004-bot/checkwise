@@ -42,7 +42,24 @@ export default function ResetPasswordPage() {
 function ResetPasswordInner() {
   const router = useRouter();
   const searchParams = useSearchParams();
-  const token = searchParams?.get("token") ?? "";
+  // Audit-finding #8 — capture the token once at mount, then strip
+  // it from the URL via ``history.replaceState`` so the secret no
+  // longer sits in the address bar. This stops the token from
+  // leaking via ``document.referrer`` if the user clicks any
+  // outbound link from this page, keeps it out of the browser
+  // history entry for the URL, and prevents accidental sharing
+  // when the user copy-pastes their current location.
+  const [token] = useState<string>(
+    () => searchParams?.get("token") ?? "",
+  );
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    const url = new URL(window.location.href);
+    if (url.searchParams.has("token")) {
+      url.searchParams.delete("token");
+      window.history.replaceState({}, "", url.toString());
+    }
+  }, []);
 
   const [password, setPassword] = useState("");
   const [confirm, setConfirm] = useState("");

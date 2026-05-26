@@ -886,3 +886,142 @@ def test_reset_password_preview_rejects_expired_token(
     )
     assert response.status_code == 400
     assert "venció" in response.json()["detail"]
+
+
+# ---------------------------------------------------------------------------
+# Audit-finding #10 — password-history reuse prevention
+# ---------------------------------------------------------------------------
+
+
+def test_set_password_rejects_reuse_of_current_password(
+    api_client: TestClient, db_factory
+) -> None:
+    """Audit finding #10 — the user cannot ``set-password`` to the
+    same password they already have. The history check includes the
+    current hash so this works even before any prior change has
+    populated the password_history table."""
+    _, _, password = _seed_user(db_factory, email="reuse-current@legalshelf.mx")
+    token = _login(api_client, "reuse-current@legalshelf.mx", password)
+
+    response = api_client.post(
+        "/api/v1/auth/set-password",
+        json={"new_password": password},
+        headers={"Authorization": f"Bearer {token}"},
+    )
+    assert response.status_code == 422
+    assert "reutilizar" in response.json()["detail"]
+
+
+def test_set_password_rejects_reuse_of_recent_password(
+    api_client: TestClient, db_factory
+) -> None:
+    """The reuse check covers the rolling history, not just the
+    current hash. Set password A → set password B → trying to set
+    back to A within the depth window must 422."""
+    from app.services.auth import PASSWORD_HISTORY_DEPTH
+
+    _, _, original = _seed_user(
+        db_factory, email="reuse-recent@legalshelf.mx"
+    )
+    token = _login(api_client, "reuse-recent@legalshelf.mx", original)
+
+    # Rotate the password ``PASSWORD_HISTORY_DEPTH`` times so the
+    # original lands inside the retained window but not at the top.
+    intermediate = [f"Rotated{i}Password!{2026 + i}" for i in range(
+        PASSWORD_HISTORY_DEPTH
+    )]
+    for pw in intermediate:
+        response = api_client.post(
+            "/api/v1/auth/set-password",
+            json={"new_password": pw},
+            headers={"Authorization": f"Bearer {token}"},
+        )
+        assert response.status_code == 200, response.text
+        # Re-login with the new password to refresh the token (each
+        # change clears must_change_password but the existing JWT
+        # stays valid; we log in fresh here to keep the test linear).
+        token = _login(
+            api_client, "reuse-recent@legalshelf.mx", pw
+        )
+
+    # Now try the original — within the retained depth, must reject.
+    response = api_client.post(
+        "/api/v1/auth/set-password",
+        json={"new_password": original},
+        headers={"Authorization": f"Bearer {token}"},
+    )
+    assert response.status_code == 422
+
+
+def test_password_history_trims_to_configured_depth(
+    api_client: TestClient, db_factory
+) -> None:
+    """The history table must not grow unbounded. After more than
+    ``PASSWORD_HISTORY_DEPTH`` changes, the oldest rows are pruned
+    so the lookup stays cheap."""
+    from app.models import PasswordHistory
+    from app.services.auth import PASSWORD_HISTORY_DEPTH
+
+    user_id, _, password = _seed_user(
+        db_factory, email="trim-history@legalshelf.mx"
+    )
+    token = _login(api_client, "trim-history@legalshelf.mx", password)
+
+    for i in range(PASSWORD_HISTORY_DEPTH + 3):
+        pw = f"Rotation{i}Password!{2026 + i}"
+        response = api_client.post(
+            "/api/v1/auth/set-password",
+            json={"new_password": pw},
+            headers={"Authorization": f"Bearer {token}"},
+        )
+        assert response.status_code == 200, response.text
+        token = _login(api_client, "trim-history@legalshelf.mx", pw)
+
+    db = db_factory()
+    try:
+        retained = list(
+            db.scalars(
+                select(PasswordHistory).where(PasswordHistory.user_id == user_id)
+            )
+        )
+        # The depth is the rolling cap; the implementation may keep
+        # exactly depth or depth+1 rows depending on whether the
+        # latest insert counts toward the cap. Assert the strict
+        # ceiling so a future drift gets caught.
+        assert len(retained) <= PASSWORD_HISTORY_DEPTH
+    finally:
+        db.close()
+
+
+def test_reset_password_rejects_reuse(
+    api_client: TestClient, db_factory
+) -> None:
+    """The history check also runs on the /reset-password path —
+    not just the authenticated /set-password flow. A user who
+    requests a fresh reset link cannot set their password back to
+    what it used to be either."""
+    user_id, _, password = _seed_user(
+        db_factory, email="reuse-reset@legalshelf.mx"
+    )
+    raw_token = "reuse-reset-token-for-test-12345"
+    db = db_factory()
+    try:
+        db.add(
+            PasswordResetToken(
+                user_id=user_id,
+                email="reuse-reset@legalshelf.mx",
+                token_hash=hash_password_reset_token(raw_token),
+                expires_at=utc_now() + timedelta(minutes=30),
+                delivery_status="sent",
+            )
+        )
+        db.commit()
+    finally:
+        db.close()
+
+    response = api_client.post(
+        "/api/v1/auth/reset-password",
+        json={"token": raw_token, "new_password": password},
+    )
+    assert response.status_code == 422
+    assert "reutilizar" in response.json()["detail"]

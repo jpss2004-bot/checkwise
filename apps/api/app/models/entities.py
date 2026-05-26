@@ -481,11 +481,26 @@ class User(TimestampMixin, Base):
     contact_preference: Mapped[str] = mapped_column(
         String(20), default="email", nullable=False
     )
+    # Phase 7 / Slice N2 — WhatsApp identity. ``phone_e164`` is the
+    # normalized form the dispatcher uses; ``phone_verified_at`` and
+    # ``whatsapp_opt_in_at`` gate WhatsApp delivery in
+    # :mod:`app.services.notifications.routing`. All nullable until
+    # the alta OTP flow (Slice N8) populates them.
+    phone_e164: Mapped[str | None] = mapped_column(String(20))
+    phone_verified_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True)
+    )
+    whatsapp_opt_in_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True)
+    )
 
     memberships: Mapped[list[Membership]] = relationship(
         back_populates="user", cascade="all, delete-orphan"
     )
     password_reset_tokens: Mapped[list[PasswordResetToken]] = relationship(
+        back_populates="user", cascade="all, delete-orphan"
+    )
+    notification_preferences: Mapped[list[UserNotificationPreference]] = relationship(
         back_populates="user", cascade="all, delete-orphan"
     )
 
@@ -512,6 +527,40 @@ class PasswordResetToken(TimestampMixin, Base):
     delivery_error: Mapped[str | None] = mapped_column(Text)
 
     user: Mapped[User] = relationship(back_populates="password_reset_tokens")
+
+
+class PasswordHistory(Base):
+    """Rolling history of a user's prior bcrypt hashes (audit #10).
+
+    Migration ``0029_password_history``. The service writes one row
+    per password change with the OLD hash (the one being replaced)
+    and trims the user's history to the most recent
+    ``PASSWORD_HISTORY_DEPTH`` entries. On every change we
+    bcrypt-verify the new plaintext against each retained hash and
+    reject 422 if any matches — preventing the "reset to the same
+    password I had before" anti-pattern that compliance audits flag.
+
+    Why a separate table instead of a JSON column on ``User``:
+      * bcrypt hashes are 60 bytes each; storing N=5 in a column is
+        fine in PG but the audit trail (creation timestamps + a
+        clean delete-on-cascade) lives more naturally in its own
+        relation.
+      * Tunability: bumping the depth from 5 → 10 is a one-line
+        constant change in the service; no schema migration.
+    """
+
+    __tablename__ = "password_history"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=new_id)
+    user_id: Mapped[str] = mapped_column(
+        ForeignKey("users.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    password_hash: Mapped[str] = mapped_column(String(255), nullable=False)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=utc_now, nullable=False
+    )
 
 
 class Membership(TimestampMixin, Base):
@@ -963,6 +1012,14 @@ class ProviderNotification(Base):
     severity: Mapped[str] = mapped_column(
         String(20), default="info", nullable=False
     )
+    # Phase 7 / Slice N9b — canonical Phase 7 vocabulary (``renewal``,
+    # ``reporting``, ``verification``, ``account``, ``admin``, ``other``).
+    # Defaults to empty string at the migration boundary; emitters
+    # populate it via :func:`app.services.notifications.categorize.derive_category`
+    # or set it explicitly.
+    category: Mapped[str] = mapped_column(
+        String(20), default="", nullable=False
+    )
     title: Mapped[str] = mapped_column(String(180), nullable=False)
     body: Mapped[str] = mapped_column(Text, nullable=False)
     action_url: Mapped[str | None] = mapped_column(String(512))
@@ -1003,6 +1060,11 @@ class ClientNotification(Base):
     # own severity without a global mapping update.
     severity: Mapped[str] = mapped_column(
         String(20), default="info", nullable=False
+    )
+    # Phase 7 / Slice N9b — canonical Phase 7 vocabulary. See
+    # the ``ProviderNotification.category`` docstring above.
+    category: Mapped[str] = mapped_column(
+        String(20), default="", nullable=False
     )
     read_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), index=True)
     created_at: Mapped[datetime] = mapped_column(
@@ -1055,4 +1117,171 @@ class RenewalReminder(Base):
             "threshold_days",
             name="uq_renewal_reminders_cycle_threshold",
         ),
+    )
+
+
+class NotificationDispatch(Base):
+    """Phase 7 / Slice N1 — idempotency anchor for the unified fabric.
+
+    One row per ``(user_id, event_type, dedupe_key)`` triple. The
+    unique constraint is the dedupe mechanism — the dispatcher
+    inserts first, and an ``IntegrityError`` on collision tells it
+    "already dispatched, skip". This is the same pattern as
+    :class:`RenewalReminder`, generalized so every event in the
+    Phase 7 catalog uses one table.
+
+    ``user_id`` is intentionally NOT a foreign key to ``users``: the
+    recipient model is heterogeneous (provider workspaces have no
+    ``User`` row), and ``recipient_role`` is the discriminator.
+
+    The channel-attempt columns (``email_status`` / ``whatsapp_status``
+    + their reasons) are populated by Slice N4 once routing and
+    delivery wire in. At N1 they stay NULL.
+    """
+
+    __tablename__ = "notification_dispatch"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=new_id)
+    user_id: Mapped[str] = mapped_column(String(36), nullable=False)
+    recipient_role: Mapped[str] = mapped_column(String(40), nullable=False)
+    event_type: Mapped[str] = mapped_column(String(80), nullable=False)
+    dedupe_key: Mapped[str] = mapped_column(String(255), nullable=False)
+    severity: Mapped[str] = mapped_column(String(20), nullable=False)
+    payload: Mapped[dict | None] = mapped_column(JSON)
+    inapp_id: Mapped[str | None] = mapped_column(String(36))
+    email_status: Mapped[str | None] = mapped_column(String(20))
+    email_reason: Mapped[str | None] = mapped_column(String(120))
+    whatsapp_status: Mapped[str | None] = mapped_column(String(20))
+    whatsapp_reason: Mapped[str | None] = mapped_column(String(120))
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=utc_now, nullable=False, index=True
+    )
+
+    __table_args__ = (
+        UniqueConstraint(
+            "user_id",
+            "event_type",
+            "dedupe_key",
+            name="uq_notification_dispatch_recipient_event",
+        ),
+    )
+
+
+class UserNotificationPreference(Base):
+    """Per-user, per-category mute matrix.
+
+    Phase 7 / Slice N2. Composite primary key on
+    ``(user_id, category)``. A row exists only when the user has
+    overridden the catalog default — absence means "no override"
+    and the routing layer treats both mute flags as ``False``.
+    Keeping the table sparse keeps the common-case query cheap and
+    avoids a backfill on user creation.
+
+    Note: ``category_email_muted`` does NOT silence ``critical``-tier
+    events. The routing function in
+    :mod:`app.services.notifications.routing` enforces the
+    critical-email-unmuteable rule regardless of what this row says.
+    The mute flag is therefore an honest representation of the
+    user's *intent*; the dispatcher applies policy on top.
+    """
+
+    __tablename__ = "user_notification_preferences"
+
+    user_id: Mapped[str] = mapped_column(
+        ForeignKey("users.id", ondelete="CASCADE"), primary_key=True
+    )
+    category: Mapped[str] = mapped_column(String(40), primary_key=True)
+    email_muted: Mapped[bool] = mapped_column(
+        Boolean, default=False, nullable=False
+    )
+    whatsapp_muted: Mapped[bool] = mapped_column(
+        Boolean, default=False, nullable=False
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=utc_now, nullable=False
+    )
+
+    user: Mapped[User] = relationship(back_populates="notification_preferences")
+
+
+class NotificationTemplateVersion(Base):
+    """Versioned copy for one (event_type, channel, locale).
+
+    Phase 7 / Slice N3. The dispatcher will look up the row with
+    ``is_active=true`` at render time and substitute ``{{var}}``
+    placeholders from the envelope payload (see
+    :mod:`app.services.notifications.rendering`).
+
+    The "at most one active per key" invariant is enforced at the
+    application layer (admin API runs the demote + promote inside
+    a transaction), not via a partial unique index, so the table
+    works on SQLite (used in tests) and Postgres alike.
+
+    ``subject`` is email-only. ``meta_template_name`` is WhatsApp-
+    only and points at the pre-approved template name registered
+    with Meta. Both are nullable.
+    """
+
+    __tablename__ = "notification_template_versions"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=new_id)
+    event_type: Mapped[str] = mapped_column(String(80), nullable=False)
+    channel: Mapped[str] = mapped_column(String(20), nullable=False)
+    locale: Mapped[str] = mapped_column(
+        String(10), nullable=False, default="es-MX"
+    )
+    version: Mapped[int] = mapped_column(Integer, nullable=False)
+    subject: Mapped[str | None] = mapped_column(String(200))
+    body: Mapped[str] = mapped_column(Text, nullable=False)
+    meta_template_name: Mapped[str | None] = mapped_column(String(80))
+    is_active: Mapped[bool] = mapped_column(
+        Boolean, default=False, nullable=False
+    )
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=utc_now, nullable=False
+    )
+
+    __table_args__ = (
+        UniqueConstraint(
+            "event_type",
+            "channel",
+            "locale",
+            "version",
+            name="uq_notif_templates_event_channel_locale_version",
+        ),
+    )
+
+
+class PhoneVerification(Base):
+    """Phase 7 / Slice N8 — short-lived OTP record.
+
+    One row per verification attempt. The User can have multiple
+    historical rows; only the most recent ``consumed_at IS NULL AND
+    expires_at > now()`` row is "active". The application enforces
+    that at most one row is active by invalidating prior rows when
+    a fresh ``request_verification`` lands.
+
+    ``code_hash`` is HMAC-SHA256 of the plaintext code keyed on the
+    server's JWT secret. The plaintext only lives in the user's
+    phone (sent out-of-band via WhatsApp) and the inbound confirm
+    request body — never on disk.
+    """
+
+    __tablename__ = "phone_verifications"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=new_id)
+    user_id: Mapped[str] = mapped_column(
+        ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    phone_e164: Mapped[str] = mapped_column(String(20), nullable=False)
+    code_hash: Mapped[str] = mapped_column(String(64), nullable=False)
+    expires_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False
+    )
+    consumed_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True)
+    )
+    attempts: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=utc_now, nullable=False
     )

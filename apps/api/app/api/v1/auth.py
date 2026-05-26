@@ -44,10 +44,11 @@ from app.core.rate_limit import (
     login_limiter,
 )
 from app.db.session import get_db
-from app.models import Membership, PasswordResetToken, User
+from app.models import Membership, PasswordHistory, PasswordResetToken, User
 from app.models.entities import utc_now
 from app.services.audit_log import add_audit_event
 from app.services.auth import (
+    PASSWORD_HISTORY_DEPTH,
     TokenClaims,
     TokenError,
     decode_access_token,
@@ -55,6 +56,7 @@ from app.services.auth import (
     hash_password,
     hash_password_reset_token,
     issue_access_token,
+    password_matches_history,
     verify_password,
 )
 from app.services.email_delivery import send_password_reset_email
@@ -104,6 +106,72 @@ class LoginResponse(BaseModel):
     roles: list[str]
     organization_ids: list[str]
     must_change_password: bool = False
+
+
+def _apply_password_change(
+    db: Session,
+    user: User,
+    new_plaintext: str,
+) -> None:
+    """Update ``user.password_hash`` to a fresh bcrypt of
+    ``new_plaintext`` AFTER checking that it doesn't bcrypt-verify
+    against any of the user's last ``PASSWORD_HISTORY_DEPTH`` hashes.
+
+    Audit-finding #10 — the reuse check + history rotation are
+    centralised here so set-password and reset-password share the
+    same enforcement. The old hash is pushed to ``password_history``
+    BEFORE rotation so the next change sees the value we just
+    replaced. The oldest entries past the depth are deleted to keep
+    the table compact.
+
+    Raises ``HTTPException`` 422 when the new password is found in
+    the user's history. Callers are expected to commit the session;
+    this helper only stages the changes via ``db.flush()``.
+    """
+    prior_hashes = list(
+        db.scalars(
+            select(PasswordHistory.password_hash)
+            .where(PasswordHistory.user_id == user.id)
+            .order_by(PasswordHistory.created_at.desc())
+            .limit(PASSWORD_HISTORY_DEPTH)
+        )
+    )
+    # ``user.password_hash`` is the most-recent hash that has not yet
+    # been pushed to the history table (we push lazily on change).
+    # Include it in the check so the user can't immediately re-set
+    # the password they currently have.
+    if user.password_hash:
+        prior_hashes.append(user.password_hash)
+    if password_matches_history(new_plaintext, prior_hashes):
+        raise HTTPException(
+            status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail=(
+                "No puedes reutilizar una contraseña reciente. "
+                "Elige una distinta."
+            ),
+        )
+
+    old_hash = user.password_hash
+    user.password_hash = hash_password(new_plaintext)
+    user.must_change_password = False
+
+    if old_hash:
+        db.add(PasswordHistory(user_id=user.id, password_hash=old_hash))
+        # Flush so the row we just added is visible to the
+        # subsequent SELECT — without this, the count would be
+        # one short and the trim would leave a stale row behind.
+        db.flush()
+        existing = list(
+            db.scalars(
+                select(PasswordHistory)
+                .where(PasswordHistory.user_id == user.id)
+                .order_by(PasswordHistory.created_at.desc())
+            )
+        )
+        for stale in existing[PASSWORD_HISTORY_DEPTH:]:
+            db.delete(stale)
+
+    db.flush()
 
 
 def _enforce_password_rules(value: str) -> str:
@@ -683,8 +751,13 @@ def reset_password(
         )
 
     now = utc_now()
-    user.password_hash = hash_password(payload.new_password)
-    user.must_change_password = False
+    # Audit-finding #10 — reject reuse against the user's last
+    # PASSWORD_HISTORY_DEPTH hashes (and the current one) BEFORE
+    # consuming the reset token. The token has already been validated
+    # as unused + unexpired; if the password is a reuse we 422 and
+    # leave the token alive so the user can try again from the same
+    # link rather than having to request a fresh one.
+    _apply_password_change(db, user, payload.new_password)
     reset_token.used_at = now
 
     sibling_tokens = (
@@ -742,9 +815,8 @@ def set_password(
     if user is None or user.status != "active":
         raise HTTPException(status.HTTP_401_UNAUTHORIZED, detail="Tu sesión ya no está activa.")
 
-    user.password_hash = hash_password(payload.new_password)
-    user.must_change_password = False
-    db.flush()
+    # Audit-finding #10 — same reuse guard as /reset-password.
+    _apply_password_change(db, user, payload.new_password)
     db.commit()
 
     return SetPasswordResponse(

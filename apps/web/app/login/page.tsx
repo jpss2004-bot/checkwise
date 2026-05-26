@@ -68,6 +68,19 @@ function LoginInner() {
       setBootChecked(true);
       return;
     }
+    // Audit-finding #9 — /activate redirects here with this reason
+    // when the user's JWT expires while they're on the
+    // forced-password-change screen. Friendlier than landing on a
+    // blank login form with no explanation of why the redirect
+    // happened.
+    if (reasonParam === "session_expired") {
+      clearAdminSession();
+      setError(
+        "Tu sesión expiró. Vuelve a iniciar sesión con tu contraseña temporal y podrás retomar el cambio.",
+      );
+      setBootChecked(true);
+      return;
+    }
 
     const session = readAdminSession();
     if (session) {

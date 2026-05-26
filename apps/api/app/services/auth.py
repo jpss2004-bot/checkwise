@@ -51,6 +51,28 @@ def verify_password(plaintext: str, hashed: str | None) -> bool:
         return False
 
 
+# Audit-finding #10 — depth of the rolling password-history check.
+# Tuned to 5: enough to deter the "I'll alternate between two
+# passwords" anti-pattern without forcing users to remember an
+# unreasonable number of past phrases. Bumping this is a one-line
+# change; no migration needed.
+PASSWORD_HISTORY_DEPTH = 5
+
+
+def password_matches_history(
+    plaintext: str, prior_hashes: list[str]
+) -> bool:
+    """Return True if ``plaintext`` bcrypt-verifies against any of the
+    supplied prior hashes. Used by the password-change endpoints to
+    block reuse of recently-used passwords."""
+    if not plaintext or not prior_hashes:
+        return False
+    for hashed in prior_hashes:
+        if verify_password(plaintext, hashed):
+            return True
+    return False
+
+
 # ---------------------------------------------------------------------------
 # Password-reset tokens
 # ---------------------------------------------------------------------------

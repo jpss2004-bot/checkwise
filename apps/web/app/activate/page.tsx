@@ -100,6 +100,38 @@ function ActivateInner() {
   const passwordsMatch = password.length > 0 && password === confirm;
   const canSubmit = allRulesPassed && passwordsMatch;
 
+  // Audit-finding #9 — surface a soft expiry warning before the JWT
+  // dies so the user doesn't type a full password only to have the
+  // request bounce them to /login. Buckets:
+  //   * "expiring" (< 2 min remaining) → yellow alert above the form
+  //     so the user knows to hurry / can save and re-log if needed.
+  //   * "expired" (already past) → hard-redirect to /login with a
+  //     reason param the login page surfaces ("Tu sesión expiró").
+  // ``"healthy"`` means we keep quiet.
+  const [sessionState, setSessionState] = useState<
+    "healthy" | "expiring" | "expired"
+  >("healthy");
+  useEffect(() => {
+    if (!session) return;
+    const expiresAtMs = Date.parse(session.expires_at);
+    if (Number.isNaN(expiresAtMs)) return;
+    const tick = () => {
+      const remaining = expiresAtMs - Date.now();
+      if (remaining <= 0) {
+        clearAdminSession();
+        router.replace("/login?reason=session_expired");
+        setSessionState("expired");
+      } else if (remaining < 2 * 60 * 1000) {
+        setSessionState("expiring");
+      } else {
+        setSessionState("healthy");
+      }
+    };
+    tick();
+    const interval = setInterval(tick, 30_000);
+    return () => clearInterval(interval);
+  }, [session, router]);
+
   const handleSubmit = useCallback(
     async (event: FormEvent<HTMLFormElement>) => {
       event.preventDefault();
@@ -207,6 +239,18 @@ function ActivateInner() {
             .
           </AlertDescription>
         </Alert>
+
+        {sessionState === "expiring" ? (
+          <Alert variant="warning">
+            <AlertTitle>Tu sesión está por expirar</AlertTitle>
+            <AlertDescription>
+              Guarda tu nueva contraseña en los próximos dos minutos. Si la
+              sesión expira antes de enviar, te llevaremos a iniciar sesión
+              de nuevo con tu contraseña temporal y podrás continuar desde
+              aquí.
+            </AlertDescription>
+          </Alert>
+        ) : null}
 
         <section className="cw-fade-up rounded-xl border border-[color:var(--border-default)] bg-[color:var(--surface-raised)] p-6 shadow-md sm:p-8">
           {success ? (
