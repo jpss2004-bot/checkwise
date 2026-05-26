@@ -15,7 +15,17 @@ when the count exceeds N) so the constraint stays simple and
 the cap is tunable without a migration.
 
 Revision ID: 0029_password_history
-Revises: 0028_notification_category
+Revises: 0023_client_onboarding_fields
+
+Note (2026-05-26): my first attempt at this migration declared
+``down_revision = "0028_notification_category"`` because the local
+working tree included an in-flight notifications session's
+migrations 0024-0028. Those were never committed to ``main``, so
+Render's deploy failed with ``KeyError: '0028_notification_category'``.
+Repointed to the real head on origin/main: 0023. When the
+notifications session lands its 0024-0028 chain, the author will
+need to either rebase 0029 onto their new head or insert a
+no-op merge revision.
 """
 
 from __future__ import annotations
@@ -25,7 +35,7 @@ import sqlalchemy as sa
 from alembic import op
 
 revision = "0029_password_history"
-down_revision = "0028_notification_category"
+down_revision = "0023_client_onboarding_fields"
 branch_labels = None
 depends_on = None
 
