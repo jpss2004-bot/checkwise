@@ -1025,3 +1025,45 @@ def test_reset_password_rejects_reuse(
     )
     assert response.status_code == 422
     assert "reutilizar" in response.json()["detail"]
+
+
+# ---------------------------------------------------------------------------
+# Hardening pass (2026-05-26) — set-password audit coverage
+# ---------------------------------------------------------------------------
+
+
+def test_set_password_writes_audit_event(
+    api_client: TestClient, db_factory
+) -> None:
+    """The /set-password endpoint backs the /activate forced-first-
+    login flow. Without an audit row, the most material action on an
+    account (initial password set + must-change-password clear) would
+    leave no forensic trace. The /reset-password endpoint already
+    writes ``auth.password_reset_completed``; this test pins the
+    parallel ``auth.password_changed`` row for the set-password path."""
+    from app.models import AuditLog
+
+    user_id, _, password = _seed_user(
+        db_factory, email="audit-set-pw@legalshelf.mx"
+    )
+    token = _login(api_client, "audit-set-pw@legalshelf.mx", password)
+    response = api_client.post(
+        "/api/v1/auth/set-password",
+        json={"new_password": "BrandNewPassword!2026"},
+        headers={"Authorization": f"Bearer {token}"},
+    )
+    assert response.status_code == 200, response.text
+
+    db = db_factory()
+    try:
+        row = db.scalar(
+            select(AuditLog)
+            .where(AuditLog.action == "auth.password_changed")
+            .where(AuditLog.entity_id == user_id)
+        )
+        assert row is not None
+        after = row.after or {}
+        assert after.get("email") == "audit-set-pw@legalshelf.mx"
+        assert after.get("source") == "set_password"
+    finally:
+        db.close()

@@ -672,6 +672,27 @@ def forgot_password(
             "delivery_status": delivery.status,
         },
     )
+    # Phase 7 cutover (Slice C) — also dispatch through the unified
+    # fabric in parallel with the legacy email send. The legacy
+    # ``send_password_reset_email`` above remains the user-visible
+    # delivery during the soak period; the emit writes a
+    # notification_dispatch row + (when active mode + Twilio are
+    # configured) sends an SMS confirmation alongside the email. A
+    # failure here NEVER breaks the request — the password reset
+    # email above already landed.
+    try:
+        from app.services.notifications import emit_password_reset_requested
+
+        emit_password_reset_requested(
+            db,
+            user=user,
+            reset_token_id=reset_token.id,
+            reset_url=reset_url,
+            mode="active",
+        )
+    except Exception:  # pragma: no cover — defensive during cutover
+        log.exception("notif_emit_failed event=account.password_reset_requested")
+
     db.commit()
 
     return generic
@@ -817,6 +838,20 @@ def set_password(
 
     # Audit-finding #10 — same reuse guard as /reset-password.
     _apply_password_change(db, user, payload.new_password)
+    # Hardening pass (2026-05-26) — write the same canonical audit
+    # row the /reset-password endpoint writes. set-password is the
+    # /activate forced-first-login surface; without this row the
+    # forensic trail was missing the most material action on the
+    # account (initial password set + must-change-password clear).
+    add_audit_event(
+        db,
+        action="auth.password_changed",
+        entity_type="user",
+        entity_id=user.id,
+        actor_type="user",
+        actor_id=user.id,
+        after={"email": user.email, "source": "set_password"},
+    )
     db.commit()
 
     return SetPasswordResponse(
