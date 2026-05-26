@@ -106,8 +106,35 @@ class LoginResponse(BaseModel):
     must_change_password: bool = False
 
 
+def _enforce_password_rules(value: str) -> str:
+    """Mirror of the frontend ``PASSWORD_RULES`` in
+    ``apps/web/lib/email-inference.ts``: ≥12 chars + at least one
+    uppercase + one lowercase + one digit.
+
+    Audit-finding #2 — without this, the backend accepted weak
+    passwords (e.g., ``aaaaaaaaaaaa``) when callers bypassed the
+    UI. The frontend gate alone is not a security control; bake the
+    same rules into the request schema so a curl call cannot land a
+    password the official UI would have rejected.
+    """
+    if len(value) < 12:
+        raise ValueError("La contraseña debe tener al menos 12 caracteres.")
+    if not any(c.isupper() for c in value):
+        raise ValueError("La contraseña debe incluir al menos una letra mayúscula.")
+    if not any(c.islower() for c in value):
+        raise ValueError("La contraseña debe incluir al menos una letra minúscula.")
+    if not any(c.isdigit() for c in value):
+        raise ValueError("La contraseña debe incluir al menos un número.")
+    return value
+
+
 class SetPasswordRequest(BaseModel):
     new_password: str = Field(..., min_length=12, max_length=128)
+
+    @field_validator("new_password")
+    @classmethod
+    def _validate_password(cls, v: str) -> str:
+        return _enforce_password_rules(v)
 
 
 class SetPasswordResponse(BaseModel):
@@ -131,6 +158,11 @@ class ForgotPasswordResponse(BaseModel):
 class ResetPasswordRequest(BaseModel):
     token: str = Field(..., min_length=20, max_length=256)
     new_password: str = Field(..., min_length=12, max_length=128)
+
+    @field_validator("new_password")
+    @classmethod
+    def _validate_password(cls, v: str) -> str:
+        return _enforce_password_rules(v)
 
 
 class ResetPasswordResponse(BaseModel):
@@ -444,7 +476,12 @@ def login(payload: LoginRequest, request: Request, db: DbSession) -> LoginRespon
         user_id=user.id, email=user.email, roles=roles, orgs=org_ids
     )
     user.last_login_at = utc_now()
-    db.flush()
+    # Audit-finding #1 — ``db.flush()`` pushes pending changes to the
+    # connection but does NOT persist them. ``get_db`` closes the
+    # session without an implicit commit, so without this explicit
+    # commit ``last_login_at`` would roll back and the column would
+    # forever stay NULL despite this code clearly intending to set it.
+    db.commit()
 
     claims = decode_access_token(token)
     return LoginResponse(

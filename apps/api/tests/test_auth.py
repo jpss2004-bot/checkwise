@@ -646,3 +646,134 @@ def test_reset_password_rejects_expired_token(
     )
     assert response.status_code == 400
     assert "venció" in response.json()["detail"]
+
+
+# ---------------------------------------------------------------------------
+# Audit findings 1, 2, 3 — auth hardening (2026-05-26 follow-up)
+# ---------------------------------------------------------------------------
+
+
+def test_login_persists_last_login_at(
+    api_client: TestClient, db_factory
+) -> None:
+    """Audit finding #1 — the login handler used to ``db.flush()`` the
+    ``last_login_at`` update without committing. ``get_db`` closes the
+    session without an implicit commit, so the column silently rolled
+    back to NULL. This test pins the explicit commit by re-reading the
+    User row in a fresh session AFTER login and asserting the column
+    is populated."""
+    _seed_user(db_factory, email="lastlogin@legalshelf.mx")
+
+    response = api_client.post(
+        "/api/v1/auth/login",
+        json={
+            "email": "lastlogin@legalshelf.mx",
+            "password": "Correct horse battery 4",
+        },
+    )
+    assert response.status_code == 200, response.text
+
+    db = db_factory()
+    try:
+        row = db.execute(
+            select(User).where(User.email == "lastlogin@legalshelf.mx")
+        ).scalar_one()
+        # The bug would leave this as None forever despite the in-memory
+        # update succeeding within the request.
+        assert row.last_login_at is not None
+    finally:
+        db.close()
+
+
+def test_set_password_rejects_weak_passwords(
+    api_client: TestClient, db_factory
+) -> None:
+    """Audit finding #2 — the backend used to validate only
+    ``min_length=12``; a caller bypassing the UI could land a password
+    the official rules would have rejected (e.g., all-lowercase with
+    no digit). The new validator mirrors the frontend ``PASSWORD_RULES``
+    so every entry path enforces the same contract."""
+    _, _, password = _seed_user(db_factory)
+    token = _login(api_client, "ada@legalshelf.mx", password)
+
+    weak_cases = [
+        # 12 chars but lowercase-only (no uppercase, no digit)
+        "aaaaaaaaaaaa",
+        # 12 chars but uppercase + digit, no lowercase
+        "AAAAAAAAAA11",
+        # No digit
+        "Aaaaaaaaaaaa",
+        # No uppercase
+        "aaaaaaaaaaa1",
+    ]
+    for pw in weak_cases:
+        response = api_client.post(
+            "/api/v1/auth/set-password",
+            json={"new_password": pw},
+            headers={"Authorization": f"Bearer {token}"},
+        )
+        assert response.status_code == 422, (
+            f"weak password '{pw}' should be rejected with 422"
+        )
+
+
+def test_reset_password_rejects_weak_passwords(
+    api_client: TestClient, db_factory
+) -> None:
+    """Audit finding #2 (mirror of the set-password test) — same
+    validator must guard the reset-password endpoint. Without it, a
+    user with a fresh reset link could bypass the frontend rules via
+    curl and persist a 12-char-all-lowercase password."""
+    user_id, _, _ = _seed_user(db_factory, email="weak-reset@legalshelf.mx")
+    raw_token = "weak-reset-token-for-test-1234567890"
+    db = db_factory()
+    try:
+        db.add(
+            PasswordResetToken(
+                user_id=user_id,
+                email="weak-reset@legalshelf.mx",
+                token_hash=hash_password_reset_token(raw_token),
+                expires_at=utc_now() + timedelta(minutes=30),
+                delivery_status="sent",
+            )
+        )
+        db.commit()
+    finally:
+        db.close()
+    response = api_client.post(
+        "/api/v1/auth/reset-password",
+        json={"token": raw_token, "new_password": "aaaaaaaaaaaa"},
+    )
+    assert response.status_code == 422
+
+
+def test_generate_temp_password_satisfies_password_rules() -> None:
+    """Audit finding #3 — the temp-password generator used to be a
+    pure random draw against the curated alphabet, which had a ~11%
+    chance of producing a 14-char password with no digit. After the
+    fix, every draw is guaranteed to contain at least one uppercase,
+    one lowercase, and one digit so the recipient can flow through
+    /activate using the same rules the UI enforces.
+
+    Run the generator 200 times and assert every output satisfies
+    the full rule set + is the requested length.
+    """
+    from app.services.auth import generate_temp_password
+
+    for _ in range(200):
+        pw = generate_temp_password()
+        assert len(pw) == 14
+        assert any(c.isupper() for c in pw), pw
+        assert any(c.islower() for c in pw), pw
+        assert any(c.isdigit() for c in pw), pw
+
+
+def test_generate_temp_password_rejects_lengths_under_minimum() -> None:
+    """The frontend rule set requires 12 chars. The generator MUST
+    refuse to produce anything shorter — a caller asking for a 10-char
+    temp password would silently land a value the recipient could not
+    use to change their password through the official UI."""
+    from app.services.auth import generate_temp_password
+
+    with pytest.raises(ValueError):
+        generate_temp_password(length=8)

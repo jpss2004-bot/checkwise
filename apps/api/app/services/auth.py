@@ -89,10 +89,37 @@ def generate_temp_password(length: int = 14) -> str:
     stores only the bcrypt hash. Combined with
     ``must_change_password=True`` this gives the recipient exactly one
     successful login before they are forced through ``/activate``.
+
+    Audit-finding #3 — the temp password must satisfy the same rule
+    set as user-defined passwords (≥12 chars, one uppercase, one
+    lowercase, one digit). A pure ``secrets.choice`` draw against
+    the alphabet has a non-trivial probability of missing a digit
+    (~11% at length 14) or a case class. We compose deterministically:
+    one char from each required pool, then fill the rest from the
+    full alphabet, then shuffle so the guaranteed chars don't always
+    sit in the same positions.
     """
-    if length < 8:
-        raise ValueError("temp password must be at least 8 chars")
-    return "".join(secrets.choice(_TEMP_PASSWORD_ALPHABET) for _ in range(length))
+    if length < 12:
+        raise ValueError("temp password must be at least 12 chars")
+    uppers = "ABCDEFGHJKLMNPQRSTUVWXYZ"
+    lowers = "abcdefghijkmnopqrstuvwxyz"
+    digits = "23456789"
+    # One guaranteed pick from each category.
+    required = [
+        secrets.choice(uppers),
+        secrets.choice(lowers),
+        secrets.choice(digits),
+    ]
+    # Fill the rest from the full curated alphabet.
+    rest = [
+        secrets.choice(_TEMP_PASSWORD_ALPHABET)
+        for _ in range(length - len(required))
+    ]
+    chars = required + rest
+    # ``secrets.SystemRandom().shuffle`` keeps the CSPRNG source so we
+    # don't drop down to ``random``'s Mersenne Twister for the mix.
+    secrets.SystemRandom().shuffle(chars)
+    return "".join(chars)
 
 
 # ---------------------------------------------------------------------------
