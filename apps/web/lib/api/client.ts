@@ -193,6 +193,24 @@ export type ClientVendorDetail = {
     message: string | null;
     occurred_at: string;
   }>;
+  /**
+   * Item 1 — every contract-type submission attached to this vendor,
+   * newest first. The signed services contract (ONB-CONT-001) plus
+   * any modifications (ONB-CONT-002) and service orders (ONB-CONT-003).
+   * View + Download buttons resolve against
+   * ``/api/v1/client/submissions/:submission_id/document``.
+   */
+  contracts: Array<ClientVendorContractDoc>;
+};
+
+export type ClientVendorContractDoc = {
+  submission_id: string;
+  requirement_code: string;
+  requirement_name: string;
+  status: string;
+  filename: string | null;
+  submitted_at: string;
+  size_bytes: number | null;
 };
 
 export type ClientCalendarItem = {
@@ -374,8 +392,20 @@ export async function getClientVendorDetail(
 export async function getClientCalendar(params?: {
   client_id?: string;
   year?: number;
+  /** Item 3 — narrow the calendar to a subset of vendors. Omit or
+   *  pass an empty array to receive the portfolio-wide view. */
+  vendor_ids?: string[];
 }): Promise<ClientCalendar> {
-  return fetchJson<ClientCalendar>(`/api/v1/client/calendar${qs(params)}`);
+  const sp = new URLSearchParams();
+  if (params?.client_id) sp.set("client_id", params.client_id);
+  if (params?.year !== undefined) sp.set("year", String(params.year));
+  for (const vid of params?.vendor_ids ?? []) {
+    if (vid) sp.append("vendor_ids", vid);
+  }
+  const s = sp.toString();
+  return fetchJson<ClientCalendar>(
+    `/api/v1/client/calendar${s ? `?${s}` : ""}`,
+  );
 }
 
 export async function listClientSubmissions(params?: {
@@ -487,6 +517,58 @@ export type ClientVendorExpedienteFilters = {
  * ``client.vendor_expediente_downloaded``. Cookie-auth navigation
  * pattern (open in a new tab so the bearer cookie carries).
  */
+/**
+ * Item 1 — URL of the per-submission document endpoint. Used by the
+ * contract list on the vendor expediente page (and any future
+ * per-document open/download action in the client portal). Cookie-
+ * auth pattern via `Authorization` header would not work for
+ * top-level navigation, so the endpoint also accepts the bearer
+ * cookie set by the staff session middleware; opening in a new tab
+ * lets the browser carry it. When ``download`` is true the response
+ * forces an attachment disposition and the backend writes a
+ * ``client.document_downloaded`` audit row.
+ */
+export function clientSubmissionDocumentUrl(
+  submissionId: string,
+  opts: { download?: boolean } = {},
+): string {
+  const params = new URLSearchParams();
+  if (opts.download) params.set("download", "1");
+  const qs = params.toString();
+  const base = `${API_BASE_URL}/api/v1/client/submissions/${encodeURIComponent(submissionId)}/document`;
+  return qs ? `${base}?${qs}` : base;
+}
+
+/**
+ * Fetch a submission's PDF with the staff JWT and return a Blob URL
+ * the caller can hand to an iframe or `window.open`. Mirrors the
+ * reviewer-side helper — top-level navigation cannot carry the
+ * localStorage bearer, so the only reliable way to preview/open a
+ * document is to fetch the bytes with the header and stream them to
+ * an object URL. Caller MUST ``URL.revokeObjectURL`` when done.
+ */
+export async function fetchClientSubmissionDocumentBlob(
+  submissionId: string,
+  opts: { download?: boolean } = {},
+): Promise<string> {
+  const session = readAdminSession();
+  if (!session?.access_token) {
+    throw new ClientApiError(401, "No active staff session.");
+  }
+  const headers = new Headers();
+  headers.set("Authorization", `Bearer ${session.access_token}`);
+  const response = await fetch(clientSubmissionDocumentUrl(submissionId, opts), {
+    headers,
+    credentials: "include",
+  });
+  if (!response.ok) {
+    const detail = await response.text().catch(() => "");
+    throw new ClientApiError(response.status, detail || response.statusText);
+  }
+  const blob = await response.blob();
+  return URL.createObjectURL(blob);
+}
+
 export function clientVendorExpedienteZipUrl(
   vendorId: string,
   filters: ClientVendorExpedienteFilters = {},
@@ -523,6 +605,9 @@ export type ClientProfileUpdate = {
   fiscal_address?: string | null;
   phone?: string | null;
   notes?: string | null;
+  /** Item 8 — true on the first-login save so the backend can write
+   *  the ``client.legal_consent_accepted`` audit row. */
+  terms_accepted?: boolean;
 };
 
 export async function getClientProfile(): Promise<ClientProfile> {
@@ -620,4 +705,94 @@ export function clientAuditPackageZipUrl(
   const qs = params.toString();
   const base = `${API_BASE_URL}/api/v1/client/audit-package.zip`;
   return qs ? `${base}?${qs}` : base;
+}
+
+// ---------------------------------------------------------------------------
+// Item 2 — audit-package tree picker
+// ---------------------------------------------------------------------------
+
+export type AuditPackageTreeNode = {
+  submission_id: string;
+  vendor_id: string;
+  vendor_name: string;
+  institution_code: string;
+  institution_name: string;
+  period_key: string;
+  requirement_code: string | null;
+  requirement_name: string;
+  filename: string;
+  size_bytes: number;
+  status: string;
+  submitted_at_iso: string | null;
+};
+
+export type AuditPackageTreeResponse = {
+  items: AuditPackageTreeNode[];
+  file_count: number;
+  total_bytes: number;
+  file_cap: number;
+  bytes_cap: number;
+};
+
+/**
+ * Flat list of every document matching the filter set. The frontend
+ * composes the Vendor → Institution → Period → Document hierarchy
+ * with cascading checkboxes and POSTs the selected ``submission_ids``
+ * to the audit-zip endpoint.
+ */
+export async function getClientAuditPackageTree(
+  filters: AuditPackageFilters = {},
+): Promise<AuditPackageTreeResponse> {
+  const params = new URLSearchParams();
+  _appendAuditPackageFilters(params, filters);
+  const qs = params.toString();
+  const suffix = qs ? `?${qs}` : "";
+  return fetchJson<AuditPackageTreeResponse>(
+    `/api/v1/client/audit-package/tree${suffix}`,
+  );
+}
+
+/**
+ * POST the audit ZIP with an explicit ``submission_ids`` whitelist.
+ * Fetches the response as a Blob so the staff JWT (header bearer)
+ * carries the request — top-level navigation cannot.
+ */
+export async function downloadClientAuditPackageZipPost(
+  body: AuditPackageFilters & { submission_ids: string[] },
+): Promise<{ blob: Blob; filename: string }> {
+  const session = readAdminSession();
+  if (!session?.access_token) {
+    throw new ClientApiError(401, "No active staff session.");
+  }
+  const headers = new Headers();
+  headers.set("Authorization", `Bearer ${session.access_token}`);
+  headers.set("Content-Type", "application/json");
+  const response = await fetch(
+    `${API_BASE_URL}/api/v1/client/audit-package.zip`,
+    {
+      method: "POST",
+      headers,
+      credentials: "include",
+      body: JSON.stringify({
+        period_from: body.period_from ?? null,
+        period_to: body.period_to ?? null,
+        institutions: body.institutions ?? null,
+        requirement_codes: body.requirement_codes ?? null,
+        statuses: body.statuses ?? null,
+        vendor_ids: body.vendor_ids ?? null,
+        submission_ids: body.submission_ids,
+      }),
+    },
+  );
+  if (!response.ok) {
+    const detail = await response.text().catch(() => "");
+    throw new ClientApiError(response.status, detail || response.statusText);
+  }
+  // Parse a filename hint from Content-Disposition when present so
+  // the user gets the same auditoria-<rfc>-<date>.zip naming.
+  const disp = response.headers.get("Content-Disposition") || "";
+  const match = /filename="?([^"]+)"?/i.exec(disp);
+  const filename = match?.[1] ?? "auditoria.zip";
+  const blob = await response.blob();
+  return { blob, filename };
 }

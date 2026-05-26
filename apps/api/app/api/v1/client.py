@@ -412,6 +412,26 @@ class ClientVendorListResponse(BaseModel):
     total: int
 
 
+class ClientVendorContractDoc(BaseModel):
+    """One contract-type document attached to a vendor expediente.
+
+    Sources from `Submission` rows where ``requirement_code`` matches an
+    onboarding contract requirement (ONB-CONT-001 / 002 / 003 — the
+    signed services contract, its modifications, and service orders).
+    Surfaced separately from ``recent_submissions`` so the vendor page
+    can render a dedicated "contratos" card; the client_admin should
+    not have to dig through the audit ZIP just to read the contract.
+    """
+
+    submission_id: str
+    requirement_code: str
+    requirement_name: str
+    status: str
+    filename: str | None
+    submitted_at: datetime
+    size_bytes: int | None
+
+
 class ClientVendorDetail(BaseModel):
     client_id: str
     vendor_id: str
@@ -426,6 +446,7 @@ class ClientVendorDetail(BaseModel):
     upcoming_deadlines: list[DashboardUpcomingDeadline]
     recent_submissions: list[dict]
     recent_reviewer_notes: list[dict]
+    contracts: list[ClientVendorContractDoc] = []
 
 
 class ClientSubmissionItem(BaseModel):
@@ -621,6 +642,12 @@ class ClientProfileUpdate(BaseModel):
     fiscal_address: str | None = None
     phone: str | None = Field(default=None, max_length=30)
     notes: str | None = None
+    # Item 8 — T&C acceptance is part of the same first-login screen
+    # as the fiscal-data form. The frontend gates onboarding
+    # completion on both. The backend persists the acceptance via an
+    # ``audit_log`` row (same forensic pattern used for provider-side
+    # consent — see ``app.api.v1.portal``).
+    terms_accepted: bool | None = None
 
 
 def _client_profile_payload(row: Client) -> ClientProfile:
@@ -703,6 +730,30 @@ def update_client_profile(
     if "notes" in data:
         row.notes = (data["notes"] or "").strip() or None
 
+    terms_accepted = bool(data.get("terms_accepted"))
+    if terms_accepted:
+        # Record the acceptance as its own audit row so a forensic
+        # reader can answer "did this client_admin accept the T&C,
+        # and when?" without scanning profile diffs. Idempotent — a
+        # second tick on the same client just appends another row,
+        # which is acceptable for the audit trail.
+        add_audit_event(
+            db,
+            action="client.legal_consent_accepted",
+            entity_type="client",
+            entity_id=row.id,
+            actor_type="client_admin",
+            actor_id=current.user.id,
+            metadata={
+                "client_id": row.id,
+                "user_id": current.user.id,
+                # Hard-coded to the current draft set until Paco/Beko
+                # sign off on the final copy. Mirrors the provider
+                # CURRENT_LEGAL_CONSENT_VERSION constant.
+                "legal_consent_version": "v0-draft",
+            },
+        )
+
     just_completed = row.onboarding_completed_at is None
     if just_completed:
         row.onboarding_completed_at = datetime.now(UTC)
@@ -721,6 +772,7 @@ def update_client_profile(
         after=after,
         metadata={
             "just_completed_onboarding": just_completed,
+            "terms_accepted": terms_accepted,
         },
     )
     db.commit()
@@ -972,6 +1024,66 @@ def _recent_submissions_for_workspace(
     return out
 
 
+# Onboarding requirement codes for the signed services contract +
+# its modifications + service orders. Sourced from
+# ``app.core.compliance_catalog._ONBOARDING_MORAL`` (section
+# "Contrato"). The lookup intentionally uses ``requirement_code`` so
+# the helper does not break if the underlying ``Requirement`` row is
+# renamed or re-seeded.
+_CONTRACT_REQUIREMENT_CODES: tuple[str, ...] = (
+    "ONB-CONT-001",
+    "ONB-CONT-002",
+    "ONB-CONT-003",
+)
+
+
+def _contracts_for_workspace(
+    db: Session, workspace: ProviderWorkspace
+) -> list[ClientVendorContractDoc]:
+    """Every contract-type submission for ``workspace``, newest first.
+
+    Includes superseded versions so the client_admin can see the full
+    history of the contract relationship. Each row carries the
+    submission's current status — the UI is free to badge replaced
+    rows or hide them behind a "ver historial" affordance.
+    """
+    rows = list(
+        db.scalars(
+            select(Submission)
+            .where(
+                Submission.client_id == workspace.client_id,
+                Submission.vendor_id == workspace.vendor_id,
+                Submission.requirement_code.in_(_CONTRACT_REQUIREMENT_CODES),
+            )
+            .order_by(Submission.created_at.desc())
+        )
+    )
+    out: list[ClientVendorContractDoc] = []
+    for sub in rows:
+        doc = db.scalar(
+            select(Document).where(Document.submission_id == sub.id).limit(1)
+        )
+        if doc is None:
+            # Submission row exists without a document blob — typically
+            # a slot reservation that never received an upload. Skip;
+            # there is nothing for the client to view or download.
+            continue
+        out.append(
+            ClientVendorContractDoc(
+                submission_id=sub.id,
+                requirement_code=sub.requirement_code or "",
+                requirement_name=(
+                    sub.requirement.name if sub.requirement else (sub.requirement_code or "Contrato")
+                ),
+                status=sub.status,
+                filename=doc.original_filename,
+                submitted_at=sub.created_at,
+                size_bytes=doc.size_bytes,
+            )
+        )
+    return out
+
+
 def _recent_reviewer_notes_for_workspace(
     db: Session, workspace: ProviderWorkspace, *, limit: int
 ) -> list[dict]:
@@ -1064,6 +1176,7 @@ def client_vendor_detail(
         recent_reviewer_notes=_recent_reviewer_notes_for_workspace(
             db, workspace, limit=10
         ),
+        contracts=_contracts_for_workspace(db, workspace),
     )
 
 
@@ -1205,6 +1318,112 @@ def client_vendor_expediente_zip(
 
 
 # ---------------------------------------------------------------------------
+# Per-submission document stream (client portal)
+# ---------------------------------------------------------------------------
+
+
+@router.get(
+    "/submissions/{submission_id}/document",
+    summary="Stream the PDF stored for one submission (client_admin)",
+)
+def client_get_submission_document(
+    submission_id: str,
+    db: DbSession,
+    current: ClientUser,
+    download: bool = False,
+) -> Response:
+    """Serve a submission's PDF inline (default) or as an attachment.
+
+    Mirrors :func:`app.api.v1.reviewer.get_submission_document` but
+    runs through the client tenant guard: the submission MUST belong
+    to a client the caller can see. ``?download=1`` writes a
+    ``client.document_downloaded`` audit row and forces an attachment
+    disposition; the default inline mode is unaudited so an iframe
+    preview does not flood the audit log.
+
+    Used by the vendor expediente contract card (item 1) and any
+    future per-document open/download action in the client portal.
+    """
+    submission = db.get(Submission, submission_id)
+    if submission is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Envío no encontrado.",
+        )
+
+    is_internal_admin = MembershipRole.INTERNAL_ADMIN.value in current.roles
+    if not is_internal_admin:
+        visible = _visible_client_ids_for_user(db, current.user.id)
+        if submission.client_id not in visible:
+            # Same 404 shape as cross-tenant vendor lookups — never
+            # confirm whether a submission exists in a client the
+            # caller cannot see.
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="Envío no encontrado.",
+            )
+
+    document = db.scalar(
+        select(Document).where(Document.submission_id == submission.id).limit(1)
+    )
+    if document is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Documento no encontrado para este envío.",
+        )
+
+    disposition_kind = "attachment" if download else "inline"
+    disposition_header = (
+        f'{disposition_kind}; filename="{document.original_filename}"'
+    )
+
+    if download:
+        add_audit_event(
+            db,
+            action="client.document_downloaded",
+            entity_type="submission",
+            entity_id=submission.id,
+            actor_type="client_admin",
+            actor_id=current.user.id,
+            metadata={
+                "document_id": document.id,
+                "filename": document.original_filename,
+                "size_bytes": document.size_bytes,
+                "requirement_code": submission.requirement_code,
+                "period_key": submission.period_key,
+                "client_id": submission.client_id,
+                "vendor_id": submission.vendor_id,
+            },
+        )
+        db.commit()
+
+    from app.services.storage import get_storage_service
+
+    storage = get_storage_service()
+    presigned = storage.presigned_download_url(
+        document.storage_key,
+        content_disposition=disposition_header,
+    )
+    if presigned is not None:
+        from fastapi.responses import RedirectResponse
+
+        return RedirectResponse(presigned, status_code=status.HTTP_302_FOUND)
+
+    path = storage.open_for_read(document.storage_key)
+    if not path.exists():
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Documento no disponible en almacenamiento.",
+        )
+    return FileResponse(
+        path,
+        media_type="application/pdf",
+        filename=document.original_filename,
+        headers={"Content-Disposition": disposition_header},
+    )
+
+
+# ---------------------------------------------------------------------------
 # /calendar
 # ---------------------------------------------------------------------------
 
@@ -1231,6 +1450,7 @@ def client_calendar(
     current: ClientUser,
     client_id: str | None = None,
     year: Annotated[int, Query(ge=MIN_YEAR, le=MAX_YEAR)] = 2026,
+    vendor_ids: Annotated[list[str] | None, Query()] = None,
 ) -> ClientCalendarResponse:
     """Aggregated client calendar.
 
@@ -1240,10 +1460,21 @@ def client_calendar(
     uses day 30 via the catalog override). The convention is
     documented in ``docs/PROVIDER_PORTAL_CANONICAL_READS.md`` and
     re-stated in ``docs/CLIENT_PORTAL_READ_MODEL.md``.
+
+    Item 3 — when ``vendor_ids`` is supplied, the response is narrowed
+    to the obligations of those vendors only. Vendors not in the
+    client's portfolio are silently dropped (no 403/404 enumeration),
+    so an attacker probing for cross-tenant ids cannot tell the
+    difference. An empty list or omitted param is treated as
+    "all vendors" — the same shape the page used before the filter
+    landed.
     """
     target_id = _resolve_client_id(db, current, requested=client_id)
     today = date.today()
     workspaces = _scoped_workspaces(db, target_id)
+    if vendor_ids:
+        wanted = {v for v in vendor_ids if v}
+        workspaces = [w for w in workspaces if w.vendor_id in wanted]
     vendor_lookup = _vendors_by_id(db, [w.vendor_id for w in workspaces])
 
     # Per workspace, walk the canonical recurring catalog so we have
@@ -1910,6 +2141,7 @@ def _build_audit_filters(
     requirement_codes: list[str] | None,
     statuses: list[str] | None,
     vendor_ids: list[str] | None,
+    submission_ids: list[str] | None = None,
 ) -> "AuditPackageFilters":
     from app.services.audit_package import AuditPackageFilters as _F
 
@@ -1920,6 +2152,7 @@ def _build_audit_filters(
         requirement_codes=tuple(requirement_codes or ()),
         statuses=tuple(statuses or ()),
         vendor_ids=tuple(vendor_ids or ()),
+        submission_ids=tuple(submission_ids or ()),
     )
 
 
@@ -2003,6 +2236,153 @@ def client_audit_package_preview(
     )
 
 
+class AuditPackageTreeNode(BaseModel):
+    """One leaf in the tree picker — a single document the user can
+    tick. Higher-level nodes (vendor, institution, period) are
+    composed on the client from the flat list so the backend stays
+    cheap and the UI controls aggregation/sort order."""
+
+    submission_id: str
+    vendor_id: str
+    vendor_name: str
+    institution_code: str
+    institution_name: str
+    period_key: str
+    requirement_code: str | None
+    requirement_name: str
+    filename: str
+    size_bytes: int
+    status: str
+    submitted_at_iso: str | None
+
+
+class AuditPackageTreeResponse(BaseModel):
+    items: list[AuditPackageTreeNode]
+    file_count: int
+    total_bytes: int
+    file_cap: int
+    bytes_cap: int
+
+
+@router.get(
+    "/audit-package/tree",
+    response_model=AuditPackageTreeResponse,
+    summary="Flat list of every document that matches the filter set",
+)
+def client_audit_package_tree(
+    db: DbSession,
+    current: ClientUser,
+    client_id: str | None = None,
+    period_from: str | None = None,
+    period_to: str | None = None,
+    institutions: Annotated[list[str] | None, Query()] = None,
+    requirement_codes: Annotated[list[str] | None, Query()] = None,
+    statuses: Annotated[list[str] | None, Query()] = None,
+    vendor_ids: Annotated[list[str] | None, Query()] = None,
+) -> AuditPackageTreeResponse:
+    """Item 2 — power the tree picker on ``/client/auditoria``.
+
+    Returns the flat list of resolved documents (one per submission)
+    matching the filter set. The frontend composes the Vendor →
+    Institution → Period → Document hierarchy and renders the
+    cascading checkboxes. The user's selected ``submission_id`` set
+    is then posted to ``/audit-package.zip`` to materialise the ZIP.
+    """
+    from app.services.audit_package import (
+        MAX_FILES,
+        MAX_TOTAL_BYTES,
+        build_entries,
+    )
+
+    target_id = _resolve_client_id(db, current, requested=client_id)
+    client_row = db.get(Client, target_id)
+    if client_row is None:  # pragma: no cover — defensive
+        raise HTTPException(
+            status.HTTP_404_NOT_FOUND, detail="Cliente no encontrado."
+        )
+
+    filters = _build_audit_filters(
+        period_from,
+        period_to,
+        institutions,
+        requirement_codes,
+        statuses,
+        vendor_ids,
+    )
+    entries = build_entries(db, client_row, filters)
+
+    items = [
+        AuditPackageTreeNode(
+            submission_id=e.submission_id,
+            vendor_id=e.vendor_id,
+            vendor_name=e.vendor_name,
+            institution_code=e.institution_code,
+            institution_name=e.institution_name,
+            period_key=e.period_key,
+            requirement_code=e.requirement_code,
+            requirement_name=e.requirement_name,
+            filename=e.filename,
+            size_bytes=e.size_bytes,
+            status=e.status,
+            submitted_at_iso=e.submitted_at_iso,
+        )
+        for e in entries
+        if e.submission_id  # defensive — legacy entries pre-field
+    ]
+    return AuditPackageTreeResponse(
+        items=items,
+        file_count=len(items),
+        total_bytes=sum(i.size_bytes for i in items),
+        file_cap=MAX_FILES,
+        bytes_cap=MAX_TOTAL_BYTES,
+    )
+
+
+class AuditPackageZipBody(BaseModel):
+    """POST body for the tree-picker download. Mirrors the GET query
+    params plus the explicit ``submission_ids`` whitelist."""
+
+    client_id: str | None = None
+    period_from: str | None = None
+    period_to: str | None = None
+    institutions: list[str] | None = None
+    requirement_codes: list[str] | None = None
+    statuses: list[str] | None = None
+    vendor_ids: list[str] | None = None
+    submission_ids: list[str] | None = None
+    skip_manifest: bool = False
+
+
+@router.post(
+    "/audit-package.zip",
+    summary="Stream the audit ZIP with an explicit submission_ids whitelist",
+)
+def client_audit_package_zip_post(
+    body: AuditPackageZipBody,
+    db: DbSession,
+    current: ClientUser,
+) -> Response:
+    """Item 2 — POST variant that accepts a body with
+    ``submission_ids``. The GET form stays available for the legacy
+    filter-only flow (and bookmarks); the POST form is what the tree
+    picker posts when the user composes a selection that would blow
+    past URL-length limits.
+    """
+    return _stream_audit_package_zip(
+        db=db,
+        current=current,
+        client_id=body.client_id,
+        period_from=body.period_from,
+        period_to=body.period_to,
+        institutions=body.institutions,
+        requirement_codes=body.requirement_codes,
+        statuses=body.statuses,
+        vendor_ids=body.vendor_ids,
+        submission_ids=body.submission_ids,
+        skip_manifest=body.skip_manifest,
+    )
+
+
 @router.get(
     "/audit-package.zip",
     summary="Stream the audit-ready ZIP scoped to the active client",
@@ -2036,6 +2416,39 @@ def client_audit_package_zip(
     Playwright dependency). The production path always renders the
     manifest.
     """
+    return _stream_audit_package_zip(
+        db=db,
+        current=current,
+        client_id=client_id,
+        period_from=period_from,
+        period_to=period_to,
+        institutions=institutions,
+        requirement_codes=requirement_codes,
+        statuses=statuses,
+        vendor_ids=vendor_ids,
+        submission_ids=None,
+        skip_manifest=skip_manifest,
+    )
+
+
+def _stream_audit_package_zip(
+    *,
+    db: Session,
+    current: CurrentUser,
+    client_id: str | None,
+    period_from: str | None,
+    period_to: str | None,
+    institutions: list[str] | None,
+    requirement_codes: list[str] | None,
+    statuses: list[str] | None,
+    vendor_ids: list[str] | None,
+    submission_ids: list[str] | None,
+    skip_manifest: bool,
+) -> Response:
+    """Shared streaming pipeline for the GET and POST audit-zip
+    endpoints. The GET form keeps the legacy filter-only contract;
+    the POST form additionally carries the tree-picker whitelist.
+    """
     from datetime import datetime as _dt
 
     from fastapi.responses import StreamingResponse
@@ -2062,6 +2475,7 @@ def client_audit_package_zip(
         requirement_codes,
         statuses,
         vendor_ids,
+        submission_ids,
     )
 
     # Resolve entries once so the cap check and the manifest see the
