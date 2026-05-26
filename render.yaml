@@ -216,3 +216,102 @@ services:
           type: web
           name: checkwise-api
           envVarKey: DATABASE_URL
+      # Phase 7 cutover Slice C — the renewal CLI now also fires
+      # the unified-fabric emitter in active mode alongside the
+      # legacy dispatcher. The active path needs Twilio + SMTP to
+      # actually fan out; without these, the new path degrades
+      # gracefully to skipped+audited rows.
+      - key: MESSAGING_ENABLED
+        sync: false
+      - key: TWILIO_ENABLED
+        sync: false
+      - key: TWILIO_ACCOUNT_SID
+        sync: false
+      - key: TWILIO_AUTH_TOKEN
+        sync: false
+      - key: TWILIO_FROM_NUMBER
+        sync: false
+      - key: SMTP_HOST
+        sync: false
+      - key: SMTP_USERNAME
+        sync: false
+      - key: SMTP_PASSWORD
+        sync: false
+      - key: SMTP_FROM_EMAIL
+        sync: false
+      - key: FRONTEND_BASE_URL
+        sync: false
+      - key: AUTH_JWT_SECRET
+        sync: false
+
+  # ──────────────────────────────────────────────────────────────────
+  # Phase 7 cutover Slice D — Periodic reporting reminder cron
+  # ──────────────────────────────────────────────────────────────────
+  #
+  # Runs ``python -m scripts.run_reporting_dispatch`` once a day to
+  # fire the five recurring-reporting threshold events from the new
+  # notification fabric: ``reporting.window.opened``, ``due.t-7``,
+  # ``due.t-1``, ``due.t-0``, ``overdue.t+3``.
+  #
+  # Walks the recurring REPSE calendar for each active workspace:
+  # IMSS + SAT mensuales, INFONAVIT bimestral, SISUB/ICSOE
+  # cuatrimestral, anual SAT. For each (workspace, requirement,
+  # period_key) triple it checks whether a submission exists and
+  # emits the appropriate threshold envelope via the unified
+  # dispatcher in active mode (in-app + email + SMS via Twilio).
+  #
+  # Schedule: ``5 14 * * *`` (every day at 14:05 UTC) — five
+  # minutes after the renewal cron so the two never compete for
+  # the same DB connection on the starter plan. 14:05 UTC =
+  # 08:05 America/Mexico_City year-round.
+  #
+  # Idempotency: the new path's ``notification_dispatch`` unique
+  # constraint on (user_id, event_type, dedupe_key) makes any
+  # replay a no-op. Catch-up emission semantics inside the
+  # emitter handle missed days.
+  #
+  # Env vars: needs DATABASE_URL + TWILIO_* + SMTP_* + WHATSAPP_*
+  # so the active dispatcher can actually fan out. Sourced from
+  # the ``checkwise-api`` web service via ``fromService`` so the
+  # secrets stay paired with the API.
+  - type: cron
+    name: checkwise-reporting-dispatch
+    runtime: python
+    plan: starter
+    rootDir: apps/api
+    branch: main
+    schedule: "5 14 * * *"
+    buildCommand: pip install -e .
+    command: python -m scripts.run_reporting_dispatch
+    envVars:
+      - key: CHECKWISE_ENV
+        value: production
+      - key: PYTHON_VERSION
+        value: "3.11"
+      - key: DATABASE_URL
+        fromService:
+          type: web
+          name: checkwise-api
+          envVarKey: DATABASE_URL
+      - key: MESSAGING_ENABLED
+        sync: false
+      - key: TWILIO_ENABLED
+        sync: false
+      - key: TWILIO_ACCOUNT_SID
+        sync: false
+      - key: TWILIO_AUTH_TOKEN
+        sync: false
+      - key: TWILIO_FROM_NUMBER
+        sync: false
+      - key: SMTP_HOST
+        sync: false
+      - key: SMTP_USERNAME
+        sync: false
+      - key: SMTP_PASSWORD
+        sync: false
+      - key: SMTP_FROM_EMAIL
+        sync: false
+      - key: FRONTEND_BASE_URL
+        sync: false
+      - key: AUTH_JWT_SECRET
+        sync: false
