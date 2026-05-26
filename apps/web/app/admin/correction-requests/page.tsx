@@ -22,6 +22,7 @@ import { Select } from "@/components/ui/select";
 import { Textarea } from "@/components/ui/textarea";
 
 import { AdminShell } from "../_shell";
+import { VendorRef } from "@/components/checkwise/vendor-ref";
 import {
   type AdminCorrectionRequest,
   type CorrectionRequestStatus,
@@ -184,7 +185,15 @@ export default function AdminCorrectionRequestsPage() {
       cell: (row) => (
         <div className="flex flex-col">
           <span className="text-[13px] font-medium text-[color:var(--text-primary)]">
-            {row.vendor_name ?? row.user_name ?? "—"}
+            {row.vendor_id && row.vendor_name ? (
+              <VendorRef
+                vendorId={row.vendor_id}
+                vendorName={row.vendor_name}
+                clientId={row.client_id ?? undefined}
+              />
+            ) : (
+              row.vendor_name ?? row.user_name ?? "—"
+            )}
           </span>
           <span className="text-[11px] text-[color:var(--text-tertiary)]">
             {row.user_email ?? row.user_id}

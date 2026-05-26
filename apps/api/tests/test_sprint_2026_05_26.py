@@ -934,6 +934,99 @@ def test_admin_provision_client_rejects_non_internal_admin(
     assert resp.status_code == 403
 
 
+def test_internal_admin_can_load_vendor_detail_without_client_id_param(
+    api_client: TestClient, db_factory
+) -> None:
+    """Item 5 follow-up — when an internal_admin clicks a vendor link
+    from an admin shell, the URL does not carry ``?client_id=``.
+    The backend must auto-resolve the scope from the vendor row
+    instead of returning the 400 ``_resolve_client_id`` raised
+    before.
+
+    The vendor still has to exist; cross-tenant probes from a
+    client_admin keep the 404 shape (covered separately in the
+    submission-document tenant-guard test)."""
+    client_id = _seed_client(db_factory, "Cliente con Vendor")
+    vendor_id, _ws = _seed_vendor_with_workspace(
+        db_factory, client_id=client_id
+    )
+    email, pw = _seed_user(
+        db_factory, role="internal_admin", email_prefix="adm"
+    )
+    token = _login(api_client, email, pw)
+
+    resp = api_client.get(
+        f"/api/v1/client/vendors/{vendor_id}", headers=_h(token)
+    )
+    assert resp.status_code == 200, resp.text
+    body = resp.json()
+    assert body["client_id"] == client_id
+    assert body["vendor_id"] == vendor_id
+
+
+def test_client_admin_still_cannot_see_another_clients_vendor_detail(
+    api_client: TestClient, db_factory
+) -> None:
+    """The auto-resolution path is internal_admin-only — a
+    client_admin from client A asking for a vendor that lives under
+    client B still gets a 404 (no cross-tenant probe)."""
+    client_a = _seed_client(db_factory, "Client A")
+    client_b = _seed_client(db_factory, "Client B")
+    vendor_b, _ = _seed_vendor_with_workspace(
+        db_factory, client_id=client_b, rfc="OTH260512AB9"
+    )
+    email_a, pw_a = _seed_user(
+        db_factory, role="client_admin", client_id=client_a, email_prefix="ca-a"
+    )
+    token_a = _login(api_client, email_a, pw_a)
+    resp = api_client.get(
+        f"/api/v1/client/vendors/{vendor_b}", headers=_h(token_a)
+    )
+    assert resp.status_code == 404
+
+
+def test_reviewer_queue_surfaces_vendor_id_and_client_id(
+    api_client: TestClient, db_factory
+) -> None:
+    """Item 5 follow-up — the reviewer queue surfaces vendor_id +
+    client_id so the admin shell can build a VendorRef link to the
+    vendor expediente without forcing a separate lookup."""
+    client_id = _seed_client(db_factory, "Cliente Reviewer")
+    vendor_id, ws_id = _seed_vendor_with_workspace(
+        db_factory, client_id=client_id, vendor_name="Q Vendor", rfc="QUE260512AB1"
+    )
+    inst_id = _seed_institution(db_factory, code="interno_cliente")
+    req_id = _seed_requirement(
+        db_factory,
+        code="ONB-CORP-M-001",
+        name="Acta",
+        institution_id=inst_id,
+    )
+    _seed_submission(
+        db_factory,
+        client_id=client_id,
+        vendor_id=vendor_id,
+        requirement_id=req_id,
+        requirement_code="ONB-CORP-M-001",
+        institution_id=inst_id,
+        status_value=DocumentStatus.PENDIENTE_REVISION.value,
+    )
+    email, pw = _seed_user(
+        db_factory, role="internal_admin", email_prefix="rev-adm"
+    )
+    token = _login(api_client, email, pw)
+
+    resp = api_client.get(
+        "/api/v1/reviewer/queue", headers=_h(token)
+    )
+    assert resp.status_code == 200, resp.text
+    items = resp.json()["items"]
+    assert items, "queue should contain at least the pending submission"
+    item = items[0]
+    assert item["provider"]["vendor_id"] == vendor_id
+    assert item["provider"]["client_id"] == client_id
+
+
 def test_client_profile_patch_terms_accepted_writes_audit(
     api_client: TestClient, db_factory
 ) -> None:

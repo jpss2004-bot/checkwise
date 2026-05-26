@@ -18,6 +18,7 @@ import { cn } from "@/lib/utils";
 export function VendorRef({
   vendorId,
   vendorName,
+  clientId,
   className,
   muted = false,
   children,
@@ -25,14 +26,25 @@ export function VendorRef({
 }: {
   vendorId: string;
   vendorName?: string;
+  /**
+   * Optional client_id query param appended to the link. Required
+   * when the link is rendered from an ``internal_admin`` shell so
+   * the vendor-detail endpoint can resolve the scope without the
+   * caller having to pick a default client first. ``client_admin``
+   * shells leave this off — their tenant is implicit.
+   */
+  clientId?: string | null;
   className?: string;
   muted?: boolean;
   children?: React.ReactNode;
   title?: string;
 }) {
+  const href = clientId
+    ? `/client/vendors/${encodeURIComponent(vendorId)}?client_id=${encodeURIComponent(clientId)}`
+    : `/client/vendors/${encodeURIComponent(vendorId)}`;
   return (
     <Link
-      href={`/client/vendors/${encodeURIComponent(vendorId)}`}
+      href={href}
       title={title ?? (vendorName ? `Abrir expediente de ${vendorName}` : "Abrir expediente del proveedor")}
       className={cn(
         "rounded-sm underline-offset-2 transition-colors hover:underline hover:text-[color:var(--text-brand)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[color:var(--interactive-primary)]",

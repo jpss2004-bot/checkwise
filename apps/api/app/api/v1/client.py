@@ -1112,6 +1112,46 @@ def _recent_reviewer_notes_for_workspace(
     return out
 
 
+def _resolve_client_id_for_vendor(
+    db: Session,
+    current: CurrentUser,
+    *,
+    vendor_id: str,
+    requested: str | None,
+) -> tuple[str, Vendor]:
+    """Resolve the active client scope when the caller addresses a
+    specific vendor.
+
+    Item 5 follow-up — the admin shell links to
+    ``/client/vendors/{vendor_id}`` without forcing the user to pick
+    a ``?client_id=`` first. For an ``internal_admin`` who supplied
+    no ``requested`` value we read the vendor row first and use its
+    own ``client_id`` as the scope. ``client_admin`` users keep the
+    historical behaviour (must be in their own portfolio; 404
+    otherwise to avoid a cross-tenant probe).
+
+    Returns ``(target_client_id, vendor_row)`` so the caller does
+    not re-fetch the vendor.
+    """
+    is_internal_admin = MembershipRole.INTERNAL_ADMIN.value in current.roles
+    if requested is None and is_internal_admin:
+        vendor = db.get(Vendor, vendor_id)
+        if vendor is None:
+            raise HTTPException(
+                status.HTTP_404_NOT_FOUND,
+                detail="Proveedor no encontrado para este cliente.",
+            )
+        return vendor.client_id, vendor
+    target_id = _resolve_client_id(db, current, requested=requested)
+    vendor = db.get(Vendor, vendor_id)
+    if vendor is None or vendor.client_id != target_id:
+        raise HTTPException(
+            status.HTTP_404_NOT_FOUND,
+            detail="Proveedor no encontrado para este cliente.",
+        )
+    return target_id, vendor
+
+
 @router.get("/vendors/{vendor_id}", response_model=ClientVendorDetail)
 def client_vendor_detail(
     vendor_id: str,
@@ -1120,14 +1160,9 @@ def client_vendor_detail(
     client_id: str | None = None,
     year: Annotated[int | None, Query(ge=MIN_YEAR, le=MAX_YEAR)] = None,
 ) -> ClientVendorDetail:
-    target_id = _resolve_client_id(db, current, requested=client_id)
-    vendor = db.get(Vendor, vendor_id)
-    if vendor is None or vendor.client_id != target_id:
-        # Same shape for not-found and cross-client to avoid a tenant probe.
-        raise HTTPException(
-            status.HTTP_404_NOT_FOUND,
-            detail="Proveedor no encontrado para este cliente.",
-        )
+    target_id, vendor = _resolve_client_id_for_vendor(
+        db, current, vendor_id=vendor_id, requested=client_id
+    )
     workspace = db.scalar(
         select(ProviderWorkspace)
         .where(
@@ -1234,14 +1269,9 @@ def client_vendor_expediente_zip(
         summarize_expediente,
     )
 
-    target_id = _resolve_client_id(db, current, requested=client_id)
-
-    vendor = db.get(Vendor, vendor_id)
-    if vendor is None or vendor.client_id != target_id:
-        raise HTTPException(
-            status.HTTP_404_NOT_FOUND,
-            detail="Proveedor no encontrado para este cliente.",
-        )
+    target_id, vendor = _resolve_client_id_for_vendor(
+        db, current, vendor_id=vendor_id, requested=client_id
+    )
 
     workspace = db.scalar(
         select(ProviderWorkspace).where(

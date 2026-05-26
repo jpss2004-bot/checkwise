@@ -18,6 +18,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 
 import { AdminShell } from "../_shell";
+import { VendorRef } from "@/components/checkwise/vendor-ref";
 import {
   adminVendorExpedienteZipUrl,
   type AdminClient,
@@ -174,7 +175,11 @@ export default function AdminVendorsPage() {
               header: "Proveedor",
               cell: (row) => (
                 <p className="font-medium text-[color:var(--text-primary)]">
-                  {row.name}
+                  <VendorRef
+                    vendorId={row.id}
+                    vendorName={row.name}
+                    clientId={row.client_id}
+                  />
                 </p>
               ),
             },

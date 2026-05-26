@@ -59,6 +59,12 @@ export type QueueItem = {
     vendor_name: string;
     vendor_rfc: string | null;
     client_name: string;
+    /** Item 5 follow-up — surfaced so the reviewer queue can link
+     *  the vendor name to /client/vendors/[id]?client_id=…. Nullable
+     *  for legacy backend builds and for rows where the underlying
+     *  Vendor/Client row was deleted. */
+    vendor_id: string | null;
+    client_id: string | null;
   };
   signal_count: number;
   has_mismatch: boolean;

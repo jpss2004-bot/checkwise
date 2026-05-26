@@ -85,6 +85,12 @@ class QueueProvider(BaseModel):
     vendor_name: str
     vendor_rfc: str | None
     client_name: str
+    # Item 5 follow-up — surface the ids so the reviewer queue can
+    # render the vendor name as a link to ``/client/vendors/{id}?client_id=…``.
+    # Optional/nullable so older client builds that ignore them stay
+    # compatible.
+    vendor_id: str | None = None
+    client_id: str | None = None
 
 
 class QueueItem(BaseModel):
@@ -243,6 +249,8 @@ def get_queue(
                     vendor_name=vendor.name if vendor else "—",
                     vendor_rfc=vendor.rfc if vendor else None,
                     client_name=client.name if client else "—",
+                    vendor_id=vendor.id if vendor else None,
+                    client_id=client.id if client else None,
                 ),
                 signal_count=int(signal_count),
                 has_mismatch=bool(inspection_mismatch),

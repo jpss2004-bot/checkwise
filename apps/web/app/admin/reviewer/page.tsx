@@ -12,6 +12,7 @@ import {
 } from "@phosphor-icons/react";
 
 import { AdminShell } from "../_shell";
+import { VendorRef } from "@/components/checkwise/vendor-ref";
 import { Badge } from "@/components/ui/badge";
 import { PageHeader } from "@/components/ui/page-header";
 import {
@@ -359,8 +360,19 @@ function QueueTableRow({
       </TableCell>
 
       <TableCell>
-        <p className="font-medium text-[color:var(--text-primary)]">
-          {item.provider.vendor_name}
+        <p
+          className="font-medium text-[color:var(--text-primary)]"
+          onClick={(e) => e.stopPropagation()}
+        >
+          {item.provider.vendor_id ? (
+            <VendorRef
+              vendorId={item.provider.vendor_id}
+              vendorName={item.provider.vendor_name}
+              clientId={item.provider.client_id ?? undefined}
+            />
+          ) : (
+            item.provider.vendor_name
+          )}
         </p>
         <p className="text-[11px] text-[color:var(--text-tertiary)]">
           {item.provider.client_name}
