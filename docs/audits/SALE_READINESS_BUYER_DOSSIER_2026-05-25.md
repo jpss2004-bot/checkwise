@@ -4,8 +4,17 @@
 **Product:** CheckWise (Mexican REPSE compliance SaaS)
 **Application version:** 2.5.0
 **Legal package version:** v1 (vigente desde 25 de mayo de 2026)
-**Audit date:** 2026-05-25
+**Audit date:** 2026-05-25 (v1.0)
+**Freeze refresh:** 2026-05-25 (v1.1 — every audit finding closed at the code level)
+**Dossier version:** v1.1
 **Audit author:** internal pre-pilot review
+
+> 🟢 **v1.1 update (2026-05-25):** every 🔴 / 🟠 code-side finding in
+> the original audit is closed. M0–M5 milestones from the parallel
+> backend hardening pass shipped. Backend test count rose 996 → 1056.
+> CI now runs gitleaks + pip-audit + npm audit on every push. The
+> only remaining blocker is operational (Render env-var paste); see
+> §7. Full diff in §10.
 
 This document is the buyer-facing summary of the technical and
 operational state of CheckWise prior to onboarding the first
@@ -24,23 +33,27 @@ lists the engineering-level fix list.
 
 ## 1. Verdict
 
-**Ready for first paying pilot conditional on three blocking
-items.** All security gates, tenant isolation, audit logging,
-and core REPSE workflows pass review. The blockers are
-operational (production environment variables) rather than
-structural; they are listed in §7 and can be cleared in a single
-deployment.
+**Ready for first paying pilot.** Every code-side audit finding
+is closed. All security gates, tenant isolation, audit logging,
+and core REPSE workflows pass review. The remaining blocker is
+operational — the operator pastes four Render env-vars
+(`AUTH_JWT_SECRET`, `SMTP_*`, `FRONTEND_BASE_URL`) and the
+service is live. The boot guard added in commit `db4aa98` makes
+that step unmissable: the API will refuse to start if
+`AUTH_JWT_SECRET` is still the public in-repo placeholder.
 
-| Pass | Outcome |
-|------|---------|
-| Production reality | ✅ infrastructure sound; 3 environment-variable blockers identified |
-| Route surface | ✅ all production routes serve correctly; 1 internal sandbox route is publicly reachable |
-| Backend hardening | ✅ all mutations role-gated; 1 audit-log gap on notification reads |
-| End-to-end workflow | ✅ document-handling chain complete; 3 invitation flows are manual today |
+| Pass | Original outcome (v1.0) | Current state (v1.1) |
+|------|------------------------|----------------------|
+| Production reality | 3 env-variable blockers | ✅ slots declared in render.yaml; boot guard enforces |
+| Route surface | 1 sandbox route reachable | ✅ deleted entirely (commit `1c8a842` upstream) |
+| Backend hardening | 1 audit-log gap | ✅ closed (commit `e9684ff`) + M0-M5 milestones all shipped |
+| End-to-end workflow | 3 invitation flows manual | 🟡 unchanged — explicitly deferred (new feature work, not polish; see §7) |
 
-**Test coverage:** 996 backend tests pass, frontend typecheck +
-lint + production build all green at the audit cut-off
-(commit `dcaaac2`).
+**Test coverage:** **1056 backend tests pass** (+60 vs the 996
+at the audit cut-off), frontend typecheck + lint + production
+build all green at the freeze cut commit (`1c8a842`). Three CI
+scans now run on every push and weekly cron (gitleaks, pip-audit
+`--strict`, `npm audit --audit-level=high`); see §6.
 
 ---
 
