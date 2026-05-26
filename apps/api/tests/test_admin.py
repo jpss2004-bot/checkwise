@@ -202,41 +202,34 @@ def _assert_audit_admin(
         db.close()
 
 
-def test_admin_can_create_client_and_write_audit(
-    api_client: TestClient, db_factory
-) -> None:
-    token = _admin_token(api_client, db_factory)
-    resp = api_client.post(
-        "/api/v1/admin/clients",
-        json={
-            "name": "Cliente Admin Test",
-            "rfc": "CAT260512AB1",
-            "email": "ada@test.example",
-            "responsible_name": "Ada Lovelace",
-        },
-        headers=_h(token),
-    )
-    assert resp.status_code == 201, resp.text
-    body = resp.json()
-    assert body["name"] == "Cliente Admin Test"
-    assert body["rfc"] == "CAT260512AB1"
-    assert body["email"] == "ada@test.example"
-    _assert_audit_admin(
-        db_factory, action="admin.client.created", entity_id=body["id"], before_must_be_none=True
-    )
+def _seed_client_via_db(db_factory, *, name: str, rfc: str | None = None) -> str:
+    """Insert a Client row directly. Replaces the old
+    ``POST /api/v1/admin/clients`` silent-create that the unified
+    user-provisioning flow removed."""
+    db = db_factory()
+    try:
+        from app.models import Client as _C
+
+        client = _C(
+            name=name,
+            rfc=rfc,
+            email=f"{name.lower().replace(' ', '-')}@test.example",
+            status="active",
+        )
+        db.add(client)
+        db.commit()
+        return client.id
+    finally:
+        db.close()
 
 
 def test_admin_can_update_client_and_write_audit(
     api_client: TestClient, db_factory
 ) -> None:
     token = _admin_token(api_client, db_factory)
-    created = api_client.post(
-        "/api/v1/admin/clients",
-        json={"name": "Cliente A", "email": "a@test.example"},
-        headers=_h(token),
-    ).json()
+    created_id = _seed_client_via_db(db_factory, name="Cliente A")
     resp = api_client.patch(
-        f"/api/v1/admin/clients/{created['id']}",
+        f"/api/v1/admin/clients/{created_id}",
         json={"name": "Cliente A Renombrado", "status": "inactive"},
         headers=_h(token),
     )
@@ -244,41 +237,10 @@ def test_admin_can_update_client_and_write_audit(
     assert resp.json()["name"] == "Cliente A Renombrado"
     assert resp.json()["status"] == "inactive"
     row = _assert_audit_admin(
-        db_factory, action="admin.client.updated", entity_id=created["id"]
+        db_factory, action="admin.client.updated", entity_id=created_id
     )
     assert (row.before or {}).get("name") == "Cliente A"
     assert (row.after or {}).get("name") == "Cliente A Renombrado"
-
-
-def test_admin_client_create_requires_email(
-    api_client: TestClient, db_factory
-) -> None:
-    """Junta 2026-05-23 — RFC + email + nombre son los datos mínimos
-    al dar de alta un cliente. Sin email la API responde 422 y no
-    persiste nada.
-    """
-    token = _admin_token(api_client, db_factory)
-    resp = api_client.post(
-        "/api/v1/admin/clients",
-        json={"name": "Sin Email"},
-        headers=_h(token),
-    )
-    assert resp.status_code == 422, resp.text
-
-
-def test_admin_client_email_normalized_and_returned(
-    api_client: TestClient, db_factory
-) -> None:
-    """Email se normaliza a minúsculas y se devuelve en el payload."""
-    token = _admin_token(api_client, db_factory)
-    resp = api_client.post(
-        "/api/v1/admin/clients",
-        json={"name": "Caso Email", "email": "  Mixed.Case@Example.com  "},
-        headers=_h(token),
-    )
-    assert resp.status_code == 201, resp.text
-    body = resp.json()
-    assert body["email"] == "mixed.case@example.com"
 
 
 # ---------------------------------------------------------------------------
@@ -290,15 +252,11 @@ def test_admin_can_create_vendor_for_existing_client(
     api_client: TestClient, db_factory
 ) -> None:
     token = _admin_token(api_client, db_factory)
-    client = api_client.post(
-        "/api/v1/admin/clients",
-        json={"name": "Cli", "email": "cli@test.example"},
-        headers=_h(token),
-    ).json()
+    client_id = _seed_client_via_db(db_factory, name="Cli")
     resp = api_client.post(
         "/api/v1/admin/vendors",
         json={
-            "client_id": client["id"],
+            "client_id": client_id,
             "name": "Proveedor X",
             "rfc": "PVX260512AB1",
             "contact_email": "ops@x.test",
@@ -308,7 +266,7 @@ def test_admin_can_create_vendor_for_existing_client(
     )
     assert resp.status_code == 201, resp.text
     body = resp.json()
-    assert body["client_id"] == client["id"]
+    assert body["client_id"] == client_id
     _assert_audit_admin(
         db_factory, action="admin.vendor.created", entity_id=body["id"], before_must_be_none=True
     )
@@ -334,14 +292,10 @@ def test_admin_can_update_vendor_and_write_audit(
     api_client: TestClient, db_factory
 ) -> None:
     token = _admin_token(api_client, db_factory)
-    client = api_client.post(
-        "/api/v1/admin/clients",
-        json={"name": "Cli", "email": "cli2@test.example"},
-        headers=_h(token),
-    ).json()
+    client_id = _seed_client_via_db(db_factory, name="Cli2")
     vendor = api_client.post(
         "/api/v1/admin/vendors",
-        json={"client_id": client["id"], "name": "Proveedor Antes", "rfc": "PVA260512AB1"},
+        json={"client_id": client_id, "name": "Proveedor Antes", "rfc": "PVA260512AB1"},
         headers=_h(token),
     ).json()
     resp = api_client.patch(
@@ -779,42 +733,43 @@ def test_audit_log_filters_and_respects_limit(
     api_client: TestClient, db_factory
 ) -> None:
     token = _admin_token(api_client, db_factory)
-    # Create three clients to seed three audit rows.
-    ids = []
+    # Seed 3 clients via DB + 3 PATCHes so the audit log gets 3
+    # ``admin.client.updated`` rows. The old test used the deleted
+    # ``POST /admin/clients`` endpoint that emitted
+    # ``admin.client.created`` rows; the unified provisioning flow
+    # emits ``admin.user.provisioned`` rows instead, on entity_type=user.
+    ids: list[str] = []
     for i in range(3):
-        body = api_client.post(
-            "/api/v1/admin/clients",
-            json={"name": f"AuditCli{i}", "email": f"audit{i}@test.example"},
+        client_id = _seed_client_via_db(db_factory, name=f"AuditCli{i}")
+        api_client.patch(
+            f"/api/v1/admin/clients/{client_id}",
+            json={"name": f"AuditCli{i} Renombrado"},
             headers=_h(token),
-        ).json()
-        ids.append(body["id"])
+        )
+        ids.append(client_id)
 
-    # Filter by action — should return exactly the 3 client.created rows.
     resp = api_client.get(
-        "/api/v1/admin/audit-log?action=admin.client.created",
+        "/api/v1/admin/audit-log?action=admin.client.updated",
         headers=_h(token),
     )
     assert resp.status_code == 200
     body = resp.json()
     actions = {item["action"] for item in body["items"]}
-    assert actions == {"admin.client.created"}
+    assert actions == {"admin.client.updated"}
     assert len(body["items"]) >= 3
 
-    # Filter by entity_id — should return exactly one row.
     by_entity = api_client.get(
         f"/api/v1/admin/audit-log?entity_id={ids[0]}", headers=_h(token)
     ).json()
     assert len(by_entity["items"]) == 1
     assert by_entity["items"][0]["entity_id"] == ids[0]
 
-    # Respect limit.
     limited = api_client.get(
         "/api/v1/admin/audit-log?limit=2", headers=_h(token)
     ).json()
     assert len(limited["items"]) <= 2
     assert limited["limit"] == 2
 
-    # Filter by entity_type narrows to the right rows.
     by_type = api_client.get(
         "/api/v1/admin/audit-log?entity_type=client", headers=_h(token)
     ).json()

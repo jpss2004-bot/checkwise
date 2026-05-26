@@ -53,7 +53,6 @@ from app.models import (
     Institution,
     Membership,
     Organization,
-    PasswordResetToken,
     ProviderWorkspace,
     Requirement,
     Submission,
@@ -819,29 +818,39 @@ def test_client_calendar_vendor_ids_narrows_response(
 # ---------------------------------------------------------------------------
 
 
-def test_admin_provision_client_creates_full_stack(
+def test_admin_users_provisions_client_with_temp_password(
     api_client: TestClient, db_factory
 ) -> None:
+    """Item 8 v2 — ``POST /admin/users`` with role=client mints a temp
+    password (returned in the response for the admin's one-time
+    confirmation view AND emailed), bcrypts it onto the User row,
+    flips ``must_change_password`` so the recipient is forced through
+    ``/activate`` on first login, and wires up the
+    Client+Organization+Membership stack."""
     email, pw = _seed_user(db_factory, role="internal_admin", email_prefix="adm")
     token = _login(api_client, email, pw)
 
     resp = api_client.post(
-        "/api/v1/admin/clients/provision",
+        "/api/v1/admin/users",
         json={
+            "full_name": "María Pérez",
+            "email": "Maria.Perez@Acero.MX",
+            "role": "client",
             "client_name": "Acero del Norte",
-            "rfc": "ANO260512XY3",
-            "client_email": "Maria.Perez@Acero.MX",
-            "admin_full_name": "María Pérez",
+            "client_rfc": "ANO260512XY3",
         },
         headers=_h(token),
     )
     assert resp.status_code == 201, resp.text
     body = resp.json()
+    assert body["role"] == "client"
     assert body["client_id"]
     assert body["organization_id"]
     assert body["user_id"]
-    assert "/reset-password?token=" in body["onboarding_url"]
-    # SMTP not configured in the test env → status returns "skipped".
+    # Temp password is returned in plaintext, exactly once, so the
+    # admin confirmation screen can render it.
+    assert len(body["temp_password"]) >= 12
+    assert body["login_url"].endswith("/login")
     assert body["email_status"] in {"skipped", "sent"}
 
     db = db_factory()
@@ -849,7 +858,6 @@ def test_admin_provision_client_creates_full_stack(
         client_row = db.get(Client, body["client_id"])
         assert client_row is not None
         assert client_row.name == "Acero del Norte"
-        # Email is normalised to lowercase.
         assert client_row.email == "maria.perez@acero.mx"
 
         org = db.get(Organization, body["organization_id"])
@@ -861,9 +869,11 @@ def test_admin_provision_client_creates_full_stack(
         assert user is not None
         assert user.email == "maria.perez@acero.mx"
         assert user.must_change_password is True
-        # The placeholder hash should not bcrypt-verify against any
-        # plaintext; only the reset link can land a real password.
-        assert user.password_hash and not user.password_hash.startswith("$2")
+        # Real bcrypt hash this time — the temp password bcrypt-verifies.
+        from app.services.auth import verify_password
+
+        assert user.password_hash and user.password_hash.startswith("$2")
+        assert verify_password(body["temp_password"], user.password_hash)
 
         membership = db.scalar(
             select(Membership).where(Membership.user_id == user.id)
@@ -872,49 +882,133 @@ def test_admin_provision_client_creates_full_stack(
         assert membership.role == "client_admin"
         assert membership.organization_id == org.id
 
-        token_row = db.scalar(
-            select(PasswordResetToken).where(PasswordResetToken.user_id == user.id)
-        )
-        assert token_row is not None
-        assert token_row.used_at is None
-
         audit = db.scalar(
             select(AuditLog)
-            .where(AuditLog.action == "admin.client.provisioned")
-            .where(AuditLog.entity_id == client_row.id)
+            .where(AuditLog.action == "admin.user.provisioned")
+            .where(AuditLog.entity_id == user.id)
         )
         assert audit is not None
         after = audit.after or {}
-        assert after.get("user_id") == user.id
-        assert after.get("organization_id") == org.id
+        assert after.get("role") == "client"
+        assert after.get("client_id") == client_row.id
     finally:
         db.close()
 
 
-def test_admin_provision_client_rejects_duplicate_email(
+def test_admin_users_provisions_provider_with_workspace(
+    api_client: TestClient, db_factory
+) -> None:
+    """Item 8 v2 — ``POST /admin/users`` with role=provider mints the
+    same temp-password User stack but builds a Vendor +
+    ProviderWorkspace (owner_user_id=user.id) anchored under the
+    requested parent client. No Membership/Organization for providers
+    — the existing portal cookie path is the auth carrier inside
+    /portal."""
+    email, pw = _seed_user(db_factory, role="internal_admin", email_prefix="adm")
+    token = _login(api_client, email, pw)
+    parent_client_id = _seed_client(db_factory, "Parent Client")
+
+    resp = api_client.post(
+        "/api/v1/admin/users",
+        json={
+            "full_name": "Juan Proveedor",
+            "email": "juan@proveedor.example",
+            "role": "provider",
+            "vendor_name": "Proveedor Test",
+            "vendor_rfc": "PRO260512AB1",
+            "persona_type": "moral",
+            "contact_phone": "+52 55 1234 5678",
+            "parent_client_id": parent_client_id,
+        },
+        headers=_h(token),
+    )
+    assert resp.status_code == 201, resp.text
+    body = resp.json()
+    assert body["role"] == "provider"
+    assert body["vendor_id"]
+    assert body["workspace_id"]
+    assert body["user_id"]
+    assert body["client_id"] is None  # provider didn't get a Client
+    assert body["organization_id"] is None
+    assert len(body["temp_password"]) >= 12
+
+    db = db_factory()
+    try:
+        from app.models import Vendor as _Vendor
+
+        vendor = db.get(_Vendor, body["vendor_id"])
+        assert vendor is not None
+        assert vendor.client_id == parent_client_id
+        assert vendor.rfc == "PRO260512AB1"
+        assert vendor.contact_email == "juan@proveedor.example"
+
+        workspace = db.get(ProviderWorkspace, body["workspace_id"])
+        assert workspace is not None
+        assert workspace.owner_user_id == body["user_id"]
+        # access_token is minted so the legacy cookie path still works
+        # for this workspace if anyone hits the older URL.
+        assert workspace.access_token
+
+        user = db.get(User, body["user_id"])
+        assert user is not None
+        assert user.must_change_password is True
+        from app.services.auth import verify_password
+
+        assert verify_password(body["temp_password"], user.password_hash)
+
+        # Providers get no Membership — they rely on workspace ownership.
+        assert (
+            db.scalar(select(Membership).where(Membership.user_id == user.id))
+            is None
+        )
+    finally:
+        db.close()
+
+
+def test_admin_users_provider_requires_parent_client(
+    api_client: TestClient, db_factory
+) -> None:
+    email, pw = _seed_user(db_factory, role="internal_admin", email_prefix="adm")
+    token = _login(api_client, email, pw)
+    resp = api_client.post(
+        "/api/v1/admin/users",
+        json={
+            "full_name": "Orphan Provider",
+            "email": "orphan@p.example",
+            "role": "provider",
+            "vendor_name": "X",
+            "vendor_rfc": "XXX260512AB1",
+        },
+        headers=_h(token),
+    )
+    assert resp.status_code == 422
+
+
+def test_admin_users_rejects_duplicate_email(
     api_client: TestClient, db_factory
 ) -> None:
     email, pw = _seed_user(db_factory, role="internal_admin", email_prefix="adm")
     token = _login(api_client, email, pw)
     payload = {
+        "full_name": "Persona Uno",
+        "email": "dup@example.com",
+        "role": "client",
         "client_name": "Empresa Uno",
-        "client_email": "dup@example.com",
-        "admin_full_name": "Persona Uno",
     }
     first = api_client.post(
-        "/api/v1/admin/clients/provision", json=payload, headers=_h(token)
+        "/api/v1/admin/users", json=payload, headers=_h(token)
     )
     assert first.status_code == 201, first.text
 
     second = api_client.post(
-        "/api/v1/admin/clients/provision",
+        "/api/v1/admin/users",
         json={**payload, "client_name": "Empresa Dos"},
         headers=_h(token),
     )
     assert second.status_code == 409
 
 
-def test_admin_provision_client_rejects_non_internal_admin(
+def test_admin_users_rejects_non_internal_admin(
     api_client: TestClient, db_factory
 ) -> None:
     client_id = _seed_client(db_factory)
@@ -923,15 +1017,101 @@ def test_admin_provision_client_rejects_non_internal_admin(
     )
     token = _login(api_client, email, pw)
     resp = api_client.post(
-        "/api/v1/admin/clients/provision",
+        "/api/v1/admin/users",
         json={
+            "full_name": "Persona X",
+            "email": "x@example.com",
+            "role": "client",
             "client_name": "Cliente X",
-            "client_email": "x@example.com",
-            "admin_full_name": "Persona X",
         },
         headers=_h(token),
     )
     assert resp.status_code == 403
+
+
+def test_client_can_add_provider_and_invitation_is_audited(
+    api_client: TestClient, db_factory
+) -> None:
+    """Item 8 v2 — ``POST /client/providers`` lets a client_admin
+    invite a provider directly from their profile. The temp password
+    is NOT returned to the client (per the spec — only the admin path
+    returns it). The audit row pins the invitation."""
+    client_id = _seed_client(db_factory, "Inviting Client")
+    email, pw = _seed_user(
+        db_factory, role="client_admin", client_id=client_id, email_prefix="ca"
+    )
+    token = _login(api_client, email, pw)
+
+    resp = api_client.post(
+        "/api/v1/client/providers",
+        json={
+            "vendor_name": "Proveedor Invitado",
+            "vendor_rfc": "INV260512AB1",
+            "persona_type": "moral",
+            "contact_name": "Ada Proveedor",
+            "contact_email": "ada@invitado.example",
+            "contact_phone": "+52 55 0000 0000",
+        },
+        headers=_h(token),
+    )
+    assert resp.status_code == 201, resp.text
+    body = resp.json()
+    assert body["vendor_id"]
+    assert body["workspace_id"]
+    assert body["user_id"]
+    assert body["contact_email"] == "ada@invitado.example"
+    # CRITICAL: the client never sees the temp password.
+    assert "temp_password" not in body
+
+    db = db_factory()
+    try:
+        from app.models import Vendor as _Vendor
+
+        vendor = db.get(_Vendor, body["vendor_id"])
+        assert vendor is not None
+        assert vendor.client_id == client_id
+
+        audit = db.scalar(
+            select(AuditLog)
+            .where(AuditLog.action == "client.provider_invited")
+            .where(AuditLog.entity_id == vendor.id)
+        )
+        assert audit is not None
+        meta = audit.event_metadata or {}
+        assert meta.get("client_id") == client_id
+        assert meta.get("user_email") == "ada@invitado.example"
+    finally:
+        db.close()
+
+
+def test_client_cannot_add_provider_with_duplicate_rfc(
+    api_client: TestClient, db_factory
+) -> None:
+    """Same-client duplicate-RFC returns 409. Different clients can
+    share an RFC (the model enforces uniqueness per ``(client_id,
+    rfc)``)."""
+    client_id = _seed_client(db_factory)
+    email, pw = _seed_user(
+        db_factory, role="client_admin", client_id=client_id, email_prefix="ca"
+    )
+    token = _login(api_client, email, pw)
+    payload = {
+        "vendor_name": "Dup",
+        "vendor_rfc": "DUP260512AB1",
+        "persona_type": "moral",
+        "contact_name": "Contacto",
+        "contact_email": "dup1@p.example",
+    }
+    first = api_client.post(
+        "/api/v1/client/providers", json=payload, headers=_h(token)
+    )
+    assert first.status_code == 201, first.text
+    second = api_client.post(
+        "/api/v1/client/providers",
+        json={**payload, "contact_email": "dup2@p.example"},
+        headers=_h(token),
+    )
+    assert second.status_code == 409
 
 
 def test_internal_admin_can_load_vendor_detail_without_client_id_param(

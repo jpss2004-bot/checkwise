@@ -31,7 +31,8 @@ from typing import Annotated, Literal
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Response, status
 from fastapi.responses import FileResponse
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, EmailStr, Field
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy import and_, func, select
 from sqlalchemy.orm import Session
 
@@ -77,6 +78,7 @@ from app.models import (
     Organization,
     ProviderWorkspace,
     Submission,
+    User,
     ValidationEvent,
     Vendor,
 )
@@ -1150,6 +1152,161 @@ def _resolve_client_id_for_vendor(
             detail="Proveedor no encontrado para este cliente.",
         )
     return target_id, vendor
+
+
+# ---------------------------------------------------------------------------
+# Item 8 v2 — client adds a provider (auto-emails the invitation)
+# ---------------------------------------------------------------------------
+
+
+class ClientProviderCreate(BaseModel):
+    """Body for ``POST /client/providers``. The client-side mirror of
+    the admin ``POST /admin/users`` flow with role=provider, but the
+    parent client is implicit (taken from the caller's tenant) and the
+    plaintext temp password is NEVER returned in the response — the
+    provider only sees it in the welcome email."""
+
+    vendor_name: str = Field(min_length=2, max_length=255)
+    vendor_rfc: str = Field(min_length=12, max_length=13)
+    persona_type: Literal["moral", "fisica"]
+    contact_name: str = Field(min_length=2, max_length=255)
+    contact_email: EmailStr = Field(...)
+    contact_phone: str | None = Field(default=None, max_length=30)
+
+
+class ClientProviderCreateResponse(BaseModel):
+    """Result of ``POST /client/providers``. Carries the email-delivery
+    outcome so the UI can warn when SMTP skipped; no plaintext
+    credentials (only the admin path returns those)."""
+
+    vendor_id: str
+    workspace_id: str
+    user_id: str
+    contact_email: str
+    email_status: str
+    email_error: str | None = None
+
+
+@router.post(
+    "/providers",
+    response_model=ClientProviderCreateResponse,
+    status_code=status.HTTP_201_CREATED,
+    summary="Client adds a provider to their portfolio (auto-invitation)",
+)
+def client_add_provider(
+    payload: ClientProviderCreate,
+    db: DbSession,
+    current: ClientUser,
+    client_id: str | None = None,
+) -> ClientProviderCreateResponse:
+    """Create a new provider under the caller's client and invite them.
+
+    Same stack the admin ``POST /admin/users role=provider`` builds:
+    User + Vendor + ProviderWorkspace(owner_user_id=user.id). Different
+    auth surface (client_admin instead of internal_admin) and different
+    response contract (no plaintext temp password — the client_admin
+    sees only confirmation that the invitation was emailed).
+
+    409 on a duplicate contact email; 409 on a duplicate (client, RFC).
+    """
+    import secrets as _secrets
+
+    from app.services.auth import generate_temp_password, hash_password
+    from app.services.email_delivery import (
+        send_welcome_with_temp_password_email,
+    )
+
+    target_id = _resolve_client_id(db, current, requested=client_id)
+    contact_email = payload.contact_email.strip().lower()
+    rfc_value = payload.vendor_rfc.strip().upper()
+
+    existing_user = db.scalar(select(User).where(User.email == contact_email))
+    if existing_user is not None:
+        raise HTTPException(
+            status.HTTP_409_CONFLICT,
+            detail="Ya existe una cuenta con ese correo de contacto.",
+        )
+
+    temp_password = generate_temp_password()
+    user = User(
+        email=contact_email,
+        password_hash=hash_password(temp_password),
+        full_name=payload.contact_name.strip(),
+        status="active",
+        must_change_password=True,
+    )
+    db.add(user)
+    db.flush()
+
+    vendor = Vendor(
+        client_id=target_id,
+        name=payload.vendor_name.strip(),
+        rfc=rfc_value,
+        contact_name=payload.contact_name.strip(),
+        contact_email=contact_email,
+        contact_phone=(payload.contact_phone or "").strip() or None,
+        persona_type=payload.persona_type,
+        status="active",
+    )
+    db.add(vendor)
+    try:
+        db.flush()
+    except IntegrityError as exc:
+        db.rollback()
+        raise HTTPException(
+            status.HTTP_409_CONFLICT,
+            detail="Ya existe un proveedor con ese RFC en tu cartera.",
+        ) from exc
+
+    workspace = ProviderWorkspace(
+        client_id=target_id,
+        vendor_id=vendor.id,
+        persona_type=payload.persona_type,
+        display_name=payload.vendor_name.strip(),
+        access_token=_secrets.token_urlsafe(32),
+        owner_user_id=user.id,
+    )
+    db.add(workspace)
+    db.flush()
+
+    from app.core.config import settings as _settings
+
+    login_url = f"{_settings.FRONTEND_BASE_URL.rstrip('/')}/login"
+    delivery = send_welcome_with_temp_password_email(
+        to_email=contact_email,
+        full_name=payload.contact_name.strip(),
+        login_url=login_url,
+        temp_password=temp_password,
+        role="provider",
+        organization_name=payload.vendor_name.strip(),
+    )
+
+    add_audit_event(
+        db,
+        action="client.provider_invited",
+        entity_type="vendor",
+        entity_id=vendor.id,
+        actor_type="client_admin",
+        actor_id=current.user.id,
+        metadata={
+            "client_id": target_id,
+            "vendor_id": vendor.id,
+            "workspace_id": workspace.id,
+            "user_id": user.id,
+            "user_email": contact_email,
+            "email_delivery_status": delivery.status,
+        },
+    )
+    db.commit()
+
+    return ClientProviderCreateResponse(
+        vendor_id=vendor.id,
+        workspace_id=workspace.id,
+        user_id=user.id,
+        contact_email=contact_email,
+        email_status=delivery.status,
+        email_error=delivery.error,
+    )
 
 
 @router.get("/vendors/{vendor_id}", response_model=ClientVendorDetail)

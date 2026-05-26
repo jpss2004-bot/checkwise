@@ -30,9 +30,10 @@ explorer itself answers "what did this admin do."
 from __future__ import annotations
 
 import re
+import secrets
 import unicodedata
 import zipfile
-from datetime import UTC, date, datetime, timedelta
+from datetime import UTC, date, datetime
 from pathlib import Path
 from typing import Annotated, Final, Literal
 from xml.etree import ElementTree as ET
@@ -64,7 +65,6 @@ from app.models import (
     Institution,
     Membership,
     Organization,
-    PasswordResetToken,
     Period,
     ProviderWorkspace,
     Requirement,
@@ -75,11 +75,11 @@ from app.models import (
     Vendor,
 )
 from app.services.auth import (
-    generate_password_reset_token,
-    hash_password_reset_token,
+    generate_temp_password,
+    hash_password,
 )
 from app.services.audit_log import add_audit_event
-from app.services.email_delivery import send_transactional_email
+from app.services.email_delivery import send_welcome_with_temp_password_email
 from app.services.search_service import SearchHit, search_submissions
 
 router = APIRouter(prefix="/admin", tags=["admin"])
@@ -342,17 +342,6 @@ def get_overview(db: DbSession, current: AdminUser) -> AdminOverview:
 # ---------------------------------------------------------------------------
 
 
-class ClientCreate(BaseModel):
-    name: str = Field(min_length=2, max_length=255)
-    rfc: str | None = Field(default=None, max_length=13)
-    # Junta 2026-05-23 — email es uno de los tres datos mínimos al
-    # dar de alta a un cliente nuevo. EmailStr garantiza formato; el
-    # admin form lo marca como requerido en UI.
-    email: EmailStr = Field(...)
-    responsible_name: str | None = Field(default=None, max_length=255)
-    status: str = "active"
-
-
 class ClientUpdate(BaseModel):
     name: str | None = Field(default=None, min_length=2, max_length=255)
     rfc: str | None = Field(default=None, max_length=13)
@@ -377,269 +366,285 @@ def get_client(client_id: str, db: DbSession, current: AdminUser) -> dict:
     return _client_to_dict(row)
 
 
-@router.post("/clients", status_code=status.HTTP_201_CREATED)
-def create_client(payload: ClientCreate, db: DbSession, current: AdminUser) -> dict:
-    row = Client(
-        name=payload.name.strip(),
-        rfc=(payload.rfc or "").strip().upper() or None,
-        email=payload.email.strip().lower(),
-        responsible_name=(payload.responsible_name or "").strip() or None,
-        status=payload.status or "active",
-    )
-    db.add(row)
-    try:
-        db.flush()
-    except IntegrityError as exc:
-        db.rollback()
-        raise HTTPException(
-            status.HTTP_409_CONFLICT, detail="RFC ya está en uso."
-        ) from exc
-    _audit_admin(
-        db,
-        actor=current,
-        action="admin.client.created",
-        entity_type="client",
-        entity_id=row.id,
-        before=None,
-        after=_client_to_dict(row),
-    )
-    db.commit()
-    db.refresh(row)
-    return _client_to_dict(row)
-
-
 # ---------------------------------------------------------------------------
-# Item 8 — onboard a new client end-to-end
+# Item 8 v2 — unified add-user flow
 # ---------------------------------------------------------------------------
+#
+# Single endpoint that handles both clients and providers. Replaces:
+#   * POST /admin/clients          (silent client create, no email)
+#   * POST /admin/clients/provision (client provision with reset link)
+# Per Junta 2026-05-26 lock — see project-sprint-2026-05-26 memory.
+#
+# Generates a real plaintext temp password, bcrypts it onto the User
+# row, returns the plaintext in the response (one-time view, shown to
+# the admin so they can hand it to the recipient over WhatsApp if SMTP
+# skipped) AND emails it. The recipient logs in with the temp password
+# once and is forced through ``/activate`` by ``must_change_password``.
 
 
-class ProvisionClientPayload(BaseModel):
-    """Single-call client onboarding.
+class ProvisionUserPayload(BaseModel):
+    """Body for ``POST /admin/users``.
 
-    Creates the ``Client`` row, the matching client-kind
-    ``Organization``, the first ``client_admin`` ``User`` (forced to
-    rotate their password on first login), a one-time
-    ``PasswordResetToken``, and ships an onboarding email pointing the
-    new admin at ``/reset-password?token=…`` so they can set their
-    password, accept the legal terms, and complete their fiscal
-    profile.
+    ``role`` switches the downstream stack:
+      * ``client`` → Client + Organization(kind=client) + Membership(client_admin)
+      * ``provider`` → Vendor + ProviderWorkspace(owner_user_id=user.id)
+        attached to the requested ``client_id``.
+
+    Email + name are common to both roles. Role-specific fields are
+    optional at the Pydantic layer; the handler validates the right
+    subset based on ``role`` and returns a clear 422 otherwise.
     """
 
-    client_name: str = Field(min_length=2, max_length=255)
-    rfc: str | None = Field(default=None, max_length=13)
-    client_email: EmailStr = Field(
-        ...,
-        description=(
-            "Email the onboarding link is sent to. Becomes both the "
-            "Client.email contact AND the first client_admin User's "
-            "login identity unless ``admin_user_email`` is supplied "
-            "explicitly."
-        ),
-    )
-    admin_full_name: str = Field(min_length=2, max_length=255)
-    admin_user_email: EmailStr | None = Field(
+    full_name: str = Field(min_length=2, max_length=255)
+    email: EmailStr = Field(...)
+    role: Literal["client", "provider"] = Field(...)
+
+    # --- client-only fields ---
+    client_name: str | None = Field(default=None, max_length=255)
+    client_rfc: str | None = Field(default=None, max_length=13)
+
+    # --- provider-only fields ---
+    vendor_name: str | None = Field(default=None, max_length=255)
+    vendor_rfc: str | None = Field(default=None, max_length=13)
+    persona_type: Literal["moral", "fisica"] | None = Field(default=None)
+    contact_phone: str | None = Field(default=None, max_length=30)
+    parent_client_id: str | None = Field(
         default=None,
         description=(
-            "Override for the user account email. Defaults to "
-            "``client_email`` — the common case where the same person "
-            "owns the operations and the inbox."
+            "Required when role=='provider'. The Vendor row is anchored "
+            "under this client; the provider's portal session will see "
+            "the documents belonging to this client's workspace."
         ),
     )
 
 
-class ProvisionClientResponse(BaseModel):
-    client_id: str
-    organization_id: str
+class ProvisionUserResponse(BaseModel):
+    """Result of ``POST /admin/users``.
+
+    ``temp_password`` is the freshly-generated plaintext, returned ONCE
+    for the admin's confirmation screen. Never persisted in this shape
+    — the User row only carries the bcrypt hash.
+    """
+
     user_id: str
+    role: Literal["client", "provider"]
+    email: str
+    temp_password: str
+    login_url: str
     email_status: str
     email_error: str | None = None
-    onboarding_url: str
-    expires_at: datetime
+    # Role-specific id of the entity the user was attached to.
+    client_id: str | None = None
+    organization_id: str | None = None
+    vendor_id: str | None = None
+    workspace_id: str | None = None
 
 
 @router.post(
-    "/clients/provision",
-    response_model=ProvisionClientResponse,
+    "/users",
+    response_model=ProvisionUserResponse,
     status_code=status.HTTP_201_CREATED,
-    summary="Create a new client + admin user and send the onboarding email",
+    summary="Provision a new user (client or provider) with temp credentials",
 )
-def provision_client(
-    payload: ProvisionClientPayload,
+def provision_user(
+    payload: ProvisionUserPayload,
     db: DbSession,
     current: AdminUser,
-) -> ProvisionClientResponse:
-    """Spin up a brand-new client tenant from a single admin action.
+) -> ProvisionUserResponse:
+    """Create a new User (client_admin or provider) end-to-end.
 
-    The flow:
+    Shared steps:
+      1. Validate role-specific required fields.
+      2. Reject duplicate email (409).
+      3. Mint a 14-char plaintext temp password; bcrypt onto the User.
+      4. Send the welcome email with the plaintext + login URL.
+      5. Audit ``admin.user.provisioned`` with the role + outcome.
 
-    1. Insert ``Client`` (unique on RFC, conflict → 409).
-    2. Insert ``Organization`` (kind='client', linked to the client).
-    3. Insert ``User`` with ``must_change_password=True`` and a
-       throw-away unusable password hash — the user MUST go through
-       the reset link to log in.
-    4. Insert ``Membership`` linking the user to the org as
-       ``client_admin``.
-    5. Mint a ``PasswordResetToken`` and email the activation link to
-       ``client_email``. The email also tells the recipient what to
-       expect: set a password, accept the legal terms, complete the
-       fiscal profile.
+    Role=client extra:
+      * Insert Client + Organization(kind=client) + Membership(client_admin).
 
-    The response carries the raw onboarding URL so the admin can
-    copy/paste it as a fallback if SMTP delivery skipped (typical in
-    dev).
+    Role=provider extra:
+      * Resolve ``parent_client_id`` against an existing Client row.
+      * Insert Vendor under that client + ProviderWorkspace with
+        ``owner_user_id=user.id`` so ``/portal/enter`` recognises the
+        provider. No Membership/Organization — the existing portal
+        cookie path is the auth carrier for /portal endpoints.
+
+    Returns the plaintext temp password ONCE for the admin's
+    confirmation surface; the User row stores only the bcrypt hash.
     """
-    name = payload.client_name.strip()
-    rfc_value = (payload.rfc or "").strip().upper() or None
-    client_email = payload.client_email.strip().lower()
-    admin_email = (payload.admin_user_email or payload.client_email).strip().lower()
-    admin_full_name = payload.admin_full_name.strip()
+    full_name = payload.full_name.strip()
+    email = payload.email.strip().lower()
 
-    # ---- Client row -------------------------------------------------
-    client_row = Client(
-        name=name,
-        rfc=rfc_value,
-        email=client_email,
-        responsible_name=admin_full_name,
-        status="active",
-    )
-    db.add(client_row)
-    try:
-        db.flush()
-    except IntegrityError as exc:
-        db.rollback()
-        raise HTTPException(
-            status.HTTP_409_CONFLICT, detail="RFC ya está en uso."
-        ) from exc
-
-    # ---- Organization (tenant container) ----------------------------
-    org = Organization(
-        name=name,
-        kind="client",
-        client_id=client_row.id,
-        status="active",
-    )
-    db.add(org)
-    db.flush()
-
-    # ---- User (login identity) --------------------------------------
-    existing_user = db.scalar(select(User).where(User.email == admin_email))
+    # ---- Reject duplicate email before any inserts. ----------------
+    existing_user = db.scalar(select(User).where(User.email == email))
     if existing_user is not None:
-        db.rollback()
         raise HTTPException(
             status.HTTP_409_CONFLICT,
             detail="Ya existe una cuenta con ese correo.",
         )
+
+    # ---- Mint the temp password + User row. ------------------------
+    temp_password = generate_temp_password()
     user = User(
-        email=admin_email,
-        # Unusable placeholder — the user cannot log in with this
-        # hash; they MUST use the reset link. The set-password
-        # endpoint replaces it with a real bcrypt hash.
-        password_hash="!locked-pending-onboarding",
-        full_name=admin_full_name,
+        email=email,
+        password_hash=hash_password(temp_password),
+        full_name=full_name,
         status="active",
         must_change_password=True,
     )
     db.add(user)
     db.flush()
 
-    # ---- Membership -------------------------------------------------
-    membership = Membership(
-        user_id=user.id,
-        organization_id=org.id,
-        role=MembershipRole.CLIENT_ADMIN.value,
-        status="active",
-    )
-    db.add(membership)
-    db.flush()
+    client_id: str | None = None
+    organization_id: str | None = None
+    vendor_id: str | None = None
+    workspace_id: str | None = None
+    welcome_org_name: str | None = None
 
-    # ---- One-time activation token ----------------------------------
-    raw_token = generate_password_reset_token()
-    now = datetime.now(UTC)
-    expires_at = now + timedelta(minutes=settings.PASSWORD_RESET_EXPIRES_MINUTES)
-    reset_token = PasswordResetToken(
-        user_id=user.id,
-        email=user.email,
-        token_hash=hash_password_reset_token(raw_token),
-        expires_at=expires_at,
-        delivery_status="pending",
-    )
-    db.add(reset_token)
-    db.flush()
+    if payload.role == "client":
+        if not payload.client_name or not payload.client_name.strip():
+            db.rollback()
+            raise HTTPException(
+                status.HTTP_422_UNPROCESSABLE_ENTITY,
+                detail="Para un cliente, ``client_name`` es obligatorio.",
+            )
+        name = payload.client_name.strip()
+        rfc_value = (payload.client_rfc or "").strip().upper() or None
+        client_row = Client(
+            name=name,
+            rfc=rfc_value,
+            email=email,
+            responsible_name=full_name,
+            status="active",
+        )
+        db.add(client_row)
+        try:
+            db.flush()
+        except IntegrityError as exc:
+            db.rollback()
+            raise HTTPException(
+                status.HTTP_409_CONFLICT, detail="RFC ya está en uso."
+            ) from exc
+        org = Organization(
+            name=name, kind="client", client_id=client_row.id, status="active"
+        )
+        db.add(org)
+        db.flush()
+        db.add(
+            Membership(
+                user_id=user.id,
+                organization_id=org.id,
+                role=MembershipRole.CLIENT_ADMIN.value,
+                status="active",
+            )
+        )
+        db.flush()
+        client_id = client_row.id
+        organization_id = org.id
+        welcome_org_name = name
+    else:  # role == "provider"
+        if not payload.vendor_name or not payload.parent_client_id:
+            db.rollback()
+            raise HTTPException(
+                status.HTTP_422_UNPROCESSABLE_ENTITY,
+                detail=(
+                    "Para un proveedor, ``vendor_name`` y "
+                    "``parent_client_id`` son obligatorios."
+                ),
+            )
+        parent_client = db.get(Client, payload.parent_client_id)
+        if parent_client is None:
+            db.rollback()
+            raise HTTPException(
+                status.HTTP_404_NOT_FOUND,
+                detail="Cliente padre no encontrado.",
+            )
+        v_name = payload.vendor_name.strip()
+        v_rfc = (payload.vendor_rfc or "").strip().upper() or None
+        if not v_rfc:
+            db.rollback()
+            raise HTTPException(
+                status.HTTP_422_UNPROCESSABLE_ENTITY,
+                detail="Para un proveedor, ``vendor_rfc`` es obligatorio.",
+            )
+        vendor = Vendor(
+            client_id=parent_client.id,
+            name=v_name,
+            rfc=v_rfc,
+            contact_name=full_name,
+            contact_email=email,
+            contact_phone=(payload.contact_phone or "").strip() or None,
+            persona_type=payload.persona_type or "moral",
+            status="active",
+        )
+        db.add(vendor)
+        try:
+            db.flush()
+        except IntegrityError as exc:
+            db.rollback()
+            raise HTTPException(
+                status.HTTP_409_CONFLICT,
+                detail=(
+                    "Ya existe un proveedor con ese RFC para el cliente."
+                ),
+            ) from exc
+        workspace = ProviderWorkspace(
+            client_id=parent_client.id,
+            vendor_id=vendor.id,
+            persona_type=payload.persona_type or "moral",
+            display_name=v_name,
+            access_token=secrets.token_urlsafe(32),
+            owner_user_id=user.id,
+        )
+        db.add(workspace)
+        db.flush()
+        vendor_id = vendor.id
+        workspace_id = workspace.id
+        welcome_org_name = v_name
 
-    onboarding_url = (
-        f"{settings.FRONTEND_BASE_URL.rstrip('/')}/reset-password"
-        f"?token={raw_token}"
+    login_url = f"{settings.FRONTEND_BASE_URL.rstrip('/')}/login"
+    delivery = send_welcome_with_temp_password_email(
+        to_email=email,
+        full_name=full_name,
+        login_url=login_url,
+        temp_password=temp_password,
+        role=payload.role,
+        organization_name=welcome_org_name,
     )
-
-    # ---- Send the welcome email -------------------------------------
-    subject = f"Bienvenido a CheckWise — termina tu alta, {admin_full_name}"
-    body = "\n".join(
-        [
-            f"Hola {admin_full_name},",
-            "",
-            (
-                f"Tu empresa {name} ya tiene acceso a CheckWise, la "
-                "plataforma con la que LegalShelf revisa tu cumplimiento "
-                "REPSE y el de tus proveedores."
-            ),
-            "",
-            "Para activar tu cuenta:",
-            "",
-            f"  1. Abre este enlace: {onboarding_url}",
-            "  2. Define una contraseña segura.",
-            "  3. Acepta los términos de uso y aviso de privacidad.",
-            "  4. Completa los datos fiscales de tu empresa (RFC, razón social y domicilio fiscal).",
-            "",
-            f"Tu correo de acceso es: {user.email}",
-            "",
-            (
-                f"El enlace vence en "
-                f"{settings.PASSWORD_RESET_EXPIRES_MINUTES} minutos. Si "
-                "ya venció, pide otro desde la pantalla de inicio de "
-                "sesión usando 'olvidé mi contraseña'."
-            ),
-            "",
-            "Estamos aquí para apoyarte — responde este correo si necesitas ayuda.",
-            "",
-            "Equipo LegalShelf · CheckWise",
-        ]
-    )
-    delivery = send_transactional_email(
-        to_email=user.email,
-        subject=subject,
-        body=body,
-    )
-    reset_token.delivery_status = delivery.status
-    reset_token.delivery_error = delivery.error
 
     _audit_admin(
         db,
         actor=current,
-        action="admin.client.provisioned",
-        entity_type="client",
-        entity_id=client_row.id,
+        action="admin.user.provisioned",
+        entity_type="user",
+        entity_id=user.id,
         before=None,
         after={
-            "client_id": client_row.id,
-            "client_name": name,
-            "rfc": rfc_value,
-            "organization_id": org.id,
+            "role": payload.role,
             "user_id": user.id,
             "user_email": user.email,
-            "reset_token_id": reset_token.id,
+            "client_id": client_id,
+            "organization_id": organization_id,
+            "vendor_id": vendor_id,
+            "workspace_id": workspace_id,
             "email_delivery_status": delivery.status,
         },
     )
     db.commit()
 
-    return ProvisionClientResponse(
-        client_id=client_row.id,
-        organization_id=org.id,
+    return ProvisionUserResponse(
         user_id=user.id,
+        role=payload.role,
+        email=email,
+        temp_password=temp_password,
+        login_url=login_url,
         email_status=delivery.status,
         email_error=delivery.error,
-        onboarding_url=onboarding_url,
-        expires_at=expires_at,
+        client_id=client_id,
+        organization_id=organization_id,
+        vendor_id=vendor_id,
+        workspace_id=workspace_id,
     )
 
 

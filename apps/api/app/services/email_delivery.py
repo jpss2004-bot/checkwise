@@ -68,6 +68,75 @@ def send_password_reset_email(*, to_email: str, reset_url: str) -> EmailDelivery
     )
 
 
+def send_welcome_with_temp_password_email(
+    *,
+    to_email: str,
+    full_name: str,
+    login_url: str,
+    temp_password: str,
+    role: str,
+    organization_name: str | None = None,
+) -> EmailDeliveryResult:
+    """Welcome email shipped by the unified ``POST /admin/users`` flow.
+
+    Carries the freshly-minted temporary credentials in plaintext.
+    Recipient logs in with them, the backend's ``must_change_password``
+    flag forces them through ``/activate``, and the temp password is
+    discarded on first password rotation.
+
+    Role drives the closing copy (client_admin → finish company
+    profile + add providers; provider → upload first batch of
+    documents). Everything else is shared.
+    """
+    if role == "client":
+        next_step = (
+            "3. Completa los datos fiscales de tu empresa y agrega a "
+            "tus proveedores desde tu perfil."
+        )
+        subject = (
+            f"Bienvenido a CheckWise — tus credenciales para {full_name}"
+        )
+    else:
+        next_step = (
+            "3. Sube los documentos REPSE pendientes desde tu espacio "
+            "de proveedor."
+        )
+        subject = "Bienvenido a CheckWise — tus credenciales de proveedor"
+    org_line = (
+        f"Tu empresa {organization_name} ya está registrada en CheckWise."
+        if organization_name
+        else "Tu cuenta de CheckWise ya está activa."
+    )
+    body = "\n".join(
+        [
+            f"Hola {full_name},",
+            "",
+            org_line,
+            "",
+            "Para iniciar sesión por primera vez:",
+            "",
+            f"  1. Abre: {login_url}",
+            f"  2. Inicia sesión con tu correo ({to_email}) y la "
+            f"contraseña temporal: {temp_password}",
+            next_step,
+            "",
+            (
+                "Apenas inicies sesión te pediremos cambiar la "
+                "contraseña temporal por una propia."
+            ),
+            "",
+            "Si necesitas ayuda, responde este correo y te apoyamos.",
+            "",
+            "Equipo LegalShelf · CheckWise",
+        ]
+    )
+    return send_transactional_email(
+        to_email=to_email,
+        subject=subject,
+        body=body,
+    )
+
+
 def send_transactional_email(
     *,
     to_email: str,

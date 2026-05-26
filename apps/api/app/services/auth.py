@@ -72,6 +72,29 @@ def hash_password_reset_token(token: str) -> str:
     return hashlib.sha256(token.encode("utf-8")).hexdigest()
 
 
+# Characters used to compose admin-generated temporary passwords.
+# Excludes the visually ambiguous pairs (``0/O``, ``1/l/I``) so the
+# password can be read off the admin success screen or off a SMS /
+# WhatsApp message without misreads. Includes lower + upper + digits
+# but not punctuation — punctuation in plaintext-emailed credentials
+# is a support call magnet ("¿el caracter raro es un punto o coma?").
+_TEMP_PASSWORD_ALPHABET = "abcdefghijkmnopqrstuvwxyzABCDEFGHJKLMNPQRSTUVWXYZ23456789"
+
+
+def generate_temp_password(length: int = 14) -> str:
+    """Mint a one-time human-readable temporary password.
+
+    Used by the admin user-provisioning flow. The returned plaintext is
+    shown to the admin once and emailed to the recipient; the User row
+    stores only the bcrypt hash. Combined with
+    ``must_change_password=True`` this gives the recipient exactly one
+    successful login before they are forced through ``/activate``.
+    """
+    if length < 8:
+        raise ValueError("temp password must be at least 8 chars")
+    return "".join(secrets.choice(_TEMP_PASSWORD_ALPHABET) for _ in range(length))
+
+
 # ---------------------------------------------------------------------------
 # JWT
 # ---------------------------------------------------------------------------
