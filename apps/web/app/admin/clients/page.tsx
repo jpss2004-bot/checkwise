@@ -16,6 +16,8 @@ import {
   type AdminClient,
   createClient,
   listClients,
+  provisionClient,
+  type ProvisionClientResponse,
   updateClient,
 } from "@/lib/api/admin";
 
@@ -25,6 +27,10 @@ export default function AdminClientsPage() {
   const [error, setError] = useState<string | null>(null);
   const [editing, setEditing] = useState<AdminClient | null>(null);
   const [createOpen, setCreateOpen] = useState(false);
+  const [provisionOpen, setProvisionOpen] = useState(false);
+  const [lastProvision, setLastProvision] = useState<ProvisionClientResponse | null>(
+    null,
+  );
   const [search, setSearch] = useState("");
 
   async function refresh() {
@@ -60,28 +66,103 @@ export default function AdminClientsPage() {
       title="Clientes"
       description="Empresas dadas de alta en CheckWise. Cada cliente puede tener uno o varios proveedores REPSE bajo gestión."
       actions={
-        <Button
-          size="sm"
-          onClick={() => {
-            setEditing(null);
-            setCreateOpen((v) => !v);
-          }}
-        >
-          {createOpen ? (
-            <>
-              <X className="h-4 w-4" weight="bold" aria-hidden="true" />
-              Cancelar
-            </>
-          ) : (
-            <>
-              <Plus className="h-4 w-4" weight="bold" aria-hidden="true" />
-              Nuevo cliente
-            </>
-          )}
-        </Button>
+        <div className="flex gap-2">
+          <Button
+            size="sm"
+            onClick={() => {
+              setEditing(null);
+              setCreateOpen(false);
+              setProvisionOpen((v) => !v);
+            }}
+          >
+            {provisionOpen ? (
+              <>
+                <X className="h-4 w-4" weight="bold" aria-hidden="true" />
+                Cancelar
+              </>
+            ) : (
+              <>
+                <Plus className="h-4 w-4" weight="bold" aria-hidden="true" />
+                Onboarding nuevo cliente
+              </>
+            )}
+          </Button>
+          <Button
+            size="sm"
+            variant="outline"
+            onClick={() => {
+              setEditing(null);
+              setProvisionOpen(false);
+              setCreateOpen((v) => !v);
+            }}
+          >
+            {createOpen ? "Cancelar" : "Solo alta (sin email)"}
+          </Button>
+        </div>
       }
     >
       <div className="space-y-5">
+        {provisionOpen && (
+          <Surface
+            title="Onboarding de cliente nuevo"
+            icon={IdentificationCard}
+            description="Crea el cliente, su organización y la primera cuenta de administrador. Le enviaremos un correo con el enlace de activación para que defina contraseña, acepte términos y complete sus datos fiscales."
+          >
+            <ProvisionForm
+              onSubmit={async (data) => {
+                const result = await provisionClient(data);
+                setLastProvision(result);
+                setProvisionOpen(false);
+                await refresh();
+              }}
+              onCancel={() => setProvisionOpen(false)}
+            />
+          </Surface>
+        )}
+
+        {lastProvision && (
+          <Surface
+            title="Onboarding enviado"
+            icon={IdentificationCard}
+            actions={
+              <button
+                type="button"
+                className="text-xs font-medium text-[color:var(--text-tertiary)] hover:underline"
+                onClick={() => setLastProvision(null)}
+              >
+                Cerrar
+              </button>
+            }
+          >
+            <div className="space-y-2 text-sm">
+              <p className="text-[color:var(--text-primary)]">
+                Cliente creado.{" "}
+                {lastProvision.email_status === "sent" ? (
+                  <span className="text-[color:var(--status-success-text)]">
+                    Correo de onboarding enviado.
+                  </span>
+                ) : (
+                  <span className="text-[color:var(--status-warning-text)]">
+                    El correo no se envió ({lastProvision.email_status}). Usa
+                    el enlace de abajo como respaldo.
+                  </span>
+                )}
+              </p>
+              <p className="break-all rounded-md border border-[color:var(--border-subtle)] bg-[color:var(--surface-page)] p-2 font-mono text-[11px] text-[color:var(--text-secondary)]">
+                {lastProvision.onboarding_url}
+              </p>
+              {lastProvision.email_error ? (
+                <p className="text-[11px] text-[color:var(--text-tertiary)]">
+                  Error: {lastProvision.email_error}
+                </p>
+              ) : null}
+              <p className="font-mono text-[10px] text-[color:var(--text-tertiary)]">
+                Vence: {new Date(lastProvision.expires_at).toLocaleString("es-MX")}
+              </p>
+            </div>
+          </Surface>
+        )}
+
         {(createOpen || editing) && (
           <Surface
             title={editing ? `Editar ${editing.name}` : "Nuevo cliente"}
@@ -325,6 +406,148 @@ function ClientForm({
       <div className="flex gap-2">
         <Button type="submit" size="sm" loading={submitting}>
           {mode === "create" ? "Crear" : "Guardar cambios"}
+        </Button>
+        <Button type="button" size="sm" variant="outline" onClick={onCancel}>
+          Cancelar
+        </Button>
+      </div>
+    </form>
+  );
+}
+
+function ProvisionForm({
+  onSubmit,
+  onCancel,
+}: {
+  onSubmit: (data: {
+    client_name: string;
+    rfc: string | null;
+    client_email: string;
+    admin_full_name: string;
+    admin_user_email: string | null;
+  }) => Promise<void>;
+  onCancel: () => void;
+}) {
+  const [clientName, setClientName] = useState("");
+  const [rfc, setRfc] = useState("");
+  const [clientEmail, setClientEmail] = useState("");
+  const [adminFullName, setAdminFullName] = useState("");
+  const [overrideAdminEmail, setOverrideAdminEmail] = useState(false);
+  const [adminEmail, setAdminEmail] = useState("");
+  const [submitting, setSubmitting] = useState(false);
+  const [err, setErr] = useState<string | null>(null);
+
+  async function handleSubmit(e: React.FormEvent) {
+    e.preventDefault();
+    setSubmitting(true);
+    setErr(null);
+    try {
+      await onSubmit({
+        client_name: clientName.trim(),
+        rfc: rfc.trim().toUpperCase() || null,
+        client_email: clientEmail.trim().toLowerCase(),
+        admin_full_name: adminFullName.trim(),
+        admin_user_email: overrideAdminEmail
+          ? adminEmail.trim().toLowerCase() || null
+          : null,
+      });
+      setClientName("");
+      setRfc("");
+      setClientEmail("");
+      setAdminFullName("");
+      setAdminEmail("");
+      setOverrideAdminEmail(false);
+    } catch (error) {
+      setErr(error instanceof Error ? error.message : "Error al provisionar.");
+    } finally {
+      setSubmitting(false);
+    }
+  }
+
+  return (
+    <form onSubmit={handleSubmit} className="space-y-4">
+      <div className="grid gap-3 sm:grid-cols-2">
+        <div className="space-y-1">
+          <Label htmlFor="prov-name">Nombre de la empresa</Label>
+          <Input
+            id="prov-name"
+            value={clientName}
+            onChange={(e) => setClientName(e.target.value)}
+            required
+            placeholder="Ej. Acero del Norte, S.A. de C.V."
+          />
+        </div>
+        <div className="space-y-1">
+          <Label htmlFor="prov-rfc">RFC (opcional)</Label>
+          <Input
+            id="prov-rfc"
+            value={rfc}
+            onChange={(e) => setRfc(e.target.value.toUpperCase())}
+            maxLength={13}
+            className="font-mono"
+            placeholder="ABC123456XYZ"
+          />
+          <p className="text-[10px] text-[color:var(--text-tertiary)]">
+            Puedes dejarlo en blanco — el cliente lo confirmará en su
+            primer login.
+          </p>
+        </div>
+        <div className="space-y-1">
+          <Label htmlFor="prov-admin-name">Nombre del administrador</Label>
+          <Input
+            id="prov-admin-name"
+            value={adminFullName}
+            onChange={(e) => setAdminFullName(e.target.value)}
+            required
+            placeholder="Ej. María Pérez"
+          />
+        </div>
+        <div className="space-y-1">
+          <Label htmlFor="prov-email">Correo de contacto / acceso</Label>
+          <Input
+            id="prov-email"
+            type="email"
+            value={clientEmail}
+            onChange={(e) => setClientEmail(e.target.value)}
+            required
+            autoComplete="email"
+            placeholder="maria@empresa.com"
+          />
+          <p className="text-[10px] text-[color:var(--text-tertiary)]">
+            Aquí enviamos el correo de onboarding y este será el email
+            con el que entra a CheckWise.
+          </p>
+        </div>
+      </div>
+
+      <label className="flex items-center gap-2 text-xs text-[color:var(--text-secondary)]">
+        <input
+          type="checkbox"
+          checked={overrideAdminEmail}
+          onChange={(e) => setOverrideAdminEmail(e.target.checked)}
+          className="h-3.5 w-3.5 accent-[color:var(--interactive-primary)]"
+        />
+        Usar un correo distinto para la cuenta de acceso
+      </label>
+      {overrideAdminEmail ? (
+        <div className="space-y-1">
+          <Label htmlFor="prov-admin-email">Correo de la cuenta admin</Label>
+          <Input
+            id="prov-admin-email"
+            type="email"
+            value={adminEmail}
+            onChange={(e) => setAdminEmail(e.target.value)}
+            placeholder="admin@empresa.com"
+          />
+        </div>
+      ) : null}
+
+      {err ? (
+        <p className="text-xs text-[color:var(--status-error-text)]">{err}</p>
+      ) : null}
+      <div className="flex gap-2">
+        <Button type="submit" size="sm" loading={submitting}>
+          Provisionar y enviar correo
         </Button>
         <Button type="button" size="sm" variant="outline" onClick={onCancel}>
           Cancelar

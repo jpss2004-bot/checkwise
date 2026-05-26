@@ -111,6 +111,38 @@ export async function updateClient(
   });
 }
 
+/**
+ * Item 8 — provision a new client end-to-end: create the Client row,
+ * the matching Organization, the first client_admin User (locked
+ * until first login), a single-use reset token, and send the
+ * onboarding email. The response carries the raw onboarding URL so
+ * the admin can copy/paste it as a fallback when SMTP is skipped
+ * (typical in dev) or when the recipient says the email never
+ * arrived.
+ */
+export type ProvisionClientResponse = {
+  client_id: string;
+  organization_id: string;
+  user_id: string;
+  email_status: string;
+  email_error: string | null;
+  onboarding_url: string;
+  expires_at: string;
+};
+
+export async function provisionClient(body: {
+  client_name: string;
+  rfc?: string | null;
+  client_email: string;
+  admin_full_name: string;
+  admin_user_email?: string | null;
+}): Promise<ProvisionClientResponse> {
+  return fetchJson("/api/v1/admin/clients/provision", {
+    method: "POST",
+    body: JSON.stringify(body),
+  });
+}
+
 // ---------------------------------------------------------------------------
 // Vendors
 // ---------------------------------------------------------------------------

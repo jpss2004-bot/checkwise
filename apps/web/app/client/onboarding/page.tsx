@@ -51,6 +51,10 @@ export default function ClientOnboardingPage() {
   const [fiscalAddress, setFiscalAddress] = useState("");
   const [phone, setPhone] = useState("");
   const [notes, setNotes] = useState("");
+  // Item 8 — T&C acceptance is required on the first save. Returning
+  // visits do not re-prompt (acceptance is already on file via the
+  // audit row written when onboarding_completed_at first became set).
+  const [termsAccepted, setTermsAccepted] = useState(false);
 
   const [saving, setSaving] = useState(false);
   const [saveError, setSaveError] = useState<string | null>(null);
@@ -100,6 +104,7 @@ export default function ClientOnboardingPage() {
         fiscal_address: fiscalAddress.trim() || null,
         phone: phone.trim() || null,
         notes: notes.trim() || null,
+        terms_accepted: termsAccepted,
       });
       setProfile(updated);
       setJustSaved(true);
@@ -263,29 +268,81 @@ export default function ClientOnboardingPage() {
                     {saveError}
                   </p>
                 ) : null}
-                <footer className="mt-4 flex items-center justify-end gap-3">
-                  {justSaved ? (
-                    <p
-                      className="inline-flex items-center gap-1.5 text-xs font-medium text-[color:var(--status-success-text)]"
-                      role="status"
-                    >
-                      <CheckCircle className="h-4 w-4" weight="fill" aria-hidden="true" />
-                      Guardado
-                    </p>
-                  ) : null}
-                  <Button type="submit" loading={saving} size="lg">
-                    {isFirstTime ? "Activar mi portafolio" : "Guardar cambios"}
-                    {!saving ? (
-                      <ArrowRight
-                        className="h-4 w-4"
-                        weight="bold"
-                        aria-hidden="true"
-                      />
-                    ) : null}
-                  </Button>
-                </footer>
               </Surface>
             </form>
+
+            {isFirstTime ? (
+              <Surface title="Términos y privacidad" icon={Info}>
+                <p className="text-sm text-[color:var(--text-secondary)]">
+                  Para activar tu portafolio necesitamos que aceptes
+                  nuestros términos. Léelos antes de marcar la casilla
+                  — son cortos.
+                </p>
+                <div className="mt-3 flex flex-wrap gap-2">
+                  <Button asChild variant="outline" size="sm">
+                    <Link href="/legal/terminos" target="_blank">
+                      Términos de uso
+                    </Link>
+                  </Button>
+                  <Button asChild variant="outline" size="sm">
+                    <Link href="/legal/privacidad" target="_blank">
+                      Aviso de privacidad
+                    </Link>
+                  </Button>
+                  <Button asChild variant="outline" size="sm">
+                    <Link href="/legal/consentimiento" target="_blank">
+                      Aviso de consentimiento
+                    </Link>
+                  </Button>
+                </div>
+                <label className="mt-4 flex items-start gap-2 text-sm text-[color:var(--text-primary)]">
+                  <input
+                    type="checkbox"
+                    checked={termsAccepted}
+                    onChange={(e) => setTermsAccepted(e.target.checked)}
+                    className="mt-0.5 h-4 w-4 accent-[color:var(--interactive-primary)]"
+                  />
+                  <span>
+                    He leído y acepto los términos de uso, el aviso de
+                    privacidad y el aviso de consentimiento de CheckWise.
+                  </span>
+                </label>
+              </Surface>
+            ) : null}
+
+            <div className="flex items-center justify-end gap-3">
+              {justSaved ? (
+                <p
+                  className="inline-flex items-center gap-1.5 text-xs font-medium text-[color:var(--status-success-text)]"
+                  role="status"
+                >
+                  <CheckCircle className="h-4 w-4" weight="fill" aria-hidden="true" />
+                  Guardado
+                </p>
+              ) : null}
+              <Button
+                type="button"
+                loading={saving}
+                size="lg"
+                disabled={
+                  saving ||
+                  (isFirstTime &&
+                    (!termsAccepted ||
+                      !responsibleName.trim() ||
+                      !fiscalAddress.trim()))
+                }
+                onClick={(e) => handleSubmit(e as unknown as FormEvent)}
+              >
+                {isFirstTime ? "Activar mi portafolio" : "Guardar cambios"}
+                {!saving ? (
+                  <ArrowRight
+                    className="h-4 w-4"
+                    weight="bold"
+                    aria-hidden="true"
+                  />
+                ) : null}
+              </Button>
+            </div>
           </>
         ) : null}
       </div>
