@@ -6,7 +6,7 @@ How to work on this repo without breaking anything important. Read once, refer b
 
 ```bash
 bash apps/api/scripts/dev_setup.sh      # venv, deps, alembic migrate, seed
-cd frontend && npm install && cd ..
+cd apps/web && npm install && cd ../..
 bash dev.sh                            # boots both services
 ```
 
@@ -18,14 +18,14 @@ Run before every commit. CI does the same.
 
 ```bash
 # Backend
-cd backend
+cd apps/api
 .venv/bin/ruff check .
-.venv/bin/pytest -q
+.venv/bin/python -m pytest -q
 
 # Frontend
-cd frontend
+cd apps/web
 node_modules/.bin/tsc --noEmit
-node_modules/.bin/next lint --quiet
+node_modules/.bin/eslint . --quiet
 node_modules/.bin/next build
 ```
 
@@ -76,7 +76,7 @@ PDFs always live in storage (local FS in dev, S3-compatible in prod via `STORAGE
 Never edit a merged migration. Add a new one.
 
 ```bash
-cd backend
+cd apps/api
 .venv/bin/alembic revision --autogenerate -m "describe the change"
 .venv/bin/alembic upgrade head
 ```
@@ -99,7 +99,7 @@ State transitions worth tracking go through `services/audit_log.add_audit_event`
 ## Frontend layout
 
 ```
-frontend/
+apps/web/
 ├── app/                 routes only
 ├── components/
 │   ├── ui/              shadcn primitives

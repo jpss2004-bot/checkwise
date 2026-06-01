@@ -435,7 +435,7 @@ def main() -> int:
                 f"Organization   : {org.name} (id={org.id}) "
                 f"{'(created)' if org_created else '(reused existing)'}"
             )
-            print(f"Role           : client_admin")
+            print("Role           : client_admin")
             print(f"Portfolio set  : {args.portfolio} ({len(portfolio_spec)} vendor spec(s))")
             print(f"Workspaces new : {len(workspaces)}")
             print(f"Temp password  : {temp_password}")

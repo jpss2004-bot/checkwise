@@ -30,13 +30,12 @@ from unittest.mock import patch
 import pytest
 
 from app.core.config import Settings
+from app.services.document_intelligence import analyze_document_text
 from app.services.ocr import OcrResult, build_ocr_client_from_settings
 from app.services.pdf_validation import (
-    PdfInspectionResult,
     inspect_pdf_with_ocr_fallback,
 )
 from app.services.submission_service import status_from_inspection
-from app.services.document_intelligence import analyze_document_text
 
 FIXTURES_DIR = Path(__file__).parent / "fixtures" / "prevalidation"
 

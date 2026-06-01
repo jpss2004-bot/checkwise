@@ -52,7 +52,6 @@ from app.services.transactional_email import (
     email_renewal_threshold_crossed,
 )
 
-
 # ---------------------------------------------------------------------------
 # Template tests — pure functions, no DB
 # ---------------------------------------------------------------------------

@@ -48,5 +48,5 @@ echo "==> Loading dev seed"
 
 echo
 echo "Backend setup complete."
-echo "  start backend: cd backend && scripts/dev_start.sh"
-echo "  start frontend: cd frontend && npm run dev"
+echo "  start backend: cd apps/api && scripts/dev_start.sh"
+echo "  start frontend: cd apps/web && npm run dev"

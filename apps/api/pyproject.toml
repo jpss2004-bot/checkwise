@@ -74,3 +74,9 @@ select = ["E", "F", "I", "UP", "B"]
 # Test files: long lines are acceptable for assertion strings, seeded
 # fixtures, and descriptive parametrize ids.
 "tests/*.py" = ["E501"]
+# Operational scripts (one-off provisioning / seed tools): long lines
+# in log/print strings and policy-template literals are intentional.
+"scripts/*.py" = ["E501"]
+# Wise LLM system prompt: each rule is one paragraph by design so the
+# model sees coherent guidance, not arbitrary line wraps.
+"app/services/wise/ai.py" = ["E501"]

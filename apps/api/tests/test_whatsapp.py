@@ -8,6 +8,7 @@ Coverage targets the parts that don't need a live network:
 
 from __future__ import annotations
 
+import dataclasses
 from datetime import date
 from unittest.mock import patch
 
@@ -26,7 +27,6 @@ from app.services.whatsapp_templates import (
     build_renewal_threshold_components,
     build_reviewer_decision_components,
 )
-
 
 # ---------------------------------------------------------------------------
 # Phone normalization
@@ -202,5 +202,6 @@ def test_whatsapp_configured_reads_from_settings(monkeypatch):
 # Smoke sanity — type signature surface
 def test_delivery_result_dataclass_is_frozen():
     r = WhatsAppDeliveryResult(delivered=True, status="sent", message_id="m1")
-    with pytest.raises(Exception):
+    # Frozen dataclasses raise FrozenInstanceError on attribute assignment.
+    with pytest.raises(dataclasses.FrozenInstanceError):
         r.delivered = False  # type: ignore[misc]

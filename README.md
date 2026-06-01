@@ -180,12 +180,12 @@ Run before every commit / PR. CI runs the same.
 
 ```bash
 # Backend
-cd backend
+cd apps/api
 .venv/bin/ruff check .
-.venv/bin/pytest -q
+.venv/bin/python -m pytest -q
 
 # Frontend
-cd frontend
+cd apps/web
 node_modules/.bin/tsc --noEmit
 node_modules/.bin/eslint . --quiet
 node_modules/.bin/next build

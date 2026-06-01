@@ -19,7 +19,6 @@ from app.core.period_range import (
     period_overlaps_range,
 )
 
-
 # ---------------------------------------------------------------------------
 # period_date_range — canonical key resolution
 # ---------------------------------------------------------------------------

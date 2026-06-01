@@ -50,7 +50,6 @@ from app.models import (
     Document,
     DocumentStatusHistory,
     Institution,
-    Membership,
     Organization,
     Period,
     ProviderWorkspace,
@@ -453,8 +452,8 @@ def main() -> int:
     print("=" * 70)
     print("TEST PROVIDER ACCOUNT — save this NOW; the password is not shown again")
     print("=" * 70)
-    print(f"  Login URL    https://checkwise-six.vercel.app/login")
-    print(f"               (or your custom domain if set)")
+    print("  Login URL    https://checkwise-six.vercel.app/login")
+    print("               (or your custom domain if set)")
     print(f"  Email        {TEST_EMAIL}")
     print(f"  Password     {password}")
     print(f"  Workspace    {TEST_WORKSPACE_ID}")
@@ -467,7 +466,7 @@ def main() -> int:
         print("the left rail to see the populated provider Reports surface.")
     else:
         print("User already existed. If you need to reset the password, run:")
-        print(f"  UPDATE users SET password_hash = '<new bcrypt hash>'")
+        print("  UPDATE users SET password_hash = '<new bcrypt hash>'")
         print(f"  WHERE email = '{TEST_EMAIL}';")
     return 0
 

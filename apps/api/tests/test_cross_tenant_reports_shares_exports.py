@@ -56,7 +56,6 @@ from app.models import (
 )
 from app.services.auth import hash_password
 
-
 # ─── Fixtures ────────────────────────────────────────────────────
 
 

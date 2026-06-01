@@ -36,14 +36,14 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.api.v1.auth import CurrentUser, get_current_user
-from app.core.config import settings
-from app.core.rate_limit import enforce_ai_heavy_rate_limit
 from app.constants.reports import (
     ConversationRole,
     ReportAudience,
     ReportStatus,
     ReportVersionOrigin,
 )
+from app.core.config import settings
+from app.core.rate_limit import enforce_ai_heavy_rate_limit
 from app.db.session import SessionLocal, get_db
 from app.models.entities import Report, ReportExport, ReportShare, ReportVersion
 from app.schemas.reports import (
@@ -1856,7 +1856,9 @@ def delete_report_share(
     try:
         get_report(db, actor=_actor_from(current, db), report_id=share.report_id)
     except ReportNotFoundError as exc:
-        raise HTTPException(status.HTTP_404_NOT_FOUND, detail="Enlace compartido no encontrado.") from exc
+        raise HTTPException(
+            status.HTTP_404_NOT_FOUND, detail="Enlace compartido no encontrado."
+        ) from exc
     revoke_share(db, share=share)
     db.commit()
     return Response(status_code=status.HTTP_204_NO_CONTENT)

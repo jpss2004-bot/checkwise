@@ -345,7 +345,10 @@ def render_workspace_block(ctx: WiseWorkspaceContext) -> str:
             if ctx.onboarding_completed_at_iso
             else ""
         ),
-        f"- Cumplimiento global: {ctx.compliance_pct}% ({ctx.on_track}/{ctx.total_tracked} obligaciones al día)",
+        (
+            f"- Cumplimiento global: {ctx.compliance_pct}% "
+            f"({ctx.on_track}/{ctx.total_tracked} obligaciones al día)"
+        ),
         f"- Aprobados: {ctx.approved_count}",
         f"- En revisión: {ctx.in_review_count}",
         f"- Por atender (rechazado / aclaración / vencido / por subir): {ctx.needs_action_count}",

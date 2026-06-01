@@ -27,7 +27,10 @@ from __future__ import annotations
 
 from collections import defaultdict
 from datetime import UTC, date, datetime
-from typing import Annotated, Literal
+from typing import TYPE_CHECKING, Annotated, Literal
+
+if TYPE_CHECKING:
+    from app.services.audit_package import AuditPackageFilters
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Response, status
 from fastapi.responses import FileResponse
@@ -1091,7 +1094,9 @@ def _contracts_for_workspace(
                 submission_id=sub.id,
                 requirement_code=sub.requirement_code or "",
                 requirement_name=(
-                    sub.requirement.name if sub.requirement else (sub.requirement_code or "Contrato")
+                    sub.requirement.name
+                    if sub.requirement
+                    else (sub.requirement_code or "Contrato")
                 ),
                 status=sub.status,
                 filename=doc.original_filename,
