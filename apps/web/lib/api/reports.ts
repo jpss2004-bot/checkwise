@@ -283,6 +283,47 @@ export function regenerateBlock(
   );
 }
 
+// ─── R6 — copilot block-composition suggestions ──────────────────
+
+export interface BlockSuggestion {
+  /** Block type from the registry, e.g. "kpi_strip". */
+  type: string;
+  /** Validated config matching the catalog's input_schema. */
+  config: Record<string, unknown>;
+  /** One-sentence reason the model gave for proposing this block. */
+  rationale: string;
+}
+
+export interface SuggestBlocksResponse {
+  suggestions: BlockSuggestion[];
+  llm_backend: string;
+  model: string;
+}
+
+/**
+ * Ask the copilot for up to 4 block drafts to insert into the canvas.
+ * The backend forces tool-use against the block catalog so every
+ * returned draft is guaranteed to (a) reference a real block type
+ * and (b) carry a config that already passes the registry's
+ * JSON-schema. The frontend can splice them straight into the
+ * canvas without re-validating.
+ */
+export function suggestBlocks(
+  reportId: string,
+  body: { intent: string; canvas_summary?: Record<string, unknown> },
+): Promise<SuggestBlocksResponse> {
+  return fetchJson<SuggestBlocksResponse>(
+    `/api/v1/reports/${reportId}/copilot/suggest-blocks`,
+    {
+      method: "POST",
+      body: JSON.stringify({
+        intent: body.intent,
+        canvas_summary: body.canvas_summary ?? {},
+      }),
+    },
+  );
+}
+
 // ─── P1.7 — Refresh data (no LLM) ────────────────────────────────
 
 export interface RefreshedBlockSummary {

@@ -718,6 +718,18 @@ export function ReportEditor({
               reportId={reportId}
               content={content}
               onClose={() => setChatOpen(false)}
+              onInsertBlock={(block) => {
+                // R6: the copilot's suggestion card hands us a fully
+                // formed ReportBlock draft (id assigned, config already
+                // validated server-side against the catalog schema).
+                // Splicing it into content.blocks runs through the
+                // existing autosave path — the user can then drag it
+                // to its final position (R5) and Save the version.
+                onCanvasChange({
+                  ...content,
+                  blocks: [...content.blocks, block],
+                });
+              }}
             />
           )}
         </div>
