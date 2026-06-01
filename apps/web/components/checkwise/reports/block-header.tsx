@@ -9,6 +9,7 @@ import {
   Trash,
 } from "@phosphor-icons/react";
 import type { Icon } from "@phosphor-icons/react";
+import type { DragControls } from "motion/react";
 
 /**
  * Shared block chrome. Sits above each rendered block and carries the
@@ -34,6 +35,13 @@ interface BlockHeaderProps {
   onRegenerate?: () => void;
   onExplain?: () => void;
   regenerating?: boolean;
+  /**
+   * R5: motion/react drag controls owned by the parent Reorder.Item.
+   * When present, the DotsSixVertical handle initiates a drag via
+   * ``controls.start(event)``; when absent (e.g. locked block, read-
+   * only canvas) the handle renders as a passive visual cue.
+   */
+  dragControls?: DragControls;
 }
 
 export function BlockHeader({
@@ -47,6 +55,7 @@ export function BlockHeader({
   onRegenerate,
   onExplain,
   regenerating,
+  dragControls,
 }: BlockHeaderProps) {
   // F1 (2026-05-19 visual audit): in read-only / print mode, drop the
   // whole header chrome. Blocks already carry their own internal titles
@@ -58,11 +67,29 @@ export function BlockHeader({
   return (
     <div className="group/blockheader flex items-center justify-between border-b border-[color:var(--border-subtle)] pb-1 text-[color:var(--text-tertiary)]">
       <div className="flex items-center gap-2">
-        <DotsSixVertical
-          className="h-4 w-4 cursor-grab opacity-0 transition-opacity group-hover/blockheader:opacity-100"
-          weight="regular"
-          aria-hidden="true"
-        />
+        {/* R5: when ``dragControls`` is provided, the dots handle
+            initiates a Reorder.Item drag on pointerdown. Without
+            controls (locked block or read-only mode) the handle is
+            rendered as a passive visual cue — never interactive. We
+            also clamp touch-action so finger drags don't fight the
+            page's scroll gesture. */}
+        {dragControls ? (
+          <button
+            type="button"
+            onPointerDown={(event) => dragControls.start(event)}
+            className="cursor-grab touch-none rounded-sm p-0.5 text-[color:var(--text-tertiary)] opacity-0 transition-opacity group-hover/blockheader:opacity-100 hover:bg-[color:var(--surface-hover)] active:cursor-grabbing"
+            aria-label="Arrastrar para reordenar"
+            title="Arrastrar para reordenar"
+          >
+            <DotsSixVertical className="h-4 w-4" weight="regular" aria-hidden="true" />
+          </button>
+        ) : (
+          <DotsSixVertical
+            className="h-4 w-4 opacity-0 transition-opacity group-hover/blockheader:opacity-100"
+            weight="regular"
+            aria-hidden="true"
+          />
+        )}
         <IconComponent className="h-3.5 w-3.5" weight="regular" aria-hidden="true" />
         {/* R3 (softer labels): dropped the uppercase mono eyebrow —
             authoring chrome was reading like a Figma layer panel. The

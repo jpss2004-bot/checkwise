@@ -2,6 +2,7 @@
 
 import { useCallback, useState } from "react";
 import { Plus, Sparkle } from "@phosphor-icons/react";
+import { Reorder, useDragControls, type DragControls } from "motion/react";
 
 import { Button } from "@/components/ui/button";
 import type { ReportBlock, ReportContent } from "@/lib/api/reports";
@@ -101,19 +102,86 @@ export function Canvas({
     [content, onChange],
   );
 
+  // R5 (drag-drop reordering): motion/react's Reorder.Group hands us
+  // the reordered ``ReportBlock[]`` directly; we just splice it into
+  // the content envelope. The page-level autosave picks it up like any
+  // other canvas edit.
+  const onReorder = useCallback(
+    (nextBlocks: ReportBlock[]) => {
+      onChange({ ...content, blocks: nextBlocks });
+    },
+    [content, onChange],
+  );
+
+  // Shared per-block render — used by both the static (read-only) path
+  // and each Reorder.Item in the editable path. Centralising it keeps
+  // the two paths from drifting on prop wiring.
+  const renderBlockBody = (
+    block: ReportBlock,
+    dragControls?: DragControls,
+  ) => {
+    const def = getBlockDefinition(block.type);
+    if (!def) return <UnknownBlock key={block.id} type={block.type} />;
+    const BlockComponent = def.Component;
+    return (
+      <>
+        <BlockHeader
+          type={block.type}
+          label={def.label}
+          icon={def.icon}
+          locked={block.locked}
+          editable={editable}
+          hasAiSummary={aiAwareTypes.includes(block.type)}
+          regenerating={regeneratingBlockId === block.id}
+          onLockToggle={() => toggleLock(block.id)}
+          onDelete={() => deleteBlock(block.id)}
+          onRegenerate={
+            onRegenerateBlock && aiAwareTypes.includes(block.type)
+              ? () => onRegenerateBlock(block.id)
+              : undefined
+          }
+          onExplain={onExplainBlock ? () => onExplainBlock(block.id) : undefined}
+          dragControls={dragControls}
+        />
+        <BlockComponent
+          block={block}
+          editable={editable && !block.locked}
+          onPatch={(patch) => patchBlock(block.id, patch)}
+        />
+        {block.ai_summary && (
+          <div className="flex items-center gap-1.5 text-[11px] text-[color:var(--text-ai)]">
+            <Sparkle className="h-3 w-3" weight="fill" aria-hidden="true" />
+            <span>Generado por IA · Verificar antes de compartir</span>
+          </div>
+        )}
+      </>
+    );
+  };
+
   return (
     <div className="space-y-6">
       {content.blocks.length === 0 ? (
         <EmptyCanvas editable={editable} />
+      ) : editable ? (
+        <Reorder.Group
+          as="div"
+          axis="y"
+          values={content.blocks}
+          onReorder={onReorder}
+          className="space-y-6"
+        >
+          {content.blocks.map((block) => (
+            <DraggableBlock
+              key={block.id}
+              block={block}
+              renderBody={renderBlockBody}
+            />
+          ))}
+        </Reorder.Group>
       ) : (
         content.blocks.map((block) => {
           const def = getBlockDefinition(block.type);
-          if (!def) {
-            return (
-              <UnknownBlock key={block.id} type={block.type} />
-            );
-          }
-          const BlockComponent = def.Component;
+          if (!def) return <UnknownBlock key={block.id} type={block.type} />;
           return (
             <article
               key={block.id}
@@ -121,34 +189,7 @@ export function Canvas({
               data-block-id={block.id}
               data-block-type={block.type}
             >
-              <BlockHeader
-                type={block.type}
-                label={def.label}
-                icon={def.icon}
-                locked={block.locked}
-                editable={editable}
-                hasAiSummary={aiAwareTypes.includes(block.type)}
-                regenerating={regeneratingBlockId === block.id}
-                onLockToggle={() => toggleLock(block.id)}
-                onDelete={() => deleteBlock(block.id)}
-                onRegenerate={
-                  onRegenerateBlock && aiAwareTypes.includes(block.type)
-                    ? () => onRegenerateBlock(block.id)
-                    : undefined
-                }
-                onExplain={onExplainBlock ? () => onExplainBlock(block.id) : undefined}
-              />
-              <BlockComponent
-                block={block}
-                editable={editable && !block.locked}
-                onPatch={(patch) => patchBlock(block.id, patch)}
-              />
-              {block.ai_summary && (
-                <div className="flex items-center gap-1.5 text-[11px] text-[color:var(--text-ai)]">
-                  <Sparkle className="h-3 w-3" weight="fill" aria-hidden="true" />
-                  <span>Generado por IA · Verificar antes de compartir</span>
-                </div>
-              )}
+              {renderBlockBody(block)}
             </article>
           );
         })
@@ -174,6 +215,43 @@ export function Canvas({
         </div>
       )}
     </div>
+  );
+}
+
+// ─── Draggable block wrapper ───────────────────────────────────
+//
+// Each block owns its own ``useDragControls()`` instance so the dots
+// handle in the header can initiate a drag without React re-rendering
+// every block on hover. ``dragListener={false}`` keeps the entire
+// article from being a drag target — only the handle starts a drag,
+// which means clicks inside the block body (table rows, BlockNote
+// editor, lock/delete buttons) keep working normally.
+//
+// Locked blocks intentionally do NOT get a drag handle in the header
+// because they're meant to stay where the user pinned them.
+function DraggableBlock({
+  block,
+  renderBody,
+}: {
+  block: ReportBlock;
+  renderBody: (
+    block: ReportBlock,
+    dragControls?: DragControls,
+  ) => React.ReactNode;
+}) {
+  const controls = useDragControls();
+  return (
+    <Reorder.Item
+      as="article"
+      value={block}
+      dragListener={false}
+      dragControls={controls}
+      className="cw-fade-up group/block space-y-2"
+      data-block-id={block.id}
+      data-block-type={block.type}
+    >
+      {renderBody(block, block.locked ? undefined : controls)}
+    </Reorder.Item>
   );
 }
 
