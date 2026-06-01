@@ -8,7 +8,7 @@ import {
   type FormEvent,
 } from "react";
 import Link from "next/link";
-import { useSearchParams } from "next/navigation";
+import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import {
   ArrowLeft,
   ArrowsClockwise,
@@ -18,6 +18,7 @@ import {
   DownloadSimple,
   Eye,
   FloppyDisk,
+  Presentation,
   Sparkle,
   WarningCircle,
   X,
@@ -28,6 +29,7 @@ import { ChatCopilot } from "@/components/checkwise/reports/chat-copilot";
 import { ExportButton } from "@/components/checkwise/reports/editor/export-button";
 import { ShareDialog } from "@/components/checkwise/reports/editor/share-dialog";
 import { ReportActionsContext } from "@/components/checkwise/reports/freshness-label";
+import { StoryView } from "@/components/checkwise/reports/story-view";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -104,8 +106,34 @@ export function ReportEditor({
   // editor. The ref guards against React StrictMode double-mount and
   // against re-firing on every render.
   const searchParams = useSearchParams();
+  const pathname = usePathname();
+  const router = useRouter();
   const autogenerate = searchParams?.get("autogenerate") === "1";
   const autogenFiredRef = useRef(false);
+  // R7 — auditor / story view. ``?mode=audit`` on the editor route
+  // swaps the authoring UI for a chrome-free deliverable view. Stays
+  // a query param (not a separate route) so the back button + the
+  // existing ReportEditor data fetch are reused — flipping between
+  // editor and auditor doesn't re-hit the API.
+  const auditMode = searchParams?.get("mode") === "audit";
+
+  const setAuditMode = useCallback(
+    (enabled: boolean) => {
+      if (!pathname) return;
+      const params = new URLSearchParams(searchParams?.toString() ?? "");
+      if (enabled) {
+        params.set("mode", "audit");
+      } else {
+        params.delete("mode");
+      }
+      // Also clear ``autogenerate`` once we transition modes; the flag
+      // is one-shot and stale on a manual toggle.
+      params.delete("autogenerate");
+      const qs = params.toString();
+      router.replace(qs ? `${pathname}?${qs}` : pathname, { scroll: false });
+    },
+    [pathname, router, searchParams],
+  );
 
   // ─── LLM backend probe ─────────────────────────────────────
   // Honest signal: if the backend has no ANTHROPIC_API_KEY the
@@ -373,6 +401,24 @@ export function ReportEditor({
     );
   }
 
+  // R7 — short-circuit into the auditor view when ?mode=audit is set.
+  // Mounted INSIDE the loaded-state branch so the StoryView gets a
+  // fully resolved report + content; the editor's fetch + error UI
+  // still wraps both modes. Returning early here is intentional —
+  // we never want the authoring toolbar to render in auditor mode.
+  if (auditMode) {
+    return (
+      <StoryView
+        report={report}
+        content={content}
+        reportId={reportId}
+        printHref={printHref}
+        backHref={backHref}
+        onExitToEditor={() => setAuditMode(false)}
+      />
+    );
+  }
+
   const versionLabel = report.current_version
     ? `v${report.current_version.version_number}`
     : "—";
@@ -402,6 +448,24 @@ export function ReportEditor({
                 <ArrowLeft className="h-4 w-4" weight="bold" aria-hidden="true" />
                 Volver
               </Link>
+            </Button>
+            <Button
+              variant={hasContent ? "default" : "outline"}
+              size="sm"
+              onClick={() => setAuditMode(true)}
+              disabled={!hasContent}
+              title={
+                hasContent
+                  ? "Cambiar a la vista de auditor (sin chrome de edición)"
+                  : "Genera contenido primero para ver el reporte como auditor"
+              }
+            >
+              <Presentation
+                className="h-4 w-4"
+                weight="bold"
+                aria-hidden="true"
+              />
+              Vista de auditor
             </Button>
             <Button
               variant="outline"
