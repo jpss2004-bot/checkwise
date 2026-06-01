@@ -58,7 +58,16 @@ const EXPIRY_QUICK_PICKS = [
 
 type View = "form" | "list";
 
-export function ShareDialog({ reportId }: { reportId: string }) {
+export function ShareDialog({
+  reportId,
+  variant = "ghost",
+}: {
+  reportId: string;
+  // R2 (promoted CTAs): the editor passes "default" once the report
+  // has rendered content so "Compartir" reads as a primary action
+  // instead of disappearing into the ghost-button toolbar.
+  variant?: "ghost" | "default" | "outline";
+}) {
   const [open, setOpen] = useState(false);
   const [view, setView] = useState<View>("form");
   const [expiryDays, setExpiryDays] = useState<number | "never">(30);
@@ -170,7 +179,7 @@ export function ShareDialog({ reportId }: { reportId: string }) {
       <DialogTrigger asChild>
         <Button
           type="button"
-          variant="ghost"
+          variant={variant}
           size="sm"
           title="Generar un enlace público para compartir este reporte sin login"
         >

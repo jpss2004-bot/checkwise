@@ -377,6 +377,18 @@ export function ReportEditor({
     ? `v${report.current_version.version_number}`
     : "—";
 
+  // R2 (promoted CTAs): once the canvas has at least one block AND
+  // we're not mid-generation, the report is ready to ship — promote
+  // "Descargar PDF" and "Compartir" to primary buttons and surface a
+  // "Listo para compartir" chip so the user has an unambiguous
+  // end-of-flow signal.
+  const isGenerating =
+    gen.state.status === "planning" ||
+    gen.state.status === "streaming" ||
+    gen.state.status === "saving";
+  const hasContent = (content.blocks?.length ?? 0) > 0 && !isGenerating;
+  const readyToShare = hasContent && !isDirty;
+
   return (
     <div className="mx-auto max-w-5xl space-y-6 px-5 py-6">
       <PageHeader
@@ -449,7 +461,7 @@ export function ReportEditor({
             </Button>
             <Button
               asChild
-              variant="ghost"
+              variant={hasContent ? "default" : "ghost"}
               size="sm"
               title="Abrir vista de impresión y disparar Guardar como PDF"
             >
@@ -469,7 +481,10 @@ export function ReportEditor({
             <ExportButton reportId={reportId} format="html" />
             <ExportButton reportId={reportId} format="pdf" />
             <ExportButton reportId={reportId} format="xlsx" />
-            <ShareDialog reportId={reportId} />
+            <ShareDialog
+              reportId={reportId}
+              variant={hasContent ? "default" : "ghost"}
+            />
             <Button
               variant="default"
               size="sm"
@@ -533,6 +548,15 @@ export function ReportEditor({
           <div>
             <span className="cw-eyebrow">IA</span>
             <GenerationBadge status={gen.state.status} />
+          </div>
+        )}
+        {readyToShare && (
+          <div>
+            <span className="cw-eyebrow">Listo</span>
+            <span className="inline-flex items-center gap-1 text-[12px] font-medium text-[color:var(--status-success-text)]">
+              <CheckCircle className="h-3.5 w-3.5" weight="fill" aria-hidden="true" />
+              Listo para compartir
+            </span>
           </div>
         )}
         {lastRefreshAt && (

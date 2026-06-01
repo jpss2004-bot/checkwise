@@ -64,9 +64,14 @@ export function BlockHeader({
           aria-hidden="true"
         />
         <IconComponent className="h-3.5 w-3.5" weight="regular" aria-hidden="true" />
-        {/* F6: dropped the raw type-code monospace span — the icon +
-            Spanish label is enough authoring context. */}
-        <span className="cw-eyebrow print:hidden">{label}</span>
+        {/* R3 (softer labels): dropped the uppercase mono eyebrow —
+            authoring chrome was reading like a Figma layer panel. The
+            sentence-case sans label keeps enough context for the
+            editor without screaming system terminology at non-author
+            viewers who are skimming the canvas. */}
+        <span className="text-[12px] font-medium text-[color:var(--text-tertiary)] print:hidden">
+          {label}
+        </span>
       </div>
       <div className="flex items-center gap-1 opacity-0 transition-opacity group-hover/blockheader:opacity-100">
         {onExplain && (

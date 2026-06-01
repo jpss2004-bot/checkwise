@@ -201,13 +201,19 @@ export function ReportsListView({
     return sorted;
   }, [reports, search, sortBy]);
 
+  // R1 (one-click select-and-generate): preset cards used to drop the
+  // user on a blank editor — they had to write/confirm a prompt and
+  // press a second button. The editor already understands
+  // ``?autogenerate=1`` (it pulls global.recommended_prompt and fires
+  // startGeneration on mount), so we just append the flag on the
+  // redirect. Single click → populated canvas.
   const onUsePreset = useCallback(
     async (preset: ReportPresetSummary) => {
       if (creating) return;
       setCreating(preset.id);
       try {
         const r = await createReportFromPreset(preset.id);
-        router.push(`${presetCreateRedirectBase}/${r.id}`);
+        router.push(`${presetCreateRedirectBase}/${r.id}?autogenerate=1`);
       } catch (e) {
         setCreating(null);
         setError(
@@ -629,7 +635,7 @@ function PresetCard({
         ) : (
           <Sparkle className="h-3.5 w-3.5" weight="bold" aria-hidden="true" />
         )}
-        {creating ? "Creando…" : "Usar plantilla"}
+        {creating ? "Generando…" : "Generar reporte"}
       </Button>
     </article>
   );

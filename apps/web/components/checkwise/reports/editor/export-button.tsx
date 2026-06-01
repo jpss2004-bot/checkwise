@@ -66,9 +66,15 @@ const FORMAT_META: Record<
 export function ExportButton({
   reportId,
   format,
+  variant = "ghost",
 }: {
   reportId: string;
   format: ReportExportFormat;
+  // R2 (promoted CTAs): editor promotes the primary export to
+  // ``variant="default"`` once the report has content so the user
+  // doesn't have to hunt for the download path in a row of ghost
+  // buttons.
+  variant?: "ghost" | "default" | "outline";
 }) {
   const [busy, setBusy] = useState(false);
   const meta = FORMAT_META[format];
@@ -127,7 +133,7 @@ export function ExportButton({
   return (
     <Button
       type="button"
-      variant="ghost"
+      variant={variant}
       size="sm"
       onClick={onClick}
       disabled={busy}
