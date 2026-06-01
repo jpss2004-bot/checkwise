@@ -846,7 +846,15 @@ def _seed_client_portfolio(db) -> tuple[str, str, int, int]:
             client_id=client.id,
             vendor_id=vendor.id,
             contract_id=None,
-            owner_user_id=user.id,
+            # 2026-06-01 — was ``owner_user_id=user.id`` which made
+            # cliente.demo (a client_admin) the owner of three vendor
+            # workspaces. ``_actor_from`` picks workspace ownership
+            # before org membership, so the client_admin's listing got
+            # silently filtered to vendor-targeted reports and their
+            # own org's reports vanished. The vendors in this seed
+            # have no provider portal user, so the workspace is
+            # legitimately unowned — owner_user_id is nullable.
+            owner_user_id=None,
             filial_name="Filial principal",
             persona_type="moral",
             display_name=spec["name"],
