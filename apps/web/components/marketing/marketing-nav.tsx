@@ -67,9 +67,12 @@ export function MarketingNav() {
             asChild
             variant="ghost"
             size="sm"
-            className="hidden text-[color:var(--text-secondary)] sm:inline-flex"
+            className="text-[color:var(--text-secondary)]"
           >
-            <Link href="/login">Iniciar sesión</Link>
+            <Link href="/login">
+              <span className="sm:hidden">Entrar</span>
+              <span className="hidden sm:inline">Iniciar sesión</span>
+            </Link>
           </Button>
           <Button asChild size="sm" className="rounded-full">
             <Link href="#contacto">
