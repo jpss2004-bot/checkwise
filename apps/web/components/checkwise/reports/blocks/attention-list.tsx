@@ -82,7 +82,11 @@ interface AttentionListData {
 }
 
 // Severity buckets for the visual chip + the print-fallback label.
-// Mirrors WORKFLOW_STATE_MACHINE.md semantics.
+// Mirrors WORKFLOW_STATE_MACHINE.md semantics on the wire; on screen
+// R4 rewrites the user-facing copy so the same state machine reads
+// without a glossary. ``Rechazado`` reads as fault assignment; this
+// list often goes in front of the vendor themselves and "Con
+// observaciones" frames it as a fixable item, not a verdict.
 const STATE_META: Record<
   SlotState,
   {
@@ -91,19 +95,31 @@ const STATE_META: Record<
     tone: "red" | "orange" | "yellow" | "blue" | "gray";
   }
 > = {
-  rejected: { label: "Rechazado", print: "[Rechazado]", tone: "red" },
-  needs_correction: { label: "Por aclarar", print: "[Por aclarar]", tone: "red" },
+  rejected: {
+    label: "Con observaciones",
+    print: "[Con observaciones]",
+    tone: "red",
+  },
+  needs_correction: {
+    label: "Pendiente aclaración",
+    print: "[Pendiente aclaración]",
+    tone: "red",
+  },
   possible_mismatch: {
-    label: "Posible inconsistencia",
-    print: "[Posible inconsistencia]",
+    label: "Revisar archivo",
+    print: "[Revisar archivo]",
     tone: "orange",
   },
   expired: { label: "Vencido", print: "[Vencido]", tone: "orange" },
-  missing: { label: "Pendiente", print: "[Pendiente]", tone: "yellow" },
+  missing: { label: "Por entregar", print: "[Por entregar]", tone: "yellow" },
   in_review: { label: "En revisión", print: "[En revisión]", tone: "blue" },
-  uploaded: { label: "Subido", print: "[Subido]", tone: "blue" },
+  uploaded: { label: "Recibido", print: "[Recibido]", tone: "blue" },
   approved: { label: "Aprobado", print: "[Aprobado]", tone: "gray" },
-  exception: { label: "Excepción", print: "[Excepción]", tone: "gray" },
+  exception: {
+    label: "Excepción autorizada",
+    print: "[Excepción autorizada]",
+    tone: "gray",
+  },
   not_applicable: { label: "No aplica", print: "[No aplica]", tone: "gray" },
 };
 

@@ -56,15 +56,57 @@ interface ComplianceStateData {
 }
 
 // Ordered for display: actionable buckets first, then in-flight, then resolved.
-const BUCKETS: Array<{ key: keyof DocumentStateCounts; label: string }> = [
-  { key: "rejected", label: "Rechazados" },
-  { key: "needs_review", label: "Por aclarar" },
-  { key: "expired", label: "Vencidos" },
-  { key: "in_review", label: "En revisión" },
-  { key: "uploaded", label: "Subidos" },
-  { key: "pending", label: "Pendientes" },
-  { key: "approved", label: "Aprobados" },
-  { key: "exception", label: "Excepción" },
+// R4 (user-language taxonomy): labels rewritten for the audience that
+// actually reads the report — internal admins and external auditors,
+// not the engineers who designed the workflow state machine. The
+// ``hint`` is surfaced as a hover tooltip so a power user who knows the
+// internal term still recognises the mapping. Order is preserved so the
+// auditor sees what needs work first, what's resolved last.
+const BUCKETS: Array<{
+  key: keyof DocumentStateCounts;
+  label: string;
+  hint: string;
+}> = [
+  {
+    key: "rejected",
+    label: "Con observaciones",
+    hint: "Documentos devueltos al proveedor para corrección.",
+  },
+  {
+    key: "needs_review",
+    label: "Pendiente aclaración",
+    hint: "El proveedor debe atender un comentario antes de avanzar.",
+  },
+  {
+    key: "expired",
+    label: "Vencidos",
+    hint: "Cuya vigencia ya expiró y deben renovarse.",
+  },
+  {
+    key: "in_review",
+    label: "En revisión",
+    hint: "Recibidos y siendo validados por el equipo de cumplimiento.",
+  },
+  {
+    key: "uploaded",
+    label: "Recibidos",
+    hint: "Cargados por el proveedor, aún sin entrar al ciclo de revisión.",
+  },
+  {
+    key: "pending",
+    label: "Por entregar",
+    hint: "El proveedor todavía no carga el documento.",
+  },
+  {
+    key: "approved",
+    label: "Aprobados",
+    hint: "Validados; cuentan como cumplimiento del periodo.",
+  },
+  {
+    key: "exception",
+    label: "Excepción autorizada",
+    hint: "Documento no exigible por decisión documentada del cliente.",
+  },
 ];
 
 const LEVEL_DOT: Record<SemaphoreLevel, string> = {
@@ -143,12 +185,22 @@ export function ComplianceStateBlock({
         </div>
       </div>
 
-      {/* Document-state counts strip */}
+      {/* Document-state counts strip.
+          R4: dropped uppercase-mono eyebrows in favour of sentence-case
+          sans labels so the strip reads like a report figure ("Por
+          entregar: 3") rather than a debug telemetry row. The
+          ``title`` attribute exposes the canonical glossary on hover
+          for power users who learned the original taxonomy. */}
       <div className="border-t border-b border-[color:var(--border-subtle)] py-3">
+        <p className="mb-2 text-[12px] text-[color:var(--text-tertiary)]">
+          Documentos del periodo agrupados por estado.
+        </p>
         <div className="cw-metadata-strip">
           {BUCKETS.map((b) => (
-            <div key={b.key}>
-              <span className="cw-eyebrow">{b.label}</span>
+            <div key={b.key} title={b.hint}>
+              <span className="text-[11px] font-medium text-[color:var(--text-tertiary)]">
+                {b.label}
+              </span>
               <span className="font-mono text-[14px] font-semibold tabular-nums text-[color:var(--text-primary)]">
                 {counts[b.key]}
               </span>

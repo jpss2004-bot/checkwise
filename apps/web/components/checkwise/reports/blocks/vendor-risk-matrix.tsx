@@ -64,6 +64,12 @@ const INSTITUTION_LABEL: Record<InstitutionCode, string> = {
   stps_repse: "STPS",
 };
 
+// R4 (user-language taxonomy): chips in the risk matrix go in front of
+// auditors and executives — replaced punitive / vague terms with what
+// the reader actually needs to know ("Con observaciones" instead of
+// "Rechazado"; "Pendiente aclaración" instead of the cryptic "Acción").
+// State codes stay unchanged on the wire so the backend contract is
+// untouched.
 const STATE_TONE: Record<
   DocumentStateCode,
   { bg: string; text: string; label: string }
@@ -71,7 +77,7 @@ const STATE_TONE: Record<
   pending: {
     bg: "bg-[color:var(--doc-pending-bg)]",
     text: "text-[color:var(--doc-pending-text)]",
-    label: "Pendiente",
+    label: "Por entregar",
   },
   uploaded: {
     bg: "bg-[color:var(--doc-uploaded-bg)]",
@@ -91,7 +97,7 @@ const STATE_TONE: Record<
   rejected: {
     bg: "bg-[color:var(--doc-rejected-bg)]",
     text: "text-[color:var(--doc-rejected-text)]",
-    label: "Rechazado",
+    label: "Con observaciones",
   },
   expired: {
     bg: "bg-[color:var(--doc-expired-bg)]",
@@ -101,7 +107,7 @@ const STATE_TONE: Record<
   needs_review: {
     bg: "bg-[color:var(--doc-needs-review-bg)]",
     text: "text-[color:var(--doc-needs-review-text)]",
-    label: "Acción",
+    label: "Pendiente aclaración",
   },
   empty: {
     bg: "bg-[color:var(--doc-empty-bg)]",
@@ -153,9 +159,6 @@ export function VendorRiskMatrixBlock({
           <p className="text-[13px] text-[color:var(--text-secondary)]">
             La matriz se llenará automáticamente cuando se generen los datos.
           </p>
-          <p className="mt-1 text-[11px] text-[color:var(--text-tertiary)]">
-            Phase 3.3 conectará este bloque al data_fetcher.
-          </p>
         </div>
       </section>
     );
@@ -179,7 +182,7 @@ export function VendorRiskMatrixBlock({
                   {c === "risk_score"
                     ? "Riesgo"
                     : c === "last_event"
-                      ? "Último evento"
+                      ? "Última actualización"
                       : INSTITUTION_LABEL[c as InstitutionCode]}
                 </th>
               ))}
