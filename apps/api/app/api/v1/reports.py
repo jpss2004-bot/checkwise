@@ -86,6 +86,7 @@ from app.services.reports.conversation import (
     text_turn,
 )
 from app.services.reports.copilot import chat_completion, explain_block
+from app.services.reports.copilot_suggest import suggest_blocks
 from app.services.reports.executor import execute_plan
 from app.services.reports.export import (
     ReportExportError,
@@ -1081,6 +1082,94 @@ def post_explain_block(
         block_id=block_id,
         explanation="".join(chunks),
         llm_backend=llm.name,
+    )
+
+
+# ─── Copilot — block-composition suggestions (R6) ─────────────────
+
+
+class SuggestBlocksRequest(BaseModel):
+    """Body for the suggest-blocks endpoint.
+
+    ``intent`` is the user's natural-language request that triggers
+    the suggestion. The frontend's "Sugerir bloques" button sends a
+    canned prompt; power users can wire a custom intent later.
+    ``canvas_summary`` mirrors the shape the chat copilot already
+    sends — block types currently on the canvas + key signals — so
+    the model can dedup against what's already rendered.
+    """
+
+    intent: str = Field(min_length=1, max_length=2000)
+    canvas_summary: dict | None = None
+
+
+class BlockSuggestionPayload(BaseModel):
+    type: str
+    config: dict
+    rationale: str
+
+
+class SuggestBlocksResponse(BaseModel):
+    suggestions: list[BlockSuggestionPayload]
+    llm_backend: str
+    model: str
+
+
+@router.post(
+    "/{report_id}/copilot/suggest-blocks",
+    response_model=SuggestBlocksResponse,
+    summary="Copilot returns structured block proposals the user can apply",
+)
+def post_suggest_blocks(
+    report_id: str,
+    payload: SuggestBlocksRequest,
+    db: DbSession,
+    current: Annotated[CurrentUser, Depends(get_current_user)],
+) -> SuggestBlocksResponse:
+    """Return up to ``MAX_SUGGESTIONS`` block drafts the user can
+    apply with one click. Synchronous — suggestions are short and the
+    UI renders a card per result, not a stream.
+    """
+    _enforce_ai_budget(current)
+    actor = _actor_from(current, db)
+
+    try:
+        report, _ = get_report(db, actor=actor, report_id=report_id)
+    except ReportNotFoundError as exc:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, str(exc)) from exc
+
+    scope = ReportScope(
+        organization_id=report.organization_id,
+        audience=ReportAudience(report.audience),
+        client_id=report.client_id,
+        vendor_id=report.vendor_id,
+    )
+
+    try:
+        context = assemble_context(db, actor=actor, scope=scope)
+    except ReportPermissionError as exc:
+        raise HTTPException(status.HTTP_403_FORBIDDEN, str(exc)) from exc
+
+    llm = get_llm_client()
+    try:
+        result = suggest_blocks(
+            llm=llm,
+            context=context,
+            canvas_summary=payload.canvas_summary or {},
+            intent=payload.intent,
+        )
+    except LLMError as exc:
+        raise HTTPException(status.HTTP_502_BAD_GATEWAY, str(exc)) from exc
+
+    return SuggestBlocksResponse(
+        suggestions=[
+            BlockSuggestionPayload(
+                type=s.type, config=s.config, rationale=s.rationale
+            )
+            for s in result.suggestions
+        ],
+        llm_backend=llm.name,
+        model=result.model,
     )
 
 

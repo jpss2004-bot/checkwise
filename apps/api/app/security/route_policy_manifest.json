@@ -244,6 +244,21 @@
     },
     {
       "method": "GET",
+      "path": "/api/v1/admin/ocr-config",
+      "function": "get_ocr_config",
+      "router": "app.api.v1.admin",
+      "file": "api/app/api/v1/admin.py",
+      "lineno": 381,
+      "gate": "internal_admin",
+      "tenant_rule": "cross-tenant (internal_admin is global)",
+      "audit_rule": "not_logged (read-only)",
+      "rate_limit_rule": "none (auth-gated)",
+      "error_lang": "es",
+      "must_change_password_allowed": false,
+      "notes": "Operator-verification helper. Pure config introspection — no Document AI calls, no credential exposure. Returns enabled/configured/missing_keys/processor_name/sdk_available."
+    },
+    {
+      "method": "GET",
       "path": "/api/v1/admin/periods",
       "function": "list_periods",
       "router": "app.api.v1.admin",
@@ -1921,6 +1936,21 @@
       "error_lang": "es_partial (raw service exceptions can leak; M2 will normalize)",
       "must_change_password_allowed": false,
       "notes": ""
+    },
+    {
+      "method": "POST",
+      "path": "/api/v1/reports/{report_id}/copilot/suggest-blocks",
+      "function": "post_suggest_blocks",
+      "router": "app.api.v1.reports",
+      "file": "api/app/api/v1/reports.py",
+      "lineno": 1090,
+      "gate": "authenticated_jwt",
+      "tenant_rule": "scoped by report service via _actor_from(current)",
+      "audit_rule": "logged for create/patch/version/generate/export/share; AI conversation turns sampled",
+      "rate_limit_rule": "ai_heavy_limiter (per-user AI_HEAVY_RATE_LIMIT_PER_MINUTE + _PER_HOUR; 429 on overflow)",
+      "error_lang": "es_partial (raw service exceptions can leak; M2 will normalize)",
+      "must_change_password_allowed": false,
+      "notes": "R6: copilot returns up to 4 validated block drafts; validation rejects unknown types + invalid configs server-side."
     },
     {
       "method": "POST",
