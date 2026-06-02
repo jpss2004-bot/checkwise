@@ -184,10 +184,12 @@ class Settings(BaseSettings):
     EXPOSE_LEGACY_SUBMISSIONS: bool = True
     EXPOSE_METADATA_DRY_RUN: bool = True
 
-    # Auth rate-limit (in-memory sliding window). Conservative defaults
-    # — protect against credential-stuffing and reset-link abuse without
-    # locking out legitimate users. Move to Redis before scaling
-    # horizontally (state would be per-worker today).
+    # Auth rate-limit. Conservative defaults — protect against
+    # credential-stuffing and reset-link abuse without locking out
+    # legitimate users. The backend implementation is selected by
+    # ``REDIS_URL`` (see below): unset → in-memory sliding window
+    # (single-worker only); set → shared Redis sliding window
+    # (correct across any number of workers).
     AUTH_LOGIN_RATE_LIMIT_PER_MINUTE: int = 10
     AUTH_FORGOT_PASSWORD_RATE_LIMIT_PER_HOUR: int = 5
     # M3 (2026-05-25) — brute-force protection on the public share-
@@ -203,6 +205,26 @@ class Settings(BaseSettings):
     # a runaway script or accidental loop. Set 0 to disable.
     AI_HEAVY_RATE_LIMIT_PER_MINUTE: int = 15
     AI_HEAVY_RATE_LIMIT_PER_HOUR: int = 120
+
+    # Rate-limit shared backing store (M4 — 2026-06-02). Empty string
+    # selects the in-memory sliding window: correct on a single
+    # uvicorn worker, silently double-counts on every additional
+    # worker because each process keeps its own counters. Any value
+    # parseable by ``redis.Redis.from_url`` (``redis://...``,
+    # ``rediss://...`` for TLS, ``redis+sentinel://...``) selects the
+    # shared backend so the configured limits hold across the entire
+    # API cluster. Operator should provision Redis before bumping
+    # Render's worker count above 1 — otherwise the documented
+    # protections are off by a factor of N silently.
+    REDIS_URL: str = ""
+    # Per-call timeout for the rate-limit Redis ops in milliseconds.
+    # Kept tight because the limiter runs on the hot path of login /
+    # share-unlock — a hung Redis must not stall every request.
+    # Failures raise (fail-closed → 500) rather than fall through so
+    # an outage surfaces immediately instead of silently disabling
+    # the limiter. See ``RedisRateLimiter`` for the fail-mode
+    # contract.
+    REDIS_RATE_LIMIT_TIMEOUT_MS: int = 250
 
     # Phase 3 — Google Document AI OCR fallback for scanned uploads.
     # OCR runs synchronously during intake when ``inspect_pdf`` reports
