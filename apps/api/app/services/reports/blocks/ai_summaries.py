@@ -95,6 +95,14 @@ def _ai_recommendation_prompt(
         "3. Para cuándo (período o plazo claro, no fecha inventada).\n"
         "4. Por qué importa (1 frase, ligada a una métrica de los datos).\n"
         "\n"
+        "REGLA CRÍTICA DE GROUNDING: solo puedes citar números, "
+        "porcentajes, nombres de proveedores y conteos que aparezcan "
+        "EXPLÍCITAMENTE en el bloque ``<upstream>`` de abajo. Si el "
+        "dato que quieres mencionar no está en ese bloque, no lo "
+        "inventes — reformula la recomendación sin la cifra. Está "
+        "PROHIBIDO redondear, interpolar, sumar mentalmente o estimar "
+        "valores que no aparezcan tal cual.\n"
+        "\n"
         "Formato: lista numerada en Markdown, una recomendación por entrada.\n"
         "No incluyas encabezado, no añadas conclusión final.\n"
     )
@@ -226,6 +234,45 @@ def upstream_summary_for_recommendation(
             "key_metric": {
                 "vendor_count": len(rows),
                 "max_risk_score": max((r["risk_score"] for r in rows), default=0),
+            },
+        }
+    if block_type == "compliance_radar":
+        # M4-followup (2026-06-02) — when the cliente Resumen
+        # ejecutivo leads with the radar, the recommendation block
+        # needs the radar's headline counts as grounding or the LLM
+        # hallucinates ("73% de completitud" / "7 proveedores en
+        # riesgo" when reality is 35% / 3). Pass the live counters
+        # and the full per-vendor ranking (name + semaphore +
+        # compliance_pct) so the recommendation can cite real
+        # vendors and real numbers without inventing.
+        semaphore = data.get("semaphore_counts") or {}
+        top_vendors = data.get("top_vendors") or []
+        return {
+            "block_id": block_id,
+            "type": block_type,
+            "key_metric": {
+                "client_name": data.get("client_name"),
+                "vendor_count": data.get("vendor_count"),
+                "overall_compliance_pct": data.get("overall_compliance_pct"),
+                "green_count": semaphore.get("green", 0),
+                "yellow_count": semaphore.get("yellow", 0),
+                "red_count": semaphore.get("red", 0),
+                "vendors_at_risk": (
+                    semaphore.get("yellow", 0) + semaphore.get("red", 0)
+                ),
+                # Top vendors are already ranked worst-first in the
+                # radar's data; pass them through so the LLM can name
+                # the actually-at-risk ones in its recommendations.
+                "vendors": [
+                    {
+                        "name": v.get("vendor_name"),
+                        "semaphore": v.get("semaphore_level"),
+                        "compliance_pct": v.get("compliance_pct"),
+                        "missing_required": v.get("missing_required_count"),
+                        "pending_reviews": v.get("pending_reviews_count"),
+                    }
+                    for v in top_vendors
+                ],
             },
         }
     return {"block_id": block_id, "type": block_type, "key_metric": None}
