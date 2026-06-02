@@ -108,6 +108,15 @@ export function ReportEditor({
   const searchParams = useSearchParams();
   const pathname = usePathname();
   const router = useRouter();
+  // M1.4 (2026-06-02) — Reportes redesign. On the cliente surface the
+  // floating ``<ClientWiseDock>`` mounted in ClientShell is the only
+  // AI affordance the buyer should see — the right-rail ChatCopilot
+  // squashes the canvas and shows duplicate "ask me anything" surface
+  // area. Detecting the surface by route prefix is sufficient because
+  // the report editor is mounted inside role-specific shells
+  // (PortalAppShell, AdminShell, ClientShell) whose paths are
+  // namespaced by /portal /admin /client respectively.
+  const isClientSurface = pathname?.startsWith("/client/") ?? false;
   const autogenerate = searchParams?.get("autogenerate") === "1";
   const autogenFiredRef = useRef(false);
   // R7 — auditor / story view. ``?mode=audit`` on the editor route
@@ -481,15 +490,17 @@ export function ReportEditor({
               <Sparkle className="h-4 w-4" weight="bold" aria-hidden="true" />
               Generar con IA
             </Button>
-            <Button
-              variant="outline"
-              size="sm"
-              onClick={() => setChatOpen((open) => !open)}
-              title="Abrir / cerrar copiloto"
-            >
-              <ChatCircle className="h-4 w-4" weight="bold" aria-hidden="true" />
-              Copiloto
-            </Button>
+            {!isClientSurface && (
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => setChatOpen((open) => !open)}
+                title="Abrir / cerrar copiloto"
+              >
+                <ChatCircle className="h-4 w-4" weight="bold" aria-hidden="true" />
+                Copiloto
+              </Button>
+            )}
             <Button
               variant="outline"
               size="sm"
@@ -777,7 +788,7 @@ export function ReportEditor({
               onExplainBlock={onExplainBlockClicked}
             />
           </div>
-          {chatOpen && (
+          {chatOpen && !isClientSurface && (
             <ChatCopilot
               reportId={reportId}
               content={content}
