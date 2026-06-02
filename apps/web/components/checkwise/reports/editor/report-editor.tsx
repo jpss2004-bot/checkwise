@@ -13,7 +13,6 @@ import {
   ArrowLeft,
   ArrowsClockwise,
   CheckCircle,
-  ChatCircle,
   CircleNotch,
   DownloadSimple,
   Eye,
@@ -25,7 +24,6 @@ import {
 } from "@phosphor-icons/react";
 
 import { Canvas } from "@/components/checkwise/reports/canvas";
-import { ChatCopilot } from "@/components/checkwise/reports/chat-copilot";
 import { ExportButton } from "@/components/checkwise/reports/editor/export-button";
 import { ShareDialog } from "@/components/checkwise/reports/editor/share-dialog";
 import { ReportActionsContext } from "@/components/checkwise/reports/freshness-label";
@@ -109,15 +107,6 @@ export function ReportEditor({
   const searchParams = useSearchParams();
   const pathname = usePathname();
   const router = useRouter();
-  // M1.4 (2026-06-02) — Reportes redesign. On the cliente surface the
-  // floating ``<ClientWiseDock>`` mounted in ClientShell is the only
-  // AI affordance the buyer should see — the right-rail ChatCopilot
-  // squashes the canvas and shows duplicate "ask me anything" surface
-  // area. Detecting the surface by route prefix is sufficient because
-  // the report editor is mounted inside role-specific shells
-  // (PortalAppShell, AdminShell, ClientShell) whose paths are
-  // namespaced by /portal /admin /client respectively.
-  const isClientSurface = pathname?.startsWith("/client/") ?? false;
   const autogenerate = searchParams?.get("autogenerate") === "1";
   const autogenFiredRef = useRef(false);
   // R7 — auditor / story view. ``?mode=audit`` on the editor route
@@ -166,9 +155,6 @@ export function ReportEditor({
       });
     return () => ctrl.abort();
   }, []);
-
-  // ─── Copilot chat (right rail) ─────────────────────────────
-  const [chatOpen, setChatOpen] = useState(false);
 
   // ─── Per-block actions ────────────────────────────────────
   const [regeneratingBlockId, setRegeneratingBlockId] = useState<string | null>(
@@ -459,9 +445,9 @@ export function ReportEditor({
           // datos, Vista previa PDF, the 3 download variants, and the
           // legacy in-browser autoprint PDF) so a client_admin opening
           // their first report sees an actionable header, not a wall
-          // of buttons. Copiloto stays gated by ``!isClientSurface``
-          // (M1.4); on portal + admin it still renders inline next to
-          // "Generar con IA".
+          // of buttons. M1-follow-up (2026-06-02) — the Copiloto
+          // button is gone; the floating Wise dock on ClientShell and
+          // (when ?client_id is set) AdminShell replaces it.
           <>
             <Button asChild variant="ghost" size="sm">
               <Link href={backHref}>
@@ -501,17 +487,6 @@ export function ReportEditor({
               <Sparkle className="h-4 w-4" weight="bold" aria-hidden="true" />
               Generar con IA
             </Button>
-            {!isClientSurface && (
-              <Button
-                variant="outline"
-                size="sm"
-                onClick={() => setChatOpen((open) => !open)}
-                title="Abrir / cerrar copiloto"
-              >
-                <ChatCircle className="h-4 w-4" weight="bold" aria-hidden="true" />
-                Copiloto
-              </Button>
-            )}
             <ShareDialog
               reportId={reportId}
               variant={hasContent ? "default" : "outline"}
@@ -808,25 +783,6 @@ export function ReportEditor({
               onExplainBlock={onExplainBlockClicked}
             />
           </div>
-          {chatOpen && !isClientSurface && (
-            <ChatCopilot
-              reportId={reportId}
-              content={content}
-              onClose={() => setChatOpen(false)}
-              onInsertBlock={(block) => {
-                // R6: the copilot's suggestion card hands us a fully
-                // formed ReportBlock draft (id assigned, config already
-                // validated server-side against the catalog schema).
-                // Splicing it into content.blocks runs through the
-                // existing autosave path — the user can then drag it
-                // to its final position (R5) and Save the version.
-                onCanvasChange({
-                  ...content,
-                  blocks: [...content.blocks, block],
-                });
-              }}
-            />
-          )}
         </div>
       </ReportActionsContext.Provider>
     </div>

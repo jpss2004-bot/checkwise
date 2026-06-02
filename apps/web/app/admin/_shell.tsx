@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { Suspense, useEffect, useState } from "react";
 import Link from "next/link";
 import { useRouter, usePathname } from "next/navigation";
 import {
@@ -21,6 +21,7 @@ import {
 import { BackBar } from "@/components/checkwise/back-bar";
 import { BrandLogo } from "@/components/checkwise/brand-logo";
 import { FeedbackLauncher } from "@/components/feedback/feedback-launcher";
+import { AdminWiseMount } from "@/components/checkwise/wise/admin-wise-mount";
 import { SearchBar } from "@/components/checkwise/search-bar";
 import { UserMenu } from "@/components/checkwise/user-menu";
 import { MetadataStrip } from "@/components/ui/metadata-strip";
@@ -290,6 +291,13 @@ export function AdminShell({
         Internal operations · Legal Shelf · CheckWise
       </footer>
       <FeedbackLauncher />
+      {/* M1-follow-up: Wise mounts only when the URL carries a
+          ``?client_id=`` so the backend's _resolve_client_id can
+          scope answers. Hidden on cross-tenant pages like the admin
+          dashboard. */}
+      <Suspense fallback={null}>
+        <AdminWiseMount />
+      </Suspense>
     </div>
   );
 }
