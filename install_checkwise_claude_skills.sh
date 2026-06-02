@@ -6,7 +6,7 @@ echo "== Installing CheckWise Claude Code skills =="
 if [ ! -d ".git" ]; then
   echo "ERROR: Run this from the root of the CheckWise repository."
   echo "Example:"
-  echo "cd /Users/josepablosamano/Desktop/Personal/legalshelf/checkwise/CheckWise"
+  echo "  cd /path/to/your/checkout/CheckWise"
   exit 1
 fi
 

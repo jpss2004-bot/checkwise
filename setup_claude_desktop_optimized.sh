@@ -6,7 +6,7 @@ echo "== CheckWise Claude Code Desktop optimized permissions setup =="
 if [ ! -d ".git" ]; then
   echo "ERROR: Run this from the root of the CheckWise git repository."
   echo "Example:"
-  echo "cd /Users/josepablosamano/Desktop/Personal/legalshelf/checkwise/CheckWise"
+  echo "  cd /path/to/your/checkout/CheckWise"
   exit 1
 fi
 
