@@ -285,13 +285,9 @@ export function LecturaDelDocumento({
 
   const verdict = buildVerdict(payload, mismatchReason);
 
-  // If we have neither a verdict nor any reasons nor a mismatch reason,
-  // there's nothing to show. Hide the card entirely (matches the
-  // pre-Phase-2 "old submissions" decision).
-  const hasAnything =
-    verdict !== null || reasons.length > 0 || mismatchReason !== null;
-  if (!hasAnything) return null;
-
+  // Effect MUST run before any conditional return so the hook order
+  // stays stable across renders (Rules of Hooks). Effect body itself
+  // is conditional — the empty-data case is a cheap noop.
   React.useEffect(() => {
     if (verdict && payload?.shadow.signals && payload.heuristic.signals) {
       const facts = buildFactRows(payload.shadow.signals, payload.heuristic.signals);
@@ -304,6 +300,13 @@ export function LecturaDelDocumento({
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+
+  // If we have neither a verdict nor any reasons nor a mismatch reason,
+  // there's nothing to show. Hide the card entirely (matches the
+  // pre-Phase-2 "old submissions" decision).
+  const hasAnything =
+    verdict !== null || reasons.length > 0 || mismatchReason !== null;
+  if (!hasAnything) return null;
 
   return (
     <Card aria-label="Lectura del documento" data-internal="lectura-del-documento">

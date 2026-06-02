@@ -4,13 +4,10 @@ import { use, useCallback, useEffect, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import {
-  WarningCircle,
-  Warning,
   ArrowLeft,
   CheckCircle,
   DownloadSimple,
   FileText,
-  ShieldCheck,
 } from "@phosphor-icons/react";
 
 import {
@@ -44,7 +41,6 @@ import {
   submitDecision,
 } from "@/lib/api/reviewer";
 import { DocumentStatus } from "@/lib/constants/statuses";
-import { validationLabel } from "@/lib/constants/validation";
 
 type PageProps = {
   params: Promise<{ submission_id: string }>;

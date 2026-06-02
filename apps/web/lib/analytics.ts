@@ -32,7 +32,6 @@ export function track(event: string, props: AnalyticsProps = {}): void {
     return;
   }
   if (process.env.NODE_ENV !== "production") {
-    // eslint-disable-next-line no-console
     console.debug(`[analytics] ${event}`, props);
   }
   // When an SDK is added, wire it here. Examples (do not enable until chosen):
