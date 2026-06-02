@@ -110,6 +110,10 @@ import {
   PrioritizedActionsBlock,
   prioritizedActionsDefinition,
 } from "@/components/checkwise/reports/blocks/prioritized-actions";
+import {
+  ComplianceRadarBlock,
+  complianceRadarDefinition,
+} from "@/components/checkwise/reports/blocks/compliance-radar";
 
 function register<TConfig, TData>(
   partial: Omit<BlockDefinition<TConfig, TData>, "Component">,
@@ -153,10 +157,18 @@ export const BLOCK_REGISTRY: Record<string, ErasedBlockDefinition> = {
     prioritizedActionsDefinition,
     PrioritizedActionsBlock,
   ),
+  [complianceRadarDefinition.type]: register(
+    complianceRadarDefinition,
+    ComplianceRadarBlock,
+  ),
 };
 
 /** Slash-menu order. New blocks append. */
 export const PALETTE_ORDER: string[] = [
+  // M4 (2026-06-02) — radar leads the cliente Resumen ejecutivo so
+  // it's the first block authors think to insert when composing a
+  // portfolio report manually.
+  complianceRadarDefinition.type,
   complianceStateDefinition.type,
   attentionListDefinition.type,
   upcomingDeadlinesDefinition.type,

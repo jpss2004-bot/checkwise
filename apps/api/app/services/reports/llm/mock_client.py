@@ -149,14 +149,36 @@ def _default_plan(prompt: str, tools: list[dict]) -> list[PlannerToolCall]:
     available = {t["name"] for t in tools}
     plan: list[PlannerToolCall] = []
 
-    # Always lead with executive_summary if it's in the catalog.
+    # M4 (2026-06-02): cliente prompts asking for a portfolio overview
+    # lead with the new ``compliance_radar`` hero. The radar already
+    # surfaces overall cumplimiento% + per-vendor semáforo + ranking,
+    # so the executive_summary that follows drops ``include_metrics``
+    # to avoid stamping the same numbers twice on the canvas.
+    portfolio_keywords = ("portafolio", "cliente", "cumplimiento global", "radar")
+    leads_with_radar = (
+        "compliance_radar" in available
+        and any(k in prompt.lower() for k in portfolio_keywords)
+    )
+    if leads_with_radar:
+        plan.append(
+            PlannerToolCall(
+                id="mock-block-0",
+                name="compliance_radar",
+                arguments={"top_n_vendors": 8, "include_history": False},
+            )
+        )
+
+    # Always lead with executive_summary if it's in the catalog. When
+    # the radar already prefaced the canvas (cliente surface),
+    # ``include_metrics`` flips off so the prose block carries
+    # narrative only.
     if "executive_summary" in available:
         focus = _infer_focus(prompt)
         plan.append(
             PlannerToolCall(
                 id="mock-block-1",
                 name="executive_summary",
-                arguments={"focus": focus, "include_metrics": True},
+                arguments={"focus": focus, "include_metrics": not leads_with_radar},
             )
         )
 

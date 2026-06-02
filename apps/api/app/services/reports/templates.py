@@ -126,22 +126,24 @@ _CLIENT_MONTHLY_EXECUTIVE = ReportPreset(
     audience=ReportAudience.CLIENT_FACING,
     required_roles=(MembershipRole.CLIENT_ADMIN, MembershipRole.INTERNAL_ADMIN),
     recommended_prompt=(
-        # M3 (2026-06-02) — Reportes redesign. The resumen ejecutivo
-        # block already renders its own 4-KPI ribbon when
-        # ``include_metrics`` is on, so requesting a separate kpi_strip
-        # block here produced a duplicated row (the user saw 73% / 7 /
-        # 3 / — twice in the canvas). Prompt now explicitly asks for a
-        # single resumen ejecutivo + matriz de riesgo + recomendaciones
-        # so both the LLM planner and the deterministic mock land on a
-        # 3-block canvas with one KPI surface.
+        # M4 (2026-06-02) — Reportes redesign. The cliente Resumen
+        # ejecutivo now leads with the new ``compliance_radar`` hero
+        # block (donut + per-vendor traffic-light cards + reserved
+        # sparkline slot) so the cliente sees portfolio-level risk
+        # at a glance. The narrative executive_summary follows with
+        # ``include_metrics=false`` (the radar already shows the
+        # metrics; the text block adds prose context). Matriz de
+        # riesgo + 3 recomendaciones round out the canvas.
         "Genera un resumen ejecutivo mensual de cumplimiento del "
-        "portafolio para la dirección del cliente: empieza con un "
-        "resumen ejecutivo enfocado en cumplimiento (incluye sus "
-        "métricas: porcentaje de cumplimiento, total de proveedores, "
-        "proveedores en riesgo y próximos vencimientos — el bloque "
-        "ya renderiza su propia tira de KPIs, no agregues una "
-        "separada), sigue con una matriz de riesgo por proveedor y "
-        "cierra con 3 recomendaciones priorizadas para la dirección."
+        "portafolio para la dirección del cliente: arranca con un "
+        "bloque ``compliance_radar`` que muestre el donut del semáforo, "
+        "el cumplimiento global y un ranking de proveedores peor a "
+        "mejor (top_n_vendors=8). Sigue con un resumen ejecutivo en "
+        "prosa enfocado en cumplimiento (NO incluyas métricas en el "
+        "resumen — el radar ya las muestra; pon include_metrics=false). "
+        "Continúa con una matriz de riesgo por proveedor y cierra con "
+        "3 recomendaciones priorizadas para la dirección. No agregues "
+        "un kpi_strip separado."
     ),
 )
 

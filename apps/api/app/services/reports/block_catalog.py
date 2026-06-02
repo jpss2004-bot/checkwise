@@ -553,6 +553,50 @@ PRIORITIZED_ACTIONS = CatalogEntry(
 )
 
 
+COMPLIANCE_RADAR = CatalogEntry(
+    type="compliance_radar",
+    description=(
+        "Hero panel for the cliente Resumen ejecutivo. Shows a portfolio-"
+        "level snapshot at a glance: a donut of the green/yellow/red "
+        "semáforo distribution, an overall cumplimiento%, and a ranked "
+        "list of vendors worst-first with their semáforo + score. "
+        "M4 (2026-06-02) — the cliente Resumen ejecutivo template "
+        "pins this as the first block; the executive_summary text "
+        "follows below."
+    ),
+    input_schema={
+        "type": "object",
+        "properties": {
+            "top_n_vendors": {
+                "type": "integer",
+                "minimum": 3,
+                "maximum": 25,
+                "description": (
+                    "How many vendors to list in the worst-first ranking "
+                    "below the donut. Default 8 — large enough to show "
+                    "every red and yellow on a typical mid-size portfolio "
+                    "but small enough to fit one screen."
+                ),
+            },
+            "include_history": {
+                "type": "boolean",
+                "description": (
+                    "Reserved for M5 (6-month trend sparkline). Today the "
+                    "fetcher always returns an empty history series; the "
+                    "frontend hides the sparkline when the series is "
+                    "empty. Set true once the historical compute lands."
+                ),
+            },
+        },
+        "required": ["top_n_vendors", "include_history"],
+        "additionalProperties": False,
+    },
+    example_configs=[
+        {"top_n_vendors": 8, "include_history": False},
+    ],
+)
+
+
 CATALOG: list[CatalogEntry] = [
     EXECUTIVE_SUMMARY,
     KPI_STRIP,
@@ -564,6 +608,7 @@ CATALOG: list[CatalogEntry] = [
     ATTENTION_LIST,
     UPCOMING_DEADLINES,
     PRIORITIZED_ACTIONS,
+    COMPLIANCE_RADAR,
 ]
 
 

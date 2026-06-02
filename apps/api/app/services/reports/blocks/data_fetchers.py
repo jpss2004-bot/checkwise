@@ -148,6 +148,88 @@ def fetch_vendor_risk_matrix(
     return {"rows": rows, "totals": totals, "fetched_at": _now_iso()}
 
 
+def fetch_compliance_radar(
+    config: dict, scope: ReportScope, db: Session
+) -> dict | None:
+    """Portfolio-shaped snapshot for the cliente Resumen ejecutivo hero.
+
+    Reuses the cliente Wise portfolio analyzer (``build_client_context``)
+    so the donut + per-vendor cards stay numerically identical to what
+    the Wise dock surfaces. Returns ``None`` if the scope isn't
+    client-shaped — the block is meant for the cliente surface; a
+    provider-side preview just doesn't render this block.
+
+    Output shape (consumed by ``compliance-radar.tsx``):
+
+        {
+          "client_name": "<str>",
+          "vendor_count": <int>,
+          "semaphore_counts": {"green": <int>, "yellow": <int>, "red": <int>},
+          "overall_compliance_pct": <int>,
+          "top_vendors": [
+            {
+              "vendor_id": "...", "vendor_name": "...",
+              "vendor_rfc": "..." | null,
+              "semaphore_level": "green" | "yellow" | "red",
+              "compliance_pct": <int>,
+              "pending_reviews_count": <int>,
+              "missing_required_count": <int>,
+            },
+            ...
+          ],
+          "history_6mo": [],
+          "fetched_at": "<iso>"
+        }
+    """
+    if scope.client_id is None:
+        return None
+    from app.models.entities import Client
+    from app.services.wise.client_context import build_client_context
+
+    client_row = db.get(Client, scope.client_id)
+    if client_row is None:  # pragma: no cover — defensive
+        return None
+
+    portfolio = build_client_context(db, client_row)
+    top_n = int(config.get("top_n_vendors", 8))
+
+    ordered = sorted(
+        portfolio.vendors,
+        key=lambda v: (
+            {"red": 0, "yellow": 1, "green": 2}.get(v.semaphore_level, 3),
+            v.vendor_name.casefold(),
+        ),
+    )[:top_n]
+
+    return {
+        "client_name": portfolio.client_name,
+        "vendor_count": portfolio.vendor_count,
+        "semaphore_counts": {
+            "green": portfolio.green_count,
+            "yellow": portfolio.yellow_count,
+            "red": portfolio.red_count,
+        },
+        "overall_compliance_pct": portfolio.overall_compliance_pct,
+        "top_vendors": [
+            {
+                "vendor_id": v.vendor_id,
+                "vendor_name": v.vendor_name,
+                "vendor_rfc": v.vendor_rfc,
+                "semaphore_level": v.semaphore_level,
+                "compliance_pct": v.compliance_pct,
+                "pending_reviews_count": v.pending_reviews_count,
+                "missing_required_count": v.missing_required_count,
+            }
+            for v in ordered
+        ],
+        # M5 will populate this with the actual 6-month trend. For
+        # now an empty series tells the frontend to hide the
+        # sparkline rather than draw a flat zero line.
+        "history_6mo": [],
+        "fetched_at": _now_iso(),
+    }
+
+
 def fetch_text_or_divider(config: dict, scope: ReportScope, db: Session) -> dict | None:
     """text + divider blocks carry no server-side data."""
     return None
@@ -178,6 +260,7 @@ _FETCHERS: dict[str, Callable[[dict, ReportScope, Session], dict | None]] = {
     "divider": fetch_text_or_divider,
     "ai_recommendation": fetch_ai_recommendation,
     "compliance_state": fetch_compliance_state,
+    "compliance_radar": fetch_compliance_radar,
     "attention_list": fetch_attention_list,
     "upcoming_deadlines": fetch_upcoming_deadlines,
     "prioritized_actions": fetch_prioritized_actions,
