@@ -344,6 +344,21 @@ class DocumentInspection(TimestampMixin, Base):
     inspection_error: Mapped[str | None] = mapped_column(Text)
     raw_metadata: Mapped[dict | None] = mapped_column(JSON)
 
+    # Phase 2 — shadow-mode AI analysis. Populated by the
+    # ``document_analysis.shadow_runner`` BackgroundTask after the
+    # intake transaction commits. ``shadow_completed_at IS NULL``
+    # means "no run yet"; non-null with ``shadow_error IS NOT NULL``
+    # means "run finished but did not produce signals". The
+    # heuristic-driven columns above remain the source of truth for
+    # user-visible status throughout shadow mode.
+    shadow_provider_id: Mapped[str | None] = mapped_column(String(120))
+    shadow_prompt_version: Mapped[str | None] = mapped_column(String(60))
+    shadow_signals: Mapped[dict | None] = mapped_column(JSON)
+    shadow_confidence: Mapped[float | None] = mapped_column(Float)
+    shadow_latency_ms: Mapped[int | None] = mapped_column(Integer)
+    shadow_error: Mapped[str | None] = mapped_column(Text)
+    shadow_completed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+
     document: Mapped[Document] = relationship(back_populates="inspection")
 
 
