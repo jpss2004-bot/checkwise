@@ -8,6 +8,8 @@
     "start": "next start",
     "lint": "eslint .",
     "typecheck": "tsc --noEmit",
+    "test": "vitest run",
+    "test:watch": "vitest",
     "check:print": "node scripts/check-print-contract.mjs",
     "check:intents": "node scripts/test-wise-intents.mjs"
   },
@@ -36,15 +38,21 @@
   },
   "devDependencies": {
     "@eslint/eslintrc": "^3.2.0",
+    "@testing-library/jest-dom": "^6.9.1",
+    "@testing-library/react": "^16.3.2",
     "@types/node": "^22.10.0",
     "@types/react": "^19.0.0",
     "@types/react-dom": "^19.0.0",
+    "@vitejs/plugin-react": "^6.0.2",
     "autoprefixer": "^10.4.20",
     "eslint": "^9.16.0",
     "eslint-config-next": "^15.0.0",
+    "happy-dom": "^20.9.0",
     "postcss": "^8.5.14",
     "tailwindcss": "^3.4.16",
-    "typescript": "^5.7.0"
+    "typescript": "^5.7.0",
+    "vite-tsconfig-paths": "^6.1.1",
+    "vitest": "^4.1.8"
   },
   "overrides": {
     "next": {
