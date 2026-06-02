@@ -71,7 +71,9 @@ from app.core.compliance_catalog import (
     recurring_for_year,
     recurring_required_document,
 )
+from app.core.config import settings
 from app.core.period_validation import MAX_YEAR, MIN_YEAR, validate_period_key
+from app.core.rate_limit import enforce_ai_heavy_rate_limit
 from app.db.session import get_db
 from app.models import (
     Client,
@@ -2903,4 +2905,212 @@ def client_search(
         matched_by=(hits[0].matched_by if hits else "folio"),
         total=len(hits),
         items=[ClientSearchHitOut(**h.__dict__) for h in hits],
+    )
+
+
+# ---------------------------------------------------------------------------
+# Wise copilot — cliente surface (Phase 5, 2026-06-02)
+# ---------------------------------------------------------------------------
+#
+# Parallel to ``/api/v1/portal/workspaces/{id}/wise/{ask,events}``. The
+# cliente Wise dock is mounted on every ``/client/*`` route via
+# ClientShell and reasons about the buyer's PORTFOLIO of vendors
+# (compliance distribution, vendors-at-risk, portfolio-wide
+# upcoming deadlines) rather than a single vendor's onboarding state.
+#
+# Architecture differences vs. the portal Wise routes:
+#
+#   * Scope: ``client_id`` resolved via ``_resolve_client_id`` (query
+#     param fallback + visible-clients guard) rather than a workspace
+#     path param.
+#   * Context: ``build_client_context`` assembles a portfolio digest;
+#     ``ask_wise_for_client`` ships it to Claude Haiku with the
+#     cliente-flavoured system rules + ``/client/*`` navigation CTAs.
+#   * Events: the ``/wise/events`` route validates + logs but does
+#     NOT persist to ``wise_events`` (that table's ``workspace_id``
+#     is NOT NULL today). M1-follow-up will either add a nullable
+#     ``client_id`` column or land a parallel ``client_wise_events``
+#     table; choosing between those needs a separate decision pass.
+
+
+_CLIENT_WISE_ALLOWED_EVENT_TYPES: frozenset[str] = frozenset(
+    {
+        "wise.first_render",
+        "wise.opened",
+        "wise.collapsed",
+        "wise.suggestion_clicked",
+        "wise.suggestion_dismissed",
+        "wise.question_asked",
+    }
+)
+
+
+class ClientWiseEventCreate(BaseModel):
+    event_type: str = Field(..., max_length=80)
+    payload: dict | None = None
+
+
+class ClientWiseEventResponse(BaseModel):
+    accepted: bool
+    event_type: str
+
+
+class ClientWiseAskCtaIn(BaseModel):
+    id: str = Field(..., max_length=200)
+    label: str = Field(..., max_length=120)
+    href: str = Field(..., max_length=500)
+    description: str = Field(default="", max_length=240)
+
+
+class ClientWisePageContextIn(BaseModel):
+    """Per-request page context shipped by the cliente Wise dock.
+
+    Mirrors ``WisePageContextIn`` from portal.py but with cliente-
+    flavoured field names. ``vendor_id`` and ``report_id`` capture the
+    two most useful "what's on screen right now" hints for the cliente
+    surface (a vendor detail page or a report-editor page).
+    """
+
+    route: str = Field(..., max_length=200)
+    page_label: str = Field(..., max_length=80)
+    vendor_id: str | None = Field(default=None, max_length=80)
+    report_id: str | None = Field(default=None, max_length=80)
+    period_key: str | None = Field(default=None, max_length=20)
+
+
+class ClientWiseAskRequest(BaseModel):
+    prompt: str = Field(..., max_length=500)
+    ctas: list[ClientWiseAskCtaIn] = Field(default_factory=list, max_length=20)
+    page_context: ClientWisePageContextIn | None = None
+
+
+class ClientWiseAskResponse(BaseModel):
+    body: str
+    cta_label: str | None = None
+    cta_href: str | None = None
+    source: Literal["llm", "fallback"]
+
+
+@router.post(
+    "/wise/events",
+    response_model=ClientWiseEventResponse,
+    status_code=status.HTTP_202_ACCEPTED,
+    summary="Record a Wise cliente-side interaction event",
+    description=(
+        "Validates and logs a Wise dock interaction event on the "
+        "cliente surface. NOTE: persistence to a dedicated table is "
+        "deferred to M1-follow-up; today the route accepts the event, "
+        "logs it via the standard logger for offline rollups, and "
+        "returns 202. The frontend's analytics interface (always-fire "
+        "+ never-block) is unaffected."
+    ),
+)
+def record_client_wise_event(
+    payload: ClientWiseEventCreate,
+    db: DbSession,
+    current: ClientUser,
+    client_id: str | None = None,
+) -> ClientWiseEventResponse:
+    if payload.event_type not in _CLIENT_WISE_ALLOWED_EVENT_TYPES:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=(
+                f"Unknown event_type '{payload.event_type}'. "
+                f"Allowed: {sorted(_CLIENT_WISE_ALLOWED_EVENT_TYPES)}"
+            ),
+        )
+    target_id = _resolve_client_id(db, current, requested=client_id)
+    log = __import__("logging").getLogger("checkwise.wise.client_events")
+    log.info(
+        "wise.client_event",
+        extra={
+            "event_type": payload.event_type,
+            "client_id": target_id,
+            "user_id": current.user.id,
+            "payload": payload.payload,
+        },
+    )
+    return ClientWiseEventResponse(accepted=True, event_type=payload.event_type)
+
+
+@router.post(
+    "/wise/ask",
+    response_model=ClientWiseAskResponse,
+    summary="Ask Wise — cliente portfolio free-text reply",
+    description=(
+        "Routes a free-text prompt through Claude Haiku with the "
+        "cliente's PORTFOLIO state digest and a list of allowed CTAs. "
+        "Scope-guarded by the same ``_resolve_client_id`` helper every "
+        "other ``/client/*`` route uses, so a caller can only ask "
+        "about clients reachable through their memberships. Returns a "
+        "structured reply (``body``, optional ``cta_label`` + "
+        "``cta_href``). On missing API key or model error, returns a "
+        "deterministic fallback rather than a 500 so the dock stays "
+        "responsive."
+    ),
+)
+def ask_client_wise_endpoint(
+    payload: ClientWiseAskRequest,
+    db: DbSession,
+    current: ClientUser,
+    client_id: str | None = None,
+) -> ClientWiseAskResponse:
+    target_id = _resolve_client_id(db, current, requested=client_id)
+    client_row = db.get(Client, target_id)
+    if client_row is None:  # pragma: no cover — _resolve_client_id guards above
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Cliente no encontrado.",
+        )
+
+    # Share the AI-heavy rate-limit bucket with the report endpoints +
+    # the portal Wise — both burn Anthropic tokens. Bucket key is the
+    # caller's user id so a single client_admin with three clients
+    # can't bypass the cap by fanning out across them.
+    enforce_ai_heavy_rate_limit(
+        current.user.id,
+        per_minute=settings.AI_HEAVY_RATE_LIMIT_PER_MINUTE,
+        per_hour=settings.AI_HEAVY_RATE_LIMIT_PER_HOUR,
+    )
+
+    from app.services.wise.ai import WiseCta, WisePageContext
+    from app.services.wise.client_ai import ask_wise_for_client
+    from app.services.wise.client_context import build_client_context
+    from app.services.wise.context import build_static_context
+
+    portfolio_ctx = build_client_context(db, client_row)
+    static_ctx = build_static_context()
+    ctas = [
+        WiseCta(id=c.id, label=c.label, href=c.href, description=c.description)
+        for c in payload.ctas
+    ]
+    page_ctx: WisePageContext | None = None
+    if payload.page_context is not None:
+        # Reuse the portal WisePageContext shape — its optional
+        # ``submission_id``/``requirement_*`` fields are unused on the
+        # cliente surface; ``vendor_id`` rides in ``requirement_code``
+        # for now so the LLM can read it from the page block without
+        # a parallel page-block renderer. Cleaner separation is a
+        # follow-up if cliente intents grow page-aware behavior.
+        page_ctx = WisePageContext(
+            route=payload.page_context.route,
+            page_label=payload.page_context.page_label,
+            requirement_code=payload.page_context.vendor_id,
+            requirement_name=None,
+            submission_id=payload.page_context.report_id,
+            period_key=payload.page_context.period_key,
+        )
+
+    result = ask_wise_for_client(
+        prompt=payload.prompt,
+        client_context=portfolio_ctx,
+        static=static_ctx,
+        ctas=ctas,
+        page_context=page_ctx,
+    )
+    return ClientWiseAskResponse(
+        body=result.body,
+        cta_label=result.cta_label,
+        cta_href=result.cta_href,
+        source=result.source,
     )

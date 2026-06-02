@@ -262,23 +262,9 @@ def ask_wise(
     Never raises. Logs warnings on graceful fallbacks so an operator
     can diagnose missing config or model errors.
     """
-    if not prompt or not prompt.strip():
-        return _fallback("No alcancé a leer tu pregunta. ¿Puedes escribirla de nuevo?")
-
-    if len(prompt) > MAX_PROMPT_CHARS:
-        return _fallback(
-            "Tu pregunta es muy larga para responder por aquí. "
-            "Intenta reformularla en una o dos oraciones."
-        )
-
-    key = api_key if api_key is not None else getattr(settings, "ANTHROPIC_API_KEY", "")
-    if client is None and not key:
-        log.warning("wise.ai.no_key", extra={"prompt_len": len(prompt)})
-        return _fallback(
-            "Las preguntas libres todavía están en aprobación interna. "
-            "Mientras tanto, usa los botones rápidos de arriba o escríbele "
-            "a soporte si necesitas algo puntual."
-        )
+    guard = _validate_prompt_and_key(prompt, api_key, client)
+    if guard.fallback is not None:
+        return guard.fallback
 
     # Always merge in the navigation CTAs so the model can hand the
     # user a button instead of writing a path string. Contextual
@@ -288,40 +274,119 @@ def ask_wise(
     # ``nav-`` prefix and contextual ids use ``act-``/``due-``.
     merged_ctas = [*ctas, *NAVIGATION_CTAS]
 
+    # System prompt is a two-part list so we can attach
+    # ``cache_control`` to the static prefix only. The runtime
+    # rules sit in the first block (rarely change), the glossary
+    # + full catalog sits in the second block (also static,
+    # versioned per deploy). Both qualify for caching together.
+    system_param: list[dict[str, Any]] = [
+        {"type": "text", "text": _SYSTEM_RULES},
+        {
+            "type": "text",
+            "text": render_static_block(static),
+            "cache_control": {"type": "ephemeral"},
+        },
+    ]
+
+    page_block = (
+        _build_page_block(page_context) + "\n\n" if page_context else ""
+    )
+    user_message = (
+        f"{page_block}"
+        f"{render_workspace_block(workspace)}\n\n"
+        f"{_build_cta_block(merged_ctas)}\n\n"
+        f"# Pregunta del proveedor\n{prompt.strip()}"
+    )
+
+    return invoke_and_parse(
+        system_param=system_param,
+        user_message=user_message,
+        ctas=merged_ctas,
+        respond_tool_name="respond_to_provider",
+        api_key=guard.key,
+        client=client,
+    )
+
+
+@dataclass(frozen=True)
+class _PromptGuard:
+    """Outcome of the early-return checks every surface shares.
+
+    When ``fallback`` is set, the caller MUST return it without
+    invoking the model. Otherwise ``key`` is the resolved API key
+    (possibly empty if the caller supplied an injected ``client``).
+    """
+
+    fallback: WiseAskResult | None
+    key: str
+
+
+def _validate_prompt_and_key(
+    prompt: str,
+    api_key: str | None,
+    client: Anthropic | None,
+) -> _PromptGuard:
+    """Run the empty-prompt, prompt-too-long, and missing-key checks
+    shared by every ``ask_wise_for_*`` variant. Returns a fallback
+    when any check fails; the caller short-circuits with it.
+    """
+    if not prompt or not prompt.strip():
+        return _PromptGuard(
+            fallback=_fallback(
+                "No alcancé a leer tu pregunta. ¿Puedes escribirla de nuevo?"
+            ),
+            key="",
+        )
+    if len(prompt) > MAX_PROMPT_CHARS:
+        return _PromptGuard(
+            fallback=_fallback(
+                "Tu pregunta es muy larga para responder por aquí. "
+                "Intenta reformularla en una o dos oraciones."
+            ),
+            key="",
+        )
+    key = api_key if api_key is not None else getattr(settings, "ANTHROPIC_API_KEY", "")
+    if client is None and not key:
+        log.warning("wise.ai.no_key", extra={"prompt_len": len(prompt)})
+        return _PromptGuard(
+            fallback=_fallback(
+                "Las preguntas libres todavía están en aprobación interna. "
+                "Mientras tanto, usa los botones rápidos de arriba o escríbele "
+                "a soporte si necesitas algo puntual."
+            ),
+            key="",
+        )
+    return _PromptGuard(fallback=None, key=key)
+
+
+def invoke_and_parse(
+    *,
+    system_param: list[dict[str, Any]],
+    user_message: str,
+    ctas: list[WiseCta],
+    respond_tool_name: str,
+    api_key: str,
+    client: Anthropic | None = None,
+) -> WiseAskResult:
+    """Surface-agnostic Anthropic invocation + tool-response parse.
+
+    Both ``ask_wise()`` (portal) and ``ask_wise_for_client()`` (cliente
+    portfolio) build their own system blocks + user message + merged
+    CTA list, then hand off to this helper. The respond tool name is
+    parameterized so each surface can label its tool after the audience
+    it speaks to (``respond_to_provider`` vs ``respond_to_client``);
+    the schema is the same.
+    """
     try:
         if client is None:
-            client = Anthropic(api_key=key)
-
-        # System prompt is a two-part list so we can attach
-        # ``cache_control`` to the static prefix only. The runtime
-        # rules sit in the first block (rarely change), the glossary
-        # + full catalog sits in the second block (also static,
-        # versioned per deploy). Both qualify for caching together.
-        system_param: list[dict[str, Any]] = [
-            {"type": "text", "text": _SYSTEM_RULES},
-            {
-                "type": "text",
-                "text": render_static_block(static),
-                "cache_control": {"type": "ephemeral"},
-            },
-        ]
-
-        page_block = (
-            _build_page_block(page_context) + "\n\n" if page_context else ""
-        )
-        user_message = (
-            f"{page_block}"
-            f"{render_workspace_block(workspace)}\n\n"
-            f"{_build_cta_block(merged_ctas)}\n\n"
-            f"# Pregunta del proveedor\n{prompt.strip()}"
-        )
-
+            client = Anthropic(api_key=api_key)
+        respond_tool = _build_respond_tool(respond_tool_name)
         response = client.messages.create(
             model=WISE_MODEL,
             max_tokens=500,
             system=system_param,
-            tools=[_RESPOND_TOOL],
-            tool_choice={"type": "tool", "name": "respond_to_provider"},
+            tools=[respond_tool],
+            tool_choice={"type": "tool", "name": respond_tool_name},
             messages=[{"role": "user", "content": user_message}],
         )
     except APIError as err:
@@ -334,22 +399,37 @@ def ask_wise(
         return _fallback(
             "Algo falló de mi lado. Intenta de nuevo en un momento."
         )
+    return _parse_tool_response(response, ctas, expected_tool_name=respond_tool_name)
 
-    return _parse_tool_response(response, merged_ctas)
+
+def _build_respond_tool(name: str) -> dict:
+    """Clone the respond-tool schema with a surface-specific name."""
+    tool = dict(_RESPOND_TOOL)
+    tool["name"] = name
+    return tool
 
 
-def _parse_tool_response(response, ctas: list[WiseCta]) -> WiseAskResult:
+def _parse_tool_response(
+    response,
+    ctas: list[WiseCta],
+    *,
+    expected_tool_name: str = "respond_to_provider",
+) -> WiseAskResult:
     """Extract the tool-use block and validate the CTA id.
 
     ``response.content`` is a list of TextBlock | ToolUseBlock. We
     only care about the tool block; anything else is conversational
-    filler the model occasionally emits before the tool call.
+    filler the model occasionally emits before the tool call. The
+    expected tool name varies per surface (``respond_to_provider``
+    for portal, ``respond_to_client`` for cliente) so a model that
+    emits the wrong tool name on the wrong surface is treated as
+    "no tool call" and falls back gracefully.
     """
     cta_index = {cta.id: cta for cta in ctas}
     for block in getattr(response, "content", []) or []:
         if getattr(block, "type", None) != "tool_use":
             continue
-        if getattr(block, "name", None) != "respond_to_provider":
+        if getattr(block, "name", None) != expected_tool_name:
             continue
         payload = getattr(block, "input", None) or {}
         # Anthropic SDK returns input as a dict already; some SDK
