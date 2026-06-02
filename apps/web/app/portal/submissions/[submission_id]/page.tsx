@@ -35,7 +35,9 @@ import {
   type SubmissionPreviousAttempt,
   type SubmissionSuggestedAction,
 } from "@/lib/api/portal";
-import { DocumentStatus } from "@/lib/constants/statuses";
+import { DocumentStatus, statusExplainer } from "@/lib/constants/statuses";
+import { GroupedValidationSummary } from "@/components/checkwise/portal/grouped-validation-summary";
+import type { ValidationSignal } from "@/components/checkwise/validation-summary";
 import { fetchCurrentSession, type PortalSession } from "@/lib/session/portal";
 
 type PageProps = {
@@ -156,6 +158,7 @@ export default function SubmissionDetailPage({ params }: PageProps) {
             <div className="space-y-5 lg:col-span-2">
               <StatusHero detail={detail} />
               <ReviewerNoteCard detail={detail} />
+              <PrevalidationCard detail={detail} />
               <SubmissionPreview detail={detail} session={session} />
               <LineageStrip detail={detail} />
               <ContextCard detail={detail} />
@@ -181,10 +184,10 @@ const STATUS_HEADLINE: Partial<Record<RequirementStatus, string>> = {
   posible_mismatch: "Este documento podría no coincidir con el requisito",
   requiere_aclaracion: "Este documento requiere una aclaración",
   pendiente_revision: "Tu documento está en revisión",
-  prevalidado: "Pasó las prevalidaciones automáticas",
+  prevalidado: "Recibimos tu documento. Un humano lo revisará pronto",
   recibido: "Recibimos tu documento",
   aprobado: "Documento aprobado",
-  excepcion_legal: "Aprobado bajo excepción legal",
+  excepcion_legal: "Aprobado con nota legal",
   no_aplica: "Este requisito no aplica para tu caso",
   pendiente: "Aún no hemos recibido este documento",
 };
@@ -238,14 +241,16 @@ function StatusHero({ detail }: { detail: SubmissionDetail }) {
             <p className="mt-2 text-base font-semibold text-[color:var(--text-primary)]">
               {headline}
             </p>
-            <p className="mt-1 text-sm text-[color:var(--text-secondary)]">
+            {statusExplainer(detail.status) ? (
+              <p className="mt-1 text-sm text-[color:var(--text-secondary)]">
+                {statusExplainer(detail.status)}
+              </p>
+            ) : null}
+            <p className="mt-1 text-sm text-[color:var(--text-tertiary)]">
               {INSTITUTION_LABELS[detail.requirement.institution ?? ""] ??
                 detail.requirement.institution ??
                 ""}
               {detail.period.period_key ? ` · ${detail.period.period_key}` : ""}
-              {detail.period.code && detail.period.code !== detail.period.period_key
-                ? ` · ${detail.period.code}`
-                : ""}
             </p>
           </div>
         </div>
@@ -372,6 +377,70 @@ function ReviewerNoteCard({ detail }: { detail: SubmissionDetail }) {
         <p className="text-[15px] leading-relaxed text-[color:var(--text-primary)]">
           {note}
         </p>
+      </CardContent>
+    </Card>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Prevalidation summary card
+// ---------------------------------------------------------------------------
+//
+// Renders the same 3-grouped outcome that the upload wizard shows on
+// its confirmation step, persisted so a provider revisiting the
+// submission later still sees a clear picture of "did my file go
+// through / does it match / what happens next".
+//
+// The detail endpoint only returns escalated signals (warning/error
+// or human-review-required) under ``detail.reasons``; "OK" file-level
+// signals are not in the payload. That's fine: the grouper defaults
+// each group to ``ok`` when no escalated signal landed in it, so the
+// provider sees positive checkmarks when nothing was flagged.
+
+function PrevalidationCard({ detail }: { detail: SubmissionDetail }) {
+  // Map ``SubmissionReason`` shape (rule_code/severity/message/
+  // requires_human_review) into the ValidationSignal shape the grouper
+  // expects. The ``result`` field is missing from reasons; derive it
+  // from severity so the grouper's worst-state logic still works.
+  const signals: ValidationSignal[] = (detail.reasons ?? []).map((r) => ({
+    rule_code: r.rule_code,
+    rule_type: "",
+    result:
+      r.severity === "error"
+        ? "fail"
+        : r.severity === "warning"
+          ? "warning"
+          : "info",
+    severity: r.severity,
+    message: r.message ?? "",
+    requires_human_review: r.requires_human_review,
+  }));
+
+  // If the classifier wrote a ``mismatch_reason`` on the document but
+  // it didn't appear in reasons[] (the backend filter only escalates
+  // some signals), synthesize a requirement_match warning so the
+  // "matches_requirement" group flips and the message shows.
+  if (
+    detail.document?.mismatch_reason &&
+    !signals.some((s) => s.rule_code === "requirement_match")
+  ) {
+    signals.push({
+      rule_code: "requirement_match",
+      rule_type: "",
+      result: "warning",
+      severity: "warning",
+      message: detail.document.mismatch_reason,
+      requires_human_review: true,
+    });
+  }
+
+  return (
+    <Card aria-label="Estado de la revisión automática">
+      <CardHeader>
+        <CardTitle>Estado de la revisión automática</CardTitle>
+      </CardHeader>
+      <CardContent>
+        <GroupedValidationSummary validations={signals} surface="detail" />
       </CardContent>
     </Card>
   );

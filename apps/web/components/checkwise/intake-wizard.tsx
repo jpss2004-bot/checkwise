@@ -43,7 +43,8 @@ import { Label } from "@/components/ui/label";
 import { Select } from "@/components/ui/select";
 import { Textarea } from "@/components/ui/textarea";
 import { RequirementStatusBadge } from "@/components/checkwise/portal/requirement-status-badge";
-import { ValidationSignal, ValidationSummary } from "@/components/checkwise/validation-summary";
+import { ValidationSignal } from "@/components/checkwise/validation-summary";
+import { GroupedValidationSummary } from "@/components/checkwise/portal/grouped-validation-summary";
 import {
   checkDuplicateBySha256,
   type CalendarAcceptedDocument,
@@ -1823,7 +1824,10 @@ function ConfirmationStep({
         )}
       </div>
 
-      <ValidationSummary validations={result.validations} />
+      <GroupedValidationSummary
+        validations={result.validations}
+        surface="wizard"
+      />
     </section>
   );
 }

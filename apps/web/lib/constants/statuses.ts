@@ -2,9 +2,23 @@
  * Frontend mirror of apps/api/app/constants/statuses.py.
  *
  * Keep the two in sync when adding or renaming a status. The backend is
- * the source of truth; this file exists so components and pages can
- * compare against a named constant instead of typing the raw string in
- * every conditional.
+ * the source of truth for the enum values; this file is the source of
+ * truth for the user-facing Spanish labels rendered everywhere a status
+ * appears (portal badges, calendar dots, admin reviewer queue, client
+ * dashboard, generated reports).
+ *
+ * Vocabulary pass (2026-06-02):
+ *   - ``Prevalidado`` is the most jargony status in the catalog — it
+ *     reads as engineer dialect to providers who don't know what was
+ *     "pre"-validated. Renamed to ``Recibido — esperando revisión`` so
+ *     the label matches what's actually true: we accepted the file, a
+ *     human will look at it.
+ *   - ``Excepción legal`` reads as a legal sanction rather than the
+ *     positive outcome it actually is (approval under a documented
+ *     legal exception). Renamed to ``Aprobado con nota legal``.
+ *   - Every other label stayed: ``Posible inconsistencia``,
+ *     ``Necesita aclaración``, ``Vencido``, ``No aplica`` are already
+ *     in plain Spanish and tested through the provider feedback loop.
  */
 
 export const DocumentStatus = {
@@ -52,12 +66,49 @@ export const STATUS_LABELS_ES: Record<DocumentStatusCode, string> = {
   [DocumentStatus.PENDIENTE]: "Pendiente",
   [DocumentStatus.RECIBIDO]: "Recibido",
   [DocumentStatus.PENDIENTE_REVISION]: "Esperando revisión",
-  [DocumentStatus.PREVALIDADO]: "Prevalidado",
+  [DocumentStatus.PREVALIDADO]: "Recibido — esperando revisión",
   [DocumentStatus.POSIBLE_MISMATCH]: "Posible inconsistencia",
   [DocumentStatus.APROBADO]: "Aprobado",
   [DocumentStatus.RECHAZADO]: "Rechazado",
   [DocumentStatus.VENCIDO]: "Vencido",
   [DocumentStatus.NO_APLICA]: "No aplica",
   [DocumentStatus.REQUIERE_ACLARACION]: "Necesita aclaración",
-  [DocumentStatus.EXCEPCION_LEGAL]: "Excepción legal",
+  [DocumentStatus.EXCEPCION_LEGAL]: "Aprobado con nota legal",
 };
+
+/**
+ * One-line plain-Spanish explainer per status, rendered beneath the
+ * status badge on the submission detail hero so the provider never has
+ * to guess what a label means. Kept short (under ~80 chars) so it fits
+ * on a single line at mobile widths.
+ *
+ * These are intentionally written from the provider's perspective —
+ * what does this status mean for ME and what should I do next.
+ */
+export const STATUS_EXPLAINER_ES: Record<DocumentStatusCode, string> = {
+  [DocumentStatus.PENDIENTE]: "Aún no has subido este documento.",
+  [DocumentStatus.RECIBIDO]: "Recibimos tu archivo. Lo vamos a revisar.",
+  [DocumentStatus.PENDIENTE_REVISION]: "Está en cola para revisión humana.",
+  [DocumentStatus.PREVALIDADO]: "Pasó las primeras revisiones. Un humano lo revisará pronto.",
+  [DocumentStatus.POSIBLE_MISMATCH]: "Detectamos algo que podría no coincidir. Lo revisará el equipo legal.",
+  [DocumentStatus.APROBADO]: "El equipo legal lo aprobó. No tienes nada más que hacer.",
+  [DocumentStatus.RECHAZADO]: "El equipo legal lo rechazó. Necesitas subir uno nuevo.",
+  [DocumentStatus.VENCIDO]: "Ya no cubre el periodo vigente. Sube la versión actualizada.",
+  [DocumentStatus.NO_APLICA]: "Este requisito no aplica para tu caso.",
+  [DocumentStatus.REQUIERE_ACLARACION]: "El equipo legal necesita más información. Lee la nota y responde.",
+  [DocumentStatus.EXCEPCION_LEGAL]: "Aprobado bajo nota legal. Conserva el sustento en tu expediente.",
+};
+
+/**
+ * Convenience accessor that always returns a string. Use this when the
+ * caller may receive a status code that's been added to the backend
+ * but not yet mirrored here — falling back to the raw code keeps the
+ * UI rendering instead of crashing, while making the gap obvious.
+ */
+export function statusLabel(status: string): string {
+  return STATUS_LABELS_ES[status as DocumentStatusCode] ?? status;
+}
+
+export function statusExplainer(status: string): string | null {
+  return STATUS_EXPLAINER_ES[status as DocumentStatusCode] ?? null;
+}
