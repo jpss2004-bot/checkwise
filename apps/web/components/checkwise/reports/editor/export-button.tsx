@@ -67,6 +67,7 @@ export function ExportButton({
   reportId,
   format,
   variant = "ghost",
+  className,
 }: {
   reportId: string;
   format: ReportExportFormat;
@@ -75,6 +76,12 @@ export function ExportButton({
   // doesn't have to hunt for the download path in a row of ghost
   // buttons.
   variant?: "ghost" | "default" | "outline";
+  // M2 (2026-06-02): the Reportes header overflow menu reskins the
+  // export buttons as menu rows. Optional className lets the consumer
+  // override the default Button styling so the trigger looks like a
+  // menuitem (full-width, left-aligned, no rounded corners) rather
+  // than a sized button.
+  className?: string;
 }) {
   const [busy, setBusy] = useState(false);
   const meta = FORMAT_META[format];
@@ -138,6 +145,7 @@ export function ExportButton({
       onClick={onClick}
       disabled={busy}
       title={meta.title}
+      className={className}
     >
       <Icon className="h-4 w-4" weight="bold" aria-hidden="true" />
       {busy ? meta.busyLabel : meta.label}

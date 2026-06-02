@@ -33,6 +33,7 @@ import { StoryView } from "@/components/checkwise/reports/story-view";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import { OverflowMenu, OverflowMenuItem } from "@/components/ui/overflow-menu";
 import { toast } from "@/components/ui/toast";
 import { PageHeader } from "@/components/ui/page-header";
 import {
@@ -451,6 +452,16 @@ export function ReportEditor({
         title={report.title}
         description={report.description ?? "Sin descripción"}
         actions={
+          // M2 (2026-06-02) — Reportes header chrome collapse.
+          // Primary row: ← Volver | Vista de auditor (de-emphasized)
+          // | Generar con IA | Compartir | Guardar versión | ⋮
+          // The overflow holds the 6 secondary affordances (Refrescar
+          // datos, Vista previa PDF, the 3 download variants, and the
+          // legacy in-browser autoprint PDF) so a client_admin opening
+          // their first report sees an actionable header, not a wall
+          // of buttons. Copiloto stays gated by ``!isClientSurface``
+          // (M1.4); on portal + admin it still renders inline next to
+          // "Generar con IA".
           <>
             <Button asChild variant="ghost" size="sm">
               <Link href={backHref}>
@@ -459,7 +470,7 @@ export function ReportEditor({
               </Link>
             </Button>
             <Button
-              variant={hasContent ? "default" : "outline"}
+              variant="ghost"
               size="sm"
               onClick={() => setAuditMode(true)}
               disabled={!hasContent}
@@ -477,7 +488,7 @@ export function ReportEditor({
               Vista de auditor
             </Button>
             <Button
-              variant="outline"
+              variant={hasContent ? "outline" : "default"}
               size="sm"
               onClick={() => setAiOpen((open) => !open)}
               disabled={
@@ -501,64 +512,9 @@ export function ReportEditor({
                 Copiloto
               </Button>
             )}
-            <Button
-              variant="outline"
-              size="sm"
-              onClick={onRefreshData}
-              disabled={refreshingData}
-              title="Re-ejecutar los lectores de datos canónicos sin tocar la IA"
-            >
-              {refreshingData ? (
-                <ArrowsClockwise
-                  className="h-4 w-4 animate-spin"
-                  weight="bold"
-                  aria-hidden="true"
-                />
-              ) : (
-                <ArrowsClockwise
-                  className="h-4 w-4"
-                  weight="bold"
-                  aria-hidden="true"
-                />
-              )}
-              {refreshingData ? "Actualizando…" : "Refrescar datos"}
-            </Button>
-            <Button
-              asChild
-              variant="ghost"
-              size="sm"
-              title="Abrir vista previa imprimible en una pestaña nueva"
-            >
-              <Link href={printHref} target="_blank" rel="noopener noreferrer">
-                <Eye className="h-4 w-4" weight="bold" aria-hidden="true" />
-                Vista previa PDF
-              </Link>
-            </Button>
-            <Button
-              asChild
-              variant={hasContent ? "default" : "ghost"}
-              size="sm"
-              title="Abrir vista de impresión y disparar Guardar como PDF"
-            >
-              <Link
-                href={`${printHref}?autoprint=1`}
-                target="_blank"
-                rel="noopener noreferrer"
-              >
-                <DownloadSimple
-                  className="h-4 w-4"
-                  weight="bold"
-                  aria-hidden="true"
-                />
-                Descargar PDF
-              </Link>
-            </Button>
-            <ExportButton reportId={reportId} format="html" />
-            <ExportButton reportId={reportId} format="pdf" />
-            <ExportButton reportId={reportId} format="xlsx" />
             <ShareDialog
               reportId={reportId}
-              variant={hasContent ? "default" : "ghost"}
+              variant={hasContent ? "default" : "outline"}
             />
             <Button
               variant="default"
@@ -584,6 +540,70 @@ export function ReportEditor({
                   ? "Guardar versión"
                   : "Sin cambios"}
             </Button>
+            <OverflowMenu triggerAriaLabel="Más acciones del reporte">
+              <OverflowMenuItem>
+                <button
+                  type="button"
+                  onClick={onRefreshData}
+                  disabled={refreshingData}
+                  className="flex w-full items-center gap-2 px-3 py-2 text-left text-[color:var(--text-primary)] hover:bg-[color:var(--surface-2)] disabled:cursor-not-allowed disabled:opacity-50"
+                >
+                  <ArrowsClockwise
+                    className={`h-4 w-4 ${refreshingData ? "animate-spin" : ""}`}
+                    weight="bold"
+                    aria-hidden="true"
+                  />
+                  {refreshingData ? "Actualizando…" : "Refrescar datos"}
+                </button>
+              </OverflowMenuItem>
+              <OverflowMenuItem>
+                <Link
+                  href={printHref}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="flex w-full items-center gap-2 px-3 py-2 text-left text-[color:var(--text-primary)] hover:bg-[color:var(--surface-2)]"
+                >
+                  <Eye className="h-4 w-4" weight="bold" aria-hidden="true" />
+                  Vista previa PDF
+                </Link>
+              </OverflowMenuItem>
+              <OverflowMenuItem>
+                <Link
+                  href={`${printHref}?autoprint=1`}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="flex w-full items-center gap-2 px-3 py-2 text-left text-[color:var(--text-primary)] hover:bg-[color:var(--surface-2)]"
+                >
+                  <DownloadSimple
+                    className="h-4 w-4"
+                    weight="bold"
+                    aria-hidden="true"
+                  />
+                  Descargar PDF (navegador)
+                </Link>
+              </OverflowMenuItem>
+              <OverflowMenuItem>
+                <ExportButton
+                  reportId={reportId}
+                  format="pdf"
+                  className="flex w-full items-center justify-start gap-2 rounded-none px-3 py-2 text-left hover:bg-[color:var(--surface-2)]"
+                />
+              </OverflowMenuItem>
+              <OverflowMenuItem>
+                <ExportButton
+                  reportId={reportId}
+                  format="html"
+                  className="flex w-full items-center justify-start gap-2 rounded-none px-3 py-2 text-left hover:bg-[color:var(--surface-2)]"
+                />
+              </OverflowMenuItem>
+              <OverflowMenuItem>
+                <ExportButton
+                  reportId={reportId}
+                  format="xlsx"
+                  className="flex w-full items-center justify-start gap-2 rounded-none px-3 py-2 text-left hover:bg-[color:var(--surface-2)]"
+                />
+              </OverflowMenuItem>
+            </OverflowMenu>
           </>
         }
       />
