@@ -9,7 +9,7 @@ re-validation flows).
 
 from __future__ import annotations
 
-from fastapi import HTTPException, UploadFile, status
+from fastapi import BackgroundTasks, HTTPException, UploadFile, status
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
@@ -41,6 +41,7 @@ from app.services.client_notifications import (
     notify_metadata_ready,
     notify_provider_uploaded,
 )
+from app.services.document_analysis.shadow_runner import run_shadow_analysis
 from app.services.document_intelligence import DocumentSignals, analyze_document_text
 from app.services.metadata_export import export_metadata_table_after_upload
 from app.services.pdf_validation import (
@@ -419,6 +420,7 @@ def finalize_intake_submission(
     intake_source: str,
     extra_audit_metadata: dict | None = None,
     supersedes_submission: Submission | None = None,
+    background_tasks: BackgroundTasks | None = None,
 ) -> SubmissionResponse:
     """Run the shared back-half of a documentary intake.
 
@@ -727,6 +729,26 @@ def finalize_intake_submission(
 
     db.commit()
 
+    # Phase 2 — schedule the background shadow analysis (Claude) after
+    # the intake transaction has committed so the provider's wait time
+    # is unaffected. The runner opens its own DB session and writes to
+    # ``DocumentInspection.shadow_*``; failures never reach the caller.
+    # When ``background_tasks`` is None (e.g., a test calling the helper
+    # directly without a request scope) the shadow analysis is simply
+    # skipped — the heuristic-driven row is already complete.
+    if background_tasks is not None:
+        background_tasks.add_task(
+            run_shadow_analysis,
+            document_id=document.id,
+            submission_id=submission.id,
+            pdf_path=str(stored_file.path),
+            requirement_code=resolved_requirement.canonical_code,
+            requirement_name=resolved_requirement.canonical_name,
+            institution_code=institution.code,
+            period_code=period_code,
+            org_id=client.id,
+        )
+
     return SubmissionResponse(
         submission_id=submission.id,
         document_id=document.id,
@@ -834,6 +856,7 @@ def finalize_multi_document_submission(
     intake_source: str,
     extra_audit_metadata: dict | None = None,
     supersedes_submission: Submission | None = None,
+    background_tasks: BackgroundTasks | None = None,
 ) -> MultiSubmissionResponse:
     """Persist 1 Submission with N Document children inside one transaction.
 
@@ -913,6 +936,7 @@ def finalize_multi_document_submission(
 
     documents_payload: list[DocumentBatchEntry] = []
     aggregated_event_types: list[str] = []
+    shadow_batch: list[tuple[str, str]] = []  # (document_id, pdf_path) for post-commit scheduling
     for (stored, pdf_inspection, document_signals, per_file_status), duplicate_found in zip(
         inspections, duplicate_flags, strict=True
     ):
@@ -927,6 +951,7 @@ def finalize_multi_document_submission(
         )
         db.add(document)
         db.flush()
+        shadow_batch.append((document.id, str(stored.path)))
 
         inspection_row = DocumentInspection(
             document_id=document.id,
@@ -1146,6 +1171,26 @@ def finalize_multi_document_submission(
     )
 
     db.commit()
+
+    # Phase 2 — schedule shadow analysis per attached document after
+    # the multi-doc transaction commits. Each document gets its own
+    # background run so a failure on one does not affect the others.
+    # The runner persists ``shadow_*`` columns on each
+    # DocumentInspection row independently; the user-visible flow is
+    # unchanged.
+    if background_tasks is not None:
+        for doc_id, pdf_path in shadow_batch:
+            background_tasks.add_task(
+                run_shadow_analysis,
+                document_id=doc_id,
+                submission_id=submission.id,
+                pdf_path=pdf_path,
+                requirement_code=resolved_requirement.canonical_code,
+                requirement_name=resolved_requirement.canonical_name,
+                institution_code=institution.code,
+                period_code=period_code,
+                org_id=client.id,
+            )
 
     return MultiSubmissionResponse(
         submission_id=submission.id,

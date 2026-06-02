@@ -2463,6 +2463,7 @@ async def create_workspace_submission(
     requirement_name: Annotated[str, Form(min_length=2)],
     db: DbSession,
     workspace: Annotated[ProviderWorkspace, Depends(current_portal_workspace)],
+    background_tasks: BackgroundTasks,
     comments: Annotated[str | None, Form()] = None,
     initial_status: Annotated[str, Form()] = DocumentStatus.PENDIENTE_REVISION.value,
     requirement_code: Annotated[str | None, Form()] = None,
@@ -2587,6 +2588,7 @@ async def create_workspace_submission(
             intake_source=INTAKE_SOURCE_WORKSPACE_PORTAL,
             extra_audit_metadata={"workspace_id": workspace.id},
             supersedes_submission=supersedes_submission,
+            background_tasks=background_tasks,
         )
     except SQLAlchemyError as exc:
         db.rollback()
@@ -2636,6 +2638,7 @@ async def create_workspace_submission_batch(
     requirement_name: Annotated[str, Form(min_length=2)],
     db: DbSession,
     workspace: Annotated[ProviderWorkspace, Depends(current_portal_workspace)],
+    background_tasks: BackgroundTasks,
     comments: Annotated[str | None, Form()] = None,
     initial_status: Annotated[str, Form()] = DocumentStatus.PENDIENTE_REVISION.value,
     requirement_code: Annotated[str | None, Form()] = None,
@@ -2776,6 +2779,7 @@ async def create_workspace_submission_batch(
             intake_source=INTAKE_SOURCE_WORKSPACE_PORTAL,
             extra_audit_metadata={"workspace_id": workspace.id},
             supersedes_submission=supersedes_submission,
+            background_tasks=background_tasks,
         )
     except HTTPException:
         # Roll back any DB writes that finalize_multi_document_submission
