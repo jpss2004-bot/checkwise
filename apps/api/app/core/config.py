@@ -246,6 +246,45 @@ class Settings(BaseSettings):
     # provider indefinitely on a slow processor.
     OCR_TIMEOUT_SECONDS: float = 30.0
 
+    # ─────────────────────────────────────────────────────────────────
+    # Phase 2 — Anthropic Claude document-analysis provider (shadow).
+    #
+    # Selects which backend the background shadow runner uses. The
+    # inline heuristic classifier in ``submission_service`` runs
+    # unconditionally; these settings only control the optional
+    # secondary AI analysis that persists to the ``shadow_*`` columns
+    # on ``DocumentInspection`` for offline comparison.
+    #
+    # Valid provider values:
+    #   ``disabled`` (default) — no shadow runs.
+    #   ``heuristic``         — shadow runs the regex baseline (test only).
+    #   ``anthropic``         — Claude reads the PDF and extracts.
+    #   ``shadow``            — alias for ``anthropic``.
+    #
+    # ``DOCUMENT_ANALYSIS_DAILY_CAP_PER_ORG`` is the safety circuit
+    # breaker against runaway spend during the pilot. 0 disables.
+    #
+    # Limits mirror Anthropic's PDF support documented caps:
+    # ``MAX_FILE_MB`` ≤ 32 (API hard cap), ``MAX_PAGES`` ≤ 100 for
+    # the 200k-context models we use. Files exceeding either limit
+    # skip the provider and record ``shadow_error=unsupported_size_or_type``.
+    # ─────────────────────────────────────────────────────────────────
+    DOCUMENT_ANALYSIS_PROVIDER: str = "disabled"
+    DOCUMENT_ANALYSIS_MODEL: str = "claude-sonnet-4-6"
+    DOCUMENT_ANALYSIS_TIMEOUT_SECONDS: float = 30.0
+    DOCUMENT_ANALYSIS_MAX_FILE_MB: int = 30
+    DOCUMENT_ANALYSIS_MAX_PAGES: int = 100
+    DOCUMENT_ANALYSIS_DAILY_CAP_PER_ORG: int = 200
+
+    # Phase 3 — pilot-cohort allowlist. CSV of ``client.id`` values
+    # that are allowed to receive shadow analysis. Empty string (the
+    # default) disables the gate, so every org is in scope. When set,
+    # the shadow runner short-circuits with
+    # ``shadow_error="not_in_pilot_cohort"`` for any org_id not in
+    # the list — the heuristic still drives the user-visible status
+    # exactly as today. Whitespace + blank entries are tolerated.
+    DOCUMENT_ANALYSIS_PILOT_ORG_IDS: str = ""
+
     model_config = SettingsConfigDict(env_file=".env", env_file_encoding="utf-8", extra="ignore")
 
     # Render (and many hosts) accept env vars set to an empty string as

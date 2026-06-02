@@ -1,5 +1,17 @@
 # Phase 3 — Google Document AI provisioning checklist
 
+> **DEPRECATED (2026-06-02 — Phase 2 of Claude rollout).** This
+> document describes the Google Document AI OCR fallback that was
+> built but never activated in production. Phase 2 replaces it with
+> a Claude-based document-analysis provider that reads PDFs directly
+> (vision + text in one call) — no separate OCR layer is needed for
+> the common case. The Google code remains in tree at
+> `apps/api/app/services/ocr.py` and `OCR_ENABLED=false` is the
+> default; do not provision a GCP project for this purpose. See
+> [`PHASE_CLAUDE_DOC_ANALYSIS.md`](./PHASE_CLAUDE_DOC_ANALYSIS.md)
+> for the live architecture. The instructions below are kept for
+> historical reference only.
+
 CheckWise prevalidation runs OCR via Google Document AI for any upload
 where `inspect_pdf` reports `is_probably_scanned=True` (i.e. the PDF
 has page count > 0 but pypdf extracted < 20 characters of text). OCR
