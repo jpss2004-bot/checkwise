@@ -1,6 +1,6 @@
 "use client";
 
-import { ChartLineUp, Sparkle } from "@phosphor-icons/react";
+import { Sparkle } from "@phosphor-icons/react";
 
 import { FreshnessLabel } from "@/components/checkwise/reports/freshness-label";
 import type { BlockDefinition, BlockProps } from "@/lib/reports/registry";
@@ -115,7 +115,7 @@ export function ExecutiveSummaryBlock({
         <textarea
           placeholder={
             editable
-              ? "Tres a cuatro frases. Período + alcance + titular + riesgo principal."
+              ? "Escribe el resumen ejecutivo o pídeselo a la IA."
               : "—"
           }
           value={config.body ?? ""}
@@ -140,16 +140,6 @@ export function ExecutiveSummaryBlock({
               </div>
             ))}
           </div>
-        </div>
-      )}
-
-      {editable && (
-        <div className="flex items-center gap-2 text-[11px] text-[color:var(--text-tertiary)] print:hidden">
-          <ChartLineUp className="h-3 w-3" weight="regular" aria-hidden="true" />
-          <span>
-            En Phase 3.3 este resumen se generará automáticamente desde los datos
-            del workspace.
-          </span>
         </div>
       )}
 

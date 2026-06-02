@@ -174,10 +174,19 @@ export function ComplianceRadarBlock({
         </div>
       </div>
 
-      {/* Optional 6-month sparkline (M5 will populate). */}
+      {/* 6-month sparkline. M5 (2026-06-02) — the series is an
+          approval-rate proxy (% of submissions created in each month
+          that ended in ``aprobado``), not a strict compliance %.
+          Header label calls it "Aprobación mensual" so the
+          distinction is honest to the executive reading the report. */}
       {history.length > 0 ? (
         <div className="mt-6 border-t border-[color:var(--border-subtle)] pt-4">
-          <p className="cw-eyebrow mb-2">Tendencia · últimos 6 meses</p>
+          <div className="mb-2 flex items-baseline justify-between gap-3">
+            <p className="cw-eyebrow">Aprobación mensual · últimos 6 meses</p>
+            <p className="font-mono text-[10px] uppercase tracking-wide text-[color:var(--text-tertiary)]">
+              {history[0]?.month_key} → {history[history.length - 1]?.month_key}
+            </p>
+          </div>
           <ComplianceSparkline points={history} />
         </div>
       ) : null}

@@ -18,7 +18,7 @@ fetchers, so the fetchers stay focused on data shape.
 from __future__ import annotations
 
 from collections.abc import Callable
-from datetime import datetime
+from datetime import date, datetime
 from typing import Any
 
 from sqlalchemy import func, select
@@ -201,6 +201,8 @@ def fetch_compliance_radar(
         ),
     )[:top_n]
 
+    history = _compute_compliance_history_6mo(db, scope.client_id)
+
     return {
         "client_name": portfolio.client_name,
         "vendor_count": portfolio.vendor_count,
@@ -222,12 +224,83 @@ def fetch_compliance_radar(
             }
             for v in ordered
         ],
-        # M5 will populate this with the actual 6-month trend. For
-        # now an empty series tells the frontend to hide the
-        # sparkline rather than draw a flat zero line.
-        "history_6mo": [],
+        "history_6mo": history,
         "fetched_at": _now_iso(),
     }
+
+
+def _compute_compliance_history_6mo(
+    db: Session, client_id: str
+) -> list[dict[str, Any]]:
+    """Approximate 6-month compliance trend for the cliente sparkline.
+
+    M5 (2026-06-02) — first pass. A proper "compliance %" historical
+    series would need a snapshot table backed by a cron (we don't
+    know "total expected obligations" at past timestamps without
+    replaying the evidence-slot service against month-end state).
+    Instead we ship an approval-rate proxy: for each of the last six
+    calendar months, the percentage of submissions created during
+    that month that ended (or are still) in the ``aprobado`` status.
+
+    The frontend labels the sparkline "Aprobación mensual" to keep the
+    semantic distinction honest — a flat 100% just means every
+    submission landed clean, not that the portfolio is 100% complete.
+
+    Returns six points ordered oldest → newest, suitable for the
+    radar's existing ``ComplianceSparkline`` component. When the
+    portfolio has zero submissions in a month, the point is omitted
+    rather than emitted as 0% so the line doesn't dive to the floor
+    on quiet months.
+    """
+    today = date.today()
+    points: list[dict[str, Any]] = []
+
+    # Walk back 6 months including the current one.
+    for offset in range(5, -1, -1):
+        # Naive month arithmetic — works for the 6-month window we
+        # care about without dragging in dateutil.relativedelta.
+        year = today.year
+        month = today.month - offset
+        while month <= 0:
+            month += 12
+            year -= 1
+        # Build month bounds [start, next_start).
+        start = date(year, month, 1)
+        if month == 12:
+            next_start = date(year + 1, 1, 1)
+        else:
+            next_start = date(year, month + 1, 1)
+
+        total = db.scalar(
+            select(func.count(Submission.id))
+            .join(Vendor, Vendor.id == Submission.vendor_id)
+            .where(
+                Vendor.client_id == client_id,
+                Submission.created_at >= start,
+                Submission.created_at < next_start,
+            )
+        ) or 0
+        approved = db.scalar(
+            select(func.count(Submission.id))
+            .join(Vendor, Vendor.id == Submission.vendor_id)
+            .where(
+                Vendor.client_id == client_id,
+                Submission.status == DocumentStatus.APROBADO,
+                Submission.created_at >= start,
+                Submission.created_at < next_start,
+            )
+        ) or 0
+        if total == 0:
+            # Skip silent months — keeps the line shape honest.
+            continue
+        pct = int(round((approved / total) * 100))
+        points.append(
+            {
+                "month_key": f"{year:04d}-{month:02d}",
+                "compliance_pct": pct,
+            }
+        )
+    return points
 
 
 def fetch_text_or_divider(config: dict, scope: ReportScope, db: Session) -> dict | None:
