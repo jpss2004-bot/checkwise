@@ -9,7 +9,7 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 
 class Settings(BaseSettings):
     PROJECT_NAME: str = "CheckWise API"
-    API_VERSION: str = "0.1.0"
+    API_VERSION: str = "2.5.1"
     API_V1_PREFIX: str = "/api/v1"
     CHECKWISE_ENV: str = "local"
 
