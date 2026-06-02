@@ -230,10 +230,13 @@ not the typesetter.
 
 # Output shape
 
-Emit one tool_use block per planned block, in the order they should
-appear in the report. Lead with executive_summary unless the user
-explicitly says otherwise. You may emit a short rationale paragraph
-alongside the tool calls — keep it under 80 words.
+Emit **multiple parallel tool_use blocks in a single response** —
+one per planned block, in the order they should appear in the report.
+A typical compliance report has 3–5 blocks (e.g. hero + narrative +
+matrix + recommendations); do NOT stop after the first tool call.
+After the last block, optionally emit a short rationale paragraph
+under 80 words. Lead with executive_summary or compliance_radar
+unless the user explicitly asks for a different opener.
 """
 
 

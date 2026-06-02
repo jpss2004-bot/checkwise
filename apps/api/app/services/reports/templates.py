@@ -126,24 +126,31 @@ _CLIENT_MONTHLY_EXECUTIVE = ReportPreset(
     audience=ReportAudience.CLIENT_FACING,
     required_roles=(MembershipRole.CLIENT_ADMIN, MembershipRole.INTERNAL_ADMIN),
     recommended_prompt=(
-        # M4 (2026-06-02) — Reportes redesign. The cliente Resumen
-        # ejecutivo now leads with the new ``compliance_radar`` hero
-        # block (donut + per-vendor traffic-light cards + reserved
-        # sparkline slot) so the cliente sees portfolio-level risk
-        # at a glance. The narrative executive_summary follows with
-        # ``include_metrics=false`` (the radar already shows the
-        # metrics; the text block adds prose context). Matriz de
-        # riesgo + 3 recomendaciones round out the canvas.
+        # M4/M5 (2026-06-02) — Reportes redesign. Be EXTREMELY
+        # explicit: enumerate the four blocks the cliente surface
+        # needs by name + config, in order. The earlier softer
+        # "arranca con… sigue con…" phrasing got Anthropic to stop
+        # after one or two tool calls. The numbered must-include
+        # list with parallel emission language gets the planner to
+        # emit all four in a single response.
         "Genera un resumen ejecutivo mensual de cumplimiento del "
-        "portafolio para la dirección del cliente: arranca con un "
-        "bloque ``compliance_radar`` que muestre el donut del semáforo, "
-        "el cumplimiento global y un ranking de proveedores peor a "
-        "mejor (top_n_vendors=8). Sigue con un resumen ejecutivo en "
-        "prosa enfocado en cumplimiento (NO incluyas métricas en el "
-        "resumen — el radar ya las muestra; pon include_metrics=false). "
-        "Continúa con una matriz de riesgo por proveedor y cierra con "
-        "3 recomendaciones priorizadas para la dirección. No agregues "
-        "un kpi_strip separado."
+        "portafolio para la dirección del cliente. Devuelve "
+        "EXACTAMENTE estos cuatro bloques, en este orden, emitidos "
+        "como cuatro tool_use paralelos en una sola respuesta:\n"
+        "1. ``compliance_radar`` con ``top_n_vendors=8``, "
+        "``include_history=false`` — hero del portafolio.\n"
+        "2. ``executive_summary`` con ``focus=compliance``, "
+        "``include_metrics=false`` — narrativa en prosa, sin tira "
+        "de KPIs (el radar ya las muestra).\n"
+        "3. ``vendor_risk_matrix`` con ``sort=risk_desc``, "
+        "``max_rows=10``, columnas ``[sat, imss, infonavit, "
+        "stps_repse, risk_score]`` — vista cruzada de proveedores "
+        "ordenada de mayor a menor riesgo.\n"
+        "4. ``ai_recommendation`` con ``priority_count=3``, "
+        "``audience_tone=client`` — tres recomendaciones priorizadas "
+        "para la dirección.\n\n"
+        "NO agregues bloques adicionales. NO omitas ninguno. NO "
+        "emitas un ``kpi_strip`` separado."
     ),
 )
 
