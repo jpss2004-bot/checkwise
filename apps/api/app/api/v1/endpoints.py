@@ -30,6 +30,7 @@ from app.core.catalogs import (
     REQUIREMENT_EXAMPLES,
     VALIDATION_RULES,
 )
+from app.core.config import settings
 from app.core.security_gates import require_local_or_internal_admin
 from app.db.session import get_db
 from app.schemas.catalogs import CatalogResponse
@@ -77,26 +78,6 @@ def get_catalogs() -> CatalogResponse:
     )
 
 
-@router.post(
-    "/submissions",
-    response_model=SubmissionResponse,
-    status_code=status.HTTP_202_ACCEPTED,
-    tags=["submissions"],
-    deprecated=True,
-    summary="Legacy native-intake submission (deprecated, gated)",
-    description=(
-        "DEPRECATED. Trusts browser-posted tenant identity (client / vendor / "
-        "contract / RFC). Kept for the importer, dev workflows, and existing "
-        "test coverage. For tenant-safe provider uploads use "
-        "`POST /api/v1/portal/workspaces/{workspace_id}/submissions`, which "
-        "derives tenant identity from the authenticated workspace. "
-        "Outside `CHECKWISE_ENV=local` this endpoint requires the "
-        "`internal_admin` role on a bearer JWT — it is never anonymous "
-        "in production."
-    ),
-    # Trust boundary: anonymous in local only; internal_admin everywhere else.
-    dependencies=[Depends(require_local_or_internal_admin)],
-)
 async def create_submission(
     client_name: Annotated[str, Form(min_length=2)],
     vendor_name: Annotated[str, Form(min_length=2)],
@@ -202,3 +183,33 @@ async def create_submission(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="No fue posible registrar la carga documental.",
         ) from exc
+
+
+# Hard kill switch — operator sets EXPOSE_LEGACY_SUBMISSIONS=false to
+# remove the legacy native-intake POST /submissions endpoint from the
+# schema entirely (404 not 403). The handler is always defined above
+# so the importer + dev workflows + test fixtures can still call it
+# directly when the route is registered. The decorator runs only when
+# the flag is True, mirroring the original docstring intent at
+# core/config.py:187-191. Defence-in-depth on top of the existing
+# require_local_or_internal_admin auth gate.
+if settings.EXPOSE_LEGACY_SUBMISSIONS:
+    create_submission = router.post(  # type: ignore[assignment]
+        "/submissions",
+        response_model=SubmissionResponse,
+        status_code=status.HTTP_202_ACCEPTED,
+        tags=["submissions"],
+        deprecated=True,
+        summary="Legacy native-intake submission (deprecated, gated)",
+        description=(
+            "DEPRECATED. Trusts browser-posted tenant identity (client / "
+            "vendor / contract / RFC). Kept for the importer, dev workflows, "
+            "and existing test coverage. For tenant-safe provider uploads use "
+            "`POST /api/v1/portal/workspaces/{workspace_id}/submissions`, "
+            "which derives tenant identity from the authenticated workspace. "
+            "Outside `CHECKWISE_ENV=local` this endpoint requires the "
+            "`internal_admin` role on a bearer JWT — it is never anonymous "
+            "in production."
+        ),
+        dependencies=[Depends(require_local_or_internal_admin)],
+    )(create_submission)

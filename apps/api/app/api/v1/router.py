@@ -18,6 +18,7 @@ from app.api.v1 import (
     reviewer,
     shares,
 )
+from app.core.config import settings
 
 api_router = APIRouter()
 api_router.include_router(endpoints.router)
@@ -27,7 +28,13 @@ api_router.include_router(auth.router)
 api_router.include_router(reviewer.router)
 api_router.include_router(admin.router)
 api_router.include_router(client.router)
-api_router.include_router(metadata_dry_run.router)
+# Hard kill switch — operator sets EXPOSE_METADATA_DRY_RUN=false to
+# remove the n8n prototyping endpoint from the schema entirely
+# (404 not 403). The router is also auth-gated via
+# require_local_or_internal_admin; this is a defence-in-depth layer
+# that shrinks the attack surface for OpenAPI enumeration / fuzzing.
+if settings.EXPOSE_METADATA_DRY_RUN:
+    api_router.include_router(metadata_dry_run.router)
 api_router.include_router(reports.router)
 # Phase 10D — public share-consume endpoints under /api/v1/r/<token>.
 api_router.include_router(shares.router)
