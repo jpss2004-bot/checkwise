@@ -21,9 +21,9 @@ archive serves.
 | `CHECKWISE_2_0.md` | superseded | Now superseded by ROADMAP.md + the in-tree audit dossier. |
 | `DEMO_1.7.1.md` | superseded | Demo script for the 1.7.1 milestone; obsolete after the 2026-05 rotation. |
 | `PRE_REDESIGN_SYSTEM_MAP.md` | superseded | System map snapshot before the 2026-05 portal redesign. Live map is `docs/MAP.md` / `docs/PROJECT_STRUCTURE.md`. |
-| `PROMPTED_BUT_INCOMPLETE_2026-05-19.md` | historical | Working notes from a single mid-rollout session. |
-| `PROVIDER_REPORTS_REDESIGN_AUDIT.md` | superseded | Audit closed; findings absorbed into `PROVIDER_REPORTS_SESSION_HANDOFF.md`. |
+| `PROVIDER_REPORTS_REDESIGN_AUDIT.md` | superseded | Audit closed; findings absorbed into `handoffs-2026-05/PROVIDER_REPORTS_SESSION_HANDOFF.md`. |
 | `PROVIDER_REPORTS_REDESIGN_PLAN.md` | superseded | Plan shipped; live behavior documented under `REPORTS_*.md`. |
+| `handoffs-2026-05/` | superseded | 13 dated handoffs and audit snapshots from the 2026-05 stabilization push, archived in the 2026-06-02 cleanup (`AUDIT_NEXT_SESSION_READINESS.md`, `AUTH_ROLE_FLOW_AUDIT_2026-05-18.md`, `FRIDAY_MEETING_ACTION_MATRIX.md`, `FULL_SYSTEM_AUDIT.md`, `MONDAY_READINESS_AUDIT.md`, `NEXT_SESSION_HANDOFF.md`, `PROD_AUDIT_2026-05-18.md`, `PROVIDER_REPORTS_AI_AUDIT_2026-05-19.md`, `PROVIDER_REPORTS_SESSION_HANDOFF.md`, `PROVIDER_REPORTS_VISUAL_AUDIT_2026-05-19.md`, `REPORTS_AUDIT_2026-05-18.md`, `STABILIZATION_AUDIT_2026-05-18.md`, `USER_TEST_READINESS.md`). |
 
 ## When to move something here
 

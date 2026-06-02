@@ -300,6 +300,6 @@ This route avoids the audited rough edges (no tablet-portrait views, no unknown 
 - `apps/web/app/portal/reports/[id]/print/page.tsx` — toolbar button label (I-03).
 - `apps/web/components/checkwise/reports/block-header.tsx` — hide block type-code label in read-only mode (I-06).
 - `docs/SYSTEM_UX_AUDIT_REPORT.md` — **this report.**
-- `docs/NEXT_SESSION_HANDOFF.md` — short companion handoff for the next session.
+- [`docs/_archive/handoffs-2026-05/NEXT_SESSION_HANDOFF.md`](_archive/handoffs-2026-05/NEXT_SESSION_HANDOFF.md) — short companion handoff for the next session.
 
 Nothing else touched; the broader recommended fixes are documented but deliberately deferred.

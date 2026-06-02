@@ -199,7 +199,7 @@ cd ../api
 
 ## Items P1 que NO bloquean Monday pero deben planearse
 
-Estos están en `FRIDAY_MEETING_ACTION_MATRIX.md`. En orden de prioridad para post-Monday:
+Estos están en [`_archive/handoffs-2026-05/FRIDAY_MEETING_ACTION_MATRIX.md`](_archive/handoffs-2026-05/FRIDAY_MEETING_ACTION_MATRIX.md). En orden de prioridad para post-Monday:
 
 1. WhatsApp integración (montar `SupportCard` + env).
 2. Form `/client/onboarding` self-service post-pago.

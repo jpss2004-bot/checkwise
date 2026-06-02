@@ -10,7 +10,7 @@ part of CheckWise."
 Companion docs:
 - [REPORTS_ARCHITECTURE.md](REPORTS_ARCHITECTURE.md) §22–§25 (R1.0 → P1
   shipped state)
-- [REPORTS_AUDIT_2026-05-18.md](REPORTS_AUDIT_2026-05-18.md) (general
+- [REPORTS_AUDIT_2026-05-18.md](handoffs-2026-05/REPORTS_AUDIT_2026-05-18.md) (general
   Reports module audit)
 - [PROVIDER_DASHBOARD_READ_MODEL.md](PROVIDER_DASHBOARD_READ_MODEL.md)
   (canonical provider read model — the data source any provider report

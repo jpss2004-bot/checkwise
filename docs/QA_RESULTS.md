@@ -1,6 +1,6 @@
 # QA results — 2026-05-18
 
-Companion to `docs/FULL_SYSTEM_AUDIT.md`. Records exactly what was tested, how, and the pass/fail.
+Companion to [`docs/_archive/handoffs-2026-05/FULL_SYSTEM_AUDIT.md`](_archive/handoffs-2026-05/FULL_SYSTEM_AUDIT.md). Records exactly what was tested, how, and the pass/fail.
 
 ## Test environment
 
