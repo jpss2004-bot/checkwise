@@ -6,8 +6,10 @@ import {
   ArrowLeft,
   ArrowRight,
   Buildings,
+  CheckCircle,
   Copy,
   IdentificationCard,
+  PaperPlaneTilt,
   Storefront,
   type Icon,
 } from "@phosphor-icons/react";
@@ -107,6 +109,12 @@ export default function AdminNewUserPage() {
       setVendorName("");
       setVendorRfc("");
       setContactPhone("");
+      // Scroll the page back to the top so the success surface is
+      // immediately in view; long forms otherwise leave the admin
+      // wondering if the submit fired at all.
+      if (typeof window !== "undefined") {
+        window.scrollTo({ top: 0, behavior: "smooth" });
+      }
     } catch (err) {
       setErrMsg(
         err instanceof Error ? err.message : "No pudimos crear el usuario.",
@@ -142,25 +150,28 @@ export default function AdminNewUserPage() {
       }
     >
       <div className="space-y-6">
-        <Surface title="Tipo de cuenta" icon={IdentificationCard}>
-          <div className="flex flex-wrap gap-2">
-            <RoleButton
-              active={role === "client"}
-              onClick={() => setRole("client")}
-              icon={Buildings}
-              label="Cliente"
-              caption="Una empresa que contrata proveedores REPSE y que recibe el cumplimiento agregado."
-            />
-            <RoleButton
-              active={role === "provider"}
-              onClick={() => setRole("provider")}
-              icon={Storefront}
-              label="Proveedor"
-              caption="Una empresa proveedora REPSE que sube documentos en su espacio."
-            />
-          </div>
-        </Surface>
+        {!result && (
+          <Surface title="Tipo de cuenta" icon={IdentificationCard}>
+            <div className="flex flex-wrap gap-2">
+              <RoleButton
+                active={role === "client"}
+                onClick={() => setRole("client")}
+                icon={Buildings}
+                label="Cliente"
+                caption="Una empresa que contrata proveedores REPSE y que recibe el cumplimiento agregado."
+              />
+              <RoleButton
+                active={role === "provider"}
+                onClick={() => setRole("provider")}
+                icon={Storefront}
+                label="Proveedor"
+                caption="Una empresa proveedora REPSE que sube documentos en su espacio."
+              />
+            </div>
+          </Surface>
+        )}
 
+        {!result && (
         <form onSubmit={handleSubmit} className="space-y-6">
           <Surface title="Datos de acceso" icon={IdentificationCard}>
             <div className="grid gap-3 sm:grid-cols-2">
@@ -315,56 +326,103 @@ export default function AdminNewUserPage() {
             </Button>
           </div>
         </form>
+        )}
 
         {result ? (
-          <Surface
-            title="Credenciales temporales"
-            icon={IdentificationCard}
-            actions={
-              <Badge variant={result.email_status === "sent" ? "success" : "warning"}>
-                {result.email_status === "sent"
-                  ? "Correo enviado"
-                  : `Correo: ${result.email_status}`}
-              </Badge>
-            }
-          >
-            <div className="space-y-3 text-sm">
-              <p className="text-[color:var(--text-primary)]">
-                Cuenta creada para <strong>{result.email}</strong> como{" "}
-                <strong>{result.role === "client" ? "cliente" : "proveedor"}</strong>.
-              </p>
-              <div className="rounded-md border border-[color:var(--border-default)] bg-[color:var(--surface-page)] p-3">
-                <p className="font-mono text-[10px] uppercase tracking-wide text-[color:var(--text-tertiary)]">
-                  Contraseña temporal (se muestra solo esta vez)
-                </p>
-                <div className="mt-1 flex items-center justify-between gap-3">
-                  <code className="select-all break-all font-mono text-base font-semibold text-[color:var(--text-primary)]">
-                    {result.temp_password}
-                  </code>
-                  <Button
-                    type="button"
-                    size="sm"
-                    variant="outline"
-                    onClick={copyTempPassword}
-                  >
-                    <Copy className="h-3.5 w-3.5" weight="bold" aria-hidden="true" />
-                    {copied ? "Copiada" : "Copiar"}
-                  </Button>
+          <div className="space-y-4">
+            <div className="rounded-md border border-[color:var(--status-success-border)] bg-[color:var(--status-success-bg)] p-5 shadow-sm">
+              <div className="flex items-start gap-3">
+                <CheckCircle
+                  className="mt-0.5 h-6 w-6 shrink-0 text-[color:var(--status-success-text)]"
+                  weight="fill"
+                  aria-hidden="true"
+                />
+                <div className="min-w-0 flex-1">
+                  <p className="text-base font-semibold text-[color:var(--status-success-text)]">
+                    Credenciales generadas
+                  </p>
+                  <p className="mt-0.5 text-sm text-[color:var(--text-primary)]">
+                    Cuenta creada para <strong>{result.email}</strong> como{" "}
+                    <strong>
+                      {result.role === "client" ? "cliente" : "proveedor"}
+                    </strong>
+                    .
+                  </p>
                 </div>
+                <Badge
+                  variant={result.email_status === "sent" ? "success" : "warning"}
+                >
+                  <PaperPlaneTilt
+                    className="h-3 w-3"
+                    weight="bold"
+                    aria-hidden="true"
+                  />
+                  {result.email_status === "sent"
+                    ? "Correo enviado"
+                    : `Correo: ${result.email_status}`}
+                </Badge>
               </div>
-              <p className="text-xs text-[color:var(--text-tertiary)]">
-                Al entrar con esa contraseña, el sistema le pedirá cambiarla
-                inmediatamente. Si el correo no llegó, mándale la contraseña
-                por WhatsApp y dile que entre en{" "}
-                <code>{result.login_url}</code>.
-              </p>
-              {result.email_error ? (
-                <p className="text-[11px] text-[color:var(--status-warning-text)]">
-                  Detalle del correo: {result.email_error}
-                </p>
-              ) : null}
             </div>
-          </Surface>
+
+            <Surface title="Contraseña temporal" icon={IdentificationCard}>
+              <div className="space-y-3 text-sm">
+                <div className="rounded-md border border-[color:var(--border-default)] bg-[color:var(--surface-page)] p-4">
+                  <p className="font-mono text-[10px] uppercase tracking-wide text-[color:var(--text-tertiary)]">
+                    Se muestra una sola vez — guárdala antes de salir
+                  </p>
+                  <div className="mt-2 flex items-center justify-between gap-3">
+                    <code className="select-all break-all font-mono text-lg font-semibold text-[color:var(--text-primary)]">
+                      {result.temp_password}
+                    </code>
+                    <Button
+                      type="button"
+                      size="sm"
+                      variant={copied ? "default" : "outline"}
+                      onClick={copyTempPassword}
+                    >
+                      <Copy className="h-3.5 w-3.5" weight="bold" aria-hidden="true" />
+                      {copied ? "Copiada" : "Copiar"}
+                    </Button>
+                  </div>
+                </div>
+                <p className="text-xs text-[color:var(--text-tertiary)]">
+                  Al entrar con esa contraseña, el sistema le pedirá cambiarla
+                  inmediatamente. Si el correo no llegó, mándale la contraseña
+                  por WhatsApp y dile que entre en{" "}
+                  <code>{result.login_url}</code>.
+                </p>
+                {result.email_error ? (
+                  <p className="rounded-md border border-[color:var(--status-warning-border)] bg-[color:var(--status-warning-bg)] p-3 text-[11px] text-[color:var(--status-warning-text)]">
+                    Detalle del correo: {result.email_error}
+                  </p>
+                ) : null}
+              </div>
+            </Surface>
+
+            <div className="flex flex-wrap items-center justify-end gap-2">
+              <Button asChild size="sm" variant="outline">
+                <Link href="/admin/clients">
+                  <ArrowLeft className="h-3.5 w-3.5" weight="bold" aria-hidden="true" />
+                  Volver a clientes
+                </Link>
+              </Button>
+              <Button
+                type="button"
+                size="sm"
+                onClick={() => {
+                  setResult(null);
+                  setErrMsg(null);
+                  setCopied(false);
+                  if (typeof window !== "undefined") {
+                    window.scrollTo({ top: 0, behavior: "smooth" });
+                  }
+                }}
+              >
+                Crear otro usuario
+                <ArrowRight className="h-3.5 w-3.5" weight="bold" aria-hidden="true" />
+              </Button>
+            </div>
+          </div>
         ) : null}
       </div>
     </PlatformShell>
