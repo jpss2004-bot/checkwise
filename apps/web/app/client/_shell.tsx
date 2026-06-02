@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { Suspense, useEffect, useState } from "react";
 import Link from "next/link";
 import { useRouter, usePathname } from "next/navigation";
 import {
@@ -303,7 +303,14 @@ export function ClientShell({
         Powered by Legal Shelf · CheckWise
       </footer>
       <FeedbackLauncher />
-      <ClientWiseDock />
+      {/* ClientWiseDock uses useSearchParams() to read ?client_id and
+          derive page context. Wrapping in <Suspense fallback={null}>
+          satisfies Next 15's bailout requirement during static
+          prerender so cliente pages (/client/auditoria,
+          /client/notifications, ...) build cleanly on Vercel. */}
+      <Suspense fallback={null}>
+        <ClientWiseDock />
+      </Suspense>
     </div>
   );
 }
