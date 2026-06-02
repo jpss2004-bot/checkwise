@@ -422,7 +422,7 @@ def emit_period_inserts(submissions: list[Submission]) -> list[str]:
             f"{_sql_str(s.period_key)}, "
             f"{year_str}, {month_str}, "
             f"{_sql_str('mensual' if (s.period_key and '-M' in s.period_key) else 'anual')}, "
-            f"NOW(), NOW()) ON CONFLICT (id) DO NOTHING;"
+            f"NOW(), NOW()) ON CONFLICT (code, period_type) DO NOTHING;"
         )
     return out
 

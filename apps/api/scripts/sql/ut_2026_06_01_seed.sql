@@ -208,7 +208,7 @@ VALUES
    'user_testing_2026_06_01-2026-M04',     '2026-M04', 2026, 4,    'mensual',       NOW(), NOW()),
   ('862f4d05-4f94-59e0-a884-fff129cb099e',
    'user_testing_2026_06_01-2026-M05',     '2026-M05', 2026, 5,    'mensual',       NOW(), NOW())
-ON CONFLICT (id) DO NOTHING;
+ON CONFLICT (code, period_type) DO NOTHING;
 
 -- prep.py may emit additional period rows (for the Provider A green
 -- recurring catalog covering the rest of 2026) into the submissions file.
