@@ -25,7 +25,7 @@ Columns:
 All columns are nullable. The migration is additive and safely
 reversible.
 
-Revision ID: 0032_document_inspection_shadow_columns
+Revision ID: 0032_doc_inspection_shadow
 Revises: 0031_audit_log_append_only
 """
 
@@ -36,7 +36,7 @@ from sqlalchemy.dialects import postgresql
 
 from alembic import op
 
-revision = "0032_document_inspection_shadow_columns"
+revision = "0032_doc_inspection_shadow"
 down_revision = "0031_audit_log_append_only"
 branch_labels = None
 depends_on = None
