@@ -23,7 +23,7 @@ import {
   NotFoundState,
   SubmissionDetailSkeleton,
 } from "@/components/checkwise/portal/state-surfaces";
-import { ShadowComparisonCard } from "@/components/checkwise/admin/shadow-comparison-card";
+import { LecturaDelDocumento } from "@/components/checkwise/admin/lectura-del-documento";
 import { SubmissionTimeline } from "@/components/checkwise/portal/submission-timeline";
 import { FeedbackLauncher } from "@/components/feedback/feedback-launcher";
 import { Button } from "@/components/ui/button";
@@ -196,8 +196,7 @@ export default function ReviewerSubmissionPage({ params }: PageProps) {
             <StatusHeader detail={detail} decidedHint={decided?.new_status ?? null} />
             <ReviewerSubmissionPreview detail={detail} session={session} />
             <LineageStrip detail={detail} />
-            <ReasonsCard detail={detail} />
-            <ShadowComparisonCard payload={detail.shadow_analysis ?? null} />
+            <LecturaDelDocumento detail={detail} />
             <ProviderCard detail={detail} />
             <SubmissionTimeline detail={detail} />
           </div>
@@ -239,6 +238,7 @@ export default function ReviewerSubmissionPage({ params }: PageProps) {
                     : undefined
                 }
                 onSubmit={handleDecision}
+                aiHint={deriveAiHint(detail)}
               />
             )}
             <TraceabilityCard detail={detail} />
@@ -338,103 +338,61 @@ function StatusHeader({
   );
 }
 
-function ReasonsCard({ detail }: { detail: SubmissionDetail }) {
-  if (detail.reasons.length === 0 && !detail.document?.mismatch_reason) return null;
-  return (
-    <Card>
-      <CardHeader>
-        <CardTitle>Señales automáticas</CardTitle>
-        <p className="mt-1 text-sm text-muted-foreground">
-          Lo que la prevalidación detectó. La decisión final es tuya.
-        </p>
-      </CardHeader>
-      <CardContent className="space-y-2">
-        {detail.document?.mismatch_reason ? (
-          <SignalRow
-            severity="warning"
-            title="Posible inconsistencia"
-            message={detail.document.mismatch_reason}
-          />
-        ) : null}
-        {detail.reasons.map((r) => (
-          <SignalRow
-            key={r.rule_code}
-            severity={r.severity}
-            title={validationLabel(r.rule_code)}
-            message={r.message ?? "Sin detalle adicional."}
-            ruleCode={r.rule_code}
-          />
-        ))}
-      </CardContent>
-    </Card>
-  );
+/**
+ * Build the optional one-line "Sugerencia automática" the Decision
+ * Panel shows above the action chips. Only surfaces when the AI lectura
+ * flagged a concern — clean approvals don't get a hint, so reviewers
+ * aren't anchored on AI for every routine submission.
+ *
+ * Concern conditions (in priority order):
+ *   1. AI returned a mismatch_reason → show it as the hint text.
+ *   2. AI confidence < 0.5 → show "Confianza baja, revisa con cuidado".
+ *   3. Heuristic mismatch_reason set (AI didn't run / no AI data) →
+ *      show the heuristic's reason.
+ *
+ * Returns null when nothing actionable — the panel hides the hint
+ * block entirely in that case.
+ */
+function deriveAiHint(detail: SubmissionDetail): string | null {
+  const shadow = detail.shadow_analysis?.shadow;
+  if (shadow?.signals?.mismatch_reason) {
+    return shadow.signals.mismatch_reason;
+  }
+  const conf = shadow?.signals?.requirement_match_confidence;
+  if (conf !== null && conf !== undefined && conf < 0.5) {
+    return "Confianza baja en la coincidencia con el requisito. Revisa el documento con cuidado.";
+  }
+  if (detail.document?.mismatch_reason) {
+    return detail.document.mismatch_reason;
+  }
+  return null;
 }
 
-function SignalRow({
-  severity,
-  title,
-  message,
-  ruleCode,
-}: {
-  severity: string;
-  title: string;
-  message: string;
-  ruleCode?: string;
-}) {
-  const Icon =
-    severity === "error" ? WarningCircle : severity === "warning" ? Warning : ShieldCheck;
-  const iconColor =
-    severity === "error"
-      ? "text-[color:var(--status-error-text)]"
-      : severity === "warning"
-        ? "text-[color:var(--status-warning-text)]"
-        : "text-[color:var(--text-brand)]";
-  // Raw rule_code stays in the title attribute + aria-label so QA and
-  // engineers can still map a row to a backend assertion without
-  // surfacing snake_case identifiers as the primary label.
-  const diagnosticHint = ruleCode ? `${title} (${ruleCode})` : title;
-  return (
-    <div
-      className="flex items-start gap-3 rounded-md border border-[color:var(--border-default)] bg-[color:var(--surface-raised)] p-3"
-      title={diagnosticHint}
-      aria-label={diagnosticHint}
-    >
-      <Icon
-        className={`mt-0.5 h-4 w-4 shrink-0 ${iconColor}`}
-        weight="fill"
-        aria-hidden
-      />
-      <div className="min-w-0">
-        <p className="text-sm font-medium text-[color:var(--text-primary)]">{title}</p>
-        <p className="mt-0.5 text-sm text-[color:var(--text-secondary)]">{message}</p>
-      </div>
-    </div>
-  );
-}
+// ReasonsCard + SignalRow + ShadowComparisonCard were merged into
+// <LecturaDelDocumento/> (apps/web/components/checkwise/admin/
+// lectura-del-documento.tsx) during the 2026-06-02 UX rework. The
+// merged card surfaces the AI verdict as the primary read, with the
+// per-rule prevalidation signals tucked inside a "Señales de
+// prevalidación" expandable so reviewers who want them can expand,
+// but the default view is no longer dominated by N rule rows.
 
 function ProviderCard({ detail }: { detail: SubmissionDetail }) {
+  // Vocabulary pass (2026-06-02): dropped `load_type` (engineer-facing
+  // intake mechanism — meaningless to a legal reviewer) and the dual
+  // period fields (period.period_key + period.code shown side by side
+  // confused reviewers about which was authoritative). We now show
+  // one human-readable period, preferring the canonical key, falling
+  // back to the raw code only when the key is missing.
+  const periodValue =
+    detail.period.period_key ?? detail.period.code ?? "—";
   return (
     <Card>
       <CardHeader>
         <CardTitle>Origen del documento</CardTitle>
       </CardHeader>
       <CardContent className="grid gap-3 sm:grid-cols-2 text-sm">
-        <Field
-          label="Carga"
-          value={formatDate(detail.submitted_at)}
-        />
-        <Field
-          label="Tipo"
-          value={detail.load_type}
-        />
-        <Field
-          label="Periodo regulatorio"
-          value={detail.period.period_key ?? "—"}
-        />
-        <Field
-          label="Periodo capturado"
-          value={detail.period.code ?? "—"}
-        />
+        <Field label="Carga" value={formatDate(detail.submitted_at)} />
+        <Field label="Periodo" value={periodValue} />
       </CardContent>
     </Card>
   );

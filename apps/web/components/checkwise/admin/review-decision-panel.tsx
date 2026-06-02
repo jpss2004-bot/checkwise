@@ -69,6 +69,16 @@ interface ReviewDecisionPanelProps {
   ) => Promise<void>;
   /** Optional override of the panel surface className. */
   className?: string;
+  /**
+   * Passive AI suggestion line shown above the action chips. ONLY
+   * surfaced when the automatic lectura flagged a concern
+   * (mismatch_reason set or low confidence). Never sets the action
+   * for the reviewer — it's an informational nudge, not a binding
+   * suggestion. Pass `null` (or omit) to hide the line entirely
+   * — including when the AI thinks everything is fine — so reviewers
+   * aren't anchored on AI for every routine approval.
+   */
+  aiHint?: string | null;
 }
 
 // Phase 9 / Slice 9A — common rejection reasons. Click a chip to
@@ -159,6 +169,7 @@ export function ReviewDecisionPanel({
   disabledReason,
   onSubmit,
   className,
+  aiHint,
 }: ReviewDecisionPanelProps) {
   const [action, setAction] = React.useState<ReviewerAction | null>(null);
   const [reason, setReason] = React.useState("");
@@ -284,6 +295,23 @@ export function ReviewDecisionPanel({
       </header>
 
       <div className="space-y-4 p-5">
+        {aiHint ? (
+          <div
+            role="note"
+            aria-label="Sugerencia automática"
+            className="flex items-start gap-2 rounded-md border border-[color:var(--status-warning-border,transparent)] bg-[color:var(--status-warning-bg,transparent)] px-3 py-2 text-xs"
+          >
+            <Warning
+              className="mt-0.5 h-3.5 w-3.5 shrink-0 text-[color:var(--status-warning-text,#d97706)]"
+              weight="fill"
+              aria-hidden="true"
+            />
+            <p className="text-[color:var(--text-primary)]">
+              <span className="font-semibold">Sugerencia automática: </span>
+              <span className="italic">{aiHint}</span>
+            </p>
+          </div>
+        ) : null}
         <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
           {ACTIONS.map((opt) => {
             const Icon = opt.icon;
