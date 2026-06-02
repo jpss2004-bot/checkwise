@@ -306,6 +306,42 @@ export type SubmissionSuggestedAction =
   | "wait_for_review"
   | "no_action";
 
+/** Phase 2 (Claude shadow) — internal AI comparison block, present
+ *  ONLY on the admin reviewer endpoint. The provider portal endpoint
+ *  never emits this field. Both `heuristic` and `shadow` carry the
+ *  same `signals` shape so the comparison card can render a single
+ *  diff table; `shadow.completed_at === null` means the background
+ *  shadow run has not finished yet.
+ */
+export type ShadowAnalysisSignals = {
+  detected_institution: string | null;
+  detected_document_type: string | null;
+  detected_rfcs: string[];
+  detected_dates: string[];
+  period_mentions: string[];
+  requirement_match_confidence: number | null;
+  mismatch_reason: string | null;
+  anomaly_codes?: string[];
+  _meta?: Record<string, unknown>;
+};
+
+export type ShadowAnalysisPayload = {
+  heuristic: {
+    provider_id: string;
+    completed_at: string | null;
+    signals: ShadowAnalysisSignals;
+  };
+  shadow: {
+    provider_id: string | null;
+    prompt_version: string | null;
+    completed_at: string | null;
+    latency_ms: number | null;
+    error: string | null;
+    confidence: number | null;
+    signals: ShadowAnalysisSignals | null;
+  };
+};
+
 export type SubmissionDetail = {
   submission_id: string;
   workspace_id: string;
@@ -331,6 +367,9 @@ export type SubmissionDetail = {
    *  renders this as a hero card for actionable statuses so the
    *  reviewer's words aren't buried in the timeline. */
   reviewer_note: string | null;
+  /** Phase 2 (Claude shadow) — admin-only comparison block. Omitted
+   *  on the provider-facing endpoint. */
+  shadow_analysis?: ShadowAnalysisPayload | null;
 };
 
 export async function getSubmissionDetail(

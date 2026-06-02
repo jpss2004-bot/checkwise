@@ -486,6 +486,55 @@ def get_submission(
         "supersedes_submission_id": submission.supersedes_submission_id,
         "superseded_by_submission_id": superseded_by_id,
         "suggested_action": _suggested_action(submission.status),
+        # Phase 2 — shadow-analysis comparison block. Only present on
+        # this reviewer endpoint; the provider-facing portal endpoint
+        # never exposes shadow data. ``shadow.completed_at IS None``
+        # signals "análisis pendiente" to the UI; the heuristic block
+        # is a denormalized copy of the inspection columns so the
+        # comparison card can render before the shadow call finishes.
+        "shadow_analysis": _build_shadow_analysis_payload(inspection),
+    }
+
+
+def _build_shadow_analysis_payload(inspection) -> dict | None:  # noqa: ANN001
+    """Shape the shadow-mode comparison payload for the admin UI.
+
+    Returns ``None`` when no inspection row exists (defensive — every
+    intake creates one, but reviewer tooling sometimes inspects
+    historical rows that predate the Phase-2 columns).
+
+    The payload is intentionally flat-ish so the React card can render
+    a single object without juggling nested optionals.
+    """
+    if inspection is None:
+        return None
+    return {
+        "heuristic": {
+            "provider_id": "heuristic:v1",
+            "completed_at": inspection.updated_at.isoformat()
+            if getattr(inspection, "updated_at", None)
+            else None,
+            "signals": {
+                "detected_institution": inspection.detected_institution,
+                "detected_document_type": inspection.detected_document_type,
+                "detected_rfcs": list(inspection.detected_rfcs or []),
+                "detected_dates": list(inspection.detected_dates or []),
+                "period_mentions": list(inspection.period_mentions or []),
+                "requirement_match_confidence": inspection.requirement_match_confidence,
+                "mismatch_reason": inspection.mismatch_reason,
+            },
+        },
+        "shadow": {
+            "provider_id": inspection.shadow_provider_id,
+            "prompt_version": inspection.shadow_prompt_version,
+            "completed_at": inspection.shadow_completed_at.isoformat()
+            if inspection.shadow_completed_at
+            else None,
+            "latency_ms": inspection.shadow_latency_ms,
+            "error": inspection.shadow_error,
+            "confidence": inspection.shadow_confidence,
+            "signals": inspection.shadow_signals,
+        },
     }
 
 

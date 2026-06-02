@@ -23,6 +23,7 @@ import {
   NotFoundState,
   SubmissionDetailSkeleton,
 } from "@/components/checkwise/portal/state-surfaces";
+import { ShadowComparisonCard } from "@/components/checkwise/admin/shadow-comparison-card";
 import { SubmissionTimeline } from "@/components/checkwise/portal/submission-timeline";
 import { FeedbackLauncher } from "@/components/feedback/feedback-launcher";
 import { Button } from "@/components/ui/button";
@@ -196,6 +197,7 @@ export default function ReviewerSubmissionPage({ params }: PageProps) {
             <ReviewerSubmissionPreview detail={detail} session={session} />
             <LineageStrip detail={detail} />
             <ReasonsCard detail={detail} />
+            <ShadowComparisonCard payload={detail.shadow_analysis ?? null} />
             <ProviderCard detail={detail} />
             <SubmissionTimeline detail={detail} />
           </div>
