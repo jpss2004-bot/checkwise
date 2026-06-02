@@ -20,11 +20,13 @@ import {
 import { BackBar } from "@/components/checkwise/back-bar";
 import { BrandLogo } from "@/components/checkwise/brand-logo";
 import { FeedbackLauncher } from "@/components/feedback/feedback-launcher";
+import { ClientWiseDock } from "@/components/checkwise/wise/client-wise-dock";
 import { SearchBar } from "@/components/checkwise/search-bar";
 import { UserMenu } from "@/components/checkwise/user-menu";
 import { MetadataStrip } from "@/components/ui/metadata-strip";
 import { cn } from "@/lib/utils";
 import { getClientNotificationSummary } from "@/lib/api/client";
+import { useUrlClientId } from "@/lib/workspace/use-url-client-id";
 import {
   type AdminSession,
   clearAdminSession,
@@ -71,6 +73,7 @@ export function ClientShell({
 }) {
   const router = useRouter();
   const pathname = usePathname();
+  const urlClientId = useUrlClientId();
   const [session, setSession] = useState<AdminSession | null>(null);
   const [ready, setReady] = useState(false);
   const [drawerOpen, setDrawerOpen] = useState(false);
@@ -95,10 +98,12 @@ export function ClientShell({
     // unread rows. Info-tier and green-tier unreads are visible in
     // the in-app feed but never inflate the count, keeping the
     // badge as a "you need to act on this" signal.
-    getClientNotificationSummary()
+    getClientNotificationSummary(
+      urlClientId ? { client_id: urlClientId } : undefined,
+    )
       .then((summary) => setUnreadCount(summary.unread_actionable_count))
       .catch(() => setUnreadCount(0));
-  }, [router]);
+  }, [router, urlClientId]);
 
   useEffect(() => {
     setDrawerOpen(false);
@@ -298,6 +303,7 @@ export function ClientShell({
         Powered by Legal Shelf · CheckWise
       </footer>
       <FeedbackLauncher />
+      <ClientWiseDock />
     </div>
   );
 }

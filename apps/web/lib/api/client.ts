@@ -423,11 +423,15 @@ export type ClientProviderCreateResponse = {
 
 export async function createClientProvider(
   body: ClientProviderCreateBody,
+  params?: { client_id?: string },
 ): Promise<ClientProviderCreateResponse> {
-  return fetchJson<ClientProviderCreateResponse>("/api/v1/client/providers", {
-    method: "POST",
-    body: JSON.stringify(body),
-  });
+  return fetchJson<ClientProviderCreateResponse>(
+    `/api/v1/client/providers${qs(params)}`,
+    {
+      method: "POST",
+      body: JSON.stringify(body),
+    },
+  );
 }
 
 export async function getClientVendorDetail(
@@ -660,14 +664,17 @@ export type ClientProfileUpdate = {
   terms_accepted?: boolean;
 };
 
-export async function getClientProfile(): Promise<ClientProfile> {
-  return fetchJson<ClientProfile>("/api/v1/client/profile");
+export async function getClientProfile(params?: {
+  client_id?: string;
+}): Promise<ClientProfile> {
+  return fetchJson<ClientProfile>(`/api/v1/client/profile${qs(params)}`);
 }
 
 export async function updateClientProfile(
   body: ClientProfileUpdate,
+  params?: { client_id?: string },
 ): Promise<ClientProfile> {
-  return fetchJson<ClientProfile>("/api/v1/client/profile", {
+  return fetchJson<ClientProfile>(`/api/v1/client/profile${qs(params)}`, {
     method: "PATCH",
     body: JSON.stringify(body),
   });
@@ -684,6 +691,7 @@ export async function updateClientProfile(
  * (notably: empty ``statuses`` → aprobado-only).
  */
 export type AuditPackageFilters = {
+  client_id?: string | null;
   period_from?: string | null;
   period_to?: string | null;
   institutions?: string[];
@@ -709,6 +717,7 @@ function _appendAuditPackageFilters(
   params: URLSearchParams,
   filters: AuditPackageFilters,
 ): void {
+  if (filters.client_id) params.set("client_id", filters.client_id);
   if (filters.period_from) params.set("period_from", filters.period_from);
   if (filters.period_to) params.set("period_to", filters.period_to);
   for (const inst of filters.institutions ?? []) {
@@ -824,6 +833,7 @@ export async function downloadClientAuditPackageZipPost(
       headers,
       credentials: "include",
       body: JSON.stringify({
+        client_id: body.client_id ?? null,
         period_from: body.period_from ?? null,
         period_to: body.period_to ?? null,
         institutions: body.institutions ?? null,
@@ -845,4 +855,85 @@ export async function downloadClientAuditPackageZipPost(
   const filename = match?.[1] ?? "auditoria.zip";
   const blob = await response.blob();
   return { blob, filename };
+}
+
+// ─── Cliente Wise copilot — M1 (2026-06-02) ───────────────────────
+//
+// Mirror of `lib/api/portal.ts`'s `postWiseAsk` / `postWiseEvent` for
+// the cliente surface. The cliente Wise dock (`<ClientWiseDock>`)
+// reasons about the buyer's portfolio of vendors rather than a single
+// vendor's onboarding state; the backend assembles that portfolio
+// context server-side from `_resolve_client_id(current, requested)`,
+// so the frontend just ships the prompt + allowed CTAs.
+
+export type ClientWiseAskCta = {
+  id: string;
+  label: string;
+  href: string;
+  description?: string;
+};
+
+export type ClientWisePageContext = {
+  route: string;
+  page_label: string;
+  vendor_id?: string;
+  report_id?: string;
+  period_key?: string;
+};
+
+export type ClientWiseAskResponse = {
+  body: string;
+  cta_label: string | null;
+  cta_href: string | null;
+  source: "llm" | "fallback";
+};
+
+export type ClientWiseEventType =
+  | "wise.first_render"
+  | "wise.opened"
+  | "wise.collapsed"
+  | "wise.suggestion_clicked"
+  | "wise.suggestion_dismissed"
+  | "wise.question_asked";
+
+export type ClientWiseEventPayload = Record<string, unknown>;
+
+export async function postClientWiseAsk(
+  prompt: string,
+  ctas: ClientWiseAskCta[],
+  pageContext?: ClientWisePageContext,
+  params?: { client_id?: string },
+): Promise<ClientWiseAskResponse> {
+  return fetchJson<ClientWiseAskResponse>(
+    `/api/v1/client/wise/ask${qs(params)}`,
+    {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        prompt,
+        ctas,
+        page_context: pageContext ?? null,
+      }),
+    },
+  );
+}
+
+export async function postClientWiseEvent(
+  eventType: ClientWiseEventType,
+  payload?: ClientWiseEventPayload,
+  params?: { client_id?: string },
+): Promise<void> {
+  // Events route is fire-and-forget telemetry. Swallow any error so
+  // a single dropped /events call never blocks the dock from firing
+  // subsequent ones. The route returns 202 with a small JSON body
+  // we don't need to parse.
+  try {
+    await fetchJson<unknown>(`/api/v1/client/wise/events${qs(params)}`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ event_type: eventType, payload: payload ?? null }),
+    });
+  } catch {
+    // intentional silent swallow — analytics never blocks UX.
+  }
 }
