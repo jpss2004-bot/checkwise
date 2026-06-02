@@ -4,7 +4,9 @@ import { useCallback, useState } from "react";
 import { DownloadSimple, FilePdf, FileXls } from "@phosphor-icons/react";
 
 import { Button } from "@/components/ui/button";
+import { OVERFLOW_MENU_ROW_CLASS } from "@/components/ui/overflow-menu";
 import { toast } from "@/components/ui/toast";
+import { cn } from "@/lib/utils";
 import {
   ReportsApiError,
   createReportExport,
@@ -68,6 +70,7 @@ export function ExportButton({
   format,
   variant = "ghost",
   className,
+  asMenuItem = false,
 }: {
   reportId: string;
   format: ReportExportFormat;
@@ -82,6 +85,14 @@ export function ExportButton({
   // menuitem (full-width, left-aligned, no rounded corners) rather
   // than a sized button.
   className?: string;
+  // 2026-06-02 fix: when rendered inside an OverflowMenuItem, the
+  // <Button>'s default chrome (size="sm" fixed height, ghost-variant
+  // hover styles, inline-flex/justify-center base) fights with the
+  // menu-row layout — items rendered visibly bigger than the plain
+  // <button>/<Link> rows around them. Setting ``asMenuItem`` switches
+  // to a bare <button> styled with OVERFLOW_MENU_ROW_CLASS so every
+  // row in the menu looks identical.
+  asMenuItem?: boolean;
 }) {
   const [busy, setBusy] = useState(false);
   const meta = FORMAT_META[format];
@@ -137,6 +148,20 @@ export function ExportButton({
   }, [busy, format, pollUntilReady, reportId]);
 
   const Icon = meta.icon;
+  if (asMenuItem) {
+    return (
+      <button
+        type="button"
+        onClick={onClick}
+        disabled={busy}
+        title={meta.title}
+        className={cn(OVERFLOW_MENU_ROW_CLASS, className)}
+      >
+        <Icon className="h-4 w-4 shrink-0" weight="bold" aria-hidden="true" />
+        <span>{busy ? meta.busyLabel : meta.label}</span>
+      </button>
+    );
+  }
   return (
     <Button
       type="button"

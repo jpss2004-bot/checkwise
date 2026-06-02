@@ -31,7 +31,11 @@ import { StoryView } from "@/components/checkwise/reports/story-view";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { OverflowMenu, OverflowMenuItem } from "@/components/ui/overflow-menu";
+import {
+  OVERFLOW_MENU_ROW_CLASS,
+  OverflowMenu,
+  OverflowMenuItem,
+} from "@/components/ui/overflow-menu";
 import { toast } from "@/components/ui/toast";
 import { PageHeader } from "@/components/ui/page-header";
 import {
@@ -439,15 +443,20 @@ export function ReportEditor({
         description={report.description ?? "Sin descripción"}
         actions={
           // M2 (2026-06-02) — Reportes header chrome collapse.
-          // Primary row: ← Volver | Vista de auditor (de-emphasized)
-          // | Generar con IA | Compartir | Guardar versión | ⋮
-          // The overflow holds the 6 secondary affordances (Refrescar
-          // datos, Vista previa PDF, the 3 download variants, and the
-          // legacy in-browser autoprint PDF) so a client_admin opening
-          // their first report sees an actionable header, not a wall
-          // of buttons. M1-follow-up (2026-06-02) — the Copiloto
-          // button is gone; the floating Wise dock on ClientShell and
-          // (when ?client_id is set) AdminShell replaces it.
+          // 2026-06-02 hierarchy rework: two high-frequency actions
+          // (Refrescar datos + Descargar PDF browser) moved from the
+          // overflow menu into the primary row. Reviewers were
+          // hunting for them; now they're one click away. The menu
+          // shrinks to 4 secondary items (preview + 3 specialised
+          // export formats).
+          //
+          // Primary row order: ← Volver | Vista de auditor (de-
+          // emphasized) | Refrescar datos | Generar con IA |
+          // Descargar PDF | Compartir | Guardar versión | ⋮
+          //
+          // M1-follow-up (2026-06-02) — Copiloto button gone; floating
+          // Wise dock on ClientShell + (when ?client_id) AdminShell
+          // replaces it.
           <>
             <Button asChild variant="ghost" size="sm">
               <Link href={backHref}>
@@ -474,6 +483,20 @@ export function ReportEditor({
               Vista de auditor
             </Button>
             <Button
+              variant="ghost"
+              size="sm"
+              onClick={onRefreshData}
+              disabled={refreshingData}
+              title="Actualizar los datos del reporte (vuelve a consultar el backend)"
+            >
+              <ArrowsClockwise
+                className={`h-4 w-4 ${refreshingData ? "animate-spin" : ""}`}
+                weight="bold"
+                aria-hidden="true"
+              />
+              {refreshingData ? "Actualizando…" : "Refrescar datos"}
+            </Button>
+            <Button
               variant={hasContent ? "outline" : "default"}
               size="sm"
               onClick={() => setAiOpen((open) => !open)}
@@ -486,6 +509,25 @@ export function ReportEditor({
             >
               <Sparkle className="h-4 w-4" weight="bold" aria-hidden="true" />
               Generar con IA
+            </Button>
+            <Button
+              asChild
+              variant="outline"
+              size="sm"
+              title="Descargar el reporte como PDF (usa la impresión del navegador)"
+            >
+              <Link
+                href={`${printHref}?autoprint=1`}
+                target="_blank"
+                rel="noopener noreferrer"
+              >
+                <DownloadSimple
+                  className="h-4 w-4"
+                  weight="bold"
+                  aria-hidden="true"
+                />
+                Descargar PDF
+              </Link>
             </Button>
             <ShareDialog
               reportId={reportId}
@@ -517,66 +559,24 @@ export function ReportEditor({
             </Button>
             <OverflowMenu triggerAriaLabel="Más acciones del reporte">
               <OverflowMenuItem>
-                <button
-                  type="button"
-                  onClick={onRefreshData}
-                  disabled={refreshingData}
-                  className="flex w-full items-center gap-2 px-3 py-2 text-left text-[color:var(--text-primary)] hover:bg-[color:var(--surface-2)] disabled:cursor-not-allowed disabled:opacity-50"
-                >
-                  <ArrowsClockwise
-                    className={`h-4 w-4 ${refreshingData ? "animate-spin" : ""}`}
-                    weight="bold"
-                    aria-hidden="true"
-                  />
-                  {refreshingData ? "Actualizando…" : "Refrescar datos"}
-                </button>
-              </OverflowMenuItem>
-              <OverflowMenuItem>
                 <Link
                   href={printHref}
                   target="_blank"
                   rel="noopener noreferrer"
-                  className="flex w-full items-center gap-2 px-3 py-2 text-left text-[color:var(--text-primary)] hover:bg-[color:var(--surface-2)]"
+                  className={OVERFLOW_MENU_ROW_CLASS}
                 >
-                  <Eye className="h-4 w-4" weight="bold" aria-hidden="true" />
-                  Vista previa PDF
+                  <Eye className="h-4 w-4 shrink-0" weight="bold" aria-hidden="true" />
+                  <span>Vista previa PDF</span>
                 </Link>
               </OverflowMenuItem>
               <OverflowMenuItem>
-                <Link
-                  href={`${printHref}?autoprint=1`}
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  className="flex w-full items-center gap-2 px-3 py-2 text-left text-[color:var(--text-primary)] hover:bg-[color:var(--surface-2)]"
-                >
-                  <DownloadSimple
-                    className="h-4 w-4"
-                    weight="bold"
-                    aria-hidden="true"
-                  />
-                  Descargar PDF (navegador)
-                </Link>
+                <ExportButton reportId={reportId} format="pdf" asMenuItem />
               </OverflowMenuItem>
               <OverflowMenuItem>
-                <ExportButton
-                  reportId={reportId}
-                  format="pdf"
-                  className="flex w-full items-center justify-start gap-2 rounded-none px-3 py-2 text-left hover:bg-[color:var(--surface-2)]"
-                />
+                <ExportButton reportId={reportId} format="html" asMenuItem />
               </OverflowMenuItem>
               <OverflowMenuItem>
-                <ExportButton
-                  reportId={reportId}
-                  format="html"
-                  className="flex w-full items-center justify-start gap-2 rounded-none px-3 py-2 text-left hover:bg-[color:var(--surface-2)]"
-                />
-              </OverflowMenuItem>
-              <OverflowMenuItem>
-                <ExportButton
-                  reportId={reportId}
-                  format="xlsx"
-                  className="flex w-full items-center justify-start gap-2 rounded-none px-3 py-2 text-left hover:bg-[color:var(--surface-2)]"
-                />
+                <ExportButton reportId={reportId} format="xlsx" asMenuItem />
               </OverflowMenuItem>
             </OverflowMenu>
           </>

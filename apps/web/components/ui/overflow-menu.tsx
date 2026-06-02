@@ -98,7 +98,12 @@ export function OverflowMenu({
           aria-label={triggerAriaLabel}
           onClick={() => setOpen(false)}
           className={cn(
-            "absolute right-0 top-full z-20 mt-1 min-w-[200px] overflow-hidden rounded-md border border-[color:var(--border-subtle)] bg-[color:var(--surface-1)] py-1 text-[13px] shadow-lg",
+            // 2026-06-02 token fix: --surface-1 / --surface-2 don't
+            // exist as CSS variables, so the panel rendered with no
+            // background and items had no hover state. Switched to the
+            // defined `surface-raised` / `surface-hover` tokens so the
+            // dropdown is actually visible.
+            "absolute right-0 top-full z-20 mt-1 min-w-[220px] overflow-hidden rounded-md border border-[color:var(--border-default)] bg-[color:var(--surface-raised)] py-1 text-[13px] shadow-lg",
             panelClassName,
           )}
         >
@@ -128,3 +133,15 @@ export function OverflowMenuItem({ children, className }: OverflowMenuItemProps)
     </li>
   );
 }
+
+/**
+ * Shared className for the interactive element inside an
+ * :class:`OverflowMenuItem`. Use on the inner ``<button>`` / ``<a>`` /
+ * ``ExportButton`` so every row in every overflow menu looks the
+ * same: full-width row, icon + label, left-aligned, plain background
+ * with hover. Avoids the Button-component-inside-menu trap where the
+ * Button's default size + variant chrome bleed through.
+ */
+export const OVERFLOW_MENU_ROW_CLASS =
+  "flex w-full items-center gap-2 rounded-none border-0 bg-transparent px-3 py-2 text-left text-[13px] text-[color:var(--text-primary)] shadow-none transition-colors hover:bg-[color:var(--surface-hover)] active:bg-[color:var(--surface-hover)] disabled:cursor-not-allowed disabled:opacity-50";
+
