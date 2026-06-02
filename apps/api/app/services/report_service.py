@@ -37,7 +37,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
-from sqlalchemy import func, select
+from sqlalchemy import func, or_, select
 from sqlalchemy.orm import Session
 
 from app.constants.reports import (
@@ -364,15 +364,25 @@ def list_reports(
     stmt = select(Report)
 
     if not actor.is_internal:
+        # BL-002 (2026-06-02): the read filter is a UNION of vendor-
+        # scope and org-scope, not an else-if. The earlier shape
+        # (``if workspace_owner: ... else: ...``) silently shadowed
+        # org memberships when a hybrid actor was also a workspace
+        # owner — a real-world demo persona (cliente.demo was set as
+        # ``owner_user_id`` on three portfolio ProviderWorkspaces)
+        # lost visibility into their own org's reports. ``can_write_
+        # report`` already evaluates with union semantics; aligning
+        # the read side keeps the rules symmetric.
+        visibility = []
         if actor.is_workspace_owner:
-            # P1: scope to reports targeting this provider's workspace.
-            # Filter on vendor_id (not organization_id) because providers
-            # don't hold an org membership — the workspace IS their tenant.
-            stmt = stmt.where(Report.vendor_id == actor.workspace_vendor_id)
-        else:
-            if not actor.organization_ids:
-                return [], 0
-            stmt = stmt.where(Report.organization_id.in_(actor.organization_ids))
+            visibility.append(Report.vendor_id == actor.workspace_vendor_id)
+        if actor.organization_ids:
+            visibility.append(
+                Report.organization_id.in_(actor.organization_ids)
+            )
+        if not visibility:
+            return [], 0
+        stmt = stmt.where(or_(*visibility))
 
     if organization_id:
         if not actor.is_internal and organization_id not in actor.organization_ids:
@@ -420,13 +430,19 @@ def get_report(
         raise ReportNotFoundError(f"Report {report_id} not found.")
 
     if not actor.is_internal:
-        if actor.is_workspace_owner:
-            # P1: providers only see their own vendor's reports. Cross-
-            # vendor reads return 404 to avoid id enumeration.
-            if report.vendor_id != actor.workspace_vendor_id:
-                raise ReportNotFoundError(f"Report {report_id} not found.")
-        elif report.organization_id not in actor.organization_ids:
-            # Indistinguishable from not-found by design (no enumeration).
+        # BL-002 mirror of the ``list_reports`` filter: a hybrid actor
+        # with both workspace ownership AND org memberships is visible
+        # via *either* path. The previous else-if shadowed the org
+        # branch when ``is_workspace_owner`` was True, returning 404
+        # for reports the user could legitimately read through their
+        # org. 404 (not 403) on the failure path is intentional — no
+        # id enumeration through error-code differentiation.
+        visible_via_workspace = (
+            actor.is_workspace_owner
+            and report.vendor_id == actor.workspace_vendor_id
+        )
+        visible_via_org = report.organization_id in actor.organization_ids
+        if not (visible_via_workspace or visible_via_org):
             raise ReportNotFoundError(f"Report {report_id} not found.")
 
     allowed = visible_audiences(actor)
