@@ -45,6 +45,8 @@ import {
   type ClientProfile,
   type ClientSubmissionItem,
 } from "@/lib/api/client";
+import { useUrlClientId } from "@/lib/workspace/use-url-client-id";
+import { statusLabel } from "@/lib/constants/statuses";
 
 /**
  * Client dashboard — redesigned.
@@ -56,13 +58,14 @@ import {
  * quick links into the operational surfaces.
  */
 export default function ClientDashboardPage() {
+  const urlClientId = useUrlClientId();
   const [me, setMe] = useState<ClientMe | null>(null);
   const [overview, setOverview] = useState<ClientOverview | null>(null);
   const [submissions, setSubmissions] = useState<ClientSubmissionItem[]>([]);
   const [activity, setActivity] = useState<ClientActivityItem[]>([]);
   const [notifications, setNotifications] = useState<ClientNotificationItem[]>([]);
   const [unreadCount, setUnreadCount] = useState(0);
-  const [clientId, setClientId] = useState<string | null>(null);
+  const [clientId, setClientId] = useState<string | null>(urlClientId);
   const [error, setError] = useState<string | null>(null);
   const [profile, setProfile] = useState<ClientProfile | null>(null);
 
@@ -72,7 +75,7 @@ export default function ClientDashboardPage() {
   // stays hidden.
   useEffect(() => {
     let cancelled = false;
-    getClientProfile()
+    getClientProfile(urlClientId ? { client_id: urlClientId } : undefined)
       .then((p) => {
         if (cancelled) return;
         setProfile(p);
@@ -83,7 +86,7 @@ export default function ClientDashboardPage() {
     return () => {
       cancelled = true;
     };
-  }, []);
+  }, [urlClientId]);
 
   useEffect(() => {
     let cancelled = false;
@@ -91,7 +94,12 @@ export default function ClientDashboardPage() {
       .then((meData) => {
         if (cancelled) return;
         setMe(meData);
-        setClientId(meData.default_client_id);
+        // URL ``?client_id=`` wins over the user's default — that's
+        // how internal-admin inspection of any tenant works. For
+        // regular client_admin users the URL param normally matches
+        // ``default_client_id`` (or is absent), so this collapses to
+        // the previous behavior.
+        setClientId(urlClientId ?? meData.default_client_id);
       })
       .catch((err: unknown) => {
         if (cancelled) return;
@@ -100,7 +108,7 @@ export default function ClientDashboardPage() {
     return () => {
       cancelled = true;
     };
-  }, []);
+  }, [urlClientId]);
 
   useEffect(() => {
     if (!me && !clientId) return;
@@ -568,20 +576,28 @@ function RecentSubmissionsCard({ rows }: { rows: ClientSubmissionItem[] }) {
   );
 }
 
+// Labels pulled from the central statuses dictionary so a vocabulary
+// change anywhere propagates here without a hunt. Variant mapping stays
+// local because it's an aesthetic concern (color tone), not vocabulary.
 function StatusPill({ status }: { status: string }) {
-  const map: Record<string, { variant: "success" | "warning" | "info" | "destructive" | "secondary"; label: string }> = {
-    aprobado: { variant: "success", label: "Aprobado" },
-    rechazado: { variant: "destructive", label: "Rechazado" },
-    requiere_aclaracion: { variant: "warning", label: "Aclaración" },
-    pendiente_revision: { variant: "info", label: "En revisión" },
-    recibido: { variant: "info", label: "Recibido" },
-    prevalidado: { variant: "info", label: "Prevalidado" },
-    posible_mismatch: { variant: "warning", label: "Posible inconsistencia" },
-    vencido: { variant: "destructive", label: "Vencido" },
-    pendiente: { variant: "secondary", label: "Pendiente" },
+  const variantByStatus: Record<string, "success" | "warning" | "info" | "destructive" | "secondary"> = {
+    aprobado: "success",
+    excepcion_legal: "success",
+    rechazado: "destructive",
+    requiere_aclaracion: "warning",
+    pendiente_revision: "info",
+    recibido: "info",
+    prevalidado: "info",
+    posible_mismatch: "warning",
+    vencido: "destructive",
+    no_aplica: "secondary",
+    pendiente: "secondary",
   };
-  const meta = map[status] ?? { variant: "secondary" as const, label: status };
-  return <Badge variant={meta.variant}>{meta.label}</Badge>;
+  return (
+    <Badge variant={variantByStatus[status] ?? "secondary"}>
+      {statusLabel(status)}
+    </Badge>
+  );
 }
 
 // ─── Quick links ─────────────────────────────────────────────────

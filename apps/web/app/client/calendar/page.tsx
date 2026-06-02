@@ -40,6 +40,8 @@ import {
   type ClientVendorListResponse,
 } from "@/lib/api/client";
 import { INSTITUTION_LABELS } from "@/lib/api/portal";
+import { statusLabel } from "@/lib/constants/statuses";
+import { useUrlClientId } from "@/lib/workspace/use-url-client-id";
 
 const MONTH_SHORT = [
   "Ene",
@@ -69,22 +71,9 @@ const INSTITUTION_ICON: Record<string, Icon> = {
 
 const INSTITUTION_ORDER = ["sat", "imss", "infonavit", "stps_repse"] as const;
 
-// Spanish labels for the status enum used inside the expanded row.
-// Centralised here so any future status surface on this page stays
-// in lockstep with the rest of the product.
-const STATUS_LABEL: Record<string, string> = {
-  aprobado: "Aprobado",
-  rechazado: "Requiere corrección",
-  requiere_aclaracion: "Necesita aclaración",
-  pendiente_revision: "En revisión",
-  posible_mismatch: "Posible inconsistencia",
-  prevalidado: "Prevalidado",
-  recibido: "Recibido",
-  vencido: "Vencido",
-  no_aplica: "No aplica",
-  pendiente: "Pendiente",
-  excepcion_legal: "Excepción legal",
-};
+// Status labels now live in the central dictionary so a vocabulary
+// change in one place propagates across every surface. See
+// apps/web/lib/constants/statuses.ts.
 
 function statusVariant(
   status: string,
@@ -104,6 +93,7 @@ function statusVariant(
 }
 
 export default function ClientCalendarPage() {
+  const urlClientId = useUrlClientId();
   const [year, setYear] = useState(new Date().getFullYear() || 2026);
   const [data, setData] = useState<ClientCalendar | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -115,7 +105,7 @@ export default function ClientCalendarPage() {
 
   useEffect(() => {
     let cancelled = false;
-    listClientVendors()
+    listClientVendors(urlClientId ? { client_id: urlClientId } : undefined)
       .then((res) => {
         if (!cancelled) setVendorsList(res);
       })
@@ -125,12 +115,16 @@ export default function ClientCalendarPage() {
     return () => {
       cancelled = true;
     };
-  }, []);
+  }, [urlClientId]);
 
   useEffect(() => {
     let cancelled = false;
     setError(null);
-    getClientCalendar({ year, vendor_ids: vendorFilter })
+    getClientCalendar({
+      year,
+      vendor_ids: vendorFilter,
+      ...(urlClientId ? { client_id: urlClientId } : {}),
+    })
       .then((cal) => {
         if (!cancelled) setData(cal);
       })
@@ -141,7 +135,7 @@ export default function ClientCalendarPage() {
     return () => {
       cancelled = true;
     };
-  }, [year, vendorFilter]);
+  }, [year, vendorFilter, urlClientId]);
 
   function toggleVendor(id: string) {
     setVendorFilter((prev) =>
@@ -509,7 +503,7 @@ function ExpandedDetail({ items }: { items: ClientCalendarItem[] }) {
             {g.rows.map((row) => {
               const inst = INSTITUTION_LABELS[row.institution] ?? row.institution;
               const IconComponent = INSTITUTION_ICON[row.institution];
-              const statusText = STATUS_LABEL[row.status] ?? row.status;
+              const statusText = statusLabel(row.status);
               return (
                 <li
                   key={`${row.vendor_id}-${row.requirement_code ?? row.requirement_name}-${row.period_key ?? ""}`}

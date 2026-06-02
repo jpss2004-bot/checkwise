@@ -61,7 +61,15 @@ export const RESOLVED_STATUSES: readonly DocumentStatusCode[] = [
   DocumentStatus.NO_APLICA,
 ];
 
-/** Plain-language Spanish labels shown in the provider UI. */
+/**
+ * Plain-language Spanish labels shown in the user UI.
+ *
+ * Note on ``rechazado``: the backend status code is literally
+ * "rechazado" but the user-facing label is the softer
+ * "Requiere corrección" so the badge invites the provider to act
+ * rather than feel rejected (Audit P1-02, 2026-05-25). The backend
+ * code never changes; only the display string is softened.
+ */
 export const STATUS_LABELS_ES: Record<DocumentStatusCode, string> = {
   [DocumentStatus.PENDIENTE]: "Pendiente",
   [DocumentStatus.RECIBIDO]: "Recibido",
@@ -69,7 +77,7 @@ export const STATUS_LABELS_ES: Record<DocumentStatusCode, string> = {
   [DocumentStatus.PREVALIDADO]: "Recibido — esperando revisión",
   [DocumentStatus.POSIBLE_MISMATCH]: "Posible inconsistencia",
   [DocumentStatus.APROBADO]: "Aprobado",
-  [DocumentStatus.RECHAZADO]: "Rechazado",
+  [DocumentStatus.RECHAZADO]: "Requiere corrección",
   [DocumentStatus.VENCIDO]: "Vencido",
   [DocumentStatus.NO_APLICA]: "No aplica",
   [DocumentStatus.REQUIERE_ACLARACION]: "Necesita aclaración",

@@ -6,6 +6,7 @@ import { ArrowRight, MagnifyingGlass } from "@phosphor-icons/react";
 
 import { Badge } from "@/components/ui/badge";
 import { INSTITUTION_LABELS } from "@/lib/api/portal";
+import { statusLabel } from "@/lib/constants/statuses";
 import type {
   SearchHit,
   SearchMatchType,
@@ -178,13 +179,12 @@ function MatchedByPill({ matched }: { matched: SearchMatchType }) {
 }
 
 function StatusPill({ status }: { status: string }) {
-  // The backend may emit any DocumentStatus enum value. We don't try to
-  // localize every one here — the row's primary value is the vendor +
-  // requirement; status is supporting info. A compact monospace badge
-  // keeps the row dense without competing.
+  // Status pulled from the central dictionary so all surfaces stay in
+  // sync. Kept as a compact outline badge so the row's primary value
+  // (vendor + requirement) still dominates.
   return (
-    <Badge variant="outline" className="font-mono text-[10.5px]">
-      {status.replace(/_/g, " ")}
+    <Badge variant="outline" className="text-[10.5px]">
+      {statusLabel(status)}
     </Badge>
   );
 }

@@ -21,6 +21,7 @@ import type {
   SubmissionHistoryEntry,
 } from "@/lib/api/portal";
 import type { DocumentStateCode } from "@/lib/types";
+import { STATUS_LABELS_ES } from "@/lib/constants/statuses";
 
 /**
  * SubmissionTimeline — the trust layer.
@@ -67,32 +68,47 @@ interface SubmissionTimelineProps {
   /** Show the heading + description; turn off for embedded use. */
   showHeader?: boolean;
   className?: string;
+  /**
+   * Which audience is viewing the timeline. Provider (default) hides
+   * admin-only diagnostic events like `shadow_analysis_completed` and
+   * `ocr_performed`; admin shows them so reviewers can see when the
+   * automatic lectura ran. Does not change any other behaviour.
+   */
+  audience?: "provider" | "admin";
 }
 
-const STATUS_LABEL: Record<string, string> = {
-  pendiente: "Pendiente",
-  recibido: "Recibido",
-  pendiente_revision: "En revisión",
-  prevalidado: "Prevalidado",
-  posible_mismatch: "Posible inconsistencia",
-  aprobado: "Aprobado",
-  // Audit P1-02 — softer copy on provider-facing timeline.
-  rechazado: "Requiere corrección",
-  vencido: "Vencido",
-  no_aplica: "No aplica",
-  requiere_aclaracion: "Requiere aclaración",
-  excepcion_legal: "Excepción legal",
+// Status labels delegate to the central dictionary so a vocabulary
+// rename in one place propagates here. See lib/constants/statuses.ts.
+const STATUS_LABEL: Record<string, string> = STATUS_LABELS_ES;
+
+// Provider-friendly event labels. The backend emits engineer-shaped
+// event_type strings (snake_case, technical); this map translates
+// them into plain Spanish a non-technical provider can scan. Events
+// without an entry fall back to the raw event_type so any new event
+// added on the backend stands out as untranslated until a label is
+// added here.
+const EVENT_LABEL: Record<string, string> = {
+  reviewer_decision: "Decisión del equipo legal",
+  submission_replacement_linked: "Reemplaza un envío anterior",
+  submission_replaced: "Reemplazado por un envío más reciente",
+  pdf_validation: "Verificación del archivo",
+  document_intelligence: "Revisión automática",
+  duplicate_check: "Comparación con cargas anteriores",
+  intake_received: "Documento recibido",
+  // Phase 2 shadow analysis events are internal (admin reviewer
+  // surface only). Providers should not see them on their timeline;
+  // we keep the label here so if they leak the wording is friendly.
+  shadow_analysis_completed: "Lectura automática terminada",
+  ocr_performed: "Lectura automática del archivo",
 };
 
-const EVENT_LABEL: Record<string, string> = {
-  reviewer_decision: "Decisión del revisor",
-  submission_replacement_linked: "Reemplazo enlazado",
-  submission_replaced: "Reemplazado por intento posterior",
-  pdf_validation: "Validación de PDF",
-  document_intelligence: "Señales del documento",
-  duplicate_check: "Verificación de duplicado",
-  intake_received: "Documento recibido",
-};
+// Event types that are reviewer/admin-only diagnostics — never shown
+// on the provider-facing timeline. The component filters these out
+// before rendering when `audience` is "provider" (the default).
+const ADMIN_ONLY_EVENT_TYPES = new Set<string>([
+  "shadow_analysis_completed",
+  "ocr_performed",
+]);
 
 const ACTOR_TYPE_LABEL: Record<string, string> = {
   supplier: "Proveedor",
@@ -146,8 +162,13 @@ export function SubmissionTimeline({
   detail,
   showHeader = true,
   className,
+  audience = "provider",
 }: SubmissionTimelineProps) {
-  const items = mergeAndSort(detail.history, detail.events);
+  const visibleEvents =
+    audience === "admin"
+      ? detail.events
+      : detail.events.filter((e) => !ADMIN_ONLY_EVENT_TYPES.has(e.event_type));
+  const items = mergeAndSort(detail.history, visibleEvents);
 
   return (
     <section

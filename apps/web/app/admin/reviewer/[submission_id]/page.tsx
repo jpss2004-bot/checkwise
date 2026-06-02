@@ -194,7 +194,7 @@ export default function ReviewerSubmissionPage({ params }: PageProps) {
             <LineageStrip detail={detail} />
             <LecturaDelDocumento detail={detail} />
             <ProviderCard detail={detail} />
-            <SubmissionTimeline detail={detail} />
+            <SubmissionTimeline detail={detail} audience="admin" />
           </div>
           <div className="space-y-5">
             {decided ? (
@@ -398,39 +398,75 @@ function ProviderCard({ detail }: { detail: SubmissionDetail }) {
 // - <SubmissionTimeline/> in components/checkwise/portal/submission-timeline.tsx
 // - <ReviewDecisionPanel/> in components/checkwise/admin/review-decision-panel.tsx
 
+// Collapsed by default. Reviewers need these IDs occasionally — to
+// paste into a support ticket, to cross-reference an audit log row —
+// but on most visits they don't, so the always-visible card was
+// stealing visual attention. One click expands; "Copiar todo" gives
+// the reviewer the whole bundle in a single clipboard write.
 function TraceabilityCard({ detail }: { detail: SubmissionDetail }) {
+  const [open, setOpen] = useState(false);
+  const [copied, setCopied] = useState(false);
+
+  const rows: Array<{ label: string; value: string }> = [
+    { label: "Submission", value: detail.submission_id },
+  ];
+  if (detail.document) {
+    rows.push({ label: "Documento", value: detail.document.filename });
+    rows.push({ label: "SHA-256", value: detail.document.sha256 });
+  }
+  if (detail.requirement.requirement_code) {
+    rows.push({
+      label: "Código canónico",
+      value: detail.requirement.requirement_code,
+    });
+  }
+
+  const copyAll = async () => {
+    const bundle = rows.map((r) => `${r.label}: ${r.value}`).join("\n");
+    try {
+      await navigator.clipboard.writeText(bundle);
+      setCopied(true);
+      setTimeout(() => setCopied(false), 1800);
+    } catch {
+      // Clipboard API blocked by browser permissions; surface a quiet
+      // failure instead of crashing the reviewer flow.
+      setCopied(false);
+    }
+  };
+
   return (
     <Card>
-      <CardHeader>
+      <button
+        type="button"
+        onClick={() => setOpen((v) => !v)}
+        aria-expanded={open}
+        className="flex w-full items-center justify-between px-5 py-3 text-left"
+      >
         <div className="flex items-center gap-2">
           <FileText className="h-4 w-4 text-muted-foreground" aria-hidden />
-          <CardTitle>Trazabilidad</CardTitle>
+          <CardTitle className="text-sm">Datos para auditoría</CardTitle>
         </div>
-      </CardHeader>
-      <CardContent className="space-y-1 text-xs text-muted-foreground">
-        <p>
-          <span className="font-medium text-foreground">Submission:</span>{" "}
-          <span className="break-all">{detail.submission_id}</span>
-        </p>
-        {detail.document ? (
-          <>
-            <p>
-              <span className="font-medium text-foreground">Documento:</span>{" "}
-              {detail.document.filename}
+        <span className="text-xs text-muted-foreground">
+          {open ? "Ocultar" : "Mostrar"}
+        </span>
+      </button>
+      {open ? (
+        <CardContent className="space-y-3 border-t border-[color:var(--border-subtle)] pt-3 text-xs text-muted-foreground">
+          {rows.map((r) => (
+            <p key={r.label}>
+              <span className="font-medium text-foreground">{r.label}:</span>{" "}
+              <span className="break-all font-mono">{r.value}</span>
             </p>
-            <p>
-              <span className="font-medium text-foreground">SHA-256:</span>{" "}
-              <span className="break-all">{detail.document.sha256}</span>
-            </p>
-          </>
-        ) : null}
-        {detail.requirement.requirement_code ? (
-          <p>
-            <span className="font-medium text-foreground">Código canónico:</span>{" "}
-            <span className="break-all">{detail.requirement.requirement_code}</span>
-          </p>
-        ) : null}
-      </CardContent>
+          ))}
+          <button
+            type="button"
+            onClick={copyAll}
+            className="rounded-md border border-[color:var(--border-default)] bg-[color:var(--surface-page)] px-2.5 py-1 text-xs font-medium text-[color:var(--text-primary)] hover:bg-[color:var(--surface-hover)]"
+          >
+            {copied ? "Copiado ✓" : "Copiar todo"}
+          </button>
+        </CardContent>
+      ) : null}
     </Card>
   );
 }
