@@ -41,6 +41,7 @@ from sqlalchemy import create_engine, select
 from sqlalchemy.orm import Session, sessionmaker
 from sqlalchemy.pool import StaticPool
 
+from app.api.v1.portal import CURRENT_LEGAL_CONSENT_VERSION
 from app.constants.statuses import DocumentStatus
 from app.core.config import settings
 from app.db.base import Base
@@ -1238,7 +1239,7 @@ def test_client_profile_patch_terms_accepted_writes_audit(
         )
         assert row is not None
         meta = row.event_metadata or {}
-        assert meta.get("legal_consent_version") == "v0-draft"
+        assert meta.get("legal_consent_version") == CURRENT_LEGAL_CONSENT_VERSION
         assert meta.get("client_id") == client_id
     finally:
         db.close()

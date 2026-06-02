@@ -43,6 +43,7 @@ from app.api.v1.auth import CurrentUser, require_any_role
 from app.api.v1.portal import (
     _ACTIONABLE_SLOT_STATES,
     _RESOLVED_SLOT_STATES,
+    CURRENT_LEGAL_CONSENT_VERSION,
     DashboardAttentionItem,
     DashboardDocumentStateCounts,
     DashboardOnboardingSummary,
@@ -768,10 +769,10 @@ def update_client_profile(
             metadata={
                 "client_id": row.id,
                 "user_id": current.user.id,
-                # Hard-coded to the current draft set until Paco/Beko
-                # sign off on the final copy. Mirrors the provider
-                # CURRENT_LEGAL_CONSENT_VERSION constant.
-                "legal_consent_version": "v0-draft",
+                # Shares the single source of truth with the provider
+                # portal so the two paths can't drift; bump the
+                # constant in portal.py when legal publishes new copy.
+                "legal_consent_version": CURRENT_LEGAL_CONSENT_VERSION,
             },
         )
 
