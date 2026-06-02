@@ -126,12 +126,22 @@ _CLIENT_MONTHLY_EXECUTIVE = ReportPreset(
     audience=ReportAudience.CLIENT_FACING,
     required_roles=(MembershipRole.CLIENT_ADMIN, MembershipRole.INTERNAL_ADMIN),
     recommended_prompt=(
+        # M3 (2026-06-02) — Reportes redesign. The resumen ejecutivo
+        # block already renders its own 4-KPI ribbon when
+        # ``include_metrics`` is on, so requesting a separate kpi_strip
+        # block here produced a duplicated row (the user saw 73% / 7 /
+        # 3 / — twice in the canvas). Prompt now explicitly asks for a
+        # single resumen ejecutivo + matriz de riesgo + recomendaciones
+        # so both the LLM planner and the deterministic mock land on a
+        # 3-block canvas with one KPI surface.
         "Genera un resumen ejecutivo mensual de cumplimiento del "
         "portafolio para la dirección del cliente: empieza con un "
-        "resumen ejecutivo enfocado en cumplimiento, sigue con un "
-        "KPI strip con porcentaje de cumplimiento, total de "
-        "proveedores, proveedores en riesgo y próximos vencimientos, "
-        "y cierra con 3 recomendaciones priorizadas para la dirección."
+        "resumen ejecutivo enfocado en cumplimiento (incluye sus "
+        "métricas: porcentaje de cumplimiento, total de proveedores, "
+        "proveedores en riesgo y próximos vencimientos — el bloque "
+        "ya renderiza su propia tira de KPIs, no agregues una "
+        "separada), sigue con una matriz de riesgo por proveedor y "
+        "cierra con 3 recomendaciones priorizadas para la dirección."
     ),
 )
 

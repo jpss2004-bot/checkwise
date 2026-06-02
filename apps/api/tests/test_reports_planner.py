@@ -160,12 +160,15 @@ def test_plan_endpoint_returns_structured_plan(
     assert body["audience"] == "internal_only"
     assert "vendors_total" in body["scope_hint"]["metrics"]
 
-    # Default mock plan includes executive_summary (always) + risk
-    # matrix when SAT keyword is present + KPI strip closer.
+    # Default mock plan includes executive_summary (always; carries
+    # its own KPI ribbon via ``include_metrics=True``) + risk matrix
+    # when SAT keyword is present. M3 (2026-06-02) dropped the
+    # standalone kpi_strip closer to avoid duplicating the in-block
+    # ribbon on the cliente Resumen ejecutivo surface.
     types = [b["type"] for b in body["blocks"]]
     assert types[0] == "executive_summary"
     assert "vendor_risk_matrix" in types
-    assert types[-1] == "kpi_strip"
+    assert "kpi_strip" not in types
 
     # First block config validates against its catalog schema (mocked
     # values are catalog-compliant by construction).

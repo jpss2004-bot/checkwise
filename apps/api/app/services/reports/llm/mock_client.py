@@ -33,9 +33,14 @@ class DeterministicMockLLMClient:
 
     The class holds a queue of pre-canned plans. Tests push specific
     plans via ``next_plan(...)``. If the queue is empty, the client
-    falls back to a default minimal plan ([executive_summary,
-    kpi_strip]) so casual callers (e.g. the API in dev mode) get a
-    sensible response without ceremony.
+    falls back to a default minimal plan
+    ([executive_summary, optional vendor_risk_matrix]) so casual
+    callers (e.g. the API in dev mode) get a sensible response without
+    ceremony. The executive_summary carries ``include_metrics=True``
+    so its in-block KPI ribbon is the only KPI surface in the canvas —
+    M3 (2026-06-02) dropped the standalone kpi_strip that the mock
+    used to append, which collided with the in-block ribbon for the
+    cliente Resumen ejecutivo template.
     """
 
     name = "mock"
@@ -175,38 +180,17 @@ def _default_plan(prompt: str, tools: list[dict]) -> list[PlannerToolCall]:
             PlannerToolCall(id="mock-block-2", name="vendor_risk_matrix", arguments=cfg)
         )
 
-    # KPI strip closes the report.
-    if "kpi_strip" in available:
-        plan.append(
-            PlannerToolCall(
-                id="mock-block-3",
-                name="kpi_strip",
-                arguments={
-                    "metrics": [
-                        {
-                            "label": "Cumplimiento",
-                            "metric_key": "completion_pct",
-                            "format": "percent",
-                        },
-                        {
-                            "label": "En riesgo",
-                            "metric_key": "vendors_at_risk",
-                            "format": "number",
-                        },
-                        {
-                            "label": "En revisión",
-                            "metric_key": "in_review_count",
-                            "format": "number",
-                        },
-                        {
-                            "label": "Próximo en",
-                            "metric_key": "days_to_next_deadline",
-                            "format": "duration_days",
-                        },
-                    ],
-                },
-            )
-        )
+    # M3 (2026-06-02) — Reportes redesign. The executive_summary
+    # block above is emitted with ``include_metrics=True``, which
+    # renders its own 4-KPI ribbon (Cumplimiento / En riesgo /
+    # En revisión / Próximo). Appending a standalone kpi_strip here
+    # produced a duplicate row that confused the cliente surface
+    # (Mayela saw 73% / 7 / 3 / — twice). The mock now skips the
+    # kpi_strip when the executive_summary already carries metrics —
+    # if a caller explicitly asks for a KPI strip via the prompt the
+    # real Anthropic planner will still emit one (the recommended
+    # prompts no longer ask for one for the client_monthly_executive
+    # preset; vendor / provider presets still can).
 
     return plan
 
@@ -224,7 +208,7 @@ def _infer_focus(prompt: str) -> str:
 
 def _default_rationale(prompt: str) -> str:
     return (
-        "Plan determinista del mock: resumen ejecutivo + (si aplica) matriz de "
-        "riesgo + tira de KPIs. Prompt: "
+        "Plan determinista del mock: resumen ejecutivo (con KPIs internos) "
+        "+ (si aplica) matriz de riesgo. Prompt: "
         + (prompt[:120] + ("…" if len(prompt) > 120 else ""))
     )
