@@ -415,18 +415,23 @@ function FactsTable({
   heuristic: ShadowAnalysisSignals;
 }) {
   const rows = buildFactRows(ai, heuristic);
+  // Mobile: stack label + value vertically (label as small caption,
+  // value below in full row width). Desktop: side-by-side grid with
+  // a fixed-width label column.
   return (
     <div className="overflow-hidden rounded-md border border-[color:var(--border-subtle)]">
       <dl className="divide-y divide-[color:var(--border-subtle)]">
         {rows.map((row) => (
           <div
             key={row.label}
-            className="grid grid-cols-[160px_1fr] gap-3 px-3 py-2 text-sm sm:grid-cols-[200px_1fr]"
+            className="flex flex-col gap-1 px-3 py-2 text-sm sm:grid sm:grid-cols-[200px_1fr] sm:gap-3"
           >
-            <dt className="text-[color:var(--text-tertiary)]">{row.label}</dt>
+            <dt className="text-xs uppercase tracking-wide text-[color:var(--text-tertiary)] sm:text-sm sm:normal-case sm:tracking-normal">
+              {row.label}
+            </dt>
             <dd className="text-[color:var(--text-primary)]">
               <div className="flex flex-wrap items-baseline gap-2">
-                <span className={row.hasDisagreement ? "font-medium" : ""}>
+                <span className={row.hasDisagreement ? "break-words font-medium" : "break-words"}>
                   {row.primaryValue}
                 </span>
                 {row.hasDisagreement && row.secondaryValue ? (
@@ -462,11 +467,18 @@ function Expandable({
         type="button"
         onClick={onToggle}
         aria-expanded={open}
-        className="flex w-full items-center justify-between px-3 py-2 text-left text-sm"
+        className="flex w-full items-center justify-between gap-2 px-3 py-2 text-left text-sm"
       >
-        <span className="font-medium text-[color:var(--text-primary)]">{label}</span>
-        <span className="flex items-center gap-2">
-          <span className="text-xs text-[color:var(--text-tertiary)]">{subtitle}</span>
+        {/* Label can grow and wrap; caret stays glued to the right.
+            Subtitle hides on the smallest screens (where the title +
+            caret already tell the user enough) and re-appears at sm+. */}
+        <span className="min-w-0 flex-1 font-medium text-[color:var(--text-primary)]">
+          {label}
+        </span>
+        <span className="flex shrink-0 items-center gap-2">
+          <span className="hidden text-xs text-[color:var(--text-tertiary)] sm:inline">
+            {subtitle}
+          </span>
           {open ? (
             <CaretDown className="h-4 w-4 text-[color:var(--text-tertiary)]" aria-hidden={true} />
           ) : (
@@ -530,11 +542,14 @@ function TechnicalDetails({
   return (
     <div className="space-y-3 text-xs text-[color:var(--text-secondary)]">
       {payload?.shadow ? (
-        <dl className="grid grid-cols-2 gap-x-4 gap-y-1 font-mono">
+        // Single-column on mobile (timestamps + tech identifiers can be
+        // long; cramming them into 2 columns on 375px breaks layouts).
+        // Two-column at sm+ where there's room.
+        <dl className="grid grid-cols-[max-content_1fr] gap-x-4 gap-y-1 font-mono sm:grid-cols-2">
           <dt>Proveedor de IA</dt>
-          <dd>{payload.shadow.provider_id ?? "—"}</dd>
+          <dd className="break-all">{payload.shadow.provider_id ?? "—"}</dd>
           <dt>Versión del prompt</dt>
-          <dd>{payload.shadow.prompt_version ?? "—"}</dd>
+          <dd className="break-all">{payload.shadow.prompt_version ?? "—"}</dd>
           <dt>Latencia</dt>
           <dd>
             {payload.shadow.latency_ms !== null
@@ -542,13 +557,13 @@ function TechnicalDetails({
               : "—"}
           </dd>
           <dt>Completado</dt>
-          <dd>
+          <dd className="break-words">
             {payload.shadow.completed_at
               ? new Date(payload.shadow.completed_at).toLocaleString("es-MX")
               : "—"}
           </dd>
           <dt>Código de error</dt>
-          <dd>{payload.shadow.error ?? "—"}</dd>
+          <dd className="break-all">{payload.shadow.error ?? "—"}</dd>
         </dl>
       ) : (
         <p>No hay datos del análisis automático.</p>
@@ -556,7 +571,7 @@ function TechnicalDetails({
       {reasons.length > 0 ? (
         <div>
           <p className="font-medium text-[color:var(--text-primary)]">Códigos de regla</p>
-          <p className="font-mono">
+          <p className="break-all font-mono">
             {reasons.map((r) => r.rule_code).join(", ")}
           </p>
         </div>
