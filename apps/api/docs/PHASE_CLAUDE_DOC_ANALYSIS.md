@@ -76,7 +76,7 @@ intake POST  ──►  storage  ──►│  finalize_intake_submission       
 | `app/api/v1/portal.py`                                            | Declares `BackgroundTasks` on the two workspace upload routes |
 | `app/api/v1/reviewer.py`                                          | Exposes `shadow_analysis` block on the reviewer detail        |
 | `app/models/entities.py`                                          | Adds `shadow_*` columns on `DocumentInspection`               |
-| `alembic/versions/0032_document_inspection_shadow_columns.py`     | Migration (additive, reversible)                              |
+| `alembic/versions/0032_doc_inspection_shadow.py`                  | Migration (additive, reversible)                              |
 | `apps/web/components/checkwise/admin/shadow-comparison-card.tsx`  | Admin-only Spanish comparison UI                              |
 
 ### Persistence contract
