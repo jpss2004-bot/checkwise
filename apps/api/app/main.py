@@ -6,11 +6,42 @@ import traceback
 from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse, RedirectResponse
+from starlette.middleware.base import BaseHTTPMiddleware
 
 from app.api.v1.router import api_router
 from app.core.config import settings
 
 log = logging.getLogger("checkwise.unhandled")
+
+
+class SecurityHeadersMiddleware(BaseHTTPMiddleware):
+    """Inject baseline security headers on every response.
+
+    FastAPI / Starlette do not emit HSTS, X-Frame-Options, etc. by
+    default. External security scanners (Mozilla Observatory, Qualys
+    SSL Labs, buyer-audit checklists) flag the omission even though
+    every state-changing route is authenticated. HSTS is gated on
+    non-local environments because plain ``http://localhost`` dev
+    would otherwise pin the browser to HTTPS for a year and refuse
+    to load the dev server.
+    """
+
+    async def dispatch(self, request: Request, call_next):
+        response = await call_next(request)
+        response.headers.setdefault("X-Content-Type-Options", "nosniff")
+        response.headers.setdefault("X-Frame-Options", "DENY")
+        response.headers.setdefault(
+            "Referrer-Policy", "strict-origin-when-cross-origin"
+        )
+        response.headers.setdefault(
+            "Permissions-Policy", "geolocation=(), microphone=(), camera=()"
+        )
+        if not settings.is_local_env:
+            response.headers.setdefault(
+                "Strict-Transport-Security",
+                "max-age=31536000; includeSubDomains",
+            )
+        return response
 
 
 def _assert_critical_routes(app: FastAPI) -> None:
@@ -69,6 +100,7 @@ def create_app() -> FastAPI:
             "X-Workspace-Token",
         ],
     )
+    app.add_middleware(SecurityHeadersMiddleware)
 
     @app.exception_handler(Exception)
     async def unhandled_exception_handler(request: Request, exc: Exception) -> JSONResponse:
