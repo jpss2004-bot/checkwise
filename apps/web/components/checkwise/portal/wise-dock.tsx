@@ -5,12 +5,10 @@ import Link from "next/link";
 import { usePathname, useSearchParams } from "next/navigation";
 import {
   ArrowRight,
-  CaretDown,
   PaperPlaneTilt,
   Quotes,
   Sparkle,
   Warning,
-  X,
 } from "@phosphor-icons/react";
 
 import { Button } from "@/components/ui/button";
@@ -36,6 +34,10 @@ import {
   type WiseAudience,
   type WiseMessage,
 } from "@/lib/wise/messages";
+import {
+  WiseDockHeader,
+  WiseDockShell,
+} from "@/components/checkwise/wise/wise-dock-shell";
 
 /**
  * Wise — provider-portal copilot dock.
@@ -46,23 +48,18 @@ import {
  * FeedbackLauncher's bottom-right FAB) and slides up as a sheet from
  * the bottom on mobile. State persists per-browser via localStorage.
  *
- * Composition:
- *   • Collapsed → 56px circular FAB with the Wise mark + tiny
- *     unread-priority pulse when there's at least one warning
- *     message and the user has never opened the dock this session.
- *   • Expanded  → 360px-wide panel (desktop) / bottom sheet (mobile)
- *     with a header (Wise mark, audience pill, close button), a
- *     scrollable list of messages, and a small footer.
+ * Phase 5 (2026-06-02): The chrome (FAB, panel positioning, hydration,
+ * Esc-to-close, mobile backdrop, lifecycle events) lives in the
+ * surface-agnostic ``WiseDockShell``. This file keeps only the
+ * portal-specific data layer: dashboard/onboarding lazy-fetch,
+ * audience classification, deterministic intent matcher, LLM fallback,
+ * page-context derivation, allowed-CTA assembly. A parallel cliente
+ * dock reuses the same shell with its own portfolio-shaped data layer.
  *
  * Analytics:
  *   ``wise.first_render`` once per mount.
  *   ``wise.opened``  / ``wise.collapsed`` on every toggle.
  *   ``wise.suggestion_clicked`` when a CTA is clicked.
- *
- * Accessibility:
- *   The expanded panel uses ``role="dialog"`` + ``aria-modal="false"``
- *   so screen readers announce it without trapping focus on desktop.
- *   Esc collapses it. The FAB is a labelled ``button``.
  */
 
 const STORAGE_KEY = "wise.dock.collapsed";
@@ -113,8 +110,6 @@ export function WiseDock({
   onboarding: onboardingProp,
   className,
 }: WiseDockProps) {
-  const [collapsed, setCollapsed] = React.useState<boolean>(true);
-  const [hydrated, setHydrated] = React.useState(false);
   // Phase 4: dock self-fetches when the host page doesn't pass these
   // in (i.e. every page except /portal/dashboard). The fetch defers
   // until the user actually opens the dock so the chat is fast to
@@ -128,7 +123,6 @@ export function WiseDock({
   const [hasOpenedOnce, setHasOpenedOnce] = React.useState(false);
   const [turns, setTurns] = React.useState<ChatTurn[]>([]);
   const [inputValue, setInputValue] = React.useState("");
-  const firedFirstRender = React.useRef(false);
   const scrollRef = React.useRef<HTMLDivElement | null>(null);
 
   // Page context: derived live from the URL so the dock knows what
@@ -209,7 +203,7 @@ export function WiseDock({
     const el = scrollRef.current;
     if (!el) return;
     el.scrollTop = el.scrollHeight;
-  }, [turns, collapsed]);
+  }, [turns]);
 
   // Submit a prompt through the hybrid pipeline:
   //   1. Classify the intent locally. Known intents
@@ -306,210 +300,65 @@ export function WiseDock({
     [audience, dashboardState, onboardingState, pageContext, session],
   );
 
-  // Hydrate from localStorage on mount. First-ever visit:
-  // default to EXPANDED so onboarding gets help loud. After the
-  // user collapses it once, the preference sticks.
-  React.useEffect(() => {
-    try {
-      const raw = window.localStorage.getItem(STORAGE_KEY);
-      if (raw === null) {
-        setCollapsed(false); // first visit
-      } else {
-        setCollapsed(raw === "true");
-      }
-    } catch {
-      setCollapsed(false);
-    }
-    setHydrated(true);
-  }, []);
+  const hasWarning = messages.some((m) => m.tone === "warning");
 
-  // Fire wise.first_render once per dock mount. Includes the route
-  // so we can later answer "which pages does the dock actually get
-  // seen on?" via the wise_events analytics table.
-  React.useEffect(() => {
-    if (firedFirstRender.current) return;
-    if (!hydrated) return;
-    firedFirstRender.current = true;
-    void postWiseEvent(session, "wise.first_render", {
-      audience,
-      route: pageContext.route,
-    });
-  }, [session, audience, hydrated, pageContext]);
-
-  // Persist + emit on toggle.
-  const setCollapsedAndPersist = React.useCallback(
-    (next: boolean) => {
-      setCollapsed(next);
-      if (!next) {
+  return (
+    <WiseDockShell
+      storageKey={STORAGE_KEY}
+      defaultCollapsed={false}
+      ariaLabel="Wise — copiloto de cumplimiento"
+      fabAriaLabel={`Abrir Wise · ${AUDIENCE_PILL[audience]}`}
+      hasWarning={hasWarning}
+      className={className}
+      onFirstRender={() => {
+        void postWiseEvent(session, "wise.first_render", {
+          audience,
+          route: pageContext.route,
+        });
+      }}
+      onOpen={() => {
         // Mark "has opened once" so the lazy-fetch effect for the
         // dashboard + onboarding payloads kicks in. We defer the
         // fetch until first open so the chat is fast to mount on
         // pages where the user never engages with Wise.
         setHasOpenedOnce(true);
-      }
-      try {
-        window.localStorage.setItem(STORAGE_KEY, String(next));
-      } catch {
-        // localStorage may be unavailable (private mode); state stays in-memory.
-      }
-      void postWiseEvent(session, next ? "wise.collapsed" : "wise.opened", {
-        audience,
-        route: pageContext.route,
-      });
-    },
-    [session, audience, pageContext],
-  );
-
-  // Esc closes when expanded.
-  React.useEffect(() => {
-    if (collapsed) return;
-    const onKey = (event: KeyboardEvent) => {
-      if (event.key === "Escape") {
-        setCollapsedAndPersist(true);
-      }
-    };
-    window.addEventListener("keydown", onKey);
-    return () => window.removeEventListener("keydown", onKey);
-  }, [collapsed, setCollapsedAndPersist]);
-
-  if (!hydrated) return null;
-
-  const hasWarning = messages.some((m) => m.tone === "warning");
-
-  return (
-    <>
-      {/* Collapsed FAB — always rendered, fades when expanded. */}
-      <button
-        type="button"
-        aria-label={`Abrir Wise · ${AUDIENCE_PILL[audience]}`}
-        aria-expanded={!collapsed}
-        onClick={() => setCollapsedAndPersist(false)}
-        className={cn(
-          "group fixed z-40 inline-flex h-14 w-14 items-center justify-center rounded-full shadow-lg transition-all duration-fast",
-          "bg-[color:var(--surface-brand)] text-white",
-          "hover:scale-105 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[color:var(--text-teal)]/60 focus-visible:ring-offset-2",
-          // Bottom-LEFT on desktop. FeedbackLauncher owns bottom-right
-          // at z-50; we mirror to the opposite corner at z-40 so the
-          // two never overlap. On mobile the FAB still sits in the
-          // bottom-left so users can swipe it open from the same side.
-          "bottom-5 left-5 sm:bottom-6 sm:left-6",
-          collapsed
-            ? "pointer-events-auto scale-100 opacity-100"
-            : "pointer-events-none scale-90 opacity-0",
-          className,
-        )}
-      >
-        <span
-          aria-hidden="true"
-          className="absolute inset-0 rounded-full bg-[color:var(--text-teal)] opacity-15 blur-md transition-opacity group-hover:opacity-30"
+        void postWiseEvent(session, "wise.opened", {
+          audience,
+          route: pageContext.route,
+        });
+      }}
+      onClose={() => {
+        void postWiseEvent(session, "wise.collapsed", {
+          audience,
+          route: pageContext.route,
+        });
+      }}
+      renderHeader={(close) => (
+        <WiseDockHeader
+          title="Wise"
+          pill={AUDIENCE_PILL[audience]}
+          onClose={close}
         />
-        <Sparkle className="relative h-6 w-6 text-[color:var(--text-teal)]" weight="fill" />
-        {hasWarning ? (
-          <span
-            aria-hidden="true"
-            className="absolute right-1 top-1 h-2.5 w-2.5 rounded-full bg-[color:var(--status-warning-text)] ring-2 ring-[color:var(--surface-brand)]"
-          />
-        ) : null}
-      </button>
-
-      {/* Expanded panel — desktop floating card, mobile bottom sheet. */}
-      {!collapsed ? (
-        <>
-          {/* Mobile-only backdrop */}
-          <div
-            aria-hidden="true"
-            onClick={() => setCollapsedAndPersist(true)}
-            className="fixed inset-0 z-40 bg-[color:var(--surface-brand)]/40 backdrop-blur-sm sm:hidden"
-          />
-          <section
-            role="dialog"
-            aria-modal="false"
-            aria-label="Wise — copiloto de cumplimiento"
-            className={cn(
-              "fixed z-50 flex flex-col overflow-hidden bg-[color:var(--surface-brand)] text-white shadow-2xl",
-              // Mobile: bottom sheet — full width, rounded top corners, ~70vh.
-              "inset-x-0 bottom-0 max-h-[78vh] rounded-t-2xl",
-              // Desktop: floating card pinned bottom-LEFT, ~380px wide.
-              // Mirrors the FAB so the panel opens out from where the
-              // launcher was sitting, keeping bottom-right free for the
-              // FeedbackLauncher.
-              "sm:inset-x-auto sm:bottom-6 sm:left-6 sm:max-h-[min(620px,calc(100vh-6rem))] sm:w-[380px] sm:rounded-2xl",
-            )}
-          >
-            <DockHeader
-              audience={audience}
-              onClose={() => setCollapsedAndPersist(true)}
-            />
-            <DockBody
-              turns={turns}
-              session={session}
-              audience={audience}
-              scrollRef={scrollRef}
-            />
-            <DockComposer
-              inputValue={inputValue}
-              onInputChange={setInputValue}
-              onSubmit={(prompt) => {
-                submitPrompt(prompt);
-                setInputValue("");
-              }}
-            />
-          </section>
-        </>
-      ) : null}
-    </>
-  );
-}
-
-// ─── Header ────────────────────────────────────────────────────────
-
-function DockHeader({
-  audience,
-  onClose,
-}: {
-  audience: WiseAudience;
-  onClose: () => void;
-}) {
-  return (
-    <header className="relative flex items-center justify-between gap-3 border-b border-white/10 px-5 py-3.5">
-      {/* Decorative teal glow */}
-      <div
-        aria-hidden="true"
-        className="pointer-events-none absolute -right-12 -top-12 h-36 w-36 rounded-full bg-[color:var(--text-teal)] opacity-15 blur-3xl"
-      />
-      <div className="relative flex items-center gap-2.5">
-        <span
-          aria-hidden="true"
-          className="inline-flex h-8 w-8 items-center justify-center rounded-full bg-[color:var(--text-teal)]/15 text-[color:var(--text-teal)]"
-        >
-          <Sparkle className="h-4 w-4" weight="fill" />
-        </span>
-        <div className="min-w-0 leading-tight">
-          <p className="text-[14px] font-semibold text-white">Wise</p>
-          <p className="font-mono text-[10px] uppercase tracking-wide text-white/60">
-            {AUDIENCE_PILL[audience]}
-          </p>
-        </div>
-      </div>
-      <div className="relative flex items-center gap-1">
-        <button
-          type="button"
-          onClick={onClose}
-          aria-label="Minimizar Wise"
-          className="hidden h-8 w-8 items-center justify-center rounded-md text-white/70 transition-colors hover:bg-white/10 hover:text-white sm:inline-flex"
-        >
-          <CaretDown className="h-4 w-4" weight="bold" />
-        </button>
-        <button
-          type="button"
-          onClick={onClose}
-          aria-label="Cerrar Wise"
-          className="inline-flex h-8 w-8 items-center justify-center rounded-md text-white/70 transition-colors hover:bg-white/10 hover:text-white sm:hidden"
-        >
-          <X className="h-4 w-4" weight="bold" />
-        </button>
-      </div>
-    </header>
+      )}
+      renderBody={() => (
+        <DockBody
+          turns={turns}
+          session={session}
+          audience={audience}
+          scrollRef={scrollRef}
+        />
+      )}
+      renderComposer={() => (
+        <DockComposer
+          inputValue={inputValue}
+          onInputChange={setInputValue}
+          onSubmit={(prompt) => {
+            submitPrompt(prompt);
+            setInputValue("");
+          }}
+        />
+      )}
+    />
   );
 }
 
