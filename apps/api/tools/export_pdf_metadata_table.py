@@ -80,6 +80,107 @@ FIELD_ROW_COLUMNS = [
     "reviewer_notes",
 ]
 
+# Spanish display labels for the raw-data sheet header row. Dict keys
+# stay snake_case throughout the pipeline (consumers depend on the
+# stable identifiers); only the header row printed in the XLSX uses
+# these friendlier labels. A snake_case column with no Spanish entry
+# below falls back to the raw key so a new column added on the
+# backend stands out as untranslated until a label lands here.
+FIELD_ROW_COLUMN_LABELS_ES: dict[str, str] = {
+    "schema_version": "Versión del esquema",
+    "generated_at": "Generado",
+    "metadata_rules_version": "Versión de las reglas",
+    "submission_id": "ID de envío",
+    "document_id": "ID del documento",
+    "document_type_code": "Código del tipo",
+    "document_type_name": "Tipo de documento",
+    "document_group": "Grupo",
+    "document_category": "Categoría",
+    "document_subtype": "Subtipo",
+    "document_frequency": "Frecuencia",
+    "document_hierarchy": "Jerarquía",
+    "institution": "Institución",
+    "client_legal_name": "Cliente",
+    "provider_nomenclature": "Proveedor",
+    "period_key": "Periodo",
+    "original_filename": "Archivo",
+    "sha256": "Hash SHA-256",
+    "page_count": "Páginas",
+    "validation_status": "Estado de validación",
+    "detected_institution": "Institución detectada",
+    "detected_document_type": "Tipo de documento detectado",
+    "detected_rfcs": "RFCs detectados",
+    "detected_dates": "Fechas detectadas",
+    "period_mentions": "Periodos mencionados",
+    "requirement_match_confidence": "Confianza de coincidencia",
+    "mismatch_reason": "Razón de no coincidencia",
+    "anomaly_codes": "Códigos de anomalía",
+    "ocr_status": "Estado del OCR",
+    "ocr_used": "OCR utilizado",
+    "field_key": "Clave del campo",
+    "field_label": "Nombre del campo",
+    "field_description": "Descripción del campo",
+    "rule_source_section": "Sección de la regla",
+    "requirement_level": "Nivel del requisito",
+    "allowed_extraction_methods": "Métodos de extracción permitidos",
+    "raw_value": "Valor extraído",
+    "normalized_value": "Valor normalizado",
+    "confidence": "Confianza",
+    "extraction_method": "Método de extracción",
+    "source": "Fuente",
+    "review_status": "Estado de revisión",
+    "human_review_required": "Requiere revisión humana",
+    "reviewer_notes": "Notas del revisor",
+}
+
+
+def _field_row_header_labels() -> list[str]:
+    """Spanish header row for the raw data sheet, falling back to the
+    snake_case key when a new column lacks a translation."""
+    return [FIELD_ROW_COLUMN_LABELS_ES.get(col, col) for col in FIELD_ROW_COLUMNS]
+
+
+# Plain-Spanish translations for anomaly codes that may appear inside
+# the `anomaly_codes` column. Internal codes only become user-facing
+# when surfaced in the raw sheet or signals sheet; this map gives them
+# a readable form. Untranslated codes pass through unchanged so a new
+# code stands out in QA.
+ANOMALY_CODE_LABELS_ES: dict[str, str] = {
+    "possible_document_type_mismatch": "Posible tipo de documento incorrecto",
+    "possible_institution_mismatch": "Posible institución incorrecta",
+    "period_not_confirmed": "Periodo no confirmado",
+    "pdf_without_readable_text": "PDF sin texto legible",
+    "expiration_visible_in_past": "Vigencia ya vencida",
+    "rfc_not_present": "RFC esperado no encontrado",
+    "signature_or_stamp_missing": "Falta firma o sello",
+}
+
+
+def _humanize_anomaly_codes(raw: str | None) -> str:
+    """Translate a comma-joined anomaly_codes string to plain Spanish."""
+    if not raw:
+        return ""
+    parts = [chunk.strip() for chunk in str(raw).split(",") if chunk.strip()]
+    return ", ".join(ANOMALY_CODE_LABELS_ES.get(code, code) for code in parts)
+
+
+def _format_confidence(raw: object) -> str:
+    """Render a 0.0-1.0 confidence float as a percent for human readers.
+
+    Empty / non-numeric values pass through unchanged so the raw column
+    remains traceable. Used by the signals sheet — the raw data sheet
+    keeps the float because consumers may parse it programmatically.
+    """
+    if raw in (None, ""):
+        return ""
+    try:
+        value = float(raw)  # type: ignore[arg-type]
+    except (TypeError, ValueError):
+        return str(raw)
+    if value < 0 or value > 1:
+        return str(raw)
+    return f"{round(value * 100)}%"
+
 REVIEW_COLUMNS = [
     "Seccion",
     "Campo",
@@ -243,7 +344,14 @@ def write_client_master_xlsx(
 
 
 def read_metadata_field_rows_from_xlsx(path: str | Path) -> list[dict[str, str]]:
-    """Read the raw metadata rows from a CheckWise generated XLSX workbook."""
+    """Read the raw metadata rows from a CheckWise generated XLSX workbook.
+
+    The XLSX header row uses Spanish display labels (2026-06-02 vocabulary
+    pass), but consumers of this function expect the stable snake_case
+    dict keys for backwards compatibility. We translate Spanish headers
+    back to their snake_case equivalents on the way out; unknown headers
+    pass through unchanged so a future column addition is still readable.
+    """
     workbook_path = Path(path).expanduser()
     with zipfile.ZipFile(workbook_path, "r") as archive:
         workbook_xml = archive.read("xl/workbook.xml")
@@ -255,7 +363,8 @@ def read_metadata_field_rows_from_xlsx(path: str | Path) -> list[dict[str, str]]
         rows = _xlsx_sheet_rows(archive.read(f"xl/worksheets/sheet{sheet_index}.xml"))
     if not rows:
         return []
-    headers = rows[0]
+    spanish_to_snake = {label: key for key, label in FIELD_ROW_COLUMN_LABELS_ES.items()}
+    headers = [spanish_to_snake.get(h, h) for h in rows[0]]
     return [
         {
             header: values[index] if index < len(values) else ""
@@ -646,9 +755,9 @@ def _signals_sheet(rows: list[dict[str, str]]) -> dict[str, Any]:
         ["RFCs detectados", first.get("detected_rfcs", ""), "Comparar contra RFC del proveedor y, cuando aplique, cliente."],
         ["Fechas detectadas", first.get("detected_dates", ""), "Usarlas para validar fecha principal, periodo reportado y vigencia."],
         ["Periodos mencionados", first.get("period_mentions", ""), "Comparar contra el periodo del calendario CheckWise."],
-        ["Confianza de match", first.get("requirement_match_confidence", ""), "Baja confianza requiere revision LegalShelf."],
+        ["Confianza de match", _format_confidence(first.get("requirement_match_confidence", "")), "Baja confianza requiere revision LegalShelf."],
         ["Mismatch", first.get("mismatch_reason", ""), "Si existe, no compartir como correcto sin revisar."],
-        ["Codigos de anomalia", first.get("anomaly_codes", ""), "Senales internas para priorizar revision."],
+        ["Codigos de anomalia", _humanize_anomaly_codes(first.get("anomaly_codes", "")), "Senales internas para priorizar revision."],
         ["OCR", first.get("ocr_status", ""), "El PDF fuente exige buena calidad y proceso OCR."],
     ]
     styles = [[3, 3, 3]] + [[9, 10, 10] for _ in signal_rows[1:]]
@@ -665,7 +774,11 @@ def _signals_sheet(rows: list[dict[str, str]]) -> dict[str, Any]:
 
 
 def _raw_data_sheet(rows: list[dict[str, str]]) -> dict[str, Any]:
-    data_rows = [FIELD_ROW_COLUMNS]
+    # Header row uses Spanish display labels so admin reviewers see
+    # "Institución detectada" instead of "detected_institution"; the
+    # underlying column order + cell values stay identical so any
+    # downstream consumer that parses by column position is unaffected.
+    data_rows = [_field_row_header_labels()]
     data_rows.extend([[row[column] for column in FIELD_ROW_COLUMNS] for row in rows])
     styles = [[3] * len(FIELD_ROW_COLUMNS)] + [[10] * len(FIELD_ROW_COLUMNS) for _ in rows]
     return {

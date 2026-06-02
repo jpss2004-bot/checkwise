@@ -146,7 +146,11 @@ def test_export_pdf_metadata_table_writes_guided_xlsx(tmp_path: Path) -> None:
     assert "Documento esperado" in signals_xml
     assert "Institucion esperada" in signals_xml
 
-    assert "document_type_code" in raw_xml
+    # 2026-06-02 vocabulary pass: raw-sheet header row now uses Spanish
+    # display labels ("Código del tipo" instead of "document_type_code").
+    # The dict keys + cell values are unchanged so loaded_rows below
+    # still reads back the snake_case keys for backwards compat.
+    assert "Código del tipo" in raw_xml
     assert "acuse_sisub" in raw_xml
 
     loaded_rows = read_metadata_field_rows_from_xlsx(output_path)
