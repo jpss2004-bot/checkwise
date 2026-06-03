@@ -407,32 +407,33 @@ function InstitutionCards({ items }: { items: UpcomingItem[] }) {
   ]);
   const ordered = Array.from(institutionsInPlay);
 
+  // De-carded (2026-06): was a 4-up equal-card grid (a banned pattern,
+  // and a third redundant representation of the timeline + table). Now a
+  // clean hairline list — one row per institution, soonest deadline
+  // first, countdown right-aligned.
   return (
-    <div className="grid grid-cols-1 gap-2 sm:grid-cols-2 lg:grid-cols-4">
+    <ul className="divide-y divide-[color:var(--border-subtle)] border-y border-[color:var(--border-subtle)]">
       {ordered.map((inst) => {
         const item = soonestByInst.get(inst);
         if (!item) {
           return (
-            <div
+            <li
               key={inst}
-              className="flex h-full flex-col rounded-md border border-dashed border-[color:var(--border-subtle)] px-3 py-3"
+              className="flex items-baseline justify-between gap-3 py-2.5"
             >
               <span className="cw-eyebrow">
                 {INSTITUTION_LABEL[inst] ?? inst}
               </span>
-              <span className="mt-1 text-[12px] text-[color:var(--text-tertiary)]">
+              <span className="text-[12px] text-[color:var(--text-tertiary)]">
                 Sin pendientes.
               </span>
-            </div>
+            </li>
           );
         }
         const tone = urgencyToneFor(item.due_in_days);
         return (
-          <div
-            key={inst}
-            className="flex h-full flex-col rounded-md border border-[color:var(--border-subtle)] bg-[color:var(--surface-elevated,transparent)] px-3 py-3"
-          >
-            <div className="flex items-baseline justify-between gap-2">
+          <li key={inst} className="py-2.5">
+            <div className="flex items-baseline justify-between gap-3">
               <span className="cw-eyebrow">
                 {INSTITUTION_LABEL[inst] ?? inst}
               </span>
@@ -443,18 +444,18 @@ function InstitutionCards({ items }: { items: UpcomingItem[] }) {
                 {formatCountdown(item.due_in_days)}
               </span>
             </div>
-            <p className="mt-1 line-clamp-2 text-[13px] font-medium text-[color:var(--text-primary)]">
-              {item.title}
-            </p>
-            <p className="text-[11px] text-[color:var(--text-tertiary)]">
-              {item.period_key ?? "—"}
-            </p>
-            <div className="mt-2">
+            <div className="mt-1 flex items-baseline justify-between gap-3">
+              <p className="min-w-0 text-[13px] font-medium text-[color:var(--text-primary)]">
+                {item.title}
+                <span className="ml-2 font-mono text-[11px] font-normal text-[color:var(--text-tertiary)]">
+                  {item.period_key ?? "—"}
+                </span>
+              </p>
               <a
                 href={item.href}
                 target="_blank"
                 rel="noreferrer"
-                className="inline-flex items-center gap-1 rounded-sm border border-[color:var(--border-subtle)] px-2 py-0.5 text-[11px] font-medium text-[color:var(--text-primary)] hover:bg-[color:var(--surface-hover)] focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-[color:var(--ring)] print:hidden"
+                className="shrink-0 rounded-sm border border-[color:var(--border-subtle)] px-2 py-0.5 text-[11px] font-medium text-[color:var(--text-primary)] hover:bg-[color:var(--surface-hover)] focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-[color:var(--ring)] print:hidden"
               >
                 Subir documento
               </a>
@@ -462,10 +463,10 @@ function InstitutionCards({ items }: { items: UpcomingItem[] }) {
                 Acción: subir documento ({item.href})
               </span>
             </div>
-          </div>
+          </li>
         );
       })}
-    </div>
+    </ul>
   );
 }
 

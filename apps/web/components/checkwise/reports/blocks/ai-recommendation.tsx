@@ -51,6 +51,7 @@ export const aiRecommendationDefinition: Omit<
 
 export function AiRecommendationBlock({
   block,
+  editable,
 }: BlockProps<AiRecommendationConfig, AiRecommendationData>) {
   const ai = block.ai_summary;
   const upstream = block.data?.upstream_block_summaries ?? [];
@@ -60,26 +61,31 @@ export function AiRecommendationBlock({
       className="space-y-3 py-2 print:break-inside-avoid"
       data-block-type="ai_recommendation"
     >
-      <div className="cw-metadata-strip">
-        <div>
-          <span className="cw-eyebrow">Prioridades</span>
-          <span className="font-mono text-[13px] text-[color:var(--text-primary)]">
-            {block.config.priority_count}
-          </span>
+      {/* Authoring config (priorities / tone / inputs) is useful while
+          editing but reads as machine telemetry to the report's audience,
+          so it's hidden in read / story / print mode. */}
+      {editable ? (
+        <div className="cw-metadata-strip">
+          <div>
+            <span className="cw-eyebrow">Prioridades</span>
+            <span className="font-mono text-[13px] text-[color:var(--text-primary)]">
+              {block.config.priority_count}
+            </span>
+          </div>
+          <div>
+            <span className="cw-eyebrow">Tono</span>
+            <span className="text-[13px] text-[color:var(--text-primary)]">
+              {toneLabel(block.config.audience_tone)}
+            </span>
+          </div>
+          <div>
+            <span className="cw-eyebrow">Basado en</span>
+            <span className="font-mono text-[11px] text-[color:var(--text-tertiary)]">
+              {upstream.length} bloque{upstream.length === 1 ? "" : "s"}
+            </span>
+          </div>
         </div>
-        <div>
-          <span className="cw-eyebrow">Tono</span>
-          <span className="text-[13px] text-[color:var(--text-primary)]">
-            {toneLabel(block.config.audience_tone)}
-          </span>
-        </div>
-        <div>
-          <span className="cw-eyebrow">Basado en</span>
-          <span className="font-mono text-[11px] text-[color:var(--text-tertiary)]">
-            {upstream.length} bloque{upstream.length === 1 ? "" : "s"}
-          </span>
-        </div>
-      </div>
+      ) : null}
 
       {ai && ai.text ? (
         <div className="rounded-md border border-[color:var(--status-ai-border)] bg-[color:var(--status-ai-bg)] p-4">

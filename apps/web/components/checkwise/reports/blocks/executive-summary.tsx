@@ -75,6 +75,13 @@ export function ExecutiveSummaryBlock({
   onPatch,
 }: BlockProps<ExecutiveSummaryConfig, ExecutiveSummaryData>) {
   const { config, data } = block;
+  // The opening paragraph: a manually-authored `config.body` always
+  // wins; otherwise fall back to the AI-generated summary text. Before
+  // this, the block only ever read `config.body`, so AI-generated
+  // executive summaries (which land in `ai_summary.text`) rendered as an
+  // empty placeholder — the report opened with no cover paragraph.
+  const aiText = block.ai_summary?.text ?? "";
+  const bodyText = config.body && config.body.trim() ? config.body : aiText;
   const period = data?.period_label ?? config.period_label ?? "—";
   const scope = data?.scope_label ?? config.scope_label ?? "Alcance por definir";
   const metrics: MetricRow[] = [
@@ -104,28 +111,35 @@ export function ExecutiveSummaryBlock({
               {period}
             </span>
           </div>
-          <div>
-            <span className="cw-eyebrow">Enfoque</span>
-            <span className="text-[13px] text-[color:var(--text-primary)]">
-              {labelForFocus(config.focus)}
-            </span>
-          </div>
+          {editable ? (
+            <div>
+              <span className="cw-eyebrow">Enfoque</span>
+              <span className="text-[13px] text-[color:var(--text-primary)]">
+                {labelForFocus(config.focus)}
+              </span>
+            </div>
+          ) : null}
         </div>
 
-        <textarea
-          placeholder={
-            editable
-              ? "Escribe el resumen ejecutivo o pídeselo a la IA."
-              : "—"
-          }
-          value={config.body ?? ""}
-          disabled={!editable}
-          onChange={(e) =>
-            onPatch({ config: { ...config, body: e.target.value } })
-          }
-          rows={Math.max(3, (config.body ?? "").split("\n").length + 1)}
-          className="cw-prose w-full resize-none border-0 bg-transparent p-0 text-[15px] leading-relaxed text-[color:var(--text-primary)] outline-none placeholder:text-[color:var(--text-tertiary)] focus:ring-0 disabled:cursor-default"
-        />
+        {editable ? (
+          <textarea
+            placeholder="Escribe el resumen ejecutivo o pídeselo a la IA."
+            value={config.body ?? aiText}
+            onChange={(e) =>
+              onPatch({ config: { ...config, body: e.target.value } })
+            }
+            rows={Math.max(3, (config.body ?? aiText).split("\n").length + 1)}
+            className="cw-prose w-full resize-none border-0 bg-transparent p-0 text-[15px] leading-relaxed text-[color:var(--text-primary)] outline-none placeholder:text-[color:var(--text-tertiary)] focus:ring-0"
+          />
+        ) : bodyText ? (
+          <p className="cw-prose text-[15px] leading-relaxed text-[color:var(--text-primary)]">
+            {bodyText}
+          </p>
+        ) : (
+          <p className="text-[14px] italic leading-relaxed text-[color:var(--text-tertiary)]">
+            Sin resumen para este periodo.
+          </p>
+        )}
       </div>
 
       {config.include_metrics && (

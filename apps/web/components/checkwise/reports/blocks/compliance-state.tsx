@@ -158,10 +158,12 @@ export function ComplianceStateBlock({
 
   return (
     <section className="space-y-3 py-3" data-block-type="compliance_state">
-      {/* Semáforo + headline */}
-      <div className="flex items-start gap-3 rounded-md border border-[color:var(--border-subtle)] bg-[color:var(--surface-elevated,transparent)] px-4 py-3">
+      {/* Semáforo + headline — de-carded (2026-06): the boxed headline
+          read as app chrome. Now a clean document headline with the
+          compliance % promoted as the block's hero figure. */}
+      <div className="flex items-start gap-3">
         <span
-          className={`mt-1 inline-block h-3 w-3 rounded-full ${LEVEL_DOT[semaphore.level]} print:hidden`}
+          className={`mt-1.5 inline-block h-3.5 w-3.5 rounded-full ${LEVEL_DOT[semaphore.level]} print:hidden`}
           aria-hidden="true"
         />
         <span className="sr-only print:not-sr-only print:mr-1">
@@ -169,10 +171,10 @@ export function ComplianceStateBlock({
         </span>
         <div className="flex-1 space-y-1">
           <div className="flex items-baseline justify-between gap-3">
-            <h3 className="text-[14px] font-semibold text-[color:var(--text-primary)]">
+            <h3 className="text-[15px] font-semibold text-[color:var(--text-primary)]">
               {semaphore.label}
             </h3>
-            <span className="font-mono text-[14px] font-semibold tabular-nums text-[color:var(--text-primary)]">
+            <span className="font-mono text-[22px] font-semibold leading-none tabular-nums text-[color:var(--text-primary)]">
               {semaphore.compliance_pct}%
             </span>
           </div>

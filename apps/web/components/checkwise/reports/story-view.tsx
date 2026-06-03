@@ -8,13 +8,12 @@ import {
   DownloadSimple,
   Pencil,
   Printer,
-  Sparkle,
 } from "@phosphor-icons/react";
 
 import { Canvas } from "@/components/checkwise/reports/canvas";
+import { ReportMasthead } from "@/components/checkwise/reports/report-masthead";
 import { ExportButton } from "@/components/checkwise/reports/editor/export-button";
 import { ShareDialog } from "@/components/checkwise/reports/editor/share-dialog";
-import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import {
   REPORT_AUDIENCE_LABEL,
@@ -121,69 +120,24 @@ export function StoryView({
         </Button>
       </div>
 
-      {/* ─── Hero ─────────────────────────────────────────── */}
-      <header className="cw-fade-up space-y-4">
-        <div className="flex items-center gap-2 text-[color:var(--text-ai)]">
-          <Sparkle className="h-3.5 w-3.5" weight="fill" aria-hidden="true" />
-          <span className="text-[11px] font-medium uppercase tracking-[0.08em]">
-            Evidencia de cumplimiento · CheckWise
-          </span>
-        </div>
-        <h1 className="text-[34px] font-semibold leading-[1.1] tracking-tight text-[color:var(--text-primary)]">
-          {report.title}
-        </h1>
-        {report.description && (
-          <p className="max-w-prose text-[15px] leading-relaxed text-[color:var(--text-secondary)]">
-            {report.description}
-          </p>
-        )}
-        <div className="flex flex-wrap items-center gap-x-6 gap-y-2 border-t border-b border-[color:var(--border-subtle)] py-3 text-[12px] text-[color:var(--text-tertiary)]">
-          <div>
-            <span className="block text-[10px] font-medium uppercase tracking-wide text-[color:var(--text-tertiary)]">
-              Audiencia
-            </span>
-            <span className="text-[13px] text-[color:var(--text-primary)]">
-              {REPORT_AUDIENCE_LABEL[audience]}
-            </span>
-          </div>
-          <div>
-            <span className="block text-[10px] font-medium uppercase tracking-wide text-[color:var(--text-tertiary)]">
-              Estado
-            </span>
-            <Badge variant={report.status === "active" ? "success" : "outline"}>
-              {REPORT_STATUS_LABEL[report.status]}
-            </Badge>
-          </div>
-          <div>
-            <span className="block text-[10px] font-medium uppercase tracking-wide text-[color:var(--text-tertiary)]">
-              Versión
-            </span>
-            <span className="font-mono text-[13px] text-[color:var(--text-primary)]">
-              {versionLabel}
-            </span>
-          </div>
-          {updatedAtLabel && (
-            <div>
-              <span className="block text-[10px] font-medium uppercase tracking-wide text-[color:var(--text-tertiary)]">
-                Última edición
-              </span>
-              <span className="text-[12px] text-[color:var(--text-secondary)]">
-                {updatedAtLabel}
-              </span>
-            </div>
-          )}
-          {sealedAtLabel && sealedAtLabel !== updatedAtLabel && (
-            <div>
-              <span className="block text-[10px] font-medium uppercase tracking-wide text-[color:var(--text-tertiary)]">
-                Datos al
-              </span>
-              <span className="text-[12px] text-[color:var(--text-secondary)]">
-                {sealedAtLabel}
-              </span>
-            </div>
-          )}
-        </div>
-      </header>
+      {/* ─── Masthead — bold, branded document cover ──────── */}
+      <ReportMasthead
+        title={report.title}
+        description={report.description}
+        meta={[
+          { label: "Audiencia", value: REPORT_AUDIENCE_LABEL[audience] },
+          { label: "Estado", value: REPORT_STATUS_LABEL[report.status] },
+          { label: "Versión", value: versionLabel },
+          { label: "Última edición", value: updatedAtLabel },
+          {
+            label: "Datos al",
+            value:
+              sealedAtLabel && sealedAtLabel !== updatedAtLabel
+                ? sealedAtLabel
+                : null,
+          },
+        ]}
+      />
 
       {/* ─── Opening framing paragraph ─────────────────── */}
       <section className="cw-fade-up space-y-2">

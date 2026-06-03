@@ -131,7 +131,6 @@ function semanticToneFor(
 export function KpiStripBlock({
   block,
   editable,
-  onPatch,
 }: BlockProps<KpiStripConfig, KpiStripData>) {
   const { metrics } = block.config;
   const resolved = block.data?.resolved ?? [];
@@ -174,33 +173,9 @@ export function KpiStripBlock({
       </div>
 
       {editable && (
-        <div className="flex items-center justify-between text-[11px] text-[color:var(--text-tertiary)] print:hidden">
-          <span>
-            {metrics.length} métrica{metrics.length === 1 ? "" : "s"}. Configurable
-            desde el inspector.
-          </span>
-          <button
-            type="button"
-            onClick={() => {
-              // Light hand-edit: cycle the first metric's format as a
-              // quick demonstration the block is wired. Real config
-              // editing happens in the right-rail Inspector in 3.5.
-              if (metrics.length === 0) return;
-              const cycle: Record<MetricFormat, MetricFormat> = {
-                percent: "number",
-                number: "duration_days",
-                duration_days: "duration_hours",
-                duration_hours: "percent",
-              };
-              const next: KpiMetric[] = [...metrics];
-              next[0] = { ...next[0], format: cycle[next[0].format] };
-              onPatch({ config: { ...block.config, metrics: next } });
-            }}
-            className="rounded-sm border border-[color:var(--border-subtle)] px-2 py-0.5 text-[color:var(--text-tertiary)] hover:bg-[color:var(--surface-hover)]"
-          >
-            Cambiar formato
-          </button>
-        </div>
+        <p className="text-[11px] text-[color:var(--text-tertiary)] print:hidden">
+          {metrics.length} métrica{metrics.length === 1 ? "" : "s"}.
+        </p>
       )}
 
       <FreshnessLabel fetchedAt={block.data?.fetched_at} />

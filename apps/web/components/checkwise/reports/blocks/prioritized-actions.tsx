@@ -104,12 +104,6 @@ const TONE_CHIP: Record<"red" | "orange" | "gray", string> = {
   gray: "bg-[color:var(--surface-muted,#f1f5f9)] text-[color:var(--text-secondary)] border-[color:var(--border-subtle)]",
 };
 
-const TONE_BORDER: Record<"red" | "orange" | "gray", string> = {
-  red: "border-l-[color:var(--state-red,#dc2626)]",
-  orange: "border-l-[color:var(--state-orange,#ea580c)]",
-  gray: "border-l-[color:var(--text-tertiary,#6b7280)]",
-};
-
 const TYPE_CTA: Record<ActionType, string> = {
   reupload: "Subir versión corregida",
   clarify: "Atender observación",
@@ -154,7 +148,7 @@ export function PrioritizedActionsBlock({
         className="space-y-2 py-2"
         data-block-type="prioritized_actions"
       >
-        <div className="rounded-md border border-[color:var(--border-subtle)] bg-[color:var(--surface-elevated,transparent)] px-4 py-6 text-center">
+        <div className="border-y border-[color:var(--border-subtle)] px-1 py-6 text-center">
           <p className="text-[14px] font-medium text-[color:var(--text-primary)]">
             No hay acciones pendientes.
           </p>
@@ -175,7 +169,7 @@ export function PrioritizedActionsBlock({
       data-block-type="prioritized_actions"
     >
       {filterChips}
-      <ol className="space-y-3">
+      <ol className="divide-y divide-[color:var(--border-subtle)] border-y border-[color:var(--border-subtle)]">
         {items.map((item, idx) => (
           <ActionCard key={item.id} item={item} index={idx + 1} />
         ))}
@@ -200,13 +194,12 @@ function ActionCard({
   const Icon = typeMeta.icon;
   const ctaLabel = TYPE_CTA[item.type] ?? "Atender";
   return (
-    <li
-      className={`relative flex flex-col gap-3 rounded-md border border-[color:var(--border-subtle)] border-l-4 bg-[color:var(--surface-elevated,transparent)] px-4 py-3 sm:flex-row sm:items-stretch sm:gap-4 ${TONE_BORDER[priorityMeta.tone]}`}
-    >
-      {/* Numbered badge */}
+    <li className="relative flex flex-col gap-3 py-4 first:pt-1 sm:flex-row sm:items-stretch sm:gap-4">
+      {/* Numbered badge — navy fill carries the brand into the document. */}
       <div
         aria-hidden="true"
-        className="hidden h-9 w-9 shrink-0 items-center justify-center rounded-full border border-[color:var(--border-subtle)] bg-[color:var(--surface-muted,#f8fafc)] font-mono text-[14px] font-semibold tabular-nums text-[color:var(--text-secondary)] sm:flex"
+        className="hidden h-8 w-8 shrink-0 items-center justify-center rounded-full bg-[color:var(--surface-brand)] font-mono text-[13px] font-semibold tabular-nums text-white sm:flex"
+        style={{ printColorAdjust: "exact", WebkitPrintColorAdjust: "exact" }}
       >
         {index}
       </div>

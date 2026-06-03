@@ -75,7 +75,9 @@ export const complianceRadarDefinition: Omit<
 const SEMAPHORE_COLOR = {
   green: "var(--status-success-text)",
   yellow: "var(--status-warning-text)",
-  red: "var(--status-danger-text)",
+  // --status-danger-text was never defined → the red donut segment
+  // rendered colorless. Use the defined error token (matches the matrix).
+  red: "var(--status-error-text)",
 } as const;
 
 const SEMAPHORE_LABEL = {
@@ -96,7 +98,7 @@ export function ComplianceRadarBlock({
     (semaphore.green ?? 0) + (semaphore.yellow ?? 0) + (semaphore.red ?? 0);
 
   return (
-    <section className="cw-compliance-radar rounded-2xl border border-[color:var(--border-subtle)] bg-[color:var(--surface-1)] p-6">
+    <section className="cw-compliance-radar border-t border-[color:var(--border-default)] pt-5">
       <header className="mb-5 flex items-baseline justify-between gap-3">
         <div>
           <p className="cw-eyebrow">Radar de cumplimiento</p>
@@ -142,7 +144,7 @@ export function ComplianceRadarBlock({
                 <li key={v.vendor_id}>
                   <Link
                     href={`/client/vendors/${v.vendor_id}`}
-                    className="group flex items-center justify-between gap-3 rounded-md border border-transparent px-2.5 py-1.5 hover:border-[color:var(--border-subtle)] hover:bg-[color:var(--surface-2)]"
+                    className="group flex items-center justify-between gap-3 rounded-md border border-transparent px-2.5 py-1.5 hover:border-[color:var(--border-subtle)] hover:bg-[color:var(--surface-hover)]"
                   >
                     <div className="flex min-w-0 items-center gap-2.5">
                       <SemaphoreDot level={v.semaphore_level} />
