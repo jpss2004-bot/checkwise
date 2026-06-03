@@ -35,6 +35,7 @@ const BLOCK_CONTRACTS = [
   { file: "components/checkwise/reports/blocks/kpi-strip.tsx", type: "kpi_strip" },
   { file: "components/checkwise/reports/blocks/vendor-risk-matrix.tsx", type: "vendor_risk_matrix" },
   { file: "components/checkwise/reports/blocks/ai-recommendation.tsx", type: "ai_recommendation" },
+  { file: "components/checkwise/reports/blocks/compliance-overview.tsx", type: "compliance_overview" },
 ];
 
 let failures = 0;

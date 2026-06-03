@@ -114,6 +114,10 @@ import {
   ComplianceRadarBlock,
   complianceRadarDefinition,
 } from "@/components/checkwise/reports/blocks/compliance-radar";
+import {
+  ComplianceOverviewBlock,
+  complianceOverviewDefinition,
+} from "@/components/checkwise/reports/blocks/compliance-overview";
 
 function register<TConfig, TData>(
   partial: Omit<BlockDefinition<TConfig, TData>, "Component">,
@@ -161,10 +165,18 @@ export const BLOCK_REGISTRY: Record<string, ErasedBlockDefinition> = {
     complianceRadarDefinition,
     ComplianceRadarBlock,
   ),
+  [complianceOverviewDefinition.type]: register(
+    complianceOverviewDefinition,
+    ComplianceOverviewBlock,
+  ),
 };
 
 /** Slash-menu order. New blocks append. */
 export const PALETTE_ORDER: string[] = [
+  // 2026-06-03 — the deterministic compliance_overview band leads the
+  // cliente palette: it's the scannable cover-stat block authors reach
+  // for first when composing a portfolio report.
+  complianceOverviewDefinition.type,
   // M4 (2026-06-02) — radar leads the cliente Resumen ejecutivo so
   // it's the first block authors think to insert when composing a
   // portfolio report manually.
