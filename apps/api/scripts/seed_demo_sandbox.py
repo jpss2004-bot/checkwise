@@ -243,8 +243,16 @@ PROVIDERS = [
 PROVIDERS_BY_KEY = {p.key: p for p in PROVIDERS}
 
 
+# Instance key namespaces all deterministic ids. Empty string = the
+# standalone Demo Sandbox client; in --attach-client-admin mode it's set to
+# the target client_id so the seeded rows (vendors, workspaces, report, etc.)
+# get their own id space and never collide with another tenant's sandbox.
+_INSTANCE_KEY = ""
+
+
 def _id(value: str) -> str:
-    return str(uuid.uuid5(SCENARIO_NAMESPACE, value))
+    key = f"{_INSTANCE_KEY}:{value}" if _INSTANCE_KEY else value
+    return str(uuid.uuid5(SCENARIO_NAMESPACE, key))
 
 
 def _dt(days_ago: int) -> datetime:
@@ -871,7 +879,7 @@ def _seed_provider_rows(db, *, client_id: str) -> dict[str, str]:
                 filial_name="Filial principal",
                 persona_type="moral",
                 display_name=provider.vendor_name,
-                access_token=f"demo-sandbox-{provider.key}",
+                access_token=_id(f"token:{provider.key}"),
                 onboarding_completed_at=complete_at,
                 profile_confirmed_at=complete_at,
                 legal_consent_accepted_at=complete_at,
@@ -1007,13 +1015,15 @@ def _seed_report(
     blocks = build_deterministic_blocks(
         db, preset_id="client-monthly-executive", scope=scope
     )
+    client_row = db.get(Client, client_id)
+    client_label = client_row.name if client_row else "Demo Sandbox"
 
     report = Report(
         id=_id("report:portfolio"),
         organization_id=org_id,
         client_id=client_id,
         vendor_id=None,
-        title="Resumen ejecutivo mensual · Demo Sandbox · Jun 2026",
+        title=f"Resumen ejecutivo mensual · {client_label} · Jun 2026",
         description="Plantilla 'Resumen ejecutivo mensual': panorama del portafolio — cumplimiento global, por institución, radar, matriz de riesgo y recomendaciones.",
         audience="client_facing",
         status="active",
@@ -1187,11 +1197,136 @@ def _wipe(db, *, backend) -> int:
 # ORCHESTRATION
 # ============================================================================
 
-def _apply(db, *, sample: SampleIndex, backend) -> dict:
-    _wipe(db, backend=backend)
-    seed_catalog(db, years=(2026,))
+# ============================================================================
+# ATTACH MODE — seed the ladder into an EXISTING client (e.g. Rebe's)
+# ============================================================================
 
-    client_id, org_id = _seed_client_and_admin(db)
+def _resolve_attach_target(db, admin_email: str) -> tuple[str, str, str]:
+    """Resolve (client_id, org_id, admin_user_id) for an existing client by
+    its client_admin's email. Looks up via users → memberships →
+    organizations → clients (never by name, which drifts). Raises if the
+    email isn't an active client_admin of a client-kind org."""
+    user = db.scalar(select(User).where(User.email == admin_email))
+    if user is None:
+        raise SystemExit(f"No user found with email {admin_email!r}.")
+    org = db.scalar(
+        select(Organization)
+        .join(Membership, Membership.organization_id == Organization.id)
+        .where(
+            Membership.user_id == user.id,
+            Membership.role == "client_admin",
+            Membership.status == "active",
+            Organization.kind == "client",
+            Organization.client_id.isnot(None),
+        )
+        .limit(1)
+    )
+    if org is None:
+        raise SystemExit(
+            f"{admin_email!r} is not an active client_admin of any client org."
+        )
+    return org.client_id, org.id, user.id
+
+
+def _wipe_attach(db, *, backend) -> int:
+    """Remove ONLY the sandbox rows this seeder created (by deterministic id),
+    leaving the host client / org / user / real vendors / shared periods
+    untouched. Safe to run against a real client. Requires ``_INSTANCE_KEY``
+    to already be set to the target client_id so the ids resolve."""
+    vendor_ids = [_id(f"vendor:{p.key}") for p in PROVIDERS]
+    workspace_ids = [_id(f"workspace:{p.key}") for p in PROVIDERS]
+    report_id = _id("report:portfolio")
+
+    deleted_blobs = 0
+    sub_ids = set(db.scalars(select(Submission.id).where(Submission.vendor_id.in_(vendor_ids))))
+    doc_ids = set(
+        db.scalars(select(Document.id).where(Document.submission_id.in_(sub_ids)))
+    ) if sub_ids else set()
+
+    if sub_ids:
+        for key in db.scalars(
+            select(Document.storage_key).where(Document.submission_id.in_(sub_ids))
+        ):
+            backend.delete(key)
+            deleted_blobs += 1
+
+    rep = db.get(Report, report_id)
+    if rep is not None:
+        rep.current_version_id = None
+        db.flush()
+        db.query(ReportConversation).filter(ReportConversation.report_id == report_id).delete(
+            synchronize_session=False
+        )
+        db.query(ReportExport).filter(ReportExport.report_id == report_id).delete(
+            synchronize_session=False
+        )
+        db.query(ReportShare).filter(ReportShare.report_id == report_id).delete(
+            synchronize_session=False
+        )
+        db.query(ReportVersion).filter(ReportVersion.report_id == report_id).delete(
+            synchronize_session=False
+        )
+        db.delete(rep)
+    db.query(ComplianceSnapshot).filter(
+        ComplianceSnapshot.vendor_id.in_(vendor_ids)
+    ).delete(synchronize_session=False)
+
+    db.query(WiseEvent).filter(WiseEvent.workspace_id.in_(workspace_ids)).delete(
+        synchronize_session=False
+    )
+    db.query(RenewalReminder).filter(RenewalReminder.workspace_id.in_(workspace_ids)).delete(
+        synchronize_session=False
+    )
+    db.query(ProviderNotification).filter(
+        ProviderNotification.workspace_id.in_(workspace_ids)
+    ).delete(synchronize_session=False)
+    db.query(ClientNotification).filter(
+        ClientNotification.vendor_id.in_(vendor_ids)
+    ).delete(synchronize_session=False)
+
+    if sub_ids:
+        db.query(ValidationEvent).filter(ValidationEvent.submission_id.in_(sub_ids)).delete(
+            synchronize_session=False
+        )
+        db.query(Validation).filter(Validation.submission_id.in_(sub_ids)).delete(
+            synchronize_session=False
+        )
+    if doc_ids:
+        db.query(DocumentInspection).filter(DocumentInspection.document_id.in_(doc_ids)).delete(
+            synchronize_session=False
+        )
+        db.query(DocumentStatusHistory).filter(
+            DocumentStatusHistory.document_id.in_(doc_ids)
+        ).delete(synchronize_session=False)
+    if sub_ids:
+        db.query(Document).filter(Document.submission_id.in_(sub_ids)).delete(
+            synchronize_session=False
+        )
+        db.query(Submission).filter(Submission.id.in_(sub_ids)).delete(
+            synchronize_session=False
+        )
+    db.query(ProviderWorkspace).filter(ProviderWorkspace.id.in_(workspace_ids)).delete(
+        synchronize_session=False
+    )
+    db.query(Vendor).filter(Vendor.id.in_(vendor_ids)).delete(synchronize_session=False)
+    db.flush()
+    return deleted_blobs
+
+
+def _apply(db, *, sample: SampleIndex, backend, attach_admin_email: str | None = None) -> dict:
+    global _INSTANCE_KEY
+    if attach_admin_email:
+        client_id, org_id, admin_user_id = _resolve_attach_target(db, attach_admin_email)
+        _INSTANCE_KEY = client_id  # namespace ids to the target client
+        _wipe_attach(db, backend=backend)
+        seed_catalog(db, years=(2026,))
+    else:
+        _INSTANCE_KEY = ""
+        _wipe(db, backend=backend)
+        seed_catalog(db, years=(2026,))
+        client_id, org_id = _seed_client_and_admin(db)
+        admin_user_id = _id(f"user:{ADMIN_EMAIL}")
+
     vendor_ids = _seed_provider_rows(db, client_id=client_id)
 
     uploader = BlobUploader(backend)
@@ -1213,7 +1348,6 @@ def _apply(db, *, sample: SampleIndex, backend) -> dict:
                 workspace_id=_id(f"workspace:{provider.key}"),
             )
 
-    admin_user_id = _id(f"user:{ADMIN_EMAIL}")
     _seed_report(db, org_id=org_id, client_id=client_id, admin_user_id=admin_user_id,
                  vendor_ids=vendor_ids, stats={})
 
@@ -1251,16 +1385,31 @@ def main() -> None:
                         help="Required to run when CHECKWISE_ENV != 'local'.")
     parser.add_argument("--sample-docs-path", default=None,
                         help="Path to _reference/sample-docs (defaults to repo root).")
+    parser.add_argument(
+        "--attach-client-admin", default=None, metavar="EMAIL",
+        help="Attach the 5-provider ladder + report to the EXISTING client "
+             "owned by this client_admin email (e.g. rebeca100901@gmail.com), "
+             "instead of creating the standalone Demo Sandbox client. Teardown "
+             "removes only the seeded rows, never the host client's real data.",
+    )
     args = parser.parse_args()
 
     _assert_env(confirm_prod=args.confirm_prod)
     backend = _storage_backend()
 
     print(f"CHECKWISE_ENV={settings.CHECKWISE_ENV}  STORAGE_BUCKET={settings.STORAGE_BUCKET}")
+    if args.attach_client_admin:
+        print(f"Attach mode → existing client of {args.attach_client_admin}")
 
     if args.teardown:
+        global _INSTANCE_KEY
         with SessionLocal() as db:
-            blobs = _wipe(db, backend=backend)
+            if args.attach_client_admin:
+                client_id, _org, _u = _resolve_attach_target(db, args.attach_client_admin)
+                _INSTANCE_KEY = client_id
+                blobs = _wipe_attach(db, backend=backend)
+            else:
+                blobs = _wipe(db, backend=backend)
             db.commit()
         print(f"Demo sandbox removed. Deleted {blobs} storage blob(s).")
         return
@@ -1270,12 +1419,19 @@ def main() -> None:
     print(f"Sample docs: {sample_path}")
 
     with SessionLocal() as db:
-        result = _apply(db, sample=sample, backend=backend)
+        result = _apply(
+            db, sample=sample, backend=backend,
+            attach_admin_email=args.attach_client_admin,
+        )
 
     print("")
     print("Demo sandbox ready.")
-    print(f"  Client    {CLIENT_NAME}  (id {result['client_id']})")
-    print(f"  Login     {ADMIN_EMAIL} / {ADMIN_PASSWORD}   (client_admin)")
+    if args.attach_client_admin:
+        print(f"  Attached  → existing client (id {result['client_id']})")
+        print(f"  Login     {args.attach_client_admin}  (the host client_admin, unchanged)")
+    else:
+        print(f"  Client    {CLIENT_NAME}  (id {result['client_id']})")
+        print(f"  Login     {ADMIN_EMAIL} / {ADMIN_PASSWORD}   (client_admin)")
     print(f"  Seeded    {result['onboarding']} onboarding + {result['recurring']} recurring "
           f"submissions across {len(PROVIDERS)} providers; {result['blobs']} unique PDF blob(s).")
     print(f"  Report    1 client-facing report pre-seeded → /client/reports")
