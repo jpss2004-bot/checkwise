@@ -244,7 +244,12 @@ def render_report_pdf(report: Report, version: ReportVersion) -> bytes:
     """
     from playwright.sync_api import sync_playwright
 
-    html_bytes = render_report_html(report, version)
+    from app.services.reports.print_render import render_report_document_html
+
+    # The PDF renders the DESIGNED document (verdict → findings → bars →
+    # matrix), not the generic key/value dump that render_report_html still
+    # produces for the raw-data HTML export.
+    html_bytes = render_report_document_html(report, version)
     # ``delete=False`` so the temp file survives the ``with`` block —
     # we delete it explicitly in the outer ``finally`` so Chromium has
     # the file path available throughout the render.
