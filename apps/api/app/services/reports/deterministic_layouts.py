@@ -49,60 +49,67 @@ _MATRIX_COLUMNS = ["sat", "imss", "infonavit", "stps_repse", "risk_score"]
 # mensual" template. (Fred feedback 2026-06-03: "all reports have to be visual".)
 LAYOUTS: dict[str, list[tuple[str, dict]]] = {
     # ── Admin · internal_only (need a client/vendor scope to populate) ──
+    # Every template now opens with the insight layer (report_verdict +
+    # key_findings) — the synthesized "so what" — then the evidence charts,
+    # then the recommendation/actions. The verdict replaces the old leading
+    # executive_summary / compliance_state (which only restated the semáforo).
     "admin-daily-queue": [
+        ("report_verdict", {}),
+        ("key_findings", {}),
         ("compliance_overview", {"top_n_vendors": 12}),
         ("vendor_risk_matrix", {"filter": {}, "columns": _MATRIX_COLUMNS, "sort": "risk_desc", "max_rows": 15}),
         ("compliance_by_institution", {}),
-        ("executive_summary", {"focus": "audit", "include_metrics": False}),
         ("__recommendation__", {"audience_tone": "internal", "priority_count": 3}),
     ],
     "admin-high-risk-vendors": [
+        ("report_verdict", {}),
+        ("key_findings", {}),
         ("compliance_radar", {"top_n_vendors": 8, "include_history": False}),
         ("vendor_risk_matrix", {"filter": {}, "columns": _MATRIX_COLUMNS, "sort": "risk_desc", "max_rows": 20}),
         ("compliance_by_institution", {}),
-        ("executive_summary", {"focus": "risk", "include_metrics": False}),
         ("__recommendation__", {"audience_tone": "internal", "priority_count": 3}),
     ],
     "admin-monthly-operational": [
+        ("report_verdict", {}),
+        ("key_findings", {}),
         ("compliance_overview", {"top_n_vendors": 12}),
         ("compliance_by_institution", {}),
-        ("compliance_radar", {"top_n_vendors": 8, "include_history": False}),
         ("vendor_risk_matrix", {"filter": {}, "columns": _MATRIX_COLUMNS, "sort": "risk_desc", "max_rows": 12}),
-        ("executive_summary", {"focus": "compliance", "include_metrics": False}),
         ("__recommendation__", {"audience_tone": "internal", "priority_count": 5}),
     ],
 
     # ── Client · client_facing (portfolio scope) ──
     "client-monthly-executive": [
+        ("report_verdict", {}),
+        ("key_findings", {}),
         ("compliance_overview", {"top_n_vendors": 12}),
         ("compliance_by_institution", {}),
-        ("compliance_radar", {"top_n_vendors": 8, "include_history": False}),
-        ("executive_summary", {"focus": "compliance", "include_metrics": False}),
         ("vendor_risk_matrix", {"filter": {}, "columns": _MATRIX_COLUMNS, "sort": "risk_desc", "max_rows": 10}),
         ("__recommendation__", {"audience_tone": "client", "priority_count": 3}),
     ],
     "client-vendor-risk-matrix": [
+        ("report_verdict", {}),
+        ("key_findings", {}),
         ("compliance_radar", {"top_n_vendors": 8, "include_history": False}),
         ("vendor_risk_matrix", {"filter": {}, "columns": _MATRIX_COLUMNS, "sort": "risk_desc", "max_rows": 10}),
         ("compliance_by_institution", {}),
-        ("executive_summary", {"focus": "risk", "include_metrics": False}),
         ("__recommendation__", {"audience_tone": "client", "priority_count": 3}),
     ],
     "client-missing-evidence": [
+        ("report_verdict", {}),
+        ("key_findings", {}),
         ("compliance_overview", {"top_n_vendors": 12}),
         ("compliance_by_institution", {}),
         ("vendor_risk_matrix", {"filter": {}, "columns": _MATRIX_COLUMNS, "sort": "risk_desc", "max_rows": 10}),
-        ("executive_summary", {"focus": "expediente", "include_metrics": False}),
         ("__recommendation__", {"audience_tone": "client", "priority_count": 3}),
     ],
 
     # ── Client · per-provider (client_facing, scoped to ONE vendor) ──
-    # Fully visual: the provider's semáforo + counts, their compliance by
-    # institution, what needs attention, their deadline timeline, and ranked
-    # action cards. No long prose — compliance_state is the visual summary and
-    # prioritized_actions is the visual recommendation.
+    # Insight-first for a single provider: their verdict + findings, then their
+    # compliance by institution, what needs attention, deadlines, action cards.
     "client-vendor-detail": [
-        ("compliance_state", {}),
+        ("report_verdict", {}),
+        ("key_findings", {}),
         ("compliance_by_institution", {}),
         ("attention_list", {"max_rows": 10}),
         ("upcoming_deadlines", {"top": 6}),
@@ -111,14 +118,16 @@ LAYOUTS: dict[str, list[tuple[str, dict]]] = {
 
     # ── Provider · vendor_facing (need a vendor scope) ──
     "provider-current-state": [
-        ("compliance_state", {}),
+        ("report_verdict", {}),
+        ("key_findings", {}),
         ("compliance_by_institution", {}),
         ("attention_list", {"max_rows": 10}),
         ("upcoming_deadlines", {"top": 6}),
         ("prioritized_actions", {"max_actions": 3}),
     ],
     "provider-missing-documents": [
-        ("compliance_state", {}),
+        ("report_verdict", {}),
+        ("key_findings", {}),
         ("compliance_by_institution", {}),
         ("attention_list", {"filter": {"states": [
             "missing", "in_review", "uploaded", "rejected",
@@ -127,7 +136,8 @@ LAYOUTS: dict[str, list[tuple[str, dict]]] = {
         ("prioritized_actions", {"max_actions": 3, "filter": {"types": ["complete_onboarding", "upcoming"]}}),
     ],
     "provider-recent-rejections": [
-        ("compliance_state", {}),
+        ("report_verdict", {}),
+        ("key_findings", {}),
         ("compliance_by_institution", {}),
         ("attention_list", {"filter": {"states": ["rejected", "needs_correction", "possible_mismatch"]}, "max_rows": 10}),
         ("prioritized_actions", {"max_actions": 3, "filter": {

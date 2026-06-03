@@ -723,10 +723,36 @@ def fetch_compliance_by_institution(
     }
 
 
+# ─── Insight blocks (the "so what" layer) ─────────────────────
+
+
+def fetch_report_verdict(config: dict, scope: ReportScope, db: Session) -> dict | None:
+    """The synthesized verdict that opens an insight-first report. Scope-
+    adaptive: a single provider's verdict when vendor-scoped, else portfolio."""
+    from app.services.reports.insights import compute_insight
+
+    insight = compute_insight(db, scope)
+    if insight is None:
+        return None
+    return {"verdict": insight["verdict"], "fetched_at": _now_iso()}
+
+
+def fetch_key_findings(config: dict, scope: ReportScope, db: Session) -> dict | None:
+    """The 2-3 findings that matter — the 'lo más importante' callouts."""
+    from app.services.reports.insights import compute_insight
+
+    insight = compute_insight(db, scope)
+    if insight is None:
+        return None
+    return {"findings": insight["findings"], "fetched_at": _now_iso()}
+
+
 # ─── Dispatcher ────────────────────────────────────────────────
 
 
 _FETCHERS: dict[str, Callable[[dict, ReportScope, Session], dict | None]] = {
+    "report_verdict": fetch_report_verdict,
+    "key_findings": fetch_key_findings,
     "compliance_overview": fetch_compliance_overview,
     "compliance_by_institution": fetch_compliance_by_institution,
     "executive_summary": fetch_executive_summary,
