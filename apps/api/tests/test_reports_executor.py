@@ -291,6 +291,27 @@ def test_executor_redact_masks_vendor_identity_by_audience() -> None:
         # Original untouched (deep-copied before masking).
         assert data["rows"][0]["vendor_name"] == "Distribuidora Nogal"
 
+    # compliance_overview carries the same vendor identity under
+    # ``by_vendor.*`` — masked for vendor_facing, kept for client_facing.
+    def fresh_overview() -> dict:
+        return {
+            "by_vendor": [
+                {"vendor_id": "v1", "vendor_name": "Nogal", "vendor_rfc": "DNG1", "compliance_pct": 40},
+            ],
+        }
+
+    kept = _redact_for_audience(
+        "compliance_overview", fresh_overview(), ReportAudience.CLIENT_FACING
+    )
+    assert kept["by_vendor"][0]["vendor_name"] == "Nogal"
+    masked = _redact_for_audience(
+        "compliance_overview", fresh_overview(), ReportAudience.VENDOR_FACING
+    )
+    assert masked["by_vendor"][0]["vendor_name"] is None
+    assert masked["by_vendor"][0]["vendor_rfc"] is None
+    # Non-identity field survives.
+    assert masked["by_vendor"][0]["compliance_pct"] == 40
+
 
 def test_executor_redact_handles_executive_summary_scope_label() -> None:
     from app.constants.reports import ReportAudience

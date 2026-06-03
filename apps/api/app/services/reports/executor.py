@@ -64,6 +64,7 @@ _PII_FIELDS_PER_BLOCK: dict[str, tuple[str, ...]] = {
     # providers. See _REDACT_VENDOR_IDENTITY_AUDIENCES.
     "executive_summary": ("scope_label",),
     "vendor_risk_matrix": ("rows.*.vendor_name", "rows.*.vendor_rfc"),
+    "compliance_overview": ("by_vendor.*.vendor_name", "by_vendor.*.vendor_rfc"),
 }
 
 # Audiences that must NOT receive named-provider identity in structured

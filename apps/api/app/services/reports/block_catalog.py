@@ -597,6 +597,39 @@ COMPLIANCE_RADAR = CatalogEntry(
 )
 
 
+COMPLIANCE_OVERVIEW = CatalogEntry(
+    type="compliance_overview",
+    description=(
+        "Deterministic at-a-glance band for the cliente report: a hero KPI "
+        "row (cumplimiento global, proveedores con su semáforo, documentos "
+        "críticos, en revisión) followed by a worst-first 'Cumplimiento por "
+        "proveedor' bar chart. Every figure is computed from the live "
+        "expediente — the block carries NO AI text, so nothing can be "
+        "invented. Pin it at the very top of the cliente Resumen ejecutivo, "
+        "above the radar, as the scannable cover-stat band."
+    ),
+    input_schema={
+        "type": "object",
+        "properties": {
+            "top_n_vendors": {
+                "type": "integer",
+                "minimum": 3,
+                "maximum": 25,
+                "description": (
+                    "How many providers to plot in the worst-first bar "
+                    "chart. Default 12."
+                ),
+            },
+        },
+        "required": ["top_n_vendors"],
+        "additionalProperties": False,
+    },
+    example_configs=[
+        {"top_n_vendors": 12},
+    ],
+)
+
+
 CATALOG: list[CatalogEntry] = [
     EXECUTIVE_SUMMARY,
     KPI_STRIP,
@@ -609,6 +642,7 @@ CATALOG: list[CatalogEntry] = [
     UPCOMING_DEADLINES,
     PRIORITIZED_ACTIONS,
     COMPLIANCE_RADAR,
+    COMPLIANCE_OVERVIEW,
 ]
 
 

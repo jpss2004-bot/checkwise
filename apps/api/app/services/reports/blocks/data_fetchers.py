@@ -148,6 +148,22 @@ def fetch_vendor_risk_matrix(
     return {"rows": rows, "totals": totals, "fetched_at": _now_iso()}
 
 
+def _is_portfolio_audience(scope: ReportScope) -> bool:
+    """Portfolio blocks (radar, overview) roll up *every* vendor under a
+    client. They may only be served to the client's own surface and to
+    internal staff — never to a vendor_facing / external_signed report,
+    whose scope still carries the workspace's client_id and would
+    otherwise leak sibling providers' counts and identities to a single
+    provider.
+    """
+    from app.constants.reports import ReportAudience
+
+    return scope.audience in (
+        ReportAudience.CLIENT_FACING,
+        ReportAudience.INTERNAL_ONLY,
+    )
+
+
 def fetch_compliance_radar(
     config: dict, scope: ReportScope, db: Session
 ) -> dict | None:
@@ -181,6 +197,8 @@ def fetch_compliance_radar(
           "fetched_at": "<iso>"
         }
     """
+    if not _is_portfolio_audience(scope):
+        return None
     if scope.client_id is None:
         return None
     from app.models.entities import Client
@@ -322,10 +340,111 @@ def fetch_ai_recommendation(
     }
 
 
+def fetch_compliance_overview(
+    config: dict, scope: ReportScope, db: Session
+) -> dict | None:
+    """Deterministic at-a-glance band for the cliente report.
+
+    Inspired by real GRC dashboards (a hero KPI row + a per-provider
+    bar): every figure here is computed from the live expediente, so the
+    block carries NO AI summary and nothing can be hallucinated.
+
+    Reuses ``build_client_context`` (same numbers the Wise dock and the
+    radar surface) for the portfolio rollup, and the canonical
+    ``Submission.status`` counts for the critical / in-review tallies.
+
+    Returns ``None`` for non-client scopes — this is a portfolio block.
+
+    Output shape (consumed by ``compliance-overview.tsx``):
+
+        {
+          "client_name": "<str>",
+          "overall_compliance_pct": <int>,
+          "vendors_total": <int>,
+          "vendors_semaphore": {"green": <int>, "yellow": <int>, "red": <int>},
+          "docs_critical": <int>,
+          "docs_critical_breakdown": {
+            "rechazados": <int>, "vencidos": <int>,
+            "inconsistencias": <int>, "aclaracion": <int>
+          },
+          "docs_in_review": <int>,
+          "by_vendor": [
+            {"vendor_id","vendor_name","vendor_rfc","semaphore_level",
+             "compliance_pct","missing_required_count","pending_reviews_count"},
+            ...  # worst-first
+          ],
+          "fetched_at": "<iso>"
+        }
+    """
+    if not _is_portfolio_audience(scope):
+        return None
+    if scope.client_id is None:
+        return None
+    from app.models.entities import Client
+    from app.services.wise.client_context import build_client_context
+
+    client_row = db.get(Client, scope.client_id)
+    if client_row is None:  # pragma: no cover — defensive
+        return None
+
+    portfolio = build_client_context(db, client_row)
+    top_n = int(config.get("top_n_vendors", 12))
+
+    # Worst-first: red → yellow → green, then lowest compliance first so
+    # the providers that need attention sit at the top of the bar chart.
+    ordered = sorted(
+        portfolio.vendors,
+        key=lambda v: (
+            {"red": 0, "yellow": 1, "green": 2}.get(v.semaphore_level, 3),
+            v.compliance_pct,
+            v.vendor_name.casefold(),
+        ),
+    )[:top_n]
+
+    critical_breakdown = {
+        "rechazados": _count_status(db, scope, DocumentStatus.RECHAZADO),
+        "vencidos": _count_status(db, scope, DocumentStatus.VENCIDO),
+        "inconsistencias": _count_status(db, scope, DocumentStatus.POSIBLE_MISMATCH),
+        "aclaracion": _count_status(db, scope, DocumentStatus.REQUIERE_ACLARACION),
+    }
+    docs_critical = sum(critical_breakdown.values())
+    docs_in_review = _count_status(
+        db, scope, DocumentStatus.PENDIENTE_REVISION
+    ) + _count_status(db, scope, DocumentStatus.PREVALIDADO)
+
+    return {
+        "client_name": portfolio.client_name,
+        "overall_compliance_pct": portfolio.overall_compliance_pct,
+        "vendors_total": portfolio.vendor_count,
+        "vendors_semaphore": {
+            "green": portfolio.green_count,
+            "yellow": portfolio.yellow_count,
+            "red": portfolio.red_count,
+        },
+        "docs_critical": docs_critical,
+        "docs_critical_breakdown": critical_breakdown,
+        "docs_in_review": docs_in_review,
+        "by_vendor": [
+            {
+                "vendor_id": v.vendor_id,
+                "vendor_name": v.vendor_name,
+                "vendor_rfc": v.vendor_rfc,
+                "semaphore_level": v.semaphore_level,
+                "compliance_pct": v.compliance_pct,
+                "missing_required_count": v.missing_required_count,
+                "pending_reviews_count": v.pending_reviews_count,
+            }
+            for v in ordered
+        ],
+        "fetched_at": _now_iso(),
+    }
+
+
 # ─── Dispatcher ────────────────────────────────────────────────
 
 
 _FETCHERS: dict[str, Callable[[dict, ReportScope, Session], dict | None]] = {
+    "compliance_overview": fetch_compliance_overview,
     "executive_summary": fetch_executive_summary,
     "kpi_strip": fetch_kpi_strip,
     "vendor_risk_matrix": fetch_vendor_risk_matrix,

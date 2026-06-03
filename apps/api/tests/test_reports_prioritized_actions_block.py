@@ -418,8 +418,10 @@ def test_catalog_tail_order_after_p15() -> None:
     ]
     start = order.index("compliance_state")
     assert order[start : start + 4] == p1_run
-    # compliance_radar (M4) was appended after the P1 run, at the catalog tail.
-    assert order[-1] == "compliance_radar"
+    # Append-only tail: M4 added compliance_radar, then the 2026-06
+    # cliente-report pass added compliance_overview — each at the end,
+    # without reordering anything before it.
+    assert order[-2:] == ["compliance_radar", "compliance_overview"]
 
 
 # ─── Agreement with portal._compute_suggested_actions ──────────

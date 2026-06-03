@@ -155,10 +155,21 @@ def _default_plan(prompt: str, tools: list[dict]) -> list[PlannerToolCall]:
     # so the executive_summary that follows drops ``include_metrics``
     # to avoid stamping the same numbers twice on the canvas.
     portfolio_keywords = ("portafolio", "cliente", "cumplimiento global", "radar")
-    leads_with_radar = (
-        "compliance_radar" in available
-        and any(k in prompt.lower() for k in portfolio_keywords)
-    )
+    is_portfolio = any(k in prompt.lower() for k in portfolio_keywords)
+
+    # 2026-06-03: portfolio prompts open with the deterministic
+    # compliance_overview band (hero KPIs + per-provider bar) above the
+    # radar, mirroring how real GRC reports lead with scannable stats.
+    if "compliance_overview" in available and is_portfolio:
+        plan.append(
+            PlannerToolCall(
+                id="mock-block-overview",
+                name="compliance_overview",
+                arguments={"top_n_vendors": 12},
+            )
+        )
+
+    leads_with_radar = "compliance_radar" in available and is_portfolio
     if leads_with_radar:
         plan.append(
             PlannerToolCall(
