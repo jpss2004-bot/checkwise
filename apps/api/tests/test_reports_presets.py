@@ -224,12 +224,12 @@ def _provider_workspace_user(
 # ─── Tests ─────────────────────────────────────────────────────
 
 
-def test_presets_list_internal_admin_sees_all_six(api_client, db_factory) -> None:
-    """R1.1 ships 3 admin presets + 3 client presets.
+def test_presets_list_internal_admin_sees_all_seven(api_client, db_factory) -> None:
+    """3 admin presets + 4 client presets (added client-vendor-detail).
 
     internal_admin is in the ``required_roles`` of every preset (so
     staff can author on behalf of either audience). The list must
-    return all six.
+    return all seven.
     """
     token = _admin_token(api_client, db_factory)
     resp = api_client.get("/api/v1/reports/_presets", headers=_h(token))
@@ -242,11 +242,13 @@ def test_presets_list_internal_admin_sees_all_six(api_client, db_factory) -> Non
         "admin-monthly-operational",
         "client-missing-evidence",
         "client-monthly-executive",
+        "client-vendor-detail",
         "client-vendor-risk-matrix",
     ]
-    # Audiences split exactly 3+3.
+    # Audiences split 4 client + 3 admin.
     audiences = sorted(p["audience"] for p in body["items"])
     assert audiences == [
+        "client_facing",
         "client_facing",
         "client_facing",
         "client_facing",
@@ -261,7 +263,7 @@ def test_presets_list_internal_admin_sees_all_six(api_client, db_factory) -> Non
 def test_presets_list_client_admin_sees_only_client_presets(
     api_client, db_factory
 ) -> None:
-    """R1.1: client_admin sees the 3 client_facing presets only.
+    """client_admin sees the 4 client_facing presets only.
 
     The 3 admin presets require internal_admin OR reviewer in their
     required_roles, so a client_admin must never see them in the list.
@@ -274,6 +276,7 @@ def test_presets_list_client_admin_sees_only_client_presets(
     assert ids == [
         "client-missing-evidence",
         "client-monthly-executive",
+        "client-vendor-detail",
         "client-vendor-risk-matrix",
     ]
     for p in body["items"]:
@@ -744,8 +747,8 @@ def test_workspace_actor_admin_preset_forbidden(api_client, db_factory) -> None:
 def test_client_admin_still_sees_only_client_presets_after_p1(
     api_client, db_factory
 ) -> None:
-    """P1 regression guard: adding the provider presets must not change
-    what client_admin sees. They still get exactly 3 client_facing."""
+    """Regression guard: provider presets must not change what
+    client_admin sees. They get exactly the 4 client_facing presets."""
     tok, _ = _client_admin(api_client, db_factory, "Cliente Regression")
     resp = api_client.get("/api/v1/reports/_presets", headers=_h(tok))
     assert resp.status_code == 200
@@ -753,23 +756,21 @@ def test_client_admin_still_sees_only_client_presets_after_p1(
     assert ids == [
         "client-missing-evidence",
         "client-monthly-executive",
+        "client-vendor-detail",
         "client-vendor-risk-matrix",
     ]
 
 
-def test_admin_sees_all_nine_presets_after_p1(api_client, db_factory) -> None:
-    """P1: admin sees 3 admin + 3 client + 3 provider = 9 total. The
-    new provider presets appear because internal_admin is implicitly
-    allowed via their full audience matrix? No — the matching rule for
-    role-based presets is required_roles intersection. Provider presets
-    have empty required_roles, so they appear ONLY for workspace owners.
-    Admin should still see exactly 6.
+def test_admin_sees_all_seven_role_presets(api_client, db_factory) -> None:
+    """Admin sees 3 admin + 4 client = 7. The 3 provider presets have
+    empty required_roles, so they appear ONLY for workspace owners —
+    never for staff who aren't workspace owners.
     """
     tok = _admin_token(api_client, db_factory)
     resp = api_client.get("/api/v1/reports/_presets", headers=_h(tok))
     assert resp.status_code == 200
     ids = sorted(p["id"] for p in resp.json()["items"])
-    # Six — admin is NOT a workspace owner, so the empty-required_roles
+    # Seven — admin is NOT a workspace owner, so the empty-required_roles
     # provider presets stay invisible to staff.
     assert ids == [
         "admin-daily-queue",
@@ -777,6 +778,7 @@ def test_admin_sees_all_nine_presets_after_p1(api_client, db_factory) -> None:
         "admin-monthly-operational",
         "client-missing-evidence",
         "client-monthly-executive",
+        "client-vendor-detail",
         "client-vendor-risk-matrix",
     ]
 

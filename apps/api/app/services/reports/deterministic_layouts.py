@@ -25,10 +25,13 @@ deterministic path it is replaced by a data-grounded ``text`` recommendation
 
 from __future__ import annotations
 
+import logging
 import uuid
 
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
+
+logger = logging.getLogger(__name__)
 
 from app.constants.statuses import DocumentStatus
 from app.models import Submission, Vendor
@@ -219,10 +222,20 @@ def build_deterministic_blocks(
 
     blocks: list[dict] = []
     for btype, config in layout:
-        if btype == "__recommendation__":
-            blocks.append(_recommendation_block(db, scope, config.get("audience_tone", "client")))
+        try:
+            if btype == "__recommendation__":
+                blocks.append(
+                    _recommendation_block(db, scope, config.get("audience_tone", "client"))
+                )
+                continue
+            data = fetch_for_block(block_type=btype, config=config, scope=scope, db=db)
+        except Exception:  # noqa: BLE001 — one bad block must never sink the report
+            logger.exception(
+                "[reports.layouts] fetch failed for block %r (preset %s); skipping",
+                btype,
+                preset_id,
+            )
             continue
-        data = fetch_for_block(block_type=btype, config=config, scope=scope, db=db)
         if data is None and btype not in ("text", "divider"):
             # Block doesn't apply to this scope — skip so we never show an
             # empty placeholder in a finished, non-editable report.

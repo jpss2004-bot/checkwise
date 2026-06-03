@@ -451,6 +451,15 @@ def post_from_preset(
             )
         if ws_name:
             qualified_title = f"{preset.title} · {ws_name}"
+    elif vendor_id and qualified_title == preset.title:
+        # Per-provider report authored by a client/internal user: name the
+        # provider in the title so the reports list isn't full of identical
+        # "Reporte por proveedor" rows.
+        from app.models.entities import Vendor  # local import
+
+        v_name = db.scalar(select(Vendor.name).where(Vendor.id == vendor_id))
+        if v_name:
+            qualified_title = f"{preset.title} · {v_name}"
 
     try:
         report, version = create_report(
