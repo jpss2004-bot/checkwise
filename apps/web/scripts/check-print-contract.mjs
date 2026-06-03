@@ -102,9 +102,15 @@ console.log("\n→ BlockHeader contract");
 // the source must contain the early-return guard, and the label span must
 // still carry `print:hidden` as belt-and-braces for any future surface
 // that mounts the editor in print context.
+//
+// Updated 2026-06-02 (reports redesign R3): the "softer labels" pass
+// dropped the uppercase mono `cw-eyebrow` eyebrow in favour of a
+// sentence-case sans label. The belt-and-braces `print:hidden` moved onto
+// that new label span, so the assertion now ties `print:hidden` directly to
+// the `{label}` render rather than to the retired `cw-eyebrow` class name.
 await check(BLOCK_HEADER, [
   ["early-return when !editable", /if\s*\(\s*!editable\s*\)\s*return\s+null/],
-  ["label belt-and-braces print:hidden", /cw-eyebrow[\s\S]{0,80}print:hidden/],
+  ["label belt-and-braces print:hidden", /print:hidden[^>]*>\s*\{label\}/],
 ]);
 
 console.log("\n→ Block data-block-type contract");
