@@ -653,6 +653,15 @@ def _humanise_type(block_type: str) -> str:
     return block_type.replace("_", " ").title()
 
 
+# Plumbing keys that are useful in the live app but pure noise in a printed
+# deliverable — dropped from the generic data dump to keep the PDF compact.
+_EXPORT_NOISE_KEYS: frozenset[str] = frozenset({
+    "id", "vendor_id", "workspace_id", "fetched_at", "as_of", "href",
+    "filter_applied", "total_before_filter", "scope_kind", "last_event_at",
+    "top", "source_snapshot_id", "data_hash",
+})
+
+
 def _render_data_html(value: Any, *, depth: int = 0) -> str:
     """Recursive data → HTML walker.
 
@@ -677,22 +686,45 @@ def _render_data_html(value: Any, *, depth: int = 0) -> str:
             return "<span class=\"value-empty\">(vacío)</span>"
         return f"<span class=\"value-str\">{html.escape(value)}</span>"
     if isinstance(value, dict):
-        if not value:
+        # Drop plumbing keys that bloat the export without informing the
+        # reader (timestamps, ids, hrefs, scope bookkeeping). They're useful
+        # in the live app but noise in a printed deliverable.
+        visible = {
+            k: v for k, v in value.items() if str(k) not in _EXPORT_NOISE_KEYS
+        }
+        if not visible:
             return "<span class=\"value-empty\">{}</span>"
+        # Leaf dict (all-scalar values, nested) → one compact inline row
+        # instead of a stacked dt/dd list. This collapses the bulk of the
+        # volume (per-vendor / per-institution entries) from ~7 lines to 1,
+        # which is what actually shrinks the printed page count.
+        if depth >= 1 and all(
+            not isinstance(v, (dict, list, tuple)) for v in visible.values()
+        ):
+            pairs = " · ".join(
+                f"<span class=\"kv\"><b>{html.escape(str(k))}:</b> "
+                f"{_render_data_html(v, depth=depth + 1)}</span>"
+                for k, v in visible.items()
+            )
+            return f"<div class=\"data-inline\">{pairs}</div>"
         items = "".join(
             f"<dt>{html.escape(str(k))}</dt>"
             f"<dd>{_render_data_html(v, depth=depth + 1)}</dd>"
-            for k, v in value.items()
+            for k, v in visible.items()
         )
         return f"<dl class=\"data-dict depth-{min(depth, 3)}\">{items}</dl>"
     if isinstance(value, (list, tuple)):
         if not value:
             return "<span class=\"value-empty\">(sin entradas)</span>"
+        rows = _truncate_iter(value, cap=12)
         items = "".join(
-            f"<li>{_render_data_html(item, depth=depth + 1)}</li>"
-            for item in _truncate_iter(value)
+            f"<li>{_render_data_html(item, depth=depth + 1)}</li>" for item in rows
         )
-        return f"<ol class=\"data-list depth-{min(depth, 3)}\">{items}</ol>"
+        more = len(value) - len(rows)
+        suffix = (
+            f"<li class=\"value-empty\">+{more} más…</li>" if more > 0 else ""
+        )
+        return f"<ol class=\"data-list depth-{min(depth, 3)}\">{items}{suffix}</ol>"
     # Defensive fallback: unknown type → str() it.
     return f"<span class=\"value-other\">{html.escape(str(value))}</span>"
 
@@ -745,6 +777,25 @@ html, body {
   max-width: 880px;
   margin: 0 auto;
   padding: 48px 32px;
+}
+/* Print pagination: drop the screen chrome, tighten spacing, and only keep
+   SMALL units (a header with its first rows, a single list item) from being
+   split — never whole blocks, which would push tall data blocks onto fresh
+   pages and balloon the page count. */
+@page { size: Letter; margin: 12mm; }
+.data-inline { margin: 2px 0; }
+.data-inline .kv { margin-right: 10px; white-space: nowrap; }
+.data-inline .kv b { color: var(--color-text-muted); font-weight: 600; }
+.block-header { break-after: avoid; page-break-after: avoid; }
+.data-list > li, .data-dict > dt, .data-dict > dd { break-inside: avoid; }
+@media print {
+  html, body { background: #ffffff; font-size: 11px; line-height: 1.35; }
+  .page { max-width: none; margin: 0; padding: 0; }
+  .cover { margin-bottom: 14px; }
+  .cover-meta { margin-bottom: 14px; padding: 8px 0 12px; }
+  .block { margin-bottom: 10px; }
+  .block-data dl, .block-data ol { margin: 2px 0; }
+  .block-data dd { margin: 0 0 2px; }
 }
 .eyebrow {
   text-transform: uppercase;
