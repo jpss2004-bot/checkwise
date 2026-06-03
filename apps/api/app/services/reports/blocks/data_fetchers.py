@@ -53,12 +53,28 @@ def _now_iso() -> str:
 def fetch_executive_summary(
     config: dict, scope: ReportScope, db: Session
 ) -> dict:
-    """Headline metrics + labels for the cover block."""
-    completion_pct, vendors_at_risk = _completion_and_risk(db, scope)
+    """Headline metrics + labels + a DETERMINISTIC factual recap for the
+    cover block.
+
+    The ``summary`` string is templated from the computed metrics — no
+    LLM — so the report's factual headline can never be hallucinated.
+    The block still carries an optional AI ``ai_summary`` (generated
+    elsewhere), but the frontend renders that as a clearly-labelled,
+    subordinate "lectura del equipo" caption *below* this deterministic
+    recap, not as the headline.
+    """
+    completion_pct, vendors_at_risk = _exec_compliance(db, scope)
     submissions_in_review = _count_status(db, scope, DocumentStatus.PENDIENTE_REVISION)
+    scope_label = _scope_label(db, scope)
     return {
         "period_label": scope.period,
-        "scope_label": _scope_label(db, scope),
+        "scope_label": scope_label,
+        "summary": _exec_summary_sentence(
+            scope=scope,
+            completion_pct=completion_pct,
+            vendors_at_risk=vendors_at_risk,
+            submissions_in_review=submissions_in_review,
+        ),
         "headline_metrics": {
             "completion_pct": completion_pct,
             "vendors_at_risk": vendors_at_risk,
@@ -67,6 +83,69 @@ def fetch_executive_summary(
         },
         "fetched_at": _now_iso(),
     }
+
+
+def _exec_compliance(db: Session, scope: ReportScope) -> tuple[int, int]:
+    """Completion% + vendors-at-risk for the executive cover, drawn from
+    the SAME slot-based source as compliance_overview / compliance_radar
+    (build_client_context / build_compliance_state_for_vendor) so every
+    block in a report agrees. Falls back to the submission-ratio
+    _completion_and_risk only when there's no client/vendor scope.
+
+    (kpi_strip still uses the submission-ratio metric; it isn't shown
+    alongside the radar in the cliente template, so the two never
+    contradict on the same canvas.)
+    """
+    if scope.vendor_id:
+        from app.services.dashboard_compute import build_compliance_state_for_vendor
+
+        payload = build_compliance_state_for_vendor(db, vendor_id=scope.vendor_id)
+        return int(payload["semaphore"]["compliance_pct"]), 0
+    if scope.client_id:
+        from app.models.entities import Client
+        from app.services.wise.client_context import build_client_context
+
+        client = db.get(Client, scope.client_id)
+        if client is not None:
+            ctx = build_client_context(db, client)
+            return int(ctx.overall_compliance_pct), int(ctx.red_count)
+    return _completion_and_risk(db, scope)
+
+
+def _exec_summary_sentence(
+    *,
+    scope: ReportScope,
+    completion_pct: int | float,
+    vendors_at_risk: int,
+    submissions_in_review: int,
+) -> str:
+    """Build the deterministic factual recap shown as the cover's lead
+    paragraph. Pure string templating over already-computed values.
+
+    Deliberately NAME-FREE — uses a scope-kind subject ("el portafolio"
+    / "tu expediente") rather than the client/vendor label, so the
+    recap is safe for every audience and never needs redaction (the
+    label itself is masked separately for vendor_facing / external)."""
+    if scope.vendor_id:
+        subject = "tu expediente"
+    elif scope.client_id:
+        subject = "el portafolio"
+    else:
+        subject = "el alcance del reporte"
+    lead = (
+        f"En {scope.period}, " if scope.period else "A la fecha, "
+    ) + f"{subject} registra {round(completion_pct)}% de cumplimiento"
+    clauses: list[str] = []
+    # 'proveedores en riesgo' only makes sense at the portfolio level.
+    if vendors_at_risk and not scope.vendor_id:
+        noun = "proveedor requiere" if vendors_at_risk == 1 else "proveedores requieren"
+        clauses.append(f"{vendors_at_risk} {noun} atención")
+    if submissions_in_review:
+        noun = "documento" if submissions_in_review == 1 else "documentos"
+        clauses.append(f"{submissions_in_review} {noun} en revisión")
+    if clauses:
+        lead += "; " + " y ".join(clauses)
+    return lead + "."
 
 
 def fetch_kpi_strip(config: dict, scope: ReportScope, db: Session) -> dict:
@@ -696,27 +775,40 @@ def _risk_score_for(cells: dict[str, dict], missing_institution: str | None) -> 
 def _completion_and_risk(
     db: Session, scope: ReportScope
 ) -> tuple[int, int]:
-    total_stmt = select(func.count(Submission.id))
-    approved_stmt = select(func.count(Submission.id)).where(
-        Submission.status == DocumentStatus.APROBADO.value
-    )
-    at_risk_stmt = select(func.count(func.distinct(Submission.vendor_id))).where(
-        Submission.status.in_(
-            [
-                DocumentStatus.POSIBLE_MISMATCH.value,
-                DocumentStatus.REQUIERE_ACLARACION.value,
-                DocumentStatus.RECHAZADO.value,
-                DocumentStatus.VENCIDO.value,
-            ]
+    # CRITICAL FIX (2026-06-03): the previous version built the three
+    # statements, then looped `for stmt_ref in (...)` reassigning a local
+    # with `.where(...)`. SQLAlchemy statements are immutable — `.where`
+    # returns a NEW object — so the scope filters were NEVER applied and
+    # every executive_summary computed completion% / vendors-at-risk
+    # across ALL tenants (a cross-tenant aggregate leak). The filters are
+    # now applied to the actual statements via a helper.
+    def _scoped(stmt):
+        if scope.client_id:
+            stmt = stmt.where(Submission.client_id == scope.client_id)
+        if scope.vendor_id:
+            stmt = stmt.where(Submission.vendor_id == scope.vendor_id)
+        if scope.period:
+            stmt = stmt.where(Submission.period_key == scope.period)
+        return stmt
+
+    total_stmt = _scoped(select(func.count(Submission.id)))
+    approved_stmt = _scoped(
+        select(func.count(Submission.id)).where(
+            Submission.status == DocumentStatus.APROBADO.value
         )
     )
-    for stmt_ref in (total_stmt, approved_stmt, at_risk_stmt):
-        if scope.client_id:
-            stmt_ref = stmt_ref.where(Submission.client_id == scope.client_id)
-        if scope.vendor_id:
-            stmt_ref = stmt_ref.where(Submission.vendor_id == scope.vendor_id)
-        if scope.period:
-            stmt_ref = stmt_ref.where(Submission.period_key == scope.period)
+    at_risk_stmt = _scoped(
+        select(func.count(func.distinct(Submission.vendor_id))).where(
+            Submission.status.in_(
+                [
+                    DocumentStatus.POSIBLE_MISMATCH.value,
+                    DocumentStatus.REQUIERE_ACLARACION.value,
+                    DocumentStatus.RECHAZADO.value,
+                    DocumentStatus.VENCIDO.value,
+                ]
+            )
+        )
+    )
     total = db.scalar(total_stmt) or 0
     approved = db.scalar(approved_stmt) or 0
     at_risk = db.scalar(at_risk_stmt) or 0

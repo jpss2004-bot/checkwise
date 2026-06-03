@@ -352,3 +352,81 @@ def test_generate_rejects_unknown_report(api_client, db_factory) -> None:
         json={"prompt": "x"},
     )
     assert resp.status_code == 404
+
+
+def test_exec_summary_sentence_is_name_free_and_scope_aware() -> None:
+    """The deterministic cover recap is templated from computed values
+    (no LLM) and carries no client/vendor name, so it's safe for every
+    audience and the factual headline can't be hallucinated."""
+    from app.constants.reports import ReportAudience
+    from app.services.reports.blocks.data_fetchers import _exec_summary_sentence
+    from app.services.reports.context import ReportScope
+
+    client_scope = ReportScope(
+        organization_id="o",
+        audience=ReportAudience.CLIENT_FACING,
+        client_id="c",
+        vendor_id=None,
+        period="2026-M05",
+    )
+    s = _exec_summary_sentence(
+        scope=client_scope,
+        completion_pct=72,
+        vendors_at_risk=3,
+        submissions_in_review=4,
+    )
+    assert "72%" in s
+    assert "el portafolio" in s
+    assert "3 proveedores requieren atención" in s
+    assert "4 documentos en revisión" in s
+    # Name-free: the recap never embeds a client/vendor label.
+    assert "·" not in s
+
+    vendor_scope = ReportScope(
+        organization_id="o",
+        audience=ReportAudience.VENDOR_FACING,
+        client_id="c",
+        vendor_id="v",
+        period="2026-M05",
+    )
+    sv = _exec_summary_sentence(
+        scope=vendor_scope,
+        completion_pct=50,
+        vendors_at_risk=3,
+        submissions_in_review=0,
+    )
+    assert "tu expediente" in sv
+    assert "50%" in sv
+    # The 'proveedores' clause is suppressed at vendor scope.
+    assert "proveedores" not in sv
+
+
+def test_completion_and_risk_applies_tenant_scope() -> None:
+    """Regression: _completion_and_risk once reassigned a loop local with
+    .where(...) (a no-op on immutable statements), so its counts ran
+    UNSCOPED across all tenants. Assert every count statement now carries
+    the client_id filter."""
+    from app.constants.reports import ReportAudience
+    from app.services.reports.blocks.data_fetchers import _completion_and_risk
+    from app.services.reports.context import ReportScope
+
+    class _SpyDB:
+        def __init__(self) -> None:
+            self.stmts: list = []
+
+        def scalar(self, stmt):  # noqa: ANN001
+            self.stmts.append(stmt)
+            return 0
+
+    spy = _SpyDB()
+    scope = ReportScope(
+        organization_id="o",
+        audience=ReportAudience.CLIENT_FACING,
+        client_id="CID-UNIQ-123",
+        vendor_id=None,
+    )
+    _completion_and_risk(spy, scope)
+    assert len(spy.stmts) == 3
+    for stmt in spy.stmts:
+        sql = str(stmt.compile(compile_kwargs={"literal_binds": True}))
+        assert "CID-UNIQ-123" in sql, "client scope must be applied to every count"
