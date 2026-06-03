@@ -123,17 +123,22 @@ const STATE_META: Record<
   not_applicable: { label: "No aplica", print: "[No aplica]", tone: "gray" },
 };
 
+// Migrated off ad-hoc `--state-*` hex-fallback variables (which were never
+// defined as tokens) onto the canonical semantic status family in
+// globals.css. red→error, orange/yellow→warning (the system has a single
+// amber attention tone; the chip label still distinguishes Vencido vs Por
+// entregar), blue→info, gray→neutral surfaces. Now fully theme-driven.
 const TONE_CLASS: Record<
   "red" | "orange" | "yellow" | "blue" | "gray",
   string
 > = {
-  red: "bg-[color:var(--state-red,#fee2e2)] text-[color:var(--state-red-fg,#991b1b)] border-[color:var(--state-red-border,#fca5a5)]",
+  red: "bg-[color:var(--status-error-bg)] text-[color:var(--status-error-text)] border-[color:var(--status-error-border)]",
   orange:
-    "bg-[color:var(--state-orange,#ffedd5)] text-[color:var(--state-orange-fg,#9a3412)] border-[color:var(--state-orange-border,#fdba74)]",
+    "bg-[color:var(--status-warning-bg)] text-[color:var(--status-warning-text)] border-[color:var(--status-warning-border)]",
   yellow:
-    "bg-[color:var(--state-yellow,#fef3c7)] text-[color:var(--state-yellow-fg,#92400e)] border-[color:var(--state-yellow-border,#fcd34d)]",
-  blue: "bg-[color:var(--state-blue,#dbeafe)] text-[color:var(--state-blue-fg,#1e40af)] border-[color:var(--state-blue-border,#93c5fd)]",
-  gray: "bg-[color:var(--surface-muted,#f1f5f9)] text-[color:var(--text-secondary)] border-[color:var(--border-subtle)]",
+    "bg-[color:var(--status-warning-bg)] text-[color:var(--status-warning-text)] border-[color:var(--status-warning-border)]",
+  blue: "bg-[color:var(--status-info-bg)] text-[color:var(--status-info-text)] border-[color:var(--status-info-border)]",
+  gray: "bg-[color:var(--surface-hover)] text-[color:var(--text-secondary)] border-[color:var(--border-subtle)]",
 };
 
 const INSTITUTION_LABEL: Record<string, string> = {
@@ -198,7 +203,7 @@ export function AttentionListBlock({
   if (items.length === 0) {
     return (
       <section className="space-y-2 py-2" data-block-type="attention_list">
-        <div className="rounded-md border border-[color:var(--border-subtle)] bg-[color:var(--surface-elevated,transparent)] px-4 py-6 text-center">
+        <div className="border-y border-[color:var(--border-subtle)] px-1 py-6 text-center">
           <p className="text-[14px] font-medium text-[color:var(--text-primary)]">
             No hay documentos por atender ahora.
           </p>
@@ -292,9 +297,9 @@ function AttentionRow({
   const dueInfo = formatDue(item.due_in_days);
   const dueClass =
     dueInfo.tone === "red"
-      ? "text-[color:var(--state-red-fg,#991b1b)]"
+      ? "text-[color:var(--status-error-text)]"
       : dueInfo.tone === "yellow"
-        ? "text-[color:var(--state-orange-fg,#9a3412)]"
+        ? "text-[color:var(--status-warning-text)]"
         : "text-[color:var(--text-tertiary)]";
   const inst = INSTITUTION_LABEL[item.institution] ?? item.institution;
   return (
@@ -307,7 +312,7 @@ function AttentionRow({
         </span>
         <span className="sr-only print:not-sr-only print:mr-1">{meta.print}</span>
         {!hideInstitutionChip ? (
-          <span className="inline-flex items-center rounded-sm border border-[color:var(--border-subtle)] bg-[color:var(--surface-muted,transparent)] px-1.5 py-[1px] text-[11px] font-medium uppercase tracking-[0.04em] text-[color:var(--text-secondary)]">
+          <span className="inline-flex items-center rounded-sm border border-[color:var(--border-subtle)] bg-[color:var(--surface-hover)] px-1.5 py-[1px] text-[11px] font-medium uppercase tracking-[0.04em] text-[color:var(--text-secondary)]">
             {inst}
           </span>
         ) : null}
