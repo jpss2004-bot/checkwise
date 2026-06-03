@@ -55,6 +55,66 @@ _RISK_STATUSES = [
 ]
 
 
+def _month_bounds(today: date, offset: int) -> tuple[date, date]:
+    """[start, next_start) for the month ``offset`` months before ``today``."""
+    y, m = today.year, today.month - offset
+    while m <= 0:
+        m += 12
+        y -= 1
+    start = date(y, m, 1)
+    next_start = date(y + 1, 1, 1) if m == 12 else date(y, m + 1, 1)
+    return start, next_start
+
+
+def _approval_rate(
+    db: Session, start: date, next_start: date, *, client_id: str | None, vendor_id: str | None
+) -> int | None:
+    """% of submissions created in [start, next_start) that landed approved.
+    None when the month is too thin (<3) to read a trend into."""
+    def scoped(stmt):
+        stmt = stmt.where(
+            Submission.created_at >= start, Submission.created_at < next_start
+        )
+        if client_id:
+            stmt = stmt.where(Submission.client_id == client_id)
+        if vendor_id:
+            stmt = stmt.where(Submission.vendor_id == vendor_id)
+        return stmt
+
+    total = int(db.scalar(scoped(select(func.count(Submission.id)))) or 0)
+    if total < 3:
+        return None
+    approved = int(
+        db.scalar(
+            scoped(select(func.count(Submission.id))).where(
+                Submission.status == DocumentStatus.APROBADO.value
+            )
+        )
+        or 0
+    )
+    return round(100 * approved / total)
+
+
+def _approval_trend(
+    db: Session, today: date, *, client_id: str | None = None, vendor_id: str | None = None
+) -> int | None:
+    """Change in approval rate (points) between the two most recent months
+    that had activity — skipping quiet months so a slow current month doesn't
+    blank the signal. None when fewer than two active months exist. An honest
+    momentum signal, not a snapshot of the cumplimiento %."""
+    rates: list[int] = []
+    for offset in range(0, 8):
+        start, next_start = _month_bounds(today, offset)
+        r = _approval_rate(db, start, next_start, client_id=client_id, vendor_id=vendor_id)
+        if r is not None:
+            rates.append(r)
+        if len(rates) == 2:
+            break
+    if len(rates) < 2:
+        return None
+    return rates[0] - rates[1]  # most recent − the one before it
+
+
 def _count_status(db: Session, scope: ReportScope, status: DocumentStatus) -> int:
     stmt = select(func.count(Submission.id)).where(Submission.status == status.value)
     if scope.client_id:
@@ -178,6 +238,7 @@ def compute_client_insight(db: Session, scope: ReportScope, *, today: date | Non
         "headline": f"{word} · {overall}% de cumplimiento",
         "subhead": subhead,
         "metric": {"value": overall, "label": "Cumplimiento global", "format": "percent"},
+        "trend": _approval_trend(db, today, client_id=scope.client_id),
     }
 
     findings: list[dict] = []
@@ -284,6 +345,7 @@ def compute_vendor_insight(db: Session, scope: ReportScope, *, today: date | Non
         "headline": f"{word} · {pct}% de cumplimiento",
         "subhead": subhead,
         "metric": {"value": pct, "label": "Cumplimiento del proveedor", "format": "percent"},
+        "trend": _approval_trend(db, today, vendor_id=scope.vendor_id),
     }
 
     findings: list[dict] = []

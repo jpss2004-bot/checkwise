@@ -28,11 +28,8 @@ from app.constants.reports import ReportAudience, ReportVersionOrigin
 from app.core.config import settings
 from app.models import Report, ReportVersion
 from app.services.report_service import ReportActor, create_version
-from app.services.reports.context import ReportScope, assemble_context
-from app.services.reports.deterministic_layouts import (
-    LAYOUTS,
-    build_deterministic_blocks,
-)
+from app.services.reports.context import ReportScope
+from app.services.reports.deterministic_layouts import build_deterministic_blocks
 
 logger = logging.getLogger(__name__)
 
@@ -55,57 +52,6 @@ def _scope_for(report: Report, period: str | None) -> ReportScope:
     )
 
 
-def _try_ai_version(
-    db: Session,
-    *,
-    actor: ReportActor,
-    report: Report,
-    recommended_prompt: str,
-    period: str | None,
-    expected_blocks: int,
-) -> ReportVersion | None:
-    """Run the real AI pipeline to completion; return the saved version or
-    ``None`` if it errored or under-delivered (so the caller falls back)."""
-    from app.services.reports.executor import execute_plan
-    from app.services.reports.llm import get_llm_client
-    from app.services.reports.planner import plan_report
-
-    scope = _scope_for(report, period)
-    try:
-        context = assemble_context(db, actor=actor, scope=scope)
-        llm = get_llm_client()
-        plan = plan_report(llm=llm, context=context, user_prompt=recommended_prompt)
-        # execute_plan is a streaming generator that persists a version on
-        # completion. We don't need the events — just drive it to the end.
-        for _event, _data in execute_plan(
-            db=db, actor=actor, report=report, plan=plan, context=context, llm=llm
-        ):
-            pass
-        db.refresh(report)
-        version = (
-            db.get(ReportVersion, report.current_version_id)
-            if report.current_version_id
-            else None
-        )
-        n_blocks = len((version.content_json or {}).get("blocks", [])) if version else 0
-        # Under-delivery guard: accept only if the planner emitted a
-        # meaningful share of the template's blocks.
-        threshold = max(2, int(expected_blocks * 0.6))
-        if version is not None and n_blocks >= threshold:
-            return version
-        logger.warning(
-            "[reports.generate] AI under-delivered (%d/%d blocks); falling back",
-            n_blocks,
-            expected_blocks,
-        )
-        return None
-    except Exception:  # noqa: BLE001 — any AI failure must fall back, never 500
-        logger.exception(
-            "[reports.generate] AI path failed; falling back to deterministic"
-        )
-        return None
-
-
 def generate_initial_version(
     db: Session,
     *,
@@ -115,32 +61,34 @@ def generate_initial_version(
     recommended_prompt: str,
     period: str | None = None,
 ) -> ReportVersion:
-    """Produce a populated v-N for ``report``. Hybrid: AI then deterministic.
+    """Produce a populated v-N for ``report``.
 
-    Always returns a ``ReportVersion`` — the deterministic registry is the
-    guaranteed floor, so this never leaves the report empty."""
-    expected_blocks = len(LAYOUTS.get(preset_id, [])) or 4
-
-    if ai_is_configured():
-        version = _try_ai_version(
-            db,
-            actor=actor,
-            report=report,
-            recommended_prompt=recommended_prompt,
-            period=period,
-            expected_blocks=expected_blocks,
-        )
-        if version is not None:
-            return version
-
-    # Deterministic fallback — the always-great floor.
+    The curated deterministic insight-first layout is ALWAYS the structure —
+    that's the guaranteed-great floor and the thing the templates promise. When
+    AI is configured we then ENRICH the prose (verdict + findings wording) in
+    place, keeping every number and name. We no longer let an LLM re-pick the
+    blocks: that would drop the insight layer it doesn't know about, and the
+    product's value is the curated template, not a free-form composition."""
     scope = _scope_for(report, period)
     blocks = build_deterministic_blocks(db, preset_id=preset_id, scope=scope)
+
+    generated = "deterministic"
+    if ai_is_configured():
+        try:
+            from app.services.reports.enrich import enrich_report_prose
+
+            blocks = enrich_report_prose(
+                db, scope=scope, blocks=blocks, audience=report.audience
+            )
+            generated = "deterministic+ai"
+        except Exception:  # noqa: BLE001 — enrichment must never break generation
+            logger.exception("[reports.generate] prose enrichment failed; using deterministic")
+
     content_json = {
         "schema_version": 1,
         "blocks": blocks,
         "audience": report.audience,
-        "global": {"preset_id": preset_id, "generated": "deterministic"},
+        "global": {"preset_id": preset_id, "generated": generated},
     }
     return create_version(
         db,
