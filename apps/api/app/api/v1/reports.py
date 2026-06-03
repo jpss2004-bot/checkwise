@@ -385,10 +385,13 @@ def post_from_preset(
     # pass client_id in the body (no implicit anchor).
     client_id = payload.client_id
     vendor_id = payload.vendor_id
+    # Resolve the caller's client_id for any client_facing preset when not
+    # supplied — including per-provider reports (client-vendor-detail) that
+    # carry a vendor_id, so the report stays anchored to the client's org and
+    # appears in their reports list.
     if (
         preset.audience == ReportAudience.CLIENT_FACING
         and client_id is None
-        and not vendor_id
     ):
         from app.models.entities import Membership, Organization  # local import
 

@@ -39,36 +39,37 @@ from app.services.reports.context import ReportScope
 # is a pseudo-type the builder renders as a data-grounded text block.
 _MATRIX_COLUMNS = ["sat", "imss", "infonavit", "stps_repse", "risk_score"]
 
+# Visual-first design: every template leads with chart/semáforo/table blocks
+# (compliance_overview, compliance_radar, compliance_by_institution,
+# vendor_risk_matrix) and keeps prose to at most one short executive_summary +
+# one closing recommendation — matching the look of the "Resumen ejecutivo
+# mensual" template. (Fred feedback 2026-06-03: "all reports have to be visual".)
 LAYOUTS: dict[str, list[tuple[str, dict]]] = {
     # ── Admin · internal_only (need a client/vendor scope to populate) ──
     "admin-daily-queue": [
-        ("executive_summary", {"focus": "audit", "include_metrics": True}),
-        ("kpi_strip", {"metrics": [
-            {"label": "En revisión", "metric_key": "in_review_count", "format": "number"},
-            {"label": "Vencidos", "metric_key": "overdue_count", "format": "number"},
-            {"label": "Próximo en", "metric_key": "days_to_next_deadline", "format": "duration_days"},
-        ]}),
+        ("compliance_overview", {"top_n_vendors": 12}),
         ("vendor_risk_matrix", {"filter": {}, "columns": _MATRIX_COLUMNS, "sort": "risk_desc", "max_rows": 15}),
+        ("compliance_by_institution", {}),
+        ("executive_summary", {"focus": "audit", "include_metrics": False}),
         ("__recommendation__", {"audience_tone": "internal", "priority_count": 3}),
     ],
     "admin-high-risk-vendors": [
-        ("executive_summary", {"focus": "risk", "include_metrics": False}),
-        ("kpi_strip", {"metrics": [
-            {"label": "Proveedores", "metric_key": "vendors_total", "format": "number"},
-            {"label": "En riesgo", "metric_key": "vendors_at_risk", "format": "number"},
-        ]}),
+        ("compliance_radar", {"top_n_vendors": 8, "include_history": False}),
         ("vendor_risk_matrix", {"filter": {}, "columns": _MATRIX_COLUMNS, "sort": "risk_desc", "max_rows": 20}),
+        ("compliance_by_institution", {}),
+        ("executive_summary", {"focus": "risk", "include_metrics": False}),
         ("__recommendation__", {"audience_tone": "internal", "priority_count": 3}),
     ],
     "admin-monthly-operational": [
         ("compliance_overview", {"top_n_vendors": 12}),
         ("compliance_by_institution", {}),
-        ("executive_summary", {"focus": "compliance", "include_metrics": True}),
+        ("compliance_radar", {"top_n_vendors": 8, "include_history": False}),
         ("vendor_risk_matrix", {"filter": {}, "columns": _MATRIX_COLUMNS, "sort": "risk_desc", "max_rows": 12}),
+        ("executive_summary", {"focus": "compliance", "include_metrics": False}),
         ("__recommendation__", {"audience_tone": "internal", "priority_count": 5}),
     ],
 
-    # ── Client · client_facing ──
+    # ── Client · client_facing (portfolio scope) ──
     "client-monthly-executive": [
         ("compliance_overview", {"top_n_vendors": 12}),
         ("compliance_by_institution", {}),
@@ -78,25 +79,31 @@ LAYOUTS: dict[str, list[tuple[str, dict]]] = {
         ("__recommendation__", {"audience_tone": "client", "priority_count": 3}),
     ],
     "client-vendor-risk-matrix": [
-        ("executive_summary", {"focus": "risk", "include_metrics": False}),
-        ("kpi_strip", {"metrics": [
-            {"label": "Proveedores", "metric_key": "vendors_total", "format": "number"},
-            {"label": "En riesgo", "metric_key": "vendors_at_risk", "format": "number"},
-        ]}),
+        ("compliance_radar", {"top_n_vendors": 8, "include_history": False}),
         ("vendor_risk_matrix", {"filter": {}, "columns": _MATRIX_COLUMNS, "sort": "risk_desc", "max_rows": 10}),
+        ("compliance_by_institution", {}),
+        ("executive_summary", {"focus": "risk", "include_metrics": False}),
         ("__recommendation__", {"audience_tone": "client", "priority_count": 3}),
     ],
     "client-missing-evidence": [
-        ("executive_summary", {"focus": "expediente", "include_metrics": False}),
-        ("kpi_strip", {"metrics": [
-            {"label": "Vencidos", "metric_key": "overdue_count", "format": "number"},
-            {"label": "En revisión", "metric_key": "in_review_count", "format": "number"},
-            {"label": "Cumplimiento", "metric_key": "approved_pct", "format": "percent"},
-            {"label": "En riesgo", "metric_key": "vendors_at_risk", "format": "number"},
-        ]}),
+        ("compliance_overview", {"top_n_vendors": 12}),
         ("compliance_by_institution", {}),
         ("vendor_risk_matrix", {"filter": {}, "columns": _MATRIX_COLUMNS, "sort": "risk_desc", "max_rows": 10}),
+        ("executive_summary", {"focus": "expediente", "include_metrics": False}),
         ("__recommendation__", {"audience_tone": "client", "priority_count": 3}),
+    ],
+
+    # ── Client · per-provider (client_facing, scoped to ONE vendor) ──
+    # Fully visual: the provider's semáforo + counts, their compliance by
+    # institution, what needs attention, their deadline timeline, and ranked
+    # action cards. No long prose — compliance_state is the visual summary and
+    # prioritized_actions is the visual recommendation.
+    "client-vendor-detail": [
+        ("compliance_state", {}),
+        ("compliance_by_institution", {}),
+        ("attention_list", {"max_rows": 10}),
+        ("upcoming_deadlines", {"top": 6}),
+        ("prioritized_actions", {"max_actions": 3}),
     ],
 
     # ── Provider · vendor_facing (need a vendor scope) ──
@@ -109,6 +116,7 @@ LAYOUTS: dict[str, list[tuple[str, dict]]] = {
     ],
     "provider-missing-documents": [
         ("compliance_state", {}),
+        ("compliance_by_institution", {}),
         ("attention_list", {"filter": {"states": [
             "missing", "in_review", "uploaded", "rejected",
             "needs_correction", "possible_mismatch", "expired",
@@ -117,6 +125,7 @@ LAYOUTS: dict[str, list[tuple[str, dict]]] = {
     ],
     "provider-recent-rejections": [
         ("compliance_state", {}),
+        ("compliance_by_institution", {}),
         ("attention_list", {"filter": {"states": ["rejected", "needs_correction", "possible_mismatch"]}, "max_rows": 10}),
         ("prioritized_actions", {"max_actions": 3, "filter": {
             "priorities": ["high"], "types": ["reupload", "clarify", "verify_mismatch"],

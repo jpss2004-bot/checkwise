@@ -210,6 +210,31 @@ _CLIENT_MISSING_EVIDENCE = ReportPreset(
 )
 
 
+_CLIENT_VENDOR_DETAIL = ReportPreset(
+    id="client-vendor-detail",
+    title="Reporte por proveedor",
+    description=(
+        "Reporte visual enfocado en un solo proveedor: su semáforo, "
+        "cumplimiento por institución, documentos por atender y próximos "
+        "vencimientos."
+    ),
+    audience=ReportAudience.CLIENT_FACING,
+    required_roles=(MembershipRole.CLIENT_ADMIN, MembershipRole.INTERNAL_ADMIN),
+    recommended_prompt=(
+        "Genera un reporte VISUAL enfocado en UN solo proveedor (el "
+        "vendor_id del alcance). Empieza con un bloque compliance_state "
+        "(semáforo verde/amarillo/rojo + conteos de documentos por "
+        "estado). Sigue con compliance_by_institution (barras de "
+        "cumplimiento del proveedor por SAT / IMSS / INFONAVIT / "
+        "STPS-REPSE). Sigue con attention_list (documentos que requieren "
+        "atención). Sigue con upcoming_deadlines (línea de tiempo de "
+        "próximos vencimientos). Cierra con prioritized_actions (tarjetas "
+        "de acciones priorizadas). NO uses bloques de prosa larga; el "
+        "reporte debe ser totalmente visual."
+    ),
+)
+
+
 # ─── Provider presets (P1 — vendor_facing) ─────────────────────
 #
 # Three vendor-facing presets for the role-less provider who owns a
@@ -316,6 +341,7 @@ PRESETS: tuple[ReportPreset, ...] = (
     _CLIENT_MONTHLY_EXECUTIVE,
     _CLIENT_VENDOR_RISK_MATRIX,
     _CLIENT_MISSING_EVIDENCE,
+    _CLIENT_VENDOR_DETAIL,
     _PROVIDER_CURRENT_STATE,
     _PROVIDER_MISSING_DOCUMENTS,
     _PROVIDER_RECENT_REJECTIONS,
