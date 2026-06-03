@@ -36,6 +36,7 @@ const BLOCK_CONTRACTS = [
   { file: "components/checkwise/reports/blocks/vendor-risk-matrix.tsx", type: "vendor_risk_matrix" },
   { file: "components/checkwise/reports/blocks/ai-recommendation.tsx", type: "ai_recommendation" },
   { file: "components/checkwise/reports/blocks/compliance-overview.tsx", type: "compliance_overview" },
+  { file: "components/checkwise/reports/blocks/compliance-by-institution.tsx", type: "compliance_by_institution" },
 ];
 
 let failures = 0;
