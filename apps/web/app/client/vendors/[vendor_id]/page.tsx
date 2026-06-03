@@ -1,12 +1,15 @@
 "use client";
 
-import { use, useEffect, useState } from "react";
+import { use, useCallback, useEffect, useState } from "react";
 import Link from "next/link";
+import { useRouter } from "next/navigation";
 import {
   ArrowLeft,
   ArrowRight,
+  ChartBar,
   ChatTeardrop,
   CheckCircle,
+  CircleNotch,
   DownloadSimple,
   Eye,
   FileText,
@@ -38,6 +41,7 @@ import {
   type ClientVendorContractDoc,
   type ClientVendorDetail,
 } from "@/lib/api/client";
+import { createReportFromPreset, ReportsApiError } from "@/lib/api/reports";
 
 type PageProps = {
   params: Promise<{ vendor_id: string }>;
@@ -47,6 +51,24 @@ export default function ClientVendorDetailPage({ params }: PageProps) {
   const { vendor_id } = use(params);
   const [detail, setDetail] = useState<ClientVendorDetail | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const router = useRouter();
+  const [generating, setGenerating] = useState(false);
+
+  const onGenerateReport = useCallback(async () => {
+    if (generating) return;
+    setGenerating(true);
+    try {
+      const r = await createReportFromPreset("client-vendor-detail", true, {
+        vendorId: vendor_id,
+      });
+      router.push(`/client/reports/${r.id}`);
+    } catch (e) {
+      setGenerating(false);
+      setError(
+        e instanceof ReportsApiError ? e.message : "Error generando el reporte.",
+      );
+    }
+  }, [generating, router, vendor_id]);
 
   useEffect(() => {
     let cancelled = false;
@@ -84,6 +106,20 @@ export default function ClientVendorDetailPage({ params }: PageProps) {
               ``client.vendor_expediente_downloaded`` so the
               forensic trail distinguishes this from a provider
               self-pull. */}
+          <Button
+            size="sm"
+            variant="default"
+            onClick={onGenerateReport}
+            disabled={generating}
+            title="Generar un reporte visual de este proveedor"
+          >
+            {generating ? (
+              <CircleNotch className="h-4 w-4 animate-spin" weight="bold" aria-hidden="true" />
+            ) : (
+              <ChartBar className="h-4 w-4" weight="bold" aria-hidden="true" />
+            )}
+            Generar reporte
+          </Button>
           <Button asChild size="sm" variant="outline">
             <a
               href={clientVendorExpedienteZipUrl(vendor_id)}
