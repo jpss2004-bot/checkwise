@@ -129,6 +129,7 @@ export function ComplianceOverviewBlock({
               className="block h-full rounded-full"
               style={{
                 width: `${pct(data.overall_compliance_pct)}%`,
+                minWidth: pct(data.overall_compliance_pct) > 0 ? "0.5rem" : undefined,
                 backgroundColor: "var(--text-brand)",
               }}
             />
@@ -204,6 +205,7 @@ export function ComplianceOverviewBlock({
                       className="block h-full rounded-full"
                       style={{
                         width: `${pct(v.compliance_pct)}%`,
+                        minWidth: pct(v.compliance_pct) > 0 ? "0.5rem" : undefined,
                         backgroundColor: SEMAPHORE_FILL[v.semaphore_level],
                       }}
                     />

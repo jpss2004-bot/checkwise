@@ -148,12 +148,11 @@ export function Canvas({
           editable={editable && !block.locked}
           onPatch={(patch) => patchBlock(block.id, patch)}
         />
-        {block.ai_summary && (
-          <div className="flex items-center gap-1.5 text-[11px] text-[color:var(--text-ai)]">
-            <Sparkle className="h-3 w-3" weight="fill" aria-hidden="true" />
-            <span>Generado por IA · Verificar antes de compartir</span>
-          </div>
-        )}
+        {/* The generic per-block AI label was removed (2026-06-03): the
+            only AI-bearing blocks — executive_summary and ai_recommendation
+            — now render their own labelled caption ("Lectura del equipo ·
+            IA" / "Generado por IA · Verificar antes de compartir"), so this
+            duplicated the warning right beneath them. */}
       </>
     );
   };

@@ -106,7 +106,10 @@ export function ComplianceByInstitutionBlock({
       <ul className="space-y-2.5">
         {institutions.map((inst) => (
           <li key={inst.code} className="flex items-center gap-3">
-            <span className="w-20 shrink-0 truncate font-mono text-[11px] uppercase tracking-wide text-[color:var(--text-secondary)]">
+            <span
+              className="w-24 shrink-0 truncate font-mono text-[11px] uppercase tracking-wide text-[color:var(--text-secondary)]"
+              title={inst.label}
+            >
               {inst.label}
             </span>
             <div className="flex flex-1 items-center gap-2">

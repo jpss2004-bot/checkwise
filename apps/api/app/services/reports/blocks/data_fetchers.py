@@ -618,7 +618,7 @@ _INSTITUTION_LABELS = {
     "imss": "IMSS",
     "infonavit": "INFONAVIT",
     "stps_repse": "STPS-REPSE",
-    "interno_cliente": "Interno (cliente)",
+    "interno_cliente": "Interno",
     "general": "General",
 }
 

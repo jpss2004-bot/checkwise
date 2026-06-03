@@ -67,14 +67,20 @@ export function FreshnessLabel({
   showRefresh,
 }: FreshnessLabelProps) {
   const actions = useReportActions();
+
+  // 2026-06-03: in read-only / story / print mode (no ReportActions
+  // provider) the document-level "Datos al" stamp lives in the masthead,
+  // so per-block freshness labels are redundant repetition down the
+  // page — hide them entirely. The editor (which provides the actions
+  // context) keeps the per-block stamp + inline Actualizar affordance.
+  if (actions === null) return null;
+
   const fetched = parseTimestamp(fetchedAt);
 
   if (!fetched) {
-    // F3 (2026-05-19 visual audit): the "Sin sello de actualización"
-    // warning is only useful to an author who can hit Actualizar. In
-    // print / read-only mode (no ReportActionsContext provider), it
-    // reads as dev chrome — hide it entirely.
-    if (actions === null) return null;
+    // The "Sin sello de actualización" warning is only useful to an
+    // author who can hit Actualizar (editor only — guaranteed here since
+    // we've already returned for the no-actions case).
     return (
       <div className="flex items-center gap-1.5 text-[10px] font-mono uppercase tracking-wide text-[color:var(--text-tertiary)] print:hidden">
         <Clock className="h-3 w-3" weight="regular" aria-hidden="true" />
