@@ -81,13 +81,21 @@ export function OverflowMenu({
   return (
     <div ref={rootRef} className="relative inline-block">
       <Button
-        variant="ghost"
+        variant="outline"
         size="sm"
         aria-haspopup="menu"
         aria-expanded={open}
         aria-label={triggerAriaLabel}
+        title={triggerAriaLabel}
         onClick={() => setOpen((v) => !v)}
-        className={cn("px-2", triggerClassName)}
+        // Bordered (outline) rather than a bare ghost icon: an unlabeled
+        // ghost ⋮ read as decoration, not an actionable menu. The border
+        // + active-state tint give it a visible affordance.
+        className={cn(
+          "px-2 data-[open=true]:bg-[color:var(--surface-hover)]",
+          triggerClassName,
+        )}
+        data-open={open}
       >
         <DotsThreeVertical className="h-5 w-5" weight="bold" aria-hidden="true" />
       </Button>
@@ -103,7 +111,13 @@ export function OverflowMenu({
             // background and items had no hover state. Switched to the
             // defined `surface-raised` / `surface-hover` tokens so the
             // dropdown is actually visible.
-            "absolute right-0 top-full z-20 mt-1 min-w-[220px] overflow-hidden rounded-md border border-[color:var(--border-default)] bg-[color:var(--surface-raised)] py-1 text-[13px] shadow-lg",
+            //
+            // 2026-06-03: the panel still read as floating, near-invisible
+            // text overlapping the content behind it. Raised to z-50 so it
+            // clears the report metadata strip + banner, and swapped to a
+            // ring + xl shadow so the card edge is unmistakable on a white
+            // surface.
+            "absolute right-0 top-full z-50 mt-1 min-w-[220px] overflow-hidden rounded-md border border-[color:var(--border-default)] bg-[color:var(--surface-raised)] py-1 text-[13px] shadow-xl ring-1 ring-black/5",
             panelClassName,
           )}
         >

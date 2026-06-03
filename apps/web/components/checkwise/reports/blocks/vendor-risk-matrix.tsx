@@ -44,8 +44,11 @@ interface VendorRiskMatrixConfig {
 interface VendorRiskMatrixData {
   rows: Array<{
     vendor_id: string;
-    vendor_name: string;
-    vendor_rfc: string;
+    // Nullable: the backend masks vendor identity for vendor_facing /
+    // external_signed audiences (a provider must not see other named
+    // vendors). client_facing + internal_only carry the real name.
+    vendor_name: string | null;
+    vendor_rfc: string | null;
     risk_score: number;
     cells: Record<
       string,
@@ -138,6 +141,16 @@ function riskTone(score: number): string {
   return "text-[color:var(--text-secondary)]";
 }
 
+// Render the last-event stamp as a compact es-MX date. Falls back to the
+// raw value if it isn't a parseable ISO string, and to an em dash when
+// the backend hasn't recorded an event yet.
+function formatEventDate(iso: string): string {
+  if (!iso) return "—";
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return iso;
+  return d.toLocaleDateString("es-MX", { day: "2-digit", month: "short", year: "numeric" });
+}
+
 export function VendorRiskMatrixBlock({
   block,
 }: BlockProps<VendorRiskMatrixConfig, VendorRiskMatrixData>) {
@@ -195,11 +208,17 @@ export function VendorRiskMatrixBlock({
                 className="border-b border-[color:var(--border-subtle)] last:border-0"
               >
                 <td className="py-2 pr-4">
-                  <div className="text-[13px] font-medium text-[color:var(--text-primary)]">
-                    {row.vendor_name}
+                  <div
+                    className={`text-[13px] font-medium ${
+                      row.vendor_name
+                        ? "text-[color:var(--text-primary)]"
+                        : "italic text-[color:var(--text-tertiary)]"
+                    }`}
+                  >
+                    {row.vendor_name || "Proveedor reservado"}
                   </div>
                   <div className="font-mono text-[11px] text-[color:var(--text-tertiary)]">
-                    {row.vendor_rfc}
+                    {row.vendor_rfc || "RFC reservado"}
                   </div>
                 </td>
                 {columns.map((c) => {
@@ -219,7 +238,7 @@ export function VendorRiskMatrixBlock({
                         key={c}
                         className="py-2 pr-4 font-mono text-[11px] text-[color:var(--text-tertiary)]"
                       >
-                        {row.last_event_at}
+                        {formatEventDate(row.last_event_at)}
                       </td>
                     );
                   }
