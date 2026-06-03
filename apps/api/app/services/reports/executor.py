@@ -59,27 +59,47 @@ Event = tuple[str, dict[str, Any]]
 
 
 _PII_FIELDS_PER_BLOCK: dict[str, tuple[str, ...]] = {
-    # block_type -> tuple of dotted JSON paths inside the data dict
-    # that carry PII and must be redacted for non-internal audiences.
+    # block_type -> tuple of dotted JSON paths carrying vendor identity
+    # that must be hidden from audiences not entitled to see *named*
+    # providers. See _REDACT_VENDOR_IDENTITY_AUDIENCES.
     "executive_summary": ("scope_label",),
     "vendor_risk_matrix": ("rows.*.vendor_name", "rows.*.vendor_rfc"),
 }
+
+# Audiences that must NOT receive named-provider identity in structured
+# block data:
+#   • vendor_facing   — a provider must never receive a portfolio of
+#     *other* named vendors (cross-tenant exposure).
+#   • external_signed — public share links stay conservative by default.
+# Audiences that DO see names:
+#   • internal_only   — Legal Shelf staff see everything.
+#   • client_facing   — the client owns the providers in its own
+#     portfolio; a risk matrix that cannot name them is useless. This
+#     was over-redacted before (2026-06): every non-internal audience
+#     was masked, so client reports rendered nameless, empty-looking
+#     matrices. Clients now see their own providers; only vendor-facing
+#     and public/signed surfaces stay masked.
+_REDACT_VENDOR_IDENTITY_AUDIENCES: frozenset[ReportAudience] = frozenset(
+    {ReportAudience.VENDOR_FACING, ReportAudience.EXTERNAL_SIGNED}
+)
 
 
 def _redact_for_audience(
     block_type: str, data: dict | None, audience: ReportAudience
 ) -> dict | None:
-    """Strip PII fields from a block's data for non-internal audiences.
+    """Hide vendor identity in a block's structured data for audiences
+    that are not entitled to see named providers.
 
-    Internal_only: data passes through. Everything else: each PII
-    path is replaced with None (preserving structure so the
-    renderer's schema validation doesn't fail).
+    internal_only + client_facing pass through (staff see everything; a
+    client owns the providers in its own portfolio). vendor_facing +
+    external_signed get each tagged path replaced with None (structure
+    preserved so the renderer's schema validation doesn't fail).
 
-    Conservative by design — anything the registry hasn't
-    explicitly tagged stays untouched. Add new tags to
-    _PII_FIELDS_PER_BLOCK alongside any new PII-bearing column.
+    Conservative by design — anything the registry hasn't explicitly
+    tagged stays untouched. Add new tags to _PII_FIELDS_PER_BLOCK
+    alongside any new identity-bearing column.
     """
-    if data is None or audience == ReportAudience.INTERNAL_ONLY:
+    if data is None or audience not in _REDACT_VENDOR_IDENTITY_AUDIENCES:
         return data
     paths = _PII_FIELDS_PER_BLOCK.get(block_type, ())
     if not paths:

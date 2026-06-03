@@ -234,48 +234,62 @@ def test_generate_persists_version_pinned_to_snapshot(api_client, db_factory) ->
         db.close()
 
 
-def test_executor_redact_strips_pii_for_client_facing() -> None:
-    """Unit test of the executor's PII sanitizer.
+def test_executor_redact_masks_vendor_identity_by_audience() -> None:
+    """Unit test of the executor's vendor-identity sanitizer.
 
-    The block-data event's row PII fields must be redacted for
-    non-internal audiences. internal_only passes through.
+    Vendor name/RFC in structured block data are masked only for the
+    audiences that must not see *named* providers:
+
+      • internal_only  → pass through (staff see everything).
+      • client_facing  → pass through (the client owns its own
+        providers; a nameless matrix is useless — 2026-06 fix).
+      • vendor_facing  → masked (a provider must not receive a
+        portfolio of *other* named vendors).
+      • external_signed → masked (public/signed surfaces stay
+        conservative).
     """
     from app.constants.reports import ReportAudience
     from app.services.reports.executor import _redact_for_audience
 
-    matrix_data = {
-        "rows": [
-            {
-                "vendor_id": "v1",
-                "vendor_name": "Distribuidora Nogal",
-                "vendor_rfc": "DNG890101AB1",
-                "risk_score": 75,
-                "cells": {},
-                "last_event_at": "",
-            },
-        ],
-        "totals": {},
-    }
+    def fresh_matrix() -> dict:
+        return {
+            "rows": [
+                {
+                    "vendor_id": "v1",
+                    "vendor_name": "Distribuidora Nogal",
+                    "vendor_rfc": "DNG890101AB1",
+                    "risk_score": 75,
+                    "cells": {},
+                    "last_event_at": "",
+                },
+            ],
+            "totals": {},
+        }
 
-    # internal_only: pass through (same object reference allowed).
-    assert (
-        _redact_for_audience(
-            "vendor_risk_matrix", matrix_data, ReportAudience.INTERNAL_ONLY
-        )
-        is matrix_data
-    )
+    # internal_only + client_facing: pass through unchanged (same ref).
+    for audience in (
+        ReportAudience.INTERNAL_ONLY,
+        ReportAudience.CLIENT_FACING,
+    ):
+        data = fresh_matrix()
+        assert (
+            _redact_for_audience("vendor_risk_matrix", data, audience) is data
+        ), f"{audience} must see named providers"
 
-    # client_facing: vendor_name + vendor_rfc set to None.
-    redacted = _redact_for_audience(
-        "vendor_risk_matrix", matrix_data, ReportAudience.CLIENT_FACING
-    )
-    assert redacted is not None
-    assert redacted["rows"][0]["vendor_name"] is None
-    assert redacted["rows"][0]["vendor_rfc"] is None
-    # Risk score still present (not PII).
-    assert redacted["rows"][0]["risk_score"] == 75
-    # Original untouched.
-    assert matrix_data["rows"][0]["vendor_name"] == "Distribuidora Nogal"
+    # vendor_facing + external_signed: vendor_name + vendor_rfc -> None.
+    for audience in (
+        ReportAudience.VENDOR_FACING,
+        ReportAudience.EXTERNAL_SIGNED,
+    ):
+        data = fresh_matrix()
+        redacted = _redact_for_audience("vendor_risk_matrix", data, audience)
+        assert redacted is not None
+        assert redacted["rows"][0]["vendor_name"] is None, audience
+        assert redacted["rows"][0]["vendor_rfc"] is None, audience
+        # Risk score still present (not identity).
+        assert redacted["rows"][0]["risk_score"] == 75
+        # Original untouched (deep-copied before masking).
+        assert data["rows"][0]["vendor_name"] == "Distribuidora Nogal"
 
 
 def test_executor_redact_handles_executive_summary_scope_label() -> None:
@@ -287,12 +301,22 @@ def test_executor_redact_handles_executive_summary_scope_label() -> None:
         "scope_label": "ACME SA · Distribuidora Nogal",
         "headline_metrics": {"completion_pct": 72},
     }
-    redacted = _redact_for_audience(
+
+    # client_facing keeps the scope label (the client owns this scope).
+    kept = _redact_for_audience(
         "executive_summary", es_data, ReportAudience.CLIENT_FACING
+    )
+    assert kept is es_data
+    assert kept["scope_label"] == "ACME SA · Distribuidora Nogal"
+
+    # vendor_facing masks it (a provider must not see the client/portfolio
+    # label of a report it doesn't own).
+    redacted = _redact_for_audience(
+        "executive_summary", es_data, ReportAudience.VENDOR_FACING
     )
     assert redacted is not None
     assert redacted["scope_label"] is None
-    # period_label survives — not PII.
+    # period_label survives — not identity.
     assert redacted["period_label"] == "2026-M05"
     assert redacted["headline_metrics"]["completion_pct"] == 72
 
