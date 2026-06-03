@@ -161,10 +161,75 @@ def fetch_kpi_strip(config: dict, scope: ReportScope, db: Session) -> dict:
     return {"resolved": resolved, "fetched_at": _now_iso()}
 
 
+# SlotState → the matrix's frontend DocumentStateCode.
+_SLOT_TO_MATRIX_STATE: dict[str, str] = {
+    "missing": "pending",
+    "uploaded": "uploaded",
+    "in_review": "in_review",
+    "approved": "approved",
+    "rejected": "rejected",
+    "needs_correction": "needs_review",
+    "possible_mismatch": "needs_review",
+    "exception": "approved",
+    "expired": "expired",
+    "not_applicable": "empty",
+}
+
+# Worst-first severity so each institution cell reflects its most urgent
+# slot (lower rank = more urgent).
+_SLOT_SEVERITY: dict[str, int] = {
+    "rejected": 0,
+    "expired": 1,
+    "needs_correction": 2,
+    "possible_mismatch": 3,
+    "missing": 4,
+    "in_review": 5,
+    "uploaded": 6,
+    "approved": 7,
+    "exception": 8,
+    "not_applicable": 9,
+}
+
+
+def _institution_states_from_slots(
+    db: Session, vendor_id: str, year: int
+) -> dict[str, str]:
+    """Worst SlotState per institution for one vendor, keyed by lowercase
+    institution code. Uses the canonical evidence-slot views (the SAME
+    source as compliance_state / compliance_by_institution) so the matrix
+    cells populate and stay consistent — the previous
+    `_latest_submission_for_institution` join returned nothing on tenants
+    whose obligations live in slots, leaving every cell empty ("—")."""
+    from app.services.dashboard_compute import resolve_workspace_for_vendor
+    from app.services.evidence_slots import (
+        build_workspace_calendar_slots,
+        build_workspace_onboarding_slots,
+    )
+
+    workspace = resolve_workspace_for_vendor(db, vendor_id)
+    if workspace is None:
+        return {}
+    views = build_workspace_onboarding_slots(
+        db, workspace
+    ) + build_workspace_calendar_slots(db, workspace, year)
+    worst: dict[str, str] = {}
+    for view in views:
+        inst = (view.institution or "").strip().lower()
+        if not inst:
+            continue
+        state = str(view.state)
+        if inst not in worst or _SLOT_SEVERITY.get(state, 99) < _SLOT_SEVERITY.get(
+            worst[inst], 99
+        ):
+            worst[inst] = state
+    return worst
+
+
 def fetch_vendor_risk_matrix(
     config: dict, scope: ReportScope, db: Session
 ) -> dict:
     """Cross-vendor portfolio view. Filters per config['filter']."""
+    from datetime import date as _date
     flt = config.get("filter") or {}
     missing_institution = flt.get("missing_institution")
     min_risk = flt.get("min_risk_score")
@@ -175,22 +240,24 @@ def fetch_vendor_risk_matrix(
     # Pull every vendor in scope.
     vendors = _vendors_in_scope(db, scope)
 
+    year = _date.today().year
     rows: list[dict[str, Any]] = []
     for v in vendors:
         cells: dict[str, dict[str, Any]] = {}
-        # For each institution column, find the latest submission.
+        # Worst slot state per institution for this vendor (slot-based,
+        # so cells populate consistently with the rest of the report).
+        inst_states = _institution_states_from_slots(db, v.id, year)
         for col in columns:
             if col in ("risk_score", "last_event"):
                 continue
-            inst_code = col
-            latest = _latest_submission_for_institution(db, v.id, inst_code, scope.period)
-            if latest is None:
+            state = inst_states.get(col)
+            if state is None:
                 cells[col] = {"state": "empty", "age_days": 0, "period": scope.period or ""}
             else:
                 cells[col] = {
-                    "state": _doc_state_for(latest.status),
-                    "age_days": _age_days(latest),
-                    "period": latest.period_key or scope.period or "",
+                    "state": _SLOT_TO_MATRIX_STATE.get(state, "pending"),
+                    "age_days": 0,
+                    "period": scope.period or "",
                 }
         # Filter on missing_institution if requested.
         if missing_institution and cells.get(missing_institution, {}).get("state") not in (
