@@ -440,11 +440,149 @@ def fetch_compliance_overview(
     }
 
 
+# Evidence-slot state → semáforo bucket for the by-institution rollup.
+# We aggregate the SAME canonical SlotView the compliance_state /
+# attention_list blocks use (not a raw Submission join), so the bars are
+# populated and numerically consistent with what the rest of the report
+# shows. NOT_APPLICABLE slots carry no obligation and are dropped.
+#   al_dia    — satisfied (approved / legal exception)
+#   en_proceso— pending action: not yet submitted, uploaded, or in review
+#   en_riesgo — rejected / expired / needs correction / mismatch (action!)
+_SLOT_INSTITUTION_BUCKET: dict[str, str] = {
+    "approved": "al_dia",
+    "exception": "al_dia",
+    "missing": "en_proceso",
+    "uploaded": "en_proceso",
+    "in_review": "en_proceso",
+    "rejected": "en_riesgo",
+    "needs_correction": "en_riesgo",
+    "possible_mismatch": "en_riesgo",
+    "expired": "en_riesgo",
+    # not_applicable → intentionally absent (no obligation to count).
+}
+
+# Preferred display order; institutions not listed sort alphabetically
+# after these. Matched case-insensitively against SlotView.institution.
+_INSTITUTION_PREF = ("SAT", "IMSS", "INFONAVIT", "STPS")
+
+# SlotView.institution arrives as a lowercase code; pretty-print the
+# known ones, title-case the rest.
+_INSTITUTION_LABELS = {
+    "sat": "SAT",
+    "imss": "IMSS",
+    "infonavit": "INFONAVIT",
+    "stps_repse": "STPS-REPSE",
+    "interno_cliente": "Interno (cliente)",
+    "general": "General",
+}
+
+
+def fetch_compliance_by_institution(
+    config: dict, scope: ReportScope, db: Session
+) -> dict | None:
+    """Deterministic 'cumplimiento por institución' rollup — the
+    "by Area of Compliance" view real GRC reports lead with.
+
+    Scope-adaptive, so the same block serves every portal:
+      • vendor scope (provider report) → the provider's OWN slots.
+      • client scope (cliente / internal report) → every vendor under
+        the client, merged.
+    Scoped by vendor_id / client_id, so there is no cross-tenant leak
+    and no vendor identity to redact. Returns ``None`` when the scope
+    resolves to neither.
+
+    Aggregates evidence-slot views (the canonical obligation state, same
+    source as compliance_state) by institution into three semáforo
+    buckets — fully deterministic, no AI.
+
+    Output shape (consumed by ``compliance-by-institution.tsx``):
+
+        {
+          "scope_kind": "vendor" | "client",
+          "institutions": [
+            {"code","label","al_dia","en_proceso","en_riesgo","total"},
+            ...
+          ],
+          "fetched_at": "<iso>"
+        }
+    """
+    from datetime import date as _date
+
+    from app.services.dashboard_compute import resolve_workspace_for_vendor
+    from app.services.evidence_slots import (
+        build_workspace_calendar_slots,
+        build_workspace_onboarding_slots,
+    )
+
+    if scope.vendor_id:
+        scope_kind = "vendor"
+        vendor_ids = [scope.vendor_id]
+    elif scope.client_id:
+        scope_kind = "client"
+        vendor_ids = [
+            v.id
+            for v in db.scalars(
+                select(Vendor).where(Vendor.client_id == scope.client_id)
+            ).all()
+        ]
+    else:
+        return None
+
+    year = _date.today().year
+    # label -> {al_dia, en_proceso, en_riesgo}
+    tallies: dict[str, dict[str, int]] = {}
+    for vid in vendor_ids:
+        workspace = resolve_workspace_for_vendor(db, vid)
+        if workspace is None:
+            continue
+        views = build_workspace_onboarding_slots(
+            db, workspace
+        ) + build_workspace_calendar_slots(db, workspace, year)
+        for view in views:
+            bucket = _SLOT_INSTITUTION_BUCKET.get(str(view.state))
+            if bucket is None:  # not_applicable / unknown — no obligation
+                continue
+            key = (view.institution or "general").strip().lower() or "general"
+            slot = tallies.setdefault(
+                key, {"al_dia": 0, "en_proceso": 0, "en_riesgo": 0}
+            )
+            slot[bucket] += 1
+
+    def _order_key(label: str) -> tuple[int, str]:
+        upper = label.upper()
+        for i, pref in enumerate(_INSTITUTION_PREF):
+            if pref in upper:
+                return (i, label)
+        return (len(_INSTITUTION_PREF), label)
+
+    institutions = []
+    for key in sorted(tallies, key=_order_key):
+        slot = tallies[key]
+        total = slot["al_dia"] + slot["en_proceso"] + slot["en_riesgo"]
+        institutions.append(
+            {
+                "code": key,
+                "label": _INSTITUTION_LABELS.get(key, key.replace("_", " ").title()),
+                "al_dia": slot["al_dia"],
+                "en_proceso": slot["en_proceso"],
+                "en_riesgo": slot["en_riesgo"],
+                "total": total,
+            }
+        )
+
+    return {
+        "scope_kind": scope_kind,
+        "institutions": institutions,
+        "fetched_at": _now_iso(),
+    }
+
+
 # ─── Dispatcher ────────────────────────────────────────────────
 
 
 _FETCHERS: dict[str, Callable[[dict, ReportScope, Session], dict | None]] = {
     "compliance_overview": fetch_compliance_overview,
+    "compliance_by_institution": fetch_compliance_by_institution,
     "executive_summary": fetch_executive_summary,
     "kpi_strip": fetch_kpi_strip,
     "vendor_risk_matrix": fetch_vendor_risk_matrix,

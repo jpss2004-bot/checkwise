@@ -158,8 +158,25 @@ def _default_plan(prompt: str, tools: list[dict]) -> list[PlannerToolCall]:
     is_portfolio = any(k in prompt.lower() for k in portfolio_keywords)
 
     # 2026-06-03: portfolio prompts open with the deterministic
-    # compliance_overview band (hero KPIs + per-provider bar) above the
-    # radar, mirroring how real GRC reports lead with scannable stats.
+    # compliance_overview band (hero KPIs + per-provider bar), then the
+    # 'por institución' bars, then the radar — mirroring how real GRC
+    # reports lead with scannable stats. 'por institución' is
+    # scope-adaptive, so non-portfolio prompts that reference an
+    # institution (provider 'mi cumplimiento', SAT/IMSS audits) get the
+    # bars too — appended at the END so executive_summary stays first.
+    institution_keywords = (
+        "institución",
+        "institucion",
+        "sat",
+        "imss",
+        "infonavit",
+        "repse",
+    )
+    wants_institution = "compliance_by_institution" in available and (
+        is_portfolio or any(k in prompt.lower() for k in institution_keywords)
+    )
+    institution_added = False
+
     if "compliance_overview" in available and is_portfolio:
         plan.append(
             PlannerToolCall(
@@ -168,6 +185,16 @@ def _default_plan(prompt: str, tools: list[dict]) -> list[PlannerToolCall]:
                 arguments={"top_n_vendors": 12},
             )
         )
+
+    if wants_institution and is_portfolio:
+        plan.append(
+            PlannerToolCall(
+                id="mock-block-inst",
+                name="compliance_by_institution",
+                arguments={},
+            )
+        )
+        institution_added = True
 
     leads_with_radar = "compliance_radar" in available and is_portfolio
     if leads_with_radar:
@@ -224,6 +251,18 @@ def _default_plan(prompt: str, tools: list[dict]) -> list[PlannerToolCall]:
     # real Anthropic planner will still emit one (the recommended
     # prompts no longer ask for one for the client_monthly_executive
     # preset; vendor / provider presets still can).
+
+    # Non-portfolio reports (provider / internal) that reference an
+    # institution get the 'por institución' bars after the narrative, so
+    # executive_summary stays the opening block.
+    if wants_institution and not institution_added:
+        plan.append(
+            PlannerToolCall(
+                id="mock-block-inst",
+                name="compliance_by_institution",
+                arguments={},
+            )
+        )
 
     return plan
 

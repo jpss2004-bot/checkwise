@@ -630,6 +630,25 @@ COMPLIANCE_OVERVIEW = CatalogEntry(
 )
 
 
+COMPLIANCE_BY_INSTITUTION = CatalogEntry(
+    type="compliance_by_institution",
+    description=(
+        "Deterministic 'cumplimiento por institución' bars (SAT / IMSS / "
+        "INFONAVIT / STPS-REPSE), each split al día / en proceso / en "
+        "riesgo. Scope-adaptive: on a cliente/interno report it rolls up "
+        "the whole portfolio; on a proveedor report it shows that "
+        "provider's own documents. No AI — pure counts. Works in every "
+        "portal; pair it with compliance_overview as the 'por área' view."
+    ),
+    input_schema={
+        "type": "object",
+        "properties": {},
+        "additionalProperties": False,
+    },
+    example_configs=[{}],
+)
+
+
 CATALOG: list[CatalogEntry] = [
     EXECUTIVE_SUMMARY,
     KPI_STRIP,
@@ -643,6 +662,7 @@ CATALOG: list[CatalogEntry] = [
     PRIORITIZED_ACTIONS,
     COMPLIANCE_RADAR,
     COMPLIANCE_OVERVIEW,
+    COMPLIANCE_BY_INSTITUTION,
 ]
 
 
