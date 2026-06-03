@@ -350,12 +350,38 @@ def test_regenerate_block_rejected_for_non_ai_block(api_client, db_factory):
     token = _login(api_client, email, pw)
     rid = _create_report_with_v1_blocks(api_client, token)
 
-    fresh = api_client.get(f"/api/v1/reports/{rid}", headers=_h(token)).json()
-    # kpi_strip has no AI summary by design — regenerate should 422.
-    kpi_block = next(
-        b for b in fresh["current_version"]["content_json"]["blocks"]
-        if b["type"] == "kpi_strip"
+    # kpi_strip carries no AI summary by design. The M3 redesign (2026-06)
+    # dropped the standalone kpi_strip from the mock planner's default plan
+    # (the executive_summary now owns the metric strip), so inject one
+    # deterministically via a saved version instead of fishing it out of the
+    # generated v1 — then assert regenerate rejects it with 422.
+    kpi_block = {
+        "id": "kpi-nonai",
+        "type": "kpi_strip",
+        "config": {
+            "metrics": [
+                {
+                    "label": "Cumplimiento",
+                    "metric_key": "completion_pct",
+                    "format": "percent",
+                }
+            ]
+        },
+    }
+    saved = api_client.post(
+        f"/api/v1/reports/{rid}/versions",
+        headers=_h(token),
+        json={
+            "content_json": {
+                "schema_version": 1,
+                "blocks": [kpi_block],
+                "global": {},
+            },
+            "label": "inject non-AI block",
+        },
     )
+    assert saved.status_code == 201, saved.text
+
     resp = api_client.post(
         f"/api/v1/reports/{rid}/blocks/{kpi_block['id']}/regenerate",
         headers=_h(token),

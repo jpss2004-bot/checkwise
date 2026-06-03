@@ -403,15 +403,23 @@ def test_prioritized_actions_in_planner_tools() -> None:
 
 
 def test_catalog_tail_order_after_p15() -> None:
-    """Append-only: compliance_state (P1.2) → attention_list (P1.3) →
-    upcoming_deadlines (P1.4) → prioritized_actions (P1.5)."""
-    tail = [entry.type for entry in CATALOG[-4:]]
-    assert tail == [
+    """Append-only catalog. P1.2→P1.5 (compliance_state, attention_list,
+    upcoming_deadlines, prioritized_actions) landed as a contiguous run in
+    order. The M4 reports redesign (2026-06) then appended ``compliance_radar``
+    at the very tail without reordering anything before it — so we assert the
+    P1 run stayed intact and the radar is the newest entry, rather than pinning
+    the absolute last-4 (which the radar legitimately shifted)."""
+    order = [entry.type for entry in CATALOG]
+    p1_run = [
         "compliance_state",
         "attention_list",
         "upcoming_deadlines",
         "prioritized_actions",
     ]
+    start = order.index("compliance_state")
+    assert order[start : start + 4] == p1_run
+    # compliance_radar (M4) was appended after the P1 run, at the catalog tail.
+    assert order[-1] == "compliance_radar"
 
 
 # ─── Agreement with portal._compute_suggested_actions ──────────
