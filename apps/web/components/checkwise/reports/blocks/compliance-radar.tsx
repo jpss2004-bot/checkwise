@@ -1,10 +1,8 @@
 "use client";
 
-import Link from "next/link";
 import { Compass } from "@phosphor-icons/react";
 
 import { FreshnessLabel } from "@/components/checkwise/reports/freshness-label";
-import { cn } from "@/lib/utils";
 import type { BlockDefinition, BlockProps } from "@/lib/reports/registry";
 
 /**
@@ -80,19 +78,12 @@ const SEMAPHORE_COLOR = {
   red: "var(--status-error-text)",
 } as const;
 
-const SEMAPHORE_LABEL = {
-  green: "Verde",
-  yellow: "Amarillo",
-  red: "Rojo",
-} as const;
-
 export function ComplianceRadarBlock({
   block,
 }: BlockProps<ComplianceRadarConfig, ComplianceRadarData>) {
   const data = block.data ?? {};
   const semaphore = data.semaphore_counts ?? { green: 0, yellow: 0, red: 0 };
   const overall = data.overall_compliance_pct ?? 0;
-  const topVendors = data.top_vendors ?? [];
   const history = data.history_6mo ?? [];
   const total =
     (semaphore.green ?? 0) + (semaphore.yellow ?? 0) + (semaphore.red ?? 0);
@@ -111,8 +102,13 @@ export function ComplianceRadarBlock({
         <FreshnessLabel fetchedAt={data.fetched_at ?? null} />
       </header>
 
-      <div className="grid grid-cols-1 gap-6 md:grid-cols-[200px_1fr]">
-        {/* Donut */}
+      {/* 2026-06-03: the radar is now a compact GAUGE + TREND. Its old
+          ranked-vendor list duplicated compliance_overview's per-provider
+          bars, so it was dropped — the donut (portfolio gauge) and the
+          6-month approval sparkline (the only trend in the report) are
+          the radar's unique contributions. */}
+      <div className="grid grid-cols-1 items-center gap-6 md:grid-cols-[200px_1fr]">
+        {/* Donut — portfolio gauge */}
         <div className="flex flex-col items-center gap-3">
           <ComplianceDonut
             green={semaphore.green ?? 0}
@@ -131,67 +127,28 @@ export function ComplianceRadarBlock({
           />
         </div>
 
-        {/* Ranked vendor list */}
+        {/* Trend — approval-rate proxy (% of submissions created each
+            month that ended ``aprobado``), labelled "Aprobación mensual"
+            so the distinction from strict compliance % stays honest. */}
         <div className="min-w-0">
-          <p className="cw-eyebrow mb-2">Atención prioritaria</p>
-          {topVendors.length === 0 ? (
-            <p className="text-[13px] text-[color:var(--text-tertiary)]">
-              El portafolio aún no tiene proveedores con workspace activo.
-            </p>
+          {history.length > 0 ? (
+            <>
+              <div className="mb-2 flex items-baseline justify-between gap-3">
+                <p className="cw-eyebrow">Aprobación mensual · últimos 6 meses</p>
+                <p className="font-mono text-[10px] uppercase tracking-wide text-[color:var(--text-tertiary)]">
+                  {history[0]?.month_key} → {history[history.length - 1]?.month_key}
+                </p>
+              </div>
+              <ComplianceSparkline points={history} />
+            </>
           ) : (
-            <ul className="space-y-1.5">
-              {topVendors.map((v) => (
-                <li key={v.vendor_id}>
-                  <Link
-                    href={`/client/vendors/${v.vendor_id}`}
-                    className="group flex items-center justify-between gap-3 rounded-md border border-transparent px-2.5 py-1.5 hover:border-[color:var(--border-subtle)] hover:bg-[color:var(--surface-hover)]"
-                  >
-                    <div className="flex min-w-0 items-center gap-2.5">
-                      <SemaphoreDot level={v.semaphore_level} />
-                      <div className="min-w-0">
-                        <p className="truncate text-[13px] font-medium text-[color:var(--text-primary)]">
-                          {v.vendor_name}
-                        </p>
-                        <p className="truncate font-mono text-[10px] uppercase tracking-wide text-[color:var(--text-tertiary)]">
-                          {v.vendor_rfc ?? "sin RFC"} ·{" "}
-                          {SEMAPHORE_LABEL[v.semaphore_level] ?? v.semaphore_level} ·{" "}
-                          faltan {v.missing_required_count}, en revisión{" "}
-                          {v.pending_reviews_count}
-                        </p>
-                      </div>
-                    </div>
-                    <span
-                      className={cn(
-                        "shrink-0 font-mono text-[14px] tabular-nums",
-                        "text-[color:var(--text-primary)]",
-                      )}
-                    >
-                      {v.compliance_pct}%
-                    </span>
-                  </Link>
-                </li>
-              ))}
-            </ul>
+            <p className="text-[13px] text-[color:var(--text-tertiary)]">
+              La tendencia mensual de aprobación aparece cuando hay actividad
+              registrada en varios periodos.
+            </p>
           )}
         </div>
       </div>
-
-      {/* 6-month sparkline. M5 (2026-06-02) — the series is an
-          approval-rate proxy (% of submissions created in each month
-          that ended in ``aprobado``), not a strict compliance %.
-          Header label calls it "Aprobación mensual" so the
-          distinction is honest to the executive reading the report. */}
-      {history.length > 0 ? (
-        <div className="mt-6 border-t border-[color:var(--border-subtle)] pt-4">
-          <div className="mb-2 flex items-baseline justify-between gap-3">
-            <p className="cw-eyebrow">Aprobación mensual · últimos 6 meses</p>
-            <p className="font-mono text-[10px] uppercase tracking-wide text-[color:var(--text-tertiary)]">
-              {history[0]?.month_key} → {history[history.length - 1]?.month_key}
-            </p>
-          </div>
-          <ComplianceSparkline points={history} />
-        </div>
-      ) : null}
     </section>
   );
 }
@@ -328,20 +285,6 @@ function DonutLegend({
         Rojo · {red}
       </li>
     </ul>
-  );
-}
-
-// ─── Per-vendor row marker ────────────────────────────────────────
-
-function SemaphoreDot({ level }: { level: "green" | "yellow" | "red" }) {
-  return (
-    <span
-      aria-label={SEMAPHORE_LABEL[level] ?? level}
-      className="inline-block h-2.5 w-2.5 shrink-0 rounded-full"
-      style={{
-        backgroundColor: `color-mix(in oklab, ${SEMAPHORE_COLOR[level]} 95%, transparent)`,
-      }}
-    />
   );
 }
 
