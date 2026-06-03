@@ -221,6 +221,11 @@ class CreateFromPresetRequest(BaseModel):
     preset_id: str = Field(min_length=1, max_length=80)
     client_id: str | None = None
     vendor_id: str | None = None
+    # When true, the endpoint generates the report's first populated version
+    # inline (hybrid: AI with deterministic fallback) before returning, so the
+    # frontend can route straight to a finished read-only report. When false
+    # (legacy), it returns an empty report for the editor flow.
+    auto_generate: bool = False
 
 
 # ─── Planner (Phase 3.3a) ────────────────────────────────────────

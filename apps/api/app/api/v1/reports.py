@@ -469,6 +469,25 @@ def post_from_preset(
         raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, str(exc)) from exc
     except ReportPermissionError as exc:
         raise HTTPException(status.HTTP_403_FORBIDDEN, str(exc)) from exc
+
+    # Pick-template → generate flow: produce the first populated version inline
+    # (hybrid AI-with-deterministic-fallback) so the caller can route straight
+    # to a finished, read-only report. The deterministic registry is the floor,
+    # so this never leaves the report empty even with no AI key.
+    if payload.auto_generate:
+        from app.services.reports.generate import generate_initial_version
+
+        try:
+            version = generate_initial_version(
+                db,
+                actor=actor,
+                report=report,
+                preset_id=preset.id,
+                recommended_prompt=preset.recommended_prompt,
+            )
+        except ReportPermissionError as exc:
+            raise HTTPException(status.HTTP_403_FORBIDDEN, str(exc)) from exc
+
     return _read(report, version)
 
 
