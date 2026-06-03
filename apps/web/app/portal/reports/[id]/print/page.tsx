@@ -3,16 +3,11 @@
 import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import { useParams, useSearchParams } from "next/navigation";
-import {
-  ArrowLeft,
-  Printer,
-  Sparkle,
-  WarningCircle,
-} from "@phosphor-icons/react";
+import { ArrowLeft, Printer, WarningCircle } from "@phosphor-icons/react";
 
 import { Canvas } from "@/components/checkwise/reports/canvas";
+import { ReportMasthead } from "@/components/checkwise/reports/report-masthead";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
-import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import {
   REPORT_AUDIENCE_LABEL,
@@ -153,61 +148,31 @@ export default function PrintPage() {
       </div>
 
       <main className="cw-print-document mx-auto max-w-3xl px-6 py-8">
-        {/* Cover */}
-        <header className="cw-print-cover mb-8 border-b border-[color:var(--border-default)] pb-6">
-          <p className="cw-eyebrow text-[color:var(--text-ai)]">
-            <Sparkle
-              className="-mt-0.5 inline h-3 w-3"
-              weight="fill"
-              aria-hidden="true"
-            />{" "}
-            Reporte CheckWise
-          </p>
-          <h1 className="mt-2 text-3xl font-semibold tracking-tight text-[color:var(--text-primary)]">
-            {report.title}
-          </h1>
-          {report.description && (
-            <p className="mt-2 max-w-prose text-[14px] leading-relaxed text-[color:var(--text-secondary)]">
-              {report.description}
-            </p>
-          )}
-          <div className="cw-metadata-strip mt-4">
-            <div>
-              <span className="cw-eyebrow">Audiencia</span>
-              <span className="text-[13px] text-[color:var(--text-primary)]">
-                {REPORT_AUDIENCE_LABEL[report.audience]}
-              </span>
-            </div>
-            <div>
-              <span className="cw-eyebrow">Estado</span>
-              <Badge variant={report.status === "active" ? "success" : "outline"}>
-                {REPORT_STATUS_LABEL[report.status]}
-              </Badge>
-            </div>
-            <div>
-              <span className="cw-eyebrow">Versión</span>
-              <span className="font-mono text-[13px] text-[color:var(--text-primary)]">
-                v{report.current_version?.version_number ?? "—"}
-              </span>
-            </div>
-            <div>
-              <span className="cw-eyebrow">Generado</span>
-              <span className="font-mono text-[11px] text-[color:var(--text-tertiary)]">
-                {generatedAtLabel}
-              </span>
-            </div>
-            {sealLabel && sealLabel !== generatedAtLabel ? (
-              <div>
-                <span className="cw-eyebrow">Datos al</span>
-                <span className="font-mono text-[11px] text-[color:var(--text-tertiary)]">
-                  {sealLabel}
-                </span>
-              </div>
-            ) : null}
-          </div>
-          {/* F5 (2026-05-19 visual audit): removed the boxed
-              `cw-print-seal` paragraph that duplicated the "Generado" /
-              "Datos al" cells already in the metadata strip above. */}
+        {/* Cover — shares the branded ReportMasthead with the on-screen
+            StoryView so the printed PDF and the auditor view open with the
+            same navy/teal document cover. */}
+        <header className="cw-print-cover mb-8">
+          <ReportMasthead
+            title={report.title}
+            description={report.description}
+            meta={[
+              { label: "Audiencia", value: REPORT_AUDIENCE_LABEL[report.audience] },
+              { label: "Estado", value: REPORT_STATUS_LABEL[report.status] },
+              {
+                label: "Versión",
+                value: `v${report.current_version?.version_number ?? "—"}`,
+              },
+              { label: "Generado", value: generatedAtLabel },
+              {
+                label: "Datos al",
+                value:
+                  sealLabel && sealLabel !== generatedAtLabel ? sealLabel : null,
+              },
+            ]}
+          />
+          {/* F5 (2026-05-19): the old boxed `cw-print-seal` paragraph was
+              dropped; the "Generado" / "Datos al" stamps now live in the
+              masthead meta row above. */}
         </header>
 
         <Canvas
