@@ -35,6 +35,8 @@ interface MetricRow {
 interface ExecutiveSummaryData {
   period_label?: string;
   scope_label?: string;
+  /** Deterministic, templated factual recap (no LLM). The cover lead. */
+  summary?: string;
   headline_metrics?: {
     completion_pct?: number;
     vendors_at_risk?: number;
@@ -75,13 +77,15 @@ export function ExecutiveSummaryBlock({
   onPatch,
 }: BlockProps<ExecutiveSummaryConfig, ExecutiveSummaryData>) {
   const { config, data } = block;
-  // The opening paragraph: a manually-authored `config.body` always
-  // wins; otherwise fall back to the AI-generated summary text. Before
-  // this, the block only ever read `config.body`, so AI-generated
-  // executive summaries (which land in `ai_summary.text`) rendered as an
-  // empty placeholder — the report opened with no cover paragraph.
+  // The opening paragraph is DETERMINISTIC: a manually-authored
+  // `config.body` wins; otherwise the templated `data.summary` (computed
+  // server-side from the metrics — no LLM, so the factual headline can't
+  // be hallucinated). The AI prose, if any, is demoted to a clearly
+  // labelled subordinate caption below (`aiText`), never the headline.
   const aiText = block.ai_summary?.text ?? "";
-  const bodyText = config.body && config.body.trim() ? config.body : aiText;
+  const deterministicSummary = data?.summary ?? "";
+  const bodyText =
+    config.body && config.body.trim() ? config.body : deterministicSummary;
   const period = data?.period_label ?? config.period_label ?? "—";
   const scope = data?.scope_label ?? config.scope_label ?? "Alcance por definir";
   const metrics: MetricRow[] = [
@@ -123,12 +127,15 @@ export function ExecutiveSummaryBlock({
 
         {editable ? (
           <textarea
-            placeholder="Escribe el resumen ejecutivo o pídeselo a la IA."
-            value={config.body ?? aiText}
+            placeholder="Resumen automático; edítalo para personalizarlo."
+            value={config.body ?? deterministicSummary}
             onChange={(e) =>
               onPatch({ config: { ...config, body: e.target.value } })
             }
-            rows={Math.max(3, (config.body ?? aiText).split("\n").length + 1)}
+            rows={Math.max(
+              2,
+              (config.body ?? deterministicSummary).split("\n").length + 1,
+            )}
             className="cw-prose w-full resize-none border-0 bg-transparent p-0 text-[15px] leading-relaxed text-[color:var(--text-primary)] outline-none placeholder:text-[color:var(--text-tertiary)] focus:ring-0"
           />
         ) : bodyText ? (
@@ -140,6 +147,23 @@ export function ExecutiveSummaryBlock({
             Sin resumen para este periodo.
           </p>
         )}
+
+        {/* AI prose is demoted to a subordinate, clearly-labelled
+            "lectura del equipo" caption below the deterministic recap —
+            it can elaborate but never replaces the computed facts above.
+            Shown only when an author hasn't overridden the body with
+            their own text (so we don't stack two prose paragraphs). */}
+        {aiText && !(config.body && config.body.trim()) ? (
+          <div className="mt-3 rounded-md bg-[color:var(--surface-ai-muted)] px-3 py-2">
+            <p className="mb-1 flex items-center gap-1.5 text-[10px] font-medium uppercase tracking-[0.06em] text-[color:var(--text-ai)]">
+              <Sparkle className="h-3 w-3" weight="fill" aria-hidden="true" />
+              Lectura del equipo · IA · verificar
+            </p>
+            <p className="text-[13px] leading-relaxed text-[color:var(--text-secondary)]">
+              {aiText}
+            </p>
+          </div>
+        ) : null}
       </div>
 
       {config.include_metrics && (
