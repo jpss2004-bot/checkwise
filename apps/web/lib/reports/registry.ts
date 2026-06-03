@@ -122,6 +122,14 @@ import {
   ComplianceByInstitutionBlock,
   complianceByInstitutionDefinition,
 } from "@/components/checkwise/reports/blocks/compliance-by-institution";
+import {
+  ReportVerdictBlock,
+  reportVerdictDefinition,
+} from "@/components/checkwise/reports/blocks/report-verdict";
+import {
+  KeyFindingsBlock,
+  keyFindingsDefinition,
+} from "@/components/checkwise/reports/blocks/key-findings";
 
 function register<TConfig, TData>(
   partial: Omit<BlockDefinition<TConfig, TData>, "Component">,
@@ -134,6 +142,8 @@ function register<TConfig, TData>(
 }
 
 export const BLOCK_REGISTRY: Record<string, ErasedBlockDefinition> = {
+  [reportVerdictDefinition.type]: register(reportVerdictDefinition, ReportVerdictBlock),
+  [keyFindingsDefinition.type]: register(keyFindingsDefinition, KeyFindingsBlock),
   [textDefinition.type]: register(textDefinition, TextBlock),
   [dividerDefinition.type]: register(dividerDefinition, DividerBlock),
   [executiveSummaryDefinition.type]: register(
@@ -181,6 +191,10 @@ export const BLOCK_REGISTRY: Record<string, ErasedBlockDefinition> = {
 
 /** Slash-menu order. New blocks append. */
 export const PALETTE_ORDER: string[] = [
+  // Insight-first blocks lead the palette: the verdict + key findings open an
+  // insightful report, then the evidence charts.
+  reportVerdictDefinition.type,
+  keyFindingsDefinition.type,
   // 2026-06-03 — the deterministic compliance_overview band leads the
   // cliente palette: it's the scannable cover-stat block authors reach
   // for first when composing a portfolio report.
