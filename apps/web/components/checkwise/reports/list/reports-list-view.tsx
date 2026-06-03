@@ -40,6 +40,9 @@ import {
   type ReportPresetSummary,
   type ReportSummary,
 } from "@/lib/api/reports";
+import { listClientVendors, type ClientVendorRow } from "@/lib/api/client";
+
+const PER_PROVIDER_PRESET_ID = "client-vendor-detail";
 
 /**
  * Shared reports list view — R2.
@@ -230,6 +233,44 @@ export function ReportsListView({
     [creating, router, presetCreateRedirectBase],
   );
 
+  // Per-provider preset: fetch the client's vendors so the picker card can
+  // offer a dropdown. Only when the per-provider preset is actually available.
+  const [vendors, setVendors] = useState<ClientVendorRow[] | null>(null);
+  const hasPerProviderPreset = (presets ?? []).some(
+    (p) => p.id === PER_PROVIDER_PRESET_ID,
+  );
+  useEffect(() => {
+    if (!hasPerProviderPreset) return;
+    let cancelled = false;
+    listClientVendors({ limit: 200 })
+      .then((res) => {
+        if (!cancelled) setVendors(res.items ?? []);
+      })
+      .catch(() => {
+        if (!cancelled) setVendors([]);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [hasPerProviderPreset]);
+
+  const onGenerateForVendor = useCallback(
+    async (presetId: string, vendorId: string) => {
+      if (creating) return;
+      setCreating(presetId);
+      try {
+        const r = await createReportFromPreset(presetId, true, { vendorId });
+        router.push(`${presetCreateRedirectBase}/${r.id}`);
+      } catch (e) {
+        setCreating(null);
+        setError(
+          e instanceof ReportsApiError ? e.message : "Error generando el reporte.",
+        );
+      }
+    },
+    [creating, router, presetCreateRedirectBase],
+  );
+
   const clearFilters = useCallback(() => {
     setStatusFilter("all");
     setAudienceFilter("all");
@@ -376,16 +417,27 @@ export function ReportsListView({
           // starting point. Visually distinguishing it gives the user a
           // clear "empieza aquí" without an explicit instruction.
           <div className="grid grid-cols-1 gap-3 md:grid-cols-3">
-            {presets.map((p, i) => (
-              <PresetCard
-                key={p.id}
-                preset={p}
-                featured={i === 0}
-                creating={creating === p.id}
-                disabled={creating !== null && creating !== p.id}
-                onUse={() => onUsePreset(p)}
-              />
-            ))}
+            {presets.map((p, i) =>
+              p.id === PER_PROVIDER_PRESET_ID ? (
+                <PerProviderPresetCard
+                  key={p.id}
+                  preset={p}
+                  vendors={vendors}
+                  creating={creating === p.id}
+                  disabled={creating !== null && creating !== p.id}
+                  onGenerate={(vendorId) => onGenerateForVendor(p.id, vendorId)}
+                />
+              ) : (
+                <PresetCard
+                  key={p.id}
+                  preset={p}
+                  featured={i === 0}
+                  creating={creating === p.id}
+                  disabled={creating !== null && creating !== p.id}
+                  onUse={() => onUsePreset(p)}
+                />
+              ),
+            )}
           </div>
         )}
       </section>
@@ -657,6 +709,69 @@ function PresetCard({
             weight="bold"
             aria-hidden="true"
           />
+        ) : (
+          <Sparkle className="h-3.5 w-3.5" weight="bold" aria-hidden="true" />
+        )}
+        {creating ? "Generando…" : "Generar reporte"}
+      </Button>
+    </article>
+  );
+}
+
+function PerProviderPresetCard({
+  preset,
+  vendors,
+  creating,
+  disabled,
+  onGenerate,
+}: {
+  preset: ReportPresetSummary;
+  vendors: ClientVendorRow[] | null;
+  creating: boolean;
+  disabled: boolean;
+  onGenerate: (vendorId: string) => void;
+}) {
+  const [vendorId, setVendorId] = useState<string>("");
+  return (
+    <article className="flex h-full flex-col gap-2 rounded-md border border-[color:var(--border-default)] bg-[color:var(--surface-raised)] p-4 shadow-[var(--shadow-sm)]">
+      <div className="flex items-center gap-2 text-[color:var(--text-ai)]">
+        <Sparkle className="h-3.5 w-3.5" weight="fill" aria-hidden="true" />
+        <span className="cw-eyebrow text-[color:var(--text-ai)]">
+          {REPORT_AUDIENCE_LABEL[preset.audience]}
+        </span>
+      </div>
+      <h3 className="text-[14px] font-semibold leading-tight text-[color:var(--text-primary)]">
+        {preset.title}
+      </h3>
+      <p className="text-[12px] leading-relaxed text-[color:var(--text-secondary)]">
+        {preset.description}
+      </p>
+      <select
+        value={vendorId}
+        onChange={(e) => setVendorId(e.target.value)}
+        disabled={disabled || creating || vendors === null}
+        aria-label="Elige un proveedor"
+        className="mt-1 w-full rounded-md border border-[color:var(--border-default)] bg-[color:var(--surface-base)] px-2 py-1.5 text-[12px] text-[color:var(--text-primary)] focus:outline-none focus:ring-1 focus:ring-[color:var(--text-ai)] disabled:opacity-60"
+      >
+        <option value="">
+          {vendors === null ? "Cargando proveedores…" : "Elige un proveedor…"}
+        </option>
+        {(vendors ?? []).map((v) => (
+          <option key={v.vendor_id} value={v.vendor_id}>
+            {v.vendor_name}
+          </option>
+        ))}
+      </select>
+      <Button
+        type="button"
+        size="sm"
+        variant="default"
+        className="mt-auto"
+        onClick={() => vendorId && onGenerate(vendorId)}
+        disabled={disabled || creating || !vendorId}
+      >
+        {creating ? (
+          <CircleNotch className="h-3.5 w-3.5 animate-spin" weight="bold" aria-hidden="true" />
         ) : (
           <Sparkle className="h-3.5 w-3.5" weight="bold" aria-hidden="true" />
         )}

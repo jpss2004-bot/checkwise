@@ -1,10 +1,13 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import Link from "next/link";
+import { useRouter } from "next/navigation";
 import {
   ArrowRight,
+  ChartBar,
   CheckCircle,
+  CircleNotch,
   MagnifyingGlass,
   Package,
   Warning,
@@ -27,6 +30,11 @@ import {
   type ClientVendorNextRenewal,
   type ClientVendorRow,
 } from "@/lib/api/client";
+import {
+  createReportFromPreset,
+  ReportsApiError,
+} from "@/lib/api/reports";
+import { useUrlClientId } from "@/lib/workspace/use-url-client-id";
 
 const LEVELS = [
   { value: "", label: "Todos" },
@@ -38,6 +46,7 @@ const LEVELS = [
 type SemaphoreLevel = "green" | "yellow" | "red";
 
 export default function ClientVendorsPage() {
+  const urlClientId = useUrlClientId();
   const [rows, setRows] = useState<ClientVendorRow[] | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -49,12 +58,14 @@ export default function ClientVendorsPage() {
     setLoading(true);
     setError(null);
     try {
+      const scope = urlClientId ? { client_id: urlClientId } : {};
       const [data, notifications] = await Promise.all([
         listClientVendors({
+          ...scope,
           search: search || undefined,
           semaphore_level: level || undefined,
         }),
-        listClientNotifications({ unread_only: true, limit: 200 }),
+        listClientNotifications({ ...scope, unread_only: true, limit: 200 }),
       ]);
       const counts: Record<string, number> = {};
       for (const item of notifications.items) {
@@ -74,7 +85,7 @@ export default function ClientVendorsPage() {
   useEffect(() => {
     refresh();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  }, [urlClientId]);
 
   const counts = useMemo(() => {
     const c = { green: 0, yellow: 0, red: 0 };
@@ -95,9 +106,34 @@ export default function ClientVendorsPage() {
     );
   }, [rows]);
 
+  const router = useRouter();
+  const [generatingVendorId, setGeneratingVendorId] = useState<string | null>(null);
+
+  const onGenerateReport = useCallback(
+    async (vendorId: string) => {
+      if (generatingVendorId) return;
+      setGeneratingVendorId(vendorId);
+      try {
+        // Per-provider report: server generates the visual deliverable inline
+        // (hybrid AI + deterministic fallback) scoped to this one vendor, then
+        // we land on the finished read-only report.
+        const r = await createReportFromPreset("client-vendor-detail", true, {
+          vendorId,
+        });
+        router.push(`/client/reports/${r.id}`);
+      } catch (e) {
+        setGeneratingVendorId(null);
+        setError(
+          e instanceof ReportsApiError ? e.message : "Error generando el reporte.",
+        );
+      }
+    },
+    [generatingVendorId, router],
+  );
+
   const columns = useMemo(
-    () => buildVendorColumns(unreadByVendor),
-    [unreadByVendor],
+    () => buildVendorColumns(unreadByVendor, onGenerateReport, generatingVendorId),
+    [unreadByVendor, onGenerateReport, generatingVendorId],
   );
 
   return (
@@ -105,6 +141,22 @@ export default function ClientVendorsPage() {
       title="Proveedores"
       description="Lista de proveedores que tienes bajo administración con su semáforo, % de cumplimiento y faltantes."
     >
+      {generatingVendorId ? (
+        <div
+          className="fixed inset-0 z-50 flex flex-col items-center justify-center gap-4 bg-[color:var(--surface-base)]/80 backdrop-blur-sm"
+          role="status"
+          aria-live="polite"
+        >
+          <CircleNotch
+            className="h-8 w-8 animate-spin text-[color:var(--text-ai)]"
+            weight="bold"
+            aria-hidden="true"
+          />
+          <p className="text-[14px] font-semibold text-[color:var(--text-primary)]">
+            Generando el reporte del proveedor…
+          </p>
+        </div>
+      ) : null}
       <div className="space-y-6">
         {/* Junta 2026-05-23 — discovery entry point to the audit
             package builder. Sits at the top of the vendors page so a
@@ -244,6 +296,8 @@ function MetricCell({ value, warn }: { value: number; warn?: boolean }) {
 
 function buildVendorColumns(
   unreadByVendor: Record<string, number>,
+  onGenerateReport: (vendorId: string) => void,
+  generatingVendorId: string | null,
 ): DataTableColumn<ClientVendorRow>[] {
   return [
   {
@@ -355,18 +409,35 @@ function buildVendorColumns(
   {
     id: "action",
     header: "",
-    width: "80px",
+    width: "210px",
     align: "right",
     cell: (row) => (
-      <Button asChild size="sm" variant="outline">
-        <Link
-          href={`/client/vendors/${row.vendor_id}`}
+      <div className="inline-flex items-center gap-2">
+        <Button
+          size="sm"
+          variant="default"
+          onClick={() => onGenerateReport(row.vendor_id)}
+          disabled={generatingVendorId !== null}
+          title="Generar un reporte visual de este proveedor"
           className="inline-flex items-center gap-1"
         >
-          Ver
-          <ArrowRight className="h-3 w-3" weight="bold" aria-hidden="true" />
-        </Link>
-      </Button>
+          {generatingVendorId === row.vendor_id ? (
+            <CircleNotch className="h-3 w-3 animate-spin" weight="bold" aria-hidden="true" />
+          ) : (
+            <ChartBar className="h-3 w-3" weight="bold" aria-hidden="true" />
+          )}
+          Reporte
+        </Button>
+        <Button asChild size="sm" variant="outline">
+          <Link
+            href={`/client/vendors/${row.vendor_id}`}
+            className="inline-flex items-center gap-1"
+          >
+            Ver
+            <ArrowRight className="h-3 w-3" weight="bold" aria-hidden="true" />
+          </Link>
+        </Button>
+      </div>
     ),
   },
   ];
