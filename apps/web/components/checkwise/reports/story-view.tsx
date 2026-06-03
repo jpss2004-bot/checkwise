@@ -5,7 +5,6 @@ import Link from "next/link";
 import {
   ArrowLeft,
   CheckCircle,
-  DownloadSimple,
   Pencil,
   Printer,
 } from "@phosphor-icons/react";
@@ -178,20 +177,9 @@ export function StoryView({
           {audienceFraming.closingBody}
         </p>
         <div className="flex flex-wrap items-center gap-2 pt-2">
-          <Button asChild variant="default" size="sm">
-            <Link
-              href={`${printHref}?autoprint=1`}
-              target="_blank"
-              rel="noopener noreferrer"
-            >
-              <DownloadSimple
-                className="h-4 w-4"
-                weight="bold"
-                aria-hidden="true"
-              />
-              Descargar PDF
-            </Link>
-          </Button>
+          {/* Primary download = the server-rendered designed PDF (one click,
+              clean document). The browser-print route stays as "Imprimir". */}
+          <ExportButton reportId={reportId} format="pdf" variant="default" />
           <ShareDialog reportId={reportId} variant="outline" />
           <ExportButton reportId={reportId} format="xlsx" />
           <Button asChild variant="ghost" size="sm">

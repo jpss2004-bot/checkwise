@@ -50,10 +50,9 @@ const FORMAT_META: Record<
     icon: DownloadSimple,
   },
   pdf: {
-    label: "Descargar PDF (servidor)",
+    label: "Descargar PDF",
     busyLabel: "Generando PDF…",
-    title:
-      "Exportar el reporte como PDF renderizado en el servidor (Playwright). El botón 'Descargar PDF' usa la impresión del navegador como alternativa.",
+    title: "Descargar el reporte como un PDF limpio, renderizado en el servidor.",
     icon: FilePdf,
   },
   xlsx: {
