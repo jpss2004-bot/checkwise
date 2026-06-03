@@ -1,6 +1,6 @@
 "use client";
 
-import { Gauge } from "@phosphor-icons/react";
+import { Gauge, TrendDown, TrendUp } from "@phosphor-icons/react";
 
 import type { BlockDefinition, BlockProps } from "@/lib/reports/registry";
 
@@ -19,6 +19,8 @@ interface VerdictData {
     headline: string;
     subhead: string;
     metric: { value: number; label: string; format: string };
+    /** Month-over-month approval-rate change in points; null = no signal. */
+    trend?: number | null;
   };
 }
 
@@ -87,6 +89,29 @@ export function ReportVerdictBlock({
           <div className="mt-1 text-[10px] uppercase tracking-[0.1em] text-[color:var(--text-tertiary)]">
             {v.metric.label}
           </div>
+          {typeof v.trend === "number" && v.trend !== 0 ? (
+            <div
+              className="mt-1.5 inline-flex items-center gap-1 text-[11px] font-semibold"
+              style={{
+                color:
+                  v.trend > 0
+                    ? "var(--state-green,#16a34a)"
+                    : "var(--state-red,#dc2626)",
+              }}
+              title="Cambio en la tasa de aprobación mensual respecto al mes anterior"
+            >
+              {v.trend > 0 ? (
+                <TrendUp className="h-3.5 w-3.5" weight="bold" aria-hidden="true" />
+              ) : (
+                <TrendDown className="h-3.5 w-3.5" weight="bold" aria-hidden="true" />
+              )}
+              {v.trend > 0 ? "+" : ""}
+              {v.trend} pts
+              <span className="font-normal text-[color:var(--text-tertiary)]">
+                vs. mes ant.
+              </span>
+            </div>
+          ) : null}
         </div>
       </div>
     </div>
