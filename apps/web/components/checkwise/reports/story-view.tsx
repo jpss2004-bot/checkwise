@@ -63,6 +63,9 @@ export interface StoryViewProps {
   backHref: string;
   /** Pushes the URL back to the editor (drops the ?mode=audit flag). */
   onExitToEditor: () => void;
+  /** Soft lock-down: hide the "Editar este reporte" affordance entirely so
+   *  the report is a read-only deliverable with no path back to authoring. */
+  hideExit?: boolean;
 }
 
 export function StoryView({
@@ -72,6 +75,7 @@ export function StoryView({
   printHref,
   backHref,
   onExitToEditor,
+  hideExit = false,
 }: StoryViewProps) {
   // The "Datos al…" seal: first ``data.fetched_at`` we find on the
   // canvas. Same heuristic the print route uses (firstFreshness in
@@ -109,15 +113,17 @@ export function StoryView({
             Volver a reportes
           </Link>
         </Button>
-        <Button
-          variant="ghost"
-          size="sm"
-          onClick={onExitToEditor}
-          title="Cambiar a la vista editable"
-        >
-          <Pencil className="h-4 w-4" weight="bold" aria-hidden="true" />
-          Editar este reporte
-        </Button>
+        {!hideExit ? (
+          <Button
+            variant="ghost"
+            size="sm"
+            onClick={onExitToEditor}
+            title="Cambiar a la vista editable"
+          >
+            <Pencil className="h-4 w-4" weight="bold" aria-hidden="true" />
+            Editar este reporte
+          </Button>
+        ) : null}
       </div>
 
       {/* ─── Masthead — bold, branded document cover ──────── */}

@@ -389,10 +389,15 @@ export function listPresets(): Promise<ReportPresetList> {
 
 export function createReportFromPreset(
   presetId: string,
+  autoGenerate = false,
 ): Promise<ReportRead> {
+  // ``auto_generate`` makes the server build the first populated version
+  // inline (hybrid: AI with deterministic fallback) so the caller can route
+  // straight to a finished, read-only report — no client-side AI streaming,
+  // no editing.
   return fetchJson<ReportRead>(`/api/v1/reports/from-preset`, {
     method: "POST",
-    body: JSON.stringify({ preset_id: presetId }),
+    body: JSON.stringify({ preset_id: presetId, auto_generate: autoGenerate }),
   });
 }
 

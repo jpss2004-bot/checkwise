@@ -185,12 +185,10 @@ export function CompliancePulseStrip({ session }: CompliancePulseStripProps) {
     if (generating) return;
     setGenerating(true);
     try {
-      const r = await createReportFromPreset(PROVIDER_CURRENT_STATE_PRESET);
-      // P1.7 (2026-05-20): the CTA copy promises a generated report,
-      // so we route to the editor with ?autogenerate=1 — the editor
-      // fires /generate on mount instead of dropping the user on an
-      // empty canvas with a "describe what you need" prompt.
-      router.push(`/portal/reports/${r.id}?autogenerate=1`);
+      // No-customization flow: server generates inline (hybrid AI +
+      // deterministic fallback); we land on the finished read-only report.
+      const r = await createReportFromPreset(PROVIDER_CURRENT_STATE_PRESET, true);
+      router.push(`/portal/reports/${r.id}`);
     } catch (e) {
       setGenerating(false);
       setLoadError(

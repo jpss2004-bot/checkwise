@@ -23,6 +23,7 @@ function PortalReportEditorPage({ session }: { session: PortalSession }) {
         reportId={reportId}
         backHref="/portal/reports"
         printHref={`/portal/reports/${reportId}/print`}
+        readOnly
       />
     </PortalAppShell>
   );

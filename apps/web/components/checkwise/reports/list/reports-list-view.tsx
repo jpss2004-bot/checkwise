@@ -212,8 +212,12 @@ export function ReportsListView({
       if (creating) return;
       setCreating(preset.id);
       try {
-        const r = await createReportFromPreset(preset.id);
-        router.push(`${presetCreateRedirectBase}/${r.id}?autogenerate=1`);
+        // No-customization flow: the server generates the populated version
+        // inline (hybrid AI + deterministic fallback) while the loading
+        // overlay shows, then we land on the finished read-only report —
+        // no ?autogenerate=1, no client-side editing.
+        const r = await createReportFromPreset(preset.id, true);
+        router.push(`${presetCreateRedirectBase}/${r.id}`);
       } catch (e) {
         setCreating(null);
         setError(
@@ -242,6 +246,27 @@ export function ReportsListView({
   // ─── Render ────────────────────────────────────────────────
   return (
     <main className="mx-auto max-w-7xl space-y-6 px-5 py-5">
+      {creating ? (
+        <div
+          className="fixed inset-0 z-50 flex flex-col items-center justify-center gap-4 bg-[color:var(--surface-base)]/80 backdrop-blur-sm"
+          role="status"
+          aria-live="polite"
+        >
+          <CircleNotch
+            className="h-8 w-8 animate-spin text-[color:var(--text-ai)]"
+            weight="bold"
+            aria-hidden="true"
+          />
+          <div className="text-center">
+            <p className="text-[14px] font-semibold text-[color:var(--text-primary)]">
+              Generando tu reporte…
+            </p>
+            <p className="mt-1 text-[12px] text-[color:var(--text-secondary)]">
+              Estamos preparando el reporte con los datos más recientes de tu portafolio.
+            </p>
+          </div>
+        </div>
+      ) : null}
       <header className="cw-fade-up space-y-1">
         <p className="cw-eyebrow">
           {role === "admin"

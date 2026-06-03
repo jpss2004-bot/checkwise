@@ -82,12 +82,19 @@ export interface ReportEditorProps {
   reportId: string;
   backHref: string;
   printHref: string;
+  /** Soft lock-down (no-customization flow): force the read-only StoryView
+   *  deliverable. Hides all authoring chrome and the path back to the editor,
+   *  and never fires client-side AI generation (the server already generated
+   *  the report on creation). Defaults to false to preserve any legacy
+   *  editor callers. */
+  readOnly?: boolean;
 }
 
 export function ReportEditor({
   reportId,
   backHref,
   printHref,
+  readOnly = false,
 }: ReportEditorProps) {
   const [report, setReport] = useState<ReportRead | null>(null);
   const [content, setContent] = useState<ReportContent | null>(null);
@@ -299,6 +306,7 @@ export function ReportEditor({
         // every re-render of this effect.
         if (
           autogenerate &&
+          !readOnly &&
           !autogenFiredRef.current &&
           promptText &&
           (loaded.blocks?.length ?? 0) === 0
@@ -406,7 +414,7 @@ export function ReportEditor({
   // fully resolved report + content; the editor's fetch + error UI
   // still wraps both modes. Returning early here is intentional —
   // we never want the authoring toolbar to render in auditor mode.
-  if (auditMode) {
+  if (auditMode || readOnly) {
     return (
       <StoryView
         report={report}
@@ -415,6 +423,7 @@ export function ReportEditor({
         printHref={printHref}
         backHref={backHref}
         onExitToEditor={() => setAuditMode(false)}
+        hideExit={readOnly}
       />
     );
   }

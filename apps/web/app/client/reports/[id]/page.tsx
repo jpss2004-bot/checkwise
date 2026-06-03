@@ -21,6 +21,7 @@ export default function ClientReportEditorPage() {
         reportId={reportId}
         backHref="/client/reports"
         printHref={`/portal/reports/${reportId}/print`}
+        readOnly
       />
     </ClientShell>
   );
