@@ -113,7 +113,7 @@ export async function updateClient(
 export type ProvisionUserBody = {
   full_name: string;
   email: string;
-  role: "client" | "provider";
+  role: "client" | "provider" | "admin";
   // client-only
   client_name?: string;
   client_rfc?: string | null;
@@ -127,7 +127,7 @@ export type ProvisionUserBody = {
 
 export type ProvisionUserResponse = {
   user_id: string;
-  role: "client" | "provider";
+  role: "client" | "provider" | "admin";
   email: string;
   temp_password: string;
   login_url: string;

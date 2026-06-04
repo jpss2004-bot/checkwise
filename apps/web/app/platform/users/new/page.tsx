@@ -10,6 +10,7 @@ import {
   Copy,
   IdentificationCard,
   PaperPlaneTilt,
+  ShieldCheck,
   Storefront,
   type Icon,
 } from "@phosphor-icons/react";
@@ -25,6 +26,7 @@ import {
   listClients,
   provisionUser,
   type AdminClient,
+  type ProvisionUserBody,
   type ProvisionUserResponse,
 } from "@/lib/api/admin";
 
@@ -40,7 +42,7 @@ import {
  * skipped (typical in dev without SMTP).
  */
 
-type Role = "client" | "provider";
+type Role = "client" | "provider" | "admin";
 
 export default function AdminNewUserPage() {
   const [role, setRole] = useState<Role>("client");
@@ -79,25 +81,29 @@ export default function AdminNewUserPage() {
     setSubmitting(true);
     setErrMsg(null);
     try {
-      const payload =
+      const base = {
+        full_name: fullName.trim(),
+        email: email.trim().toLowerCase(),
+      };
+      const payload: ProvisionUserBody =
         role === "client"
           ? {
-              full_name: fullName.trim(),
-              email: email.trim().toLowerCase(),
-              role: "client" as const,
+              ...base,
+              role: "client",
               client_name: clientName.trim(),
               client_rfc: clientRfc.trim().toUpperCase() || null,
             }
-          : {
-              full_name: fullName.trim(),
-              email: email.trim().toLowerCase(),
-              role: "provider" as const,
-              vendor_name: vendorName.trim(),
-              vendor_rfc: vendorRfc.trim().toUpperCase(),
-              persona_type: personaType,
-              contact_phone: contactPhone.trim() || null,
-              parent_client_id: parentClientId,
-            };
+          : role === "admin"
+            ? { ...base, role: "admin" }
+            : {
+                ...base,
+                role: "provider",
+                vendor_name: vendorName.trim(),
+                vendor_rfc: vendorRfc.trim().toUpperCase(),
+                persona_type: personaType,
+                contact_phone: contactPhone.trim() || null,
+                parent_client_id: parentClientId,
+              };
       const response = await provisionUser(payload);
       setResult(response);
       // Reset just the identity fields so the admin can chain another
@@ -139,7 +145,7 @@ export default function AdminNewUserPage() {
   return (
     <PlatformShell
       title="Nuevo usuario"
-      description="Crea una cuenta nueva de cliente o proveedor. CheckWise genera una contraseña temporal, la muestra una vez en pantalla y la envía por correo."
+      description="Crea una cuenta nueva de cliente, proveedor o administrador. CheckWise genera una contraseña temporal, la muestra una vez en pantalla y la envía por correo."
       actions={
         <Button asChild size="sm" variant="outline">
           <Link href="/admin/clients">
@@ -166,6 +172,13 @@ export default function AdminNewUserPage() {
                 icon={Storefront}
                 label="Proveedor"
                 caption="Una empresa proveedora REPSE que sube documentos en su espacio."
+              />
+              <RoleButton
+                active={role === "admin"}
+                onClick={() => setRole("admin")}
+                icon={ShieldCheck}
+                label="Administrador"
+                caption="Un miembro del equipo LegalShelf con acceso al portal de administración."
               />
             </div>
           </Surface>
@@ -204,7 +217,7 @@ export default function AdminNewUserPage() {
             </div>
           </Surface>
 
-          {role === "client" ? (
+          {role === "admin" ? null : role === "client" ? (
             <Surface title="Empresa cliente" icon={Buildings}>
               <div className="grid gap-3 sm:grid-cols-2">
                 <div className="space-y-1">
@@ -344,7 +357,11 @@ export default function AdminNewUserPage() {
                   <p className="mt-0.5 text-sm text-[color:var(--text-primary)]">
                     Cuenta creada para <strong>{result.email}</strong> como{" "}
                     <strong>
-                      {result.role === "client" ? "cliente" : "proveedor"}
+                      {result.role === "client"
+                        ? "cliente"
+                        : result.role === "admin"
+                          ? "administrador"
+                          : "proveedor"}
                     </strong>
                     .
                   </p>
