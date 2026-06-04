@@ -41,7 +41,7 @@ from xml.etree import ElementTree as ET
 from fastapi import APIRouter, Depends, HTTPException, Query, Response, status
 from fastapi.responses import FileResponse
 from pydantic import BaseModel, EmailStr, Field
-from sqlalchemy import and_, func, select
+from sqlalchemy import and_, func, select, tuple_
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
@@ -967,10 +967,23 @@ def list_requirements(
     if is_active is not None:
         stmt = stmt.where(Requirement.is_active == is_active)
     rows = list(db.scalars(stmt))
-    items = []
-    for r in rows:
-        v = _load_current_version(db, r)
-        items.append(_requirement_to_dict(r, version=v))
+    # Batch the current-version lookup: one tuple-IN over
+    # (requirement_id, current_version) instead of a query per row.
+    version_by_req: dict[str, RequirementVersion] = {}
+    pairs = [(r.id, r.current_version) for r in rows]
+    if pairs:
+        for v in db.scalars(
+            select(RequirementVersion).where(
+                tuple_(
+                    RequirementVersion.requirement_id,
+                    RequirementVersion.version,
+                ).in_(pairs)
+            )
+        ):
+            version_by_req[v.requirement_id] = v
+    items = [
+        _requirement_to_dict(r, version=version_by_req.get(r.id)) for r in rows
+    ]
     return {"items": items, "total": len(items)}
 
 

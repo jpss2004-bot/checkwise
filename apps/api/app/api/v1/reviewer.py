@@ -21,22 +21,19 @@ from typing import Annotated, Literal
 from fastapi import APIRouter, Depends, HTTPException, Query, Response, status
 from pydantic import BaseModel, Field
 from sqlalchemy import select
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, selectinload
 
 from app.api.v1.auth import CurrentUser, require_any_role
 from app.constants.roles import MembershipRole
 from app.constants.statuses import DocumentStatus, ReviewerAction
 from app.db.session import get_db
 from app.models import (
-    Client,
     Document,
     DocumentStatusHistory,
     Institution,
-    Requirement,
     Submission,
     Validation,
     ValidationEvent,
-    Vendor,
 )
 from app.models.entities import utc_now
 from app.services.audit_log import add_audit_event
@@ -168,11 +165,23 @@ def get_queue(
     """
 
     statuses = (submission_status,) if submission_status else QUEUE_STATUSES
+    # Eager-load every relationship the per-row build touches so the queue
+    # is a handful of batched queries instead of ~7 lookups per submission
+    # (the original N+1 made the page seconds-slow on a networked DB).
     stmt = (
         select(Submission)
         .where(Submission.status.in_(statuses))
         .order_by(Submission.created_at.asc())
         .limit(limit)
+        .options(
+            selectinload(Submission.vendor),
+            selectinload(Submission.client),
+            selectinload(Submission.requirement),
+            selectinload(Submission.institution),
+            selectinload(Submission.period),
+            selectinload(Submission.documents),
+            selectinload(Submission.validations),
+        )
     )
     if institution:
         stmt = stmt.join(Institution, Submission.institution_id == Institution.id).where(
@@ -189,40 +198,37 @@ def get_queue(
         or 0
     )
 
+    # Batch the document-inspection lookup: collect the first document per
+    # queued submission, then fetch all their inspections in one IN query
+    # (was one SELECT per row).
+    from app.models import DocumentInspection
+
+    first_doc_by_sub: dict[str, Document] = {
+        sub.id: sub.documents[0] for sub in submissions if sub.documents
+    }
+    mismatch_by_doc: dict[str, str | None] = {}
+    if first_doc_by_sub:
+        doc_ids = [doc.id for doc in first_doc_by_sub.values()]
+        for insp in db.scalars(
+            select(DocumentInspection).where(
+                DocumentInspection.document_id.in_(doc_ids)
+            )
+        ):
+            mismatch_by_doc.setdefault(insp.document_id, insp.mismatch_reason)
+
     items: list[QueueItem] = []
     now = utc_now()
     for sub in submissions:
-        vendor = db.get(Vendor, sub.vendor_id)
-        client = db.get(Client, sub.client_id)
-        requirement = (
-            db.get(Requirement, sub.requirement_id) if sub.requirement_id else None
+        vendor = sub.vendor
+        client = sub.client
+        requirement = sub.requirement
+        institution_row = sub.institution
+        document = first_doc_by_sub.get(sub.id)
+        inspection_mismatch: str | None = (
+            mismatch_by_doc.get(document.id) if document is not None else None
         )
-        institution_row = (
-            db.get(Institution, sub.institution_id) if sub.institution_id else None
-        )
-        document = db.scalar(
-            select(Document).where(Document.submission_id == sub.id).limit(1)
-        )
-        inspection_mismatch: str | None = None
-        if document is not None:
-            from app.models import DocumentInspection
-
-            inspection_row = db.scalar(
-                select(DocumentInspection)
-                .where(DocumentInspection.document_id == document.id)
-                .limit(1)
-            )
-            inspection_mismatch = (
-                inspection_row.mismatch_reason if inspection_row else None
-            )
-        signal_count = (
-            db.scalar(
-                select(__import__("sqlalchemy").func.count(Validation.id)).where(
-                    Validation.submission_id == sub.id,
-                    Validation.severity.in_(("warning", "error")),
-                )
-            )
-            or 0
+        signal_count = sum(
+            1 for v in sub.validations if v.severity in ("warning", "error")
         )
 
         created_at = sub.created_at

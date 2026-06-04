@@ -49,7 +49,7 @@ from fastapi import (
 from pydantic import BaseModel, Field
 from sqlalchemy import and_, func, select
 from sqlalchemy.exc import SQLAlchemyError
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, selectinload
 
 from app.api.v1.auth import CurrentUser, _claims_from_header, get_current_user
 from app.constants.statuses import DocumentStatus
@@ -87,6 +87,7 @@ from app.models import (
     DocumentStatusHistory,
     ProviderNotification,
     ProviderWorkspace,
+    Requirement,
     Submission,
     User,
     Validation,
@@ -3628,6 +3629,17 @@ def _compute_recent_uploads(
         )
         .order_by(Submission.created_at.desc())
         .limit(limit)
+        # Eager-load the requirement (+ its institution) and documents the
+        # loop reads, so this is 3 batched queries instead of 3 lazy loads
+        # per row. Critical here: the submissions-list caller passes
+        # limit=10_000, where the per-row lazy loads were thousands of
+        # round-trips.
+        .options(
+            selectinload(Submission.requirement).selectinload(
+                Requirement.institution
+            ),
+            selectinload(Submission.documents),
+        )
     )
     submissions = list(db.scalars(stmt))
     rows: list[DashboardRecentUpload] = []

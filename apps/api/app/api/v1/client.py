@@ -37,7 +37,7 @@ from fastapi.responses import FileResponse
 from pydantic import BaseModel, EmailStr, Field
 from sqlalchemy import and_, func, select
 from sqlalchemy.exc import IntegrityError
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, selectinload
 
 from app.api.v1.auth import CurrentUser, require_any_role
 from app.api.v1.portal import (
@@ -60,7 +60,6 @@ from app.api.v1.portal import (
     _compute_upcoming_deadlines,
     _due_in_days_for_period,
     _empty_document_counts,
-    _latest_reviewer_note,
 )
 from app.constants.roles import MembershipRole
 from app.constants.statuses import DocumentStatus
@@ -331,21 +330,38 @@ def _vendor_compliance(
     }
 
 
-def _last_activity_timestamps(
-    db: Session, vendor_id: str
-) -> tuple[datetime | None, datetime | None]:
-    """Return (last_submission_at, last_review_at) for one vendor."""
-    last_sub = db.scalar(
-        select(func.max(Submission.created_at)).where(Submission.vendor_id == vendor_id)
-    )
-    last_review = db.scalar(
-        select(func.max(ValidationEvent.created_at))
-        .join(Submission, ValidationEvent.submission_id == Submission.id)
+def _last_activity_timestamps_bulk(
+    db: Session, vendor_ids: list[str]
+) -> tuple[dict[str, datetime], dict[str, datetime]]:
+    """Return ``(last_submission_at, last_review_at)`` maps keyed by
+    vendor_id for many vendors at once.
+
+    Two GROUP BY queries for the whole set instead of two scalar
+    aggregates per vendor (the per-row version was a 2N N+1 on the
+    vendors list). Vendors with no submissions / no reviewer decision are
+    simply absent from the corresponding map, so callers use ``.get()``
+    and fall back to None exactly as the per-vendor version did.
+    """
+    last_sub: dict[str, datetime] = {}
+    last_review: dict[str, datetime] = {}
+    if not vendor_ids:
+        return last_sub, last_review
+    for vid, ts in db.execute(
+        select(Submission.vendor_id, func.max(Submission.created_at))
+        .where(Submission.vendor_id.in_(vendor_ids))
+        .group_by(Submission.vendor_id)
+    ):
+        last_sub[vid] = ts
+    for vid, ts in db.execute(
+        select(Submission.vendor_id, func.max(ValidationEvent.created_at))
+        .join(ValidationEvent, ValidationEvent.submission_id == Submission.id)
         .where(
-            Submission.vendor_id == vendor_id,
+            Submission.vendor_id.in_(vendor_ids),
             ValidationEvent.event_type == "reviewer_decision",
         )
-    )
+        .group_by(Submission.vendor_id)
+    ):
+        last_review[vid] = ts
     return last_sub, last_review
 
 
@@ -922,6 +938,7 @@ def client_vendors(
     workspaces = _scoped_workspaces(db, target_id)
     vendor_ids = [w.vendor_id for w in workspaces]
     vendors = _vendors_by_id(db, vendor_ids)
+    last_sub_map, last_review_map = _last_activity_timestamps_bulk(db, vendor_ids)
 
     needle = (search or "").strip().lower()
     rows: list[ClientVendorRow] = []
@@ -941,7 +958,8 @@ def client_vendors(
         summary = _vendor_compliance(db, ws, today=today, year=selected_year)
         if semaphore_level and summary["semaphore_level"] != semaphore_level:
             continue
-        last_sub, last_review = _last_activity_timestamps(db, vendor.id)
+        last_sub = last_sub_map.get(vendor.id)
+        last_review = last_review_map.get(vendor.id)
         rows.append(
             ClientVendorRow(
                 vendor_id=vendor.id,
@@ -1904,29 +1922,57 @@ def client_submissions(
             .where(and_(*filters))
             .order_by(Submission.created_at.desc())
             .limit(limit)
+            # Eager-load the requirement + institution the serializer reads
+            # so they don't lazy-load one round-trip per row.
+            .options(
+                selectinload(Submission.requirement),
+                selectinload(Submission.institution),
+            )
         )
     )
     vendor_lookup = _vendors_by_id(db, [s.vendor_id for s in rows])
 
-    items: list[ClientSubmissionItem] = []
-    for sub in rows:
-        vendor = vendor_lookup.get(sub.vendor_id)
-        doc = db.scalar(
-            select(Document).where(Document.submission_id == sub.id).limit(1)
-        )
-        replacement_id = db.scalar(
-            select(Submission.id).where(
-                Submission.supersedes_submission_id == sub.id
+    # Batch the three remaining per-row lookups (document, replacement
+    # pointer, latest reviewer decision) into one query each instead of
+    # one-per-submission. The reviewer note is derived from the same
+    # latest-review row, dropping a redundant fourth query per row.
+    sub_ids = [s.id for s in rows]
+    doc_by_sub: dict[str, Document] = {}
+    replacement_by_sub: dict[str, str] = {}
+    latest_review_by_sub: dict[str, ValidationEvent] = {}
+    if sub_ids:
+        for d in db.scalars(
+            select(Document).where(Document.submission_id.in_(sub_ids))
+        ):
+            doc_by_sub.setdefault(d.submission_id, d)
+        for rep_id, superseded in db.execute(
+            select(Submission.id, Submission.supersedes_submission_id).where(
+                Submission.supersedes_submission_id.in_(sub_ids)
             )
-        )
-        latest_review = db.scalar(
+        ):
+            if superseded is not None:
+                replacement_by_sub[superseded] = rep_id
+        # Newest reviewer_decision per submission: rows arrive newest-first,
+        # setdefault keeps the first (latest) seen per submission_id.
+        for ev in db.scalars(
             select(ValidationEvent)
             .where(
-                ValidationEvent.submission_id == sub.id,
+                ValidationEvent.submission_id.in_(sub_ids),
                 ValidationEvent.event_type == "reviewer_decision",
             )
             .order_by(ValidationEvent.created_at.desc())
-            .limit(1)
+        ):
+            latest_review_by_sub.setdefault(ev.submission_id, ev)
+
+    items: list[ClientSubmissionItem] = []
+    for sub in rows:
+        vendor = vendor_lookup.get(sub.vendor_id)
+        doc = doc_by_sub.get(sub.id)
+        latest_review = latest_review_by_sub.get(sub.id)
+        note = (
+            ((latest_review.message or "").strip() or None)
+            if latest_review
+            else None
         )
         items.append(
             ClientSubmissionItem(
@@ -1945,9 +1991,9 @@ def client_submissions(
                 filename=doc.original_filename if doc else None,
                 submitted_at=sub.created_at,
                 reviewed_at=(latest_review.created_at if latest_review else None),
-                reviewer_note=_latest_reviewer_note(db, sub.id),
+                reviewer_note=note,
                 supersedes_submission_id=sub.supersedes_submission_id,
-                superseded_by_submission_id=replacement_id,
+                superseded_by_submission_id=replacement_by_sub.get(sub.id),
             )
         )
     return ClientSubmissionsResponse(
@@ -2018,6 +2064,16 @@ def client_activity(
         )
     )
 
+    # Batch the event submissions in one query instead of a db.get per
+    # event row below.
+    event_subs: dict[str, Submission] = {}
+    event_sub_ids = [ev.submission_id for ev in event_rows if ev.submission_id]
+    if event_sub_ids:
+        for s in db.scalars(
+            select(Submission).where(Submission.id.in_(event_sub_ids))
+        ):
+            event_subs[s.id] = s
+
     feed: list[tuple[datetime, ClientActivityItem]] = []
     for sub in upload_rows:
         v = vendor_lookup.get(sub.vendor_id)
@@ -2042,7 +2098,7 @@ def client_activity(
             )
         )
     for ev in event_rows:
-        sub = db.get(Submission, ev.submission_id)
+        sub = event_subs.get(ev.submission_id)
         if sub is None or sub.client_id != target_id:
             continue
         v = vendor_lookup.get(sub.vendor_id) if sub else None
