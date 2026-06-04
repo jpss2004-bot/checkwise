@@ -1,7 +1,7 @@
 "use client";
 
 import * as React from "react";
-import { CaretDown, Sparkle, X } from "@phosphor-icons/react";
+import { CaretDoubleRight, Sparkle, X } from "@phosphor-icons/react";
 
 import { cn } from "@/lib/utils";
 
@@ -134,23 +134,20 @@ export function WiseDockShell({
 
   return (
     <>
-      {/* Collapsed FAB — always rendered, fades when expanded so the
-          transition reads as "the FAB expanded into the panel" rather
-          than "two separate things popped in and out". */}
+      {/* ── Collapsed launchers ───────────────────────────────────
+          Mobile keeps a bottom-left FAB (paired with the bottom sheet).
+          Desktop gets a slim rail tab anchored to the right edge — the
+          docked sidebar collapsed to its handle. Both fade out while the
+          panel is open so the transition reads as one surface. */}
       <button
         type="button"
         aria-label={fabAriaLabel}
         aria-expanded={!collapsed}
         onClick={() => setCollapsedAndPersist(false)}
         className={cn(
-          "group fixed z-40 inline-flex h-14 w-14 items-center justify-center rounded-full shadow-lg transition-all duration-fast",
+          "group fixed bottom-5 left-5 z-40 inline-flex h-14 w-14 items-center justify-center rounded-full shadow-lg transition-all duration-fast sm:hidden",
           "bg-[color:var(--surface-brand)] text-white",
-          "hover:scale-105 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[color:var(--text-teal)]/60 focus-visible:ring-offset-2",
-          // Bottom-LEFT on desktop. FeedbackLauncher owns bottom-right
-          // at z-50; we mirror to the opposite corner at z-40 so the
-          // two never overlap. On mobile the FAB still sits in the
-          // bottom-left so users can swipe it open from the same side.
-          "bottom-5 left-5 sm:bottom-6 sm:left-6",
+          "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[color:var(--text-teal)]/60 focus-visible:ring-offset-2",
           collapsed
             ? "pointer-events-auto scale-100 opacity-100"
             : "pointer-events-none scale-90 opacity-0",
@@ -170,11 +167,41 @@ export function WiseDockShell({
         ) : null}
       </button>
 
-      {/* Expanded panel — desktop floating card pinned bottom-left,
-          mobile bottom sheet with backdrop. */}
+      <button
+        type="button"
+        aria-label={fabAriaLabel}
+        aria-expanded={!collapsed}
+        onClick={() => setCollapsedAndPersist(false)}
+        className={cn(
+          "group fixed right-0 top-1/2 z-40 hidden -translate-y-1/2 flex-col items-center gap-2.5 rounded-l-xl border border-r-0 border-white/10 px-2.5 py-4 shadow-lg transition-[opacity,transform,padding] duration-fast sm:flex",
+          "bg-[color:var(--surface-brand)] text-white hover:pr-3.5",
+          "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[color:var(--text-teal)]/60",
+          collapsed
+            ? "pointer-events-auto translate-x-0 opacity-100"
+            : "pointer-events-none translate-x-full opacity-0",
+          className,
+        )}
+      >
+        <Sparkle className="h-5 w-5 text-[color:var(--text-teal)]" weight="fill" />
+        <span className="text-[10px] font-semibold uppercase tracking-[0.18em] text-white [writing-mode:vertical-rl]">
+          Wise
+        </span>
+        {hasWarning ? (
+          <span
+            aria-hidden="true"
+            className="h-2 w-2 rounded-full bg-[color:var(--status-warning-text)]"
+          />
+        ) : null}
+      </button>
+
+      {/* ── Expanded panel ────────────────────────────────────────
+          Mobile: bottom sheet with backdrop. Desktop: a full-height
+          sidebar docked to the right edge that stays fixed while the
+          user scrolls/navigates the page behind it. */}
       {!collapsed ? (
         <>
-          {/* Mobile-only backdrop. Clicking it collapses the dock. */}
+          {/* Mobile-only backdrop. Clicking it collapses the dock. The
+              desktop sidebar is non-modal, so the page stays usable. */}
           <div
             aria-hidden="true"
             onClick={close}
@@ -185,16 +212,11 @@ export function WiseDockShell({
             aria-modal="false"
             aria-label={ariaLabel}
             className={cn(
-              "fixed z-50 flex flex-col overflow-hidden bg-[color:var(--surface-brand)] text-white shadow-2xl",
-              // Mobile: bottom sheet — full width, rounded top corners,
-              // ~78vh max so the user can still see what they were
-              // doing behind the dock.
+              "cw-fade-in fixed z-50 flex flex-col overflow-hidden bg-[color:var(--surface-brand)] text-white shadow-2xl",
+              // Mobile: bottom sheet, ~78vh so context behind stays visible.
               "inset-x-0 bottom-0 max-h-[78vh] rounded-t-2xl",
-              // Desktop: floating card pinned bottom-LEFT, ~380px wide.
-              // Mirrors the FAB so the panel opens out from where the
-              // launcher was sitting, keeping bottom-right free for the
-              // FeedbackLauncher.
-              "sm:inset-x-auto sm:bottom-6 sm:left-6 sm:max-h-[min(620px,calc(100vh-6rem))] sm:w-[380px] sm:rounded-2xl",
+              // Desktop: full-height right-docked sidebar, fluid width.
+              "sm:inset-y-0 sm:left-auto sm:right-0 sm:bottom-0 sm:top-0 sm:max-h-none sm:w-[clamp(360px,30vw,440px)] sm:rounded-none sm:border-l sm:border-white/10",
             )}
           >
             {renderHeader(close)}
@@ -245,10 +267,11 @@ export function WiseDockHeader({ title, pill, onClose }: WiseDockHeaderProps) {
         <button
           type="button"
           onClick={onClose}
-          aria-label="Minimizar"
+          aria-label="Colapsar panel"
+          title="Colapsar"
           className="hidden h-8 w-8 items-center justify-center rounded-md text-white/70 transition-colors hover:bg-white/10 hover:text-white sm:inline-flex"
         >
-          <CaretDown className="h-4 w-4" weight="bold" />
+          <CaretDoubleRight className="h-4 w-4" weight="bold" />
         </button>
         <button
           type="button"
