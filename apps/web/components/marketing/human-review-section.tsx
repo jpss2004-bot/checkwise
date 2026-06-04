@@ -1,6 +1,5 @@
 "use client";
 
-import Image from "next/image";
 import Link from "next/link";
 import {
   BellRinging,
@@ -18,6 +17,7 @@ import { Button } from "@/components/ui/button";
 
 import { EASE_ENTER, Reveal } from "./motion-helpers";
 import { useMotionPreference } from "./motion-preference";
+import { ProductShot, type ProductShotFocus } from "./product-shot";
 
 const AI_DOES = [
   "Planear el reporte con datos del expediente",
@@ -27,11 +27,11 @@ const AI_DOES = [
 
 const AI_DOES_NOT = [
   "Aprobar documentos legales",
-  "Sustituir la revisión Legal Shelf",
+  "Sustituir la revisión del equipo CheckWise",
   "Cambiar estados sin registro de auditoría",
 ] as const;
 
-export function LegalShelfSection() {
+export function HumanReviewSection() {
   const { reduced: reduce } = useMotionPreference();
 
   return (
@@ -67,7 +67,7 @@ export function LegalShelfSection() {
           </h2>
           <p className="mt-4 max-w-[48ch] text-[15px] leading-[1.6] text-[color:var(--text-inverse)]/82">
             La IA ayuda a explicar, redactar y convertir estados en reportes.
-            Las decisiones críticas siguen en manos de Legal Shelf, con actor,
+            Las decisiones críticas siguen en manos del equipo CheckWise, con actor,
             acción y cambio firmado.
           </p>
 
@@ -90,7 +90,7 @@ export function LegalShelfSection() {
             <Statement
               n="01"
               kicker="Revisión"
-              body="La cola prioriza documentos; el equipo legal decide aprobar, rechazar, aclarar o exceptuar."
+              body="La cola prioriza documentos; el equipo CheckWise decide aprobar, rechazar, aclarar o exceptuar."
             />
             <Statement
               n="02"
@@ -108,7 +108,7 @@ export function LegalShelfSection() {
             <Button asChild size="lg" variant="secondary" className="rounded-full">
               <Link href="#contacto">
                 <PaperPlaneTilt className="h-4 w-4" weight="bold" aria-hidden="true" />
-                <span>Hablar con Legal Shelf</span>
+                <span>Contactar a CheckWise</span>
               </Link>
             </Button>
           </div>
@@ -123,20 +123,22 @@ export function LegalShelfSection() {
         >
           <div className="grid grid-cols-1 gap-5">
             <ProductProof
-              label="Bandeja Legal Shelf"
+              label="Bandeja CheckWise"
               status="Decisión firmada"
-              image="/marketing/product/admin-reviewer-queue.png"
-              alt="Bandeja de revisión Legal Shelf con documentos pendientes y estados de revisión."
+              image="/marketing/generated/cw-review-queue.png"
+              alt="Bandeja de revisión CheckWise con documentos pendientes y estados de revisión."
               icon={Gavel}
+              focus={{ zoom: 1, origin: "50% 50%", position: "center" }}
             />
             <div className="grid grid-cols-1 gap-5 md:grid-cols-[minmax(0,1fr)_260px]">
               <ProductProof
                 compact
                 label="Reportes AI"
                 status="Bloques editables"
-                image="/marketing/product/admin-report-editor.png"
+                image="/marketing/generated/cw-report-editor.png"
                 alt="Editor de reportes CheckWise con asistente AI y bloques editables."
                 icon={ChartLineUp}
+                focus={{ zoom: 1, origin: "50% 50%", position: "center" }}
               />
               <div className="rounded-[12px] border border-white/12 bg-white/[0.04] p-4">
                 <p className="font-mono text-[10px] uppercase tracking-[0.2em] text-white/55">
@@ -174,6 +176,7 @@ function ProductProof({
   image,
   alt,
   icon: Icon,
+  focus,
   compact = false,
 }: {
   label: string;
@@ -181,6 +184,7 @@ function ProductProof({
   image: string;
   alt: string;
   icon: Icon;
+  focus: ProductShotFocus;
   compact?: boolean;
 }) {
   return (
@@ -204,13 +208,12 @@ function ProductProof({
           compact ? "aspect-[16/10]" : "aspect-[16/9.8]"
         }`}
       >
-        <Image
+        <ProductShot
           src={image}
           alt={alt}
-          fill
-          sizes={compact ? "(min-width: 1024px) 34vw, 92vw" : "(min-width: 1024px) 56vw, 92vw"}
-          className="object-contain object-top p-3"
+          sizes={compact ? "(min-width: 1024px) 48vw, 150vw" : "(min-width: 1024px) 72vw, 160vw"}
           loading="lazy"
+          focus={focus}
         />
       </div>
     </div>

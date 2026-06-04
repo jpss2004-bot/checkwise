@@ -9,7 +9,7 @@ import { cn } from "@/lib/utils";
  * which `<Field/>` does for you — same contract as `<Input/>`.
  */
 const Textarea = React.forwardRef<HTMLTextAreaElement, React.TextareaHTMLAttributes<HTMLTextAreaElement>>(
-  ({ className, ...props }, ref) => (
+  ({ className, style, ...props }, ref) => (
     <textarea
       ref={ref}
       className={cn(
@@ -24,6 +24,7 @@ const Textarea = React.forwardRef<HTMLTextAreaElement, React.TextareaHTMLAttribu
         "aria-[invalid=true]:focus-visible:ring-[color:var(--border-error)]/30",
         className,
       )}
+      style={style ?? {}}
       {...props}
     />
   ),

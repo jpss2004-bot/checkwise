@@ -9,7 +9,7 @@ import { ContactForm } from "@/components/marketing/contact-form";
 import { FeaturesSection } from "@/components/marketing/features-section";
 import { HeroSection } from "@/components/marketing/hero-section";
 import { JourneySection } from "@/components/marketing/journey-section";
-import { LegalShelfSection } from "@/components/marketing/legal-shelf-section";
+import { HumanReviewSection } from "@/components/marketing/human-review-section";
 import { MarketingNav } from "@/components/marketing/marketing-nav";
 import { Reveal } from "@/components/marketing/motion-helpers";
 import { MotionPreferenceProvider } from "@/components/marketing/motion-preference";
@@ -23,7 +23,7 @@ export default function PublicHome() {
         <HeroSection />
         <FeaturesSection />
         <JourneySection />
-        <LegalShelfSection />
+        <HumanReviewSection />
         <RequestInformation />
         <MarketingFooter />
         <FeedbackLauncher allowPublic />
@@ -39,7 +39,7 @@ export default function PublicHome() {
  * directly on the surface-page background, with a chrome bar above it
  * that mirrors the live-system signature used by every other section
  * on this page. The narrative column on the left carries three
- * numbered statements (same composition pattern as the Legal Shelf
+ * numbered statements (same composition pattern as the human review
  * section) so the whole landing reads with one editorial voice.
  */
 function RequestInformation() {
@@ -63,7 +63,7 @@ function RequestInformation() {
             </span>
           </h2>
           <p className="mt-4 max-w-[44ch] text-[15px] leading-[1.6] text-[color:var(--text-secondary)]">
-            Recorremos calendario, expediente, revisión Legal Shelf y reportes
+            Recorremos calendario, expediente, revisión CheckWise y reportes
             AI con datos de ejemplo. Sin video pregrabado.
           </p>
 
@@ -71,7 +71,7 @@ function RequestInformation() {
             <DemoStep
               n="01"
               kicker="Sistema"
-              body="Vista proveedor, vista cliente y consola Legal Shelf sobre el mismo expediente."
+              body="Vista proveedor, vista cliente y consola CheckWise sobre el mismo expediente."
             />
             <DemoStep
               n="02"
@@ -155,9 +155,9 @@ function MarketingFooter() {
       <div className="mx-auto grid max-w-[1320px] grid-cols-1 gap-10 px-5 py-12 md:grid-cols-[minmax(0,1.4fr)_minmax(0,1fr)_minmax(0,1fr)] md:gap-12">
         {/* Brand column */}
         <div>
-          <BrandLogo size="sm" poweredBy />
+          <BrandLogo size="sm" />
           <p className="mt-4 max-w-[32ch] text-[13px] leading-[1.55] text-[color:var(--text-secondary)]">
-            Sistema operativo REPSE para proveedor, cliente y Legal Shelf,
+            Sistema operativo REPSE para proveedor, cliente y equipo CheckWise,
             sobre un mismo expediente auditable.
           </p>
         </div>
@@ -183,7 +183,7 @@ function MarketingFooter() {
           title={`CheckWise v${APP_VERSION} · ${BUILD_SHA}`}
         >
           <p className="font-mono text-[10px] uppercase tracking-[0.2em] text-[color:var(--text-tertiary)]">
-            Powered by Legal Shelf
+            Equipo CheckWise
           </p>
           <p className="text-[13px] text-[color:var(--text-secondary)]">
             Hecho en Ciudad de México.

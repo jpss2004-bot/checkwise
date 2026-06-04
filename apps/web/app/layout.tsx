@@ -10,7 +10,7 @@ import "./globals.css";
 export const metadata: Metadata = {
   title: "CheckWise · Plataforma de cumplimiento REPSE",
   description:
-    "Carga, prevalidación y revisión humana de obligaciones documentales REPSE. Powered by Legal Shelf.",
+    "Carga guiada, revisión humana y reportes AI para obligaciones documentales REPSE.",
   icons: { icon: "/favicon.png" },
 };
 

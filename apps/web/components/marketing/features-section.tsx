@@ -1,6 +1,5 @@
 "use client";
 
-import Image from "next/image";
 import { useState } from "react";
 import { AnimatePresence, motion } from "motion/react";
 import {
@@ -15,6 +14,7 @@ import {
 
 import { EASE_ENTER, Reveal } from "./motion-helpers";
 import { useMotionPreference } from "./motion-preference";
+import { ProductShot, type ProductShotFocus } from "./product-shot";
 
 type Role = {
   id: string;
@@ -23,6 +23,7 @@ type Role = {
   headline: string;
   body: string;
   image: string;
+  focus: ProductShotFocus;
   chrome: string;
   bullets: ReadonlyArray<string>;
   pillar: {
@@ -38,7 +39,8 @@ const ROLES: ReadonlyArray<Role> = [
     icon: ClipboardText,
     headline: "Espacio propio con la próxima acción a la vista",
     body: "Cada proveedor entra a una vista precargada con cliente, RFC y contacto. El asistente Wise resuelve dudas del expediente sin salir de la pantalla.",
-    image: "/marketing/product/portal-dashboard.png",
+    image: "/marketing/generated/cw-provider-workspace.png",
+    focus: { zoom: 1, origin: "50% 50%", position: "center" },
     chrome: "Vista del proveedor",
     bullets: [
       "Cumplimiento, faltantes y vencimientos en una sola vista",
@@ -53,7 +55,8 @@ const ROLES: ReadonlyArray<Role> = [
     icon: Buildings,
     headline: "Portafolio en semáforo, sin pedir cortes manuales",
     body: "Vista cliente con riesgo, faltantes y proveedores listos para ser auditados. Vive en su propio dominio, no es un subdash del admin.",
-    image: "/marketing/product/client-dashboard.png",
+    image: "/marketing/generated/cw-client-portfolio.png",
+    focus: { zoom: 1, origin: "50% 50%", position: "center" },
     chrome: "Vista del cliente",
     bullets: [
       "Proveedores en verde, amarillo o rojo según evidencia",
@@ -64,18 +67,19 @@ const ROLES: ReadonlyArray<Role> = [
   },
   {
     id: "legalshelf",
-    label: "Legal Shelf",
+    label: "CheckWise",
     icon: Gavel,
     headline: "Cola priorizada de revisión humana, no automatización ciega",
-    body: "Los documentos críticos pasan por Ada Reyes y el equipo legal. Cada decisión queda firmada, con motivo y cambio registrado antes de aprobar o rechazar.",
-    image: "/marketing/product/admin-reviewer-queue.png",
-    chrome: "Bandeja Legal Shelf",
+    body: "Los documentos críticos pasan por el equipo CheckWise. Cada decisión queda firmada, con motivo y cambio registrado antes de aprobar o rechazar.",
+    image: "/marketing/generated/cw-review-queue.png",
+    focus: { zoom: 1, origin: "50% 50%", position: "center" },
+    chrome: "Bandeja CheckWise",
     bullets: [
       "FIFO por edad del documento, con desempate humano",
       "Estado por inconsistencia, aclaración o decisión",
       "Cada acción firma el registro de auditoría",
     ],
-    pillar: { label: "Audiencia", value: "Equipo legal" },
+    pillar: { label: "Audiencia", value: "Equipo CheckWise" },
   },
   {
     id: "reports",
@@ -83,7 +87,8 @@ const ROLES: ReadonlyArray<Role> = [
     icon: ChartLineUp,
     headline: "Editor de reportes con asistente y exportación nativa",
     body: "El reporte ejecutivo se redacta, regenera y exporta en el mismo canvas. Bloques editables, versiones, IA explicativa, y descarga en PDF, Excel o HTML.",
-    image: "/marketing/product/admin-report-editor.png",
+    image: "/marketing/generated/cw-report-editor.png",
+    focus: { zoom: 1, origin: "50% 50%", position: "center" },
     chrome: "Reporte ejecutivo",
     bullets: [
       "Generar · Asistir · Refrescar datos · Vista previa",
@@ -98,7 +103,8 @@ const ROLES: ReadonlyArray<Role> = [
     icon: Archive,
     headline: "Paquete listo para auditor, filtrado por periodo e institución",
     body: "Llega un inspector y CheckWise arma el ZIP exacto: documentos filtrados, índice firmado y registro de auditoría de toda la operación.",
-    image: "/marketing/product/client-auditoria.png",
+    image: "/marketing/generated/cw-audit-package.png",
+    focus: { zoom: 1, origin: "50% 50%", position: "center" },
     chrome: "Paquete para auditoría",
     bullets: [
       "Filtros por periodo (mes, trimestre, año fiscal)",
@@ -143,7 +149,7 @@ export function FeaturesSection() {
             </h2>
           </div>
           <p className="text-[14px] leading-[1.65] text-[color:var(--text-secondary)] md:text-right">
-            Proveedor, cliente, Legal Shelf, reportes y auditoría conectados
+            Proveedor, cliente, equipo CheckWise, reportes y auditoría conectados
             por requisito, periodo, institución y evidencia.
           </p>
         </Reveal>
@@ -267,14 +273,13 @@ function RoleCanvas({ active, reduce }: { active: Role; reduce: boolean }) {
                 En vivo
               </span>
             </div>
-            <div className="relative aspect-[16/10] w-full bg-[color:var(--surface-page)] p-3">
-              <Image
+            <div className="relative aspect-[16/9.4] w-full bg-[color:var(--surface-page)]">
+              <ProductShot
                 src={active.image}
                 alt={`Captura del sistema CheckWise mostrando ${active.label.toLowerCase()}.`}
-                fill
-                sizes="(min-width: 1024px) 60vw, 92vw"
-                className="object-contain object-top"
+                sizes="(min-width: 1024px) 78vw, 160vw"
                 priority={active.id === ROLES[0].id}
+                focus={active.focus}
               />
             </div>
           </div>

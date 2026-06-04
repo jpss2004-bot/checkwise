@@ -66,7 +66,7 @@ export function HeroSection() {
             {...fade(0.12)}
             className="mt-6 max-w-[52ch] text-[16px] leading-[1.65] text-[color:var(--text-secondary)] md:text-[17px]"
           >
-            CheckWise conecta calendario, carga guiada, revisión Legal Shelf,
+            CheckWise conecta calendario, carga guiada, revisión humana,
             auditoría y reportes AI en una sola operación para cumplimiento
             REPSE. La IA asiste; la decisión legal sigue siendo humana.
           </motion.p>

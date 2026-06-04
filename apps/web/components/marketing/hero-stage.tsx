@@ -1,6 +1,5 @@
 "use client";
 
-import Image from "next/image";
 import { useEffect, useState } from "react";
 import { AnimatePresence, motion } from "motion/react";
 import {
@@ -13,6 +12,7 @@ import {
 
 import { EASE_ENTER } from "./motion-helpers";
 import { useMotionPreference } from "./motion-preference";
+import { ProductShot, type ProductShotFocus } from "./product-shot";
 
 type HeroScene = {
   id: string;
@@ -23,6 +23,7 @@ type HeroScene = {
   metricLabel: string;
   image: string;
   icon: Icon;
+  focus: ProductShotFocus;
 };
 
 const SCENES: ReadonlyArray<HeroScene> = [
@@ -33,8 +34,9 @@ const SCENES: ReadonlyArray<HeroScene> = [
     body: "Cada obligación vive ligada a proveedor, institución, requisito y periodo.",
     metric: "151",
     metricLabel: "requisitos sembrados",
-    image: "/marketing/product/portal-calendar.png",
+    image: "/marketing/generated/cw-hero-operating-loop.png",
     icon: CalendarCheck,
+    focus: { zoom: 1, origin: "50% 50%", position: "center" },
   },
   {
     id: "upload",
@@ -43,18 +45,20 @@ const SCENES: ReadonlyArray<HeroScene> = [
     body: "El proveedor no sube un archivo suelto: resuelve una obligación específica.",
     metric: "5",
     metricLabel: "pasos de intake",
-    image: "/marketing/product/portal-upload.png",
+    image: "/marketing/generated/cw-upload-guided.png",
     icon: ClipboardText,
+    focus: { zoom: 1, origin: "50% 50%", position: "center" },
   },
   {
     id: "review",
-    label: "03 · Revisión Legal Shelf",
+    label: "03 · Revisión CheckWise",
     title: "Firma decisiones humanas",
     body: "Aprobación, rechazo, aclaración y excepción quedan en auditoría.",
     metric: "4",
     metricLabel: "decisiones canónicas",
-    image: "/marketing/product/admin-reviewer-queue.png",
+    image: "/marketing/generated/cw-review-queue.png",
     icon: Gavel,
+    focus: { zoom: 1, origin: "50% 50%", position: "center" },
   },
   {
     id: "reports",
@@ -63,8 +67,9 @@ const SCENES: ReadonlyArray<HeroScene> = [
     body: "El copilot compone bloques editables con datos tenant-scoped.",
     metric: "30",
     metricLabel: "eventos SSE verificados",
-    image: "/marketing/product/admin-report-editor.png",
+    image: "/marketing/generated/cw-report-editor.png",
     icon: ChartLineUp,
+    focus: { zoom: 1, origin: "50% 50%", position: "center" },
   },
 ];
 
@@ -113,23 +118,22 @@ export function HeroStage() {
         </div>
 
         <div className="grid min-h-[500px] grid-cols-1 lg:grid-cols-[minmax(0,1fr)_260px] xl:grid-cols-[minmax(0,1fr)_300px]">
-          <div className="relative min-h-[360px] overflow-hidden border-b border-[color:var(--border-subtle)] bg-[color:var(--surface-page)] p-3 lg:border-b-0 lg:border-r">
+          <div className="relative min-h-[360px] overflow-hidden border-b border-[color:var(--border-subtle)] bg-[color:var(--surface-page)] lg:border-b-0 lg:border-r">
             <AnimatePresence mode="wait">
               <motion.div
                 key={scene.id}
-                className="absolute inset-3"
+                className="absolute inset-0"
                 initial={reduce ? false : { opacity: 0, scale: 1.012 }}
                 animate={{ opacity: 1, scale: 1 }}
                 exit={reduce ? { opacity: 0 } : { opacity: 0, scale: 0.992 }}
                 transition={{ duration: 0.52, ease: EASE_ENTER }}
               >
-                <Image
+                <ProductShot
                   src={scene.image}
                   alt=""
-                  fill
                   priority={active === 0}
-                  sizes="(min-width: 1280px) 44vw, (min-width: 1024px) 54vw, 92vw"
-                  className="object-contain object-top"
+                  sizes="(min-width: 1280px) 64vw, (min-width: 1024px) 70vw, 160vw"
+                  focus={scene.focus}
                 />
               </motion.div>
             </AnimatePresence>
@@ -159,7 +163,7 @@ export function HeroStage() {
                 La operación completa
               </p>
               <p className="mt-2 text-[14px] leading-[1.55] text-[color:var(--text-secondary)]">
-                Una misma fuente de verdad para proveedor, Legal Shelf y cliente.
+                Una misma fuente de verdad para proveedor, cliente y equipo CheckWise.
               </p>
             </div>
 

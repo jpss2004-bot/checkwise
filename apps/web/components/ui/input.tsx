@@ -9,7 +9,7 @@ import { cn } from "@/lib/utils";
  * which `<Field/>` does for you. Spec: DESIGN_SYSTEM.md §6.4.
  */
 const Input = React.forwardRef<HTMLInputElement, React.InputHTMLAttributes<HTMLInputElement>>(
-  ({ className, type, ...props }, ref) => (
+  ({ className, style, type, ...props }, ref) => (
     <input
       type={type}
       className={cn(
@@ -25,6 +25,7 @@ const Input = React.forwardRef<HTMLInputElement, React.InputHTMLAttributes<HTMLI
         "aria-[invalid=true]:focus-visible:ring-[color:var(--border-error)]/30",
         className,
       )}
+      style={style ?? {}}
       ref={ref}
       {...props}
     />

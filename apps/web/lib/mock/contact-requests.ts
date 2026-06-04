@@ -33,7 +33,7 @@ export interface ContactRequestResult {
 export const INTEREST_LABELS: Record<LeadInterest, string> = {
   client_admin: "Soy cliente y quiero auditar a mis proveedores",
   provider: "Soy proveedor y quiero entregar mi expediente",
-  internal_legal: "Soy equipo legal / Legal Shelf",
+  internal_legal: "Soy parte del equipo CheckWise",
   exploring: "Estoy explorando opciones para mi empresa",
 };
 
