@@ -38,6 +38,13 @@ export interface WiseDockShellProps {
   /** Show the small warning pulse on the FAB. The shell never decides
    *  this — the entry computes it from its own message state. */
   hasWarning?: boolean;
+  /** Which corner the FAB + panel anchor to. ``left`` (default) is the
+   *  bottom-left floating icon used on surfaces with no left sidebar
+   *  (e.g. the client portal). ``right`` stacks the FAB above the
+   *  bottom-right feedback launcher and opens the panel bottom-right —
+   *  used on the provider portal, whose left sidebar owns the
+   *  bottom-left corner. */
+  placement?: "left" | "right";
   className?: string;
 
   /** Fired once per mount (after hydration completes). Use to send
@@ -63,6 +70,7 @@ export function WiseDockShell({
   ariaLabel,
   fabAriaLabel,
   hasWarning = false,
+  placement = "left",
   className,
   onFirstRender,
   onOpen,
@@ -146,11 +154,13 @@ export function WiseDockShell({
           "group fixed z-40 inline-flex h-14 w-14 items-center justify-center rounded-full shadow-lg transition-all duration-fast",
           "bg-[color:var(--surface-brand)] text-white",
           "hover:scale-105 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[color:var(--text-teal)]/60 focus-visible:ring-offset-2",
-          // Bottom-LEFT on desktop. FeedbackLauncher owns bottom-right
-          // at z-50; we mirror to the opposite corner at z-40 so the
-          // two never overlap. On mobile the FAB still sits in the
-          // bottom-left so users can swipe it open from the same side.
-          "bottom-5 left-5 sm:bottom-6 sm:left-6",
+          // ``left`` (client, no sidebar): bottom-left floating icon.
+          // ``right`` (provider): stacked ABOVE the FeedbackLauncher pill
+          // (bottom-4 right-4, z-50) so it clears the left sidebar's
+          // collapse + account controls and both stay clearly visible.
+          placement === "right"
+            ? "bottom-[5.5rem] right-5"
+            : "bottom-5 left-5 sm:bottom-6 sm:left-6",
           collapsed
             ? "pointer-events-auto scale-100 opacity-100"
             : "pointer-events-none scale-90 opacity-0",
@@ -190,11 +200,10 @@ export function WiseDockShell({
               // ~78vh max so the user can still see what they were
               // doing behind the dock.
               "inset-x-0 bottom-0 max-h-[78vh] rounded-t-2xl",
-              // Desktop: floating card pinned bottom-LEFT, ~380px wide.
-              // Mirrors the FAB so the panel opens out from where the
-              // launcher was sitting, keeping bottom-right free for the
-              // FeedbackLauncher.
-              "sm:inset-x-auto sm:bottom-6 sm:left-6 sm:max-h-[min(620px,calc(100vh-6rem))] sm:w-[380px] sm:rounded-2xl",
+              // Desktop: floating card mirroring the FAB corner, ~380px.
+              placement === "right"
+                ? "sm:inset-x-auto sm:bottom-6 sm:right-6 sm:max-h-[min(620px,calc(100vh-6rem))] sm:w-[380px] sm:rounded-2xl"
+                : "sm:inset-x-auto sm:bottom-6 sm:left-6 sm:max-h-[min(620px,calc(100vh-6rem))] sm:w-[380px] sm:rounded-2xl",
             )}
           >
             {renderHeader(close)}

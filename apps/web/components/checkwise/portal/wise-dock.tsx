@@ -309,6 +309,9 @@ export function WiseDock({
       ariaLabel="Wise — copiloto de cumplimiento"
       fabAriaLabel={`Abrir Wise · ${AUDIENCE_PILL[audience]}`}
       hasWarning={hasWarning}
+      // Provider portal has a left sidebar that owns the bottom-left
+      // corner; anchor Wise bottom-right so the two never overlap.
+      placement="right"
       className={className}
       onFirstRender={() => {
         void postWiseEvent(session, "wise.first_render", {
