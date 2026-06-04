@@ -10,13 +10,11 @@ import {
   ReportExportOverlay,
   type ExportPhase,
 } from "@/components/checkwise/reports/report-export-overlay";
-import { ReportPreviewModal } from "@/components/checkwise/reports/report-preview-modal";
 import { cn } from "@/lib/utils";
 import {
   ReportsApiError,
   createReportExport,
   downloadReportExport,
-  fetchReportExportObjectUrl,
   pollReportExportUntilReady,
   type ReportExportFormat,
 } from "@/lib/api/reports";
@@ -172,17 +170,15 @@ export function ExportButton({
 }
 
 /**
- * Inline PDF preview — renders the SAME server-rendered PDF the Download
- * button produces, in an in-app modal (iframe) rather than a browser tab.
+ * Vista previa — opens the report PDF in a NEW browser tab.
  *
- * Why not a new tab: the old approach opened a blank tab synchronously on
- * click (to dodge popup blockers) and pointed it at the URL once the
- * render finished. But opening the tab stole focus to it, which
- * backgrounded the app tab — and browsers throttle background-tab timers,
- * so the poll loop stalled until the user clicked back into the app. The
- * render now stays in the foreground and the result appears in place; the
- * modal still offers "Abrir en pestaña" / "Descargar" as one-click
- * gesture actions.
+ * The click only opens ``/reports/pdf/<id>`` in a new tab (a synchronous
+ * window.open, so it's never popup-blocked). That route — now the
+ * FOREGROUND tab — creates the export, polls to ready, and replaces
+ * itself with the PDF, landing in the browser's native viewer where the
+ * user can download / print. Doing the work in the new (foreground) tab
+ * is what fixes the old bug: the source tab no longer polls in the
+ * background, so nothing is throttled and nothing stalls.
  */
 export function PreviewPdfButton({
   reportId,
@@ -198,114 +194,35 @@ export function PreviewPdfButton({
   // ExportButton, so every row in a menu looks identical.
   asMenuItem?: boolean;
 }) {
-  const [busy, setBusy] = useState(false);
-  const [phase, setPhase] = useState<ExportPhase>("queued");
-  const [previewUrl, setPreviewUrl] = useState<string | null>(null);
-  const [previewExportId, setPreviewExportId] = useState<string | null>(null);
-  const [downloading, setDownloading] = useState(false);
+  const onClick = useCallback(() => {
+    window.open(`/reports/pdf/${reportId}`, "_blank", "noopener");
+  }, [reportId]);
 
-  const onClick = useCallback(async () => {
-    if (busy) return;
-    setBusy(true);
-    setPhase("queued");
-    try {
-      const created = await createReportExport(reportId, { format: "pdf" });
-      const ready = await pollReportExportUntilReady(created.id, {
-        onStatus: (s) => setPhase(s === "rendering" ? "rendering" : "queued"),
-      });
-      setPhase("finalizing");
-      // ``inline`` disposition URL — the modal's iframe renders it in place.
-      const objectUrl = await fetchReportExportObjectUrl(ready.id);
-      setPreviewExportId(ready.id);
-      setPreviewUrl(objectUrl);
-    } catch (err) {
-      const message =
-        err instanceof ReportsApiError
-          ? err.message
-          : err instanceof Error
-            ? err.message
-            : "No pudimos generar la vista previa.";
-      toast.error(message);
-    } finally {
-      setBusy(false);
-    }
-  }, [busy, reportId]);
-
-  const closePreview = useCallback(() => {
-    setPreviewUrl((current) => {
-      // Only blob URLs (local-disk storage) need revoking; presigned R2
-      // URLs are plain links.
-      if (current && current.startsWith("blob:")) URL.revokeObjectURL(current);
-      return null;
-    });
-    setPreviewExportId(null);
-  }, []);
-
-  const onDownloadFromPreview = useCallback(async () => {
-    if (!previewExportId || downloading) return;
-    setDownloading(true);
-    try {
-      await downloadReportExport(
-        previewExportId,
-        `checkwise-reporte-${reportId.slice(0, 8)}.pdf`,
-      );
-    } catch (err) {
-      toast.error(
-        err instanceof ReportsApiError
-          ? err.message
-          : "No pudimos descargar el PDF.",
-      );
-    } finally {
-      setDownloading(false);
-    }
-  }, [previewExportId, downloading, reportId]);
-
-  const label = busy ? "Generando vista previa…" : "Vista previa";
-  const overlay = (
-    <>
-      <ReportExportOverlay open={busy} mode="preview" phase={phase} />
-      {previewUrl ? (
-        <ReportPreviewModal
-          url={previewUrl}
-          onClose={closePreview}
-          onDownload={onDownloadFromPreview}
-          downloading={downloading}
-        />
-      ) : null}
-    </>
-  );
+  const title = "Abrir el PDF del reporte en una pestaña nueva";
   if (asMenuItem) {
     return (
-      <>
-        <button
-          type="button"
-          onClick={onClick}
-          disabled={busy}
-          title="Abrir una vista previa del PDF en una pestaña nueva"
-          className={cn(OVERFLOW_MENU_ROW_CLASS, className)}
-        >
-          <Eye className="h-4 w-4 shrink-0" weight="bold" aria-hidden="true" />
-          <span>{label}</span>
-        </button>
-        {overlay}
-      </>
+      <button
+        type="button"
+        onClick={onClick}
+        title={title}
+        className={cn(OVERFLOW_MENU_ROW_CLASS, className)}
+      >
+        <Eye className="h-4 w-4 shrink-0" weight="bold" aria-hidden="true" />
+        <span>Vista previa</span>
+      </button>
     );
   }
   return (
-    <>
-      <Button
-        type="button"
-        variant={variant}
-        size="sm"
-        onClick={onClick}
-        disabled={busy}
-        title="Abrir una vista previa del PDF en una pestaña nueva"
-        className={className}
-      >
-        <Eye className="h-4 w-4" weight="bold" aria-hidden="true" />
-        {label}
-      </Button>
-      {overlay}
-    </>
+    <Button
+      type="button"
+      variant={variant}
+      size="sm"
+      onClick={onClick}
+      title={title}
+      className={className}
+    >
+      <Eye className="h-4 w-4" weight="bold" aria-hidden="true" />
+      Vista previa
+    </Button>
   );
 }
