@@ -124,13 +124,13 @@ export function FeaturesSection() {
   const active = ROLES.find((r) => r.id === activeId) ?? ROLES[0];
 
   return (
-    <section id="features" className="relative bg-[color:var(--surface-raised)]">
+    <section id="sistema" className="relative bg-[color:var(--surface-raised)]">
       <div className="mx-auto max-w-[1320px] px-5 py-24 lg:py-28">
         {/* Section header — small, deliberate. The product carries the page. */}
         <Reveal className="grid gap-6 md:grid-cols-[minmax(0,2fr)_minmax(0,1fr)] md:items-end">
           <div>
             <p className="cw-eyebrow text-[color:var(--text-teal)]">
-              El sistema, por rol
+              Tres espacios, un expediente
             </p>
             <h2
               className="mt-3 font-semibold tracking-[-0.022em] text-[color:var(--text-primary)] [text-wrap:balance]"
@@ -139,12 +139,12 @@ export function FeaturesSection() {
                 lineHeight: 1.04,
               }}
             >
-              Una superficie para cada persona, un mismo expediente debajo.
+              Cada persona ve su trabajo. Todos comparten la misma verdad.
             </h2>
           </div>
           <p className="text-[14px] leading-[1.65] text-[color:var(--text-secondary)] md:text-right">
-            Recorre las cinco superficies que conforman la operación REPSE
-            completa de CheckWise.
+            Proveedor, cliente, Legal Shelf, reportes y auditoría conectados
+            por requisito, periodo, institución y evidencia.
           </p>
         </Reveal>
 
@@ -173,13 +173,14 @@ function RoleRail({
       <ul className="mt-4 flex flex-col">
         {roles.map((role) => {
           const active = role.id === activeId;
+          const Icon = role.icon;
           return (
             <li key={role.id}>
               <button
                 type="button"
                 aria-pressed={active}
                 onClick={() => onSelect(role.id)}
-                className="group relative flex w-full items-baseline gap-3 py-3 text-left focus-visible:outline-none"
+                className="group relative flex w-full items-center gap-3 py-3 text-left focus-visible:outline-none"
               >
                 {/* Left edge accent — teal hairline on active, hairline
                     track underneath for the others. */}
@@ -191,7 +192,17 @@ function RoleRail({
                       : "bg-[color:var(--border-subtle)] group-hover:bg-[color:var(--border-strong)]"
                   }`}
                 />
-                <div className="pl-4">
+                <span
+                  aria-hidden="true"
+                  className={`ml-4 flex h-8 w-8 shrink-0 items-center justify-center rounded-md transition-colors ${
+                    active
+                      ? "bg-[color:var(--surface-brand)] text-[color:var(--text-inverse)]"
+                      : "bg-[color:var(--surface-teal-muted)] text-[color:var(--text-teal)]"
+                  }`}
+                >
+                  <Icon className="h-3.5 w-3.5" weight="duotone" />
+                </span>
+                <div className="min-w-0">
                   <p
                     className={`text-[18px] font-semibold leading-tight tracking-[-0.012em] transition-colors ${
                       active
@@ -256,13 +267,13 @@ function RoleCanvas({ active, reduce }: { active: Role; reduce: boolean }) {
                 En vivo
               </span>
             </div>
-            <div className="relative aspect-[16/9.2] w-full">
+            <div className="relative aspect-[16/10] w-full bg-[color:var(--surface-page)] p-3">
               <Image
                 src={active.image}
                 alt={`Captura del sistema CheckWise mostrando ${active.label.toLowerCase()}.`}
                 fill
                 sizes="(min-width: 1024px) 60vw, 92vw"
-                className="object-cover object-top"
+                className="object-contain object-top"
                 priority={active.id === ROLES[0].id}
               />
             </div>

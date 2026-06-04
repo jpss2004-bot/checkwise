@@ -1,9 +1,14 @@
 "use client";
 
-import Image from "next/image";
 import Link from "next/link";
 import { motion } from "motion/react";
-import { ArrowRight, Lock } from "@phosphor-icons/react";
+import {
+  ArrowRight,
+  CalendarCheck,
+  CheckCircle,
+  Gavel,
+  Lock,
+} from "@phosphor-icons/react";
 
 import { Button } from "@/components/ui/button";
 
@@ -12,15 +17,12 @@ import { useMotionPreference } from "./motion-preference";
 
 const EASE_ENTER = [0.16, 1, 0.3, 1] as const;
 
-/**
- * Hero — pain-first typographic column + layered product stage.
- *
- * The page opens on a single sentence framed around the problem ("stop
- * chasing REPSE documents"), a tight subhead that names what CheckWise
- * is, and one primary CTA. The stage to the right carries the live
- * proof. The mobile path collapses to the typographic column + an
- * inline product screenshot.
- */
+const HERO_PROOF = [
+  { label: "Obligaciones", value: "151", detail: "requisitos REPSE sembrados" },
+  { label: "Flujo", value: "5", detail: "pasos de carga guiada" },
+  { label: "Salida", value: "PDF", detail: "Excel, HTML y paquete auditor" },
+] as const;
+
 export function HeroSection() {
   const { reduced: reduce } = useMotionPreference();
   const fade = (delay: number) =>
@@ -33,45 +35,43 @@ export function HeroSection() {
         } as const);
 
   return (
-    <section className="relative isolate min-h-[640px] overflow-hidden bg-[color:var(--surface-page)] md:min-h-[min(88vh,860px)]">
-      <HeroStage />
+    <section className="relative isolate overflow-hidden border-b border-[color:var(--border-subtle)] bg-[color:var(--surface-page)]">
+      <div
+        aria-hidden="true"
+        className="cw-grid-pattern pointer-events-none absolute inset-x-0 top-0 -z-10 h-[72%] opacity-[0.62]"
+      />
 
-      <div className="relative mx-auto flex min-h-[640px] max-w-[1320px] items-center px-5 py-16 md:min-h-[min(88vh,860px)] md:py-20">
-        <div className="max-w-[560px] min-w-0">
+      <div className="mx-auto grid max-w-[1320px] grid-cols-1 items-center gap-10 px-5 py-10 md:py-16 lg:min-h-[calc(100dvh-64px)] lg:grid-cols-[minmax(0,0.86fr)_minmax(0,1.14fr)] lg:gap-14 lg:py-20">
+        <div className="min-w-0">
           <motion.div
             {...fade(0)}
-            className="inline-flex items-center gap-2 rounded-full border border-[color:var(--border-default)] bg-[color:var(--surface-raised)]/85 px-2.5 py-1 font-mono text-[10px] uppercase tracking-[0.2em] text-[color:var(--text-secondary)] backdrop-blur-sm"
+            className="inline-flex items-center gap-2 rounded-full border border-[color:var(--border-default)] bg-[color:var(--surface-raised)]/90 px-2.5 py-1 font-mono text-[10px] uppercase tracking-[0.2em] text-[color:var(--text-secondary)] shadow-[0_12px_28px_-24px_hsl(var(--brand-navy)/0.45)] backdrop-blur-sm"
           >
             <span className="cw-pulse-soft inline-block h-1.5 w-1.5 rounded-full bg-[color:var(--text-teal)]" />
-            CheckWise · Sistema operativo REPSE
+            CheckWise · operación REPSE real
           </motion.div>
 
           <motion.h1
             {...fade(0.06)}
-            className="mt-6 font-semibold tracking-[-0.025em] text-[color:var(--text-primary)] [text-wrap:balance]"
+            className="mt-6 max-w-[12ch] font-semibold tracking-[-0.025em] text-[color:var(--text-primary)] [text-wrap:balance]"
             style={{
-              fontSize: "clamp(2rem, 4vw, 3.25rem)",
-              lineHeight: "1.04",
+              fontSize: "clamp(2.45rem, 5.7vw, 5.25rem)",
+              lineHeight: "0.95",
             }}
           >
-            Controla la documentación REPSE de tus proveedores{" "}
-            <span className="text-[color:var(--text-teal)]">
-              sin perseguir archivos cada mes.
-            </span>
+            Del pendiente al expediente defendible.
           </motion.h1>
 
           <motion.p
             {...fade(0.12)}
-            className="mt-5 max-w-[44ch] text-[16px] leading-[1.55] text-[color:var(--text-secondary)]"
+            className="mt-6 max-w-[52ch] text-[16px] leading-[1.65] text-[color:var(--text-secondary)] md:text-[17px]"
           >
-            Calendario, carga guiada, revisión humana y reportes
-            ejecutivos sobre un mismo expediente trazable.
+            CheckWise conecta calendario, carga guiada, revisión Legal Shelf,
+            auditoría y reportes AI en una sola operación para cumplimiento
+            REPSE. La IA asiste; la decisión legal sigue siendo humana.
           </motion.p>
 
-          <motion.div
-            {...fade(0.18)}
-            className="mt-7 flex flex-wrap items-center gap-3"
-          >
+          <motion.div {...fade(0.18)} className="mt-8 flex flex-wrap gap-3">
             <Button
               asChild
               size="lg"
@@ -93,42 +93,59 @@ export function HeroSection() {
               size="lg"
               className="cw-hover-lift gap-2 rounded-full px-4 text-[color:var(--text-secondary)]"
             >
-              <Link href="#features">
-                <span>Ver cómo funciona</span>
-              </Link>
+              <Link href="#sistema">Ver el sistema</Link>
             </Button>
           </motion.div>
+        </div>
 
-          {/* Mobile-only inline screenshot — shows the product on small
-              screens where the desktop stage is hidden. */}
+        <div className="min-w-0 lg:row-span-2">
+          <HeroStage />
+        </div>
+
+        <div className="min-w-0">
           <motion.div
-            {...fade(0.22)}
-            className="mt-10 overflow-hidden rounded-[12px] border border-[color:var(--border-default)] bg-[color:var(--surface-raised)] shadow-[0_24px_60px_-36px_hsl(var(--brand-navy)/0.35)] md:hidden"
+            {...fade(0.24)}
+            className="mt-10 grid max-w-[560px] grid-cols-1 gap-3 sm:grid-cols-3"
           >
-            <div className="flex items-center gap-1.5 border-b border-[color:var(--border-subtle)] bg-[color:var(--surface-page)] px-3 py-2">
-              <span className="h-1.5 w-1.5 rounded-full bg-[color:var(--border-strong)]/70" />
-              <span className="h-1.5 w-1.5 rounded-full bg-[color:var(--border-strong)]/45" />
-              <span className="h-1.5 w-1.5 rounded-full bg-[color:var(--border-strong)]/30" />
-              <span className="ml-2 font-mono text-[9px] uppercase tracking-[0.16em] text-[color:var(--text-tertiary)]">
-                Portal proveedor · en vivo
-              </span>
-            </div>
-            <Image
-              src="/marketing/product/portal-dashboard.png"
-              alt="Dashboard del proveedor con cumplimiento y próximas acciones."
-              width={1920}
-              height={1080}
-              priority
-              className="block h-auto w-full"
-              sizes="92vw"
-            />
+            {HERO_PROOF.map((item) => (
+              <div
+                key={item.label}
+                className="border-t border-[color:var(--border-default)] pt-3"
+              >
+                <p className="font-mono text-[10px] uppercase tracking-[0.18em] text-[color:var(--text-tertiary)]">
+                  {item.label}
+                </p>
+                <p className="mt-1 text-[24px] font-semibold tracking-[-0.03em] text-[color:var(--text-primary)]">
+                  {item.value}
+                </p>
+                <p className="mt-1 text-[12.5px] leading-[1.45] text-[color:var(--text-secondary)]">
+                  {item.detail}
+                </p>
+              </div>
+            ))}
           </motion.div>
 
-          {/* Quiet utility note — replaces the prior chip-trail of role
-              names. One line, one promise. */}
+          <motion.div
+            {...fade(0.3)}
+            className="mt-8 flex flex-wrap items-center gap-x-5 gap-y-2 text-[12.5px] text-[color:var(--text-secondary)]"
+          >
+            <span className="inline-flex items-center gap-2">
+              <CalendarCheck className="h-3.5 w-3.5 text-[color:var(--text-teal)]" weight="bold" />
+              Calendario y periodos
+            </span>
+            <span className="inline-flex items-center gap-2">
+              <Gavel className="h-3.5 w-3.5 text-[color:var(--text-teal)]" weight="bold" />
+              Revisión humana
+            </span>
+            <span className="inline-flex items-center gap-2">
+              <CheckCircle className="h-3.5 w-3.5 text-[color:var(--text-teal)]" weight="bold" />
+              Registro auditable
+            </span>
+          </motion.div>
+
           <motion.p
-            {...fade(0.28)}
-            className="mt-10 inline-flex items-center gap-2 text-[12.5px] text-[color:var(--text-tertiary)]"
+            {...fade(0.34)}
+            className="mt-7 inline-flex items-center gap-2 text-[12.5px] text-[color:var(--text-tertiary)]"
           >
             <Lock className="h-3.5 w-3.5" weight="bold" aria-hidden="true" />
             <span>
@@ -143,35 +160,6 @@ export function HeroSection() {
           </motion.p>
         </div>
       </div>
-
-      <ScrollHint />
     </section>
-  );
-}
-
-function ScrollHint() {
-  const { reduced: reduce } = useMotionPreference();
-  return (
-    <motion.div
-      aria-hidden="true"
-      className="pointer-events-none absolute inset-x-0 bottom-3 z-0 flex justify-center"
-      initial={reduce ? false : { opacity: 0 }}
-      animate={{ opacity: 1 }}
-      transition={{ duration: 0.4, delay: 1.6 }}
-    >
-      <motion.span
-        className="inline-flex items-center gap-2 font-mono text-[9px] uppercase tracking-[0.2em] text-[color:var(--text-tertiary)]"
-        animate={reduce ? undefined : { y: [0, 4, 0] }}
-        transition={
-          reduce
-            ? undefined
-            : { duration: 2.6, repeat: Infinity, ease: "easeInOut" }
-        }
-      >
-        <span className="h-px w-6 bg-[color:var(--border-default)]" />
-        Continúa
-        <span className="h-px w-6 bg-[color:var(--border-default)]" />
-      </motion.span>
-    </motion.div>
   );
 }

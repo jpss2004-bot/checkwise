@@ -57,31 +57,31 @@ function RequestInformation() {
             className="mt-3 font-semibold tracking-[-0.022em] text-[color:var(--text-primary)] [text-wrap:balance]"
             style={{ fontSize: "clamp(1.9rem, 2.9vw, 2.55rem)", lineHeight: 1.04 }}
           >
-            ¿Listo para entrar al sistema?{" "}
+            ¿Listo para ver tu operación en CheckWise?{" "}
             <span className="text-[color:var(--text-teal)]">
-              Te abrimos una demo guiada.
+              Te abrimos una demo guiada sobre el producto real.
             </span>
           </h2>
           <p className="mt-4 max-w-[44ch] text-[15px] leading-[1.6] text-[color:var(--text-secondary)]">
-            Veinte minutos sobre el sistema real con tus datos de ejemplo.
-            Sin presentación, sin video pregrabado.
+            Recorremos calendario, expediente, revisión Legal Shelf y reportes
+            AI con datos de ejemplo. Sin video pregrabado.
           </p>
 
           <ol className="mt-9 space-y-5 border-l border-[color:var(--border-default)] pl-5">
             <DemoStep
               n="01"
-              kicker="Recorrido"
-              body="Vista del proveedor, vista cliente y bandeja Legal Shelf sobre un mismo expediente real."
+              kicker="Sistema"
+              body="Vista proveedor, vista cliente y consola Legal Shelf sobre el mismo expediente."
             />
             <DemoStep
               n="02"
-              kicker="Reportes"
-              body="Editor con asistente de reportes, generación, exportación PDF, Excel y HTML en vivo."
+              kicker="Evidencia"
+              body="Slots por requisito, periodo e institución, con estado, reemplazos y decisión firmada."
             />
             <DemoStep
               n="03"
-              kicker="Auditoría"
-              body="Registro firmado, paquete ZIP con índice y datos exportables a tu auditor."
+              kicker="AI + auditoría"
+              body="Reportes asistidos, exportación ejecutiva y registro listo para auditoría."
             />
           </ol>
 
@@ -167,9 +167,9 @@ function MarketingFooter() {
         <FooterColumn
           label="Producto"
           links={[
-            { label: "Cómo funciona", href: "#features" },
-            { label: "Recorrido", href: "#producto" },
-            { label: "Legal Shelf", href: "#legal-shelf" },
+            { label: "Sistema", href: "#sistema" },
+            { label: "Evidencia", href: "#evidencia" },
+            { label: "AI + revisión", href: "#ai-revision" },
             { label: "Iniciar sesión", href: "/login" },
             { label: "Solicitar demo", href: "#contacto" },
           ]}
