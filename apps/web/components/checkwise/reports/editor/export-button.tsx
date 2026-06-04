@@ -10,6 +10,7 @@ import {
   ReportExportOverlay,
   type ExportPhase,
 } from "@/components/checkwise/reports/report-export-overlay";
+import { ReportPreviewModal } from "@/components/checkwise/reports/report-preview-modal";
 import { cn } from "@/lib/utils";
 import {
   ReportsApiError,
@@ -171,16 +172,17 @@ export function ExportButton({
 }
 
 /**
- * Inline PDF preview — opens the SAME server-rendered PDF the Download
- * button produces, but in a new browser tab instead of saving it. This
- * replaced the old "Imprimir" (window.print) button, which was
- * redundant with Download PDF and produced a browser-chrome printout
- * rather than the designed document.
+ * Inline PDF preview — renders the SAME server-rendered PDF the Download
+ * button produces, in an in-app modal (iframe) rather than a browser tab.
  *
- * Popup-blocker note: we open the tab synchronously inside the click
- * handler (so it's attributed to the user gesture) and only navigate it
- * to the blob URL once the render finishes. If render fails we close the
- * placeholder tab and toast the error.
+ * Why not a new tab: the old approach opened a blank tab synchronously on
+ * click (to dodge popup blockers) and pointed it at the URL once the
+ * render finished. But opening the tab stole focus to it, which
+ * backgrounded the app tab — and browsers throttle background-tab timers,
+ * so the poll loop stalled until the user clicked back into the app. The
+ * render now stays in the foreground and the result appears in place; the
+ * modal still offers "Abrir en pestaña" / "Descargar" as one-click
+ * gesture actions.
  */
 export function PreviewPdfButton({
   reportId,
@@ -198,32 +200,25 @@ export function PreviewPdfButton({
 }) {
   const [busy, setBusy] = useState(false);
   const [phase, setPhase] = useState<ExportPhase>("queued");
+  const [previewUrl, setPreviewUrl] = useState<string | null>(null);
+  const [previewExportId, setPreviewExportId] = useState<string | null>(null);
+  const [downloading, setDownloading] = useState(false);
 
   const onClick = useCallback(async () => {
     if (busy) return;
     setBusy(true);
     setPhase("queued");
-    const tab = window.open("", "_blank", "noopener,noreferrer");
-    let objectUrl: string | null = null;
     try {
       const created = await createReportExport(reportId, { format: "pdf" });
       const ready = await pollReportExportUntilReady(created.id, {
         onStatus: (s) => setPhase(s === "rendering" ? "rendering" : "queued"),
       });
       setPhase("finalizing");
-      objectUrl = await fetchReportExportObjectUrl(ready.id);
-      if (tab) {
-        tab.location.href = objectUrl;
-      } else {
-        // Popup was blocked — fall back to opening once we have the URL.
-        window.open(objectUrl, "_blank", "noopener,noreferrer");
-      }
-      // Revoke after the tab has had time to load the bytes.
-      const urlToRevoke = objectUrl;
-      setTimeout(() => URL.revokeObjectURL(urlToRevoke), 60_000);
+      // ``inline`` disposition URL — the modal's iframe renders it in place.
+      const objectUrl = await fetchReportExportObjectUrl(ready.id);
+      setPreviewExportId(ready.id);
+      setPreviewUrl(objectUrl);
     } catch (err) {
-      if (tab) tab.close();
-      if (objectUrl) URL.revokeObjectURL(objectUrl);
       const message =
         err instanceof ReportsApiError
           ? err.message
@@ -236,9 +231,48 @@ export function PreviewPdfButton({
     }
   }, [busy, reportId]);
 
+  const closePreview = useCallback(() => {
+    setPreviewUrl((current) => {
+      // Only blob URLs (local-disk storage) need revoking; presigned R2
+      // URLs are plain links.
+      if (current && current.startsWith("blob:")) URL.revokeObjectURL(current);
+      return null;
+    });
+    setPreviewExportId(null);
+  }, []);
+
+  const onDownloadFromPreview = useCallback(async () => {
+    if (!previewExportId || downloading) return;
+    setDownloading(true);
+    try {
+      await downloadReportExport(
+        previewExportId,
+        `checkwise-reporte-${reportId.slice(0, 8)}.pdf`,
+      );
+    } catch (err) {
+      toast.error(
+        err instanceof ReportsApiError
+          ? err.message
+          : "No pudimos descargar el PDF.",
+      );
+    } finally {
+      setDownloading(false);
+    }
+  }, [previewExportId, downloading, reportId]);
+
   const label = busy ? "Generando vista previa…" : "Vista previa";
   const overlay = (
-    <ReportExportOverlay open={busy} mode="preview" phase={phase} />
+    <>
+      <ReportExportOverlay open={busy} mode="preview" phase={phase} />
+      {previewUrl ? (
+        <ReportPreviewModal
+          url={previewUrl}
+          onClose={closePreview}
+          onDownload={onDownloadFromPreview}
+          downloading={downloading}
+        />
+      ) : null}
+    </>
   );
   if (asMenuItem) {
     return (
