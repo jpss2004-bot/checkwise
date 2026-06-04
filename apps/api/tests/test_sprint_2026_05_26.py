@@ -1108,6 +1108,79 @@ def test_admin_users_provisions_provider_with_workspace(
         db.close()
 
 
+def test_admin_users_provisions_internal_admin(
+    api_client: TestClient, db_factory
+) -> None:
+    """``POST /admin/users`` with role=admin mints the temp-password
+    User stack and binds an internal_admin Membership on the shared
+    internal organisation — no Client/Vendor. Re-running reuses the
+    same internal org rather than creating a duplicate."""
+    email, pw = _seed_user(db_factory, role="internal_admin", email_prefix="adm")
+    token = _login(api_client, email, pw)
+
+    resp = api_client.post(
+        "/api/v1/admin/users",
+        json={
+            "full_name": "Nueva Administradora",
+            "email": "nueva.admin@legalshelf.mx",
+            "role": "admin",
+        },
+        headers=_h(token),
+    )
+    assert resp.status_code == 201, resp.text
+    body = resp.json()
+    assert body["role"] == "admin"
+    assert body["user_id"]
+    assert body["organization_id"]
+    assert body["client_id"] is None
+    assert body["vendor_id"] is None
+    assert len(body["temp_password"]) >= 12
+
+    db = db_factory()
+    try:
+        user = db.get(User, body["user_id"])
+        assert user is not None
+        assert user.email == "nueva.admin@legalshelf.mx"
+        assert user.must_change_password is True
+        from app.services.auth import verify_password
+
+        assert verify_password(body["temp_password"], user.password_hash)
+
+        org = db.get(Organization, body["organization_id"])
+        assert org is not None
+        assert org.kind == "internal"
+
+        membership = db.scalar(
+            select(Membership).where(Membership.user_id == user.id)
+        )
+        assert membership is not None
+        assert membership.role == "internal_admin"
+        assert membership.organization_id == org.id
+
+        audit = db.scalar(
+            select(AuditLog)
+            .where(AuditLog.action == "admin.user.provisioned")
+            .where(AuditLog.entity_id == user.id)
+        )
+        assert audit is not None
+        assert (audit.after or {}).get("role") == "admin"
+    finally:
+        db.close()
+
+    # Second admin reuses the same internal org (no duplicate row).
+    resp2 = api_client.post(
+        "/api/v1/admin/users",
+        json={
+            "full_name": "Segundo Admin",
+            "email": "segundo.admin@legalshelf.mx",
+            "role": "admin",
+        },
+        headers=_h(token),
+    )
+    assert resp2.status_code == 201, resp2.text
+    assert resp2.json()["organization_id"] == body["organization_id"]
+
+
 def test_admin_users_provider_requires_parent_client(
     api_client: TestClient, db_factory
 ) -> None:

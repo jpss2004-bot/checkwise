@@ -382,6 +382,12 @@ def get_client(client_id: str, db: DbSession, current: AdminUser) -> dict:
 # once and is forced through ``/activate`` by ``must_change_password``.
 
 
+# Shared internal organisation for portal-provisioned admins. Mirrors
+# ``DEFAULT_ORG_NAME`` in scripts/add_internal_admin.py so a web-created
+# admin lands in the same org as a CLI-bootstrapped one.
+INTERNAL_ORG_NAME: Final = "LegalShelf — Internal"
+
+
 class ProvisionUserPayload(BaseModel):
     """Body for ``POST /admin/users``.
 
@@ -389,15 +395,17 @@ class ProvisionUserPayload(BaseModel):
       * ``client`` → Client + Organization(kind=client) + Membership(client_admin)
       * ``provider`` → Vendor + ProviderWorkspace(owner_user_id=user.id)
         attached to the requested ``client_id``.
+      * ``admin`` → Membership(internal_admin) on the internal
+        LegalShelf organisation. No client/vendor fields needed.
 
-    Email + name are common to both roles. Role-specific fields are
+    Email + name are common to all roles. Role-specific fields are
     optional at the Pydantic layer; the handler validates the right
     subset based on ``role`` and returns a clear 422 otherwise.
     """
 
     full_name: str = Field(min_length=2, max_length=255)
     email: EmailStr = Field(...)
-    role: Literal["client", "provider"] = Field(...)
+    role: Literal["client", "provider", "admin"] = Field(...)
 
     # --- client-only fields ---
     client_name: str | None = Field(default=None, max_length=255)
@@ -427,7 +435,7 @@ class ProvisionUserResponse(BaseModel):
     """
 
     user_id: str
-    role: Literal["client", "provider"]
+    role: Literal["client", "provider", "admin"]
     email: str
     temp_password: str
     login_url: str
@@ -543,6 +551,33 @@ def provision_user(
         client_id = client_row.id
         organization_id = org.id
         welcome_org_name = name
+    elif payload.role == "admin":
+        # Internal LegalShelf admin. Get-or-create the shared internal
+        # organisation (mirrors scripts/add_internal_admin.py), then
+        # bind an internal_admin membership. No Client/Vendor stack.
+        org = db.scalar(
+            select(Organization).where(
+                Organization.name == INTERNAL_ORG_NAME,
+                Organization.kind == "internal",
+            )
+        )
+        if org is None:
+            org = Organization(
+                name=INTERNAL_ORG_NAME, kind="internal", status="active"
+            )
+            db.add(org)
+            db.flush()
+        db.add(
+            Membership(
+                user_id=user.id,
+                organization_id=org.id,
+                role=MembershipRole.INTERNAL_ADMIN.value,
+                status="active",
+            )
+        )
+        db.flush()
+        organization_id = org.id
+        welcome_org_name = None
     else:  # role == "provider"
         if not payload.vendor_name or not payload.parent_client_id:
             db.rollback()
