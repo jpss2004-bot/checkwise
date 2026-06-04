@@ -49,6 +49,16 @@ services:
         value: production
       - key: PYTHON_VERSION
         value: "3.11"
+      # Install Playwright's Chromium INTO the pip package location (0 = the
+      # browsers live next to the playwright install) instead of a separate
+      # ~/.cache the build writes but the runtime can't find. Without this,
+      # the build's `playwright install` lands in a cache that doesn't
+      # persist to the run container, the PDF renderer can't locate Chromium,
+      # and Download PDF fails with "playwright install". Must be set for
+      # BOTH build and runtime — Render env vars are. The renderer also
+      # self-heals (installs on demand) if it's ever still missing.
+      - key: PLAYWRIGHT_BROWSERS_PATH
+        value: "0"
 
       # ---- Database (Neon) ----
       # DATABASE_URL points at the POOLED Neon endpoint (used at runtime).
