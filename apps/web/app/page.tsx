@@ -160,6 +160,10 @@ function MarketingFooter() {
             Sistema operativo REPSE para proveedor, cliente y equipo CheckWise,
             sobre un mismo expediente auditable.
           </p>
+          <p className="mt-4 font-mono text-[10px] uppercase tracking-[0.18em] text-[color:var(--text-tertiary)]">
+            Una solución de{" "}
+            <span className="text-[color:var(--text-secondary)]">Legal Shelf</span>
+          </p>
         </div>
 
         {/* Nav column — mirrors the top-nav anchors so labels stay
@@ -193,6 +197,35 @@ function MarketingFooter() {
           </p>
         </div>
       </div>
+
+      {/* Legal strip — required near data collection for a compliance
+          product; links to the existing /legal pages. */}
+      <div className="border-t border-[color:var(--border-subtle)]">
+        <div className="mx-auto flex max-w-[1320px] flex-col gap-3 px-5 py-5 text-[12px] sm:flex-row sm:items-center sm:justify-between">
+          <p className="text-[color:var(--text-tertiary)]">
+            CheckWise es una plataforma de control documental REPSE. No emite
+            resoluciones legales ni garantiza el cumplimiento automático.
+          </p>
+          <ul className="flex flex-wrap items-center gap-x-5 gap-y-2">
+            <li>
+              <Link
+                href="/legal/privacidad"
+                className="text-[color:var(--text-secondary)] transition-colors hover:text-[color:var(--text-primary)]"
+              >
+                Aviso de privacidad
+              </Link>
+            </li>
+            <li>
+              <Link
+                href="/legal/terminos"
+                className="text-[color:var(--text-secondary)] transition-colors hover:text-[color:var(--text-primary)]"
+              >
+                Términos
+              </Link>
+            </li>
+          </ul>
+        </div>
+      </div>
     </footer>
   );
 }
@@ -206,7 +239,7 @@ function FooterColumn({
 }) {
   return (
     <div>
-      <p className="font-mono text-[10px] uppercase tracking-[0.2em] text-[color:var(--text-tertiary)]">
+      <p className="font-mono text-[10px] uppercase tracking-[0.2em] text-[color:var(--text-secondary)]">
         {label}
       </p>
       <ul className="mt-4 space-y-2.5">

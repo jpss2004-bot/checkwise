@@ -1,5 +1,6 @@
 "use client";
 
+import Link from "next/link";
 import { useState, type FormEvent } from "react";
 import { ArrowRight, CheckCircle, PaperPlaneTilt } from "@phosphor-icons/react";
 
@@ -183,9 +184,16 @@ export function ContactForm() {
         <span>Enviar solicitud</span>
         {!submitting && <ArrowRight className="h-4 w-4" weight="bold" aria-hidden="true" />}
       </Button>
-      <p className="text-xs text-[color:var(--text-tertiary)]">
+      <p className="text-xs leading-relaxed text-[color:var(--text-secondary)]">
         Al enviar aceptas que te contactemos para coordinar una demo o brindarte
-        información.
+        información. Tratamos tus datos conforme a nuestro{" "}
+        <Link
+          href="/legal/privacidad"
+          className="font-medium text-[color:var(--text-link)] underline-offset-2 hover:underline"
+        >
+          Aviso de privacidad
+        </Link>
+        .
       </p>
     </form>
   );
