@@ -164,10 +164,15 @@ export function PreviewPdfButton({
   reportId,
   variant = "outline",
   className,
+  asMenuItem = false,
 }: {
   reportId: string;
   variant?: "ghost" | "default" | "outline";
   className?: string;
+  // Render as an overflow-menu row (bare button styled with
+  // OVERFLOW_MENU_ROW_CLASS) instead of a sized Button — same pattern as
+  // ExportButton, so every row in a menu looks identical.
+  asMenuItem?: boolean;
 }) {
   const [busy, setBusy] = useState(false);
 
@@ -204,6 +209,21 @@ export function PreviewPdfButton({
     }
   }, [busy, reportId]);
 
+  const label = busy ? "Generando vista previa…" : "Vista previa";
+  if (asMenuItem) {
+    return (
+      <button
+        type="button"
+        onClick={onClick}
+        disabled={busy}
+        title="Abrir una vista previa del PDF en una pestaña nueva"
+        className={cn(OVERFLOW_MENU_ROW_CLASS, className)}
+      >
+        <Eye className="h-4 w-4 shrink-0" weight="bold" aria-hidden="true" />
+        <span>{label}</span>
+      </button>
+    );
+  }
   return (
     <Button
       type="button"
@@ -215,7 +235,7 @@ export function PreviewPdfButton({
       className={className}
     >
       <Eye className="h-4 w-4" weight="bold" aria-hidden="true" />
-      {busy ? "Generando vista previa…" : "Vista previa"}
+      {label}
     </Button>
   );
 }

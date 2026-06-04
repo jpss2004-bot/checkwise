@@ -24,7 +24,6 @@ export default function AdminReportEditorPage() {
       <ReportEditor
         reportId={reportId}
         backHref="/admin/reports"
-        printHref={`/portal/reports/${reportId}/print`}
         readOnly
       />
     </AdminShell>

@@ -14,8 +14,6 @@ import {
   ArrowsClockwise,
   CheckCircle,
   CircleNotch,
-  DownloadSimple,
-  Eye,
   FloppyDisk,
   Presentation,
   Sparkle,
@@ -24,7 +22,10 @@ import {
 } from "@phosphor-icons/react";
 
 import { Canvas } from "@/components/checkwise/reports/canvas";
-import { ExportButton } from "@/components/checkwise/reports/editor/export-button";
+import {
+  ExportButton,
+  PreviewPdfButton,
+} from "@/components/checkwise/reports/editor/export-button";
 import { ShareDialog } from "@/components/checkwise/reports/editor/share-dialog";
 import { ReportActionsContext } from "@/components/checkwise/reports/freshness-label";
 import { StoryView } from "@/components/checkwise/reports/story-view";
@@ -32,7 +33,6 @@ import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import {
-  OVERFLOW_MENU_ROW_CLASS,
   OverflowMenu,
   OverflowMenuItem,
 } from "@/components/ui/overflow-menu";
@@ -74,14 +74,10 @@ import { useReportGeneration } from "@/lib/reports/use-generation";
  *   at its own reports list (/portal/reports, /admin/reports,
  *   /client/reports) so the user never gets bounced into a
  *   different shell.
- * - printHref: where the "Imprimir" link points. The print view
- *   lives at /portal/reports/[id]/print and is the same for every
- *   shell (it has its own chrome).
  */
 export interface ReportEditorProps {
   reportId: string;
   backHref: string;
-  printHref: string;
   /** Soft lock-down (no-customization flow): force the read-only StoryView
    *  deliverable. Hides all authoring chrome and the path back to the editor,
    *  and never fires client-side AI generation (the server already generated
@@ -93,7 +89,6 @@ export interface ReportEditorProps {
 export function ReportEditor({
   reportId,
   backHref,
-  printHref,
   readOnly = false,
 }: ReportEditorProps) {
   const [report, setReport] = useState<ReportRead | null>(null);
@@ -518,25 +513,10 @@ export function ReportEditor({
               <Sparkle className="h-4 w-4" weight="bold" aria-hidden="true" />
               Generar con IA
             </Button>
-            <Button
-              asChild
-              variant="outline"
-              size="sm"
-              title="Descargar el reporte como PDF (usa la impresión del navegador)"
-            >
-              <Link
-                href={`${printHref}?autoprint=1`}
-                target="_blank"
-                rel="noopener noreferrer"
-              >
-                <DownloadSimple
-                  className="h-4 w-4"
-                  weight="bold"
-                  aria-hidden="true"
-                />
-                Descargar PDF
-              </Link>
-            </Button>
+            {/* Real server-rendered PDF (the designed document), not the
+                browser-print fallback that used to live here. Preview of the
+                same PDF is in the overflow menu. */}
+            <ExportButton reportId={reportId} format="pdf" variant="outline" />
             <ShareDialog
               reportId={reportId}
               variant={hasContent ? "default" : "outline"}
@@ -567,18 +547,7 @@ export function ReportEditor({
             </Button>
             <OverflowMenu triggerAriaLabel="Más acciones del reporte">
               <OverflowMenuItem>
-                <Link
-                  href={printHref}
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  className={OVERFLOW_MENU_ROW_CLASS}
-                >
-                  <Eye className="h-4 w-4 shrink-0" weight="bold" aria-hidden="true" />
-                  <span>Vista previa PDF</span>
-                </Link>
-              </OverflowMenuItem>
-              <OverflowMenuItem>
-                <ExportButton reportId={reportId} format="pdf" asMenuItem />
+                <PreviewPdfButton reportId={reportId} asMenuItem />
               </OverflowMenuItem>
               <OverflowMenuItem>
                 <ExportButton reportId={reportId} format="html" asMenuItem />
