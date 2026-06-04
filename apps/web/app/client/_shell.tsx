@@ -25,7 +25,11 @@ import { SearchBar } from "@/components/checkwise/search-bar";
 import { UserMenu } from "@/components/checkwise/user-menu";
 import { MetadataStrip } from "@/components/ui/metadata-strip";
 import { cn } from "@/lib/utils";
-import { getClientMe, getClientNotificationSummary } from "@/lib/api/client";
+import {
+  ClientApiError,
+  getClientMe,
+  getClientNotificationSummary,
+} from "@/lib/api/client";
 import { useUrlClientId } from "@/lib/workspace/use-url-client-id";
 import {
   type AdminSession,
@@ -56,6 +60,22 @@ function clientLegalConsentRequired(me: {
   if (me.legal_consent_accepted_at === null) return true;
   if (me.current_legal_consent_version === null) return false;
   return me.legal_consent_version !== me.current_legal_consent_version;
+}
+
+// Best-effort HTTP status from a thrown API error. Prefers
+// ``ClientApiError`` but falls back to duck-typing a numeric ``status``
+// so a 401/403 is still recognised even if the error crosses a module
+// boundary (e.g. dev HMR) and breaks ``instanceof``.
+function httpStatusOf(err: unknown): number | null {
+  if (err instanceof ClientApiError) return err.status;
+  if (
+    typeof err === "object" &&
+    err !== null &&
+    typeof (err as { status?: unknown }).status === "number"
+  ) {
+    return (err as { status: number }).status;
+  }
+  return null;
 }
 
 const NAV: { href: string; label: string; icon: Icon }[] = [
@@ -103,6 +123,12 @@ export function ClientShell({
     "checking" | "ok" | "blocked" | "error"
   >("checking");
   const [consentReloadKey, setConsentReloadKey] = useState(0);
+  // Human-readable detail for the fail-closed error screen so a stuck
+  // user (and support) can see *why* verification failed instead of a
+  // generic "revisa tu conexión".
+  const [consentErrorDetail, setConsentErrorDetail] = useState<string | null>(
+    null,
+  );
 
   useEffect(() => {
     const current = readAdminSession();
@@ -150,6 +176,7 @@ export function ClientShell({
     }
     let cancelled = false;
     setConsentState("checking");
+    setConsentErrorDetail(null);
     getClientMe()
       .then((me) => {
         if (cancelled) return;
@@ -160,8 +187,28 @@ export function ClientShell({
           setConsentState("ok");
         }
       })
-      .catch(() => {
-        if (!cancelled) setConsentState("error");
+      .catch((err: unknown) => {
+        if (cancelled) return;
+        const status = httpStatusOf(err);
+        // A 401/403 means the stored token is invalid (rotated secret,
+        // signature mismatch, or a session minted before this gate
+        // shipped). readAdminSession() only checks *expiry*, so such a
+        // token never bounces to /login on its own and a plain retry
+        // re-sends the same dead token forever. Recover by clearing the
+        // session and routing to re-login, which mints a fresh token.
+        if (status === 401 || status === 403) {
+          clearAdminSession();
+          router.replace("/login?reason=session_expired");
+          return;
+        }
+        setConsentErrorDetail(
+          status != null
+            ? `Error ${status}`
+            : err instanceof Error && err.message
+              ? err.message
+              : null,
+        );
+        setConsentState("error");
       });
     return () => {
       cancelled = true;
@@ -183,13 +230,33 @@ export function ClientShell({
           No pudimos verificar tu aceptación de los avisos legales. Revisa tu
           conexión e intenta de nuevo.
         </p>
-        <button
-          type="button"
-          onClick={() => setConsentReloadKey((k) => k + 1)}
-          className="rounded-md border border-[color:var(--border-default)] bg-[color:var(--surface-raised)] px-3 py-1.5 text-sm font-medium text-[color:var(--text-primary)] transition-colors hover:bg-[color:var(--surface-hover)]"
-        >
-          Reintentar
-        </button>
+        {consentErrorDetail ? (
+          <p className="max-w-sm font-mono text-[11px] text-[color:var(--text-tertiary)]">
+            {consentErrorDetail}
+          </p>
+        ) : null}
+        <div className="flex flex-wrap items-center justify-center gap-2">
+          <button
+            type="button"
+            onClick={() => setConsentReloadKey((k) => k + 1)}
+            className="rounded-md border border-[color:var(--border-default)] bg-[color:var(--surface-raised)] px-3 py-1.5 text-sm font-medium text-[color:var(--text-primary)] transition-colors hover:bg-[color:var(--surface-hover)]"
+          >
+            Reintentar
+          </button>
+          {/* Escape hatch: if retry can't help (invalid session), let the
+              user re-authenticate instead of being trapped behind the
+              fail-closed gate. */}
+          <button
+            type="button"
+            onClick={() => {
+              clearAdminSession();
+              router.replace("/login");
+            }}
+            className="rounded-md px-3 py-1.5 text-sm font-medium text-[color:var(--text-secondary)] transition-colors hover:text-[color:var(--text-primary)]"
+          >
+            Iniciar sesión de nuevo
+          </button>
+        </div>
       </div>
     );
   }
