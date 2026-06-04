@@ -201,14 +201,18 @@ export function PortalAppShell({
       {/* ── Sidebar (lg+) ─────────────────────────────────────── */}
       <aside
         className={cn(
-          "hidden lg:flex lg:shrink-0 lg:flex-col lg:border-r lg:border-[color:var(--border-subtle)] lg:bg-[color:var(--surface-raised)] lg:transition-[width] lg:duration-200",
+          // Sticky, viewport-height column: nav stays at the top and the
+          // collapse control + account footer stay pinned to the bottom of
+          // the VIEWPORT, so neither is buried at the bottom of a tall page.
+          "hidden lg:sticky lg:top-0 lg:flex lg:h-screen lg:shrink-0 lg:flex-col lg:self-start lg:border-r lg:border-[color:var(--border-subtle)] lg:bg-[color:var(--surface-raised)] lg:transition-[width] lg:duration-200",
           sidebarCollapsed ? "lg:w-20" : "lg:w-64",
         )}
         aria-label={sidebarCollapsed ? "Barra lateral colapsada" : "Barra lateral"}
       >
+        {/* Brand — pinned top */}
         <div
           className={cn(
-            "flex items-center",
+            "flex shrink-0 items-center",
             sidebarCollapsed ? "h-20 justify-center px-2" : "h-20 px-5",
           )}
         >
@@ -217,33 +221,40 @@ export function PortalAppShell({
             aria-label="CheckWise"
             className="inline-flex items-center"
           >
-            <BrandLogo
-              size={sidebarCollapsed ? "lg" : "lg"}
-              variant={sidebarCollapsed ? "compact" : undefined}
-            />
+            <BrandLogo size="lg" variant={sidebarCollapsed ? "compact" : undefined} />
           </Link>
         </div>
 
-        {sidebarCollapsed ? null : (
-          <div className="px-3 pt-1 pb-3">
-            <WorkspaceCard session={session} />
-          </div>
-        )}
+        {/* Workspace + nav — the only part that scrolls, so the brand and
+            footer never leave the viewport. */}
+        <div className="flex-1 overflow-y-auto">
+          {sidebarCollapsed ? null : (
+            <div className="px-3 pt-1 pb-3">
+              <WorkspaceCard session={session} />
+            </div>
+          )}
 
-        <SidebarNav
-          pathname={pathname ?? ""}
-          items={primaryNav}
-          title="Operación"
-          collapsed={sidebarCollapsed}
-        />
-        <SidebarNav
-          pathname={pathname ?? ""}
-          items={SECONDARY_NAV}
-          title="Cuenta"
-          collapsed={sidebarCollapsed}
-        />
+          <SidebarNav
+            pathname={pathname ?? ""}
+            items={primaryNav}
+            title="Operación"
+            collapsed={sidebarCollapsed}
+          />
+          <SidebarNav
+            pathname={pathname ?? ""}
+            items={SECONDARY_NAV}
+            title="Cuenta"
+            collapsed={sidebarCollapsed}
+          />
+        </div>
 
-        <div className={cn("mt-auto", sidebarCollapsed ? "p-2" : "p-3")}>
+        {/* Account + collapse — pinned bottom of the viewport */}
+        <div
+          className={cn(
+            "shrink-0 border-t border-[color:var(--border-subtle)]",
+            sidebarCollapsed ? "p-2" : "p-3",
+          )}
+        >
           {pct !== null && !sidebarCollapsed ? (
             <SidebarProgress pct={pct} complete={isComplete} />
           ) : null}
