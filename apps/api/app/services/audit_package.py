@@ -81,6 +81,24 @@ CONTRACT_INSTITUTION_CODE: str = "contrato"
 CONTRACT_INSTITUTION_NAME: str = "Contrato"
 CONTRACT_FOLDER: str = "contratos"
 
+# Onboarding corporate-documentation requirement codes. Sourced from
+# ``app.core.compliance_catalog._ONBOARDING_MORAL`` / ``_ONBOARDING_FISICA``
+# (section "Documentación Corporativa"), restricted to the codes whose
+# issuing source is ``interno_cliente`` — the CSF codes (ONB-CORP-M-002 /
+# ONB-CORP-F-002) are real SAT documents and stay under ``sat``. Mirrors the
+# contract carve-out above: these submissions are lifted into a dedicated
+# ``corporativo`` folder and synthetic institution code so the acta
+# constitutiva and official ID surface as their own first-class group rather
+# than being buried inside ``interno_cliente/sin-periodo/``. With both
+# carve-outs in place, the onboarding ``interno_cliente`` bucket holds only a
+# genuine miscellaneous remainder.
+CORPORATE_REQUIREMENT_CODES: frozenset[str] = frozenset(
+    {"ONB-CORP-M-001", "ONB-CORP-F-001"}
+)
+CORPORATE_INSTITUTION_CODE: str = "corporativo"
+CORPORATE_INSTITUTION_NAME: str = "Documentación Corporativa"
+CORPORATE_FOLDER: str = "corporativo"
+
 # Statuses that have no bytes on disk. Excluded from every audit
 # package regardless of explicit selection so the ZIP never hits a
 # 404 mid-stream.
@@ -501,10 +519,22 @@ def build_entries(
                 sub.requirement_code is not None
                 and sub.requirement_code in CONTRACT_REQUIREMENT_CODES
             )
+            # Corporate docs (acta constitutiva, official ID) get the same
+            # first-class treatment as contracts — see CORPORATE_* above. The
+            # synthetic ``corporativo`` code threads through the manifest label
+            # and the tree-picker pin exactly like ``contrato`` does.
+            is_corporate = (
+                sub.requirement_code is not None
+                and sub.requirement_code in CORPORATE_REQUIREMENT_CODES
+            )
             if is_contract:
                 institution_code = CONTRACT_INSTITUTION_CODE
                 institution_name = CONTRACT_INSTITUTION_NAME
                 base_arc = f"{vendor_slug}/{CONTRACT_FOLDER}/{safe_name}"
+            elif is_corporate:
+                institution_code = CORPORATE_INSTITUTION_CODE
+                institution_name = CORPORATE_INSTITUTION_NAME
+                base_arc = f"{vendor_slug}/{CORPORATE_FOLDER}/{safe_name}"
             else:
                 base_arc = f"{vendor_slug}/{institution_code}/{period}/{safe_name}"
             count = seen_arc.get(base_arc, 0)

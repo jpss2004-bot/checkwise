@@ -34,6 +34,7 @@ import {
   type ClientVendorListResponse,
 } from "@/lib/api/client";
 import { INSTITUTION_LABELS } from "@/lib/api/portal";
+import { useUrlClientId } from "@/lib/workspace/use-url-client-id";
 
 /**
  * /client/auditoria
@@ -99,6 +100,7 @@ function resolvePreset(key: PresetKey, today: Date): { from: string; to: string 
 }
 
 export default function ClientAuditoriaPage() {
+  const urlClientId = useUrlClientId();
   const today = useMemo(() => new Date(), []);
 
   // Default range: Year-to-date so the live counter shows something
@@ -134,7 +136,7 @@ export default function ClientAuditoriaPage() {
   // and to map vendor_id → vendor_name on the preview breakdown.
   useEffect(() => {
     let cancelled = false;
-    listClientVendors()
+    listClientVendors(urlClientId ? { client_id: urlClientId } : undefined)
       .then((data) => {
         if (cancelled) return;
         setVendorsList(data);
@@ -148,7 +150,7 @@ export default function ClientAuditoriaPage() {
     return () => {
       cancelled = true;
     };
-  }, []);
+  }, [urlClientId]);
 
   // Live preview + tree fetch — refetch whenever any filter changes.
   // ``selectedIds`` is reset to null (= "all in tree") on every
@@ -161,6 +163,7 @@ export default function ClientAuditoriaPage() {
     setTreeLoading(true);
     setTreeError(null);
     const filters: AuditPackageFilters = {
+      client_id: urlClientId,
       period_from: periodFrom || null,
       period_to: periodTo || null,
       institutions,
@@ -204,12 +207,13 @@ export default function ClientAuditoriaPage() {
     return () => {
       cancelled = true;
     };
-  }, [periodFrom, periodTo, institutions, vendorIds, statuses]);
+  }, [periodFrom, periodTo, institutions, vendorIds, statuses, urlClientId]);
 
   // Filter-only fallback URL (GET) used when the user has NOT tweaked
   // the per-document selection. The tree picker submits via POST so
   // the bearer header carries and the body can hold hundreds of ids.
   const downloadUrl = clientAuditPackageZipUrl({
+    client_id: urlClientId,
     period_from: periodFrom || null,
     period_to: periodTo || null,
     institutions,
@@ -262,6 +266,7 @@ export default function ClientAuditoriaPage() {
     setDownloadError(null);
     try {
       const { blob, filename } = await downloadClientAuditPackageZipPost({
+        client_id: urlClientId,
         period_from: periodFrom || null,
         period_to: periodTo || null,
         institutions,
@@ -692,15 +697,20 @@ function buildGroupedTree(items: TreeNode[]): GroupedTree {
           };
         })
         .sort((a, b) => {
-          // Item 1 follow-up — pin the synthetic "Contrato" group to
-          // the top of each vendor's subtree. The auditor expects to
-          // see the contract first; alphabetical order happens to
-          // place it there too, but the pin makes the intent
-          // explicit so a future copy change can't silently bury it.
-          const aIsContract = a.institution_code === "contrato";
-          const bIsContract = b.institution_code === "contrato";
-          if (aIsContract && !bIsContract) return -1;
-          if (bIsContract && !aIsContract) return 1;
+          // Item 1 follow-up — pin the synthetic onboarding groups to the
+          // top of each vendor's subtree in a fixed order: "Contrato" first,
+          // then "Documentación Corporativa", then the real institutions
+          // alphabetically. The auditor expects the expediente artefacts
+          // first; the explicit pin keeps a future copy change from silently
+          // burying them.
+          const PINNED = ["contrato", "corporativo"];
+          const aRank = PINNED.indexOf(a.institution_code);
+          const bRank = PINNED.indexOf(b.institution_code);
+          if (aRank !== -1 || bRank !== -1) {
+            if (aRank === -1) return 1;
+            if (bRank === -1) return -1;
+            if (aRank !== bRank) return aRank - bRank;
+          }
           return a.institution_name.localeCompare(b.institution_name, "es");
         });
       return { vendor_id: vid, vendor_name: name, institutions };

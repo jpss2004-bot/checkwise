@@ -727,12 +727,19 @@ export const INSTITUTION_LABELS: Record<string, string> = {
   imss: "IMSS",
   infonavit: "INFONAVIT",
   stps_repse: "STPS / REPSE",
+  // Full register: roomy surfaces (filters, expediente card, audit preview)
+  // use "Interno / Cliente". Dense report-surface chips deliberately use the
+  // short "Interno" — see the note in compliance-pulse-strip.tsx.
   interno_cliente: "Interno / Cliente",
   // Synthetic code the audit-package backend mints for contract-type
   // submissions (item 1 follow-up). Lets the auditoria preview chip,
   // the tree picker group label, and any future surface that reads
   // these labels render "Contrato" consistently.
   contrato: "Contrato",
+  // Synthetic code for onboarding corporate docs (acta constitutiva,
+  // official ID) lifted into the dedicated "corporativo" group — mirrors
+  // the contract carve-out so the preview chip and tree label match.
+  corporativo: "Documentación Corporativa",
 };
 
 export const MONTH_LABELS_ES: Record<number, string> = {

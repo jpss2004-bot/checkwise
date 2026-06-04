@@ -595,10 +595,13 @@ def test_audit_package_tree_groups_contracts_under_synthetic_institution(
         name="Contrato",
         institution_id=inst_id,
     )
+    # A genuine miscellaneous ``interno_cliente`` doc that is NOT carved out
+    # into ``contrato`` or ``corporativo`` — represents the remainder that
+    # legitimately stays under the bucket after both carve-outs.
     req_other = _seed_requirement(
         db_factory,
-        code="ONB-CORP-M-001",
-        name="Acta constitutiva",
+        code="MON-INT-001",
+        name="Reporte interno",
         institution_id=inst_id,
     )
     _seed_submission(
@@ -615,9 +618,9 @@ def test_audit_package_tree_groups_contracts_under_synthetic_institution(
         client_id=client_id,
         vendor_id=vendor_id,
         requirement_id=req_other,
-        requirement_code="ONB-CORP-M-001",
+        requirement_code="MON-INT-001",
         institution_id=inst_id,
-        storage_subpath="acta.pdf",
+        storage_subpath="reporte.pdf",
     )
     email, pw = _seed_user(
         db_factory, role="client_admin", client_id=client_id, email_prefix="ca"
@@ -632,8 +635,8 @@ def test_audit_package_tree_groups_contracts_under_synthetic_institution(
     by_code: dict[str, list[dict]] = {}
     for it in items:
         by_code.setdefault(it["institution_code"], []).append(it)
-    # The contract submission moved to the synthetic group; the acta
-    # constitutiva stayed under the real institution. The auditor's
+    # The contract submission moved to the synthetic group; the misc
+    # internal doc stayed under the real institution. The auditor's
     # tree picker now shows two distinct top-level groups for this
     # vendor, not one ``interno_cliente`` group mixing both.
     assert "contrato" in by_code
@@ -641,7 +644,7 @@ def test_audit_package_tree_groups_contracts_under_synthetic_institution(
     assert by_code["contrato"][0]["institution_name"] == "Contrato"
     assert "interno_cliente" in by_code
     assert len(by_code["interno_cliente"]) == 1
-    assert by_code["interno_cliente"][0]["requirement_code"] == "ONB-CORP-M-001"
+    assert by_code["interno_cliente"][0]["requirement_code"] == "MON-INT-001"
 
 
 def test_audit_package_zip_puts_contracts_in_dedicated_folder(
@@ -663,10 +666,12 @@ def test_audit_package_zip_puts_contracts_in_dedicated_folder(
         name="Contrato",
         institution_id=inst_id,
     )
+    # Misc ``interno_cliente`` remainder doc — not carved out, so it keeps
+    # the historical ``<vendor>/interno_cliente/<period>/<file>`` layout.
     req_other = _seed_requirement(
         db_factory,
-        code="ONB-CORP-M-001",
-        name="Acta",
+        code="MON-INT-001",
+        name="Reporte interno",
         institution_id=inst_id,
     )
     sub_contract = _seed_submission(
@@ -678,14 +683,14 @@ def test_audit_package_zip_puts_contracts_in_dedicated_folder(
         institution_id=inst_id,
         storage_subpath="contrato.pdf",
     )
-    sub_acta = _seed_submission(
+    sub_other = _seed_submission(
         db_factory,
         client_id=client_id,
         vendor_id=vendor_id,
         requirement_id=req_other,
-        requirement_code="ONB-CORP-M-001",
+        requirement_code="MON-INT-001",
         institution_id=inst_id,
-        storage_subpath="acta.pdf",
+        storage_subpath="reporte.pdf",
     )
     email, pw = _seed_user(
         db_factory, role="client_admin", client_id=client_id, email_prefix="ca"
@@ -695,7 +700,7 @@ def test_audit_package_zip_puts_contracts_in_dedicated_folder(
     resp = api_client.post(
         "/api/v1/client/audit-package.zip",
         json={
-            "submission_ids": [sub_contract, sub_acta],
+            "submission_ids": [sub_contract, sub_other],
             "skip_manifest": True,
         },
         headers=_h(token),
@@ -711,6 +716,143 @@ def test_audit_package_zip_puts_contracts_in_dedicated_folder(
     assert contract_paths[0].endswith("contrato.pdf")
     assert all("/interno_cliente/" in p for p in other_paths)
     assert all("/contratos/" not in p for p in other_paths)
+
+
+def test_audit_package_tree_groups_corporate_docs_under_synthetic_institution(
+    api_client: TestClient, db_factory
+) -> None:
+    """Corporate-doc submissions (acta constitutiva, official ID) surface in
+    the tree response under a synthetic ``corporativo`` institution code so
+    the picker shows them as a dedicated group — mirroring the contract
+    carve-out — rather than buried inside ``interno_cliente``. The CSF code
+    (ONB-CORP-M-002) is a real SAT document and stays under ``sat``."""
+    client_id = _seed_client(db_factory)
+    vendor_id, _ = _seed_vendor_with_workspace(
+        db_factory, client_id=client_id
+    )
+    inst_interno = _seed_institution(db_factory, code="interno_cliente")
+    inst_sat = _seed_institution(db_factory, code="sat")
+    req_acta = _seed_requirement(
+        db_factory,
+        code="ONB-CORP-M-001",
+        name="Acta constitutiva",
+        institution_id=inst_interno,
+    )
+    req_csf = _seed_requirement(
+        db_factory,
+        code="ONB-CORP-M-002",
+        name="Constancia de Situación Fiscal",
+        institution_id=inst_sat,
+    )
+    _seed_submission(
+        db_factory,
+        client_id=client_id,
+        vendor_id=vendor_id,
+        requirement_id=req_acta,
+        requirement_code="ONB-CORP-M-001",
+        institution_id=inst_interno,
+        storage_subpath="acta.pdf",
+    )
+    _seed_submission(
+        db_factory,
+        client_id=client_id,
+        vendor_id=vendor_id,
+        requirement_id=req_csf,
+        requirement_code="ONB-CORP-M-002",
+        institution_id=inst_sat,
+        storage_subpath="csf.pdf",
+    )
+    email, pw = _seed_user(
+        db_factory, role="client_admin", client_id=client_id, email_prefix="ca"
+    )
+    token = _login(api_client, email, pw)
+
+    resp = api_client.get(
+        "/api/v1/client/audit-package/tree", headers=_h(token)
+    )
+    assert resp.status_code == 200, resp.text
+    items = resp.json()["items"]
+    by_code: dict[str, list[dict]] = {}
+    for it in items:
+        by_code.setdefault(it["institution_code"], []).append(it)
+    # The acta moved to the synthetic ``corporativo`` group; the CSF stayed
+    # under its real SAT institution. No ``interno_cliente`` group remains.
+    assert "corporativo" in by_code
+    assert len(by_code["corporativo"]) == 1
+    assert by_code["corporativo"][0]["institution_name"] == "Documentación Corporativa"
+    assert by_code["corporativo"][0]["requirement_code"] == "ONB-CORP-M-001"
+    assert "sat" in by_code
+    assert by_code["sat"][0]["requirement_code"] == "ONB-CORP-M-002"
+    assert "interno_cliente" not in by_code
+
+
+def test_audit_package_zip_puts_corporate_docs_in_dedicated_folder(
+    api_client: TestClient, db_factory
+) -> None:
+    """Streaming the ZIP routes corporate submissions into a
+    ``<vendor>/corporativo/<file>`` path; the SAT-issued CSF keeps the
+    historical ``<vendor>/sat/<period>/<file>`` layout."""
+    client_id = _seed_client(db_factory, "Corp Client")
+    vendor_id, _ = _seed_vendor_with_workspace(
+        db_factory, client_id=client_id, vendor_name="CorpZip"
+    )
+    inst_interno = _seed_institution(db_factory, code="interno_cliente")
+    inst_sat = _seed_institution(db_factory, code="sat")
+    req_acta = _seed_requirement(
+        db_factory,
+        code="ONB-CORP-M-001",
+        name="Acta",
+        institution_id=inst_interno,
+    )
+    req_csf = _seed_requirement(
+        db_factory,
+        code="ONB-CORP-M-002",
+        name="CSF",
+        institution_id=inst_sat,
+    )
+    sub_acta = _seed_submission(
+        db_factory,
+        client_id=client_id,
+        vendor_id=vendor_id,
+        requirement_id=req_acta,
+        requirement_code="ONB-CORP-M-001",
+        institution_id=inst_interno,
+        storage_subpath="acta.pdf",
+    )
+    sub_csf = _seed_submission(
+        db_factory,
+        client_id=client_id,
+        vendor_id=vendor_id,
+        requirement_id=req_csf,
+        requirement_code="ONB-CORP-M-002",
+        institution_id=inst_sat,
+        storage_subpath="csf.pdf",
+    )
+    email, pw = _seed_user(
+        db_factory, role="client_admin", client_id=client_id, email_prefix="ca"
+    )
+    token = _login(api_client, email, pw)
+
+    resp = api_client.post(
+        "/api/v1/client/audit-package.zip",
+        json={
+            "submission_ids": [sub_acta, sub_csf],
+            "skip_manifest": True,
+        },
+        headers=_h(token),
+    )
+    assert resp.status_code == 200, resp.text
+    archive = zipfile.ZipFile(BytesIO(resp.content))
+    names = archive.namelist()
+    corporate_paths = [n for n in names if "/corporativo/" in n]
+    other_paths = [n for n in names if "/corporativo/" not in n]
+    # The acta lives under the dedicated corporate folder; the CSF keeps its
+    # SAT layout and is NOT also under corporativo or interno_cliente.
+    assert len(corporate_paths) == 1
+    assert corporate_paths[0].endswith("acta.pdf")
+    assert all("/sat/" in p for p in other_paths)
+    assert all("/corporativo/" not in p for p in other_paths)
+    assert all("/interno_cliente/" not in p for p in other_paths)
 
 
 def test_audit_package_zip_post_with_submission_ids_narrows_set(
