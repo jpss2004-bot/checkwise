@@ -18,6 +18,7 @@ from datetime import date, timedelta
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
+from app.constants.reports import ReportAudience
 from app.constants.statuses import DocumentStatus
 from app.models import (
     Client,
@@ -315,6 +316,13 @@ def compute_vendor_insight(db: Session, scope: ReportScope, *, today: date | Non
     vendor = db.get(Vendor, scope.vendor_id)
     if vendor is None:
         return None
+    # Only the provider's OWN copy (vendor_facing) is addressed in second
+    # person ("Tienes… Vuelve a cargar"). A client/auditor/internal reader
+    # gets third-person copy about the provider — they can't upload, so
+    # "Vuelve a cargar" addressed to them is wrong (the whole report is a
+    # findings document they hand to the provider). Mirrors the block-level
+    # ``interactive`` gate.
+    vendor_reads = scope.audience == ReportAudience.VENDOR_FACING
     state = build_compliance_state_for_vendor(db, vendor_id=scope.vendor_id)
     sem = state.get("semaphore", {})
     counts = state.get("document_state_counts", {})
@@ -338,7 +346,11 @@ def compute_vendor_insight(db: Session, scope: ReportScope, *, today: date | Non
     elif pending:
         subhead = f"{pending} obligación(es) pendientes de cargar."
     else:
-        subhead = "Tu expediente está al día."
+        subhead = (
+            "Tu expediente está al día."
+            if vendor_reads
+            else "El expediente del proveedor está al día."
+        )
 
     verdict = {
         "level": level,
@@ -360,7 +372,13 @@ def compute_vendor_insight(db: Session, scope: ReportScope, *, today: date | Non
         findings.append({
             "tone": "red",
             "title": "Documentos que requieren corrección",
-            "detail": "Tienes " + ", ".join(parts) + ". Vuelve a cargar la versión corregida.",
+            "detail": (
+                "Tienes " + ", ".join(parts) + ". Vuelve a cargar la versión corregida."
+                if vendor_reads
+                else "El proveedor tiene "
+                + ", ".join(parts)
+                + ". Debe volver a cargar la versión corregida."
+            ),
         })
     deadlines = build_upcoming_deadlines_for_vendor(db, vendor_id=scope.vendor_id, top=1)
     items = deadlines.get("items", [])
