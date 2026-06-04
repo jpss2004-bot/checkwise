@@ -139,6 +139,54 @@ def create_app() -> FastAPI:
     def health() -> dict[str, str]:
         return {"status": "ok", "service": "checkwise-api", "environment": settings.CHECKWISE_ENV}
 
+    @app.on_event("startup")
+    def _prewarm_pdf_renderer() -> None:
+        """Pre-install Chromium in the background at boot if it's missing.
+
+        The report PDF renderer needs Playwright's Chromium. When the build's
+        ``playwright install`` doesn't end up where the runtime looks (a
+        recurring Render build-cache / browser-path quirk), the renderer
+        self-heals by installing on the FIRST PDF request — which makes that
+        one request take ~30s. Warming here moves that cost to deploy time,
+        in a background thread, so the server is live immediately and the
+        first user-triggered render is fast. No-op when Chromium is already
+        present (the normal case). Production only; local/CI rely on a
+        one-time ``playwright install``.
+        """
+        if settings.CHECKWISE_ENV != "production":
+            return
+
+        import os
+        import subprocess
+        import sys
+        import threading
+
+        def _warm() -> None:
+            try:
+                from playwright.sync_api import sync_playwright
+
+                with sync_playwright() as p:
+                    exe = p.chromium.executable_path
+                if exe and os.path.exists(exe):
+                    log.info("[startup] Chromium present; PDF renderer warm.")
+                    return
+            except Exception as exc:  # noqa: BLE001 — fall through to install
+                log.warning("[startup] Chromium probe failed (%s); installing.", exc)
+            try:
+                subprocess.run(
+                    [sys.executable, "-m", "playwright", "install", "chromium"],
+                    check=False,
+                    capture_output=True,
+                    timeout=300,
+                )
+                log.info("[startup] Chromium pre-warm install finished.")
+            except Exception as exc:  # noqa: BLE001
+                log.warning("[startup] Chromium pre-warm install failed: %s", exc)
+
+        threading.Thread(
+            target=_warm, name="chromium-prewarm", daemon=True
+        ).start()
+
     app.include_router(api_router, prefix=settings.API_V1_PREFIX)
     _assert_critical_routes(app)
     return app
