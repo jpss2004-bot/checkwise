@@ -1819,3 +1819,139 @@ def test_mark_all_client_notifications_read_writes_audit_event(
     assert noop.status_code == 200
     after_noop = _notify_audit_rows(db_factory, "client.notifications_marked_all_read")
     assert len(after_noop) == 1
+
+
+# ---------------------------------------------------------------------------
+# Client legal-consent gate (v2+) — every client_admin must accept.
+# ---------------------------------------------------------------------------
+
+
+def _client_consent_audit_rows(db_factory, user_id: str) -> list[AuditLog]:
+    db = db_factory()
+    try:
+        return list(
+            db.query(AuditLog)
+            .filter(
+                AuditLog.action == "client.legal_consent_accepted",
+                AuditLog.entity_type == "user",
+                AuditLog.actor_id == user_id,
+            )
+            .order_by(AuditLog.created_at.asc())
+            .all()
+        )
+    finally:
+        db.close()
+
+
+def test_client_me_reports_unconsented_then_accept_flips_it(
+    api_client: TestClient, db_factory
+) -> None:
+    from app.api.v1.portal import CURRENT_LEGAL_CONSENT_VERSION
+
+    client_id = _seed_client(db_factory, "Cliente Consent")
+    user_id, email, pw = _seed_user_with_role(
+        db_factory, role="client_admin", client_id=client_id, email_prefix="cc"
+    )
+    token = _login(api_client, email, pw)
+
+    before = api_client.get("/api/v1/client/me", headers=_h(token)).json()
+    assert before["legal_consent_accepted_at"] is None
+    assert before["legal_consent_version"] is None
+    assert before["current_legal_consent_version"] == CURRENT_LEGAL_CONSENT_VERSION
+
+    accept = api_client.post(
+        "/api/v1/client/legal-consent",
+        headers={**_h(token), "User-Agent": "ConsentTest/1.0"},
+    )
+    assert accept.status_code == 200, accept.text
+    body = accept.json()
+    assert body["user_id"] == user_id
+    assert body["legal_consent_version"] == CURRENT_LEGAL_CONSENT_VERSION
+    assert body["legal_consent_accepted_at"]
+
+    after = api_client.get("/api/v1/client/me", headers=_h(token)).json()
+    assert after["legal_consent_accepted_at"] is not None
+    assert after["legal_consent_version"] == CURRENT_LEGAL_CONSENT_VERSION
+
+    # Persisted on the user row.
+    db = db_factory()
+    try:
+        user = db.get(User, user_id)
+        assert user.legal_consent_version == CURRENT_LEGAL_CONSENT_VERSION
+        assert user.legal_consent_accepted_at is not None
+    finally:
+        db.close()
+
+
+def test_client_consent_writes_audit_with_ip_and_user_agent(
+    api_client: TestClient, db_factory
+) -> None:
+    from app.api.v1.portal import CURRENT_LEGAL_CONSENT_VERSION
+
+    client_id = _seed_client(db_factory, "Cliente Audit")
+    user_id, email, pw = _seed_user_with_role(
+        db_factory, role="client_admin", client_id=client_id, email_prefix="ca-audit"
+    )
+    token = _login(api_client, email, pw)
+
+    api_client.post(
+        "/api/v1/client/legal-consent",
+        headers={**_h(token), "User-Agent": "ConsentUA/2.0"},
+    )
+
+    rows = _client_consent_audit_rows(db_factory, user_id)
+    assert len(rows) == 1
+    meta = rows[0].event_metadata
+    assert meta["version"] == CURRENT_LEGAL_CONSENT_VERSION
+    assert meta["user_agent"] == "ConsentUA/2.0"
+    assert "ip" in meta
+    assert rows[0].actor_type == "client_admin"
+
+
+def test_client_consent_is_idempotent_within_a_version(
+    api_client: TestClient, db_factory
+) -> None:
+    client_id = _seed_client(db_factory, "Cliente Idem")
+    user_id, email, pw = _seed_user_with_role(
+        db_factory, role="client_admin", client_id=client_id, email_prefix="ca-idem"
+    )
+    token = _login(api_client, email, pw)
+
+    first = api_client.post("/api/v1/client/legal-consent", headers=_h(token)).json()
+    second = api_client.post("/api/v1/client/legal-consent", headers=_h(token)).json()
+    # Same timestamp returned; no duplicate audit row.
+    assert first["legal_consent_accepted_at"] == second["legal_consent_accepted_at"]
+    assert len(_client_consent_audit_rows(db_factory, user_id)) == 1
+
+
+def test_client_consent_version_bump_reprompts(
+    api_client: TestClient, db_factory, monkeypatch
+) -> None:
+    from app.api.v1 import client as client_module
+
+    client_id = _seed_client(db_factory, "Cliente Bump")
+    user_id, email, pw = _seed_user_with_role(
+        db_factory, role="client_admin", client_id=client_id, email_prefix="ca-bump"
+    )
+    token = _login(api_client, email, pw)
+
+    monkeypatch.setattr(client_module, "CURRENT_LEGAL_CONSENT_VERSION", "vA-test")
+    api_client.post("/api/v1/client/legal-consent", headers=_h(token))
+    me_a = api_client.get("/api/v1/client/me", headers=_h(token)).json()
+    assert me_a["legal_consent_version"] == "vA-test"
+    assert me_a["current_legal_consent_version"] == "vA-test"
+
+    # Publish a new version: /me must now report a mismatch (re-prompt).
+    monkeypatch.setattr(client_module, "CURRENT_LEGAL_CONSENT_VERSION", "vB-test")
+    me_b = api_client.get("/api/v1/client/me", headers=_h(token)).json()
+    assert me_b["legal_consent_version"] == "vA-test"
+    assert me_b["current_legal_consent_version"] == "vB-test"
+
+    # Re-accepting bumps the stored version and writes a second audit row
+    # carrying the previous version for the forensic trail.
+    api_client.post("/api/v1/client/legal-consent", headers=_h(token))
+    me_c = api_client.get("/api/v1/client/me", headers=_h(token)).json()
+    assert me_c["legal_consent_version"] == "vB-test"
+    rows = _client_consent_audit_rows(db_factory, user_id)
+    assert len(rows) == 2
+    assert rows[1].event_metadata["previous_version"] == "vA-test"

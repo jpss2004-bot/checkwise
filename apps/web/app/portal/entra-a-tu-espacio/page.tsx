@@ -250,8 +250,8 @@ function EntraATuEspacioInner({ session }: { session: PortalSession }) {
                 className="mt-3 text-[11px] text-[color:var(--text-tertiary)]"
               >
                 Cada enlace abre el documento en una pestaña nueva. Versión
-                vigente <code className="font-mono">v1</code> · efectiva desde
-                el 25 de mayo de 2026.
+                vigente <code className="font-mono">v2</code> · efectiva desde
+                el 3 de junio de 2026.
               </p>
               {consentError ? (
                 <Alert variant="error" className="mt-4">

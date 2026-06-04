@@ -25,7 +25,7 @@ import { SearchBar } from "@/components/checkwise/search-bar";
 import { UserMenu } from "@/components/checkwise/user-menu";
 import { MetadataStrip } from "@/components/ui/metadata-strip";
 import { cn } from "@/lib/utils";
-import { getClientNotificationSummary } from "@/lib/api/client";
+import { getClientMe, getClientNotificationSummary } from "@/lib/api/client";
 import { useUrlClientId } from "@/lib/workspace/use-url-client-id";
 import {
   type AdminSession,
@@ -40,6 +40,23 @@ import {
  * Density: dense. Horizontal nav with drawer fallback <1024px.
  * Workspace identity rendered as MetadataStrip below the title.
  */
+
+// Legal-consent gate (v2+). A client_admin is blocked from the client
+// console until they accept the current legal package. The acceptance
+// screen at /client/consentimiento is standalone (no ClientShell) so it
+// never gates itself; internal staff bypass to match the provider gate.
+const CLIENT_CONSENT_PATH = "/client/consentimiento";
+const INTERNAL_ROLES = new Set(["internal_admin", "reviewer"]);
+
+function clientLegalConsentRequired(me: {
+  legal_consent_accepted_at: string | null;
+  legal_consent_version: string | null;
+  current_legal_consent_version: string | null;
+}): boolean {
+  if (me.legal_consent_accepted_at === null) return true;
+  if (me.current_legal_consent_version === null) return false;
+  return me.legal_consent_version !== me.current_legal_consent_version;
+}
 
 const NAV: { href: string; label: string; icon: Icon }[] = [
   { href: "/client/dashboard", label: "Resumen", icon: Gauge },
@@ -78,6 +95,14 @@ export function ClientShell({
   const [ready, setReady] = useState(false);
   const [drawerOpen, setDrawerOpen] = useState(false);
   const [unreadCount, setUnreadCount] = useState(0);
+  // "checking" until /client/me resolves; "ok" to render; "blocked"
+  // while the consent redirect is in flight; "error" when we could not
+  // verify consent. The console only renders on "ok" — the gate fails
+  // CLOSED (a legal gate must never let an unverified user through).
+  const [consentState, setConsentState] = useState<
+    "checking" | "ok" | "blocked" | "error"
+  >("checking");
+  const [consentReloadKey, setConsentReloadKey] = useState(0);
 
   useEffect(() => {
     const current = readAdminSession();
@@ -109,12 +134,68 @@ export function ClientShell({
     setDrawerOpen(false);
   }, [pathname]);
 
+  // Legal-consent gate. Runs once the session is ready: internal staff
+  // and the acceptance page itself are exempt; everyone else must have
+  // accepted the current legal version or they are routed to the
+  // acceptance screen. Fails CLOSED — on a /me error the console is held
+  // behind a retry rather than letting an unverified user through.
+  useEffect(() => {
+    if (!session) return;
+    if (
+      session.roles.some((r) => INTERNAL_ROLES.has(r)) ||
+      pathname === CLIENT_CONSENT_PATH
+    ) {
+      setConsentState("ok");
+      return;
+    }
+    let cancelled = false;
+    setConsentState("checking");
+    getClientMe()
+      .then((me) => {
+        if (cancelled) return;
+        if (clientLegalConsentRequired(me)) {
+          setConsentState("blocked");
+          router.replace(CLIENT_CONSENT_PATH);
+        } else {
+          setConsentState("ok");
+        }
+      })
+      .catch(() => {
+        if (!cancelled) setConsentState("error");
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [session, pathname, router, consentReloadKey]);
+
   function onLogout() {
     clearAdminSession();
     router.replace("/login");
   }
 
   if (!ready || !session) return null;
+  // Could not verify legal consent — fail closed with a retry instead of
+  // rendering the console or bouncing the user.
+  if (consentState === "error") {
+    return (
+      <div className="flex min-h-dvh flex-col items-center justify-center gap-4 bg-[color:var(--surface-page)] px-5 text-center">
+        <p className="max-w-sm text-sm text-[color:var(--text-secondary)]">
+          No pudimos verificar tu aceptación de los avisos legales. Revisa tu
+          conexión e intenta de nuevo.
+        </p>
+        <button
+          type="button"
+          onClick={() => setConsentReloadKey((k) => k + 1)}
+          className="rounded-md border border-[color:var(--border-default)] bg-[color:var(--surface-raised)] px-3 py-1.5 text-sm font-medium text-[color:var(--text-primary)] transition-colors hover:bg-[color:var(--surface-hover)]"
+        >
+          Reintentar
+        </button>
+      </div>
+    );
+  }
+  // Hold the render until consent is confirmed so the console never
+  // flashes for an un-consented client_admin mid-redirect.
+  if (consentState !== "ok") return null;
 
   return (
     <div

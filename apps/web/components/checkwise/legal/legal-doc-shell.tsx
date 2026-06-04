@@ -60,9 +60,10 @@ export function LegalDocShell({
             >
               legal@legalshelf.mx
             </a>
-            . LegalShelf opera CheckWise como responsable del tratamiento
-            de datos en cumplimiento con la Ley Federal de Protección de
-            Datos Personales en Posesión de los Particulares (LFPDPPP).
+            . LegalShelf opera CheckWise como encargado del tratamiento de
+            datos personales por cuenta del responsable, conforme a la Ley
+            Federal de Protección de Datos Personales en Posesión de los
+            Particulares.
           </p>
         </footer>
       </div>

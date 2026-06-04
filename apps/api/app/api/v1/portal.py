@@ -1033,22 +1033,28 @@ def complete_onboarding(
 # cannot lie about which document set it accepted. When legal returns
 # final wording the version bumps and providers re-consent.
 
-CURRENT_LEGAL_CONSENT_VERSION = "v1"
-"""Active version of the legal document set the provider must accept.
+CURRENT_LEGAL_CONSENT_VERSION = "v2"
+"""Active version of the legal document set every provider and client
+must accept.
 
 The string is intentionally readable. Bump when the published copy of
 any of the three documents changes materially. Existing acceptances
 stay tied to their old version so a "you must re-consent" UI can diff
-``workspace.legal_consent_version`` against the current value.
+the stored ``legal_consent_version`` against the current value.
 
 History:
 - ``v0-draft`` — initial draft set shipped 2026-05-22; pending legal
   review. Replaced by v1 on 2026-05-25.
 - ``v1`` — first approved copy after Paco/Beko sign-off (effective
-  2026-05-25). All v0-draft acceptances are automatically re-prompted
-  on the next portal entry because the comparison logic in
-  :func:`get_legal_consent_status` returns ``True`` for "needs
-  consent" when the stored version differs from this constant.
+  2026-05-25).
+- ``v2`` — legal review of 2026-06-03 (effective 2026-06-03). Reframes
+  LegalShelf as *encargado* (no longer *responsable*), updates the
+  regime to "la Ley" + Secretaría Anticorrupción y Buen Gobierno,
+  enumerates sensitive data, and reworks the ARCO flow. All v1
+  acceptances are automatically re-prompted on the next entry because
+  the comparison logic returns ``True`` for "needs consent" when the
+  stored version differs from this constant. This is also the first
+  version enforced for client_admin users, not only providers.
 """
 
 

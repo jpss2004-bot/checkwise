@@ -508,6 +508,15 @@ class User(TimestampMixin, Base):
     whatsapp_opt_in_at: Mapped[datetime | None] = mapped_column(
         DateTime(timezone=True)
     )
+    # Client-side legal consent (v2+). Mirrors the provider gate, but
+    # stored per-user because a client_admin accepts the legal package
+    # once per version regardless of how many client orgs they manage.
+    # Providers keep their own per-workspace columns on ProviderWorkspace;
+    # these are read only by the client gate (``app.api.v1.client``).
+    legal_consent_accepted_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True)
+    )
+    legal_consent_version: Mapped[str | None] = mapped_column(String(120))
 
     memberships: Mapped[list[Membership]] = relationship(
         back_populates="user", cascade="all, delete-orphan"

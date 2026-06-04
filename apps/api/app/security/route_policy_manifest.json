@@ -708,6 +708,21 @@
       "notes": ""
     },
     {
+      "method": "POST",
+      "path": "/api/v1/client/legal-consent",
+      "function": "accept_client_legal_consent",
+      "router": "app.api.v1.client",
+      "file": "api/app/api/v1/client.py",
+      "lineno": 695,
+      "gate": "client_admin_or_admin",
+      "tenant_rule": "per-user (current.user.id); consent is recorded on the user row, not a tenant resource",
+      "audit_rule": "logged via client.legal_consent_accepted with version + IP + UA metadata",
+      "rate_limit_rule": "none (auth-gated)",
+      "error_lang": "es",
+      "must_change_password_allowed": false,
+      "notes": "client-side legal-consent gate (v2+)"
+    },
+    {
       "method": "GET",
       "path": "/api/v1/client/profile",
       "function": "client_profile",

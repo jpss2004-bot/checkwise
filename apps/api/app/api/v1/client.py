@@ -32,7 +32,7 @@ from typing import TYPE_CHECKING, Annotated, Literal
 if TYPE_CHECKING:
     from app.services.audit_package import AuditPackageFilters
 
-from fastapi import APIRouter, Depends, HTTPException, Query, Response, status
+from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response, status
 from fastapi.responses import FileResponse
 from pydantic import BaseModel, EmailStr, Field
 from sqlalchemy import and_, func, select
@@ -376,6 +376,19 @@ class ClientMe(BaseModel):
     roles: list[str]
     visible_client_ids: list[str]
     default_client_id: str | None
+    # Client-side legal-consent gate (v2+). The frontend blocks the
+    # dashboard until ``legal_consent_version == current_legal_consent_version``.
+    # ``current`` is owned by the backend so the client can't claim a
+    # different document set than what was rendered.
+    legal_consent_accepted_at: str | None = None
+    legal_consent_version: str | None = None
+    current_legal_consent_version: str = CURRENT_LEGAL_CONSENT_VERSION
+
+
+class ClientLegalConsentResponse(BaseModel):
+    user_id: str
+    legal_consent_accepted_at: str
+    legal_consent_version: str
 
 
 class ClientOverview(BaseModel):
@@ -638,16 +651,124 @@ class ClientCalendarResponse(BaseModel):
 
 @router.get("/me", response_model=ClientMe)
 def client_me(db: DbSession, current: ClientUser) -> ClientMe:
-    """Identity + visible client ids + default. The frontend stores
-    this so it can pick the right scope on every subsequent call.
+    """Identity + visible client ids + default + legal-consent state.
+    The frontend stores this so it can pick the right scope on every
+    subsequent call and gate the dashboard on consent.
     """
     visible = _visible_client_ids_for_user(db, current.user.id)
+    user_row = db.get(User, current.user.id)
+    accepted_at = (
+        user_row.legal_consent_accepted_at.isoformat()
+        if user_row and user_row.legal_consent_accepted_at
+        else None
+    )
     return ClientMe(
         user_id=current.user.id,
         email=current.user.email,
         roles=current.roles,
         visible_client_ids=visible,
         default_client_id=visible[0] if visible else None,
+        legal_consent_accepted_at=accepted_at,
+        legal_consent_version=user_row.legal_consent_version if user_row else None,
+        current_legal_consent_version=CURRENT_LEGAL_CONSENT_VERSION,
+    )
+
+
+def _client_ip(request: Request) -> str | None:
+    """Best-effort client IP. Prefers the first ``X-Forwarded-For`` hop
+    (Render/Vercel sit behind proxies) and falls back to the socket
+    peer. Mirrors ``app.api.v1.portal._client_ip``."""
+    fwd = request.headers.get("x-forwarded-for")
+    if fwd:
+        first = fwd.split(",", 1)[0].strip()
+        if first:
+            return first
+    return request.client.host if request.client else None
+
+
+@router.post(
+    "/legal-consent",
+    response_model=ClientLegalConsentResponse,
+    status_code=status.HTTP_200_OK,
+    summary="Record a client_admin's acceptance of the legal-consent gate",
+)
+def accept_client_legal_consent(
+    request: Request,
+    db: DbSession,
+    current: ClientUser,
+) -> ClientLegalConsentResponse:
+    """Persist the client_admin's acceptance of the current legal set.
+
+    Mirrors the provider endpoint (``app.api.v1.portal.accept_legal_consent``)
+    but stores acceptance per-user on ``users`` so a client_admin who
+    manages several client orgs accepts once per version. Body is empty
+    by design: the backend owns ``CURRENT_LEGAL_CONSENT_VERSION``.
+
+    Idempotent within a version. On a version bump the stored version
+    differs, so this is treated as a fresh acceptance: the timestamp is
+    rebumped and a new ``AuditLog`` row is written with the new version,
+    capturing IP + User-Agent. The prior acceptance row stays untouched
+    so the audit history shows the full sequence (v1 -> v2).
+    """
+    user_row = db.get(User, current.user.id)
+    if user_row is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, detail="Usuario no encontrado.")
+
+    if (
+        user_row.legal_consent_accepted_at is not None
+        and user_row.legal_consent_version == CURRENT_LEGAL_CONSENT_VERSION
+    ):
+        return ClientLegalConsentResponse(
+            user_id=user_row.id,
+            legal_consent_accepted_at=user_row.legal_consent_accepted_at.isoformat(),
+            legal_consent_version=CURRENT_LEGAL_CONSENT_VERSION,
+        )
+
+    prior_accepted_at = (
+        user_row.legal_consent_accepted_at.isoformat()
+        if user_row.legal_consent_accepted_at
+        else None
+    )
+    prior_version = user_row.legal_consent_version
+
+    accepted_at = datetime.now(UTC)
+    user_row.legal_consent_accepted_at = accepted_at
+    user_row.legal_consent_version = CURRENT_LEGAL_CONSENT_VERSION
+
+    add_audit_event(
+        db,
+        action="client.legal_consent_accepted",
+        entity_type="user",
+        entity_id=user_row.id,
+        actor_type="client_admin",
+        actor_id=user_row.id,
+        before=(
+            {
+                "legal_consent_accepted_at": prior_accepted_at,
+                "legal_consent_version": prior_version,
+            }
+            if prior_accepted_at is not None
+            else None
+        ),
+        after={
+            "legal_consent_accepted_at": accepted_at.isoformat(),
+            "legal_consent_version": CURRENT_LEGAL_CONSENT_VERSION,
+        },
+        metadata={
+            "version": CURRENT_LEGAL_CONSENT_VERSION,
+            "previous_version": prior_version,
+            "ip": _client_ip(request),
+            "user_agent": request.headers.get("user-agent"),
+        },
+    )
+
+    db.flush()
+    db.commit()
+    db.refresh(user_row)
+    return ClientLegalConsentResponse(
+        user_id=user_row.id,
+        legal_consent_accepted_at=user_row.legal_consent_accepted_at.isoformat(),
+        legal_consent_version=CURRENT_LEGAL_CONSENT_VERSION,
     )
 
 

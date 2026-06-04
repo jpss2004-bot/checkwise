@@ -62,6 +62,17 @@ export type ClientMe = {
   roles: string[];
   visible_client_ids: string[];
   default_client_id: string | null;
+  // Client-side legal-consent gate (v2+). The shell blocks the
+  // dashboard until legal_consent_version === current_legal_consent_version.
+  legal_consent_accepted_at: string | null;
+  legal_consent_version: string | null;
+  current_legal_consent_version: string | null;
+};
+
+export type ClientLegalConsentResponse = {
+  user_id: string;
+  legal_consent_accepted_at: string;
+  legal_consent_version: string;
 };
 
 export type ClientOverview = {
@@ -377,6 +388,13 @@ export type ClientMetadataResponse = {
 
 export async function getClientMe(): Promise<ClientMe> {
   return fetchJson<ClientMe>("/api/v1/client/me");
+}
+
+/** Record the client_admin's acceptance of the current legal package. */
+export async function acceptClientLegalConsent(): Promise<ClientLegalConsentResponse> {
+  return fetchJson<ClientLegalConsentResponse>("/api/v1/client/legal-consent", {
+    method: "POST",
+  });
 }
 
 export async function getClientOverview(params?: {
