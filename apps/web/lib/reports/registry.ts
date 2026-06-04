@@ -30,6 +30,17 @@ export interface BlockProps<TConfig = unknown, TData = unknown> {
   block: ReportBlock<TConfig> & { data?: TData };
   editable: boolean;
   /**
+   * Whether the reader can ACT on the block's items (e.g. follow an
+   * upload CTA). True only for the provider's own copy of a report
+   * (audience ``vendor_facing``); false for client-facing, signed, or
+   * internal audiences, where the same items must read as findings the
+   * client hands to the provider — not buttons the viewer can't use.
+   * The ``/portal/upload`` href is a provider-portal route, so showing
+   * it to a client_admin is both useless and broken. Defaults to true
+   * so any caller that doesn't thread audience keeps the old behavior.
+   */
+  interactive?: boolean;
+  /**
    * Patch the block's config or data in place. The canvas debounces
    * patches into the parent ReportContent. AI summary fields are
    * patched through a separate code path (Phase 3.3+).

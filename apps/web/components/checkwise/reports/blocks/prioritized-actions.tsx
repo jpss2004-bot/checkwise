@@ -126,6 +126,7 @@ export const prioritizedActionsDefinition: Omit<
 
 export function PrioritizedActionsBlock({
   block,
+  interactive = true,
 }: BlockProps<PrioritizedActionsConfig, PrioritizedActionsData>) {
   const data = block.data;
 
@@ -171,7 +172,12 @@ export function PrioritizedActionsBlock({
       {filterChips}
       <ol className="divide-y divide-[color:var(--border-subtle)] border-y border-[color:var(--border-subtle)]">
         {items.map((item, idx) => (
-          <ActionCard key={item.id} item={item} index={idx + 1} />
+          <ActionCard
+            key={item.id}
+            item={item}
+            index={idx + 1}
+            interactive={interactive}
+          />
         ))}
       </ol>
       <p className="text-[11px] text-[color:var(--text-tertiary)]">
@@ -185,9 +191,11 @@ export function PrioritizedActionsBlock({
 function ActionCard({
   item,
   index,
+  interactive = true,
 }: {
   item: PrioritizedAction;
   index: number;
+  interactive?: boolean;
 }) {
   const priorityMeta = PRIORITY_META[item.priority] ?? PRIORITY_META.low;
   const typeMeta = TYPE_META[item.type] ?? TYPE_META.reupload;
@@ -247,20 +255,24 @@ function ActionCard({
           </p>
         )}
 
-        {/* CTA */}
-        <div className="flex items-center gap-2 pt-1">
-          <a
-            href={item.href}
-            target="_blank"
-            rel="noreferrer"
-            className="inline-flex items-center gap-1 rounded-sm border border-[color:var(--border-strong,var(--border-subtle))] bg-[color:var(--surface,#fff)] px-2.5 py-1 text-[12px] font-medium text-[color:var(--text-primary)] hover:bg-[color:var(--surface-hover)] focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-[color:var(--ring)] print:hidden"
-          >
-            {ctaLabel}
-          </a>
-          <span className="sr-only print:not-sr-only print:text-[11px] print:text-[color:var(--text-tertiary)]">
-            Acción: {ctaLabel} ({item.href})
-          </span>
-        </div>
+        {/* CTA — only for the provider's own copy (``interactive``).
+            Other audiences read this as a prioritized findings list to
+            forward, not a set of buttons they can act on. */}
+        {interactive ? (
+          <div className="flex items-center gap-2 pt-1">
+            <a
+              href={item.href}
+              target="_blank"
+              rel="noreferrer"
+              className="inline-flex items-center gap-1 rounded-sm border border-[color:var(--border-strong,var(--border-subtle))] bg-[color:var(--surface,#fff)] px-2.5 py-1 text-[12px] font-medium text-[color:var(--text-primary)] hover:bg-[color:var(--surface-hover)] focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-[color:var(--ring)] print:hidden"
+            >
+              {ctaLabel}
+            </a>
+            <span className="sr-only print:not-sr-only print:text-[11px] print:text-[color:var(--text-tertiary)]">
+              Acción: {ctaLabel} ({item.href})
+            </span>
+          </div>
+        ) : null}
       </div>
     </li>
   );

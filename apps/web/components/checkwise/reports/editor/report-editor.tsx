@@ -420,7 +420,6 @@ export function ReportEditor({
         report={report}
         content={content}
         reportId={reportId}
-        printHref={printHref}
         backHref={backHref}
         onExitToEditor={() => setAuditMode(false)}
         hideExit={readOnly}
@@ -583,9 +582,6 @@ export function ReportEditor({
               </OverflowMenuItem>
               <OverflowMenuItem>
                 <ExportButton reportId={reportId} format="html" asMenuItem />
-              </OverflowMenuItem>
-              <OverflowMenuItem>
-                <ExportButton reportId={reportId} format="xlsx" asMenuItem />
               </OverflowMenuItem>
             </OverflowMenu>
           </>
@@ -786,6 +782,11 @@ export function ReportEditor({
             <Canvas
               content={content}
               editable={true}
+              // Mirror the audience the report will ship to, so the
+              // authoring preview shows the same read-only findings the
+              // client will see (only the provider's own copy keeps the
+              // interactive "Subir" CTAs).
+              interactive={report.audience === "vendor_facing"}
               onChange={onCanvasChange}
               regeneratingBlockId={regeneratingBlockId}
               onRegenerateBlock={onRegenerateBlock}

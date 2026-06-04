@@ -145,7 +145,7 @@ const INSTITUTION_LABEL: Record<string, string> = {
   sat: "SAT",
   imss: "IMSS",
   infonavit: "INFONAVIT",
-  stps_repse: "STPS · REPSE",
+  stps_repse: "STPS / REPSE",
   interno_cliente: "Interno",
 };
 
@@ -184,6 +184,7 @@ export const attentionListDefinition: Omit<
 
 export function AttentionListBlock({
   block,
+  interactive = true,
 }: BlockProps<AttentionListConfig, AttentionListData>) {
   const data = block.data;
 
@@ -224,11 +225,11 @@ export function AttentionListBlock({
     <section className="space-y-2 py-2" data-block-type="attention_list">
       {filterChips}
       {groupByInstitution ? (
-        <GroupedRows items={items} hideInstitutionChip />
+        <GroupedRows items={items} hideInstitutionChip interactive={interactive} />
       ) : (
         <ul className="divide-y divide-[color:var(--border-subtle)] border-y border-[color:var(--border-subtle)]">
           {items.map((item) => (
-            <AttentionRow key={item.id} item={item} />
+            <AttentionRow key={item.id} item={item} interactive={interactive} />
           ))}
         </ul>
       )}
@@ -243,9 +244,11 @@ export function AttentionListBlock({
 function GroupedRows({
   items,
   hideInstitutionChip,
+  interactive = true,
 }: {
   items: AttentionItem[];
   hideInstitutionChip?: boolean;
+  interactive?: boolean;
 }) {
   // Preserve incoming order within each institution; the backend has
   // already ranked items by urgency.
@@ -277,6 +280,7 @@ function GroupedRows({
                 key={item.id}
                 item={item}
                 hideInstitutionChip={hideInstitutionChip}
+                interactive={interactive}
               />
             ))}
           </ul>
@@ -289,9 +293,11 @@ function GroupedRows({
 function AttentionRow({
   item,
   hideInstitutionChip,
+  interactive = true,
 }: {
   item: AttentionItem;
   hideInstitutionChip?: boolean;
+  interactive?: boolean;
 }) {
   const meta = STATE_META[item.state] ?? STATE_META.missing;
   const dueInfo = formatDue(item.due_in_days);
@@ -321,19 +327,26 @@ function AttentionRow({
         </span>
         <span className={`text-[12px] tabular-nums ${dueClass}`}>· {dueInfo.label}</span>
       </div>
-      <div className="flex items-center gap-2">
-        <a
-          href={item.href}
-          target="_blank"
-          rel="noreferrer"
-          className="inline-flex items-center gap-1 rounded-sm border border-[color:var(--border-strong,var(--border-subtle))] px-2 py-1 text-[12px] font-medium text-[color:var(--text-primary)] hover:bg-[color:var(--surface-hover)] focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-[color:var(--ring)] print:hidden"
-        >
-          {STATE_CTA[item.state] ?? "Subir"}
-        </a>
-        <span className="sr-only print:not-sr-only print:text-[11px] print:text-[color:var(--text-tertiary)]">
-          Acción: {STATE_CTA[item.state] ?? "Subir"} ({item.href})
-        </span>
-      </div>
+      {/* The upload CTA only renders for the provider's own copy of the
+          report (``interactive``). For a client/auditor/internal reader
+          the row is a finding, not an action — the "Subir" link points
+          at the provider portal they can't use, so we drop it and the
+          state chip + due date carry the "what's missing" message. */}
+      {interactive ? (
+        <div className="flex items-center gap-2">
+          <a
+            href={item.href}
+            target="_blank"
+            rel="noreferrer"
+            className="inline-flex items-center gap-1 rounded-sm border border-[color:var(--border-strong,var(--border-subtle))] px-2 py-1 text-[12px] font-medium text-[color:var(--text-primary)] hover:bg-[color:var(--surface-hover)] focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-[color:var(--ring)] print:hidden"
+          >
+            {STATE_CTA[item.state] ?? "Subir"}
+          </a>
+          <span className="sr-only print:not-sr-only print:text-[11px] print:text-[color:var(--text-tertiary)]">
+            Acción: {STATE_CTA[item.state] ?? "Subir"} ({item.href})
+          </span>
+        </div>
+      ) : null}
     </li>
   );
 }

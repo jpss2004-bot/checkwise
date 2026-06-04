@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useState } from "react";
-import { DownloadSimple, FilePdf, FileXls } from "@phosphor-icons/react";
+import { DownloadSimple, Eye, FilePdf } from "@phosphor-icons/react";
 
 import { Button } from "@/components/ui/button";
 import { OVERFLOW_MENU_ROW_CLASS } from "@/components/ui/overflow-menu";
@@ -11,8 +11,8 @@ import {
   ReportsApiError,
   createReportExport,
   downloadReportExport,
-  getReportExport,
-  type ReportExport,
+  fetchReportExportObjectUrl,
+  pollReportExportUntilReady,
   type ReportExportFormat,
 } from "@/lib/api/reports";
 
@@ -36,9 +36,6 @@ import {
  * start.
  */
 
-const POLL_INTERVAL_MS = 1000;
-const POLL_MAX_ATTEMPTS = 30;
-
 const FORMAT_META: Record<
   ReportExportFormat,
   { label: string; busyLabel: string; title: string; icon: React.ElementType }
@@ -54,13 +51,6 @@ const FORMAT_META: Record<
     busyLabel: "Generando PDF…",
     title: "Descargar el reporte como un PDF limpio, renderizado en el servidor.",
     icon: FilePdf,
-  },
-  xlsx: {
-    label: "Descargar Excel",
-    busyLabel: "Generando Excel…",
-    title:
-      "Exportar el reporte como libro de Excel. Una hoja por bloque; bloques tabulares (matriz de riesgos, métricas) se exportan como tablas filtrables.",
-    icon: FileXls,
   },
 };
 
@@ -103,31 +93,12 @@ export function ExportButton({
   // continue after unmount is safe — the toast call targets a
   // gone-Toaster (no-op) and we never touch state with setBusy
   // after the async chain unwinds.
-  const pollUntilReady = useCallback(
-    async (exportId: string): Promise<ReportExport> => {
-      for (let attempt = 0; attempt < POLL_MAX_ATTEMPTS; attempt += 1) {
-        const current = await getReportExport(exportId);
-        if (current.status === "ready") return current;
-        if (current.status === "failed") {
-          throw new Error(
-            current.error_text ?? "El renderizador falló sin mensaje.",
-          );
-        }
-        await new Promise((resolve) => setTimeout(resolve, POLL_INTERVAL_MS));
-      }
-      throw new Error(
-        "El export tardó demasiado. Intenta de nuevo en unos segundos.",
-      );
-    },
-    [],
-  );
-
   const onClick = useCallback(async () => {
     if (busy) return;
     setBusy(true);
     try {
       const created = await createReportExport(reportId, { format });
-      const ready = await pollUntilReady(created.id);
+      const ready = await pollReportExportUntilReady(created.id);
       await downloadReportExport(
         ready.id,
         `checkwise-reporte-${reportId.slice(0, 8)}.${format}`,
@@ -144,7 +115,7 @@ export function ExportButton({
     } finally {
       setBusy(false);
     }
-  }, [busy, format, pollUntilReady, reportId]);
+  }, [busy, format, reportId]);
 
   const Icon = meta.icon;
   if (asMenuItem) {
@@ -173,6 +144,78 @@ export function ExportButton({
     >
       <Icon className="h-4 w-4" weight="bold" aria-hidden="true" />
       {busy ? meta.busyLabel : meta.label}
+    </Button>
+  );
+}
+
+/**
+ * Inline PDF preview — opens the SAME server-rendered PDF the Download
+ * button produces, but in a new browser tab instead of saving it. This
+ * replaced the old "Imprimir" (window.print) button, which was
+ * redundant with Download PDF and produced a browser-chrome printout
+ * rather than the designed document.
+ *
+ * Popup-blocker note: we open the tab synchronously inside the click
+ * handler (so it's attributed to the user gesture) and only navigate it
+ * to the blob URL once the render finishes. If render fails we close the
+ * placeholder tab and toast the error.
+ */
+export function PreviewPdfButton({
+  reportId,
+  variant = "outline",
+  className,
+}: {
+  reportId: string;
+  variant?: "ghost" | "default" | "outline";
+  className?: string;
+}) {
+  const [busy, setBusy] = useState(false);
+
+  const onClick = useCallback(async () => {
+    if (busy) return;
+    setBusy(true);
+    const tab = window.open("", "_blank", "noopener,noreferrer");
+    let objectUrl: string | null = null;
+    try {
+      const created = await createReportExport(reportId, { format: "pdf" });
+      const ready = await pollReportExportUntilReady(created.id);
+      objectUrl = await fetchReportExportObjectUrl(ready.id);
+      if (tab) {
+        tab.location.href = objectUrl;
+      } else {
+        // Popup was blocked — fall back to opening once we have the URL.
+        window.open(objectUrl, "_blank", "noopener,noreferrer");
+      }
+      // Revoke after the tab has had time to load the bytes.
+      const urlToRevoke = objectUrl;
+      setTimeout(() => URL.revokeObjectURL(urlToRevoke), 60_000);
+    } catch (err) {
+      if (tab) tab.close();
+      if (objectUrl) URL.revokeObjectURL(objectUrl);
+      const message =
+        err instanceof ReportsApiError
+          ? err.message
+          : err instanceof Error
+            ? err.message
+            : "No pudimos generar la vista previa.";
+      toast.error(message);
+    } finally {
+      setBusy(false);
+    }
+  }, [busy, reportId]);
+
+  return (
+    <Button
+      type="button"
+      variant={variant}
+      size="sm"
+      onClick={onClick}
+      disabled={busy}
+      title="Abrir una vista previa del PDF en una pestaña nueva"
+      className={className}
+    >
+      <Eye className="h-4 w-4" weight="bold" aria-hidden="true" />
+      {busy ? "Generando vista previa…" : "Vista previa"}
     </Button>
   );
 }

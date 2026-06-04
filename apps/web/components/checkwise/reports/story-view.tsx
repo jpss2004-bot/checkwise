@@ -2,16 +2,14 @@
 
 import { useMemo } from "react";
 import Link from "next/link";
-import {
-  ArrowLeft,
-  CheckCircle,
-  Pencil,
-  Printer,
-} from "@phosphor-icons/react";
+import { ArrowLeft, CheckCircle, Pencil } from "@phosphor-icons/react";
 
 import { Canvas } from "@/components/checkwise/reports/canvas";
 import { ReportMasthead } from "@/components/checkwise/reports/report-masthead";
-import { ExportButton } from "@/components/checkwise/reports/editor/export-button";
+import {
+  ExportButton,
+  PreviewPdfButton,
+} from "@/components/checkwise/reports/editor/export-button";
 import { ShareDialog } from "@/components/checkwise/reports/editor/share-dialog";
 import { Button } from "@/components/ui/button";
 import {
@@ -56,8 +54,6 @@ export interface StoryViewProps {
   report: ReportRead;
   content: ReportContent;
   reportId: string;
-  /** Route to the printable PDF surface (existing /portal/reports/{id}/print). */
-  printHref: string;
   /** Route the back link points to when the auditor closes the report. */
   backHref: string;
   /** Pushes the URL back to the editor (drops the ?mode=audit flag). */
@@ -71,7 +67,6 @@ export function StoryView({
   report,
   content,
   reportId,
-  printHref,
   backHref,
   onExitToEditor,
   hideExit = false,
@@ -159,7 +154,17 @@ export function StoryView({
         <p className="text-[11px] font-medium uppercase tracking-[0.08em] text-[color:var(--text-tertiary)]">
           Qué encontramos
         </p>
-        <Canvas content={content} editable={false} onChange={() => {}} />
+        {/* Items render as read-only findings unless this is the
+            provider's own copy — a client/auditor reading the report
+            can't act on a "Subir" upload CTA (that's a provider-portal
+            route), so for every non-vendor audience the blocks show
+            what's missing/expired as a findings list to hand off. */}
+        <Canvas
+          content={content}
+          editable={false}
+          interactive={audience === "vendor_facing"}
+          onChange={() => {}}
+        />
       </section>
 
       {/* ─── Closing CTA — make the deliverable obvious ───── */}
@@ -180,14 +185,8 @@ export function StoryView({
           {/* Primary download = the server-rendered designed PDF (one click,
               clean document). The browser-print route stays as "Imprimir". */}
           <ExportButton reportId={reportId} format="pdf" variant="default" />
+          <PreviewPdfButton reportId={reportId} />
           <ShareDialog reportId={reportId} variant="outline" />
-          <ExportButton reportId={reportId} format="xlsx" />
-          <Button asChild variant="ghost" size="sm">
-            <Link href={printHref} target="_blank" rel="noopener noreferrer">
-              <Printer className="h-4 w-4" weight="bold" aria-hidden="true" />
-              Imprimir
-            </Link>
-          </Button>
         </div>
       </section>
 

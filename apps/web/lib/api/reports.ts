@@ -412,7 +412,7 @@ export function createReportFromPreset(
 // HTML is the only format wired in 10A; PDF (10B) and Excel (10C)
 // will land alongside their renderer choices.
 
-export type ReportExportFormat = "html" | "pdf" | "xlsx";
+export type ReportExportFormat = "html" | "pdf";
 
 export interface ReportExport {
   id: string;
@@ -483,6 +483,66 @@ export async function downloadReportExport(
   // Revoke after a small delay so the browser's download pipeline
   // has time to grab the blob.
   setTimeout(() => URL.revokeObjectURL(url), 1000);
+}
+
+/**
+ * Poll an export row until it reaches ``ready`` (or ``failed``).
+ * Shared by the download and preview buttons so both honour the same
+ * cadence and surface the renderer's ``error_text`` verbatim.
+ */
+export async function pollReportExportUntilReady(
+  exportId: string,
+  {
+    intervalMs = 1000,
+    maxAttempts = 30,
+  }: { intervalMs?: number; maxAttempts?: number } = {},
+): Promise<ReportExport> {
+  for (let attempt = 0; attempt < maxAttempts; attempt += 1) {
+    const current = await getReportExport(exportId);
+    if (current.status === "ready") return current;
+    if (current.status === "failed") {
+      throw new ReportsApiError(
+        502,
+        current.error_text ?? "El renderizador falló sin mensaje.",
+      );
+    }
+    await new Promise((resolve) => setTimeout(resolve, intervalMs));
+  }
+  throw new ReportsApiError(
+    504,
+    "El export tardó demasiado. Intenta de nuevo en unos segundos.",
+  );
+}
+
+/**
+ * Fetch a ready export and return a blob object URL so the caller can
+ * open it inline (e.g. preview the PDF in a new tab) instead of
+ * downloading. The bearer token flows through ``fetch`` for the same
+ * reason as ``downloadReportExport``. The caller owns the returned URL
+ * and must ``URL.revokeObjectURL`` it when done.
+ */
+export async function fetchReportExportObjectUrl(
+  exportId: string,
+): Promise<string> {
+  const session = readAdminSession();
+  const headers: Record<string, string> = {
+    Accept: "application/pdf, application/octet-stream",
+  };
+  if (session?.access_token) {
+    headers.Authorization = `Bearer ${session.access_token}`;
+  }
+  const response = await fetch(
+    `${API_BASE_URL}/api/v1/reports/exports/${exportId}/download`,
+    { headers },
+  );
+  if (!response.ok) {
+    throw new ReportsApiError(
+      response.status,
+      `No pudimos abrir la vista previa (HTTP ${response.status}).`,
+    );
+  }
+  const blob = await response.blob();
+  return URL.createObjectURL(blob);
 }
 
 // ─── Shares (Phase 10D) ──────────────────────────────────────────

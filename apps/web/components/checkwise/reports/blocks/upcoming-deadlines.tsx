@@ -84,7 +84,7 @@ const INSTITUTION_LABEL: Record<string, string> = {
   sat: "SAT",
   imss: "IMSS",
   infonavit: "INFONAVIT",
-  stps_repse: "STPS · REPSE",
+  stps_repse: "STPS / REPSE",
   interno_cliente: "Interno",
 };
 
@@ -162,6 +162,7 @@ export const upcomingDeadlinesDefinition: Omit<
 
 export function UpcomingDeadlinesBlock({
   block,
+  interactive = true,
 }: BlockProps<UpcomingDeadlinesConfig, UpcomingDeadlinesData>) {
   const data = block.data;
 
@@ -209,10 +210,10 @@ export function UpcomingDeadlinesBlock({
       <TimelineSvg items={items} buckets={buckets} />
 
       {/* ── Per-institution cards ── */}
-      <InstitutionCards items={items} />
+      <InstitutionCards items={items} interactive={interactive} />
 
       {/* ── Compact table (PDF-safe) ── */}
-      <DeadlinesTable items={items} />
+      <DeadlinesTable items={items} interactive={interactive} />
 
       {/* Footer meta */}
       <p className="text-[11px] text-[color:var(--text-tertiary)]">
@@ -389,7 +390,13 @@ function BucketSwatch({
 
 // ── Institution cards ───────────────────────────────────────────
 
-function InstitutionCards({ items }: { items: UpcomingItem[] }) {
+function InstitutionCards({
+  items,
+  interactive = true,
+}: {
+  items: UpcomingItem[];
+  interactive?: boolean;
+}) {
   // Group: keep the SOONEST item per institution. Items are already
   // sorted ascending by due_in_days from the backend.
   const soonestByInst = new Map<Institution, UpcomingItem>();
@@ -451,17 +458,23 @@ function InstitutionCards({ items }: { items: UpcomingItem[] }) {
                   {item.period_key ?? "—"}
                 </span>
               </p>
-              <a
-                href={item.href}
-                target="_blank"
-                rel="noreferrer"
-                className="shrink-0 rounded-sm border border-[color:var(--border-subtle)] px-2 py-0.5 text-[11px] font-medium text-[color:var(--text-primary)] hover:bg-[color:var(--surface-hover)] focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-[color:var(--ring)] print:hidden"
-              >
-                Subir documento
-              </a>
-              <span className="sr-only print:not-sr-only print:text-[11px] print:text-[color:var(--text-tertiary)]">
-                Acción: subir documento ({item.href})
-              </span>
+              {/* Upload CTA only for the provider's own copy; other
+                  audiences read the countdown as a finding. */}
+              {interactive ? (
+                <>
+                  <a
+                    href={item.href}
+                    target="_blank"
+                    rel="noreferrer"
+                    className="shrink-0 rounded-sm border border-[color:var(--border-subtle)] px-2 py-0.5 text-[11px] font-medium text-[color:var(--text-primary)] hover:bg-[color:var(--surface-hover)] focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-[color:var(--ring)] print:hidden"
+                  >
+                    Subir documento
+                  </a>
+                  <span className="sr-only print:not-sr-only print:text-[11px] print:text-[color:var(--text-tertiary)]">
+                    Acción: subir documento ({item.href})
+                  </span>
+                </>
+              ) : null}
             </div>
           </li>
         );
@@ -472,7 +485,13 @@ function InstitutionCards({ items }: { items: UpcomingItem[] }) {
 
 // ── Table (canonical PDF surface) ───────────────────────────────
 
-function DeadlinesTable({ items }: { items: UpcomingItem[] }) {
+function DeadlinesTable({
+  items,
+  interactive = true,
+}: {
+  items: UpcomingItem[];
+  interactive?: boolean;
+}) {
   return (
     <details className="rounded-md border border-[color:var(--border-subtle)] bg-[color:var(--surface-elevated,transparent)] print:open">
       <summary className="cursor-pointer select-none px-3 py-2 text-[12px] text-[color:var(--text-secondary)] print:hidden">
@@ -497,9 +516,11 @@ function DeadlinesTable({ items }: { items: UpcomingItem[] }) {
               <th className="border-y border-[color:var(--border-subtle)] px-3 py-2 text-right font-medium">
                 Días
               </th>
-              <th className="border-y border-[color:var(--border-subtle)] px-3 py-2 text-right font-medium print:hidden">
-                Acción
-              </th>
+              {interactive ? (
+                <th className="border-y border-[color:var(--border-subtle)] px-3 py-2 text-right font-medium print:hidden">
+                  Acción
+                </th>
+              ) : null}
             </tr>
           </thead>
           <tbody>
@@ -528,16 +549,18 @@ function DeadlinesTable({ items }: { items: UpcomingItem[] }) {
                   >
                     {formatCountdown(it.due_in_days)}
                   </td>
-                  <td className="px-3 py-2 text-right print:hidden">
-                    <a
-                      href={it.href}
-                      target="_blank"
-                      rel="noreferrer"
-                      className="rounded-sm border border-[color:var(--border-subtle)] px-2 py-0.5 text-[11px] hover:bg-[color:var(--surface-hover)]"
-                    >
-                      Subir
-                    </a>
-                  </td>
+                  {interactive ? (
+                    <td className="px-3 py-2 text-right print:hidden">
+                      <a
+                        href={it.href}
+                        target="_blank"
+                        rel="noreferrer"
+                        className="rounded-sm border border-[color:var(--border-subtle)] px-2 py-0.5 text-[11px] hover:bg-[color:var(--surface-hover)]"
+                      >
+                        Subir
+                      </a>
+                    </td>
+                  ) : null}
                 </tr>
               );
             })}

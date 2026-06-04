@@ -33,6 +33,13 @@ interface CanvasProps {
   content: ReportContent;
   editable: boolean;
   onChange: (next: ReportContent) => void;
+  /**
+   * Whether block items render their action CTAs (e.g. the "Subir"
+   * upload link). True only when the audience is the provider itself
+   * (``vendor_facing``); otherwise blocks render as read-only findings.
+   * Defaults to true so existing callers are unchanged.
+   */
+  interactive?: boolean;
   /** Block types that carry an AI summary (per backend ai_summaries.py). */
   aiAwareTypes?: string[];
   /** Block currently being regenerated. */
@@ -48,6 +55,7 @@ export function Canvas({
   content,
   editable,
   onChange,
+  interactive = true,
   aiAwareTypes = DEFAULT_AI_AWARE_TYPES,
   regeneratingBlockId = null,
   onRegenerateBlock,
@@ -146,6 +154,7 @@ export function Canvas({
         <BlockComponent
           block={block}
           editable={editable && !block.locked}
+          interactive={interactive}
           onPatch={(patch) => patchBlock(block.id, patch)}
         />
         {/* The generic per-block AI label was removed (2026-06-03): the
