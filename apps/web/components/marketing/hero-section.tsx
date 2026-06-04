@@ -41,34 +41,35 @@ export function HeroSection() {
         className="cw-grid-pattern pointer-events-none absolute inset-x-0 top-0 -z-10 h-[72%] opacity-[0.62]"
       />
 
-      <div className="mx-auto grid max-w-[1320px] grid-cols-1 items-center gap-10 px-5 py-10 md:py-16 lg:min-h-[calc(100dvh-64px)] lg:grid-cols-[minmax(0,0.86fr)_minmax(0,1.14fr)] lg:gap-14 lg:py-20">
+      <div className="mx-auto grid max-w-[1320px] grid-cols-1 items-center gap-10 px-5 py-10 md:py-14 lg:min-h-[calc(100dvh-64px)] lg:grid-cols-[minmax(0,0.86fr)_minmax(0,1.14fr)] lg:gap-14 lg:py-12">
         <div className="min-w-0">
           <motion.div
             {...fade(0)}
             className="inline-flex items-center gap-2 rounded-full border border-[color:var(--border-default)] bg-[color:var(--surface-raised)]/90 px-2.5 py-1 font-mono text-[10px] uppercase tracking-[0.2em] text-[color:var(--text-secondary)] shadow-[0_12px_28px_-24px_hsl(var(--brand-navy)/0.45)] backdrop-blur-sm"
           >
             <span className="cw-pulse-soft inline-block h-1.5 w-1.5 rounded-full bg-[color:var(--text-teal)]" />
-            CheckWise · operación REPSE real
+            CheckWise · cumplimiento REPSE
           </motion.div>
 
           <motion.h1
             {...fade(0.06)}
-            className="mt-6 max-w-[12ch] font-semibold tracking-[-0.025em] text-[color:var(--text-primary)] [text-wrap:balance]"
+            className="mt-6 max-w-[15ch] font-semibold tracking-[-0.025em] text-[color:var(--text-primary)] [text-wrap:balance]"
             style={{
-              fontSize: "clamp(2.45rem, 5.7vw, 5.25rem)",
-              lineHeight: "0.95",
+              fontSize: "clamp(2.3rem, 5vw, 4.6rem)",
+              lineHeight: "0.98",
             }}
           >
-            Del pendiente al expediente defendible.
+            Controla el cumplimiento REPSE de todos tus proveedores.
           </motion.h1>
 
           <motion.p
             {...fade(0.12)}
             className="mt-6 max-w-[52ch] text-[16px] leading-[1.65] text-[color:var(--text-secondary)] md:text-[17px]"
           >
-            CheckWise conecta calendario, carga guiada, revisión humana,
-            auditoría y reportes AI en una sola operación para cumplimiento
-            REPSE. La IA asiste; la decisión legal sigue siendo humana.
+            CheckWise reúne calendario, evidencia, revisión humana y reportes en
+            un solo expediente auditable. Ve qué falta, qué vence y qué está en
+            riesgo en tu portafolio — antes de una inspección. La IA asiste; la
+            decisión legal sigue siendo humana.
           </motion.p>
 
           <motion.div {...fade(0.18)} className="mt-8 flex flex-wrap gap-3">
@@ -105,14 +106,14 @@ export function HeroSection() {
         <div className="min-w-0">
           <motion.div
             {...fade(0.24)}
-            className="mt-10 grid max-w-[560px] grid-cols-1 gap-3 sm:grid-cols-3"
+            className="mt-6 grid max-w-[560px] grid-cols-1 gap-3 sm:grid-cols-3"
           >
             {HERO_PROOF.map((item) => (
               <div
                 key={item.label}
                 className="border-t border-[color:var(--border-default)] pt-3"
               >
-                <p className="font-mono text-[10px] uppercase tracking-[0.18em] text-[color:var(--text-tertiary)]">
+                <p className="font-mono text-[10px] uppercase tracking-[0.18em] text-[color:var(--text-secondary)]">
                   {item.label}
                 </p>
                 <p className="mt-1 text-[24px] font-semibold tracking-[-0.03em] text-[color:var(--text-primary)]">
