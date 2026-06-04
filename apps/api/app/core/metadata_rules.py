@@ -84,6 +84,15 @@ class DocumentMetadataRule:
     notes: tuple[str, ...] = ()
     human_review_required: bool = True
     legal_approval_allowed: bool = False
+    # When True, this rule is a candidate when matching a document of ANY
+    # institution, not only its own. Used by the metadata matcher's fuzzy
+    # fallback for documents that can be slotted under any institution
+    # (e.g. corporate/contract docs). This is an explicit, separable flag:
+    # it used to be inferred from ``institution == "interno_cliente"``, which
+    # conflated "non-government source" with "universal fallback candidate".
+    # The bucket and the fallback behavior are now independent — a future
+    # ``interno_cliente`` rule can opt out, and a government rule can opt in.
+    applies_to_all_institutions: bool = False
 
     def to_dict(self) -> dict:
         """Return a JSON-serializable representation for tests or future APIs."""
@@ -455,6 +464,7 @@ def _rule(
     fixed_tags: tuple[str, ...] = (),
     annex_document_type_codes: tuple[str, ...] = (),
     notes: tuple[str, ...] = (),
+    applies_to_all_institutions: bool = False,
 ) -> DocumentMetadataRule:
     return DocumentMetadataRule(
         code=code,
@@ -474,6 +484,7 @@ def _rule(
         fixed_tags=fixed_tags,
         annex_document_type_codes=annex_document_type_codes,
         notes=notes,
+        applies_to_all_institutions=applies_to_all_institutions,
     )
 
 
@@ -485,6 +496,7 @@ _DOCUMENT_RULES: tuple[DocumentMetadataRule, ...] = (
         category="Corporativo",
         subtype="Escritura Pública y Constitutiva",
         institution="interno_cliente",
+        applies_to_all_institutions=True,
         frequency="unica_vez",
         source_section="I.I. Constitutiva",
         naming_pattern="{provider_nomenclature} {public_deed_number}",
@@ -500,6 +512,7 @@ _DOCUMENT_RULES: tuple[DocumentMetadataRule, ...] = (
         category="Corporativo",
         subtype="Escritura Pública",
         institution="interno_cliente",
+        applies_to_all_institutions=True,
         frequency="unica_vez",
         source_section="I.II. Protocolización de Acta",
         naming_pattern="{provider_nomenclature} {public_deed_number}",
@@ -515,6 +528,7 @@ _DOCUMENT_RULES: tuple[DocumentMetadataRule, ...] = (
         category="Contrato",
         subtype="Prestación de Servicios",
         institution="interno_cliente",
+        applies_to_all_institutions=True,
         frequency="unica_vez",
         source_section="II.I. Contrato de Prestación de Servicios",
         naming_pattern="{provider_nomenclature} Contrato Prestación Servicios",
@@ -531,6 +545,7 @@ _DOCUMENT_RULES: tuple[DocumentMetadataRule, ...] = (
         category="Contrato",
         subtype="Otros",
         institution="interno_cliente",
+        applies_to_all_institutions=True,
         frequency="evento",
         source_section="II.II. Prórroga / Extensión del Contrato",
         naming_pattern="{provider_nomenclature} Prórroga / Extensión",
@@ -546,6 +561,7 @@ _DOCUMENT_RULES: tuple[DocumentMetadataRule, ...] = (
         category="Contrato",
         subtype="Otros",
         institution="interno_cliente",
+        applies_to_all_institutions=True,
         frequency="evento",
         source_section="II.III. Addendum",
         naming_pattern="{provider_nomenclature} Addendum",
@@ -561,6 +577,7 @@ _DOCUMENT_RULES: tuple[DocumentMetadataRule, ...] = (
         category="Contrato",
         subtype="Modificatorio",
         institution="interno_cliente",
+        applies_to_all_institutions=True,
         frequency="evento",
         source_section="II.IV. Convenio Modificatorio",
         naming_pattern="{provider_nomenclature} Convenio Modificatorio",
@@ -577,6 +594,7 @@ _DOCUMENT_RULES: tuple[DocumentMetadataRule, ...] = (
         category="Contrato",
         subtype="Órden de Servicios",
         institution="interno_cliente",
+        applies_to_all_institutions=True,
         frequency="evento",
         source_section="II.V. Órdenes de Servicios",
         naming_pattern="{provider_nomenclature} Órden Servicio",
@@ -592,6 +610,7 @@ _DOCUMENT_RULES: tuple[DocumentMetadataRule, ...] = (
         category="Contrato",
         subtype="Anexo",
         institution="interno_cliente",
+        applies_to_all_institutions=True,
         frequency="evento",
         hierarchy="anexo",
         source_section="II.I. Anexos / 2.2 Nomenclatura por Tipo de Documento",
@@ -607,6 +626,7 @@ _DOCUMENT_RULES: tuple[DocumentMetadataRule, ...] = (
         category="Corporativo",
         subtype="Otros",
         institution="interno_cliente",
+        applies_to_all_institutions=True,
         frequency="unica_vez",
         source_section="III.I. Identificación Oficial",
         naming_pattern="{provider_nomenclature} Identificación Oficial",
@@ -903,6 +923,7 @@ _COMPLIANCE_RULES: tuple[DocumentMetadataRule, ...] = (
         category="Otros",
         subtype="Reporte",
         institution="interno_cliente",
+        applies_to_all_institutions=True,
         frequency="reporte_interno",
         source_section="VI. Reportes de Monitoreo Regulatorio",
         naming_pattern="{provider_nomenclature} Reporte de Monitoreo Regulatorio {report_period}",

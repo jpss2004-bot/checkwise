@@ -168,7 +168,7 @@ def resolve_metadata_document_type_code(
     candidates = [
         rule
         for rule in all_metadata_rules(include_annexes=True)
-        if rule.institution == institution or rule.institution == "interno_cliente"
+        if rule.institution == institution or rule.applies_to_all_institutions
     ]
     scored: list[tuple[int, str]] = []
     for rule in candidates:
