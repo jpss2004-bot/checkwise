@@ -94,6 +94,15 @@ class DocumentAiOcrClient:
         # processor_name format: projects/PROJECT/locations/LOCATION/processors/PROCESSOR_ID
         self._processor_name = self._client.processor_path(project_id, location, processor_id)
 
+    @property
+    def processor_name(self) -> str:
+        """Fully-qualified Document AI processor path used for OCR calls.
+
+        Surfaced so the intake layer can record which processor produced a
+        scanned document's text in the ``ocr_performed`` audit event.
+        """
+        return self._processor_name
+
     def extract_text(self, pdf_path: Path) -> OcrResult:
         """Run Document AI OCR on a single PDF and return the plain text.
 

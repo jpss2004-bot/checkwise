@@ -129,7 +129,49 @@ GOOGLE_APPLICATION_CREDENTIALS=/Users/yourname/.gcp/checkwise-ocr-dev.json
 
 ## Step 6 — Verify
 
-After Render redeploys (or after a local `uvicorn` restart):
+### 6a. Cheap config check (no Document AI page billed)
+
+After Render redeploys, hit the admin verification endpoint to confirm
+the deploy picked up every required env var:
+
+```bash
+# Log in as an internal_admin first; copy the access_token from the
+# response. Then:
+curl -H "Authorization: Bearer $TOKEN" \
+  https://<your-api-host>/api/v1/admin/ocr-config
+```
+
+Expected response when fully configured:
+
+```json
+{
+  "enabled": true,
+  "configured": true,
+  "missing_keys": [],
+  "processor_name": "projects/checkwise-prod/locations/us/processors/abc123def456789",
+  "sdk_available": true
+}
+```
+
+If `configured` is `false`, `missing_keys` tells you exactly which env
+var didn't make it into Render. If `sdk_available` is `false`, the
+runtime image doesn't have `google-cloud-documentai` installed — that's
+a build problem, not a config problem.
+
+The endpoint is `internal_admin`-gated and does **not** make a
+Document AI call, so it costs nothing and is safe to hit repeatedly
+during a deploy verification.
+
+You can also confirm the same state by reading Render's deploy logs —
+a single line is emitted at boot:
+
+```
+checkwise.boot ocr.config enabled=true configured=true sdk=true processor=projects/.../processors/abc123
+```
+
+### 6b. Live extraction smoke test (bills one or more Document AI pages)
+
+After 6a passes:
 
 1. Upload the scanned fixture
    `apps/api/tests/fixtures/prevalidation/masterclean-imss-comp-pago-bancario-2025-09.pdf`
@@ -142,6 +184,11 @@ After Render redeploys (or after a local `uvicorn` restart):
 5. The submission's status should now be either `prevalidado` (if
    confidence ≥ 0.7) or `pendiente_revision` (if lower); never
    `requiere_aclaracion`.
+6. In the validation-event timeline you should see an
+   `ocr_performed` event with `payload.processor_name` matching the
+   value returned by `/admin/ocr-config`. That's the evidence-quality
+   audit record proving Document AI processed this specific file
+   against the expected processor.
 
 ## Rollback
 

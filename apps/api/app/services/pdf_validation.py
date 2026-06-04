@@ -26,6 +26,15 @@ class PdfInspectionResult:
     is_probably_scanned: bool = False
     metadata: dict[str, Any] = field(default_factory=dict)
     error: str | None = None
+    # Phase 3 OCR-fallback provenance. Only meaningful when
+    # ``inspect_pdf_with_ocr_fallback`` actually invoked Document AI on a
+    # scanned PDF; otherwise these stay at their defaults (``ocr_attempted``
+    # False) and the intake audit trail emits no OCR event. ``inspect_pdf``
+    # never touches them.
+    ocr_attempted: bool = False
+    ocr_text_char_count: int | None = None
+    ocr_error: str | None = None
+    ocr_processor_name: str | None = None
 
 
 def inspect_pdf(path: Path, *, max_text_pages: int = 3) -> PdfInspectionResult:
@@ -165,15 +174,30 @@ def inspect_pdf_with_ocr_fallback(
 
     client = _cached_ocr_client() if ocr_client is ... else ocr_client
     if client is None:
+        # No OCR configured — OCR was NOT attempted, so the row stays as
+        # "scanned, no text" with ocr_attempted False (no OCR audit event).
         return result
 
+    # From here OCR is genuinely invoked. Record the provenance fields so
+    # the intake audit trail can emit a truthful ``ocr_performed`` event
+    # (pass / warning / fail) regardless of the outcome. ``extract_text``
+    # is contracted to never raise — it folds read/API/timeout failures
+    # into ``OcrResult.error`` — so OCR never aborts an upload.
     ocr_result = client.extract_text(path)
     text = (ocr_result.text or "").strip()
+    ocr_fields: dict[str, Any] = {
+        "ocr_attempted": True,
+        "ocr_text_char_count": len(text),
+        "ocr_error": ocr_result.error,
+        "ocr_processor_name": getattr(client, "processor_name", None),
+    }
+
     if not text:
-        # OCR ran but produced nothing usable — keep the original
-        # result so the row still records "scanned, no text" and lands
-        # in pendiente_revision.
-        return result
+        # OCR ran but produced nothing usable (error or genuinely empty) —
+        # keep the original text so the row still records "scanned, no
+        # text" and lands in pendiente_revision, but stamp the OCR
+        # provenance so the audit event reflects what happened.
+        return replace(result, **ocr_fields)
 
     return replace(
         result,
@@ -182,4 +206,5 @@ def inspect_pdf_with_ocr_fallback(
         has_text=len(text) >= _PDF_TEXT_MIN_CHARS,
         # is_probably_scanned stays True — the audit trail records
         # that text came from OCR, not from the original PDF.
+        **ocr_fields,
     )

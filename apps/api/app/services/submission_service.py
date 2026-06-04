@@ -324,6 +324,52 @@ def add_native_intake_events(
             )
         )
 
+    # Phase 3 — explicit OCR-fired audit event. Emitted only when
+    # ``inspect_pdf_with_ocr_fallback`` actually invoked Document AI
+    # (scanned PDF + configured client). Result is ``pass`` when OCR
+    # returned usable text, ``fail`` when the call errored, ``warning``
+    # when OCR ran but returned nothing. ``processor_name`` is included
+    # in the payload so a reviewer can answer "which Document AI
+    # processor produced this text" from the timeline alone, without
+    # cross-referencing runtime config. Provider-facing UI never
+    # surfaces this event — it's reviewer/auditor evidence only.
+    if pdf_inspection.ocr_attempted:
+        ocr_chars = pdf_inspection.ocr_text_char_count or 0
+        if pdf_inspection.ocr_error:
+            ocr_result = "fail"
+            ocr_severity = "warning"
+            ocr_message = (
+                "OCR no pudo procesar el documento; el revisor humano "
+                "lo evaluará manualmente."
+            )
+        elif ocr_chars > 0:
+            ocr_result = "pass"
+            ocr_severity = "info"
+            ocr_message = "OCR extrajo texto del documento escaneado."
+        else:
+            ocr_result = "warning"
+            ocr_severity = "warning"
+            ocr_message = (
+                "OCR procesó el documento pero no extrajo texto utilizable."
+            )
+        events.append(
+            add_validation_event(
+                db,
+                submission_id=submission_id,
+                document_id=document_id,
+                event_type="ocr_performed",
+                rule_code="ocr_fallback",
+                result=ocr_result,
+                severity=ocr_severity,
+                message=ocr_message,
+                payload={
+                    "ocr_text_char_count": ocr_chars,
+                    "ocr_error": pdf_inspection.ocr_error,
+                    "processor_name": pdf_inspection.ocr_processor_name,
+                },
+            )
+        )
+
     if document_signals.mismatch_reason:
         events.append(
             add_validation_event(
