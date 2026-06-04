@@ -17,16 +17,7 @@ import {
   listRequirements,
   updateRequirement,
 } from "@/lib/api/admin";
-
-const RISK_VARIANT: Record<
-  string,
-  "success" | "warning" | "destructive" | "info" | "outline"
-> = {
-  low: "success",
-  medium: "warning",
-  high: "destructive",
-  critical: "destructive",
-};
+import { cadenceLabel, riskLabel, riskVariant } from "@/lib/constants/labels";
 
 export default function AdminRequirementsPage() {
   const [rows, setRows] = useState<AdminRequirement[]>([]);
@@ -163,7 +154,7 @@ export default function AdminRequirementsPage() {
               width: "100px",
               cell: (row) => (
                 <span className="text-[12px] text-[color:var(--text-secondary)]">
-                  {row.load_type}
+                  {cadenceLabel(row.load_type)}
                 </span>
               ),
             },
@@ -171,15 +162,17 @@ export default function AdminRequirementsPage() {
               id: "frequency",
               header: "Frecuencia",
               width: "120px",
-              cell: (row) => <Badge variant="outline">{row.frequency}</Badge>,
+              cell: (row) => (
+                <Badge variant="outline">{cadenceLabel(row.frequency)}</Badge>
+              ),
             },
             {
               id: "risk",
               header: "Riesgo",
               width: "100px",
               cell: (row) => (
-                <Badge variant={RISK_VARIANT[row.risk_level] ?? "outline"}>
-                  {row.risk_level}
+                <Badge variant={riskVariant(row.risk_level)}>
+                  {riskLabel(row.risk_level)}
                 </Badge>
               ),
             },

@@ -826,7 +826,7 @@ function ReportRow({
         )}
       </td>
       <td className="py-3 pr-4 text-[12px] text-[color:var(--text-secondary)]">
-        {REPORT_AUDIENCE_LABEL[report.audience as ReportAudience]}
+        {REPORT_AUDIENCE_LABEL[report.audience as ReportAudience] ?? report.audience}
       </td>
       <td className="py-3 pr-4">
         <Badge variant={report.status === "active" ? "success" : "outline"}>

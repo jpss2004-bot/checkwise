@@ -25,6 +25,7 @@ import { AdminWiseMount } from "@/components/checkwise/wise/admin-wise-mount";
 import { SearchBar } from "@/components/checkwise/search-bar";
 import { UserMenu } from "@/components/checkwise/user-menu";
 import { MetadataStrip } from "@/components/ui/metadata-strip";
+import { roleLabels } from "@/lib/constants/labels";
 import { cn } from "@/lib/utils";
 import {
   type AdminSession,
@@ -274,10 +275,7 @@ export function AdminShell({
                 { label: "Correo", value: session.user.email, mono: true },
                 {
                   label: "Roles",
-                  value: session.roles
-                    .map((r) => r.replace(/_/g, " "))
-                    .join(", "),
-                  mono: true,
+                  value: roleLabels(session.roles),
                   tone: "teal",
                 },
               ]}
@@ -288,7 +286,7 @@ export function AdminShell({
       </main>
 
       <footer className="mx-auto max-w-7xl px-5 py-6 text-center font-mono text-[10px] uppercase tracking-wide text-[color:var(--text-tertiary)]">
-        Internal operations · Legal Shelf · CheckWise
+        Operaciones internas · Legal Shelf · CheckWise
       </footer>
       <FeedbackLauncher />
       {/* M1-follow-up: Wise mounts only when the URL carries a

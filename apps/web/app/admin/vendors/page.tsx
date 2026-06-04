@@ -20,6 +20,11 @@ import { Label } from "@/components/ui/label";
 import { AdminShell } from "../_shell";
 import { VendorRef } from "@/components/checkwise/vendor-ref";
 import {
+  entityStatusLabel,
+  entityStatusVariant,
+  personaLabel,
+} from "@/lib/constants/labels";
+import {
   adminVendorExpedienteZipUrl,
   type AdminClient,
   type AdminVendor,
@@ -205,7 +210,7 @@ export default function AdminVendorsPage() {
                       weight="bold"
                       aria-hidden="true"
                     />
-                    {client?.name ?? row.client_id.slice(0, 8)}
+                    {client?.name ?? "Cliente no disponible"}
                   </Badge>
                 );
               },
@@ -213,9 +218,9 @@ export default function AdminVendorsPage() {
             {
               id: "persona",
               header: "Tipo",
-              width: "100px",
+              width: "120px",
               cell: (row) => (
-                <Badge variant="outline">{row.persona_type ?? "—"}</Badge>
+                <Badge variant="outline">{personaLabel(row.persona_type)}</Badge>
               ),
             },
             {
@@ -231,12 +236,11 @@ export default function AdminVendorsPage() {
               id: "status",
               header: "Estado",
               width: "100px",
-              cell: (row) =>
-                row.status === "active" ? (
-                  <Badge variant="success">Activo</Badge>
-                ) : (
-                  <Badge variant="secondary">{row.status}</Badge>
-                ),
+              cell: (row) => (
+                <Badge variant={entityStatusVariant(row.status)}>
+                  {entityStatusLabel(row.status)}
+                </Badge>
+              ),
             },
             {
               id: "action",
@@ -420,8 +424,8 @@ function VendorForm({
             onChange={(e) => setPersona(e.target.value)}
             className="h-9 w-full rounded-md border border-[color:var(--border-default)] bg-[color:var(--surface-raised)] px-2 text-sm"
           >
-            <option value="moral">moral</option>
-            <option value="fisica">fisica</option>
+            <option value="moral">Persona moral</option>
+            <option value="fisica">Persona física</option>
           </select>
         </div>
         <div className="space-y-1">
@@ -432,8 +436,8 @@ function VendorForm({
             onChange={(e) => setStatus(e.target.value)}
             className="h-9 w-full rounded-md border border-[color:var(--border-default)] bg-[color:var(--surface-raised)] px-2 text-sm"
           >
-            <option value="active">active</option>
-            <option value="inactive">inactive</option>
+            <option value="active">Activo</option>
+            <option value="inactive">Inactivo</option>
           </select>
         </div>
       </div>

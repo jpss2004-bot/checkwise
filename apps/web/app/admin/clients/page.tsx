@@ -17,6 +17,7 @@ import {
   listClients,
   updateClient,
 } from "@/lib/api/admin";
+import { entityStatusLabel, entityStatusVariant } from "@/lib/constants/labels";
 
 export default function AdminClientsPage() {
   const [rows, setRows] = useState<AdminClient[]>([]);
@@ -181,9 +182,11 @@ export default function AdminClientsPage() {
 }
 
 function StatusBadge({ status }: { status: string }) {
-  if (status === "active") return <Badge variant="success">Activo</Badge>;
-  if (status === "inactive") return <Badge variant="secondary">Inactivo</Badge>;
-  return <Badge variant="outline">{status}</Badge>;
+  return (
+    <Badge variant={entityStatusVariant(status)}>
+      {entityStatusLabel(status)}
+    </Badge>
+  );
 }
 
 function ClientForm({

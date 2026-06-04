@@ -20,6 +20,11 @@ import {
   getAdminCalendar,
   listPeriods,
 } from "@/lib/api/admin";
+import {
+  cadenceLabel,
+  INSTITUTION_LABELS,
+  personaLabel,
+} from "@/lib/constants/labels";
 
 const MONTH_SHORT = [
   "Ene",
@@ -41,6 +46,7 @@ export default function AdminCalendarPage() {
   const [calendar, setCalendar] = useState<AdminCalendar | null>(null);
   const [periods, setPeriods] = useState<AdminPeriod[]>([]);
   const [error, setError] = useState<string | null>(null);
+  const [reloadKey, setReloadKey] = useState(0);
 
   useEffect(() => {
     let cancelled = false;
@@ -58,7 +64,7 @@ export default function AdminCalendarPage() {
     return () => {
       cancelled = true;
     };
-  }, [year]);
+  }, [year, reloadKey]);
 
   const expectedBars = useMemo(() => {
     if (!calendar) return [];
@@ -107,7 +113,7 @@ export default function AdminCalendarPage() {
         <ErrorState
           title="No pudimos cargar el calendario"
           description={error}
-          onRetry={() => setYear((y) => y)}
+          onRetry={() => setReloadKey((k) => k + 1)}
         />
       ) : !calendar ? (
         <CalendarSkeleton />
@@ -121,20 +127,19 @@ export default function AdminCalendarPage() {
                 mono: true,
               },
               {
-                label: "Periodos BD",
+                label: "Periodos cargados",
                 value: periods.length.toString(),
                 mono: true,
                 tone: "teal",
               },
               {
-                label: "Cobertura",
+                label: "Meses con datos",
                 value: `${calendar.months.length}/12`,
                 mono: true,
               },
               {
                 label: "Año",
-                value: `${calendar.year} · ${calendar.persona_type}`,
-                mono: true,
+                value: `${calendar.year} · ${personaLabel(calendar.persona_type)}`,
               },
             ]}
           />
@@ -178,7 +183,7 @@ export default function AdminCalendarPage() {
                           <div className="flex flex-wrap gap-1.5">
                             {m.institutions.map((i) => (
                               <Badge key={i.institution} variant="outline">
-                                {i.institution}: {i.expected}
+                                {INSTITUTION_LABELS[i.institution] ?? i.institution}: {i.expected}
                               </Badge>
                             ))}
                           </div>
@@ -219,7 +224,7 @@ export default function AdminCalendarPage() {
                         {p.period_key ?? "—"}
                       </td>
                       <td className="px-3 py-2.5">
-                        <Badge variant="outline">{p.period_type}</Badge>
+                        <Badge variant="outline">{cadenceLabel(p.period_type)}</Badge>
                       </td>
                       <td className="px-3 py-2.5 font-mono tabular-nums">
                         {p.year ?? "—"}
