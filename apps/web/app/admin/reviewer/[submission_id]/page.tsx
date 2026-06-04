@@ -40,7 +40,7 @@ import {
   ReviewerApiError,
   submitDecision,
 } from "@/lib/api/reviewer";
-import { DocumentStatus } from "@/lib/constants/statuses";
+import { DocumentStatus, statusLabel } from "@/lib/constants/statuses";
 
 type PageProps = {
   params: Promise<{ submission_id: string }>;
@@ -123,7 +123,7 @@ export default function ReviewerSubmissionPage({ params }: PageProps) {
         );
         setDecided({ new_status: result.new_status, action: result.action as ReviewerAction });
         toast.success("Decisión registrada", {
-          description: `Este documento ahora está en ${result.new_status}.`,
+          description: `Este documento ahora está en "${statusLabel(result.new_status)}".`,
         });
       } catch (err) {
         if (err instanceof ReviewerApiError && err.status === 409) {
@@ -152,7 +152,7 @@ export default function ReviewerSubmissionPage({ params }: PageProps) {
     <>
     <main className="mx-auto max-w-6xl space-y-5 px-5 py-8">
       <PageHeader
-        eyebrow="Reviewer workbench"
+        eyebrow="Mesa de revisión"
         title={detail?.requirement.name ?? "Documento por revisar"}
         description="Revisa señales automáticas, contexto del proveedor y la línea de tiempo. Tu decisión queda en el audit log."
         actions={
@@ -230,7 +230,7 @@ export default function ReviewerSubmissionPage({ params }: PageProps) {
                 disabled={panelDisabled}
                 disabledReason={
                   isTerminal
-                    ? `Este documento ya está en ${detail.status}. Solo una nueva carga del proveedor puede reabrirlo.`
+                    ? `Este documento ya está en "${statusLabel(detail.status)}". Solo una nueva carga del proveedor puede reabrirlo.`
                     : undefined
                 }
                 onSubmit={handleDecision}
@@ -326,7 +326,7 @@ function StatusHeader({
         </div>
         {decidedHint ? (
           <div className="rounded-md border border-[color:var(--status-success-border)] bg-[color:var(--status-success-bg)] px-3 py-2 text-xs font-medium text-[color:var(--status-success-text)]">
-            Decisión registrada · ahora {decidedHint}
+            Decisión registrada · ahora {statusLabel(decidedHint)}
           </div>
         ) : null}
       </div>

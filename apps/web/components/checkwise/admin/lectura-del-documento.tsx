@@ -15,9 +15,11 @@ import {
 
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
+import { confidenceLevelFromPercent } from "@/components/checkwise/confidence-badge";
 import { track } from "@/lib/analytics";
 import { validationLabel } from "@/lib/constants/validation";
 import { cn } from "@/lib/utils";
+import type { ConfidenceLevel } from "@/lib/types";
 import type {
   ShadowAnalysisPayload,
   ShadowAnalysisSignals,
@@ -84,23 +86,35 @@ function friendlyShadowError(code: string | null): string {
 
 // ─────────────────────────────────────────────────────────────────────
 // Confidence formatting (per user pick: "73% — media")
+//
+// Buckets are delegated to ``confidenceLevelFromPercent`` so the
+// qualitative word matches the design system's canonical thresholds
+// (alta ≥95, media ≥70, baja ≥50) instead of an independent, more
+// generous scale. This keeps the AI from being labelled "alta" at 80%
+// here while the shared ConfidenceBadge reserves "alta" for ≥95% — the
+// two surfaces must not disagree on the same score.
 // ─────────────────────────────────────────────────────────────────────
+
+const CONFIDENCE_QUAL_ES: Record<ConfidenceLevel, string> = {
+  high: "alta",
+  medium: "media",
+  low: "baja",
+  none: "sin señal clara",
+};
 
 function confidenceLabel(value: number | null | undefined): string {
   if (value === null || value === undefined) return "—";
   const pct = Math.round(value * 100);
-  let qual: string;
-  if (value >= 0.8) qual = "alta";
-  else if (value >= 0.5) qual = "media";
-  else qual = "baja";
-  return `${pct}% — ${qual}`;
+  return `${pct}% — ${CONFIDENCE_QUAL_ES[confidenceLevelFromPercent(pct)]}`;
 }
 
 function confidenceTone(value: number | null | undefined): "ok" | "warn" | "low" | "neutral" {
   if (value === null || value === undefined) return "neutral";
-  if (value >= 0.8) return "ok";
-  if (value >= 0.5) return "warn";
-  return "low";
+  const level = confidenceLevelFromPercent(Math.round(value * 100));
+  if (level === "high") return "ok";
+  if (level === "medium") return "warn";
+  if (level === "low") return "low";
+  return "neutral";
 }
 
 // ─────────────────────────────────────────────────────────────────────

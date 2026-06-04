@@ -155,7 +155,7 @@ export default function ReviewerQueuePage() {
     <AdminShell unframed>
       <div className="mx-auto max-w-6xl space-y-6 px-5 py-8">
         <PageHeader
-          eyebrow="Reviewer workbench"
+          eyebrow="Mesa de revisión"
           title="Documentos por revisar"
           description="Empieza por lo más viejo. Cada documento espera tu decisión humana. La automatización no aprueba ni rechaza nada."
         />
@@ -257,7 +257,7 @@ export default function ReviewerQueuePage() {
               </TabsList>
             </Tabs>
             <Badge variant="outline" className="whitespace-nowrap">
-              FIFO · más viejos primero
+              Más viejos primero
             </Badge>
           </header>
 
@@ -332,7 +332,7 @@ function QueueTableRow({
           {item.has_mismatch ? (
             <span className="inline-flex w-max items-center gap-1 rounded-sm border border-[color:var(--status-warning-border)] bg-[color:var(--status-warning-bg)] px-1.5 py-0.5 text-[10px] font-medium text-[color:var(--status-warning-text)]">
               <Warning className="h-3 w-3" weight="fill" aria-hidden />
-              Mismatch
+              Posible inconsistencia
             </span>
           ) : null}
         </div>
@@ -344,8 +344,9 @@ function QueueTableRow({
         </p>
         {item.signal_count > 0 ? (
           <p className="mt-1 text-[11px] text-[color:var(--text-tertiary)]">
-            {item.signal_count} señal{item.signal_count === 1 ? "" : "es"} automátic
-            {item.signal_count === 1 ? "a" : "as"}
+            {item.signal_count === 1
+              ? "1 señal automática"
+              : `${item.signal_count} señales automáticas`}
           </p>
         ) : null}
       </TableCell>
