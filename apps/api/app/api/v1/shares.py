@@ -46,7 +46,7 @@ from app.core.rate_limit import enforce_share_unlock_rate_limit
 from app.db.session import get_db
 from app.models import Report, ReportVersion
 from app.models.entities import utc_now
-from app.services.reports.export import render_report_html
+from app.services.reports.print_render import render_report_document_html
 from app.services.reports.sharing import (
     ShareExpiredError,
     ShareNotFoundError,
@@ -405,7 +405,11 @@ def get_share(token: str, request: Request, db: DbSession) -> Response:
         raise HTTPException(
             status.HTTP_410_GONE, detail="Enlace no disponible."
         )
-    html_bytes = render_report_html(report, version)
+    # Serve the DESIGNED document (verdict → findings → bars → matrix),
+    # the same self-contained HTML the PDF renders — not the generic
+    # key/value structural dump. A shared link should show the real
+    # report, not a debug view.
+    html_bytes = render_report_document_html(report, version)
     db.commit()
     return Response(
         content=html_bytes,

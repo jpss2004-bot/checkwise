@@ -572,17 +572,29 @@ export interface CreateReportShareResponse {
   url: string;
 }
 
-export function createReportShare(
+export async function createReportShare(
   reportId: string,
   params: { version_id?: string; expires_at?: string; password?: string } = {},
 ): Promise<CreateReportShareResponse> {
-  return fetchJson<CreateReportShareResponse>(
+  const result = await fetchJson<CreateReportShareResponse>(
     `/api/v1/reports/${reportId}/shares`,
     {
       method: "POST",
       body: JSON.stringify(params),
     },
   );
+  // The backend returns an ABSOLUTE consume URL only when PUBLIC_BASE_URL
+  // is configured; otherwise it falls back to a bare path like
+  // ``/api/v1/r/<token>`` (what the user saw as "api/xxx"). The consume
+  // page is served by the API itself (GET /api/v1/r/<token> → HTML), so
+  // resolve a relative URL against the API host — NOT the Vercel origin,
+  // which doesn't serve /api/v1/. Yields a real, copy-pasteable link.
+  return {
+    ...result,
+    url: result.url.startsWith("/")
+      ? `${API_BASE_URL.replace(/\/$/, "")}${result.url}`
+      : result.url,
+  };
 }
 
 export function listReportShares(
