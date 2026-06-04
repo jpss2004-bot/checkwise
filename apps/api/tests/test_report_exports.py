@@ -624,6 +624,36 @@ def test_get_export_returns_ready_status_after_background_runs(
     assert body["bytes"] is not None and body["bytes"] > 0
 
 
+def test_download_url_returns_url_and_filename_when_ready(
+    api_client, db_factory
+) -> None:
+    """``GET /exports/{id}/download-url`` returns {url, filename} for a
+    ready export. It exists so the prod (R2) path can NAVIGATE to the
+    presigned URL instead of cross-origin fetching it (the bug that broke
+    Download PDF). On local-disk storage there is no presigned URL, so
+    ``url`` is null and the frontend falls back to streaming /download.
+    Both dispositions are accepted; the filename carries the format ext."""
+    pw, email, _ = _seed_user(db_factory, email="dlurl@exp.test")
+    token = _login(api_client, email, pw)
+    report_id = _create_report_with_blocks(api_client, token)
+    export_id = api_client.post(
+        f"/api/v1/reports/{report_id}/exports",
+        headers=_h(token),
+        json={"format": "html"},
+    ).json()["id"]
+
+    for disposition in ("attachment", "inline"):
+        resp = api_client.get(
+            f"/api/v1/reports/exports/{export_id}/download-url",
+            headers=_h(token),
+            params={"disposition": disposition},
+        )
+        assert resp.status_code == 200, resp.text
+        body = resp.json()
+        assert body["url"] is None  # local storage has no presigned URL
+        assert body["filename"].endswith(".html")
+
+
 def test_download_export_returns_html_bytes(api_client, db_factory) -> None:
     pw, email, _ = _seed_user(db_factory, email="admin5@exp.test")
     token = _login(api_client, email, pw)
