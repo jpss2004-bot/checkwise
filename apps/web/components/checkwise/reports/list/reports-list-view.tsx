@@ -89,6 +89,15 @@ export interface ReportsListViewProps {
    * for their tier.
    */
   diagnosticCode?: string;
+  /**
+   * Restrict the preset gallery to these preset ids, in this order. When
+   * set, only matching presets render (others are hidden) and they appear
+   * in the order listed here. Used by the client shell to show exactly the
+   * four client presets and drop the provider-facing ones that leak in for
+   * client_admins who also own a workspace. Omit to show every preset the
+   * API returns for the caller's role.
+   */
+  allowedPresetIds?: readonly string[];
 }
 
 export function ReportsListView({
@@ -99,6 +108,7 @@ export function ReportsListView({
   showAudienceFilter = false,
   headerSlot,
   diagnosticCode,
+  allowedPresetIds,
 }: ReportsListViewProps) {
   const router = useRouter();
   const [presets, setPresets] = useState<ReportPresetSummary[] | null>(null);
@@ -129,7 +139,14 @@ export function ReportsListView({
     listPresets()
       .then((p) => {
         if (cancelled) return;
-        setPresets(p.items);
+        // When the caller pins an allow-list, keep only those presets and
+        // render them in the listed order (filter + sort in one pass).
+        const items = allowedPresetIds
+          ? allowedPresetIds
+              .map((id) => p.items.find((x) => x.id === id))
+              .filter((x): x is ReportPresetSummary => Boolean(x))
+          : p.items;
+        setPresets(items);
         setPresetsError(null);
       })
       .catch((e: ReportsApiError) => {
@@ -152,7 +169,7 @@ export function ReportsListView({
     return () => {
       cancelled = true;
     };
-  }, []);
+  }, [allowedPresetIds]);
 
   // ─── Report list — reloads on filter change ────────────────
   useEffect(() => {
@@ -416,7 +433,7 @@ export function ReportsListView({
           // F4 (2026-05-19 visual audit): first preset is the recommended
           // starting point. Visually distinguishing it gives the user a
           // clear "empieza aquí" without an explicit instruction.
-          <div className="grid grid-cols-1 gap-3 md:grid-cols-3">
+          <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
             {presets.map((p, i) =>
               p.id === PER_PROVIDER_PRESET_ID ? (
                 <PerProviderPresetCard
