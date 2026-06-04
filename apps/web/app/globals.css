@@ -488,6 +488,15 @@ pre {
   }
 }
 
+@keyframes cw-indeterminate {
+  0% {
+    transform: translateX(-110%);
+  }
+  100% {
+    transform: translateX(360%);
+  }
+}
+
 @media (prefers-reduced-motion: no-preference) {
   .cw-fade-up {
     animation: cw-fade-up 320ms var(--ease-enter) both;
@@ -515,6 +524,13 @@ pre {
 
   .cw-pulse-soft {
     animation: cw-pulse-soft 3.6s ease-in-out infinite;
+  }
+
+  /* Indeterminate progress sweep — used by the report-export overlay.
+     Gated behind no-preference so reduced-motion users get a calm
+     static partial bar instead of a sweep. */
+  .cw-indeterminate {
+    animation: cw-indeterminate 1.5s var(--ease-standard) infinite;
   }
 
   .cw-hover-lift {

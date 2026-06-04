@@ -6,6 +6,10 @@ import { DownloadSimple, Eye, FilePdf } from "@phosphor-icons/react";
 import { Button } from "@/components/ui/button";
 import { OVERFLOW_MENU_ROW_CLASS } from "@/components/ui/overflow-menu";
 import { toast } from "@/components/ui/toast";
+import {
+  ReportExportOverlay,
+  type ExportPhase,
+} from "@/components/checkwise/reports/report-export-overlay";
 import { cn } from "@/lib/utils";
 import {
   ReportsApiError,
@@ -84,6 +88,7 @@ export function ExportButton({
   asMenuItem?: boolean;
 }) {
   const [busy, setBusy] = useState(false);
+  const [phase, setPhase] = useState<ExportPhase>("queued");
   const meta = FORMAT_META[format];
 
   // Note: no unmount-cancellation guard. The earlier version used a
@@ -96,9 +101,13 @@ export function ExportButton({
   const onClick = useCallback(async () => {
     if (busy) return;
     setBusy(true);
+    setPhase("queued");
     try {
       const created = await createReportExport(reportId, { format });
-      const ready = await pollReportExportUntilReady(created.id);
+      const ready = await pollReportExportUntilReady(created.id, {
+        onStatus: (s) => setPhase(s === "rendering" ? "rendering" : "queued"),
+      });
+      setPhase("finalizing");
       await downloadReportExport(
         ready.id,
         `checkwise-reporte-${reportId.slice(0, 8)}.${format}`,
@@ -117,34 +126,47 @@ export function ExportButton({
     }
   }, [busy, format, reportId]);
 
+  // Only PDF gets the full progress overlay; HTML renders in <500ms in
+  // the overflow menu, where the button's busy label is enough.
+  const overlay =
+    format === "pdf" ? (
+      <ReportExportOverlay open={busy} mode="download" phase={phase} />
+    ) : null;
+
   const Icon = meta.icon;
   if (asMenuItem) {
     return (
-      <button
-        type="button"
-        onClick={onClick}
-        disabled={busy}
-        title={meta.title}
-        className={cn(OVERFLOW_MENU_ROW_CLASS, className)}
-      >
-        <Icon className="h-4 w-4 shrink-0" weight="bold" aria-hidden="true" />
-        <span>{busy ? meta.busyLabel : meta.label}</span>
-      </button>
+      <>
+        <button
+          type="button"
+          onClick={onClick}
+          disabled={busy}
+          title={meta.title}
+          className={cn(OVERFLOW_MENU_ROW_CLASS, className)}
+        >
+          <Icon className="h-4 w-4 shrink-0" weight="bold" aria-hidden="true" />
+          <span>{busy ? meta.busyLabel : meta.label}</span>
+        </button>
+        {overlay}
+      </>
     );
   }
   return (
-    <Button
-      type="button"
-      variant={variant}
-      size="sm"
-      onClick={onClick}
-      disabled={busy}
-      title={meta.title}
-      className={className}
-    >
-      <Icon className="h-4 w-4" weight="bold" aria-hidden="true" />
-      {busy ? meta.busyLabel : meta.label}
-    </Button>
+    <>
+      <Button
+        type="button"
+        variant={variant}
+        size="sm"
+        onClick={onClick}
+        disabled={busy}
+        title={meta.title}
+        className={className}
+      >
+        <Icon className="h-4 w-4" weight="bold" aria-hidden="true" />
+        {busy ? meta.busyLabel : meta.label}
+      </Button>
+      {overlay}
+    </>
   );
 }
 
@@ -175,15 +197,20 @@ export function PreviewPdfButton({
   asMenuItem?: boolean;
 }) {
   const [busy, setBusy] = useState(false);
+  const [phase, setPhase] = useState<ExportPhase>("queued");
 
   const onClick = useCallback(async () => {
     if (busy) return;
     setBusy(true);
+    setPhase("queued");
     const tab = window.open("", "_blank", "noopener,noreferrer");
     let objectUrl: string | null = null;
     try {
       const created = await createReportExport(reportId, { format: "pdf" });
-      const ready = await pollReportExportUntilReady(created.id);
+      const ready = await pollReportExportUntilReady(created.id, {
+        onStatus: (s) => setPhase(s === "rendering" ? "rendering" : "queued"),
+      });
+      setPhase("finalizing");
       objectUrl = await fetchReportExportObjectUrl(ready.id);
       if (tab) {
         tab.location.href = objectUrl;
@@ -210,32 +237,41 @@ export function PreviewPdfButton({
   }, [busy, reportId]);
 
   const label = busy ? "Generando vista previa…" : "Vista previa";
+  const overlay = (
+    <ReportExportOverlay open={busy} mode="preview" phase={phase} />
+  );
   if (asMenuItem) {
     return (
-      <button
-        type="button"
-        onClick={onClick}
-        disabled={busy}
-        title="Abrir una vista previa del PDF en una pestaña nueva"
-        className={cn(OVERFLOW_MENU_ROW_CLASS, className)}
-      >
-        <Eye className="h-4 w-4 shrink-0" weight="bold" aria-hidden="true" />
-        <span>{label}</span>
-      </button>
+      <>
+        <button
+          type="button"
+          onClick={onClick}
+          disabled={busy}
+          title="Abrir una vista previa del PDF en una pestaña nueva"
+          className={cn(OVERFLOW_MENU_ROW_CLASS, className)}
+        >
+          <Eye className="h-4 w-4 shrink-0" weight="bold" aria-hidden="true" />
+          <span>{label}</span>
+        </button>
+        {overlay}
+      </>
     );
   }
   return (
-    <Button
-      type="button"
-      variant={variant}
-      size="sm"
-      onClick={onClick}
-      disabled={busy}
-      title="Abrir una vista previa del PDF en una pestaña nueva"
-      className={className}
-    >
-      <Eye className="h-4 w-4" weight="bold" aria-hidden="true" />
-      {label}
-    </Button>
+    <>
+      <Button
+        type="button"
+        variant={variant}
+        size="sm"
+        onClick={onClick}
+        disabled={busy}
+        title="Abrir una vista previa del PDF en una pestaña nueva"
+        className={className}
+      >
+        <Eye className="h-4 w-4" weight="bold" aria-hidden="true" />
+        {label}
+      </Button>
+      {overlay}
+    </>
   );
 }

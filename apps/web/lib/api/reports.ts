@@ -544,10 +544,18 @@ export async function pollReportExportUntilReady(
   {
     intervalMs = 1000,
     maxAttempts = 30,
-  }: { intervalMs?: number; maxAttempts?: number } = {},
+    onStatus,
+  }: {
+    intervalMs?: number;
+    maxAttempts?: number;
+    /** Called with each polled status so a progress UI can reflect the
+     *  real export phase (pending → rendering → ready). */
+    onStatus?: (status: ReportExport["status"]) => void;
+  } = {},
 ): Promise<ReportExport> {
   for (let attempt = 0; attempt < maxAttempts; attempt += 1) {
     const current = await getReportExport(exportId);
+    onStatus?.(current.status);
     if (current.status === "ready") return current;
     if (current.status === "failed") {
       throw new ReportsApiError(

@@ -374,10 +374,35 @@ export function ReportEditor({
   // ─── Render states ──────────────────────────────────────────
   if (loading) {
     return (
-      <div className="mx-auto max-w-5xl space-y-4 px-5 py-6">
-        <div className="h-10 animate-pulse rounded-sm bg-[color:var(--surface-sunken)]" />
-        <div className="h-32 animate-pulse rounded-md bg-[color:var(--surface-sunken)]" />
-        <div className="h-64 animate-pulse rounded-md bg-[color:var(--surface-sunken)]" />
+      <div className="mx-auto max-w-3xl space-y-8 px-5 py-8">
+        <div className="cw-fade-up flex items-center gap-3">
+          <span className="cw-pulse-soft inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-md bg-[color:var(--surface-ai-muted)] text-[color:var(--text-ai)]">
+            <Sparkle className="h-5 w-5" weight="duotone" aria-hidden="true" />
+          </span>
+          <div>
+            <p className="text-[11px] font-medium uppercase tracking-[0.08em] text-[color:var(--text-ai)]">
+              CheckWise · Reporte
+            </p>
+            <h2 className="text-[16px] font-semibold tracking-tight text-[color:var(--text-primary)]">
+              Preparando tu reporte
+            </h2>
+          </div>
+        </div>
+        {/* Skeleton mirrors the document shape (cover, framing, blocks) so
+            the wait reads as "your report is assembling", not a blank page. */}
+        <div className="space-y-4" aria-hidden="true">
+          <div className="h-28 animate-pulse rounded-lg bg-[color:var(--surface-sunken)]" />
+          <div className="space-y-2 pt-2">
+            <div className="h-3 w-1/3 animate-pulse rounded-sm bg-[color:var(--surface-sunken)]" />
+            <div className="h-3 w-full animate-pulse rounded-sm bg-[color:var(--surface-sunken)]" />
+            <div className="h-3 w-5/6 animate-pulse rounded-sm bg-[color:var(--surface-sunken)]" />
+          </div>
+          <div className="h-40 animate-pulse rounded-lg bg-[color:var(--surface-sunken)]" />
+          <div className="h-40 animate-pulse rounded-lg bg-[color:var(--surface-sunken)]" />
+        </div>
+        <span className="sr-only" role="status">
+          Cargando el reporte…
+        </span>
       </div>
     );
   }
