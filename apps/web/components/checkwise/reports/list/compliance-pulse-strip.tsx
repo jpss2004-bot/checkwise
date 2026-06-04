@@ -55,12 +55,17 @@ import type { PortalSession } from "@/lib/session/portal";
 
 const PROVIDER_CURRENT_STATE_PRESET = "provider-current-state";
 
+// Compact chip register: dense report-surface chips use the short
+// ``"Interno"`` (matching attention-list / upcoming-deadlines / the
+// dashboard semaphore). The full ``"Interno / Cliente"`` is reserved for
+// roomy surfaces — filters, the expediente card, and the shared label map
+// in ``lib/api/portal.ts``.
 const INSTITUTION_LABEL: Record<string, string> = {
   sat: "SAT",
   imss: "IMSS",
   infonavit: "INFONAVIT",
   stps_repse: "STPS / REPSE",
-  interno_cliente: "Interno / Cliente",
+  interno_cliente: "Interno",
 };
 
 const SEMAPHORE_TONE: Record<
