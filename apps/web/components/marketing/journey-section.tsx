@@ -32,11 +32,11 @@ const LOOP: ReadonlyArray<LoopStep> = [
     label: "01 · Calendario",
     title: "Se abre la obligación correcta",
     body: "CheckWise parte de requisitos reales por cliente, proveedor, institución y periodo. No hay carga suelta.",
-    output: "Slot creado",
+    output: "Obligación abierta",
     icon: CalendarCheck,
-    image: "/marketing/generated/cw-hero-operating-loop.png",
+    image: "/marketing/product/portal-calendar.png",
     chrome: "Portal proveedor · calendario REPSE",
-    focus: { zoom: 1, origin: "50% 50%", position: "center" },
+    focus: { position: "top center" },
   },
   {
     id: "upload",
@@ -45,9 +45,9 @@ const LOOP: ReadonlyArray<LoopStep> = [
     body: "El flujo pide el archivo correcto, captura metadatos y conserva reemplazos para no perder linaje.",
     output: "Evidencia recibida",
     icon: ClipboardText,
-    image: "/marketing/generated/cw-upload-guided.png",
+    image: "/marketing/product/portal-upload.png",
     chrome: "Carga documental · intake guiado",
-    focus: { zoom: 1, origin: "50% 50%", position: "center" },
+    focus: { position: "top center" },
   },
   {
     id: "review",
@@ -56,20 +56,20 @@ const LOOP: ReadonlyArray<LoopStep> = [
     body: "Aprobar, rechazar, pedir aclaración o registrar excepción queda firmado en auditoría.",
     output: "Decisión humana",
     icon: Gavel,
-    image: "/marketing/generated/cw-review-queue.png",
+    image: "/marketing/product/admin-reviewer-queue.png",
     chrome: "Bandeja CheckWise · revisión",
-    focus: { zoom: 1, origin: "50% 50%", position: "center" },
+    focus: { position: "top center" },
   },
   {
     id: "report",
     label: "04 · Reporte",
     title: "La operación se convierte en reporte",
-    body: "El canvas AI arma bloques editables con datos tenant-scoped y exportación ejecutiva.",
+    body: "El editor con copiloto arma bloques editables con datos del expediente y exportación ejecutiva.",
     output: "PDF · Excel · HTML",
     icon: ChartLineUp,
-    image: "/marketing/generated/cw-report-editor.png",
-    chrome: "Editor de reportes · AI copilot",
-    focus: { zoom: 1, origin: "50% 50%", position: "center" },
+    image: "/marketing/product/admin-report-editor.png",
+    chrome: "Editor de reportes · copiloto",
+    focus: { position: "top center" },
   },
 ] as const;
 
@@ -93,7 +93,7 @@ export function JourneySection() {
         <Reveal className="grid gap-6 md:grid-cols-[minmax(0,1.4fr)_minmax(0,0.8fr)] md:items-end">
           <div>
             <p className="cw-eyebrow text-[color:var(--text-teal)]">
-              Evidence Slot System
+              Sistema de evidencia por requisito
             </p>
             <h2
               className="mt-3 font-semibold tracking-[-0.022em] text-[color:var(--text-primary)] [text-wrap:balance]"
@@ -113,7 +113,9 @@ export function JourneySection() {
 
         <div className="mt-14 grid grid-cols-1 gap-12 lg:grid-cols-[minmax(0,0.9fr)_minmax(0,1.1fr)] lg:gap-16">
           <Reveal className="lg:sticky lg:top-24 lg:self-start">
-            <p className="cw-eyebrow">Compliance loop</p>
+            <p className="cw-eyebrow text-[color:var(--text-secondary)]">
+              Ciclo de cumplimiento
+            </p>
             <div className="mt-5 space-y-2">
               {LOOP.map((item, index) => {
                 const ItemIcon = item.icon;
@@ -181,7 +183,7 @@ export function JourneySection() {
               </div>
 
               <div className="bg-[color:var(--surface-raised)]">
-                <div className="relative aspect-[16/10] min-h-[380px] overflow-hidden bg-[color:var(--surface-page)] sm:min-h-[430px]">
+                <div className="relative aspect-[16/10] overflow-hidden bg-[color:var(--surface-page)]">
                   <AnimatePresence mode="wait">
                     <motion.div
                       key={step.id}

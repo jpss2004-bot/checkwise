@@ -125,20 +125,20 @@ export function HumanReviewSection() {
             <ProductProof
               label="Bandeja CheckWise"
               status="Decisión firmada"
-              image="/marketing/generated/cw-review-queue.png"
+              image="/marketing/product/admin-reviewer-queue.png"
               alt="Bandeja de revisión CheckWise con documentos pendientes y estados de revisión."
               icon={Gavel}
-              focus={{ zoom: 1, origin: "50% 50%", position: "center" }}
+              focus={{ position: "top center" }}
             />
             <div className="grid grid-cols-1 gap-5 md:grid-cols-[minmax(0,1fr)_260px]">
               <ProductProof
                 compact
                 label="Reportes AI"
                 status="Bloques editables"
-                image="/marketing/generated/cw-report-editor.png"
+                image="/marketing/product/admin-report-editor.png"
                 alt="Editor de reportes CheckWise con asistente AI y bloques editables."
                 icon={ChartLineUp}
-                focus={{ zoom: 1, origin: "50% 50%", position: "center" }}
+                focus={{ position: "top center" }}
               />
               <div className="rounded-[12px] border border-white/12 bg-white/[0.04] p-4">
                 <p className="font-mono text-[10px] uppercase tracking-[0.2em] text-white/55">

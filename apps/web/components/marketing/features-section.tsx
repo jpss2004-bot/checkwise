@@ -34,30 +34,14 @@ type Role = {
 
 const ROLES: ReadonlyArray<Role> = [
   {
-    id: "provider",
-    label: "Proveedor",
-    icon: ClipboardText,
-    headline: "Espacio propio con la próxima acción a la vista",
-    body: "Cada proveedor entra a una vista precargada con cliente, RFC y contacto. El asistente Wise resuelve dudas del expediente sin salir de la pantalla.",
-    image: "/marketing/generated/cw-provider-workspace.png",
-    focus: { zoom: 1, origin: "50% 50%", position: "center" },
-    chrome: "Vista del proveedor",
-    bullets: [
-      "Cumplimiento, faltantes y vencimientos en una sola vista",
-      "Carga guiada con requisito, periodo e institución",
-      "Asistente de cumplimiento para dudas del expediente",
-    ],
-    pillar: { label: "Audiencia", value: "Equipo del proveedor" },
-  },
-  {
     id: "client",
     label: "Cliente",
     icon: Buildings,
-    headline: "Portafolio en semáforo, sin pedir cortes manuales",
-    body: "Vista cliente con riesgo, faltantes y proveedores listos para ser auditados. Vive en su propio dominio, no es un subdash del admin.",
-    image: "/marketing/generated/cw-client-portfolio.png",
-    focus: { zoom: 1, origin: "50% 50%", position: "center" },
-    chrome: "Vista del cliente",
+    headline: "Tu portafolio de proveedores en semáforo, sin cortes manuales",
+    body: "La vista del cliente reúne riesgo, faltantes y proveedores listos para auditar. Vive en su propio dominio, no es un subtablero del admin.",
+    image: "/marketing/product/client-vendors.png",
+    focus: { position: "top center" },
+    chrome: "Vista del cliente · proveedores",
     bullets: [
       "Proveedores en verde, amarillo o rojo según evidencia",
       "Faltantes obligatorios y próximas renovaciones",
@@ -66,14 +50,30 @@ const ROLES: ReadonlyArray<Role> = [
     pillar: { label: "Audiencia", value: "Operación del cliente" },
   },
   {
+    id: "provider",
+    label: "Proveedor",
+    icon: ClipboardText,
+    headline: "Espacio propio con la próxima acción a la vista",
+    body: "Cada proveedor entra a una vista precargada con cliente, RFC y contacto. El asistente Wise resuelve dudas del expediente sin salir de la pantalla.",
+    image: "/marketing/product/portal-dashboard.png",
+    focus: { position: "top center" },
+    chrome: "Vista del proveedor · expediente",
+    bullets: [
+      "Cumplimiento, faltantes y vencimientos en una sola vista",
+      "Carga guiada con requisito, periodo e institución",
+      "Asistente de cumplimiento para dudas del expediente",
+    ],
+    pillar: { label: "Audiencia", value: "Equipo del proveedor" },
+  },
+  {
     id: "legalshelf",
     label: "CheckWise",
     icon: Gavel,
     headline: "Cola priorizada de revisión humana, no automatización ciega",
     body: "Los documentos críticos pasan por el equipo CheckWise. Cada decisión queda firmada, con motivo y cambio registrado antes de aprobar o rechazar.",
-    image: "/marketing/generated/cw-review-queue.png",
-    focus: { zoom: 1, origin: "50% 50%", position: "center" },
-    chrome: "Bandeja CheckWise",
+    image: "/marketing/product/admin-reviewer-queue.png",
+    focus: { position: "top center" },
+    chrome: "Bandeja CheckWise · revisión",
     bullets: [
       "FIFO por edad del documento, con desempate humano",
       "Estado por inconsistencia, aclaración o decisión",
@@ -87,9 +87,9 @@ const ROLES: ReadonlyArray<Role> = [
     icon: ChartLineUp,
     headline: "Editor de reportes con asistente y exportación nativa",
     body: "El reporte ejecutivo se redacta, regenera y exporta en el mismo canvas. Bloques editables, versiones, IA explicativa, y descarga en PDF, Excel o HTML.",
-    image: "/marketing/generated/cw-report-editor.png",
-    focus: { zoom: 1, origin: "50% 50%", position: "center" },
-    chrome: "Reporte ejecutivo",
+    image: "/marketing/product/admin-report-editor.png",
+    focus: { position: "top center" },
+    chrome: "Reporte ejecutivo · editor",
     bullets: [
       "Generar · Asistir · Refrescar datos · Vista previa",
       "Versiones con borrador, publicado y firmado",
@@ -102,14 +102,14 @@ const ROLES: ReadonlyArray<Role> = [
     label: "Auditoría",
     icon: Archive,
     headline: "Paquete listo para auditor, filtrado por periodo e institución",
-    body: "Llega un inspector y CheckWise arma el ZIP exacto: documentos filtrados, índice firmado y registro de auditoría de toda la operación.",
-    image: "/marketing/generated/cw-audit-package.png",
-    focus: { zoom: 1, origin: "50% 50%", position: "center" },
+    body: "Llega un inspector y CheckWise arma el paquete exacto: documentos filtrados, índice firmado y registro de auditoría de toda la operación.",
+    image: "/marketing/product/client-auditoria.png",
+    focus: { position: "top center" },
     chrome: "Paquete para auditoría",
     bullets: [
       "Filtros por periodo (mes, trimestre, año fiscal)",
       "Selección por institución y proveedor",
-      "ÍNDICE.pdf firmado más registro exportable",
+      "Índice firmado más registro exportable",
     ],
     pillar: { label: "Audiencia", value: "Auditor externo" },
   },
@@ -175,7 +175,7 @@ function RoleRail({
 }) {
   return (
     <div className="lg:sticky lg:top-24 lg:self-start">
-      <p className="cw-eyebrow">Roles</p>
+      <p className="cw-eyebrow text-[color:var(--text-secondary)]">Roles</p>
       <ul className="mt-4 flex flex-col">
         {roles.map((role) => {
           const active = role.id === activeId;
@@ -186,7 +186,7 @@ function RoleRail({
                 type="button"
                 aria-pressed={active}
                 onClick={() => onSelect(role.id)}
-                className="group relative flex w-full items-center gap-3 py-3 text-left focus-visible:outline-none"
+                className="group relative flex w-full items-center gap-3 rounded-[8px] py-3 pr-2 text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[color:var(--border-focus)]/45 focus-visible:ring-offset-2 focus-visible:ring-offset-[color:var(--surface-raised)]"
               >
                 {/* Left edge accent — teal hairline on active, hairline
                     track underneath for the others. */}
