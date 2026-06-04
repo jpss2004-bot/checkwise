@@ -441,23 +441,47 @@ export function getReportExport(exportId: string): Promise<ReportExport> {
 }
 
 /**
- * Fetch the rendered artifact as a Blob and trigger a browser
- * download. ``fetch()`` is used so the bearer token flows through
- * via the same session helper the rest of this module uses — a
- * plain ``window.location`` navigation would 401 because the
- * browser doesn't carry the token on a cross-origin link.
+ * Resolve a ready export to a directly-navigable presigned URL.
  *
- * The anchor-click trick (create an <a download>, click, revoke
- * object URL) is the standard cross-browser way to land the bytes
- * on disk without relying on Content-Disposition alone.
+ * Prod stores artifacts in R2; the ``/download`` endpoint 302-redirects
+ * to a presigned R2 URL. A browser ``fetch()`` that follows that
+ * redirect does a CROSS-ORIGIN read of R2 → blocked by CORS ("failed to
+ * fetch"). So we ask the API (bearer-authed, same-origin JSON) for the
+ * presigned URL and navigate straight to it instead — a top-level
+ * navigation/download is not subject to CORS. Returns ``url: null`` on
+ * local-disk storage, where the caller streams ``/download`` as a blob.
  */
-export async function downloadReportExport(
+async function getReportExportPresignedUrl(
+  exportId: string,
+  disposition: "attachment" | "inline",
+): Promise<{ url: string | null; filename: string }> {
+  const session = readAdminSession();
+  const headers: Record<string, string> = {};
+  if (session?.access_token) {
+    headers.Authorization = `Bearer ${session.access_token}`;
+  }
+  const response = await fetch(
+    `${API_BASE_URL}/api/v1/reports/exports/${exportId}/download-url?disposition=${disposition}`,
+    { headers },
+  );
+  if (!response.ok) {
+    throw new ReportsApiError(
+      response.status,
+      `No pudimos preparar la descarga (HTTP ${response.status}).`,
+    );
+  }
+  return (await response.json()) as { url: string | null; filename: string };
+}
+
+/** Stream a ready export as a blob and trigger a save. Local-disk
+ *  storage only — same-origin, so no cross-origin/CORS concern. */
+async function streamExportAsBlob(
   exportId: string,
   filename: string,
 ): Promise<void> {
   const session = readAdminSession();
   const headers: Record<string, string> = {
-    Accept: "application/octet-stream, text/html",
+    Accept: "application/octet-stream, application/pdf, text/html",
   };
   if (session?.access_token) {
     headers.Authorization = `Bearer ${session.access_token}`;
@@ -480,9 +504,34 @@ export async function downloadReportExport(
   document.body.appendChild(a);
   a.click();
   document.body.removeChild(a);
-  // Revoke after a small delay so the browser's download pipeline
-  // has time to grab the blob.
   setTimeout(() => URL.revokeObjectURL(url), 1000);
+}
+
+/**
+ * Download a ready export. In prod, navigates directly to the presigned
+ * R2 URL (R2 serves it as an attachment — a top-level navigation, NOT a
+ * fetch, so it sidesteps the cross-origin CORS block that broke the old
+ * blob-fetch path). Falls back to streaming the bytes on local-disk
+ * storage where no presigned URL exists.
+ */
+export async function downloadReportExport(
+  exportId: string,
+  filename: string,
+): Promise<void> {
+  const { url } = await getReportExportPresignedUrl(exportId, "attachment");
+  if (!url) {
+    await streamExportAsBlob(exportId, filename);
+    return;
+  }
+  const a = document.createElement("a");
+  a.href = url;
+  // ``download`` is ignored for cross-origin hrefs, but R2 returns
+  // Content-Disposition: attachment so the save dialog fires anyway.
+  a.download = filename;
+  a.rel = "noopener";
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
 }
 
 /**
@@ -515,15 +564,19 @@ export async function pollReportExportUntilReady(
 }
 
 /**
- * Fetch a ready export and return a blob object URL so the caller can
- * open it inline (e.g. preview the PDF in a new tab) instead of
- * downloading. The bearer token flows through ``fetch`` for the same
- * reason as ``downloadReportExport``. The caller owns the returned URL
- * and must ``URL.revokeObjectURL`` it when done.
+ * Resolve a ready export to a URL the caller opens inline (preview the
+ * PDF in a new tab). In prod this is the presigned R2 URL with an
+ * ``inline`` disposition — the browser renders it directly, no
+ * cross-origin fetch. On local-disk storage it falls back to a
+ * same-origin blob URL. A blob URL should be revoked by the caller; a
+ * presigned URL needs no cleanup (revokeObjectURL is a no-op on it).
  */
 export async function fetchReportExportObjectUrl(
   exportId: string,
 ): Promise<string> {
+  const { url } = await getReportExportPresignedUrl(exportId, "inline");
+  if (url) return url;
+  // Local-disk storage: stream same-origin and hand back a blob URL.
   const session = readAdminSession();
   const headers: Record<string, string> = {
     Accept: "application/pdf, application/octet-stream",

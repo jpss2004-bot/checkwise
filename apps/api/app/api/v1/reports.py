@@ -1736,6 +1736,48 @@ def get_report_export_download(
     )
 
 
+@router.get(
+    "/exports/{export_id}/download-url",
+    summary="Return the presigned artifact URL (avoids a cross-origin fetch)",
+)
+def get_report_export_download_url(
+    export_id: str,
+    db: DbSession,
+    current: Annotated[CurrentUser, Depends(get_current_user)],
+    disposition: str = "attachment",
+):
+    """Return a directly-navigable URL for the rendered artifact.
+
+    ``/download`` 302-redirects to a presigned R2 URL; a browser
+    ``fetch()`` that follows that redirect does a cross-origin READ of
+    R2, which the bucket's CORS blocks → "failed to fetch". Instead the
+    frontend asks this (bearer-authed, same-origin JSON) endpoint for the
+    presigned URL and navigates straight to it — a top-level
+    navigation/download is not subject to CORS.
+
+    ``disposition`` is ``attachment`` (Download) or ``inline`` (Preview),
+    baked into the presigned URL's ResponseContentDisposition so R2
+    serves it correctly. ``url`` is null on local-disk storage (no
+    presigning) — the caller then streams ``/download`` (same-origin).
+    """
+    if disposition not in ("attachment", "inline"):
+        disposition = "attachment"
+    row = _load_export_for_user(db, export_id=export_id, current=current)
+    if row.status != "ready" or not row.storage_key:
+        raise HTTPException(
+            status.HTTP_409_CONFLICT,
+            detail=f"Export en estado '{row.status}'. Espera a que sea 'ready'.",
+        )
+    download_name = (
+        f"checkwise-report-{row.report_id}-v{row.version_id}.{row.format}"
+    )
+    cd = f'{disposition}; filename="{download_name}"'
+    presigned = get_storage_service().presigned_download_url(
+        row.storage_key, content_disposition=cd
+    )
+    return {"url": presigned, "filename": download_name}
+
+
 # ──────────────────────────────────────────────────────────────────
 # Phase 10D — Report shares
 # ──────────────────────────────────────────────────────────────────
