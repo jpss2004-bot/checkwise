@@ -1,9 +1,9 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import { useRouter } from "next/navigation";
 import {
   Check,
-  IdentificationCard,
   X as XIcon,
 } from "@phosphor-icons/react";
 
@@ -24,6 +24,7 @@ import { Textarea } from "@/components/ui/textarea";
 import { AdminShell } from "../_shell";
 import { VendorRef } from "@/components/checkwise/vendor-ref";
 import {
+  AdminApiError,
   type AdminCorrectionRequest,
   type CorrectionRequestStatus,
   approveCorrectionRequest,
@@ -77,6 +78,7 @@ const STATUS_ORDER: CorrectionRequestStatus[] = [
 const PAGE_LIMIT = 50;
 
 export default function AdminCorrectionRequestsPage() {
+  const router = useRouter();
   const [rows, setRows] = useState<AdminCorrectionRequest[] | null>(null);
   const [total, setTotal] = useState<number>(0);
   const [statusFilter, setStatusFilter] = useState<
@@ -103,6 +105,10 @@ export default function AdminCorrectionRequestsPage() {
       setRows(data.items);
       setTotal(data.total);
     } catch (err) {
+      if (err instanceof AdminApiError && err.status === 401) {
+        router.replace("/login");
+        return;
+      }
       setError(
         err instanceof Error
           ? err.message
@@ -196,7 +202,7 @@ export default function AdminCorrectionRequestsPage() {
             )}
           </span>
           <span className="text-[11px] text-[color:var(--text-tertiary)]">
-            {row.user_email ?? row.user_id}
+            {row.user_email ?? row.user_name ?? "Usuario del proveedor"}
           </span>
           {row.client_name ? (
             <span className="text-[10px] font-mono uppercase tracking-wide text-[color:var(--text-tertiary)]">
@@ -352,53 +358,23 @@ export default function AdminCorrectionRequestsPage() {
           </div>
         </div>
 
-        {error ? (
-          <div className="rounded-md border border-[color:var(--status-error-border)] bg-[color:var(--status-error-bg)] px-4 py-3 text-[12px] text-[color:var(--status-error-text)]">
-            {error}
-          </div>
-        ) : null}
-
-        {!loading && rows && rows.length === 0 ? (
-          <div className="flex flex-col items-center gap-2 rounded-lg border border-dashed border-[color:var(--border-subtle)] px-6 py-12 text-center">
-            <IdentificationCard
-              className="h-8 w-8 text-[color:var(--text-tertiary)]"
-              weight="regular"
-              aria-hidden="true"
-            />
-            <h3 className="text-[14px] font-semibold text-[color:var(--text-primary)]">
-              {statusFilter === "pending"
-                ? "No hay solicitudes pendientes"
-                : statusFilter
-                  ? "No hay solicitudes en este estado"
-                  : "Aún no hay solicitudes"}
-            </h3>
-            <p className="max-w-prose text-[12px] text-[color:var(--text-secondary)]">
-              Cuando un proveedor pida cambiar su correo, teléfono o nombre
-              de contacto desde su portal, la solicitud aparecerá aquí.
-            </p>
-            {statusFilter ? (
-              <Button
-                variant="outline"
-                size="sm"
-                onClick={() => {
-                  setStatusFilter("");
-                  refresh("");
-                }}
-              >
-                Quitar filtro
-              </Button>
-            ) : null}
-          </div>
-        ) : null}
-
-        {rows && rows.length > 0 ? (
-          <DataTable<AdminCorrectionRequest>
-            columns={columns}
-            items={rows}
-            rowKey={(row) => row.id}
-            ariaLabel="Solicitudes de corrección"
-          />
-        ) : null}
+        <DataTable<AdminCorrectionRequest>
+          columns={columns}
+          items={loading ? null : rows}
+          loading={loading}
+          error={error}
+          onRetry={() => refresh()}
+          rowKey={(row) => row.id}
+          ariaLabel="Solicitudes de corrección"
+          emptyTitle={
+            statusFilter === "pending"
+              ? "No hay solicitudes pendientes"
+              : statusFilter
+                ? "No hay solicitudes en este estado"
+                : "Aún no hay solicitudes"
+          }
+          emptyDescription="Cuando un proveedor pida cambiar su correo, teléfono o nombre de contacto desde su portal, la solicitud aparecerá aquí."
+        />
       </section>
 
       <Dialog

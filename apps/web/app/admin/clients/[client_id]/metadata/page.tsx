@@ -146,7 +146,11 @@ export default function ClientMetadataPage({ params }: PageProps) {
             items={[
               { label: "Cliente", value: data.client.name },
               { label: "Documentos", value: documents.length, mono: true },
-              { label: "Archivo", value: "metadata.xlsx", mono: true, tone: "teal" },
+              {
+                label: "Maestro",
+                value: data.master_available ? "Disponible" : "Sin generar",
+                tone: "teal",
+              },
             ]}
           />
 
@@ -258,16 +262,25 @@ function Cell({
   mono?: boolean;
   wide?: boolean;
 }) {
+  const value = children || "—";
   return (
     <td
       className={[
         "max-w-[260px] px-3 py-3 align-top text-[color:var(--text-primary)]",
-        wide ? "min-w-[240px]" : "min-w-[150px]",
+        wide ? "min-w-[200px]" : "min-w-[140px]",
         strong ? "font-medium" : "",
         mono ? "font-mono text-[11px]" : "",
       ].join(" ")}
     >
-      {children || "—"}
+      {/* Clamp long free-text cells to two lines so rows stay uniform
+          height instead of going ragged; the full value is available on
+          hover via the title attribute. */}
+      <span
+        className="block overflow-hidden text-ellipsis [-webkit-box-orient:vertical] [-webkit-line-clamp:2] [display:-webkit-box]"
+        title={children || undefined}
+      >
+        {value}
+      </span>
     </td>
   );
 }

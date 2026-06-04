@@ -53,7 +53,7 @@ export default function AdminDashboardPage() {
   return (
     <AdminShell
       title="Resumen operativo"
-      description="Vista panorámica del control plane: clientes, proveedores, workspaces activos y bandeja de revisión humana."
+      description="Vista panorámica de la operación: clientes, proveedores, espacios activos y la bandeja de revisión humana."
       actions={
         <Button asChild size="sm" variant="outline">
           <Link href="/admin/reviewer">
@@ -85,24 +85,25 @@ export default function AdminDashboardPage() {
 // ─── Hero (asymmetric, no gradient) ─────────────────────────────
 
 function AdminHero({ data }: { data: AdminOverview }) {
-  const utilisation =
-    data.vendors_total === 0
-      ? 0
-      : Math.round((data.active_workspaces_total / Math.max(1, data.vendors_total)) * 100);
   const reviewBacklog =
     data.pending_reviews_total + data.rejected_or_correction_total;
+  // The gauge headline is a REAL count (active workspaces), not a
+  // synthetic percentage. The ring is a coverage proportion of active
+  // workspaces against vendors, clamped by RadialGauge so it never reads
+  // a misleading ">100%" when a vendor holds more than one workspace.
   return (
     <section className="cw-fade-up grid gap-5 rounded-lg border border-[color:var(--border-default)] bg-[color:var(--surface-raised)] p-5 shadow-xs md:grid-cols-[auto,1fr] md:items-center md:gap-8 md:p-6">
       <RadialGauge
-        value={utilisation}
+        value={data.active_workspaces_total}
+        max={Math.max(1, data.vendors_total)}
         tone="brand"
         size={140}
         thickness={12}
-        label={`${utilisation}%`}
-        caption="workspaces activos"
+        label={data.active_workspaces_total.toString()}
+        caption={`espacios activos · ${data.vendors_total} proveedores`}
       />
       <div className="min-w-0 space-y-3">
-        <p className="cw-eyebrow">Control plane · {data.clients_total} clientes · {data.vendors_total} proveedores</p>
+        <p className="cw-eyebrow">Panorama · {data.clients_total} clientes · {data.vendors_total} proveedores</p>
         <p className="text-xl font-semibold leading-tight tracking-tight text-[color:var(--text-primary)]">
           {heroHeadline(data, reviewBacklog)}
         </p>
@@ -137,7 +138,9 @@ function AdminHero({ data }: { data: AdminOverview }) {
 }
 
 function formatCount(n: number): string {
-  return n === 0 ? "—" : n.toString();
+  // Show a real 0 on an operations dashboard: "0 por revisar" is
+  // meaningful good news and must be distinguishable from missing data.
+  return n.toString();
 }
 
 function heroHeadline(data: AdminOverview, backlog: number): string {
@@ -158,7 +161,7 @@ function heroDescription(data: AdminOverview, backlog: number): string {
   if (data.recent_submissions_total > 0)
     parts.push(`${data.recent_submissions_total} entregas en el último ciclo`);
   if (data.recent_audit_events_total > 0)
-    parts.push(`${data.recent_audit_events_total} eventos audit log recientes`);
+    parts.push(`${data.recent_audit_events_total} eventos recientes en la bitácora de auditoría`);
   if (parts.length === 0)
     return backlog === 0
       ? "No hay actividad operativa pendiente. Todo está al día."
@@ -195,7 +198,7 @@ function AdminSignals({ data }: { data: AdminOverview }) {
     },
     {
       icon: Users,
-      label: "Workspaces activos",
+      label: "Espacios activos",
       caption: "Proveedores con expediente vivo.",
       value: data.active_workspaces_total,
       tone: "teal",
@@ -223,7 +226,7 @@ function AdminSignals({ data }: { data: AdminOverview }) {
     {
       href: "/platform/audit-log",
       icon: ListMagnifyingGlass,
-      label: "Eventos audit log",
+      label: "Eventos de auditoría",
       caption: "Trazabilidad reciente del sistema.",
       value: data.recent_audit_events_total,
     },
@@ -275,7 +278,7 @@ function SignalRow({ row }: { row: SignalRow }) {
       <span
         className={`font-mono text-lg font-semibold tabular-nums ${valueTone}`}
       >
-        {row.value === 0 ? "—" : row.value}
+        {row.value}
       </span>
       {row.href ? (
         <ArrowRight
@@ -343,7 +346,7 @@ function OperationsLauncher() {
     {
       href: "/platform/audit-log",
       icon: ListMagnifyingGlass,
-      label: "Audit log",
+      label: "Bitácora de auditoría",
       helper: "Eventos del sistema.",
     },
   ];
@@ -355,7 +358,7 @@ function OperationsLauncher() {
       <header className="border-b border-[color:var(--border-subtle)] px-5 py-3">
         <p className="cw-eyebrow">Superficies operativas</p>
         <p className="text-sm font-semibold text-[color:var(--text-primary)]">
-          Cada cambio queda firmado en el audit log
+          Cada cambio queda firmado en la bitácora de auditoría
         </p>
       </header>
       <ul className="divide-y divide-[color:var(--border-subtle)]">

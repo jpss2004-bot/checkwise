@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { EnvelopeSimple } from "@phosphor-icons/react";
+import { useRouter } from "next/navigation";
 
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -10,6 +10,7 @@ import { Select } from "@/components/ui/select";
 
 import { AdminShell } from "../_shell";
 import {
+  AdminApiError,
   type AdminContactRequest,
   type ContactRequestStatus,
   listContactRequests,
@@ -52,6 +53,7 @@ const STATUS_ORDER: ContactRequestStatus[] = [
 const PAGE_LIMIT = 50;
 
 export default function AdminContactRequestsPage() {
+  const router = useRouter();
   const [rows, setRows] = useState<AdminContactRequest[] | null>(null);
   const [total, setTotal] = useState<number>(0);
   const [statusFilter, setStatusFilter] = useState<ContactRequestStatus | "">(
@@ -73,6 +75,10 @@ export default function AdminContactRequestsPage() {
       setRows(data.items);
       setTotal(data.total);
     } catch (err) {
+      if (err instanceof AdminApiError && err.status === 401) {
+        router.replace("/login");
+        return;
+      }
       setError(
         err instanceof Error
           ? err.message
@@ -258,52 +264,25 @@ export default function AdminContactRequestsPage() {
           </div>
         </div>
 
-        {error ? (
-          <div className="rounded-md border border-[color:var(--status-error-border)] bg-[color:var(--status-error-bg)] px-4 py-3 text-[12px] text-[color:var(--status-error-text)]">
-            {error}
-          </div>
-        ) : null}
-
-        {!loading && rows && rows.length === 0 ? (
-          <div className="flex flex-col items-center gap-2 rounded-lg border border-dashed border-[color:var(--border-subtle)] px-6 py-12 text-center">
-            <EnvelopeSimple
-              className="h-8 w-8 text-[color:var(--text-tertiary)]"
-              weight="regular"
-              aria-hidden="true"
-            />
-            <h3 className="text-[14px] font-semibold text-[color:var(--text-primary)]">
-              {statusFilter
-                ? "No hay solicitudes en este estado"
-                : "Aún no hay solicitudes"}
-            </h3>
-            <p className="max-w-prose text-[12px] text-[color:var(--text-secondary)]">
-              {statusFilter
-                ? "Ajusta el filtro de estado o vuelve a “Todas”."
-                : "Cada vez que alguien envíe el formulario público de la landing, aparecerá aquí."}
-            </p>
-            {statusFilter ? (
-              <Button
-                variant="outline"
-                size="sm"
-                onClick={() => {
-                  setStatusFilter("");
-                  refresh("");
-                }}
-              >
-                Quitar filtro
-              </Button>
-            ) : null}
-          </div>
-        ) : null}
-
-        {rows && rows.length > 0 ? (
-          <DataTable<AdminContactRequest>
-            columns={columns}
-            items={rows}
-            rowKey={(row) => row.id}
-            ariaLabel="Solicitudes de contacto"
-          />
-        ) : null}
+        <DataTable<AdminContactRequest>
+          columns={columns}
+          items={loading ? null : rows}
+          loading={loading}
+          error={error}
+          onRetry={() => refresh()}
+          rowKey={(row) => row.id}
+          ariaLabel="Solicitudes de contacto"
+          emptyTitle={
+            statusFilter
+              ? "No hay solicitudes en este estado"
+              : "Aún no hay solicitudes"
+          }
+          emptyDescription={
+            statusFilter
+              ? "Ajusta el filtro de estado o vuelve a “Todas”."
+              : "Cada vez que alguien envíe el formulario público de la landing, aparecerá aquí."
+          }
+        />
       </section>
     </AdminShell>
   );
