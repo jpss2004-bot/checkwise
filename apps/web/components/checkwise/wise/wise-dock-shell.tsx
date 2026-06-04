@@ -155,11 +155,13 @@ export function WiseDockShell({
           "bg-[color:var(--surface-brand)] text-white",
           "hover:scale-105 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[color:var(--text-teal)]/60 focus-visible:ring-offset-2",
           // ``left`` (client, no sidebar): bottom-left floating icon.
-          // ``right`` (provider): stacked ABOVE the FeedbackLauncher pill
-          // (bottom-4 right-4, z-50) so it clears the left sidebar's
-          // collapse + account controls and both stay clearly visible.
+          // ``right`` (provider): bottom-right, SIDE-BY-SIDE to the left of
+          // the FeedbackLauncher pill (bottom-4 right-4 — ~110px wide with
+          // its "Reportar" label on sm+, icon-only ~42px below). The
+          // responsive offset leaves a clear gap so the two never touch,
+          // and both stay off the left sidebar.
           placement === "right"
-            ? "bottom-[5.5rem] right-5"
+            ? "bottom-4 right-[4.75rem] sm:right-[8.75rem]"
             : "bottom-5 left-5 sm:bottom-6 sm:left-6",
           collapsed
             ? "pointer-events-auto scale-100 opacity-100"
