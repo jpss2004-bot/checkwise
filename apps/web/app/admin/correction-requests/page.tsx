@@ -196,6 +196,7 @@ export default function AdminCorrectionRequestsPage() {
                 vendorId={row.vendor_id}
                 vendorName={row.vendor_name}
                 clientId={row.client_id ?? undefined}
+                surface="admin"
               />
             ) : (
               row.vendor_name ?? row.user_name ?? "—"

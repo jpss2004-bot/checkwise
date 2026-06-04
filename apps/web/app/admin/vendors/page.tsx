@@ -184,6 +184,7 @@ export default function AdminVendorsPage() {
                     vendorId={row.id}
                     vendorName={row.name}
                     clientId={row.client_id}
+                    surface="admin"
                   />
                 </p>
               ),

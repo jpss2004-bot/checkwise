@@ -370,6 +370,7 @@ function QueueTableRow({
               vendorId={item.provider.vendor_id}
               vendorName={item.provider.vendor_name}
               clientId={item.provider.client_id ?? undefined}
+              surface="admin"
             />
           ) : (
             item.provider.vendor_name
