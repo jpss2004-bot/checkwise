@@ -110,14 +110,12 @@ export default function PrintPage() {
     );
   }
 
-  const generatedAtLabel = new Date().toLocaleString("es-MX", {
+  const generatedAtLabel = new Date().toLocaleDateString("es-MX", {
     dateStyle: "long",
-    timeStyle: "short",
   });
   const sealLabel = sealedAt
-    ? new Date(sealedAt).toLocaleString("es-MX", {
+    ? new Date(sealedAt).toLocaleDateString("es-MX", {
         dateStyle: "long",
-        timeStyle: "short",
       })
     : null;
 
@@ -156,12 +154,23 @@ export default function PrintPage() {
             title={report.title}
             description={report.description}
             meta={[
-              { label: "Audiencia", value: REPORT_AUDIENCE_LABEL[report.audience] },
-              { label: "Estado", value: REPORT_STATUS_LABEL[report.status] },
-              {
-                label: "Versión",
-                value: `v${report.current_version?.version_number ?? "—"}`,
-              },
+              // 2026-06-05: Audiencia / Estado / Versión are internal
+              // document-management fields — kept on internal_only
+              // covers, dropped for client/vendor/external deliverables
+              // (matches StoryView). External covers carry only dates.
+              ...(report.audience === "internal_only"
+                ? [
+                    {
+                      label: "Audiencia",
+                      value: REPORT_AUDIENCE_LABEL[report.audience],
+                    },
+                    { label: "Estado", value: REPORT_STATUS_LABEL[report.status] },
+                    {
+                      label: "Versión",
+                      value: `v${report.current_version?.version_number ?? "—"}`,
+                    },
+                  ]
+                : []),
               { label: "Generado", value: generatedAtLabel },
               {
                 label: "Datos al",

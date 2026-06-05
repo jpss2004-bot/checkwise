@@ -80,20 +80,19 @@ export function StoryView({
     [content.blocks],
   );
   const audience = report.audience as ReportAudience;
+  const isInternal = audience === "internal_only";
   const audienceFraming = FRAMING_BY_AUDIENCE[audience] ?? FRAMING_BY_AUDIENCE.internal_only;
   const versionLabel = report.current_version
     ? `v${report.current_version.version_number}`
     : "—";
   const updatedAtLabel = report.updated_at
-    ? new Date(report.updated_at).toLocaleString("es-MX", {
+    ? new Date(report.updated_at).toLocaleDateString("es-MX", {
         dateStyle: "long",
-        timeStyle: "short",
       })
     : null;
   const sealedAtLabel = sealedAt
-    ? new Date(sealedAt).toLocaleString("es-MX", {
+    ? new Date(sealedAt).toLocaleDateString("es-MX", {
         dateStyle: "long",
-        timeStyle: "short",
       })
     : null;
 
@@ -125,9 +124,19 @@ export function StoryView({
         title={report.title}
         description={report.description}
         meta={[
-          { label: "Audiencia", value: REPORT_AUDIENCE_LABEL[audience] },
-          { label: "Estado", value: REPORT_STATUS_LABEL[report.status] },
-          { label: "Versión", value: versionLabel },
+          // 2026-06-05: Audiencia / Estado / Versión are internal
+          // document-management fields. On a report delivered to a
+          // client or provider they're noise — and "Estado: Borrador"
+          // on a shared PDF reads as unfinished. Show them only on
+          // internal_only reports; external audiences get just the
+          // dates.
+          ...(isInternal
+            ? [
+                { label: "Audiencia", value: REPORT_AUDIENCE_LABEL[audience] },
+                { label: "Estado", value: REPORT_STATUS_LABEL[report.status] },
+                { label: "Versión", value: versionLabel },
+              ]
+            : []),
           { label: "Última edición", value: updatedAtLabel },
           {
             label: "Datos al",
