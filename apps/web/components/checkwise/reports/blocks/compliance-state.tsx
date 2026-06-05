@@ -156,6 +156,15 @@ export function ComplianceStateBlock({
 
   const { semaphore, document_state_counts: counts } = data;
 
+  // 2026-06-05: only surface buckets that actually carry documents.
+  // The eight-bucket strip used to print every state including the
+  // zeros — a clean provider saw "Con observaciones: 0 · Vencidos: 0
+  // · Excepción autorizada: 0…", which is noise (and "Excepción
+  // autorizada" is a client-side internal call the provider rarely
+  // needs). Empty buckets are dropped; the strip is hidden entirely
+  // when nothing is tracked yet.
+  const visibleBuckets = BUCKETS.filter((b) => counts[b.key] > 0);
+
   return (
     <section className="space-y-3 py-3" data-block-type="compliance_state">
       {/* Semáforo + headline — de-carded (2026-06): the boxed headline
@@ -193,23 +202,25 @@ export function ComplianceStateBlock({
           entregar: 3") rather than a debug telemetry row. The
           ``title`` attribute exposes the canonical glossary on hover
           for power users who learned the original taxonomy. */}
-      <div className="border-t border-b border-[color:var(--border-subtle)] py-3">
-        <p className="mb-2 text-[12px] text-[color:var(--text-tertiary)]">
-          Documentos del periodo agrupados por estado.
-        </p>
-        <div className="cw-metadata-strip">
-          {BUCKETS.map((b) => (
-            <div key={b.key} title={b.hint}>
-              <span className="text-[11px] font-medium text-[color:var(--text-tertiary)]">
-                {b.label}
-              </span>
-              <span className="font-mono text-[14px] font-semibold tabular-nums text-[color:var(--text-primary)]">
-                {counts[b.key]}
-              </span>
-            </div>
-          ))}
+      {visibleBuckets.length > 0 ? (
+        <div className="border-t border-b border-[color:var(--border-subtle)] py-3">
+          <p className="mb-2 text-[12px] text-[color:var(--text-tertiary)]">
+            Documentos del periodo agrupados por estado.
+          </p>
+          <div className="cw-metadata-strip">
+            {visibleBuckets.map((b) => (
+              <div key={b.key} title={b.hint}>
+                <span className="text-[11px] font-medium text-[color:var(--text-tertiary)]">
+                  {b.label}
+                </span>
+                <span className="font-mono text-[14px] font-semibold tabular-nums text-[color:var(--text-primary)]">
+                  {counts[b.key]}
+                </span>
+              </div>
+            ))}
+          </div>
         </div>
-      </div>
+      ) : null}
 
       <FreshnessLabel fetchedAt={data.fetched_at} />
     </section>
