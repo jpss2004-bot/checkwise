@@ -10,6 +10,7 @@ import {
 } from "@phosphor-icons/react";
 import type { Icon as PhosphorIcon } from "@phosphor-icons/react";
 
+import { BlockIntro } from "@/components/checkwise/reports/block-intro";
 import { FreshnessLabel } from "@/components/checkwise/reports/freshness-label";
 import type { BlockDefinition, BlockProps } from "@/lib/reports/registry";
 
@@ -169,6 +170,10 @@ export function PrioritizedActionsBlock({
       className="space-y-3 py-3"
       data-block-type="prioritized_actions"
     >
+      <BlockIntro
+        title="Acciones prioritarias"
+        caption="Lo que conviene resolver primero, ordenado por prioridad. Cada tarjeta indica el documento a atender y, en tu portal, incluye un acceso directo para resolverlo."
+      />
       {filterChips}
       <ol className="divide-y divide-[color:var(--border-subtle)] border-y border-[color:var(--border-subtle)]">
         {items.map((item, idx) => (

@@ -2,6 +2,7 @@
 
 import { Buildings } from "@phosphor-icons/react";
 
+import { BlockIntro } from "@/components/checkwise/reports/block-intro";
 import { FreshnessLabel } from "@/components/checkwise/reports/freshness-label";
 import type { BlockDefinition, BlockProps } from "@/lib/reports/registry";
 
@@ -102,6 +103,8 @@ export function ComplianceByInstitutionBlock({
           ))}
         </div>
       </div>
+
+      <BlockIntro caption="Una barra por institución (SAT, IMSS, INFONAVIT, STPS-REPSE) con sus documentos segmentados por estado. El largo de la barra refleja el volumen de documentos, para comparar de un vistazo dónde se concentra el trabajo." />
 
       <ul className="space-y-2.5">
         {institutions.map((inst) => (

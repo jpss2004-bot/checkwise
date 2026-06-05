@@ -2,6 +2,7 @@
 
 import { GridFour } from "@phosphor-icons/react";
 
+import { BlockIntro } from "@/components/checkwise/reports/block-intro";
 import { FreshnessLabel } from "@/components/checkwise/reports/freshness-label";
 import type { BlockDefinition, BlockProps } from "@/lib/reports/registry";
 
@@ -142,6 +143,7 @@ export function KpiStripBlock({
       className="space-y-2 py-2 print:break-inside-avoid"
       data-block-type="kpi_strip"
     >
+      <BlockIntro caption="Los indicadores clave del periodo en una sola línea. El primero es el que mejor resume este reporte; los valores en rojo o ámbar señalan lo que está fuera de meta." />
       <div className="border-t border-b border-[color:var(--border-subtle)] py-3">
         <div className="cw-metadata-strip">
           {/* F2 (2026-05-19 visual audit): first metric gets hero treatment

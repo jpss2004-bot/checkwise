@@ -2,6 +2,7 @@
 
 import { CalendarBlank } from "@phosphor-icons/react";
 
+import { BlockIntro } from "@/components/checkwise/reports/block-intro";
 import { FreshnessLabel } from "@/components/checkwise/reports/freshness-label";
 import type { BlockDefinition, BlockProps } from "@/lib/reports/registry";
 
@@ -206,6 +207,10 @@ export function UpcomingDeadlinesBlock({
       className="space-y-4 py-3"
       data-block-type="upcoming_deadlines"
     >
+      <BlockIntro
+        title="Próximos vencimientos"
+        caption="Las obligaciones por vencer, ordenadas de la más cercana a la más lejana. En la línea de tiempo, el color indica la urgencia: rojo es esta semana y se relaja hacia gris conforme la fecha se aleja."
+      />
       {/* ── Timeline ── */}
       <TimelineSvg items={items} buckets={buckets} />
 

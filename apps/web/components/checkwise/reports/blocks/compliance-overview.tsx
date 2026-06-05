@@ -2,6 +2,7 @@
 
 import { ChartBar } from "@phosphor-icons/react";
 
+import { BlockIntro } from "@/components/checkwise/reports/block-intro";
 import { FreshnessLabel } from "@/components/checkwise/reports/freshness-label";
 import type { BlockDefinition, BlockProps } from "@/lib/reports/registry";
 
@@ -116,6 +117,10 @@ export function ComplianceOverviewBlock({
       className="space-y-6 py-2 print:break-inside-avoid"
       data-block-type="compliance_overview"
     >
+      <BlockIntro
+        title="Resumen del portafolio"
+        caption="Las cifras clave del portafolio de un vistazo, seguidas del cumplimiento de cada proveedor ordenado de menor a mayor — los proveedores que más atención necesitan quedan arriba."
+      />
       {/* ─── Hero KPI band ─────────────────────────────────────── */}
       <div className="grid grid-cols-2 gap-x-6 gap-y-6 border-y border-[color:var(--border-default)] py-5 sm:grid-cols-4">
         {/* Cumplimiento global */}

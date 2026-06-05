@@ -2,6 +2,7 @@
 
 import { Table } from "@phosphor-icons/react";
 
+import { BlockIntro } from "@/components/checkwise/reports/block-intro";
 import { FreshnessLabel } from "@/components/checkwise/reports/freshness-label";
 import type { BlockDefinition, BlockProps } from "@/lib/reports/registry";
 
@@ -182,6 +183,10 @@ export function VendorRiskMatrixBlock({
       className="space-y-2 py-2"
       data-block-type="vendor_risk_matrix"
     >
+      <BlockIntro
+        title="Matriz de riesgo por proveedor"
+        caption="Cada renglón es un proveedor con su estado por institución y un puntaje de riesgo de 0 a 100, donde un número más alto significa mayor riesgo. La tabla está ordenada de mayor a menor riesgo, así que lo más urgente aparece primero."
+      />
       <div className="overflow-x-auto border-t border-b border-[color:var(--border-default)]">
         <table className="min-w-full text-[13px]">
           <thead>

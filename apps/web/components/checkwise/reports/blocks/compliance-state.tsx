@@ -2,6 +2,7 @@
 
 import { Gauge } from "@phosphor-icons/react";
 
+import { BlockIntro } from "@/components/checkwise/reports/block-intro";
 import { FreshnessLabel } from "@/components/checkwise/reports/freshness-label";
 import type { BlockDefinition, BlockProps } from "@/lib/reports/registry";
 
@@ -167,6 +168,7 @@ export function ComplianceStateBlock({
 
   return (
     <section className="space-y-3 py-3" data-block-type="compliance_state">
+      <BlockIntro caption="El estado general de cumplimiento a la fecha: el semáforo y el porcentaje resumen qué tan al día está el expediente, y el desglose de abajo cuenta los documentos por estado." />
       {/* Semáforo + headline — de-carded (2026-06): the boxed headline
           read as app chrome. Now a clean document headline with the
           compliance % promoted as the block's hero figure. */}

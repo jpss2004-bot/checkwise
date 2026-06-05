@@ -2,6 +2,7 @@
 
 import { ListChecks } from "@phosphor-icons/react";
 
+import { BlockIntro } from "@/components/checkwise/reports/block-intro";
 import { FreshnessLabel } from "@/components/checkwise/reports/freshness-label";
 import type { BlockDefinition, BlockProps } from "@/lib/reports/registry";
 
@@ -223,6 +224,10 @@ export function AttentionListBlock({
 
   return (
     <section className="space-y-2 py-2" data-block-type="attention_list">
+      <BlockIntro
+        title="Documentos por atender"
+        caption="Cada renglón es una obligación que necesita acción ahora — rechazada, por corregir, vencida o por vencer. Muestra el estado, la institución y los días que faltan para la fecha límite."
+      />
       {filterChips}
       {groupByInstitution ? (
         <GroupedRows items={items} hideInstitutionChip interactive={interactive} />

@@ -2,6 +2,7 @@
 
 import { Compass } from "@phosphor-icons/react";
 
+import { BlockIntro } from "@/components/checkwise/reports/block-intro";
 import { FreshnessLabel } from "@/components/checkwise/reports/freshness-label";
 import type { BlockDefinition, BlockProps } from "@/lib/reports/registry";
 
@@ -101,6 +102,8 @@ export function ComplianceRadarBlock({
         </div>
         <FreshnessLabel fetchedAt={data.fetched_at ?? null} />
       </header>
+
+      <BlockIntro caption="La salud del portafolio de un vistazo: la dona muestra cómo se reparten los proveedores entre verde, amarillo y rojo, y la línea sigue la tasa de aprobación mes a mes durante los últimos seis meses." />
 
       {/* 2026-06-03: the radar is now a compact GAUGE + TREND. Its old
           ranked-vendor list duplicated compliance_overview's per-provider
