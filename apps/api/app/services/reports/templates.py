@@ -138,17 +138,21 @@ _CLIENT_MONTHLY_EXECUTIVE = ReportPreset(
         # parallel emission language gets the planner to emit all of
         # them in a single response.
         #
-        # 2026-06-05 — de-dup pass. Dropped the ``compliance_radar``
-        # block: its semáforo donut already lives as the "proveedores
-        # por semáforo" KPI in compliance_overview, and its worst-
-        # first vendor ranking is reproduced by both the overview bar
-        # and the vendor_risk_matrix below. Three stacked worst-first
-        # vendor rankings was more than the audience needed; the
-        # report now carries exactly two (overview bar + risk matrix).
+        # 2026-06-05 — de-dup pass, then partial reversal. We briefly
+        # dropped ``compliance_radar`` on the theory it was a third
+        # redundant worst-first vendor ranking. That was stale: the
+        # radar's ranked-vendor list was already removed on 2026-06-03,
+        # so today the block is a semáforo donut + a 6-month approval
+        # sparkline — and that sparkline is the ONLY trend view in the
+        # whole report (the fetcher always computes history_6mo, see
+        # data_fetchers.fetch_compliance_radar). Restored it with
+        # ``include_history=true``. The only remaining overlap is the
+        # donut vs the overview's semáforo KPI — a distinct hero viz,
+        # worth keeping for the trend it carries.
         "Genera un resumen ejecutivo mensual de cumplimiento del "
         "portafolio para la dirección del cliente. Devuelve "
-        "EXACTAMENTE estos cinco bloques, en este orden, emitidos "
-        "como cinco tool_use paralelos en una sola respuesta:\n"
+        "EXACTAMENTE estos seis bloques, en este orden, emitidos "
+        "como seis tool_use paralelos en una sola respuesta:\n"
         "1. ``compliance_overview`` con ``top_n_vendors=12`` — banda "
         "de cifras clave (cumplimiento global, proveedores por "
         "semáforo, documentos críticos, en revisión) + barra de "
@@ -157,19 +161,22 @@ _CLIENT_MONTHLY_EXECUTIVE = ReportPreset(
         "de cumplimiento por institución (SAT / IMSS / INFONAVIT / "
         "STPS-REPSE), al día / en proceso / en riesgo. La vista 'por "
         "área' del portafolio.\n"
-        "3. ``executive_summary`` con ``focus=compliance``, "
+        "3. ``compliance_radar`` con ``top_n_vendors=8``, "
+        "``include_history=true`` — dona del semáforo del portafolio "
+        "+ tendencia de aprobación de los últimos 6 meses. Es la "
+        "única tendencia del reporte.\n"
+        "4. ``executive_summary`` con ``focus=compliance``, "
         "``include_metrics=false`` — narrativa en prosa, sin tira "
         "de KPIs (las cifras ya están arriba).\n"
-        "4. ``vendor_risk_matrix`` con ``sort=risk_desc``, "
+        "5. ``vendor_risk_matrix`` con ``sort=risk_desc``, "
         "``max_rows=10``, columnas ``[sat, imss, infonavit, "
         "stps_repse, risk_score]`` — vista cruzada de proveedores "
         "ordenada de mayor a menor riesgo.\n"
-        "5. ``ai_recommendation`` con ``priority_count=3``, "
+        "6. ``ai_recommendation`` con ``priority_count=3``, "
         "``audience_tone=client`` — tres recomendaciones priorizadas "
         "para la dirección.\n\n"
         "NO agregues bloques adicionales. NO omitas ninguno. NO "
-        "emitas un ``kpi_strip`` separado. NO agregues un "
-        "``compliance_radar``."
+        "emitas un ``kpi_strip`` separado."
     ),
 )
 
