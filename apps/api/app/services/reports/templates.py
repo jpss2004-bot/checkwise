@@ -131,16 +131,24 @@ _CLIENT_MONTHLY_EXECUTIVE = ReportPreset(
     required_roles=(MembershipRole.CLIENT_ADMIN, MembershipRole.INTERNAL_ADMIN),
     recommended_prompt=(
         # M4/M5 (2026-06-02) — Reportes redesign. Be EXTREMELY
-        # explicit: enumerate the four blocks the cliente surface
-        # needs by name + config, in order. The earlier softer
-        # "arranca con… sigue con…" phrasing got Anthropic to stop
-        # after one or two tool calls. The numbered must-include
-        # list with parallel emission language gets the planner to
-        # emit all four in a single response.
+        # explicit: enumerate the blocks the cliente surface needs
+        # by name + config, in order. The earlier softer "arranca
+        # con… sigue con…" phrasing got Anthropic to stop after one
+        # or two tool calls. The numbered must-include list with
+        # parallel emission language gets the planner to emit all of
+        # them in a single response.
+        #
+        # 2026-06-05 — de-dup pass. Dropped the ``compliance_radar``
+        # block: its semáforo donut already lives as the "proveedores
+        # por semáforo" KPI in compliance_overview, and its worst-
+        # first vendor ranking is reproduced by both the overview bar
+        # and the vendor_risk_matrix below. Three stacked worst-first
+        # vendor rankings was more than the audience needed; the
+        # report now carries exactly two (overview bar + risk matrix).
         "Genera un resumen ejecutivo mensual de cumplimiento del "
         "portafolio para la dirección del cliente. Devuelve "
-        "EXACTAMENTE estos seis bloques, en este orden, emitidos "
-        "como seis tool_use paralelos en una sola respuesta:\n"
+        "EXACTAMENTE estos cinco bloques, en este orden, emitidos "
+        "como cinco tool_use paralelos en una sola respuesta:\n"
         "1. ``compliance_overview`` con ``top_n_vendors=12`` — banda "
         "de cifras clave (cumplimiento global, proveedores por "
         "semáforo, documentos críticos, en revisión) + barra de "
@@ -149,20 +157,19 @@ _CLIENT_MONTHLY_EXECUTIVE = ReportPreset(
         "de cumplimiento por institución (SAT / IMSS / INFONAVIT / "
         "STPS-REPSE), al día / en proceso / en riesgo. La vista 'por "
         "área' del portafolio.\n"
-        "3. ``compliance_radar`` con ``top_n_vendors=8``, "
-        "``include_history=false`` — hero del portafolio.\n"
-        "4. ``executive_summary`` con ``focus=compliance``, "
+        "3. ``executive_summary`` con ``focus=compliance``, "
         "``include_metrics=false`` — narrativa en prosa, sin tira "
         "de KPIs (las cifras ya están arriba).\n"
-        "5. ``vendor_risk_matrix`` con ``sort=risk_desc``, "
+        "4. ``vendor_risk_matrix`` con ``sort=risk_desc``, "
         "``max_rows=10``, columnas ``[sat, imss, infonavit, "
         "stps_repse, risk_score]`` — vista cruzada de proveedores "
         "ordenada de mayor a menor riesgo.\n"
-        "6. ``ai_recommendation`` con ``priority_count=3``, "
+        "5. ``ai_recommendation`` con ``priority_count=3``, "
         "``audience_tone=client`` — tres recomendaciones priorizadas "
         "para la dirección.\n\n"
         "NO agregues bloques adicionales. NO omitas ninguno. NO "
-        "emitas un ``kpi_strip`` separado."
+        "emitas un ``kpi_strip`` separado. NO agregues un "
+        "``compliance_radar``."
     ),
 )
 
