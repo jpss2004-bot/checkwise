@@ -142,11 +142,26 @@ The full 2.x track is complete at this tag.
 
 ## Next (post-2.x)
 
+### Finalization track — June 2026 readiness gate
+
+Current posture: presentation-ready and pilot-ready after the 2026-06-08 workspace hardening pass, but not yet production-complete for broad rollout.
+
+Source-of-truth plan: [FINAL_SYSTEM_COMPLETION_PLAN_2026-06-08.md](FINAL_SYSTEM_COMPLETION_PLAN_2026-06-08.md).
+
+Release freeze gate:
+
+- Reconcile the mixed dirty tree before committing; the workspace currently contains hardening changes plus pre-existing WhatsApp, onboarding, seed, render, and demo-deploy edits.
+- Commit the approved hardening/finalization scope with validation evidence.
+- Deploy staging with managed database, object storage, SMTP, WhatsApp/Twilio, AI keys, and explicit CORS/frontend origins.
+- Run a clean smoke test across login, provider portal, upload, reviewer decisions, client portal, reports, audit packages, and notification fanout.
+- Confirm demo data, local storage artifacts, and generated exports are separated from production data.
+
 ### V2.2 — Mock → real backend wiring
 
 Finish the backend-integration TODOs that 2.0 carried forward through `portal-adapters.ts`.
 
-- Enrich `/portal/workspaces/{id}/onboarding` with `why` / `format` / `next_action` / `reviewer_note` fields so the adapter can be dropped.
+- Done/current: `/api/v1/portal/workspaces/{id}/onboarding` exposes `why` / `format` / `next_action` / `reviewer_note`, and `/portal/onboarding` consumes it directly without `MOCK_EXPEDIENTE`.
+- Retire any remaining legacy onboarding adapter references after confirming no hidden consumer depends on the old mock shape.
 - Wire the admin + client dashboards to real `/api/v1/clients/*` payloads (today they still consume `lib/mock/*`).
 - Replace the V1.2 opaque `X-Workspace-Token` with the JWT/RBAC stack already used by `/admin/*`.
 

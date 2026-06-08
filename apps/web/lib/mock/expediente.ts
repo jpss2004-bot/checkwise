@@ -1,15 +1,10 @@
 /**
- * MOCK expediente inicial data.
+ * Legacy MOCK expediente inicial data.
  *
- * Used by the onboarding gate (/portal/onboarding) and the dashboard's
- * "completeness" gate. The real backend exposes some of this via
- * /api/v1/portal/onboarding but the per-card "why" copy + format hints
- * + plain-language CTAs live here in the frontend until the catalog
- * is enriched server-side.
- *
- * TODO[backend-integration]: When the backend grows a richer
- * onboarding API (with per-requirement explanation + accepted formats),
- * delete this file and consume the real shape from lib/api/portal.ts.
+ * The live `/portal/onboarding` route now consumes the enriched backend
+ * onboarding API directly. This file remains as a compatibility fixture
+ * for older adapters/tests and should not be treated as the source of
+ * truth for provider onboarding copy.
  */
 
 import type { DocumentStateCode } from "@/lib/types";

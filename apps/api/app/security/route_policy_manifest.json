@@ -244,21 +244,6 @@
     },
     {
       "method": "GET",
-      "path": "/api/v1/admin/ocr-config",
-      "function": "get_ocr_config",
-      "router": "app.api.v1.admin",
-      "file": "api/app/api/v1/admin.py",
-      "lineno": 381,
-      "gate": "internal_admin",
-      "tenant_rule": "cross-tenant (internal_admin is global)",
-      "audit_rule": "not_logged (read-only)",
-      "rate_limit_rule": "none (auth-gated)",
-      "error_lang": "es",
-      "must_change_password_allowed": false,
-      "notes": "Operator-verification helper. Pure config introspection — no Document AI calls, no credential exposure. Returns enabled/configured/missing_keys/processor_name/sdk_available."
-    },
-    {
-      "method": "GET",
       "path": "/api/v1/admin/periods",
       "function": "list_periods",
       "router": "app.api.v1.admin",
@@ -918,6 +903,36 @@
       "notes": ""
     },
     {
+      "method": "POST",
+      "path": "/api/v1/client/wise/ask",
+      "function": "ask_client_wise_endpoint",
+      "router": "app.api.v1.client",
+      "file": "api/app/api/v1/client.py",
+      "lineno": 3213,
+      "gate": "client_admin_or_admin",
+      "tenant_rule": "scoped by _resolve_client_id against the caller's reachable client memberships",
+      "audit_rule": "sampled (client Wise event logging)",
+      "rate_limit_rule": "ai_heavy_limiter (per-user AI_HEAVY_RATE_LIMIT_PER_MINUTE + _PER_HOUR; 429 on overflow)",
+      "error_lang": "es",
+      "must_change_password_allowed": false,
+      "notes": "Cliente portfolio Wise route; model context is built server-side from scoped portfolio state."
+    },
+    {
+      "method": "POST",
+      "path": "/api/v1/client/wise/events",
+      "function": "record_client_wise_event",
+      "router": "app.api.v1.client",
+      "file": "api/app/api/v1/client.py",
+      "lineno": 3171,
+      "gate": "client_admin_or_admin",
+      "tenant_rule": "scoped by _resolve_client_id against the caller's reachable client memberships",
+      "audit_rule": "logged to checkwise.wise.client_events for offline rollups",
+      "rate_limit_rule": "none (auth-gated)",
+      "error_lang": "es_partial (unknown event_type detail includes raw event_type)",
+      "must_change_password_allowed": false,
+      "notes": "Accepts only allowlisted Wise cliente event_type values."
+    },
+    {
       "method": "GET",
       "path": "/api/v1/health",
       "function": "api_health",
@@ -1246,6 +1261,21 @@
       "error_lang": "es_partial (raw service exceptions can leak; M2 will normalize)",
       "must_change_password_allowed": false,
       "notes": ""
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/reports/exports/{export_id}/download-url",
+      "function": "get_report_export_download_url",
+      "router": "app.api.v1.reports",
+      "file": "api/app/api/v1/reports.py",
+      "lineno": 1739,
+      "gate": "authenticated_jwt",
+      "tenant_rule": "scoped via parent report's audience and creator; presigned URL inherits storage TTL",
+      "audit_rule": "not_logged (read-only URL lookup; underlying export row remains scoped)",
+      "rate_limit_rule": "none (auth-gated)",
+      "error_lang": "es_partial (raw service exceptions can leak; M2 will normalize)",
+      "must_change_password_allowed": false,
+      "notes": "Returns JSON with direct storage URL to avoid browser CORS on redirected fetches."
     },
     {
       "method": "GET",

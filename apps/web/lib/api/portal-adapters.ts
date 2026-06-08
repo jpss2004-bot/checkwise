@@ -1,16 +1,8 @@
 /**
- * Adapters that map the real backend payloads to the
- * UI-friendly mock shapes the V1.5/1.6 pages were built against.
- *
- * The mocks include UX-only fields (why / format / next_action /
- * reviewer_note for onboarding, year tag for calendar) that the
- * backend does not yet expose. The adapter merges those from a
- * frontend enrichment dictionary so the pages render with real
- * data plus the curated copy.
- *
- * TODO[backend-integration]: when /portal/workspaces/{id}/onboarding
- * gets enriched with the missing fields (P1-1), drop this adapter
- * and consume the API directly.
+ * Legacy adapters that map real backend payloads to older UI-friendly
+ * mock shapes. `/portal/onboarding` now consumes the enriched backend
+ * response directly; the onboarding adapter is retained only for older
+ * callers/tests and prefers backend-owned copy when present.
  */
 
 import { MOCK_EXPEDIENTE, type ExpedienteRequirement } from "@/lib/mock/expediente";
@@ -67,9 +59,9 @@ function statusToCode(status: RequirementStatus): DocumentStateCode {
 // ──────────────────────────────────────────────────────────────────
 
 /**
- * Enrichment dictionary keyed by requirement_code, derived from the
- * mock. Provides why / format / next_action fallbacks the backend
- * doesn't yet ship.
+ * Fallback enrichment keyed by requirement_code, derived from the
+ * original mock. The backend owns these fields now; this dictionary is
+ * only a backward-compatibility fallback.
  */
 const ENRICHMENT_BY_CODE: Record<
   string,
@@ -140,11 +132,11 @@ function adaptOnboardingItem(
     requirement_code: item.code,
     name: item.name,
     institution: INSTITUTION_FROM_BACKEND[item.institution] ?? "interno_cliente",
-    why: enrichment.why,
-    format: enrichment.format,
+    why: item.why || enrichment.why,
+    format: item.format || enrichment.format,
     state: statusToCode(item.status),
-    next_action: item.note ?? enrichment.next_action,
-    reviewer_note: enrichment.reviewer_note,
+    next_action: item.next_action || item.note || enrichment.next_action,
+    reviewer_note: item.reviewer_note ?? enrichment.reviewer_note,
     required: item.required,
     filename: item.filename ?? null,
   };

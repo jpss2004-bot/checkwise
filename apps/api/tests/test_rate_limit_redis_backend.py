@@ -113,18 +113,20 @@ def test_reset_all_clears_every_bucket(limiter) -> None:
 def test_short_window_admits_burst_after_expiry(limiter) -> None:
     """An event older than ``window_seconds`` should not count.
 
-    Uses a sub-second window so the test runs quickly. Both backends
-    bound their notion of "now" to a real clock (monotonic / wall);
-    the assertion sleeps just past the window.
+    Uses a short window so the test runs quickly. Redis needs enough
+    room for first-call Lua registration / fakeredis overhead; otherwise
+    the first event can expire before the third assertion and the test
+    measures harness latency instead of limiter semantics.
     """
     import time
 
-    assert limiter.check("k", limit=2, window_seconds=0.2)
-    assert limiter.check("k", limit=2, window_seconds=0.2)
-    assert limiter.check("k", limit=2, window_seconds=0.2) is False
-    time.sleep(0.25)
+    window_seconds = 1.0
+    assert limiter.check("k", limit=2, window_seconds=window_seconds)
+    assert limiter.check("k", limit=2, window_seconds=window_seconds)
+    assert limiter.check("k", limit=2, window_seconds=window_seconds) is False
+    time.sleep(window_seconds + 0.05)
     # Window has passed; the bucket should be fresh again.
-    assert limiter.check("k", limit=2, window_seconds=0.2)
+    assert limiter.check("k", limit=2, window_seconds=window_seconds)
 
 
 # ─── Redis-specific guarantees ───────────────────────────────────

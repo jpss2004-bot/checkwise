@@ -94,6 +94,15 @@ class Settings(BaseSettings):
     WHATSAPP_DEFAULT_LANGUAGE_CODE: str = "es_MX"
     WHATSAPP_DEFAULT_COUNTRY_CODE: str = "52"  # MX
 
+    # Reverse-cutover gate. When True, the notification fanout builds
+    # the per-event Meta template ``components`` payload and sends via
+    # WhatsApp Cloud API instead of falling through to Twilio SMS.
+    # Flip ON only after every required template
+    # (cw_renewal_threshold, cw_reviewer_decision) is APPROVED in Meta
+    # WhatsApp Manager AND WHATSAPP_ENABLED/credentials are set. While
+    # False, fanout preserves the SMS-first behavior shipped in Phase 7.
+    WHATSAPP_NATIVE_TEMPLATES_ENABLED: bool = False
+
     # SMS via Twilio (Phase 7 cutover). Used as the messaging
     # transport until Meta approves CheckWise's WhatsApp templates;
     # see :mod:`app.services.messaging_delivery` for the selection
@@ -175,14 +184,13 @@ class Settings(BaseSettings):
     #   * unset (None) → enabled in local, disabled everywhere else.
     #   * "true"  → forced ON (any environment).
     #   * "false" → forced OFF (any environment).
-    # EXPOSE_LEGACY_SUBMISSIONS / EXPOSE_METADATA_DRY_RUN: hard kill switches
-    # that turn the legacy unauthenticated upload endpoints off entirely.
-    # When False (default outside local), the endpoints still mount but require
-    # `internal_admin` — set these to False to remove them from the schema
-    # completely (the routers do not register the route).
+    # EXPOSE_LEGACY_SUBMISSIONS / EXPOSE_METADATA_DRY_RUN: route-registration
+    # switches for deprecated/prototyping upload surfaces. Unset means local
+    # only; set true to deliberately expose them in another tier, still behind
+    # require_local_or_internal_admin. Set false to remove them everywhere.
     ENABLE_API_DOCS: str = ""
-    EXPOSE_LEGACY_SUBMISSIONS: bool = True
-    EXPOSE_METADATA_DRY_RUN: bool = True
+    EXPOSE_LEGACY_SUBMISSIONS: bool | None = None
+    EXPOSE_METADATA_DRY_RUN: bool | None = None
 
     # Auth rate-limit. Conservative defaults — protect against
     # credential-stuffing and reset-link abuse without locking out
@@ -344,6 +352,20 @@ class Settings(BaseSettings):
             return True
         if flag in {"0", "false", "no", "off"}:
             return False
+        return self.is_local_env
+
+    @property
+    def expose_legacy_submissions(self) -> bool:
+        """Whether the deprecated browser-posted tenant route is registered."""
+        if self.EXPOSE_LEGACY_SUBMISSIONS is not None:
+            return self.EXPOSE_LEGACY_SUBMISSIONS
+        return self.is_local_env
+
+    @property
+    def expose_metadata_dry_run(self) -> bool:
+        """Whether the local/n8n metadata dry-run route is registered."""
+        if self.EXPOSE_METADATA_DRY_RUN is not None:
+            return self.EXPOSE_METADATA_DRY_RUN
         return self.is_local_env
 
     @property

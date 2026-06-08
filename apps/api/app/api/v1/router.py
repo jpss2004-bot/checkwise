@@ -33,7 +33,7 @@ api_router.include_router(client.router)
 # (404 not 403). The router is also auth-gated via
 # require_local_or_internal_admin; this is a defence-in-depth layer
 # that shrinks the attack surface for OpenAPI enumeration / fuzzing.
-if settings.EXPOSE_METADATA_DRY_RUN:
+if settings.expose_metadata_dry_run:
     api_router.include_router(metadata_dry_run.router)
 api_router.include_router(reports.router)
 # Phase 10D — public share-consume endpoints under /api/v1/r/<token>.

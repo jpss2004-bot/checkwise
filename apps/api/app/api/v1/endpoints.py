@@ -193,7 +193,7 @@ async def create_submission(
 # the flag is True, mirroring the original docstring intent at
 # core/config.py:187-191. Defence-in-depth on top of the existing
 # require_local_or_internal_admin auth gate.
-if settings.EXPOSE_LEGACY_SUBMISSIONS:
+if settings.expose_legacy_submissions:
     create_submission = router.post(  # type: ignore[assignment]
         "/submissions",
         response_model=SubmissionResponse,

@@ -2,11 +2,10 @@
 
 Both flags are read at module-import time (the conditional decorator
 on ``create_submission`` and the conditional ``include_router`` on
-``metadata_dry_run``). The flags default to True, so the in-process
-TestClient already exercises the on-state; this module verifies the
-off-state by spinning up a fresh Python subprocess with the env
-vars overridden and inspecting the registered routes through the
-TestClient.
+``metadata_dry_run``). Unset means local-only registration; explicit
+``true`` exposes the routes in another tier, still behind the auth
+gate. This module spins up fresh Python subprocesses with env vars
+overridden and inspects registered routes through the TestClient.
 
 Subprocess isolation is required because the @router.post decorator
 runs at import time — once ``app.main`` has been imported in the
@@ -20,6 +19,9 @@ import json
 import subprocess
 import sys
 import textwrap
+from pathlib import Path
+
+API_DIR = Path(__file__).resolve().parents[1]
 
 
 def _routes_with_env(env_overrides: dict[str, str]) -> dict[str, bool]:
@@ -42,8 +44,10 @@ def _routes_with_env(env_overrides: dict[str, str]) -> dict[str, bool]:
         [sys.executable, "-c", script],
         env={
             "PATH": "/usr/bin:/bin",
+            "PYTHONPATH": str(API_DIR),
             **env_overrides,
         },
+        cwd=API_DIR,
         capture_output=True,
         text=True,
         check=True,
@@ -68,7 +72,35 @@ def test_kill_switches_off_removes_legacy_routes() -> None:
 
 
 def test_kill_switches_on_registers_legacy_routes() -> None:
-    """Default-on (flags omitted) keeps the legacy routes registered."""
+    """Unset flags keep local-dev legacy routes registered."""
     routes = _routes_with_env({"CHECKWISE_ENV": "local"})
+    assert routes["legacy_submissions"] is True
+    assert routes["metadata_dry_run"] is True
+
+
+def test_kill_switches_default_off_outside_local() -> None:
+    """Unset flags remove legacy/prototyping routes in non-local tiers."""
+    routes = _routes_with_env(
+        {
+            "CHECKWISE_ENV": "production",
+            "AUTH_JWT_SECRET": "prod-secret-prod-secret-prod-secret-12345",
+        }
+    )
+    assert routes["legacy_submissions"] is False
+    assert routes["metadata_dry_run"] is False
+    assert routes["health"] is True
+    assert routes["catalogs"] is True
+
+
+def test_kill_switches_can_explicitly_opt_in_outside_local() -> None:
+    """Explicit true preserves the operator escape hatch in production."""
+    routes = _routes_with_env(
+        {
+            "CHECKWISE_ENV": "production",
+            "AUTH_JWT_SECRET": "prod-secret-prod-secret-prod-secret-12345",
+            "EXPOSE_LEGACY_SUBMISSIONS": "true",
+            "EXPOSE_METADATA_DRY_RUN": "true",
+        }
+    )
     assert routes["legacy_submissions"] is True
     assert routes["metadata_dry_run"] is True
