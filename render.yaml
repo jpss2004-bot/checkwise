@@ -126,6 +126,70 @@ services:
       - key: SMTP_FROM_EMAIL
         sync: false
 
+      # ---- Messaging (Phase 7 cutover — Twilio SMS + WhatsApp) ----
+      # MESSAGING_ENABLED is the master gate; without it the unified
+      # notification fanout in ``app/services/notifications/fanout.py``
+      # marks every messaging dispatch row as
+      # ``whatsapp_status="skipped"`` regardless of channel readiness.
+      #
+      # Twilio SMS is the active outbound channel today. Native
+      # WhatsApp template delivery is gated on
+      # WHATSAPP_NATIVE_TEMPLATES_ENABLED — flip ON only after Meta
+      # APPROVES the templates in docs/runbooks/whatsapp_templates.json
+      # AND WHATSAPP_ENABLED is true. While the native flag is off,
+      # fanout passes ``whatsapp_components=None`` to send_message and
+      # falls through to Twilio SMS with the rendered plaintext body.
+      #
+      # WHATSAPP_* keys are required separately for
+      # ``POST /api/v1/me/phone-verification/issue``: that path calls
+      # ``send_whatsapp_template`` directly (bypassing the fanout) and
+      # needs Meta credentials to deliver the OTP. Without them the
+      # row is created but the user never receives the code.
+      - key: MESSAGING_ENABLED
+        sync: false
+      - key: TWILIO_ENABLED
+        sync: false
+      - key: TWILIO_ACCOUNT_SID
+        sync: false
+      - key: TWILIO_AUTH_TOKEN
+        sync: false
+      - key: TWILIO_FROM_NUMBER
+        sync: false
+      - key: WHATSAPP_ENABLED
+        sync: false
+      - key: WHATSAPP_NATIVE_TEMPLATES_ENABLED
+        sync: false
+      - key: WHATSAPP_ACCESS_TOKEN
+        sync: false
+      - key: WHATSAPP_PHONE_NUMBER_ID
+        sync: false
+      - key: WHATSAPP_API_VERSION
+        sync: false
+
+      # ---- Document AI / OCR (Phase 3 — scanned-PDF fallback) ----
+      # OCR runs synchronously during intake when
+      # ``inspect_pdf_with_ocr_fallback`` flags a scanned document.
+      # Default OFF (``OCR_ENABLED=false``) — uploads without
+      # extracted text route to ``pendiente_revision`` and the
+      # extraction pipeline gracefully degrades.
+      #
+      # To enable: provision a Google Cloud project, enable the
+      # Document AI API, create an Enterprise Document OCR processor,
+      # mint a service account with ``documentai.editor``, export the
+      # JSON key, paste its contents into
+      # ``GOOGLE_APPLICATION_CREDENTIALS_JSON``. Full step-by-step:
+      # apps/api/docs/PHASE3_DOCUMENTAI_SETUP.md.
+      - key: OCR_ENABLED
+        sync: false
+      - key: GOOGLE_DOC_AI_PROJECT_ID
+        sync: false
+      - key: GOOGLE_DOC_AI_LOCATION
+        sync: false
+      - key: GOOGLE_DOC_AI_PROCESSOR_ID
+        sync: false
+      - key: GOOGLE_APPLICATION_CREDENTIALS_JSON
+        sync: false
+
       # ---- Support links (optional; populate when finalized) ----
       - key: SUPPORT_WHATSAPP_URL
         sync: false
@@ -231,6 +295,11 @@ services:
       # legacy dispatcher. The active path needs Twilio + SMTP to
       # actually fan out; without these, the new path degrades
       # gracefully to skipped+audited rows.
+      #
+      # WHATSAPP_* keys are wired here so the cron is ready the
+      # moment WHATSAPP_NATIVE_TEMPLATES_ENABLED flips ON across
+      # services — see the web service messaging block above for the
+      # full Twilio-SMS-first-then-native-templates story.
       - key: MESSAGING_ENABLED
         sync: false
       - key: TWILIO_ENABLED
@@ -240,6 +309,16 @@ services:
       - key: TWILIO_AUTH_TOKEN
         sync: false
       - key: TWILIO_FROM_NUMBER
+        sync: false
+      - key: WHATSAPP_ENABLED
+        sync: false
+      - key: WHATSAPP_NATIVE_TEMPLATES_ENABLED
+        sync: false
+      - key: WHATSAPP_ACCESS_TOKEN
+        sync: false
+      - key: WHATSAPP_PHONE_NUMBER_ID
+        sync: false
+      - key: WHATSAPP_API_VERSION
         sync: false
       - key: SMTP_HOST
         sync: false
@@ -312,6 +391,16 @@ services:
       - key: TWILIO_AUTH_TOKEN
         sync: false
       - key: TWILIO_FROM_NUMBER
+        sync: false
+      - key: WHATSAPP_ENABLED
+        sync: false
+      - key: WHATSAPP_NATIVE_TEMPLATES_ENABLED
+        sync: false
+      - key: WHATSAPP_ACCESS_TOKEN
+        sync: false
+      - key: WHATSAPP_PHONE_NUMBER_ID
+        sync: false
+      - key: WHATSAPP_API_VERSION
         sync: false
       - key: SMTP_HOST
         sync: false

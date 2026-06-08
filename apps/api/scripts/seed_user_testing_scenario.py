@@ -78,8 +78,8 @@ INTERNAL_ORG_NAME = "LegalShelf User Testing — Local"
 
 MAYELA_EMAIL = "mayela.user-test@checkwise.local"
 MAYELA_PASSWORD = "MayelaLocal!2026"
-ANWAR_EMAIL = "anwar.user-test@checkwise.local"
-ANWAR_PASSWORD = "AnwarLocal!2026"
+ANWAR_EMAIL = "anuar.user-test@checkwise.local"
+ANWAR_PASSWORD = "AnuarLocal!2026"
 MINA_EMAIL = "mina.olaez.user-test@checkwise.local"
 MINA_PASSWORD = "MinaLocal!2026"
 
@@ -493,7 +493,7 @@ def _insert_submission(
 def _wipe_existing(db) -> None:
     provider_workspace_ids = [p.workspace_id for p in PROVIDERS]
     provider_emails = [p.owner_email for p in PROVIDERS]
-    user_emails = [MAYELA_EMAIL, ANWAR_EMAIL, *provider_emails]
+    user_emails = [MAYELA_EMAIL, ANWAR_EMAIL, "anwar.user-test@checkwise.local", *provider_emails]
 
     vendor_ids = set(
         db.scalars(
@@ -610,7 +610,7 @@ def _user(email: str, password: str, full_name: str) -> User:
 
 def _seed_users_and_orgs(db) -> tuple[str, str, str, dict[str, str]]:
     mayela = _user(MAYELA_EMAIL, MAYELA_PASSWORD, "Mayela")
-    anwar = _user(ANWAR_EMAIL, ANWAR_PASSWORD, "Anwar")
+    anwar = _user(ANWAR_EMAIL, ANWAR_PASSWORD, "Anuar")
     db.add_all([mayela, anwar])
     provider_user_ids: dict[str, str] = {}
     for provider in PROVIDERS:
@@ -852,7 +852,7 @@ def main() -> None:
     print("")
     print("Synthetic test accounts:")
     print(f"  Mayela client_admin: {MAYELA_EMAIL} / {MAYELA_PASSWORD}")
-    print(f"  Anwar internal_admin+reviewer: {ANWAR_EMAIL} / {ANWAR_PASSWORD}")
+    print(f"  Anuar internal_admin+reviewer: {ANWAR_EMAIL} / {ANWAR_PASSWORD}")
     print(f"  Mina provider_admin: {MINA_EMAIL} / {MINA_PASSWORD}")
     print("")
     print("Provider portfolio:")

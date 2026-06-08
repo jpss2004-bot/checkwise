@@ -27,6 +27,7 @@ import {
   type ClientProfile,
   type ClientVendorRow,
 } from "@/lib/api/client";
+import { useUrlClientId } from "@/lib/workspace/use-url-client-id";
 
 /**
  * /client/onboarding
@@ -46,6 +47,7 @@ import {
 
 export default function ClientOnboardingPage() {
   const router = useRouter();
+  const urlClientId = useUrlClientId();
   const [profile, setProfile] = useState<ClientProfile | null>(null);
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState<string | null>(null);
@@ -69,7 +71,7 @@ export default function ClientOnboardingPage() {
     let cancelled = false;
     setLoading(true);
     setLoadError(null);
-    getClientProfile()
+    getClientProfile(urlClientId ? { client_id: urlClientId } : undefined)
       .then((data) => {
         if (cancelled) return;
         setProfile(data);
@@ -93,7 +95,7 @@ export default function ClientOnboardingPage() {
     return () => {
       cancelled = true;
     };
-  }, []);
+  }, [urlClientId]);
 
   async function handleSubmit(e: FormEvent) {
     e.preventDefault();
@@ -102,14 +104,17 @@ export default function ClientOnboardingPage() {
     setSaveError(null);
     setJustSaved(false);
     try {
-      const updated = await updateClientProfile({
-        responsible_name: responsibleName.trim() || null,
-        industry: industry.trim() || null,
-        fiscal_address: fiscalAddress.trim() || null,
-        phone: phone.trim() || null,
-        notes: notes.trim() || null,
-        terms_accepted: termsAccepted,
-      });
+      const updated = await updateClientProfile(
+        {
+          responsible_name: responsibleName.trim() || null,
+          industry: industry.trim() || null,
+          fiscal_address: fiscalAddress.trim() || null,
+          phone: phone.trim() || null,
+          notes: notes.trim() || null,
+          terms_accepted: termsAccepted,
+        },
+        urlClientId ? { client_id: urlClientId } : undefined,
+      );
       setProfile(updated);
       setJustSaved(true);
       // First-time completion → land them on the dashboard so they
@@ -393,6 +398,7 @@ function ReadOnlyField({
 // ---------------------------------------------------------------------------
 
 function MyProvidersSection() {
+  const urlClientId = useUrlClientId();
   const [providers, setProviders] = useState<ClientVendorRow[] | null>(null);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [showForm, setShowForm] = useState(false);
@@ -402,7 +408,10 @@ function MyProvidersSection() {
 
   useEffect(() => {
     let cancelled = false;
-    listClientVendors({ limit: 100 })
+    listClientVendors({
+      limit: 100,
+      ...(urlClientId ? { client_id: urlClientId } : {}),
+    })
       .then((data) => {
         if (!cancelled) setProviders(data.items);
       })
@@ -417,7 +426,7 @@ function MyProvidersSection() {
     return () => {
       cancelled = true;
     };
-  }, [reloadKey]);
+  }, [reloadKey, urlClientId]);
 
   return (
     <Surface
@@ -517,6 +526,7 @@ function AddProviderForm({
 }: {
   onCreated: (result: { contact_email: string; email_status: string }) => void;
 }) {
+  const urlClientId = useUrlClientId();
   const [vendorName, setVendorName] = useState("");
   const [vendorRfc, setVendorRfc] = useState("");
   const [personaType, setPersonaType] = useState<"moral" | "fisica">("moral");
@@ -531,14 +541,17 @@ function AddProviderForm({
     setSubmitting(true);
     setErr(null);
     try {
-      const result = await createClientProvider({
-        vendor_name: vendorName.trim(),
-        vendor_rfc: vendorRfc.trim().toUpperCase(),
-        persona_type: personaType,
-        contact_name: contactName.trim(),
-        contact_email: contactEmail.trim().toLowerCase(),
-        contact_phone: contactPhone.trim() || null,
-      });
+      const result = await createClientProvider(
+        {
+          vendor_name: vendorName.trim(),
+          vendor_rfc: vendorRfc.trim().toUpperCase(),
+          persona_type: personaType,
+          contact_name: contactName.trim(),
+          contact_email: contactEmail.trim().toLowerCase(),
+          contact_phone: contactPhone.trim() || null,
+        },
+        urlClientId ? { client_id: urlClientId } : undefined,
+      );
       onCreated(result);
       // Reset for the next entry — operators often add several in a row.
       setVendorName("");

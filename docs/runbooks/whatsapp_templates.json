@@ -48,5 +48,27 @@
         "text": "CheckWise · revisión Legal Shelf"
       }
     ]
+  },
+  {
+    "name": "cw_phone_otp",
+    "category": "AUTHENTICATION",
+    "language": "es_MX",
+    "components": [
+      {
+        "type": "BODY",
+        "text": "Tu código de verificación de CheckWise es *{{1}}*. Expira en 10 minutos. Si no lo solicitaste, ignora este mensaje.",
+        "example": {
+          "body_text": [
+            [
+              "428193"
+            ]
+          ]
+        }
+      },
+      {
+        "type": "FOOTER",
+        "text": "CheckWise · verificación"
+      }
+    ]
   }
 ]

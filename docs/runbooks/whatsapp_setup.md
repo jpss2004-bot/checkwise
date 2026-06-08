@@ -23,35 +23,42 @@ and [`apps/api/app/services/transactional_whatsapp.py`](../../apps/api/app/servi
 
 ---
 
-## Step 1 — Submit the two templates for approval
+## Step 1 — Submit the three templates for approval
 
 Meta requires every outbound utility message to use a pre-approved
 template. The canonical submission payload lives at
 [`docs/runbooks/whatsapp_templates.json`](./whatsapp_templates.json).
-The two templates are:
+The three templates are:
 
 | Name | Category | Used by |
 |---|---|---|
-| `cw_renewal_threshold` | UTILITY | Renewal cron at 30 / 14 / 7 / 0 / -7 / -14 / -21 / -28 day thresholds |
-| `cw_reviewer_decision` | UTILITY | Reviewer decision (approved / rejected / needs clarification) |
+| `cw_renewal_threshold` | UTILITY | Renewal cron at 7 / 0 / -7 / -14 / -21 / -28 day thresholds (catalog `whatsapp_eligible=true` rows). |
+| `cw_reviewer_decision` | UTILITY | Reviewer decision (approved / rejected / clarification requested). |
+| `cw_phone_otp` | AUTHENTICATION | `POST /api/v1/me/phone-verification/issue` — the 6-digit OTP code. |
 
-To submit:
+To submit each one:
 
 1. Open **Meta Business Manager** → **WhatsApp Manager** → **Account
    tools** → **Message templates**.
-2. Click **Create template** → **Utility**.
-3. Paste each template's name, language (`es_MX`), body text, and
-   footer from `whatsapp_templates.json`. Meta's UI accepts the JSON
-   shape inline for examples — copy them verbatim so the variable
-   ordering matches what the code sends.
-4. Submit. Approval is usually 24-48 hr. Templates start in
-   `PENDING_REVIEW`; once they flip to `APPROVED` you can flip the
-   `WHATSAPP_ENABLED` env var on the API.
+2. Click **Create template** → pick **Utility** (or **Authentication**
+   for `cw_phone_otp`).
+3. Paste the template's name and language (`es_MX`).
+4. Body: copy the body text verbatim from
+   [`whatsapp_templates.json`](./whatsapp_templates.json), including
+   the `{{1}}`, `{{2}}` … placeholders in order. Meta's UI accepts
+   the JSON example block inline — paste the `example.body_text`
+   array so reviewers see realistic content.
+5. Footer: copy the footer text verbatim.
+6. Submit. Approval is usually 24-48 hr. Templates start in
+   `PENDING_REVIEW`; once they flip to `APPROVED` they're callable.
 
 If Meta rejects a template, edit the body to match their feedback
 (typically: too promotional, too short, missing context). Don't change
 the variable count or order without also updating
-`whatsapp_templates.py` — the parameters are positional.
+[`whatsapp_templates.py`](../../apps/api/app/services/whatsapp_templates.py)
+— the parameters are positional and the dispatch table in
+[`fanout.py`](../../apps/api/app/services/notifications/fanout.py)
+hands them to Meta in that exact order.
 
 ---
 
@@ -81,7 +88,12 @@ Set `WHATSAPP_PHONE_NUMBER_ID=<id>` on the API server's env.
 
 ---
 
-## Step 4 — Flip the kill switch
+## Step 4 — Flip the kill switches
+
+There are two switches and they do different things. Flip them in
+this order:
+
+### 4a. Enable Meta credentials + the OTP path
 
 ```bash
 # In apps/api/.env (or your prod env-var store)
@@ -94,9 +106,36 @@ WHATSAPP_DEFAULT_LANGUAGE_CODE=es_MX
 WHATSAPP_DEFAULT_COUNTRY_CODE=52
 ```
 
-Restart the API. The next renewal cron fire will start sending
-WhatsApp to users whose `contact_preference` is `whatsapp` or `both`,
-provided their `User.phone` is set.
+At this point the **phone-verification OTP** path (`/me/phone-verification/issue`)
+starts working — it calls Meta directly and uses `cw_phone_otp`.
+The **fanout** (renewal cron, reviewer decisions) still sends via
+Twilio SMS, because the native-templates flag below is still off.
+
+### 4b. Reverse the SMS-first cutover
+
+Only do this once `cw_renewal_threshold` AND `cw_reviewer_decision`
+both show `APPROVED` in WhatsApp Manager:
+
+```bash
+WHATSAPP_NATIVE_TEMPLATES_ENABLED=true
+```
+
+Restart the API + both notification crons (renewal + reporting
+dispatch on Render). On the next dispatch loop, renewal and
+reviewer-decision events ship via native Meta templates instead of
+falling through to Twilio SMS. Reporting events (Group B) and
+account-invitation events (`account.invitation_sent`) keep flowing
+through Twilio because they do not yet have approved Meta
+templates; that's intentional and audited via the dispatch row's
+`whatsapp_status="sent" backend="twilio"`.
+
+### Rollback
+
+`WHATSAPP_NATIVE_TEMPLATES_ENABLED=false` reverts the fanout to
+SMS-first behavior within one restart cycle. `WHATSAPP_ENABLED=false`
+on top of that disables Meta entirely (the OTP path will then
+return `skipped_disabled` from `send_whatsapp_template`). No code
+revert is ever required.
 
 ---
 
@@ -117,17 +156,33 @@ in review.
 
 ## Audit + observability
 
-Every send (success, skip, failure) writes one audit row:
+Two audit-log signals to monitor, depending on path:
+
+**Legacy transactional path** (still used by the renewal-dispatch
+direct callers — being phased out by the unified fabric):
 
 - `action = "whatsapp.transactional_sent"`
 - `entity_type = "submission" | "provider_workspace" | "client"`
-- `metadata.status` = `sent | skipped_disabled | skipped_no_recipient
-  | skipped_not_configured | skipped_dry_run | skipped_phone_missing
-  | skipped_preference_excludes_whatsapp | failed`
+- `metadata.status` = `sent | skipped_* | failed`
 - `metadata.template` = template name
 - `metadata.error` = Meta's error body when `status == "failed"`
 
-Filter the audit log by this action to see delivery health.
+**Unified fanout path** (active when `WHATSAPP_NATIVE_TEMPLATES_ENABLED=true`):
+
+- `action = "notification.whatsapp_dispatched"`
+- `entity_type = "user"`, `entity_id` = recipient user id
+- `metadata.event_type` = catalog event_type (e.g. `renewal.threshold.t-0`)
+- `metadata.template_name` = Meta template that was attempted
+- `metadata.status` = `sent | skipped | failed`
+- `metadata.error` = stamping reason or Meta error body
+- `metadata.message_id` = Meta `wamid.*` on success
+- `metadata.phone_last4` = last four digits of recipient phone
+  (PII-safe; full E.164 is never logged in audit metadata)
+
+Twilio SMS sends do NOT write this row — only Meta backend attempts
+do. To monitor Meta health, filter the audit log by
+`action = "notification.whatsapp_dispatched"` and group by
+`metadata.status` + `metadata.template_name`.
 
 ---
 

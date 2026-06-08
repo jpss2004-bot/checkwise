@@ -28,10 +28,12 @@ from __future__ import annotations
 
 import logging
 from dataclasses import dataclass
+from datetime import date
 
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
+from app.core.config import settings
 from app.models import (
     ClientNotification,
     Membership,
@@ -42,6 +44,7 @@ from app.models import (
     User,
     UserNotificationPreference,
 )
+from app.services.audit_log import add_audit_event
 from app.services.email_delivery import (
     send_transactional_email,
     smtp_configured,
@@ -54,6 +57,12 @@ from app.services.notifications.rendering import (
     render,
 )
 from app.services.notifications.routing import ChannelDecision, decide
+from app.services.whatsapp_templates import (
+    DECISION_TEMPLATE,
+    RENEWAL_TEMPLATE,
+    build_renewal_threshold_components,
+    build_reviewer_decision_components,
+)
 
 log = logging.getLogger("checkwise.notifications.fanout")
 
@@ -121,6 +130,7 @@ def fanout_channels(
 
     # ---- Messaging (SMS / WhatsApp) --------------------------------------
     _send_messaging_if_eligible(
+        db=db,
         envelope=envelope,
         user=user,
         decision=routing_decision,
@@ -290,13 +300,13 @@ def _send_email_if_eligible(
 
 def _send_messaging_if_eligible(
     *,
+    db: Session,
     envelope: NotificationEnvelope,
     user: User,
     decision: ChannelDecision,
     rendered: _Rendered | None,
     dispatch_row: NotificationDispatch,
 ) -> None:
-    _ = envelope  # reserved
     if not decision.whatsapp:
         dispatch_row.whatsapp_status = "skipped"
         dispatch_row.whatsapp_reason = decision.whatsapp_skip_reason
@@ -310,30 +320,185 @@ def _send_messaging_if_eligible(
         dispatch_row.whatsapp_reason = "no_template"
         return
 
-    # Building the structured ``components`` array for the WhatsApp
-    # template requires per-event domain knowledge (the existing
-    # builders in :mod:`app.services.whatsapp_templates`). Until
-    # those are registered against the new event_types AND Meta
-    # approves the templates, ``components=None`` short-circuits
-    # the WhatsApp path inside :func:`send_message`, falling through
-    # to Twilio SMS with the rendered plaintext body — exactly the
-    # cutover plan locked with the operator.
+    # Reverse-cutover gate. When the operator has flipped the flag
+    # AND the event has a native builder registered below, we ship a
+    # structured WhatsApp template payload to Meta. When the flag is
+    # off (the default), or the event has no native builder yet
+    # (reporting, account.invitation_sent), components stays None
+    # and :func:`send_message` falls through to the Twilio SMS path
+    # — exactly today's behavior. Meta failures never fall back to
+    # SMS; the dispatch row records ``failed`` and email still fires
+    # for critical events via the parallel email leg.
+    template_name = rendered.meta_template_name
+    components: list[dict] | None = None
+    if settings.WHATSAPP_NATIVE_TEMPLATES_ENABLED:
+        native = _build_native_components(envelope)
+        if native is not None:
+            template_name, components = native
+
     result = send_message(
         to_phone=user.phone_e164,
         body=rendered.body,
-        whatsapp_template_name=rendered.meta_template_name,
-        whatsapp_components=None,
+        whatsapp_template_name=template_name,
+        whatsapp_components=components,
     )
     if result.delivered:
         dispatch_row.whatsapp_status = "sent"
         dispatch_row.whatsapp_reason = None
-        return
-    if result.status.startswith("skipped"):
+    elif result.status.startswith("skipped"):
         dispatch_row.whatsapp_status = "skipped"
         dispatch_row.whatsapp_reason = result.status
     else:
         dispatch_row.whatsapp_status = "failed"
         dispatch_row.whatsapp_reason = result.error or result.status
+
+    # Audit only attempts that actually reached the WhatsApp Cloud
+    # API. Twilio SMS sends are already audited by the messaging
+    # leg's dispatch row; duplicating them here would muddy the
+    # Meta-health signal the operator monitors with this action.
+    if result.backend == "whatsapp":
+        _audit_whatsapp_attempt(
+            db,
+            user=user,
+            envelope=envelope,
+            template_name=template_name,
+            status=dispatch_row.whatsapp_status or "failed",
+            reason=dispatch_row.whatsapp_reason,
+            message_id=result.message_id,
+        )
+
+
+# Renewal threshold catalog → severity label expected by the Meta
+# template body. Catalog "critical" rows are the day-of and overdue
+# crossings (red); "important" is the t-7 yellow nudge.
+_RENEWAL_WA_SEVERITY: dict[str, str] = {
+    "critical": "red",
+    "important": "yellow",
+    "info": "info",  # unreachable: info events are never whatsapp_eligible
+}
+
+# Verification event_type → reviewer-decision label key consumed by
+# :func:`build_reviewer_decision_components`. Mirrors the
+# REVIEWER_ACTION_EVENT_TYPE inverse in
+# :mod:`app.services.notifications.emitters.verification`.
+_VERIFICATION_DECISION_ACTION: dict[str, str] = {
+    "submission.approved": "approved",
+    "submission.rejected": "rejected",
+    "submission.clarification_requested": "needs_clarification",
+}
+
+
+def _build_native_components(
+    envelope: NotificationEnvelope,
+) -> tuple[str, list[dict]] | None:
+    """Return ``(template_name, components)`` when a native builder
+    exists for ``envelope.event_type``, else ``None``.
+
+    Returning ``None`` is the documented "no native template, fall
+    through to Twilio SMS" path. The fanout caller is responsible
+    for invoking this only when the runtime flag is on.
+
+    Builder coverage today (Phase 7 + reverse cutover):
+        * renewal.threshold.t-7 / t-0 / t+7 / t+14 / t+21 / t+28
+          → ``cw_renewal_threshold``
+        * submission.approved / rejected / clarification_requested
+          → ``cw_reviewer_decision``
+
+    Reporting (Group B) and ``account.invitation_sent`` (Group D) do
+    not yet have approved Meta templates; this function returns None
+    for them and the caller falls through to SMS unchanged.
+    """
+    event_type = envelope.event_type
+    payload = envelope.payload
+
+    if event_type.startswith("renewal.threshold."):
+        try:
+            due = date.fromisoformat(str(payload["due_on"]))
+            components = build_renewal_threshold_components(
+                vendor_name=str(payload["vendor_name"]),
+                requirement_name=str(payload["requirement_name"]),
+                due_date=due,
+                days_remaining=int(payload["days_remaining"]),
+                severity=_RENEWAL_WA_SEVERITY.get(
+                    envelope.definition.severity, "yellow"
+                ),  # type: ignore[arg-type]
+            )
+            return (RENEWAL_TEMPLATE, components)
+        except (KeyError, ValueError, TypeError) as exc:
+            log.warning(
+                "[fanout] renewal native build failed event=%s err=%s",
+                event_type,
+                exc,
+            )
+            return None
+
+    if event_type in _VERIFICATION_DECISION_ACTION:
+        try:
+            components = build_reviewer_decision_components(
+                vendor_name=str(payload.get("vendor_name") or ""),
+                requirement_name=str(
+                    payload.get("requirement_name") or "Documento"
+                ),
+                decision_action=_VERIFICATION_DECISION_ACTION[event_type],
+                # reviewer_name absent → builder substitutes
+                # "Legal Shelf"; deliberate fallback per operator
+                # decision (kickoff Phase 2 Q4).
+                reviewer_name=payload.get("reviewer_name") or None,
+            )
+            return (DECISION_TEMPLATE, components)
+        except (KeyError, ValueError, TypeError) as exc:
+            log.warning(
+                "[fanout] decision native build failed event=%s err=%s",
+                event_type,
+                exc,
+            )
+            return None
+
+    return None
+
+
+def _audit_whatsapp_attempt(
+    db: Session,
+    *,
+    user: User,
+    envelope: NotificationEnvelope,
+    template_name: str | None,
+    status: str,
+    reason: str | None,
+    message_id: str | None,
+) -> None:
+    """Write one ``notification.whatsapp_dispatched`` row.
+
+    Never logs the full phone number — only the last four digits, so
+    the audit trail is reviewable without leaking PII. Failures
+    inside this helper degrade silently: the dispatch row stamping
+    already carries the operational truth, the audit row is a
+    secondary signal.
+    """
+    try:
+        phone = user.phone_e164 or ""
+        phone_tail = phone[-4:] if phone else ""
+        add_audit_event(
+            db,
+            action="notification.whatsapp_dispatched",
+            entity_type="user",
+            entity_id=user.id,
+            actor_type="system",
+            metadata={
+                "event_type": envelope.event_type,
+                "template_name": template_name,
+                "status": status,
+                "error": reason,
+                "message_id": message_id,
+                "phone_last4": phone_tail,
+            },
+        )
+    except Exception:  # pragma: no cover — defensive
+        log.exception(
+            "[fanout] whatsapp audit write failed event=%s user=%s",
+            envelope.event_type,
+            user.id,
+        )
 
 
 def _resolve_workspace_id_from_user(
