@@ -16,6 +16,10 @@ import type { PersonaType, PortalSession } from "@/lib/session/portal";
 const API_BASE_URL =
   process.env.NEXT_PUBLIC_API_BASE_URL ?? "http://127.0.0.1:8000";
 
+// Default per-request timeout for JSON calls. A stalled API should
+// surface a clear error rather than spin forever (audit 2026-06-09).
+const REQUEST_TIMEOUT_MS = 30_000;
+
 export type RequirementStatus =
   | "pendiente"
   | "recibido"
@@ -189,11 +193,33 @@ async function fetchJson<T>(
     headers.set("X-Workspace-Token", session.access_token);
   }
   // 3. credentials: "include" so the cookie tags along when the browser allows.
-  const response = await fetch(`${API_BASE_URL}${path}`, {
-    ...init,
-    headers,
-    credentials: "include",
-  });
+  // Fail fast instead of hanging forever if the API stalls (audit
+  // 2026-06-09). A caller-provided signal wins; otherwise we apply a
+  // default timeout so a hung request surfaces a clear error rather than
+  // an infinite spinner.
+  const controller = init.signal ? null : new AbortController();
+  const timeoutId = controller
+    ? setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS)
+    : null;
+  let response: Response;
+  try {
+    response = await fetch(`${API_BASE_URL}${path}`, {
+      ...init,
+      headers,
+      credentials: "include",
+      signal: init.signal ?? controller?.signal,
+    });
+  } catch (err) {
+    if (controller?.signal.aborted) {
+      throw new PortalApiError(
+        0,
+        "La solicitud tardó demasiado. Revisa tu conexión e inténtalo de nuevo.",
+      );
+    }
+    throw err;
+  } finally {
+    if (timeoutId) clearTimeout(timeoutId);
+  }
   if (!response.ok) {
     const detail = await response.text().catch(() => "");
     throw new PortalApiError(response.status, detail || response.statusText);

@@ -13,6 +13,10 @@ import { readAdminSession } from "@/lib/session/admin";
 const API_BASE_URL =
   process.env.NEXT_PUBLIC_API_BASE_URL ?? "http://127.0.0.1:8000";
 
+// Default per-request timeout so a stalled API surfaces a clear error
+// instead of an infinite spinner (audit 2026-06-09).
+const REQUEST_TIMEOUT_MS = 30_000;
+
 export class ClientApiError extends Error {
   status: number;
   constructor(status: number, message: string) {
@@ -32,7 +36,28 @@ async function fetchJson<T>(path: string, init: RequestInit = {}): Promise<T> {
     headers.set("Content-Type", "application/json");
   }
   headers.set("Authorization", `Bearer ${session.access_token}`);
-  const response = await fetch(`${API_BASE_URL}${path}`, { ...init, headers });
+  const controller = init.signal ? null : new AbortController();
+  const timeoutId = controller
+    ? setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS)
+    : null;
+  let response: Response;
+  try {
+    response = await fetch(`${API_BASE_URL}${path}`, {
+      ...init,
+      headers,
+      signal: init.signal ?? controller?.signal,
+    });
+  } catch (err) {
+    if (controller?.signal.aborted) {
+      throw new ClientApiError(
+        0,
+        "La solicitud tardó demasiado. Revisa tu conexión e inténtalo de nuevo.",
+      );
+    }
+    throw err;
+  } finally {
+    if (timeoutId) clearTimeout(timeoutId);
+  }
   if (!response.ok) {
     const detail = await response.text().catch(() => "");
     throw new ClientApiError(response.status, detail || response.statusText);

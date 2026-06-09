@@ -109,7 +109,13 @@ function DashboardInner({ session }: { session: PortalSession }) {
     // non-fatal — the dashboard still renders without the checklist.
     Promise.all([
       getDashboard(session),
-      getOnboarding(session).catch(() => null),
+      getOnboarding(session).catch((err) => {
+        // Non-fatal, but don't swallow it silently — a recurring
+        // failure here means the empty-state checklist degrades with no
+        // signal (audit 2026-06-09).
+        console.warn("[portal/dashboard] onboarding fetch failed:", err);
+        return null;
+      }),
     ])
       .then(([dash, onboarding]) => {
         if (cancelled) return;
