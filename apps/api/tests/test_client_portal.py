@@ -2027,3 +2027,94 @@ def test_portfolio_query_count_is_constant_in_vendor_count(
     )
     # And the flat count is small (prefetch + activity aggregates), not ~N.
     assert count_large <= 6, f"{path}: unexpectedly many submissions scans: {count_large}"
+
+
+# ---------------------------------------------------------------------------
+# Tenant isolation + permission boundaries (audit 2026-06-09)
+#
+# The audit found these clean on inspection but UNTESTED. These lock the
+# boundary so a future refactor can't silently widen it: a client_admin of
+# one org must never read another org's checklist data, and the staff-only
+# reviewer/admin surfaces must reject a client_admin token.
+# ---------------------------------------------------------------------------
+
+
+def _two_clients_with_vendor_under_b(db_factory):
+    """(token_for_A, vendor_id_under_B). The caller is a client_admin of A."""
+    client_a = _seed_client(db_factory, name="Cliente A")
+    client_b = _seed_client(db_factory, name="Cliente B")
+    vendor_b, _ = _seed_vendor_with_workspace(
+        db_factory,
+        client_id=client_b,
+        vendor_name="Proveedor de B",
+        rfc="BBB260512AB1",
+    )
+    return client_a, client_b, vendor_b
+
+
+def test_client_admin_cannot_read_foreign_vendor_detail(api_client, db_factory):
+    client_a, _client_b, vendor_b = _two_clients_with_vendor_under_b(db_factory)
+    _, email, password = _seed_user_with_role(
+        db_factory, role="client_admin", client_id=client_a
+    )
+    token = _login(api_client, email, password)
+
+    resp = api_client.get(f"/api/v1/client/vendors/{vendor_b}", headers=_h(token))
+    # Own-portfolio rule: a vendor outside A's portfolio is a 404, never a
+    # cross-tenant 200 (and never a 403 that would confirm it exists).
+    assert resp.status_code == 404, resp.text
+
+
+def test_client_admin_cannot_download_foreign_vendor_expediente(api_client, db_factory):
+    client_a, _client_b, vendor_b = _two_clients_with_vendor_under_b(db_factory)
+    _, email, password = _seed_user_with_role(
+        db_factory, role="client_admin", client_id=client_a
+    )
+    token = _login(api_client, email, password)
+
+    resp = api_client.get(
+        f"/api/v1/client/vendors/{vendor_b}/expediente.zip", headers=_h(token)
+    )
+    assert resp.status_code == 404, resp.text
+
+
+@pytest.mark.parametrize("path", ["/api/v1/client/overview", "/api/v1/client/submissions"])
+def test_client_admin_cannot_request_foreign_client_scope(api_client, db_factory, path):
+    client_a, client_b, _vendor_b = _two_clients_with_vendor_under_b(db_factory)
+    _, email, password = _seed_user_with_role(
+        db_factory, role="client_admin", client_id=client_a
+    )
+    token = _login(api_client, email, password)
+
+    resp = api_client.get(f"{path}?client_id={client_b}", headers=_h(token))
+    # Requesting a client outside one's memberships is forbidden, not 404.
+    assert resp.status_code == 403, resp.text
+
+
+def test_client_admin_token_rejected_by_reviewer_decision(api_client, db_factory):
+    """A client_admin JWT must not reach the staff-only reviewer surface —
+    the role gate rejects it before any submission lookup."""
+    client_a = _seed_client(db_factory, name="Cliente A")
+    _, email, password = _seed_user_with_role(
+        db_factory, role="client_admin", client_id=client_a
+    )
+    token = _login(api_client, email, password)
+
+    resp = api_client.post(
+        "/api/v1/reviewer/submissions/does-not-exist/decision",
+        headers=_h(token),
+        json={"action": "aprobado", "comment": "x"},
+    )
+    assert resp.status_code == 403, resp.text
+
+
+def test_client_admin_token_rejected_by_admin_requirements(api_client, db_factory):
+    """The admin requirement catalog is internal_admin-only."""
+    client_a = _seed_client(db_factory, name="Cliente A")
+    _, email, password = _seed_user_with_role(
+        db_factory, role="client_admin", client_id=client_a
+    )
+    token = _login(api_client, email, password)
+
+    resp = api_client.get("/api/v1/admin/requirements", headers=_h(token))
+    assert resp.status_code == 403, resp.text
