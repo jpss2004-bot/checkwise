@@ -11,6 +11,7 @@ from sqlalchemy import (
     DateTime,
     Float,
     ForeignKey,
+    Index,
     Integer,
     String,
     Text,
@@ -214,6 +215,27 @@ class RequirementVersion(TimestampMixin, Base):
 class Submission(TimestampMixin, Base):
     __tablename__ = "submissions"
 
+    # Hot-path indexes for the evidence-slot engine and the client
+    # portfolio views. Postgres does NOT auto-index foreign keys, so
+    # without these every slot build (``WHERE client_id=? AND
+    # vendor_id=?``) and every status/period filter full-scans the
+    # whole submissions table. See migration 0034.
+    __table_args__ = (
+        Index("ix_submissions_client_vendor", "client_id", "vendor_id"),
+        Index("ix_submissions_client_status", "client_id", "status"),
+        Index("ix_submissions_period_id", "period_id"),
+        Index("ix_submissions_requirement_id", "requirement_id"),
+    )
+    # NOTE: a unique partial index ``ux_submissions_active_slot`` enforces
+    # "one active-genesis submission per evidence slot" in Postgres — see
+    # migration 0035. It is intentionally NOT declared here: the test
+    # schema (``create_all`` on SQLite) seeds parallel-genesis rows to
+    # exercise the read engine's defensive recency-tiebreak for legacy /
+    # codeless data, which the constraint exempts. The invariant the
+    # constraint protects is upheld by the auto-supersede write path
+    # (``portal._resolve_supersedes_submission``), which IS covered by
+    # endpoint tests.
+
     id: Mapped[str] = mapped_column(String(36), primary_key=True, default=new_id)
     client_id: Mapped[str] = mapped_column(ForeignKey("clients.id"), nullable=False)
     vendor_id: Mapped[str] = mapped_column(ForeignKey("vendors.id"), nullable=False)
@@ -263,6 +285,14 @@ class Submission(TimestampMixin, Base):
 
 class Document(TimestampMixin, Base):
     __tablename__ = "documents"
+
+    # ``submission_id`` is the most common join in the app (documents per
+    # submission); ``status`` backs status-filtered queues. Neither was
+    # indexed before migration 0034.
+    __table_args__ = (
+        Index("ix_documents_submission_id", "submission_id"),
+        Index("ix_documents_status", "status"),
+    )
 
     id: Mapped[str] = mapped_column(String(36), primary_key=True, default=new_id)
     submission_id: Mapped[str] = mapped_column(ForeignKey("submissions.id"), nullable=False)
@@ -364,6 +394,12 @@ class DocumentInspection(TimestampMixin, Base):
 
 class DocumentStatusHistory(Base):
     __tablename__ = "document_status_history"
+
+    # Audit-trail lookups are by document (chronological) or submission.
+    __table_args__ = (
+        Index("ix_doc_status_history_document", "document_id", "created_at"),
+        Index("ix_doc_status_history_submission", "submission_id"),
+    )
 
     id: Mapped[str] = mapped_column(String(36), primary_key=True, default=new_id)
     document_id: Mapped[str] = mapped_column(ForeignKey("documents.id"), nullable=False)
@@ -615,6 +651,14 @@ class Membership(TimestampMixin, Base):
 
 class AuditLog(Base):
     __tablename__ = "audit_log"
+
+    # Entity audit-trail reconstruction filters by (entity_type,
+    # entity_id); actor timelines filter by actor_id. Both full-scanned
+    # the append-only log before migration 0034.
+    __table_args__ = (
+        Index("ix_audit_log_entity", "entity_type", "entity_id"),
+        Index("ix_audit_log_actor", "actor_id"),
+    )
 
     id: Mapped[str] = mapped_column(String(36), primary_key=True, default=new_id)
     actor_id: Mapped[str | None] = mapped_column(String(120))
