@@ -263,6 +263,7 @@ def current_onboarding_submission_for_workspace(
     *,
     workspace: ProviderWorkspace,
     requirement_code: str,
+    prefetched_submissions: list[Submission] | None = None,
 ) -> Submission | None:
     """Return the current onboarding submission for ``requirement_code``.
 
@@ -278,16 +279,27 @@ def current_onboarding_submission_for_workspace(
     Returns the leaf of the supersession chain — the latest
     submission that no other submission supersedes. ``None`` when no
     submission exists for the slot.
+
+    ``prefetched_submissions`` (the batch path) lets a caller supply
+    this workspace's submissions so we filter in memory instead of
+    issuing a query per requirement_code.
     """
-    candidates = list(
-        db.scalars(
-            select(Submission).where(
-                Submission.client_id == workspace.client_id,
-                Submission.vendor_id == workspace.vendor_id,
-                Submission.requirement_code == requirement_code,
+    if prefetched_submissions is not None:
+        candidates = [
+            s
+            for s in prefetched_submissions
+            if s.requirement_code == requirement_code
+        ]
+    else:
+        candidates = list(
+            db.scalars(
+                select(Submission).where(
+                    Submission.client_id == workspace.client_id,
+                    Submission.vendor_id == workspace.vendor_id,
+                    Submission.requirement_code == requirement_code,
+                )
             )
         )
-    )
     return _pick_current_submission(candidates)
 
 
@@ -322,22 +334,27 @@ def _slot_view_from_candidates(
     )
 
 
-def build_workspace_onboarding_slots(
-    db: Session, workspace: ProviderWorkspace
-) -> list[SlotView]:
-    """Project the Expediente Corporativo catalog onto this workspace's submissions.
+def _workspace_submissions(
+    db: Session,
+    workspace: ProviderWorkspace,
+    prefetched: list[Submission] | None,
+) -> list[Submission]:
+    """Every submission for a workspace's ``(client_id, vendor_id)``.
 
-    One :class:`SlotView` per onboarding requirement for the workspace's
-    persona type. Slots with no submission report
-    ``state=SlotState.MISSING``; slots with submissions follow the
-    supersession lineage to pick the current one.
+    When ``prefetched`` is supplied it is used verbatim and **no query
+    runs** — this is the batch path: a caller rendering many vendors
+    (e.g. the client portfolio) fetches all of a client's submissions in
+    one query, buckets them by ``vendor_id``, and hands each builder the
+    matching bucket. That collapses the old ``2 × N`` per-vendor scans
+    (each a full ``submissions`` scan) into a single query. The caller
+    owns the contract that the bucket holds exactly this workspace's
+    rows. With ``prefetched=None`` we fall back to the original
+    per-workspace query, so every existing single-workspace caller is
+    unaffected.
     """
-    # Bugfix (2026-05-21) — defensive normalize. See compliance_catalog.
-    # normalize_persona_type for context.
-    catalog = expediente_for_persona(normalize_persona_type(workspace.persona_type))
-    # Pull every submission for the workspace once, then bucket per slot
-    # in Python. This avoids N+1 lookups for catalogs in the dozens.
-    all_for_workspace = list(
+    if prefetched is not None:
+        return prefetched
+    return list(
         db.scalars(
             select(Submission).where(
                 Submission.client_id == workspace.client_id,
@@ -345,6 +362,31 @@ def build_workspace_onboarding_slots(
             )
         )
     )
+
+
+def build_workspace_onboarding_slots(
+    db: Session,
+    workspace: ProviderWorkspace,
+    *,
+    prefetched_submissions: list[Submission] | None = None,
+) -> list[SlotView]:
+    """Project the Expediente Corporativo catalog onto this workspace's submissions.
+
+    One :class:`SlotView` per onboarding requirement for the workspace's
+    persona type. Slots with no submission report
+    ``state=SlotState.MISSING``; slots with submissions follow the
+    supersession lineage to pick the current one.
+
+    ``prefetched_submissions`` lets a batch caller supply this
+    workspace's submissions instead of querying — see
+    :func:`_workspace_submissions`.
+    """
+    # Bugfix (2026-05-21) — defensive normalize. See compliance_catalog.
+    # normalize_persona_type for context.
+    catalog = expediente_for_persona(normalize_persona_type(workspace.persona_type))
+    # Pull every submission for the workspace once, then bucket per slot
+    # in Python. This avoids N+1 lookups for catalogs in the dozens.
+    all_for_workspace = _workspace_submissions(db, workspace, prefetched_submissions)
     by_code: dict[str, list[Submission]] = {}
     for sub in all_for_workspace:
         if not sub.requirement_code:
@@ -377,7 +419,12 @@ def build_workspace_onboarding_slots(
 
 
 def build_workspace_calendar_slots(
-    db: Session, workspace: ProviderWorkspace, year: int
+    db: Session,
+    workspace: ProviderWorkspace,
+    year: int,
+    *,
+    prefetched_submissions: list[Submission] | None = None,
+    institutions_by_id: dict[str, str] | None = None,
 ) -> list[SlotView]:
     """Project the recurring REPSE calendar onto this workspace's submissions.
 
@@ -405,21 +452,20 @@ def build_workspace_calendar_slots(
     lives behind the explicit branch below.
     """
     if settings.RECURRING_CATALOG_V2:
-        return _build_workspace_calendar_slots_v2(db, workspace, year)
+        return _build_workspace_calendar_slots_v2(
+            db,
+            workspace,
+            year,
+            prefetched_submissions=prefetched_submissions,
+            institutions_by_id=institutions_by_id,
+        )
 
     # Bugfix (2026-05-21) — defensive normalize.
     persona = normalize_persona_type(workspace.persona_type)
     catalog: list[RecurringRequirement] = list(
         recurring_for_year(year, persona)
     )
-    all_for_workspace = list(
-        db.scalars(
-            select(Submission).where(
-                Submission.client_id == workspace.client_id,
-                Submission.vendor_id == workspace.vendor_id,
-            )
-        )
-    )
+    all_for_workspace = _workspace_submissions(db, workspace, prefetched_submissions)
     by_slot: dict[tuple[str, str], list[Submission]] = {}
     for sub in all_for_workspace:
         if not sub.requirement_code or not sub.period_key:
@@ -450,7 +496,12 @@ def build_workspace_calendar_slots(
 
 
 def _build_workspace_calendar_slots_v2(
-    db: Session, workspace: ProviderWorkspace, year: int
+    db: Session,
+    workspace: ProviderWorkspace,
+    year: int,
+    *,
+    prefetched_submissions: list[Submission] | None = None,
+    institutions_by_id: dict[str, str] | None = None,
 ) -> list[SlotView]:
     """Catalog v2 slot resolver — collapsed rows + compatibility join.
 
@@ -469,19 +520,15 @@ def _build_workspace_calendar_slots_v2(
     )
 
     # One-shot id → code map for the institutions referenced by this
-    # workspace's submissions. Keeps the resolver self-contained.
-    institutions_by_id: dict[str, str] = {
-        inst.id: inst.code for inst in db.scalars(select(Institution))
-    }
+    # workspace's submissions. Keeps the resolver self-contained. A batch
+    # caller can hand in a shared map so we don't re-scan ``institutions``
+    # once per vendor.
+    if institutions_by_id is None:
+        institutions_by_id = {
+            inst.id: inst.code for inst in db.scalars(select(Institution))
+        }
 
-    all_for_workspace = list(
-        db.scalars(
-            select(Submission).where(
-                Submission.client_id == workspace.client_id,
-                Submission.vendor_id == workspace.vendor_id,
-            )
-        )
-    )
+    all_for_workspace = _workspace_submissions(db, workspace, prefetched_submissions)
     by_slot: dict[tuple[str, str], list[Submission]] = {}
     for sub in all_for_workspace:
         if not sub.institution_id or not sub.period_key:

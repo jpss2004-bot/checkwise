@@ -799,3 +799,98 @@ def test_workspace_upload_replacement_writes_audit_log(
         assert (created_row.event_metadata or {}).get("supersedes_submission_id") == prior_id
     finally:
         db.close()
+
+
+# ---------------------------------------------------------------------------
+# Audit 2026-06-09 — auto-supersede: one active-genesis submission per slot
+# ---------------------------------------------------------------------------
+
+
+def _genesis_count_for_slot(
+    api_client: TestClient, *, client_id: str, vendor_id: str, requirement_code: str
+) -> int:
+    """How many ``supersedes_submission_id IS NULL`` rows the slot holds."""
+    factory = api_client.app.state.testing_session  # type: ignore[attr-defined]
+    db: Session = factory()
+    try:
+        return len(
+            list(
+                db.scalars(
+                    select(Submission).where(
+                        Submission.client_id == client_id,
+                        Submission.vendor_id == vendor_id,
+                        Submission.requirement_code == requirement_code,
+                        Submission.supersedes_submission_id.is_(None),
+                    )
+                )
+            )
+        )
+    finally:
+        db.close()
+
+
+def test_workspace_first_upload_to_empty_slot_is_genesis(
+    api_client: TestClient,
+) -> None:
+    """The first upload for a slot stands alone (``supersedes`` is NULL)."""
+    ws = _setup_workspace(api_client)
+    first = _upload(api_client, ws["workspace_id"])
+    assert first.status_code == 202, first.text
+    first_id = first.json()["submission_id"]
+
+    factory = api_client.app.state.testing_session  # type: ignore[attr-defined]
+    db: Session = factory()
+    try:
+        sub = db.get(Submission, first_id)
+        assert sub is not None
+        assert sub.supersedes_submission_id is None
+    finally:
+        db.close()
+
+
+def test_workspace_upload_auto_supersedes_current_occupant(
+    api_client: TestClient,
+) -> None:
+    """A new upload to an occupied slot auto-links to the current occupant
+    even when no ``supersedes_submission_id`` is passed and the occupant is
+    already ``aprobado`` — so the slot keeps exactly one genesis row and the
+    fresh evidence returns to review. This is the invariant migration 0035's
+    unique index relies on."""
+    ws = _setup_workspace(api_client)
+    first = _upload(api_client, ws["workspace_id"])
+    assert first.status_code == 202, first.text
+    first_id = first.json()["submission_id"]
+    # Approve it — the explicit-replace path 409s on aprobado, but a plain
+    # re-upload must still succeed by auto-superseding.
+    _set_status(api_client, first_id, "aprobado")
+
+    second = _upload(api_client, ws["workspace_id"], filename="inf-2.pdf")
+    assert second.status_code == 202, second.text
+    second_id = second.json()["submission_id"]
+    assert second_id != first_id
+
+    factory = api_client.app.state.testing_session  # type: ignore[attr-defined]
+    db: Session = factory()
+    try:
+        new_sub = db.get(Submission, second_id)
+        assert new_sub is not None
+        # Auto-linked over the approved occupant; fresh evidence is back in
+        # review rather than spawning a parallel genesis.
+        assert new_sub.supersedes_submission_id == first_id
+        assert new_sub.status == "pendiente_revision"
+        req_code = new_sub.requirement_code
+        client_id = new_sub.client_id
+        vendor_id = new_sub.vendor_id
+    finally:
+        db.close()
+
+    # Exactly one genesis remains for the slot — what the unique index enforces.
+    assert (
+        _genesis_count_for_slot(
+            api_client,
+            client_id=client_id,
+            vendor_id=vendor_id,
+            requirement_code=req_code,
+        )
+        == 1
+    )

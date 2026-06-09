@@ -1955,3 +1955,75 @@ def test_client_consent_version_bump_reprompts(
     rows = _client_consent_audit_rows(db_factory, user_id)
     assert len(rows) == 2
     assert rows[1].event_metadata["previous_version"] == "vA-test"
+
+
+# ---------------------------------------------------------------------------
+# Performance regression — portfolio query count is constant in vendor count
+# ---------------------------------------------------------------------------
+
+
+def _count_submissions_selects(
+    api_client: TestClient, path: str, headers: dict
+) -> int:
+    """Issue a GET and return how many SQL statements scanned ``submissions``.
+
+    Regression guard for the audit's P0-B finding: ``/client/overview`` and
+    ``/client/vendors`` used to call the slot builders once per vendor, so
+    the number of ``FROM submissions`` statements grew ~5N with the vendor
+    count. After batching (one prefetch + bucketing) it must be flat.
+    """
+    from sqlalchemy import event
+    from sqlalchemy.engine import Engine
+
+    seen: list[str] = []
+
+    def _capture(conn, cursor, statement, params, context, executemany):  # noqa: ANN001
+        if "from submissions" in statement.lower():
+            seen.append(statement)
+
+    event.listen(Engine, "before_cursor_execute", _capture)
+    try:
+        resp = api_client.get(path, headers=headers)
+        assert resp.status_code == 200, resp.text
+    finally:
+        event.remove(Engine, "before_cursor_execute", _capture)
+    return len(seen)
+
+
+@pytest.mark.parametrize("path", ["/api/v1/client/vendors", "/api/v1/client/overview"])
+def test_portfolio_query_count_is_constant_in_vendor_count(
+    api_client, db_factory, path
+):
+    client_id = _seed_client(db_factory)
+    _, email, password = _seed_user_with_role(
+        db_factory, role="client_admin", client_id=client_id
+    )
+    token = _login(api_client, email, password)
+    headers = _h(token)
+
+    for i in range(2):
+        _seed_vendor_with_workspace(
+            db_factory,
+            client_id=client_id,
+            vendor_name=f"Proveedor {i}",
+            rfc=f"QCV2605{i:02d}AB1",
+        )
+    count_small = _count_submissions_selects(api_client, path, headers)
+
+    # Quadruple the portfolio. A per-vendor query pattern would scale the
+    # submissions-scan count with it; the batched path must not move.
+    for i in range(2, 8):
+        _seed_vendor_with_workspace(
+            db_factory,
+            client_id=client_id,
+            vendor_name=f"Proveedor {i}",
+            rfc=f"QCV2605{i:02d}AB1",
+        )
+    count_large = _count_submissions_selects(api_client, path, headers)
+
+    assert count_small == count_large, (
+        f"{path}: submissions-scan count grew with vendor count "
+        f"({count_small} → {count_large}); per-vendor N+1 regressed"
+    )
+    # And the flat count is small (prefetch + activity aggregates), not ~N.
+    assert count_large <= 6, f"{path}: unexpectedly many submissions scans: {count_large}"

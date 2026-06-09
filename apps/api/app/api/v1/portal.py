@@ -118,6 +118,8 @@ from app.services.evidence_slots import (
     SlotView,
     build_workspace_calendar_slots,
     build_workspace_onboarding_slots,
+    current_onboarding_submission_for_workspace,
+    current_submission_for_slot,
 )
 from app.services.portal_session import (
     PortalSessionError,
@@ -1929,16 +1931,28 @@ def get_workspace_submission(
             .order_by(Submission.created_at.desc())
             .limit(10)
         )
-        for prev in db.scalars(previous_query):
-            prev_doc = db.scalar(
-                select(Document).where(Document.submission_id == prev.id).limit(1)
-            )
+        prev_subs = list(db.scalars(previous_query))
+        # One batched lookup for the first document of each prior attempt,
+        # instead of a query per attempt (audit 2026-06-09, P1-A N+1).
+        prev_filename_by_sub: dict[str, str] = {}
+        if prev_subs:
+            for doc in db.scalars(
+                select(Document).where(
+                    Document.submission_id.in_([p.id for p in prev_subs])
+                )
+            ):
+                # First document seen per submission wins, mirroring the
+                # prior per-row ``.limit(1)``.
+                prev_filename_by_sub.setdefault(
+                    doc.submission_id, doc.original_filename
+                )
+        for prev in prev_subs:
             previous_attempts.append(
                 SubmissionPreviousAttempt(
                     submission_id=prev.id,
                     status=prev.status,
                     submitted_at=prev.created_at.isoformat(),
-                    filename=prev_doc.original_filename if prev_doc else None,
+                    filename=prev_filename_by_sub.get(prev.id),
                 )
             )
 
@@ -2362,6 +2376,43 @@ _REPLACEMENT_ELIGIBLE_STATUSES: frozenset[str] = frozenset(
 )
 
 
+def _auto_supersede_target(
+    db: Session,
+    *,
+    workspace: ProviderWorkspace,
+    new_requirement_code: str | None,
+    new_period_key: str | None,
+) -> Submission | None:
+    """Current occupant of the slot this upload targets, or ``None``.
+
+    Mirrors the read engine's slot identity so the auto-link lands on the
+    exact submission the dashboards consider "current":
+
+    * recurring slot — ``(requirement_code, period_key)``;
+    * onboarding slot — ``requirement_code`` only (no period).
+
+    Codeless legacy uploads (no ``requirement_code``) can't be slotted, so
+    they return ``None`` and stand alone — consistent with the
+    ``requirement_code IS NOT NULL`` predicate on the slot-uniqueness
+    index.
+    """
+    if not new_requirement_code:
+        return None
+    if new_period_key:
+        return current_submission_for_slot(
+            db,
+            client_id=workspace.client_id,
+            vendor_id=workspace.vendor_id,
+            requirement_code=new_requirement_code,
+            period_key=new_period_key,
+        )
+    return current_onboarding_submission_for_workspace(
+        db,
+        workspace=workspace,
+        requirement_code=new_requirement_code,
+    )
+
+
 def _resolve_supersedes_submission(
     db: Session,
     *,
@@ -2386,11 +2437,26 @@ def _resolve_supersedes_submission(
       blocking the upload — they are tracked through their existing
       requirement/period FKs.
 
-    No auto-linking: when ``prior_id`` is empty / None this function
-    returns None and the new submission stands alone.
+    Auto-linking (2026-06-09): when ``prior_id`` is empty / None and the
+    target slot is already occupied, the new upload automatically
+    supersedes the current occupant (the supersession-chain leaf),
+    *regardless of that occupant's status*. This makes "exactly one
+    genesis (``supersedes_submission_id IS NULL``) submission per slot"
+    an invariant — which the ``ux_submissions_active_slot`` unique index
+    enforces — and means re-uploading evidence for an already-approved or
+    in-review slot replaces it (the prior row is kept as linked history
+    and the slot returns to review) instead of silently spawning a
+    parallel submission the read engine had to disambiguate by recency.
+    Only canonical (``requirement_code``-bearing) uploads auto-link;
+    codeless legacy uploads can't be slotted and stand alone.
     """
     if not prior_id:
-        return None
+        return _auto_supersede_target(
+            db,
+            workspace=workspace,
+            new_requirement_code=new_requirement_code,
+            new_period_key=new_period_key,
+        )
 
     prior = db.get(Submission, prior_id)
     if prior is None:

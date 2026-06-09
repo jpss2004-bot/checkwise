@@ -236,6 +236,7 @@ def _next_renewal_for_workspace(
     workspace: ProviderWorkspace,
     *,
     today: date,
+    prefetched_submissions: list[Submission] | None = None,
 ) -> ClientVendorNextRenewal | None:
     """Phase 6D — most urgent renewal-bearing slot for the vendor row.
 
@@ -253,7 +254,10 @@ def _next_renewal_for_workspace(
         if req.renewal_frequency_days is None:
             continue
         sub = current_onboarding_submission_for_workspace(
-            db, workspace=workspace, requirement_code=req.code
+            db,
+            workspace=workspace,
+            requirement_code=req.code,
+            prefetched_submissions=prefetched_submissions,
         )
         anchor = renewal_anchor_date(sub)
         due = next_renewal_due_date(
@@ -282,15 +286,31 @@ def _vendor_compliance(
     *,
     today: date,
     year: int,
+    prefetched_submissions: list[Submission] | None = None,
+    institutions_by_id: dict[str, str] | None = None,
 ) -> dict:
     """Compute compliance summary for one workspace.
 
     Returns the dict the ``/client/vendors`` list endpoint emits per
     row. Built from the canonical slot service so red/yellow/green
     semantics match the provider dashboard exactly.
+
+    ``prefetched_submissions`` / ``institutions_by_id`` let a portfolio
+    caller (``/overview``, ``/vendors``) supply this vendor's submissions
+    and a shared institution map so the slot builders don't run a fresh
+    full-table scan per vendor. ``None`` keeps the single-vendor path
+    (``/vendors/{id}``) querying as before.
     """
-    onboarding_slots = build_workspace_onboarding_slots(db, workspace)
-    calendar_slots = build_workspace_calendar_slots(db, workspace, year)
+    onboarding_slots = build_workspace_onboarding_slots(
+        db, workspace, prefetched_submissions=prefetched_submissions
+    )
+    calendar_slots = build_workspace_calendar_slots(
+        db,
+        workspace,
+        year,
+        prefetched_submissions=prefetched_submissions,
+        institutions_by_id=institutions_by_id,
+    )
     counts = _empty_document_counts()
     for view in onboarding_slots + calendar_slots:
         _bucket_document_state(counts, view.state)
@@ -363,6 +383,39 @@ def _last_activity_timestamps_bulk(
     ):
         last_review[vid] = ts
     return last_sub, last_review
+
+
+def _portfolio_slot_inputs(
+    db: Session, client_id: str
+) -> tuple[dict[str, list[Submission]], dict[str, str] | None]:
+    """Pre-fetch everything the slot builders need for a whole client.
+
+    Returns ``(submissions_by_vendor, institutions_by_id)``:
+
+    * ``submissions_by_vendor`` — every submission for the client in one
+      query, bucketed by ``vendor_id``. Feeding each vendor its bucket to
+      :func:`_vendor_compliance` turns the old ``2 × N`` per-vendor full
+      ``submissions`` scans (the ``/overview`` and ``/vendors`` hot path)
+      into a single query, so query count is constant in the vendor
+      count.
+    * ``institutions_by_id`` — id→code map the recurring-**v2** resolver
+      needs; ``None`` under the v1 catalog so we don't query for nothing.
+
+    Both are behaviour-preserving: the slot builders produce identical
+    ``SlotView`` output whether fed prefetched rows or querying
+    themselves (see :func:`app.services.evidence_slots._workspace_submissions`).
+    """
+    submissions_by_vendor: dict[str, list[Submission]] = {}
+    for sub in db.scalars(
+        select(Submission).where(Submission.client_id == client_id)
+    ):
+        submissions_by_vendor.setdefault(sub.vendor_id, []).append(sub)
+    institutions_by_id: dict[str, str] | None = None
+    if settings.RECURRING_CATALOG_V2:
+        institutions_by_id = {
+            inst.id: inst.code for inst in db.scalars(select(Institution))
+        }
+    return submissions_by_vendor, institutions_by_id
 
 
 # ---------------------------------------------------------------------------
@@ -974,6 +1027,7 @@ def client_overview(
     selected_year = year or today.year
 
     workspaces = _scoped_workspaces(db, target_id)
+    subs_by_vendor, institutions_by_id = _portfolio_slot_inputs(db, target_id)
     vendors_total = int(
         db.scalar(select(func.count(Vendor.id)).where(Vendor.client_id == target_id))
         or 0
@@ -988,7 +1042,14 @@ def client_overview(
     weighted_pct_sum = 0
     weighted_count = 0
     for ws in workspaces:
-        summary = _vendor_compliance(db, ws, today=today, year=selected_year)
+        summary = _vendor_compliance(
+            db,
+            ws,
+            today=today,
+            year=selected_year,
+            prefetched_submissions=subs_by_vendor.get(ws.vendor_id, []),
+            institutions_by_id=institutions_by_id,
+        )
         level = summary["semaphore_level"]
         if level == "green":
             green += 1
@@ -1060,6 +1121,7 @@ def client_vendors(
     vendor_ids = [w.vendor_id for w in workspaces]
     vendors = _vendors_by_id(db, vendor_ids)
     last_sub_map, last_review_map = _last_activity_timestamps_bulk(db, vendor_ids)
+    subs_by_vendor, institutions_by_id = _portfolio_slot_inputs(db, target_id)
 
     needle = (search or "").strip().lower()
     rows: list[ClientVendorRow] = []
@@ -1076,7 +1138,14 @@ def client_vendors(
             )
             if needle not in haystack:
                 continue
-        summary = _vendor_compliance(db, ws, today=today, year=selected_year)
+        summary = _vendor_compliance(
+            db,
+            ws,
+            today=today,
+            year=selected_year,
+            prefetched_submissions=subs_by_vendor.get(ws.vendor_id, []),
+            institutions_by_id=institutions_by_id,
+        )
         if semaphore_level and summary["semaphore_level"] != semaphore_level:
             continue
         last_sub = last_sub_map.get(vendor.id)
@@ -1097,7 +1166,12 @@ def client_vendors(
                 due_soon_count=summary["due_soon_count"],
                 last_submission_at=last_sub,
                 last_review_at=last_review,
-                next_renewal=_next_renewal_for_workspace(db, ws, today=today),
+                next_renewal=_next_renewal_for_workspace(
+                    db,
+                    ws,
+                    today=today,
+                    prefetched_submissions=subs_by_vendor.get(ws.vendor_id, []),
+                ),
             )
         )
         if len(rows) >= limit:
@@ -1158,19 +1232,30 @@ def _recent_submissions_for_workspace(
             select(Submission)
             .where(Submission.vendor_id == workspace.vendor_id)
             .order_by(Submission.created_at.desc())
+            .options(selectinload(Submission.requirement))
             .limit(limit)
         )
     )
+    sub_ids = [s.id for s in rows]
+    # Batch the per-row document + reverse-lineage lookups into two IN
+    # queries instead of 2 per row, and eager-load ``requirement`` above
+    # so ``sub.requirement.name`` isn't a third lazy hit per row (audit
+    # 2026-06-09, P1-A N+1).
+    filename_by_sub: dict[str, str] = {}
+    replacement_by_sub: dict[str, str] = {}
+    if sub_ids:
+        for doc in db.scalars(
+            select(Document).where(Document.submission_id.in_(sub_ids))
+        ):
+            filename_by_sub.setdefault(doc.submission_id, doc.original_filename)
+        for superseded_id, repl_id in db.execute(
+            select(Submission.supersedes_submission_id, Submission.id).where(
+                Submission.supersedes_submission_id.in_(sub_ids)
+            )
+        ):
+            replacement_by_sub.setdefault(superseded_id, repl_id)
     out: list[dict] = []
     for sub in rows:
-        doc = db.scalar(
-            select(Document).where(Document.submission_id == sub.id).limit(1)
-        )
-        replacement_id = db.scalar(
-            select(Submission.id).where(
-                Submission.supersedes_submission_id == sub.id
-            )
-        )
         out.append(
             {
                 "submission_id": sub.id,
@@ -1178,10 +1263,10 @@ def _recent_submissions_for_workspace(
                 "requirement_name": sub.requirement.name if sub.requirement else None,
                 "period_key": sub.period_key,
                 "status": sub.status,
-                "filename": doc.original_filename if doc else None,
+                "filename": filename_by_sub.get(sub.id),
                 "submitted_at": sub.created_at.isoformat(),
                 "supersedes_submission_id": sub.supersedes_submission_id,
-                "superseded_by_submission_id": replacement_id,
+                "superseded_by_submission_id": replacement_by_sub.get(sub.id),
             }
         )
     return out
@@ -1219,13 +1304,22 @@ def _contracts_for_workspace(
                 Submission.requirement_code.in_(_CONTRACT_REQUIREMENT_CODES),
             )
             .order_by(Submission.created_at.desc())
+            .options(selectinload(Submission.requirement))
         )
     )
+    # Batch the per-row document lookup into one IN query, and eager-load
+    # ``requirement`` so the name access isn't lazy per row (audit
+    # 2026-06-09, P1-A N+1).
+    doc_by_sub: dict[str, Document] = {}
+    sub_ids = [s.id for s in rows]
+    if sub_ids:
+        for d in db.scalars(
+            select(Document).where(Document.submission_id.in_(sub_ids))
+        ):
+            doc_by_sub.setdefault(d.submission_id, d)
     out: list[ClientVendorContractDoc] = []
     for sub in rows:
-        doc = db.scalar(
-            select(Document).where(Document.submission_id == sub.id).limit(1)
-        )
+        doc = doc_by_sub.get(sub.id)
         if doc is None:
             # Submission row exists without a document blob — typically
             # a slot reservation that never received an upload. Skip;

@@ -415,16 +415,26 @@ def get_submission(
             .order_by(Submission.created_at.desc())
             .limit(10)
         )
-        for prev in db.scalars(previous_query):
-            prev_doc = db.scalar(
-                select(Document).where(Document.submission_id == prev.id).limit(1)
-            )
+        prev_subs = list(db.scalars(previous_query))
+        # One batched lookup for the first document of each prior attempt,
+        # instead of a query per attempt (audit 2026-06-09, P1-A N+1).
+        prev_filename_by_sub: dict[str, str] = {}
+        if prev_subs:
+            for doc in db.scalars(
+                select(Document).where(
+                    Document.submission_id.in_([p.id for p in prev_subs])
+                )
+            ):
+                prev_filename_by_sub.setdefault(
+                    doc.submission_id, doc.original_filename
+                )
+        for prev in prev_subs:
             previous_attempts.append(
                 SubmissionPreviousAttempt(
                     submission_id=prev.id,
                     status=prev.status,
                     submitted_at=prev.created_at.isoformat(),
-                    filename=prev_doc.original_filename if prev_doc else None,
+                    filename=prev_filename_by_sub.get(prev.id),
                 )
             )
 
