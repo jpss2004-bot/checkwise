@@ -626,11 +626,13 @@ def test_workspace_upload_replacement_404_on_foreign_prior(
     assert response.status_code == 404
 
 
-def test_workspace_upload_replacement_409_on_terminal_aprobado_prior(
+def test_workspace_upload_explicit_replace_over_approved_now_supersedes(
     api_client: TestClient,
 ) -> None:
-    """A submission already in ``aprobado`` cannot be replaced — provider
-    must escalate to the reviewer, not silently overwrite."""
+    """Reconciled 2026-06-09 (audit Tier 1): an explicit replace of an
+    APPROVED prior now succeeds and supersedes it — matching plain
+    re-upload's auto-supersede — instead of the old 409. The slot returns
+    to review for a reviewer to re-decide."""
     ws = _setup_workspace(api_client)
     first = _upload(api_client, ws["workspace_id"])
     assert first.status_code == 202
@@ -638,10 +640,51 @@ def test_workspace_upload_replacement_409_on_terminal_aprobado_prior(
     _set_status(api_client, prior_id, "aprobado")
 
     response = _upload(
-        api_client, ws["workspace_id"], supersedes_submission_id=prior_id
+        api_client,
+        ws["workspace_id"],
+        supersedes_submission_id=prior_id,
+        filename="replace-approved.pdf",
     )
-    assert response.status_code == 409
-    assert "no puede reemplazarse" in response.json()["detail"]
+    assert response.status_code == 202, response.text
+    new_id = response.json()["submission_id"]
+
+    factory = api_client.app.state.testing_session  # type: ignore[attr-defined]
+    db: Session = factory()
+    try:
+        new_sub = db.get(Submission, new_id)
+        assert new_sub is not None
+        assert new_sub.supersedes_submission_id == prior_id
+        assert new_sub.status == "pendiente_revision"
+    finally:
+        db.close()
+
+
+def test_workspace_slot_state_reports_current_occupant(
+    api_client: TestClient,
+) -> None:
+    """The slot-state endpoint (the wizard's replace-warning source)
+    returns nulls on an empty slot and the current submission once one is
+    filed."""
+    ws = _setup_workspace(api_client)
+    payload, _item = _canonical_intake_payload()
+    qs = {
+        "requirement_code": payload["requirement_code"],
+        "period_key": payload["period_key"],
+    }
+    url = f"/api/v1/portal/workspaces/{ws['workspace_id']}/slot-state"
+
+    empty = api_client.get(url, params=qs)
+    assert empty.status_code == 200, empty.text
+    assert empty.json()["current_status"] is None
+    assert empty.json()["current_submission_id"] is None
+
+    sub_id = _upload(api_client, ws["workspace_id"]).json()["submission_id"]
+    _set_status(api_client, sub_id, "aprobado")
+
+    occupied = api_client.get(url, params=qs)
+    assert occupied.status_code == 200, occupied.text
+    assert occupied.json()["current_status"] == "aprobado"
+    assert occupied.json()["current_submission_id"] == sub_id
 
 
 def test_workspace_upload_replacement_409_on_mismatched_requirement_code(

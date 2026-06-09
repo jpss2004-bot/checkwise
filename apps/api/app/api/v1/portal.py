@@ -2361,21 +2361,6 @@ _VALID_LOAD_TYPES = frozenset(item["code"] for item in LOAD_TYPES)
 _VALID_INSTITUTION_CODES = frozenset(item["code"] for item in INSTITUTIONS)
 
 
-# Statuses a prior submission must be in for a provider to replace it.
-# Anything else is either still in flight (``recibido`` / ``pendiente_revision``
-# / ``prevalidado``), already approved (``aprobado``), or otherwise
-# closed (``excepcion_legal`` / ``no_aplica``). The provider does not get
-# to bypass those by uploading a "replacement."
-_REPLACEMENT_ELIGIBLE_STATUSES: frozenset[str] = frozenset(
-    {
-        DocumentStatus.RECHAZADO.value,
-        DocumentStatus.REQUIERE_ACLARACION.value,
-        DocumentStatus.POSIBLE_MISMATCH.value,
-        DocumentStatus.VENCIDO.value,
-    }
-)
-
-
 def _auto_supersede_target(
     db: Session,
     *,
@@ -2471,14 +2456,15 @@ def _resolve_supersedes_submission(
             detail="Submission previa no encontrada para este workspace.",
         )
 
-    if prior.status not in _REPLACEMENT_ELIGIBLE_STATUSES:
-        raise HTTPException(
-            status_code=status.HTTP_409_CONFLICT,
-            detail=(
-                f"La submission previa no puede reemplazarse desde el estado "
-                f"'{prior.status}'."
-            ),
-        )
+    # No status-eligibility gate (reconciled 2026-06-09). A plain
+    # re-upload already auto-supersedes the slot's current occupant in
+    # ANY status (the slot-uniqueness constraint requires it), so an
+    # explicit replace must allow the same — otherwise the two paths
+    # diverge (explicit replace would 409 on an approved/in-review prior
+    # that a plain upload silently supersedes). Re-uploading a settled
+    # slot returns it to review for a reviewer to re-decide (including
+    # re-asserting a legal exception); it never lets the provider
+    # unilaterally clear an obligation.
 
     # Canonical slot check. When both sides carry both keys, they MUST
     # match — otherwise the provider would be using a rejection from one
@@ -2511,6 +2497,54 @@ def _resolve_supersedes_submission(
         )
 
     return prior
+
+
+class SlotStateResponse(BaseModel):
+    """Current occupant of an obligation slot (for the upload wizard's
+    replace guard). All nulls when the slot is empty."""
+
+    requirement_code: str
+    period_key: str | None = None
+    current_status: str | None = None
+    current_submission_id: str | None = None
+
+
+@router.get(
+    "/workspaces/{workspace_id}/slot-state",
+    response_model=SlotStateResponse,
+    tags=["submissions"],
+    summary="Current occupant of an obligation slot",
+)
+def get_workspace_slot_state(
+    workspace_id: str,
+    db: DbSession,
+    workspace: Annotated[ProviderWorkspace, Depends(current_portal_workspace)],
+    requirement_code: Annotated[str, Query(min_length=1)],
+    period_key: Annotated[str | None, Query()] = None,
+) -> SlotStateResponse:
+    """Submission currently occupying this provider's slot, or nulls.
+
+    Drives the upload wizard's replace warning: when the slot already
+    holds a settled (approved / exception / not-applicable) document, the
+    wizard confirms before a re-upload supersedes it. Resolution mirrors
+    the auto-supersede target exactly — recurring slots key on
+    ``requirement_code`` + ``period_key``; onboarding slots on
+    ``requirement_code`` alone — so the warning matches what the upload
+    would actually replace. Tenant-scoped via ``current_portal_workspace``;
+    read-only.
+    """
+    current = _auto_supersede_target(
+        db,
+        workspace=workspace,
+        new_requirement_code=requirement_code,
+        new_period_key=(period_key or "").strip() or None,
+    )
+    return SlotStateResponse(
+        requirement_code=requirement_code,
+        period_key=period_key,
+        current_status=current.status if current is not None else None,
+        current_submission_id=current.id if current is not None else None,
+    )
 
 
 @router.post(

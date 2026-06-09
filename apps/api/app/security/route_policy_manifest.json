@@ -1054,6 +1054,21 @@
     },
     {
       "method": "GET",
+      "path": "/api/v1/portal/workspaces/{workspace_id}/slot-state",
+      "function": "get_workspace_slot_state",
+      "router": "app.api.v1.portal",
+      "file": "api/app/api/v1/portal.py",
+      "lineno": 2518,
+      "gate": "provider_workspace",
+      "tenant_rule": "current_portal_workspace dependency validates session-vs-path workspace_id",
+      "audit_rule": "not_logged (read-only)",
+      "rate_limit_rule": "none (auth-gated)",
+      "error_lang": "es",
+      "must_change_password_allowed": false,
+      "notes": "Audit Tier 1 — current slot occupant for the upload replace-warning."
+    },
+    {
+      "method": "GET",
       "path": "/api/v1/portal/workspaces/{workspace_id}/expediente.zip",
       "function": "get_workspace_expediente_zip",
       "router": "app.api.v1.portal",
