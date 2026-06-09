@@ -129,6 +129,9 @@ export default function ClientAuditoriaPage() {
   const [treeLoading, setTreeLoading] = useState(false);
   const [treeError, setTreeError] = useState<string | null>(null);
   const [selectedIds, setSelectedIds] = useState<Set<string> | null>(null);
+  // Ephemeral notice shown when a filter change discards a manual
+  // selection, so the reset doesn't read as silent data loss (audit F7).
+  const [selectionCleared, setSelectionCleared] = useState(false);
   const [downloading, setDownloading] = useState(false);
   const [downloadError, setDownloadError] = useState<string | null>(null);
 
@@ -190,7 +193,12 @@ export default function ClientAuditoriaPage() {
       .then((data) => {
         if (cancelled) return;
         setTree(data);
-        setSelectedIds(null);
+        setSelectedIds((prev) => {
+          // Only notify when the user had actually narrowed the set; a
+          // reset from the default "all" is invisible and needs no notice.
+          if (prev !== null) setSelectionCleared(true);
+          return null;
+        });
       })
       .catch((err: unknown) => {
         if (cancelled) return;
@@ -208,6 +216,13 @@ export default function ClientAuditoriaPage() {
       cancelled = true;
     };
   }, [periodFrom, periodTo, institutions, vendorIds, statuses, urlClientId]);
+
+  // Auto-dismiss the "selection reset" notice after a few seconds.
+  useEffect(() => {
+    if (!selectionCleared) return;
+    const t = window.setTimeout(() => setSelectionCleared(false), 6000);
+    return () => window.clearTimeout(t);
+  }, [selectionCleared]);
 
   // Filter-only fallback URL (GET) used when the user has NOT tweaked
   // the per-document selection. The tree picker submits via POST so
@@ -576,6 +591,24 @@ export default function ClientAuditoriaPage() {
             ) : null
           }
         >
+          {selectionCleared ? (
+            <div
+              role="status"
+              className="mb-3 flex items-center justify-between gap-3 rounded-md border border-[color:var(--text-brand)] px-3 py-2 text-xs text-[color:var(--text-secondary)]"
+            >
+              <span>
+                Cambiaste los filtros, así que reiniciamos tu selección a
+                «todos los documentos del resultado».
+              </span>
+              <button
+                type="button"
+                className="shrink-0 font-medium text-[color:var(--text-brand)] underline"
+                onClick={() => setSelectionCleared(false)}
+              >
+                Entendido
+              </button>
+            </div>
+          ) : null}
           {treeLoading ? (
             <p className="text-sm text-[color:var(--text-tertiary)]">
               Cargando documentos…
