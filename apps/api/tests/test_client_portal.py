@@ -2118,3 +2118,51 @@ def test_client_admin_token_rejected_by_admin_requirements(api_client, db_factor
 
     resp = api_client.get("/api/v1/admin/requirements", headers=_h(token))
     assert resp.status_code == 403, resp.text
+
+
+# ---------------------------------------------------------------------------
+# Large-dataset correctness — the batched portfolio path stays correct and
+# flat-query at volume, not just on the 2-vendor fixtures (audit 2026-06-09).
+# ---------------------------------------------------------------------------
+
+
+def test_portfolio_correct_and_flat_at_volume(api_client, db_factory):
+    client_id = _seed_client(db_factory, name="Cliente Volumen")
+    _, email, password = _seed_user_with_role(
+        db_factory, role="client_admin", client_id=client_id
+    )
+    token = _login(api_client, email, password)
+
+    ws_ids: list[str] = []
+    for i in range(25):
+        _vendor_id, ws_id = _seed_vendor_with_workspace(
+            db_factory,
+            client_id=client_id,
+            vendor_name=f"Proveedor {i:02d}",
+            rfc=f"VOL2605{i:02d}AB1",
+        )
+        ws_ids.append(ws_id)
+
+    # One vendor actually has an approved submission; the other 24 are bare.
+    _seed_submission_for_workspace(
+        api_client, db_factory, ws_ids[0], status_value="aprobado"
+    )
+
+    # All 25 vendors come back, and the submissions-scan count is still flat
+    # (a per-vendor query pattern would be ~5×25 here).
+    scans = _count_submissions_selects(api_client, "/api/v1/client/vendors", _h(token))
+    assert scans <= 6, f"submissions scans grew at volume: {scans}"
+    rows = api_client.get("/api/v1/client/vendors", headers=_h(token)).json()["items"]
+    assert len(rows) == 25
+
+    # Correctness: only the seeded vendor has activity; counts are coherent.
+    with_activity = [r for r in rows if r["last_submission_at"] is not None]
+    assert len(with_activity) == 1
+    assert all(0 <= r["compliance_pct"] <= 100 for r in rows)
+    assert all(
+        r["semaphore_level"] in {"green", "yellow", "red"} for r in rows
+    )
+
+    overview = api_client.get("/api/v1/client/overview", headers=_h(token)).json()
+    assert overview["vendors_total"] == 25
+    assert overview["green_count"] + overview["yellow_count"] + overview["red_count"] == 25
