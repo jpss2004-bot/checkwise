@@ -46,7 +46,7 @@ import {
   type ClientSubmissionItem,
 } from "@/lib/api/client";
 import { useUrlClientId } from "@/lib/workspace/use-url-client-id";
-import { statusLabel } from "@/lib/constants/statuses";
+import { statusLabel, statusVariant } from "@/lib/constants/statuses";
 
 /**
  * Client dashboard — redesigned.
@@ -576,25 +576,12 @@ function RecentSubmissionsCard({ rows }: { rows: ClientSubmissionItem[] }) {
   );
 }
 
-// Labels pulled from the central statuses dictionary so a vocabulary
-// change anywhere propagates here without a hunt. Variant mapping stays
-// local because it's an aesthetic concern (color tone), not vocabulary.
+// Both the label and the color tone are pulled from the central statuses
+// dictionary so a vocabulary or color change anywhere propagates here
+// without a hunt (Audit F2).
 function StatusPill({ status }: { status: string }) {
-  const variantByStatus: Record<string, "success" | "warning" | "info" | "destructive" | "secondary"> = {
-    aprobado: "success",
-    excepcion_legal: "success",
-    rechazado: "destructive",
-    requiere_aclaracion: "warning",
-    pendiente_revision: "info",
-    recibido: "info",
-    prevalidado: "info",
-    posible_mismatch: "warning",
-    vencido: "destructive",
-    no_aplica: "secondary",
-    pendiente: "secondary",
-  };
   return (
-    <Badge variant={variantByStatus[status] ?? "secondary"}>
+    <Badge variant={statusVariant(status)}>
       {statusLabel(status)}
     </Badge>
   );

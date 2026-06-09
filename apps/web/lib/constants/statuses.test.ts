@@ -4,9 +4,19 @@ import {
   DocumentStatus,
   statusExplainer,
   statusLabel,
+  statusVariant,
   STATUS_EXPLAINER_ES,
   STATUS_LABELS_ES,
+  STATUS_VARIANT,
 } from "./statuses";
+
+const VALID_VARIANTS = [
+  "success",
+  "warning",
+  "info",
+  "destructive",
+  "secondary",
+] as const;
 
 describe("statusLabel", () => {
   it("returns the Spanish label for every known status", () => {
@@ -60,5 +70,34 @@ describe("statusExplainer", () => {
   it("frames rechazado as actionable (must mention what to do next)", () => {
     const text = statusExplainer(DocumentStatus.RECHAZADO);
     expect(text).toMatch(/sub(e|ir)|nuev[ao]|corre(gir|cci)/i);
+  });
+});
+
+describe("statusVariant", () => {
+  it("maps every known status to a valid Badge variant (Audit F2)", () => {
+    for (const code of Object.values(DocumentStatus)) {
+      const variant = STATUS_VARIANT[code];
+      expect(variant).toBeDefined();
+      expect(VALID_VARIANTS).toContain(variant);
+      expect(statusVariant(code)).toBe(variant);
+    }
+  });
+
+  it("has no extra entries beyond the canonical status set", () => {
+    expect(Object.keys(STATUS_VARIANT).sort()).toEqual(
+      Object.values(DocumentStatus).sort(),
+    );
+  });
+
+  it("treats resolved positives as success and no_aplica as neutral", () => {
+    // Reconciled toward the dashboard's mapping (the call sites converged
+    // here): excepcion_legal is a positive outcome, no_aplica is neutral.
+    expect(statusVariant(DocumentStatus.APROBADO)).toBe("success");
+    expect(statusVariant(DocumentStatus.EXCEPCION_LEGAL)).toBe("success");
+    expect(statusVariant(DocumentStatus.NO_APLICA)).toBe("secondary");
+  });
+
+  it("falls back to secondary for an unknown status (matches the old per-page default)", () => {
+    expect(statusVariant("future_status_not_yet_mirrored")).toBe("secondary");
   });
 });

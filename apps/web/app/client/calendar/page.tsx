@@ -40,7 +40,7 @@ import {
   type ClientVendorListResponse,
 } from "@/lib/api/client";
 import { INSTITUTION_LABELS } from "@/lib/api/portal";
-import { statusLabel } from "@/lib/constants/statuses";
+import { statusLabel, statusVariant } from "@/lib/constants/statuses";
 import { useUrlClientId } from "@/lib/workspace/use-url-client-id";
 
 const MONTH_SHORT = [
@@ -71,26 +71,9 @@ const INSTITUTION_ICON: Record<string, Icon> = {
 
 const INSTITUTION_ORDER = ["sat", "imss", "infonavit", "stps_repse"] as const;
 
-// Status labels now live in the central dictionary so a vocabulary
-// change in one place propagates across every surface. See
-// apps/web/lib/constants/statuses.ts.
-
-function statusVariant(
-  status: string,
-): "success" | "warning" | "destructive" | "info" | "secondary" {
-  if (status === "aprobado" || status === "excepcion_legal") return "success";
-  if (status === "rechazado" || status === "vencido") return "destructive";
-  if (
-    status === "requiere_aclaracion" ||
-    status === "posible_mismatch" ||
-    status === "pendiente_revision" ||
-    status === "prevalidado" ||
-    status === "recibido"
-  ) {
-    return "warning";
-  }
-  return "secondary";
-}
+// Status labels and color tones now live in the central dictionary so a
+// vocabulary or color change in one place propagates across every
+// surface. See apps/web/lib/constants/statuses.ts.
 
 export default function ClientCalendarPage() {
   const urlClientId = useUrlClientId();

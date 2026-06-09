@@ -84,6 +84,48 @@ export const STATUS_LABELS_ES: Record<DocumentStatusCode, string> = {
   [DocumentStatus.EXCEPCION_LEGAL]: "Aprobado con nota legal",
 };
 
+/** Badge color tones used for status surfaces across the client portal. */
+export type StatusVariant =
+  | "success"
+  | "warning"
+  | "info"
+  | "destructive"
+  | "secondary";
+
+/**
+ * Status → Badge color "variant". Centralized (Audit F2, 2026-06-09) so
+ * the client-portal surfaces (dashboard pill, submissions table, calendar
+ * dots) can't drift apart when a status is added or its tone changes.
+ *
+ * The tone reconciles the three pre-existing per-page maps toward the
+ * dashboard's mapping: the in-review-ish states (recibido /
+ * pendiente_revision / prevalidado) read as ``info``; ``excepcion_legal``
+ * is a positive outcome so it shares ``aprobado``'s ``success``;
+ * ``no_aplica`` is a neutral non-event (``secondary``).
+ */
+export const STATUS_VARIANT: Record<DocumentStatusCode, StatusVariant> = {
+  [DocumentStatus.PENDIENTE]: "secondary",
+  [DocumentStatus.RECIBIDO]: "info",
+  [DocumentStatus.PENDIENTE_REVISION]: "info",
+  [DocumentStatus.PREVALIDADO]: "info",
+  [DocumentStatus.POSIBLE_MISMATCH]: "warning",
+  [DocumentStatus.APROBADO]: "success",
+  [DocumentStatus.RECHAZADO]: "destructive",
+  [DocumentStatus.VENCIDO]: "destructive",
+  [DocumentStatus.NO_APLICA]: "secondary",
+  [DocumentStatus.REQUIERE_ACLARACION]: "warning",
+  [DocumentStatus.EXCEPCION_LEGAL]: "success",
+};
+
+/**
+ * Convenience accessor that always returns a variant. Falls back to
+ * ``secondary`` for a status code that's been added to the backend but
+ * not yet mirrored here — matching the per-page fallbacks this replaced.
+ */
+export function statusVariant(status: string): StatusVariant {
+  return STATUS_VARIANT[status as DocumentStatusCode] ?? "secondary";
+}
+
 /**
  * One-line plain-Spanish explainer per status, rendered beneath the
  * status badge on the submission detail hero so the provider never has

@@ -11,48 +11,18 @@ import {
   type CalendarEvent,
   type CalendarInstitution as MockCalendarInstitution,
 } from "@/lib/mock/calendar";
-import type {
-  CalendarPayload,
-  OnboardingItem,
-  OnboardingSummary,
-  RequirementStatus,
+import {
+  statusToDocumentStateCode,
+  type CalendarPayload,
+  type OnboardingItem,
+  type OnboardingSummary,
+  type RequirementStatus,
 } from "@/lib/api/portal";
-import type { DocumentStateCode } from "@/lib/types";
 
-// ──────────────────────────────────────────────────────────────────
-// Status mapping
-// ──────────────────────────────────────────────────────────────────
-
-/**
- * Map a backend RequirementStatus (Spanish, e.g. "pendiente_revision")
- * onto the UI DocumentStateCode (English snake_case). Keep this
- * exhaustive — every backend value gets a UI representation.
- */
-function statusToCode(status: RequirementStatus): DocumentStateCode {
-  switch (status) {
-    case "pendiente":
-      return "pending";
-    case "recibido":
-      return "uploaded";
-    case "pendiente_revision":
-    case "prevalidado":
-      return "in_review";
-    case "aprobado":
-      return "approved";
-    case "rechazado":
-      return "rejected";
-    case "vencido":
-      return "expired";
-    case "posible_mismatch":
-    case "requiere_aclaracion":
-      return "needs_review";
-    case "no_aplica":
-    case "excepcion_legal":
-      return "approved"; // resolved states, displayed as approved-equivalent
-    default:
-      return "empty";
-  }
-}
+// The backend-status → UI DocumentStateCode mapping lives in portal.ts
+// (statusToDocumentStateCode). This module used to re-declare an
+// identical copy (statusToCode); removed to keep one source of truth
+// (Audit F2).
 
 // ──────────────────────────────────────────────────────────────────
 // Onboarding adapter
@@ -134,7 +104,7 @@ function adaptOnboardingItem(
     institution: INSTITUTION_FROM_BACKEND[item.institution] ?? "interno_cliente",
     why: item.why || enrichment.why,
     format: item.format || enrichment.format,
-    state: statusToCode(item.status),
+    state: statusToDocumentStateCode(item.status),
     next_action: item.next_action || item.note || enrichment.next_action,
     reviewer_note: item.reviewer_note ?? enrichment.reviewer_note,
     required: item.required,
@@ -180,7 +150,7 @@ export function adaptCalendarToEvents(payload: CalendarPayload): CalendarEvent[]
           obligation: item.name,
           required_document: item.name,
           deadline_iso: `${payload.year}-${String(month.month).padStart(2, "0")}-17`,
-          state: statusToCode(item.status),
+          state: statusToDocumentStateCode(item.status),
           suggested_action: defaultActionFor(item.status),
           frequency: FREQ_MAP[item.frequency] ?? "monthly",
         });

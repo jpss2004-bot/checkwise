@@ -19,39 +19,38 @@ import {
   type ClientVendorRow,
 } from "@/lib/api/client";
 import { INSTITUTION_LABELS } from "@/lib/api/portal";
+import { statusVariant } from "@/lib/constants/statuses";
 
-// Status options shown in the dropdown, in the order a reviewer thinks
-// about them. ``""`` is the "all statuses" sentinel; the API receives
-// ``status=`` omitted when this is selected. Labels mirror the same
-// canonical Spanish copy the table uses.
-const STATUS_META: Record<
-  string,
-  { variant: "success" | "warning" | "info" | "destructive" | "secondary"; label: string }
-> = {
-  aprobado: { variant: "success", label: "Aprobado" },
-  rechazado: { variant: "destructive", label: "Rechazado" },
-  requiere_aclaracion: { variant: "warning", label: "Aclaración" },
-  pendiente_revision: { variant: "info", label: "En revisión" },
-  recibido: { variant: "info", label: "Recibido" },
-  prevalidado: { variant: "info", label: "Prevalidado" },
-  posible_mismatch: { variant: "warning", label: "Posible inconsistencia" },
-  vencido: { variant: "destructive", label: "Vencido" },
-  pendiente: { variant: "secondary", label: "Pendiente" },
-  no_aplica: { variant: "secondary", label: "N/A" },
-  excepcion_legal: { variant: "info", label: "Excepción" },
+// Short, filter-oriented status labels specific to this table's dropdown
+// and badge (e.g. "Aclaración", "N/A") — deliberately terser than the
+// canonical STATUS_LABELS_ES copy. The color tone is no longer declared
+// here: it comes from the central statusVariant() so it can't drift from
+// the dashboard/calendar (Audit F2).
+const STATUS_LABELS: Record<string, string> = {
+  aprobado: "Aprobado",
+  rechazado: "Rechazado",
+  requiere_aclaracion: "Aclaración",
+  pendiente_revision: "En revisión",
+  recibido: "Recibido",
+  prevalidado: "Prevalidado",
+  posible_mismatch: "Posible inconsistencia",
+  vencido: "Vencido",
+  pendiente: "Pendiente",
+  no_aplica: "N/A",
+  excepcion_legal: "Excepción",
 };
 
 // Order matches the reviewer workflow: actionable first, then resolved.
 const STATUS_OPTIONS: ReadonlyArray<{ value: string; label: string }> = [
   { value: "", label: "Todos los estados" },
-  { value: "pendiente_revision", label: STATUS_META.pendiente_revision.label },
-  { value: "requiere_aclaracion", label: STATUS_META.requiere_aclaracion.label },
-  { value: "posible_mismatch", label: STATUS_META.posible_mismatch.label },
-  { value: "rechazado", label: STATUS_META.rechazado.label },
-  { value: "aprobado", label: STATUS_META.aprobado.label },
-  { value: "vencido", label: STATUS_META.vencido.label },
-  { value: "excepcion_legal", label: STATUS_META.excepcion_legal.label },
-  { value: "no_aplica", label: STATUS_META.no_aplica.label },
+  { value: "pendiente_revision", label: STATUS_LABELS.pendiente_revision },
+  { value: "requiere_aclaracion", label: STATUS_LABELS.requiere_aclaracion },
+  { value: "posible_mismatch", label: STATUS_LABELS.posible_mismatch },
+  { value: "rechazado", label: STATUS_LABELS.rechazado },
+  { value: "aprobado", label: STATUS_LABELS.aprobado },
+  { value: "vencido", label: STATUS_LABELS.vencido },
+  { value: "excepcion_legal", label: STATUS_LABELS.excepcion_legal },
+  { value: "no_aplica", label: STATUS_LABELS.no_aplica },
 ];
 
 // Institution dropdown options. Mirrors the canonical INSTITUTION_LABELS
@@ -126,7 +125,9 @@ export default function ClientSubmissionsPage() {
   }, []);
 
   const sortedVendors = [...vendors].sort((a, b) =>
-    a.vendor_name.localeCompare(b.vendor_name, "es"),
+    // Null-guard: a missing vendor_name from the API must not crash the
+    // whole page (audit 2026-06-09).
+    (a.vendor_name ?? "").localeCompare(b.vendor_name ?? "", "es"),
   );
 
   return (
@@ -313,13 +314,11 @@ const SUBMISSIONS_COLUMNS: DataTableColumn<ClientSubmissionItem>[] = [
     id: "status",
     header: "Estado",
     width: "140px",
-    cell: (row) => {
-      const meta = STATUS_META[row.status] ?? {
-        variant: "secondary" as const,
-        label: row.status,
-      };
-      return <Badge variant={meta.variant}>{meta.label}</Badge>;
-    },
+    cell: (row) => (
+      <Badge variant={statusVariant(row.status)}>
+        {STATUS_LABELS[row.status] ?? row.status}
+      </Badge>
+    ),
   },
   {
     id: "file",
