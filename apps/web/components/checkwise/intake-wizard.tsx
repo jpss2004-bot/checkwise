@@ -38,6 +38,7 @@ function requirementsForInstitution(institutionValue: string): string[] {
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Checkbox } from "@/components/ui/checkbox";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Select } from "@/components/ui/select";
@@ -52,6 +53,7 @@ import {
   type RequirementStatus,
 } from "@/lib/api/portal";
 import { DocumentStatus } from "@/lib/constants/statuses";
+import type { DocumentStateCode } from "@/lib/types";
 import { readAdminSession } from "@/lib/session/admin";
 import {
   fetchCurrentSession,
@@ -189,6 +191,7 @@ export function IntakeWizard({
   successContinue,
   supersedesSubmissionId,
   acceptedDocuments,
+  replaceWarning,
 }: {
   prefill?: IntakeWizardPrefill;
   lockedFields?: IntakeLockedField[];
@@ -209,6 +212,12 @@ export function IntakeWizard({
    *  the wizard surfaces that explicitly. ``undefined`` (default)
    *  means v1 / legacy behavior. */
   acceptedDocuments?: CalendarAcceptedDocument[] | null;
+  /** Audit Tier 1 (2026-06-09) — set to the slot's current state code
+   *  when it already holds a settled / in-flight document (``approved`` /
+   *  ``in_review`` / ``uploaded``). The wizard then requires an explicit
+   *  acknowledgement before the re-upload supersedes it. ``null``
+   *  (default) = empty or actionable slot, no warning. */
+  replaceWarning?: DocumentStateCode | null;
 } = {}) {
   const apiBaseUrl = useMemo(
     () => process.env.NEXT_PUBLIC_API_BASE_URL ?? "http://127.0.0.1:8000",
@@ -263,6 +272,10 @@ export function IntakeWizard({
     return base;
   });
   const [file, setFile] = useState<File | null>(null);
+  // Audit Tier 1 — explicit acknowledgement before a re-upload replaces a
+  // settled/in-flight document in this slot. Only gates submit when
+  // ``replaceWarning`` is set.
+  const [replaceAck, setReplaceAck] = useState(false);
   const [fileError, setFileError] = useState<string | null>(null);
   // Stage 2.7-b — additional files (annexes). Empty by default; only
   // populated when the multi-file flag is on AND the user opts to
@@ -568,6 +581,13 @@ export function IntakeWizard({
   async function handleSubmit(event?: FormEvent<HTMLFormElement>) {
     event?.preventDefault();
 
+    // Belt-and-suspenders for the replace-warning gate: the submit button
+    // is disabled until acknowledged, but a stray Enter key could still
+    // fire form submit. Bail out the same way (audit Tier 1).
+    if (replaceWarning && !replaceAck) {
+      return;
+    }
+
     for (const targetStep of [0, 2]) {
       const validationError = validateStep(targetStep);
       if (validationError) {
@@ -819,6 +839,43 @@ export function IntakeWizard({
             />
           ) : null}
 
+          {step === 3 && replaceWarning ? (
+            <div
+              role="alert"
+              className="mt-5 rounded-md border border-amber-300 bg-amber-50 p-4"
+            >
+              <div className="flex gap-3">
+                <div className="mt-0.5 flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-amber-500 text-white">
+                  <Warning className="h-4 w-4" aria-hidden="true" />
+                </div>
+                <div className="min-w-0">
+                  <p className="text-sm font-semibold text-amber-900">
+                    {replaceWarning === "approved"
+                      ? "Este requisito ya tiene un documento aprobado"
+                      : "Este requisito ya tiene un documento en revisión"}
+                  </p>
+                  <p className="mt-1 text-sm text-amber-900/80">
+                    {replaceWarning === "approved"
+                      ? "Si subes este archivo, reemplazará al documento aprobado y el requisito volverá a revisión."
+                      : "Si subes este archivo, reemplazará al documento que ya está en revisión."}
+                  </p>
+                  <label className="mt-3 flex items-start gap-2 text-sm font-medium text-amber-900">
+                    <Checkbox
+                      checked={replaceAck}
+                      onCheckedChange={(value) => setReplaceAck(value === true)}
+                      className="mt-0.5"
+                      aria-label="Confirmar que entiendo el reemplazo"
+                    />
+                    <span>
+                      Entiendo que esto reemplaza el documento actual de este
+                      requisito.
+                    </span>
+                  </label>
+                </div>
+              </div>
+            </div>
+          ) : null}
+
           {error && step !== 4 ? (
             <div
               role="alert"
@@ -871,7 +928,7 @@ export function IntakeWizard({
               <Button
                 type="submit"
                 data-testid="submit-submission"
-                disabled={isSubmitting}
+                disabled={isSubmitting || (!!replaceWarning && !replaceAck)}
                 className="active:scale-[0.98]"
               >
                 {isSubmitting ? (

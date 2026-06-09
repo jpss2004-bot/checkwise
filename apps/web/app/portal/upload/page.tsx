@@ -17,9 +17,23 @@ import { Button } from "@/components/ui/button";
 import { PageHeader } from "@/components/ui/page-header";
 import {
   getCalendar,
+  getSlotState,
+  statusToDocumentStateCode,
   type CalendarAcceptedDocument,
 } from "@/lib/api/portal";
+import type { DocumentStateCode } from "@/lib/types";
 import { fetchCurrentSession, type PortalSession } from "@/lib/session/portal";
+
+// Slot states where re-uploading replaces something already settled or
+// in flight — the provider should confirm before knocking it back to
+// review (audit Tier 1, 2026-06-09). Actionable states (missing /
+// rejected / expired …) are where a re-upload is the expected action,
+// so they raise no warning.
+const REPLACE_WARNING_STATES: ReadonlySet<DocumentStateCode> = new Set([
+  "approved",
+  "in_review",
+  "uploaded",
+]);
 
 function PortalUploadInner() {
   const router = useRouter();
@@ -129,6 +143,40 @@ function PortalUploadInner() {
       cancelled = true;
     };
   }, [session, isV2Mode, requirementCode, periodKey, periodLabel]);
+
+  // Replace-warning probe: ask the backend what (if anything) currently
+  // occupies this slot, so the wizard can confirm before a re-upload
+  // supersedes a settled/in-flight document. Non-fatal — on any failure
+  // we simply omit the warning rather than block the upload.
+  const [replaceWarning, setReplaceWarning] = useState<DocumentStateCode | null>(
+    null,
+  );
+  useEffect(() => {
+    if (!session || !requirementCode) {
+      setReplaceWarning(null);
+      return;
+    }
+    let cancelled = false;
+    getSlotState(session, {
+      requirement_code: requirementCode,
+      period_key: periodKey,
+    })
+      .then((slot) => {
+        if (cancelled) return;
+        if (!slot.current_status) {
+          setReplaceWarning(null);
+          return;
+        }
+        const code = statusToDocumentStateCode(slot.current_status);
+        setReplaceWarning(REPLACE_WARNING_STATES.has(code) ? code : null);
+      })
+      .catch(() => {
+        if (!cancelled) setReplaceWarning(null);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [session, requirementCode, periodKey]);
 
   const prefill = useMemo<IntakeWizardPrefill | undefined>(() => {
     if (!session) return undefined;
@@ -291,6 +339,7 @@ function PortalUploadInner() {
           successContinue={successContinue}
           supersedesSubmissionId={supersedesSubmissionId}
           acceptedDocuments={isV2Mode ? acceptedDocuments : undefined}
+          replaceWarning={replaceWarning}
         />
       </main>
     </PortalAppShell>

@@ -266,6 +266,28 @@ export async function getCalendar(
   );
 }
 
+/** Current occupant of an obligation slot — drives the upload wizard's
+ *  "this replaces an existing document" warning. All nulls when empty. */
+export type SlotState = {
+  requirement_code: string;
+  period_key: string | null;
+  current_status: RequirementStatus | null;
+  current_submission_id: string | null;
+};
+
+export async function getSlotState(
+  session: PortalSession,
+  opts: { requirement_code: string; period_key?: string | null },
+): Promise<SlotState> {
+  const params = new URLSearchParams({ requirement_code: opts.requirement_code });
+  if (opts.period_key) params.set("period_key", opts.period_key);
+  return await fetchJson<SlotState>(
+    `/api/v1/portal/workspaces/${session.workspace_id}/slot-state?${params.toString()}`,
+    { method: "GET" },
+    session,
+  );
+}
+
 export type SubmissionRequirementSummary = {
   code: string | null;
   name: string | null;
