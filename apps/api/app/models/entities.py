@@ -16,6 +16,7 @@ from sqlalchemy import (
     String,
     Text,
     UniqueConstraint,
+    text,
 )
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
@@ -487,6 +488,13 @@ class Organization(TimestampMixin, Base):
     kind: Mapped[str] = mapped_column(String(40), nullable=False)
     client_id: Mapped[str | None] = mapped_column(ForeignKey("clients.id"))
     vendor_id: Mapped[str | None] = mapped_column(ForeignKey("vendors.id"))
+    # Multi-user (2026-06-10) — maximum active memberships this org may
+    # hold. 3 for ``kind='client'`` (1 primary owner + 2 secondaries);
+    # NULL means "no cap" (internal staff org). The cap is data so a
+    # future subscription tier can lift it per-org without a deploy.
+    # The service-layer check treats NULL on a *client* org as the
+    # default 3 defensively.
+    seat_limit: Mapped[int | None] = mapped_column(Integer)
     status: Mapped[str] = mapped_column(String(40), default="active", nullable=False)
 
     memberships: Mapped[list[Membership]] = relationship(
@@ -633,9 +641,20 @@ class Membership(TimestampMixin, Base):
     """
 
     __tablename__ = "memberships"
+    # The partial unique index mirrors migration 0037 with a
+    # ``sqlite_where`` twin so SQLite test fixtures (``create_all``)
+    # enforce the one-active-primary-per-org invariant consistently
+    # with production Postgres.
     __table_args__ = (
         UniqueConstraint(
             "user_id", "organization_id", "role", name="uq_memberships_user_org_role"
+        ),
+        Index(
+            "ux_memberships_primary_per_org",
+            "organization_id",
+            unique=True,
+            postgresql_where=text("is_primary AND status = 'active'"),
+            sqlite_where=text("is_primary AND status = 'active'"),
         ),
     )
 
@@ -643,6 +662,13 @@ class Membership(TimestampMixin, Base):
     user_id: Mapped[str] = mapped_column(ForeignKey("users.id"), nullable=False)
     organization_id: Mapped[str] = mapped_column(ForeignKey("organizations.id"), nullable=False)
     role: Mapped[str] = mapped_column(String(40), nullable=False)
+    # Multi-user (2026-06-10) — marks the Primary Account Owner of a
+    # client org. The owner manages the org's other seats (invite,
+    # disable, remove); secondaries carry the same ``client_admin``
+    # role so every existing gate keeps working. At most one *active*
+    # primary per org (removed/disabled rows keep the flag for the
+    # historical record while a successor is designated).
+    is_primary: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
     status: Mapped[str] = mapped_column(String(40), default="active", nullable=False)
 
     user: Mapped[User] = relationship(back_populates="memberships")
@@ -1140,6 +1166,37 @@ class ClientNotification(Base):
     )
 
     client: Mapped[Client] = relationship(back_populates="notifications")
+
+
+class ClientNotificationRead(Base):
+    """Per-user read mark for a client notification.
+
+    Multi-user (2026-06-10). ``ClientNotification`` rows are scoped to
+    the *client*, so the parent ``read_at`` column conflates read
+    state once an org has more than one user: user A marking a row
+    read would mark it read for user B. One row here per
+    ``(notification_id, user_id)`` gives each user an independent
+    read state. Absence of a row means "unread for that user" — the
+    table stays sparse and needs no backfill.
+
+    The notification endpoints switch from ``read_at`` to this table
+    in a follow-up patch; until then the legacy column keeps the
+    current single-user behavior intact.
+    """
+
+    __tablename__ = "client_notification_reads"
+    __table_args__ = (Index("ix_client_notification_reads_user", "user_id"),)
+
+    notification_id: Mapped[str] = mapped_column(
+        ForeignKey("client_notifications.id", ondelete="CASCADE"),
+        primary_key=True,
+    )
+    user_id: Mapped[str] = mapped_column(
+        ForeignKey("users.id", ondelete="CASCADE"), primary_key=True
+    )
+    read_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=utc_now, nullable=False
+    )
 
 
 class RenewalReminder(Base):
