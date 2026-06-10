@@ -8,6 +8,7 @@ up FOUR independent client tenants, one per demo user:
     Hillary Gómez      hgomez@legalshelf.mx       / GomezDemo!2026
     Rubén Martínez     rmartinez@legalshelf.mx    / MartinezDemo!2026
     Rafael Samano      rsamano@samanosc.com.mx    / SamanoDemo!2026
+    Santiago Guzmán    sanguzhuer@gmail.com       / GuzmanDemo!2026
 
 Each tenant gets five REALISTICALLY-NAMED providers that form the same
 compliance ladder as the sandbox (recién invitado → cumplimiento total),
@@ -228,6 +229,23 @@ DEMO_CLIENTS = [
             ("Catering Empresarial San Ángel", "CES260203CC6", "Marcos Tinoco Ávila", "sanangel"),
             ("Climas y Refrigeración Polar", "CRP260204DD7", "Diana Escamilla Bravo", "polar"),
             ("Outsourcing Contable Insurgentes", "OCI260205EE8", "Alonso Gracia Téllez", "insurgentes"),
+        ]),
+    ),
+    DemoClientSpec(
+        key="sguzman",
+        admin_email="sanguzhuer@gmail.com",
+        admin_password="GuzmanDemo!2026",
+        admin_fullname="Santiago Guzmán",
+        client_name="Cliente de Santiago Guzmán",
+        client_rfc="SGU260610EE5",
+        org_name="Cliente de Santiago Guzmán — Cliente",
+        industry="Hospitalidad y turismo",
+        providers=_roster([
+            ("Paquetería Express del Centro", "PEC260201AA5", "Joaquín Mora Salinas", "expresscentro"),
+            ("Lavandería Industrial Bugambilia", "LIB260202BB6", "Karla Domínguez Peña", "bugambilia"),
+            ("Telecomunicaciones del Valle", "TDV260203CC7", "Esteban Carrillo Ponce", "delvalle"),
+            ("Almacenes y Montacargas Orión", "AMO260204DD8", "Patricia Lozano Rivas", "orion"),
+            ("Capacitación Empresarial Delta", "CED260205EE9", "Adrián Soberanes Cano", "delta"),
         ]),
     ),
 ]
