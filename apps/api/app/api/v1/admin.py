@@ -534,8 +534,15 @@ def provision_user(
             raise HTTPException(
                 status.HTTP_409_CONFLICT, detail="RFC ya está en uso."
             ) from exc
+        # Multi-user (migration 0037) — new client orgs start with the
+        # default 3-seat cap, and the provisioned admin is the Primary
+        # Account Owner who manages the other two seats.
         org = Organization(
-            name=name, kind="client", client_id=client_row.id, status="active"
+            name=name,
+            kind="client",
+            client_id=client_row.id,
+            seat_limit=3,
+            status="active",
         )
         db.add(org)
         db.flush()
@@ -544,6 +551,7 @@ def provision_user(
                 user_id=user.id,
                 organization_id=org.id,
                 role=MembershipRole.CLIENT_ADMIN.value,
+                is_primary=True,
                 status="active",
             )
         )

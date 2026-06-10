@@ -69,6 +69,55 @@ def send_password_reset_email(*, to_email: str, reset_url: str) -> EmailDelivery
     )
 
 
+def send_owner_reset_temp_password_email(
+    *,
+    to_email: str,
+    full_name: str,
+    login_url: str,
+    temp_password: str,
+    organization_name: str | None = None,
+) -> EmailDeliveryResult:
+    """Temp credentials issued by the account owner (multi-user step 2).
+
+    Sent when the Primary Account Owner resets a secondary user's
+    password from ``POST /client/users/{id}/reset-password``. Same
+    plaintext-once discipline as the welcome email: the recipient
+    logs in with the temp password and ``must_change_password``
+    forces a rotation. Plain text (like the self-service reset) —
+    the welcome HTML's "Bienvenido" framing would be wrong here.
+    """
+    origin = (
+        f"El titular de la cuenta de {organization_name}"
+        if organization_name
+        else "El titular de su cuenta"
+    )
+    body = "\n".join(
+        [
+            f"Hola {full_name}:",
+            "",
+            f"{origin} restableció su contraseña de CheckWise.",
+            "",
+            "Sus nuevos datos de acceso:",
+            f"  Usuario:               {to_email}",
+            f"  Contraseña temporal:   {temp_password}",
+            "",
+            f"Ingrese en {login_url} con la contraseña temporal; por "
+            "seguridad, le pediremos definir una nueva en cuanto "
+            "inicie sesión.",
+            "",
+            "Si usted no esperaba este cambio, contacte al titular de "
+            "su cuenta o responda a este correo.",
+            "",
+            "Equipo LegalShelf · CheckWise",
+        ]
+    )
+    return send_transactional_email(
+        to_email=to_email,
+        subject="CheckWise — su contraseña fue restablecida",
+        body=body,
+    )
+
+
 def send_welcome_with_temp_password_email(
     *,
     to_email: str,

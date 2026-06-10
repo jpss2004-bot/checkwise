@@ -4,6 +4,21 @@
   "routes": [
     {
       "method": "DELETE",
+      "path": "/api/v1/client/users/{user_id}",
+      "function": "remove_client_user",
+      "router": "app.api.v1.client_users",
+      "file": "api/app/api/v1/client_users.py",
+      "lineno": 569,
+      "gate": "client_admin_or_admin",
+      "tenant_rule": "scoped via _resolve_client_id() + owner-only; target membership must be active in the resolved org",
+      "audit_rule": "logged via client.user_removed",
+      "rate_limit_rule": "none (auth-gated)",
+      "error_lang": "es",
+      "must_change_password_allowed": false,
+      "notes": ""
+    },
+    {
+      "method": "DELETE",
       "path": "/api/v1/reports/shares/{share_id}",
       "function": "delete_report_share",
       "router": "app.api.v1.reports",
@@ -420,7 +435,7 @@
       "rate_limit_rule": "none (auth-gated)",
       "error_lang": "es_full",
       "must_change_password_allowed": false,
-      "notes": "Phase 7 / Slice N2 — notification fabric preference matrix."
+      "notes": "Phase 7 / Slice N2 \u2014 notification fabric preference matrix."
     },
     {
       "method": "PUT",
@@ -435,7 +450,7 @@
       "rate_limit_rule": "none (auth-gated)",
       "error_lang": "es_full",
       "must_change_password_allowed": false,
-      "notes": "Phase 7 / Slice N2 — notification fabric preference matrix."
+      "notes": "Phase 7 / Slice N2 \u2014 notification fabric preference matrix."
     },
     {
       "method": "POST",
@@ -450,7 +465,7 @@
       "rate_limit_rule": "phone_verify_limiter (3/min, 10/hour per user)",
       "error_lang": "es_full",
       "must_change_password_allowed": false,
-      "notes": "Phase 7 / Slice N8 — issues an OTP via WhatsApp (cw_phone_otp)."
+      "notes": "Phase 7 / Slice N8 \u2014 issues an OTP via WhatsApp (cw_phone_otp)."
     },
     {
       "method": "POST",
@@ -465,7 +480,7 @@
       "rate_limit_rule": "none (OTP attempts capped at 5 in the row itself)",
       "error_lang": "es_full",
       "must_change_password_allowed": false,
-      "notes": "Phase 7 / Slice N8 — confirms OTP, fires account.whatsapp_verified."
+      "notes": "Phase 7 / Slice N8 \u2014 confirms OTP, fires account.whatsapp_verified."
     },
     {
       "method": "GET",
@@ -480,7 +495,7 @@
       "rate_limit_rule": "none (auth-gated)",
       "error_lang": "es_full",
       "must_change_password_allowed": false,
-      "notes": "Phase 7 / Slice N3 — versioned template browser."
+      "notes": "Phase 7 / Slice N3 \u2014 versioned template browser."
     },
     {
       "method": "GET",
@@ -495,7 +510,7 @@
       "rate_limit_rule": "none (auth-gated)",
       "error_lang": "es_full",
       "must_change_password_allowed": false,
-      "notes": "Phase 7 / Slice N3 — versioned template detail."
+      "notes": "Phase 7 / Slice N3 \u2014 versioned template detail."
     },
     {
       "method": "POST",
@@ -510,7 +525,7 @@
       "rate_limit_rule": "none (auth-gated)",
       "error_lang": "es_full",
       "must_change_password_allowed": false,
-      "notes": "Phase 7 / Slice N3 — create a new template version."
+      "notes": "Phase 7 / Slice N3 \u2014 create a new template version."
     },
     {
       "method": "POST",
@@ -525,7 +540,7 @@
       "rate_limit_rule": "none (auth-gated)",
       "error_lang": "es_full",
       "must_change_password_allowed": false,
-      "notes": "Phase 7 / Slice N3 — atomic active-version swap."
+      "notes": "Phase 7 / Slice N3 \u2014 atomic active-version swap."
     },
     {
       "method": "GET",
@@ -783,6 +798,21 @@
       "notes": "Pre-existing route missed during prior manifest sweeps; classified during Phase 7 / Slice N4 review."
     },
     {
+      "method": "GET",
+      "path": "/api/v1/client/users",
+      "function": "list_client_users",
+      "router": "app.api.v1.client_users",
+      "file": "api/app/api/v1/client_users.py",
+      "lineno": 287,
+      "gate": "client_admin_or_admin",
+      "tenant_rule": "scoped via _resolve_client_id() membership check; org resolved from client_id",
+      "audit_rule": "not_logged (read-only)",
+      "rate_limit_rule": "none (auth-gated)",
+      "error_lang": "es",
+      "must_change_password_allowed": false,
+      "notes": ""
+    },
+    {
       "method": "POST",
       "path": "/api/v1/client/audit-package.zip",
       "function": "client_audit_package_zip_post",
@@ -805,12 +835,12 @@
       "file": "api/app/api/v1/client.py",
       "lineno": 1196,
       "gate": "client_admin_or_admin",
-      "tenant_rule": "scoped via _resolve_client_id() — provider lands under caller's client",
+      "tenant_rule": "scoped via _resolve_client_id() \u2014 provider lands under caller's client",
       "audit_rule": "logged (client.provider.created)",
       "rate_limit_rule": "none (auth-gated)",
       "error_lang": "es",
       "must_change_password_allowed": false,
-      "notes": "Sprint 2026-05-26 D2 — client_admin self-service provider invite."
+      "notes": "Sprint 2026-05-26 D2 \u2014 client_admin self-service provider invite."
     },
     {
       "method": "GET",
@@ -1065,7 +1095,7 @@
       "rate_limit_rule": "none (auth-gated)",
       "error_lang": "es",
       "must_change_password_allowed": false,
-      "notes": "Audit Tier 1 — current slot occupant for the upload replace-warning."
+      "notes": "Audit Tier 1 \u2014 current slot occupant for the upload replace-warning."
     },
     {
       "method": "GET",
@@ -1519,6 +1549,21 @@
     },
     {
       "method": "PATCH",
+      "path": "/api/v1/client/users/{user_id}",
+      "function": "update_client_user",
+      "router": "app.api.v1.client_users",
+      "file": "api/app/api/v1/client_users.py",
+      "lineno": 507,
+      "gate": "client_admin_or_admin",
+      "tenant_rule": "scoped via _resolve_client_id() + owner-only; target membership must be active in the resolved org",
+      "audit_rule": "logged via client.user_disabled / client.user_reactivated",
+      "rate_limit_rule": "none (auth-gated)",
+      "error_lang": "es",
+      "must_change_password_allowed": false,
+      "notes": ""
+    },
+    {
+      "method": "PATCH",
       "path": "/api/v1/portal/workspaces/{workspace_id}/profile",
       "function": "patch_workspace_profile",
       "router": "app.api.v1.portal",
@@ -1560,7 +1605,7 @@
       "rate_limit_rule": "none (auth-gated)",
       "error_lang": "es",
       "must_change_password_allowed": false,
-      "notes": "Sprint 2026-05-26 D3 — replaces the prior POST /admin/clients."
+      "notes": "Sprint 2026-05-26 D3 \u2014 replaces the prior POST /admin/clients."
     },
     {
       "method": "POST",
@@ -1711,6 +1756,36 @@
       "error_lang": "es",
       "must_change_password_allowed": false,
       "notes": "P1 fix scheduled: write client.notification_read audit row."
+    },
+    {
+      "method": "POST",
+      "path": "/api/v1/client/users",
+      "function": "create_client_user",
+      "router": "app.api.v1.client_users",
+      "file": "api/app/api/v1/client_users.py",
+      "lineno": 341,
+      "gate": "client_admin_or_admin",
+      "tenant_rule": "scoped via _resolve_client_id() + owner-only (_require_can_manage); seat cap counted under org-row FOR UPDATE",
+      "audit_rule": "logged via client.user_created",
+      "rate_limit_rule": "none (auth-gated)",
+      "error_lang": "es",
+      "must_change_password_allowed": false,
+      "notes": ""
+    },
+    {
+      "method": "POST",
+      "path": "/api/v1/client/users/{user_id}/reset-password",
+      "function": "reset_client_user_password",
+      "router": "app.api.v1.client_users",
+      "file": "api/app/api/v1/client_users.py",
+      "lineno": 618,
+      "gate": "client_admin_or_admin",
+      "tenant_rule": "scoped via _resolve_client_id() + owner-only; target membership must be active in the resolved org",
+      "audit_rule": "logged via client.user_password_reset",
+      "rate_limit_rule": "none (auth-gated)",
+      "error_lang": "es",
+      "must_change_password_allowed": false,
+      "notes": ""
     },
     {
       "method": "POST",

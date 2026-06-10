@@ -7,6 +7,7 @@ from app.api.v1 import (
     admin_notification_templates,
     auth,
     client,
+    client_users,
     compliance,
     contact,
     endpoints,
@@ -28,6 +29,8 @@ api_router.include_router(auth.router)
 api_router.include_router(reviewer.router)
 api_router.include_router(admin.router)
 api_router.include_router(client.router)
+# Multi-user step 2 — owner-managed seats (max 3 per client org).
+api_router.include_router(client_users.router)
 # Hard kill switch — operator sets EXPOSE_METADATA_DRY_RUN=false to
 # remove the n8n prototyping endpoint from the schema entirely
 # (404 not 403). The router is also auth-gated via
