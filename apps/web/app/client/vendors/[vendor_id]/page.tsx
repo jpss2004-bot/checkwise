@@ -499,8 +499,9 @@ function DocumentBreakdownCard({ detail }: { detail: ClientVendorDetail }) {
   const c = detail.document_state_counts;
   const all: ChartSegment[] = [
     { label: "Aprobados", value: c.approved, tone: "success" },
-    { label: "En revisión", value: c.in_review, tone: "info" },
-    { label: "Recibidos", value: c.uploaded, tone: "info" },
+    // 2026-06-10: "Recibidos" (uploaded) and "En revisión" (in_review)
+    // collapsed to a single client-facing state — sum both counts.
+    { label: "En revisión", value: c.in_review + c.uploaded, tone: "info" },
     { label: slotStateLabel("needs_correction"), value: c.needs_review, tone: "warning" },
     { label: slotStateLabel("rejected"), value: c.rejected, tone: "error" },
     { label: "Vencidos", value: c.expired, tone: "error" },

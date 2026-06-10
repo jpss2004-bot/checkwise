@@ -211,7 +211,7 @@ export default function ClientCalendarPage() {
                 mono: true,
                 tone: totals.missing + totals.rejected > 0 ? "warning" : "default",
               },
-              { label: "Por vencer", value: totals.dueSoon.toString(), mono: true, tone: totals.dueSoon > 0 ? "warning" : "default" },
+              { label: "Por vencer ≤14 d", value: totals.dueSoon.toString(), mono: true, tone: totals.dueSoon > 0 ? "warning" : "default" },
             ]}
           />
 

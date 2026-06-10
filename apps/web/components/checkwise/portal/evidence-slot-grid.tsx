@@ -53,15 +53,24 @@ const STATE_GROUP_ORDER: DocumentStateCode[] = [
   "empty",
 ];
 
+// Plural group headers. Canonical wording unification (2026-06-10): the
+// singular item-level labels live in slotStateLabel() (@/lib/constants/
+// statuses); these are their plural group forms so the section headers
+// match the badges. The 2026-06-10 collapse means two GROUPS can share a
+// header — uploaded + in_review both read "En revisión", and empty +
+// pending both read "Por entregar". The grid renders groups by iterating
+// STATE_GROUP_ORDER (a fixed list of distinct state keys), so each bucket
+// still renders as its own section with its own state-colored dot; the
+// duplicated header is intentional and harmless.
 const STATE_GROUP_LABEL: Record<DocumentStateCode, string> = {
-  rejected: "Rechazados",
+  rejected: "Requieren corrección",
   expired: "Vencidos",
-  needs_review: "Requieren tu atención",
+  needs_review: "Necesitan aclaración",
   in_review: "En revisión",
-  uploaded: "Recibidos",
-  pending: "Pendientes",
+  uploaded: "En revisión",
+  pending: "Por entregar",
   approved: "Aprobados",
-  empty: "Sin estado",
+  empty: "Por entregar",
 };
 
 const STATE_GROUP_DOT: Record<DocumentStateCode, string> = {

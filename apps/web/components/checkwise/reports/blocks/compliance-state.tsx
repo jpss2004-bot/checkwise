@@ -67,6 +67,9 @@ const BUCKETS: Array<{
   key: keyof DocumentStateCounts;
   label: string;
   hint: string;
+  /** Other count keys folded into this bucket's total (2026-06-10:
+   *  ``uploaded`` and ``in_review`` collapsed to one "En revisión"). */
+  combineWith?: Array<keyof DocumentStateCounts>;
 }> = [
   {
     key: "rejected",
@@ -86,12 +89,8 @@ const BUCKETS: Array<{
   {
     key: "in_review",
     label: "En revisión",
-    hint: "Recibidos y siendo validados por el equipo de cumplimiento.",
-  },
-  {
-    key: "uploaded",
-    label: "Recibidos",
-    hint: "Cargados por el proveedor, aún sin entrar al ciclo de revisión.",
+    hint: "Recibidos y en validación por el equipo de cumplimiento.",
+    combineWith: ["uploaded"],
   },
   {
     key: "pending",
@@ -157,6 +156,11 @@ export function ComplianceStateBlock({
 
   const { semaphore, document_state_counts: counts } = data;
 
+  // A bucket's displayed total is its own key plus any folded-in
+  // keys (2026-06-10: ``uploaded`` is summed into "En revisión").
+  const bucketCount = (b: (typeof BUCKETS)[number]): number =>
+    (b.combineWith ?? []).reduce((sum, k) => sum + counts[k], counts[b.key]);
+
   // 2026-06-05: only surface buckets that actually carry documents.
   // The eight-bucket strip used to print every state including the
   // zeros — a clean provider saw "Con observaciones: 0 · Vencidos: 0
@@ -164,7 +168,7 @@ export function ComplianceStateBlock({
   // autorizada" is a client-side internal call the provider rarely
   // needs). Empty buckets are dropped; the strip is hidden entirely
   // when nothing is tracked yet.
-  const visibleBuckets = BUCKETS.filter((b) => counts[b.key] > 0);
+  const visibleBuckets = BUCKETS.filter((b) => bucketCount(b) > 0);
 
   return (
     <section className="space-y-3 py-3" data-block-type="compliance_state">
@@ -216,7 +220,7 @@ export function ComplianceStateBlock({
                   {b.label}
                 </span>
                 <span className="font-mono text-[14px] font-semibold tabular-nums text-[color:var(--text-primary)]">
-                  {counts[b.key]}
+                  {bucketCount(b)}
                 </span>
               </div>
             ))}

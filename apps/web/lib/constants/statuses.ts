@@ -72,7 +72,9 @@ export const RESOLVED_STATUSES: readonly DocumentStatusCode[] = [
  */
 export const STATUS_LABELS_ES: Record<DocumentStatusCode, string> = {
   [DocumentStatus.PENDIENTE]: "Pendiente",
-  [DocumentStatus.RECIBIDO]: "Recibido",
+  // Collapsed (2026-06-10): a just-received document and one actively in
+  // the reviewer queue read the same to a client — both "En revisión".
+  [DocumentStatus.RECIBIDO]: "En revisión",
   [DocumentStatus.PENDIENTE_REVISION]: "En revisión",
   [DocumentStatus.PREVALIDADO]: "En revisión",
   [DocumentStatus.POSIBLE_MISMATCH]: "Posible inconsistencia",
@@ -229,7 +231,8 @@ export type SlotStateCode = (typeof SlotState)[keyof typeof SlotState];
 
 export const SLOT_STATE_LABELS_ES: Record<SlotStateCode, string> = {
   [SlotState.MISSING]: "Por entregar",
-  [SlotState.UPLOADED]: "Recibido",
+  // Collapsed with IN_REVIEW (2026-06-10): both read "En revisión".
+  [SlotState.UPLOADED]: "En revisión",
   [SlotState.IN_REVIEW]: "En revisión",
   [SlotState.POSSIBLE_MISMATCH]: "Posible inconsistencia",
   [SlotState.APPROVED]: "Aprobado",

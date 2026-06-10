@@ -86,7 +86,7 @@ const STATE_TONE: Record<
   uploaded: {
     bg: "bg-[color:var(--doc-uploaded-bg)]",
     text: "text-[color:var(--doc-uploaded-text)]",
-    label: "Recibido",
+    label: "En revisión",
   },
   in_review: {
     bg: "bg-[color:var(--doc-in-review-bg)]",

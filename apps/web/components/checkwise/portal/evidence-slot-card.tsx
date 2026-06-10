@@ -46,15 +46,18 @@ export interface EvidenceSlotCardProps {
 }
 
 const STATE_LABEL_FALLBACK: Record<DocumentStateCode, string> = {
-  empty: "Sin estado",
-  pending: "Pendiente",
-  uploaded: "Recibido",
+  // Canonical wording unification (2026-06-10) — mirrors slotStateLabel()
+  // in @/lib/constants/statuses so provider slot cards read the same words
+  // as client surfaces. `uploaded` collapses into "En revisión".
+  empty: "Por entregar",
+  pending: "Por entregar",
+  uploaded: "En revisión",
   in_review: "En revisión",
   approved: "Aprobado",
   // Audit P1-02 — softer copy on provider-facing slot cards.
   rejected: "Requiere corrección",
   expired: "Vencido",
-  needs_review: "Requiere atención",
+  needs_review: "Necesita aclaración",
 };
 
 const STATE_TEXT_CLASS: Record<DocumentStateCode, string> = {

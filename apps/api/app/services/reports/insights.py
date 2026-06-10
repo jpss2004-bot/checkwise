@@ -220,11 +220,11 @@ def compute_client_insight(db: Session, scope: ReportScope, *, today: date | Non
     need_action = red + yellow
 
     if red > 0 or overall < 50:
-        level, word = "red", "Riesgo alto"
+        level, word = "red", "En riesgo"
     elif yellow > 0 or overall < 85:
-        level, word = "yellow", "Riesgo moderado"
+        level, word = "yellow", "En proceso"
     else:
-        level, word = "green", "Cumplimiento sólido"
+        level, word = "green", "Al día"
 
     if need_action == 0:
         subhead = "Todos tus proveedores están al día."
@@ -329,10 +329,10 @@ def compute_vendor_insight(db: Session, scope: ReportScope, *, today: date | Non
     pct = int(sem.get("compliance_pct", 0))
     level = sem.get("level", "yellow")
     word = {
-        "red": "Riesgo alto",
-        "yellow": "Atención requerida",
-        "green": "Cumplimiento sólido",
-    }.get(level, "Atención requerida")
+        "red": "En riesgo",
+        "yellow": "En proceso",
+        "green": "Al día",
+    }.get(level, "En proceso")
 
     rejected = int(counts.get("rejected", 0))
     needs = int(counts.get("needs_review", 0))

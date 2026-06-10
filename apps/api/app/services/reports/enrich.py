@@ -30,7 +30,10 @@ _SYSTEM = (
     "dato: números, porcentajes, nombres de proveedores, fechas y hechos deben "
     "quedar idénticos. No agregues ni inventes información, no agregues ni "
     "quites elementos. Responde ÚNICAMENTE con JSON válido y con la misma "
-    "estructura que recibes."
+    "estructura que recibes. Para el estado del semáforo usa EXACTAMENTE estos "
+    "términos en español: «Al día» (verde), «En proceso» (amarillo), «En riesgo» "
+    "(rojo); para documentos rechazados «Requiere corrección» y en revisión «En "
+    "revisión». No uses sinónimos como «Riesgo alto» o «Atención requerida»."
 )
 
 _AUDIENCE_VOICE = {

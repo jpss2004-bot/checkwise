@@ -195,7 +195,7 @@ export default function ClientVendorsPage() {
             { label: semaphoreLabel("yellow"), value: counts.yellow.toString(), mono: true, tone: counts.yellow > 0 ? "warning" : "default" },
             { label: semaphoreLabel("red"), value: counts.red.toString(), mono: true, tone: counts.red > 0 ? "warning" : "default" },
             { label: BUCKET_LABELS_ES.missing_required, value: sums.missing.toString(), mono: true, tone: sums.missing > 0 ? "warning" : "default" },
-            { label: BUCKET_LABELS_ES.due_soon, value: sums.dueSoon.toString(), mono: true, tone: sums.dueSoon > 0 ? "warning" : "default" },
+            { label: `${BUCKET_LABELS_ES.due_soon} ≤14 d`, value: sums.dueSoon.toString(), mono: true, tone: sums.dueSoon > 0 ? "warning" : "default" },
           ]}
         />
 
@@ -375,7 +375,7 @@ function buildVendorColumns(
   },
   {
     id: "due_soon",
-    header: BUCKET_LABELS_ES.due_soon,
+    header: `${BUCKET_LABELS_ES.due_soon} ≤14d`,
     width: "90px",
     align: "right",
     cell: (row) => (

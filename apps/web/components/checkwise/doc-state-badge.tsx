@@ -21,14 +21,17 @@ import type { DocumentStateCode } from "@/lib/types";
  * Spec: docs/DESIGN_SYSTEM.md §3.1 (Document States) + §6.1 (Onboarding).
  */
 export const DOC_STATE_LABELS: Record<DocumentStateCode, string> = {
-  empty: "Sin cargar",
-  pending: "Pendiente",
-  uploaded: "Enviado",
+  // Canonical wording unification (2026-06-10) — mirrors slotStateLabel()
+  // in @/lib/constants/statuses so providers read the same words as
+  // clients. `uploaded` collapses into "En revisión" alongside in_review.
+  empty: "Por entregar",
+  pending: "Por entregar",
+  uploaded: "En revisión",
   in_review: "En revisión",
   approved: "Aprobado",
-  rejected: "Rechazado",
+  rejected: "Requiere corrección",
   expired: "Vencido",
-  needs_review: "Necesita revisión",
+  needs_review: "Necesita aclaración",
 };
 
 const DOC_STATE_ICON: Record<DocumentStateCode, Icon> = {

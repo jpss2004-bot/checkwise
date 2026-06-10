@@ -114,7 +114,7 @@ const STATE_META: Record<
   expired: { label: "Vencido", print: "[Vencido]", tone: "orange" },
   missing: { label: "Por entregar", print: "[Por entregar]", tone: "yellow" },
   in_review: { label: "En revisión", print: "[En revisión]", tone: "blue" },
-  uploaded: { label: "Recibido", print: "[Recibido]", tone: "blue" },
+  uploaded: { label: "En revisión", print: "[En revisión]", tone: "blue" },
   approved: { label: "Aprobado", print: "[Aprobado]", tone: "gray" },
   exception: {
     label: "Excepción autorizada",

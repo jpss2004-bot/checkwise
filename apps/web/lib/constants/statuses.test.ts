@@ -156,8 +156,13 @@ describe("cross-axis wording consistency", () => {
     expect(SLOT_STATE_LABELS_ES[SlotState.REJECTED]).toBe("Requiere corrección");
   });
 
-  it("an in-review document reads 'En revisión' on every axis", () => {
+  it("collapses every pre-decision state to 'En revisión' on every axis", () => {
+    // recibido + pendiente_revision + prevalidado (DocumentStatus) and
+    // uploaded + in_review (SlotState) all read the same to a client.
+    expect(STATUS_LABELS_ES[DocumentStatus.RECIBIDO]).toBe("En revisión");
     expect(STATUS_LABELS_ES[DocumentStatus.PENDIENTE_REVISION]).toBe("En revisión");
+    expect(STATUS_LABELS_ES[DocumentStatus.PREVALIDADO]).toBe("En revisión");
+    expect(SLOT_STATE_LABELS_ES[SlotState.UPLOADED]).toBe("En revisión");
     expect(SLOT_STATE_LABELS_ES[SlotState.IN_REVIEW]).toBe("En revisión");
     expect(BUCKET_LABELS_ES.pending_reviews).toBe("En revisión");
   });
