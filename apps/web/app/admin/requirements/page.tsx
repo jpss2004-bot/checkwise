@@ -9,15 +9,77 @@ import { Button } from "@/components/ui/button";
 import { DataTable } from "@/components/ui/data-table";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { Select } from "@/components/ui/select";
 
 import { AdminShell } from "../_shell";
 import {
+  type AdminInstitution,
   type AdminRequirement,
   createRequirement,
+  listInstitutions,
   listRequirements,
   updateRequirement,
 } from "@/lib/api/admin";
-import { cadenceLabel, riskLabel, riskVariant } from "@/lib/constants/labels";
+import {
+  CADENCE_LABELS_ES,
+  cadenceLabel,
+  riskLabel,
+  riskVariant,
+} from "@/lib/constants/labels";
+
+// ---------------------------------------------------------------------------
+// Canonical enum option sets. Free-text inputs here used to let a typo
+// ("mensaul") create a requirement the slot engine never recognizes —
+// these mirror the backend so the form can only emit valid codes.
+// ---------------------------------------------------------------------------
+
+/** Mirrors LOAD_TYPES in apps/api/app/core/catalogs.py — the exact set
+ *  uploads are validated against (_VALID_LOAD_TYPES). */
+const LOAD_TYPE_CODES: readonly string[] = [
+  "alta_inicial",
+  "contrato",
+  "mensual",
+  "bimestral",
+  "cuatrimestral",
+  "anual",
+  "renovacion",
+  "evento",
+];
+
+/** cadenceLabel covers most load-type codes; the two non-cadence codes
+ *  get explicit labels (the humanizer would drop the accent in
+ *  "Renovación"). Matches the backend catalog labels. */
+const LOAD_TYPE_LABELS_EXTRA: Record<string, string> = {
+  contrato: "Contrato",
+  renovacion: "Renovación",
+};
+
+function loadTypeLabel(code: string): string {
+  return LOAD_TYPE_LABELS_EXTRA[code] ?? cadenceLabel(code);
+}
+
+const FREQUENCY_CODES: readonly string[] = Object.keys(CADENCE_LABELS_ES);
+
+const RISK_CODES: readonly string[] = ["bajo", "medio", "alto", "critico"];
+
+/** The backend stores risk inconsistently (seed writes "alto", the old
+ *  admin form defaulted to English "medium"). Normalize whatever a row
+ *  carries onto the canonical Spanish codes so the select matches. */
+const RISK_TO_CANONICAL: Record<string, string> = {
+  low: "bajo",
+  medium: "medio",
+  med: "medio",
+  high: "alto",
+  critical: "critico",
+  "crítico": "critico",
+};
+
+function canonicalRiskCode(code: string | null | undefined): string {
+  if (!code) return "medio";
+  const lower = code.toLowerCase();
+  if (RISK_CODES.includes(lower)) return lower;
+  return RISK_TO_CANONICAL[lower] ?? "medio";
+}
 
 export default function AdminRequirementsPage() {
   const [rows, setRows] = useState<AdminRequirement[]>([]);
@@ -26,6 +88,10 @@ export default function AdminRequirementsPage() {
   const [editing, setEditing] = useState<AdminRequirement | null>(null);
   const [createOpen, setCreateOpen] = useState(false);
   const [search, setSearch] = useState("");
+  // null until the catalog loads; the form falls back to the raw UUID
+  // input when it never does (institutionsError) so it stays usable.
+  const [institutions, setInstitutions] = useState<AdminInstitution[] | null>(null);
+  const [institutionsError, setInstitutionsError] = useState(false);
 
   async function refresh() {
     setError(null);
@@ -42,6 +108,9 @@ export default function AdminRequirementsPage() {
 
   useEffect(() => {
     refresh();
+    listInstitutions()
+      .then((data) => setInstitutions(data.items))
+      .catch(() => setInstitutionsError(true));
   }, []);
 
   const filtered = useMemo(() => {
@@ -90,6 +159,8 @@ export default function AdminRequirementsPage() {
             <RequirementForm
               mode={editing ? "edit" : "create"}
               initial={editing ?? undefined}
+              institutions={institutions}
+              institutionsError={institutionsError}
               onSubmit={async (data) => {
                 if (editing) {
                   await updateRequirement(editing.id, data);
@@ -230,11 +301,15 @@ export default function AdminRequirementsPage() {
 function RequirementForm({
   mode,
   initial,
+  institutions,
+  institutionsError,
   onSubmit,
   onCancel,
 }: {
   mode: "create" | "edit";
   initial?: AdminRequirement;
+  institutions: AdminInstitution[] | null;
+  institutionsError: boolean;
   onSubmit: (data: {
     code: string;
     name: string;
@@ -254,11 +329,24 @@ function RequirementForm({
   const [institutionId, setInstitutionId] = useState(initial?.institution_id ?? "");
   const [loadType, setLoadType] = useState(initial?.load_type ?? "mensual");
   const [frequency, setFrequency] = useState(initial?.frequency ?? "mensual");
-  const [riskLevel, setRiskLevel] = useState(initial?.risk_level ?? "medium");
+  const [riskLevel, setRiskLevel] = useState(canonicalRiskCode(initial?.risk_level));
   const [isActive, setIsActive] = useState(initial?.is_active ?? true);
   const [legalBasis, setLegalBasis] = useState(initial?.version?.legal_basis ?? "");
   const [submitting, setSubmitting] = useState(false);
   const [err, setErr] = useState<string | null>(null);
+
+  // Legacy rows can carry off-catalog codes (the seed wrote
+  // load_type=frequency for recurring requirements). Surface the stored
+  // value as an extra option on edit so opening the form never silently
+  // rewrites it — the operator opts into a canonical code explicitly.
+  const legacyLoadType =
+    initial && !LOAD_TYPE_CODES.includes(initial.load_type)
+      ? initial.load_type
+      : null;
+  const legacyFrequency =
+    initial && !FREQUENCY_CODES.includes(initial.frequency)
+      ? initial.frequency
+      : null;
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
@@ -307,14 +395,41 @@ function RequirementForm({
               />
             </div>
             <div className="space-y-1">
-              <Label htmlFor="req-inst">Institution ID (uuid)</Label>
-              <Input
-                id="req-inst"
-                value={institutionId}
-                onChange={(e) => setInstitutionId(e.target.value)}
-                className="font-mono"
-                required
-              />
+              <Label htmlFor="req-inst">Institución</Label>
+              {institutions ? (
+                <Select
+                  id="req-inst"
+                  value={institutionId}
+                  onChange={(e) => setInstitutionId(e.target.value)}
+                  required
+                >
+                  <option value="" disabled>
+                    Selecciona una institución
+                  </option>
+                  {institutions.map((inst) => (
+                    <option key={inst.id} value={inst.id}>
+                      {inst.name}
+                    </option>
+                  ))}
+                </Select>
+              ) : (
+                <>
+                  <Input
+                    id="req-inst"
+                    value={institutionId}
+                    onChange={(e) => setInstitutionId(e.target.value)}
+                    className="font-mono"
+                    placeholder="UUID de la institución"
+                    required
+                  />
+                  {institutionsError ? (
+                    <p className="text-[11px] text-[color:var(--status-warning-text)]">
+                      No se pudo cargar el catálogo de instituciones — captura
+                      el UUID manualmente.
+                    </p>
+                  ) : null}
+                </>
+              )}
             </div>
           </>
         ) : null}
@@ -329,29 +444,58 @@ function RequirementForm({
         </div>
         <div className="space-y-1">
           <Label htmlFor="req-load">Tipo de carga</Label>
-          <Input
+          <Select
             id="req-load"
             value={loadType}
             onChange={(e) => setLoadType(e.target.value)}
             required
-          />
+          >
+            {legacyLoadType ? (
+              <option value={legacyLoadType}>
+                {loadTypeLabel(legacyLoadType)} (valor actual)
+              </option>
+            ) : null}
+            {LOAD_TYPE_CODES.map((code) => (
+              <option key={code} value={code}>
+                {loadTypeLabel(code)}
+              </option>
+            ))}
+          </Select>
         </div>
         <div className="space-y-1">
           <Label htmlFor="req-freq">Frecuencia</Label>
-          <Input
+          <Select
             id="req-freq"
             value={frequency}
             onChange={(e) => setFrequency(e.target.value)}
             required
-          />
+          >
+            {legacyFrequency ? (
+              <option value={legacyFrequency}>
+                {cadenceLabel(legacyFrequency)} (valor actual)
+              </option>
+            ) : null}
+            {FREQUENCY_CODES.map((code) => (
+              <option key={code} value={code}>
+                {CADENCE_LABELS_ES[code]}
+              </option>
+            ))}
+          </Select>
         </div>
         <div className="space-y-1">
           <Label htmlFor="req-risk">Nivel de riesgo</Label>
-          <Input
+          <Select
             id="req-risk"
             value={riskLevel}
             onChange={(e) => setRiskLevel(e.target.value)}
-          />
+            required
+          >
+            {RISK_CODES.map((code) => (
+              <option key={code} value={code}>
+                {riskLabel(code)}
+              </option>
+            ))}
+          </Select>
         </div>
         <div className="flex items-end gap-2 pb-1">
           <input

@@ -468,6 +468,20 @@ export type AdminRequirement = {
   updated_at: string | null;
 };
 
+/** Institution catalog row for form dropdowns (P0 audit fix — the
+ *  requirements form previously demanded a raw institution UUID). */
+export type AdminInstitution = {
+  id: string;
+  code: string;
+  name: string;
+};
+
+export async function listInstitutions(): Promise<{
+  items: AdminInstitution[];
+}> {
+  return fetchJson("/api/v1/admin/institutions");
+}
+
 export async function listRequirements(params?: {
   institution_id?: string;
   is_active?: boolean;

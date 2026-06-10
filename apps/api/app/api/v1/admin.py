@@ -16,6 +16,8 @@ Surfaces:
 * ``/admin/requirements`` — list / get / create / patch. On create,
   an initial ``RequirementVersion`` is spawned when caller supplies
   any version-shaped fields.
+* ``GET /admin/institutions`` — read-only institution catalog for
+  the requirements form dropdowns.
 * ``GET /admin/periods`` and ``GET /admin/calendar?year=`` —
   read-only operational visibility into period rows + recurring
   catalog summary.
@@ -33,7 +35,7 @@ import re
 import secrets
 import unicodedata
 import zipfile
-from datetime import UTC, date, datetime
+from datetime import UTC, date, datetime, timedelta
 from pathlib import Path
 from typing import Annotated, Final, Literal
 from xml.etree import ElementTree as ET
@@ -292,12 +294,12 @@ class AdminOverview(BaseModel):
 def get_overview(db: DbSession, current: AdminUser) -> AdminOverview:
     """Operational counters for the admin home page.
 
-    ``recent_*`` fields count the last 100 rows in the respective
-    tables — enough to spot a sudden spike without expensive date math
-    on day-one of the surface. Replace with a time-bounded query when
-    a real ops dashboard surface lands.
+    ``recent_*`` fields are real 7-day windows: rows whose
+    ``created_at`` falls within the last 7 days (UTC) in the
+    submissions and audit-log tables respectively.
     """
     _ = current
+    recent_cutoff = datetime.now(UTC) - timedelta(days=7)
     clients_total = int(db.scalar(select(func.count(Client.id))) or 0)
     vendors_total = int(db.scalar(select(func.count(Vendor.id))) or 0)
     active_workspaces_total = int(
@@ -324,16 +326,30 @@ def get_overview(db: DbSession, current: AdminUser) -> AdminOverview:
         )
         or 0
     )
-    submissions_total = int(db.scalar(select(func.count(Submission.id))) or 0)
-    audit_total = int(db.scalar(select(func.count(AuditLog.id))) or 0)
+    recent_submissions_total = int(
+        db.scalar(
+            select(func.count(Submission.id)).where(
+                Submission.created_at >= recent_cutoff
+            )
+        )
+        or 0
+    )
+    recent_audit_events_total = int(
+        db.scalar(
+            select(func.count(AuditLog.id)).where(
+                AuditLog.created_at >= recent_cutoff
+            )
+        )
+        or 0
+    )
     return AdminOverview(
         clients_total=clients_total,
         vendors_total=vendors_total,
         active_workspaces_total=active_workspaces_total,
         pending_reviews_total=pending_reviews_total,
         rejected_or_correction_total=rejected_or_correction_total,
-        recent_submissions_total=min(submissions_total, 100),
-        recent_audit_events_total=min(audit_total, 100),
+        recent_submissions_total=recent_submissions_total,
+        recent_audit_events_total=recent_audit_events_total,
     )
 
 
@@ -994,6 +1010,16 @@ class RequirementUpdate(BaseModel):
     frequency: str | None = None
     risk_level: str | None = None
     is_active: bool | None = None
+
+
+@router.get("/institutions")
+def list_institutions(db: DbSession, current: AdminUser) -> dict:
+    """Institution catalog for the requirements form dropdowns."""
+    _ = current
+    rows = list(db.scalars(select(Institution).order_by(Institution.name.asc())))
+    return {
+        "items": [{"id": r.id, "code": r.code, "name": r.name} for r in rows]
+    }
 
 
 @router.get("/requirements")

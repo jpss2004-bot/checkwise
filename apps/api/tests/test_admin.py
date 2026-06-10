@@ -174,6 +174,110 @@ def test_overview_accepts_internal_admin(
         assert key in body
 
 
+def test_overview_recent_counts_use_seven_day_window(
+    api_client: TestClient, db_factory
+) -> None:
+    """``recent_*`` counters are real 7-day windows on ``created_at``:
+    a 30-day-old submission/audit row must NOT be counted, a fresh one
+    must be."""
+    from datetime import timedelta
+
+    from app.models.entities import utc_now
+
+    db = db_factory()
+    try:
+        institution = Institution(code="sat_overview", name="SAT Overview")
+        db.add(institution)
+        db.flush()
+        client = Client(name="Cliente Overview", rfc="OVW260101AB1")
+        db.add(client)
+        db.flush()
+        vendor = Vendor(
+            client_id=client.id, name="Vendor Overview", rfc="VOV260101AB1"
+        )
+        db.add(vendor)
+        db.flush()
+        period = Period(
+            code="2026-M05",
+            period_key="2026-M05",
+            year=2026,
+            month=5,
+            period_type="mensual",
+        )
+        db.add(period)
+        db.flush()
+        requirement = Requirement(
+            code="overview_req",
+            name="Overview Req",
+            institution_id=institution.id,
+            load_type="pdf",
+            frequency="mensual",
+            risk_level="medium",
+            is_active=True,
+            current_version=1,
+        )
+        db.add(requirement)
+        db.flush()
+
+        now = utc_now()
+        stale = now - timedelta(days=30)
+        for idx, ts in enumerate((now, stale)):
+            db.add(
+                Submission(
+                    client_id=client.id,
+                    vendor_id=vendor.id,
+                    institution_id=institution.id,
+                    requirement_id=requirement.id,
+                    period_id=period.id,
+                    status="pendiente_revision",
+                    load_type="pdf",
+                    requirement_code=f"overview_req_{idx}",
+                    period_key="2026-M05",
+                    created_at=ts,
+                    updated_at=ts,
+                )
+            )
+        # One stale + one fresh audit row.
+        for ts, suffix in ((stale, "stale"), (now, "fresh")):
+            db.add(
+                AuditLog(
+                    action=f"admin.test.{suffix}",
+                    entity_type="client",
+                    entity_id=client.id,
+                    created_at=ts,
+                )
+            )
+        db.commit()
+    finally:
+        db.close()
+
+    token = _admin_token(api_client, db_factory)
+    resp = api_client.get("/api/v1/admin/overview", headers=_h(token))
+    assert resp.status_code == 200, resp.text
+    body = resp.json()
+
+    # Only the fresh submission falls inside the window.
+    assert body["recent_submissions_total"] == 1
+
+    # The stale audit row is excluded; the count matches exactly the
+    # rows inside the window (the fresh seed + anything the login flow
+    # itself logged), which is strictly fewer than the table total.
+    from datetime import UTC, datetime
+
+    db = db_factory()
+    try:
+        cutoff = datetime.now(UTC) - timedelta(days=7)
+        all_rows = list(db.scalars(select(AuditLog)))
+        fresh_audit = len(
+            [r for r in all_rows if r.created_at.replace(tzinfo=UTC) >= cutoff]
+        )
+    finally:
+        db.close()
+    assert fresh_audit >= 1
+    assert body["recent_audit_events_total"] == fresh_audit
+    assert body["recent_audit_events_total"] < len(all_rows)
+
+
 # ---------------------------------------------------------------------------
 # Clients
 # ---------------------------------------------------------------------------
@@ -594,6 +698,47 @@ def test_admin_can_list_preview_and_download_metadata_exports(
 # ---------------------------------------------------------------------------
 # Requirements
 # ---------------------------------------------------------------------------
+
+
+def test_admin_can_list_institutions_sorted_by_name(
+    api_client: TestClient, db_factory
+) -> None:
+    """``GET /admin/institutions`` returns the seeded catalog as
+    ``{id, code, name}`` items ordered by name ascending."""
+    db = db_factory()
+    try:
+        db.add(Institution(code="stps", name="STPS"))
+        db.add(Institution(code="imss_cat", name="IMSS"))
+        db.add(Institution(code="infonavit", name="Infonavit"))
+        db.commit()
+    finally:
+        db.close()
+
+    token = _admin_token(api_client, db_factory)
+    resp = api_client.get("/api/v1/admin/institutions", headers=_h(token))
+    assert resp.status_code == 200, resp.text
+    body = resp.json()
+    assert set(body.keys()) == {"items"}
+    names = [item["name"] for item in body["items"]]
+    assert names == ["IMSS", "Infonavit", "STPS"]
+    for item in body["items"]:
+        assert set(item.keys()) == {"id", "code", "name"}
+        assert item["id"]
+    codes = {item["code"] for item in body["items"]}
+    assert codes == {"stps", "imss_cat", "infonavit"}
+
+
+def test_institutions_rejects_unauthenticated(api_client: TestClient) -> None:
+    resp = api_client.get("/api/v1/admin/institutions")
+    assert resp.status_code == 401
+
+
+def test_institutions_rejects_reviewer_only(
+    api_client: TestClient, db_factory
+) -> None:
+    token = _reviewer_token(api_client, db_factory)
+    resp = api_client.get("/api/v1/admin/institutions", headers=_h(token))
+    assert resp.status_code == 403
 
 
 def test_admin_can_list_requirements(api_client: TestClient, db_factory) -> None:
