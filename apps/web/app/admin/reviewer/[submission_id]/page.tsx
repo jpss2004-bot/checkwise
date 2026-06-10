@@ -5,6 +5,7 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import {
   ArrowLeft,
+  ArrowRight,
   CheckCircle,
   DownloadSimple,
   FileText,
@@ -23,8 +24,10 @@ import {
 import { LecturaDelDocumento } from "@/components/checkwise/admin/lectura-del-documento";
 import { SubmissionTimeline } from "@/components/checkwise/portal/submission-timeline";
 import { FeedbackLauncher } from "@/components/feedback/feedback-launcher";
+import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { MetadataStrip, type MetadataItem } from "@/components/ui/metadata-strip";
 import { PageHeader } from "@/components/ui/page-header";
 import { toast } from "@/components/ui/toast";
 import {
@@ -39,8 +42,14 @@ import {
   reviewerDocumentDownloadUrl,
   ReviewerApiError,
   submitDecision,
+  type ReviewerSubmissionDetail,
 } from "@/lib/api/reviewer";
-import { DocumentStatus, statusLabel } from "@/lib/constants/statuses";
+import { personaLabel } from "@/lib/constants/labels";
+import {
+  DocumentStatus,
+  statusLabel,
+  statusVariant,
+} from "@/lib/constants/statuses";
 
 type PageProps = {
   params: Promise<{ submission_id: string }>;
@@ -52,14 +61,18 @@ export default function ReviewerSubmissionPage({ params }: PageProps) {
   const { submission_id } = use(params);
   const router = useRouter();
   const [session, setSession] = useState<AdminSession | null>(null);
-  const [detail, setDetail] = useState<SubmissionDetail | null>(null);
+  const [detail, setDetail] = useState<ReviewerSubmissionDetail | null>(null);
   const [loading, setLoading] = useState(true);
   const [errorKind, setErrorKind] = useState<"not_found" | "network" | null>(null);
   const [reloadKey, setReloadKey] = useState(0);
 
-  const [decided, setDecided] = useState<{ new_status: string; action: ReviewerAction } | null>(
-    null,
-  );
+  const [decided, setDecided] = useState<{
+    new_status: string;
+    action: ReviewerAction;
+    /** Oldest still-pending submission (FIFO) — drives "Siguiente
+     *  documento". Null when the queue is drained. */
+    next_pending_submission_id: string | null;
+  } | null>(null);
 
   useEffect(() => {
     const current = readAdminSession();
@@ -79,6 +92,10 @@ export default function ReviewerSubmissionPage({ params }: PageProps) {
     let cancelled = false;
     setLoading(true);
     setErrorKind(null);
+    // Auto-advance navigates to a new submission_id within the same
+    // mounted page — reset the decided card so the next document opens
+    // on a fresh decision panel.
+    setDecided(null);
     getReviewerSubmission(session.access_token, submission_id)
       .then((payload) => {
         if (!cancelled) setDetail(payload);
@@ -121,7 +138,11 @@ export default function ReviewerSubmissionPage({ params }: PageProps) {
           reason,
           observations,
         );
-        setDecided({ new_status: result.new_status, action: result.action as ReviewerAction });
+        setDecided({
+          new_status: result.new_status,
+          action: result.action as ReviewerAction,
+          next_pending_submission_id: result.next_pending_submission_id ?? null,
+        });
         toast.success("Decisión registrada", {
           description: `Este documento ahora está en "${statusLabel(result.new_status)}".`,
         });
@@ -137,6 +158,34 @@ export default function ReviewerSubmissionPage({ params }: PageProps) {
     },
     [session, detail],
   );
+
+  // After a decision lands, Enter or N jumps to the next pending
+  // document — the keyboard reviewer never has to reach for the mouse
+  // between documents. Ignored while a form control has focus (e.g.
+  // the feedback launcher) so we never steal typed characters.
+  useEffect(() => {
+    const nextId = decided?.next_pending_submission_id;
+    if (!nextId) return;
+    function onKeyDown(event: KeyboardEvent) {
+      if (event.metaKey || event.ctrlKey || event.altKey) return;
+      const el = document.activeElement;
+      if (
+        el instanceof HTMLElement &&
+        (el.tagName === "INPUT" ||
+          el.tagName === "TEXTAREA" ||
+          el.tagName === "SELECT" ||
+          el.isContentEditable)
+      ) {
+        return;
+      }
+      if (event.key === "Enter" || event.key.toLowerCase() === "n") {
+        event.preventDefault();
+        router.push(`/admin/reviewer/${nextId}`);
+      }
+    }
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
+  }, [decided, router]);
 
   if (!session) return null;
 
@@ -190,10 +239,12 @@ export default function ReviewerSubmissionPage({ params }: PageProps) {
         <div className="grid gap-5 lg:grid-cols-3">
           <div className="space-y-5 lg:col-span-2">
             <StatusHeader detail={detail} decidedHint={decided?.new_status ?? null} />
+            <VendorIdentityStrip detail={detail} />
             <ReviewerSubmissionPreview detail={detail} session={session} />
             <LineageStrip detail={detail} />
             <LecturaDelDocumento detail={detail} />
             <ProviderCard detail={detail} />
+            <PreviousAttemptsCard detail={detail} />
             <SubmissionTimeline detail={detail} audience="admin" />
           </div>
           <div className="space-y-5">
@@ -217,16 +268,48 @@ export default function ReviewerSubmissionPage({ params }: PageProps) {
                     />
                     . La línea de tiempo refleja tu decisión.
                   </p>
-                  <Button asChild className="mt-4">
-                    <Link href="/admin/reviewer">
-                      <ArrowLeft className="h-4 w-4" aria-hidden />
-                      Volver a la bandeja
-                    </Link>
-                  </Button>
+                  {decided.next_pending_submission_id ? (
+                    <div className="mt-4 space-y-2">
+                      <Button
+                        className="w-full"
+                        onClick={() =>
+                          router.push(
+                            `/admin/reviewer/${decided.next_pending_submission_id}`,
+                          )
+                        }
+                      >
+                        Siguiente documento
+                        <ArrowRight className="h-4 w-4" aria-hidden />
+                      </Button>
+                      <Button asChild variant="outline" className="w-full">
+                        <Link href="/admin/reviewer">
+                          <ArrowLeft className="h-4 w-4" aria-hidden />
+                          Volver a la bandeja
+                        </Link>
+                      </Button>
+                      <p className="text-center text-[11px] text-[color:var(--text-tertiary)]">
+                        Enter o N para pasar al siguiente
+                      </p>
+                    </div>
+                  ) : (
+                    <>
+                      <p className="mt-3 text-sm font-medium text-[color:var(--status-success-text)]">
+                        Bandeja despejada 🎉 No quedan documentos pendientes
+                        por revisar.
+                      </p>
+                      <Button asChild className="mt-4">
+                        <Link href="/admin/reviewer">
+                          <ArrowLeft className="h-4 w-4" aria-hidden />
+                          Volver a la bandeja
+                        </Link>
+                      </Button>
+                    </>
+                  )}
                 </CardContent>
               </Card>
             ) : (
               <ReviewDecisionPanel
+                key={detail.submission_id}
                 disabled={panelDisabled}
                 disabledReason={
                   isTerminal
@@ -297,6 +380,144 @@ function LineageStrip({ detail }: { detail: SubmissionDetail }) {
         </p>
       ) : null}
     </section>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Vendor identity + RFC match (P1 audit fix, 2026-06-10)
+// ---------------------------------------------------------------------------
+
+type RfcComparison =
+  | { state: "unknown"; expected: string | null; detected: string | null }
+  | { state: "match" | "mismatch"; expected: string; detected: string };
+
+/**
+ * Pull the OCR/AI-detected RFCs from the inspection payload, mirroring
+ * <LecturaDelDocumento/>'s primary-signal choice (AI shadow signals
+ * when the shadow run produced them, heuristic otherwise) so this
+ * comparison never disagrees with the "RFC detectado" row below it.
+ */
+function detectedRfcs(detail: SubmissionDetail): string[] {
+  const payload = detail.shadow_analysis ?? null;
+  if (!payload) return [];
+  const signals = payload.shadow?.signals ?? payload.heuristic?.signals ?? null;
+  return signals?.detected_rfcs ?? [];
+}
+
+/**
+ * Case-insensitive, trimmed comparison of the registry's expected RFC
+ * against the detected candidates. Any candidate matching counts as a
+ * match (multi-RFC documents like contratos list both parties). When
+ * either side is missing we surface a neutral "Sin comparación" state
+ * instead of a scary ✗.
+ */
+function compareRfc(
+  expectedRaw: string | null,
+  detected: string[],
+): RfcComparison {
+  const expected = expectedRaw?.trim() || null;
+  const candidates = detected
+    .map((rfc) => rfc.trim())
+    .filter((rfc) => rfc.length > 0);
+  if (!expected || candidates.length === 0) {
+    return { state: "unknown", expected, detected: candidates[0] ?? null };
+  }
+  const matched = candidates.find(
+    (rfc) => rfc.toUpperCase() === expected.toUpperCase(),
+  );
+  if (matched) {
+    return { state: "match", expected, detected: matched };
+  }
+  return { state: "mismatch", expected, detected: candidates[0] };
+}
+
+/**
+ * Vendor identity block — answers "WHOSE document is this?" before the
+ * reviewer reads a single signal, and makes the most common fraud
+ * vector (right document type, wrong company) a one-glance ✓/✗ check
+ * instead of a memory exercise against the queue row. Null-safe:
+ * legacy rows can carry ``vendor: null`` — the strip simply doesn't
+ * render and the page reads exactly as before.
+ */
+function VendorIdentityStrip({ detail }: { detail: ReviewerSubmissionDetail }) {
+  const vendor = detail.vendor;
+  if (!vendor) return null;
+
+  const comparison = compareRfc(vendor.vendor_rfc, detectedRfcs(detail));
+
+  const items: MetadataItem[] = [
+    { label: "Proveedor", value: vendor.vendor_name ?? "—" },
+    { label: "RFC esperado", value: vendor.vendor_rfc ?? "—", mono: true },
+    { label: "Cliente", value: vendor.client_name ?? "—" },
+    { label: "Persona", value: personaLabel(vendor.persona_type) },
+    {
+      label: "RFC detectado",
+      value: (
+        <span className="inline-flex items-center gap-1.5">
+          <span className="font-mono tabular-nums">
+            {comparison.detected ?? "—"}
+          </span>
+          {comparison.state === "match" ? (
+            <Badge variant="success">✓ Coincide</Badge>
+          ) : comparison.state === "mismatch" ? (
+            <Badge variant="destructive">✗ No coincide</Badge>
+          ) : (
+            <Badge variant="secondary">Sin comparación</Badge>
+          )}
+        </span>
+      ),
+    },
+  ];
+
+  return <MetadataStrip items={items} />;
+}
+
+// ---------------------------------------------------------------------------
+// Previous attempts (2026-06-10)
+// ---------------------------------------------------------------------------
+
+/**
+ * Compact history of earlier submissions on the same slot. The detail
+ * payload has carried ``previous_attempts`` since Phase 4 but nothing
+ * rendered it — reviewers walked the raw-UUID lineage strip one hop at
+ * a time instead. Each row links straight to the sibling decision
+ * screen. Hidden when the submission is the first attempt.
+ */
+function PreviousAttemptsCard({ detail }: { detail: SubmissionDetail }) {
+  const attempts = detail.previous_attempts ?? [];
+  if (attempts.length === 0) return null;
+  return (
+    <Card>
+      <CardHeader>
+        <CardTitle>
+          Intentos anteriores ({attempts.length})
+        </CardTitle>
+      </CardHeader>
+      <CardContent>
+        <ul className="space-y-2">
+          {attempts.map((attempt) => (
+            <li key={attempt.submission_id}>
+              <Link
+                href={`/admin/reviewer/${attempt.submission_id}`}
+                className="flex items-center justify-between gap-3 rounded-md border border-[color:var(--border-subtle)] bg-[color:var(--surface-page)] px-3 py-2 transition-colors hover:bg-[color:var(--surface-hover)]"
+              >
+                <div className="min-w-0">
+                  <p className="text-sm font-medium text-[color:var(--text-primary)]">
+                    {formatShortDate(attempt.submitted_at)}
+                  </p>
+                  <p className="truncate font-mono text-xs text-[color:var(--text-tertiary)]">
+                    {attempt.filename ?? "Sin archivo"}
+                  </p>
+                </div>
+                <Badge variant={statusVariant(attempt.status)}>
+                  {statusLabel(attempt.status)}
+                </Badge>
+              </Link>
+            </li>
+          ))}
+        </ul>
+      </CardContent>
+    </Card>
   );
 }
 
@@ -482,6 +703,19 @@ function Field({ label, value }: { label: string; value: string }) {
       </p>
     </div>
   );
+}
+
+/** Date-only variant for compact lists (previous attempts). */
+function formatShortDate(iso: string): string {
+  try {
+    return new Date(iso).toLocaleDateString("es-MX", {
+      day: "2-digit",
+      month: "short",
+      year: "numeric",
+    });
+  } catch {
+    return iso;
+  }
 }
 
 function formatDate(iso: string): string {

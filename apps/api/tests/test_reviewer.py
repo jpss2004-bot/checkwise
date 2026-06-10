@@ -575,3 +575,170 @@ def test_document_endpoint_404_when_storage_missing(
         headers={"Authorization": f"Bearer {token}"},
     )
     assert response.status_code == 404
+
+
+# ---------------------------------------------------------------------------
+# Queue pagination (keyset cursor)
+# ---------------------------------------------------------------------------
+
+
+def test_queue_total_reflects_all_matching_rows_and_sets_cursor(
+    api_client: TestClient, db_factory
+) -> None:
+    """``total`` is the real filtered count (not len(items)) and
+    ``next_cursor`` is populated when more rows remain past ``limit``."""
+    _seed_user(db_factory, email="rev@x.mx", role="reviewer")
+    token = _login(api_client, "rev@x.mx", "Hunter2 Correct horse")
+    oldest = _seed_submission(db_factory, age_hours=30, period_key="2026-M01")
+    middle = _seed_submission(db_factory, age_hours=20, period_key="2026-M02")
+    _seed_submission(db_factory, age_hours=10, period_key="2026-M03")
+
+    response = api_client.get(
+        "/api/v1/reviewer/queue",
+        params={"limit": 2},
+        headers={"Authorization": f"Bearer {token}"},
+    )
+    assert response.status_code == 200, response.text
+    payload = response.json()
+    assert payload["total"] == 3
+    assert len(payload["items"]) == 2
+    assert payload["total"] > len(payload["items"])
+    assert [i["submission_id"] for i in payload["items"]] == [oldest, middle]
+    assert payload["next_cursor"] is not None
+
+
+def test_queue_cursor_walks_disjoint_pages_in_fifo_order(
+    api_client: TestClient, db_factory
+) -> None:
+    _seed_user(db_factory, email="rev@x.mx", role="reviewer")
+    token = _login(api_client, "rev@x.mx", "Hunter2 Correct horse")
+    expected_fifo = [
+        _seed_submission(db_factory, age_hours=50, period_key="2026-M01"),
+        _seed_submission(db_factory, age_hours=40, period_key="2026-M02"),
+        _seed_submission(db_factory, age_hours=30, period_key="2026-M03"),
+        _seed_submission(db_factory, age_hours=20, period_key="2026-M04"),
+        _seed_submission(db_factory, age_hours=10, period_key="2026-M05"),
+    ]
+
+    headers = {"Authorization": f"Bearer {token}"}
+    collected: list[str] = []
+    cursor: str | None = None
+    pages = 0
+    while True:
+        params: dict = {"limit": 2}
+        if cursor:
+            params["cursor"] = cursor
+        response = api_client.get(
+            "/api/v1/reviewer/queue", params=params, headers=headers
+        )
+        assert response.status_code == 200, response.text
+        payload = response.json()
+        assert payload["total"] == 5
+        page_ids = [i["submission_id"] for i in payload["items"]]
+        # Pages are disjoint.
+        assert not set(page_ids) & set(collected)
+        collected.extend(page_ids)
+        cursor = payload["next_cursor"]
+        pages += 1
+        if cursor is None:
+            break
+        assert pages < 10, "cursor never terminated"
+
+    assert pages == 3
+    assert collected == expected_fifo
+
+
+def test_queue_rejects_garbage_cursor(api_client: TestClient, db_factory) -> None:
+    _seed_user(db_factory, email="rev@x.mx", role="reviewer")
+    token = _login(api_client, "rev@x.mx", "Hunter2 Correct horse")
+    response = api_client.get(
+        "/api/v1/reviewer/queue",
+        params={"cursor": "no-es-un-cursor"},
+        headers={"Authorization": f"Bearer {token}"},
+    )
+    assert response.status_code == 422
+
+
+# ---------------------------------------------------------------------------
+# Detail — vendor identity block
+# ---------------------------------------------------------------------------
+
+
+def test_detail_includes_vendor_block_with_expected_rfc(
+    api_client: TestClient, db_factory
+) -> None:
+    from app.models import ProviderWorkspace
+
+    _seed_user(db_factory, email="rev@x.mx", role="reviewer")
+    token = _login(api_client, "rev@x.mx", "Hunter2 Correct horse")
+    submission_id = _seed_submission(db_factory)
+
+    # Look up the seeded vendor/client and tie them to a workspace.
+    db = db_factory()
+    try:
+        sub = db.get(Submission, submission_id)
+        assert sub is not None
+        vendor = db.get(Vendor, sub.vendor_id)
+        client_row = db.get(Client, sub.client_id)
+        assert vendor is not None and client_row is not None
+        vendor.persona_type = "moral"
+        workspace = ProviderWorkspace(
+            client_id=client_row.id,
+            vendor_id=vendor.id,
+            persona_type="moral",
+            access_token=f"tok-{submission_id[:24]}",
+        )
+        db.add(workspace)
+        db.commit()
+        expected = {
+            "vendor_id": vendor.id,
+            "vendor_name": vendor.name,
+            "vendor_rfc": vendor.rfc,
+            "persona_type": "moral",
+            "client_id": client_row.id,
+            "client_name": client_row.name,
+            "workspace_id": workspace.id,
+        }
+    finally:
+        db.close()
+
+    response = api_client.get(
+        f"/api/v1/reviewer/submissions/{submission_id}",
+        headers={"Authorization": f"Bearer {token}"},
+    )
+    assert response.status_code == 200, response.text
+    payload = response.json()
+    assert payload["vendor"] == expected
+
+
+# ---------------------------------------------------------------------------
+# Decision — next-pending pointer
+# ---------------------------------------------------------------------------
+
+
+def test_decision_returns_next_pending_submission_id(
+    api_client: TestClient, db_factory
+) -> None:
+    _seed_user(db_factory, email="rev@x.mx", role="reviewer")
+    token = _login(api_client, "rev@x.mx", "Hunter2 Correct horse")
+    older = _seed_submission(db_factory, age_hours=48, period_key="2026-M01")
+    newer = _seed_submission(db_factory, age_hours=2, period_key="2026-M02")
+    headers = {"Authorization": f"Bearer {token}"}
+
+    # Deciding the older one points at the remaining (newer) item.
+    response = api_client.post(
+        f"/api/v1/reviewer/submissions/{older}/decision",
+        json={"action": "approve"},
+        headers=headers,
+    )
+    assert response.status_code == 200, response.text
+    assert response.json()["next_pending_submission_id"] == newer
+
+    # Deciding the last one drains the queue -> None.
+    response = api_client.post(
+        f"/api/v1/reviewer/submissions/{newer}/decision",
+        json={"action": "reject", "reason": "Documento ilegible"},
+        headers=headers,
+    )
+    assert response.status_code == 200, response.text
+    assert response.json()["next_pending_submission_id"] is None

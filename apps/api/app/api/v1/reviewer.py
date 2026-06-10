@@ -15,12 +15,14 @@ Per-client scoping arrives with Patch 8 (client_admin role).
 
 from __future__ import annotations
 
+import base64
+import binascii
 from datetime import UTC, datetime
 from typing import Annotated, Literal
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Response, status
 from pydantic import BaseModel, Field
-from sqlalchemy import select
+from sqlalchemy import and_, func, or_, select
 from sqlalchemy.orm import Session, selectinload
 
 from app.api.v1.auth import CurrentUser, require_any_role
@@ -141,6 +143,37 @@ class DecisionResponse(BaseModel):
     observations: str | None = None
     decided_at: datetime
     reviewer_user_id: str
+    # Reviewer-flow ergonomics — id of the oldest submission still
+    # waiting in the queue after this decision, so the UI can offer a
+    # "siguiente pendiente" jump without an extra round-trip. ``None``
+    # when the queue is empty.
+    next_pending_submission_id: str | None = None
+
+
+# ---------------------------------------------------------------------------
+# Queue cursor (keyset pagination)
+# ---------------------------------------------------------------------------
+
+
+def _encode_queue_cursor(created_at: datetime, submission_id: str) -> str:
+    """Opaque keyset cursor: base64 of ``"<created_at isoformat>|<id>"``."""
+    raw = f"{created_at.isoformat()}|{submission_id}"
+    return base64.urlsafe_b64encode(raw.encode("utf-8")).decode("ascii")
+
+
+def _decode_queue_cursor(cursor: str) -> tuple[datetime, str]:
+    """Inverse of :func:`_encode_queue_cursor`; 422 on garbage input."""
+    try:
+        raw = base64.urlsafe_b64decode(cursor.encode("ascii")).decode("utf-8")
+        created_raw, sep, submission_id = raw.partition("|")
+        if not sep or not submission_id:
+            raise ValueError("malformed cursor payload")
+        return datetime.fromisoformat(created_raw), submission_id
+    except (ValueError, binascii.Error, UnicodeError) as exc:
+        raise HTTPException(
+            status.HTTP_422_UNPROCESSABLE_CONTENT,
+            detail="Cursor de paginación inválido.",
+        ) from exc
 
 
 # ---------------------------------------------------------------------------
@@ -155,24 +188,28 @@ def get_queue(
     limit: Annotated[int, Query(ge=1, le=100)] = 50,
     institution: Annotated[str | None, Query()] = None,
     submission_status: Annotated[str | None, Query(alias="status")] = None,
+    cursor: Annotated[str | None, Query()] = None,
 ) -> QueueResponse:
     """List submissions waiting on a human decision.
 
     Default ordering is FIFO (oldest first) — the reviewer should clear
     the queue from the top. ``status`` defaults to *any of* the queue
     statuses; passing one narrows it. ``institution`` is the institution
-    code (e.g. ``sat``, ``imss``).
+    code (e.g. ``sat``, ``imss``). ``cursor`` is the opaque keyset
+    cursor from a previous page's ``next_cursor``; pass it back to get
+    the next page under the same FIFO ordering.
     """
 
     statuses = (submission_status,) if submission_status else QUEUE_STATUSES
     # Eager-load every relationship the per-row build touches so the queue
     # is a handful of batched queries instead of ~7 lookups per submission
     # (the original N+1 made the page seconds-slow on a networked DB).
+    # ``id`` is the deterministic tiebreak for equal ``created_at`` so the
+    # keyset cursor never skips or repeats rows.
     stmt = (
         select(Submission)
         .where(Submission.status.in_(statuses))
-        .order_by(Submission.created_at.asc())
-        .limit(limit)
+        .order_by(Submission.created_at.asc(), Submission.id.asc())
         .options(
             selectinload(Submission.vendor),
             selectinload(Submission.client),
@@ -183,20 +220,46 @@ def get_queue(
             selectinload(Submission.validations),
         )
     )
+    count_stmt = select(func.count(Submission.id)).where(
+        Submission.status.in_(statuses)
+    )
     if institution:
         stmt = stmt.join(Institution, Submission.institution_id == Institution.id).where(
             Institution.code == institution
         )
+        count_stmt = count_stmt.join(
+            Institution, Submission.institution_id == Institution.id
+        ).where(Institution.code == institution)
 
-    submissions = list(db.scalars(stmt))
-    total = (
-        db.scalar(
-            select(__import__("sqlalchemy").func.count(Submission.id)).where(
-                Submission.status.in_(statuses)
+    if cursor:
+        cursor_created_at, cursor_id = _decode_queue_cursor(cursor)
+        # Keyset filter: strictly after (created_at, id). Spelled as the
+        # OR expansion (instead of a row-value tuple comparison) so the
+        # SQLite test backend evaluates it identically to Postgres.
+        stmt = stmt.where(
+            or_(
+                Submission.created_at > cursor_created_at,
+                and_(
+                    Submission.created_at == cursor_created_at,
+                    Submission.id > cursor_id,
+                ),
             )
         )
-        or 0
-    )
+
+    # Fetch one extra row past ``limit``: a cheap "is there a next page"
+    # probe without a second COUNT under the cursor filter.
+    rows = list(db.scalars(stmt.limit(limit + 1)))
+    has_more = len(rows) > limit
+    submissions = rows[:limit]
+
+    # ``total`` is the real number of rows matching the current filters
+    # (status/institution), independent of limit/cursor.
+    total = db.scalar(count_stmt) or 0
+
+    next_cursor: str | None = None
+    if has_more and submissions:
+        last = submissions[-1]
+        next_cursor = _encode_queue_cursor(last.created_at, last.id)
 
     # Batch the document-inspection lookup: collect the first document per
     # queued submission, then fetch all their inspections in one IN query
@@ -275,7 +338,7 @@ def get_queue(
     cutoff = utc_now() - timedelta(days=7)
     approved_count = (
         db.scalar(
-            select(__import__("sqlalchemy").func.count(Submission.id)).where(
+            select(func.count(Submission.id)).where(
                 Submission.status.in_((
                     DocumentStatus.APROBADO.value,
                     DocumentStatus.EXCEPCION_LEGAL.value,
@@ -287,7 +350,7 @@ def get_queue(
     )
     rejected_count = (
         db.scalar(
-            select(__import__("sqlalchemy").func.count(Submission.id)).where(
+            select(func.count(Submission.id)).where(
                 Submission.status == DocumentStatus.RECHAZADO.value,
                 Submission.updated_at >= cutoff,
             )
@@ -298,6 +361,7 @@ def get_queue(
     return QueueResponse(
         items=items,
         total=int(total),
+        next_cursor=next_cursor,
         approved_last_7d_count=int(approved_count),
         rejected_last_7d_count=int(rejected_count),
     )
@@ -335,11 +399,37 @@ def get_submission(
         SubmissionRequirementSummary,
         _suggested_action,
     )
-    from app.models import DocumentInspection
+    from app.models import DocumentInspection, ProviderWorkspace
 
-    submission = db.get(Submission, submission_id)
+    submission = db.scalar(
+        select(Submission)
+        .where(Submission.id == submission_id)
+        .options(
+            selectinload(Submission.vendor),
+            selectinload(Submission.client),
+            selectinload(Submission.requirement),
+            selectinload(Submission.institution),
+            selectinload(Submission.period),
+            selectinload(Submission.requirement_version),
+        )
+    )
     if submission is None:
         raise HTTPException(status.HTTP_404_NOT_FOUND, detail="Envío no encontrado.")
+
+    # Vendor identity context — the EXPECTED RFC the frontend compares
+    # against the OCR-detected one, plus the ids needed to deep-link
+    # into the client/vendor admin views. One scalar lookup resolves the
+    # workspace tying this vendor to this client (no per-field N+1).
+    vendor = submission.vendor
+    client = submission.client
+    workspace_id = db.scalar(
+        select(ProviderWorkspace.id)
+        .where(
+            ProviderWorkspace.vendor_id == submission.vendor_id,
+            ProviderWorkspace.client_id == submission.client_id,
+        )
+        .limit(1)
+    )
 
     document = db.scalar(
         select(Document).where(Document.submission_id == submission.id).limit(1)
@@ -456,6 +546,17 @@ def get_submission(
         "load_type": submission.load_type,
         "submitted_at": submission.created_at.isoformat(),
         "comments": submission.comments,
+        "vendor": {
+            "vendor_id": vendor.id if vendor else None,
+            "vendor_name": vendor.name if vendor else None,
+            # Expected RFC — the frontend compares this against the
+            # OCR-detected RFC from the document inspection.
+            "vendor_rfc": vendor.rfc if vendor else None,
+            "persona_type": vendor.persona_type if vendor else None,
+            "client_id": client.id if client else None,
+            "client_name": client.name if client else None,
+            "workspace_id": workspace_id,
+        },
         "requirement": SubmissionRequirementSummary(
             code=submission.requirement.code if submission.requirement else None,
             name=submission.requirement.name if submission.requirement else None,
@@ -621,6 +722,20 @@ def submit_decision(
             submission_id,
         )
 
+    # "Siguiente pendiente" pointer — the oldest submission still
+    # waiting in the queue (FIFO, same ordering as GET /reviewer/queue),
+    # excluding the row just decided. One cheap scalar query; ``None``
+    # means the queue is empty and the UI can celebrate.
+    next_pending_id = db.scalar(
+        select(Submission.id)
+        .where(
+            Submission.status.in_(QUEUE_STATUSES),
+            Submission.id != submission.id,
+        )
+        .order_by(Submission.created_at.asc(), Submission.id.asc())
+        .limit(1)
+    )
+
     return DecisionResponse(
         submission_id=result.submission_id,
         previous_status=result.previous_status,
@@ -630,6 +745,7 @@ def submit_decision(
         observations=result.observations,
         decided_at=result.decided_at,
         reviewer_user_id=result.reviewer_user_id,
+        next_pending_submission_id=next_pending_id,
     )
 
 

@@ -33,9 +33,13 @@ import { cn } from "@/lib/utils";
  *     mark exception) — each carries the doc-state token of the
  *     resulting status so the reviewer sees what the document will
  *     look like *after* their click,
- *   - opens a Dialog confirmation for the three destructive paths
- *     (anything that returns the document to the provider) so a
- *     fast double-click can't push a wrong reason through,
+ *   - opens a Dialog confirmation for the three non-approve paths
+ *     (anything that returns the document to the provider or needs a
+ *     documented reason) so a fast double-click can't push a wrong
+ *     reason through — approve, the safe majority path, submits
+ *     directly (2026-06-10),
+ *   - wires single-letter keyboard shortcuts (A/R/C/E) plus
+ *     Cmd/Ctrl+Enter so the queue can be worked without the mouse,
  *   - drives the reason textarea through the Field primitive so
  *     aria-invalid + helper/error wiring is consistent with every
  *     other form in the product.
@@ -153,6 +157,29 @@ const ACTIONS: {
   },
 ];
 
+// Keyboard shortcuts (2026-06-10) — single-letter chip selection for
+// the keyboard-first reviewer grinding through the queue. Mirrors the
+// chip order: A=aprobar, R=rechazar, C=pedir aclaración, E=excepción.
+const KEY_TO_ACTION: Record<string, ReviewerAction> = {
+  a: "approve",
+  r: "reject",
+  c: "request_clarification",
+  e: "mark_exception",
+};
+
+/** True when typing would land in a form control — letter shortcuts
+ *  must never steal characters from the reason/observations fields. */
+function isEditableElement(el: Element | null): boolean {
+  if (!(el instanceof HTMLElement)) return false;
+  const tag = el.tagName;
+  return (
+    tag === "INPUT" ||
+    tag === "TEXTAREA" ||
+    tag === "SELECT" ||
+    el.isContentEditable
+  );
+}
+
 const TONE_ACTIVE: Record<(typeof ACTIONS)[number]["tone"], string> = {
   approve:
     "border-[color:var(--doc-approved-border)] bg-[color:var(--doc-approved-bg)] text-[color:var(--doc-approved-text)]",
@@ -200,44 +227,13 @@ export function ReviewDecisionPanel({
     setReasonError(null);
   }
 
-  if (disabled) {
-    return (
-      <section
-        className={cn(
-          "rounded-lg border border-[color:var(--border-default)] bg-[color:var(--surface-raised)] p-5 shadow-xs",
-          className,
-        )}
-        aria-label="Decisión bloqueada"
-      >
-        <h2 className="text-[15px] font-semibold text-[color:var(--text-primary)]">
-          Documento resuelto
-        </h2>
-        <p className="mt-2 text-sm text-[color:var(--text-secondary)]">
-          {disabledReason ??
-            "Este documento ya tiene una decisión registrada. Solo una nueva carga del proveedor puede reabrirlo."}
-        </p>
-      </section>
-    );
-  }
-
-  function handleChip(next: ReviewerAction) {
+  const handleChip = React.useCallback((next: ReviewerAction) => {
     setAction(next);
     setReasonError(null);
     setNetworkError(null);
-  }
+  }, []);
 
-  function attemptSubmit() {
-    if (!action) return;
-    const trimmed = reason.trim();
-    if (requiresReason && !trimmed) {
-      setReasonError("Esta decisión necesita una razón.");
-      return;
-    }
-    setReasonError(null);
-    setConfirmOpen(true);
-  }
-
-  async function confirmSubmit() {
+  const confirmSubmit = React.useCallback(async () => {
     if (!action) return;
     setSubmitting(true);
     setNetworkError(null);
@@ -265,6 +261,85 @@ export function ReviewDecisionPanel({
     } finally {
       setSubmitting(false);
     }
+  }, [action, observations, onSubmit, reason, requiresReason]);
+
+  const attemptSubmit = React.useCallback(() => {
+    if (!action || submitting) return;
+    const trimmed = reason.trim();
+    if (requiresReason && !trimmed) {
+      setReasonError("Esta decisión necesita una razón.");
+      return;
+    }
+    setReasonError(null);
+    // Lighter approve (2026-06-10): approving is the safe majority
+    // path — it doesn't return the document to the provider, so the
+    // confirmation Dialog was pure friction. Submit directly. The
+    // three provider-facing actions keep the confirm step.
+    if (action === "approve") {
+      void confirmSubmit();
+      return;
+    }
+    setConfirmOpen(true);
+  }, [action, confirmSubmit, reason, requiresReason, submitting]);
+
+  // Keyboard shortcuts (2026-06-10). Letter keys select an action
+  // chip; Cmd/Ctrl+Enter advances the submit flow (opens the confirm
+  // dialog, or confirms it when already open — and on approve submits
+  // directly). Letter keys are suppressed while a form control has
+  // focus or while any dialog is open; Cmd/Ctrl+Enter stays available
+  // from the reason textarea (modifier-guarded, can't collide with
+  // typing) but is suppressed when a dialog other than our confirm
+  // flow is open.
+  React.useEffect(() => {
+    if (disabled) return;
+    function onKeyDown(event: KeyboardEvent) {
+      const dialogEl = document.querySelector(
+        '[role="dialog"], [role="alertdialog"]',
+      );
+      const foreignDialogOpen = dialogEl !== null && !confirmOpen;
+      if (foreignDialogOpen) return;
+
+      if ((event.metaKey || event.ctrlKey) && event.key === "Enter") {
+        event.preventDefault();
+        if (submitting) return;
+        if (confirmOpen) {
+          void confirmSubmit();
+        } else {
+          attemptSubmit();
+        }
+        return;
+      }
+      if (event.metaKey || event.ctrlKey || event.altKey) return;
+      if (confirmOpen) return;
+      if (isEditableElement(document.activeElement)) return;
+      const next = KEY_TO_ACTION[event.key.toLowerCase()];
+      if (next) {
+        event.preventDefault();
+        handleChip(next);
+      }
+    }
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
+  }, [attemptSubmit, confirmOpen, confirmSubmit, disabled, handleChip, submitting]);
+
+  if (disabled) {
+    return (
+      <section
+        className={cn(
+          "rounded-lg border border-[color:var(--border-default)] bg-[color:var(--surface-raised)] p-5 shadow-xs",
+          className,
+        )}
+        aria-label="Decisión bloqueada"
+      >
+        <h2 className="text-[15px] font-semibold text-[color:var(--text-primary)]">
+          Documento resuelto
+        </h2>
+        <p className="mt-2 text-sm text-[color:var(--text-secondary)]">
+          {disabledReason ??
+            "Este documento ya tiene una decisión registrada. Solo una nueva carga del proveedor puede reabrirlo."}
+        </p>
+      </section>
+    );
   }
 
   const activeAction = action ? ACTIONS.find((a) => a.action === action) ?? null : null;
@@ -290,7 +365,8 @@ export function ReviewDecisionPanel({
         </div>
         <p className="mt-1 text-xs text-[color:var(--text-secondary)]">
           Elige una acción. Las que devuelven el documento al proveedor requieren
-          una razón. Confirmamos antes de registrar.
+          una razón y se confirman antes de registrar. Aprobar se registra
+          directo.
         </p>
       </header>
 
@@ -406,14 +482,30 @@ export function ReviewDecisionPanel({
 
         <Button
           type="button"
-          disabled={!action}
+          disabled={!action || submitting}
+          loading={action === "approve" && submitting}
           onClick={attemptSubmit}
           className="w-full"
           data-testid="open-decision-confirm"
         >
-          <Gavel className="h-4 w-4" weight="bold" aria-hidden="true" />
-          {action ? "Revisar y confirmar" : "Selecciona una acción"}
+          {action === "approve" ? (
+            <CheckCircle className="h-4 w-4" weight="bold" aria-hidden="true" />
+          ) : (
+            <Gavel className="h-4 w-4" weight="bold" aria-hidden="true" />
+          )}
+          {action === "approve"
+            ? "Aprobar documento"
+            : action
+              ? "Revisar y confirmar"
+              : "Selecciona una acción"}
         </Button>
+
+        <p
+          className="text-center text-[11px] text-[color:var(--text-tertiary)]"
+          aria-hidden="true"
+        >
+          Atajos: A · R · C · E · ⌘Enter
+        </p>
       </div>
 
       {activeAction ? (

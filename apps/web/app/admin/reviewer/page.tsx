@@ -1,7 +1,7 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useState } from "react";
-import { useRouter } from "next/navigation";
+import { Suspense, useCallback, useEffect, useMemo, useState } from "react";
+import { useRouter, useSearchParams } from "next/navigation";
 import {
   Warning,
   ArrowRight,
@@ -13,7 +13,7 @@ import {
 
 import { AdminShell } from "../_shell";
 import { VendorRef } from "@/components/checkwise/vendor-ref";
-import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
 import { PageHeader } from "@/components/ui/page-header";
 import {
   Table,
@@ -46,41 +46,120 @@ import {
 
 const REVIEWER_ROLES = ["reviewer", "internal_admin"] as const;
 
-type FilterKey = "all" | "in_review" | "mismatch" | "clarify";
+// Audit fix 2026-06-10 — the queue used to cap at the backend's default
+// 50 rows with no hint that more existed. We now request the backend
+// maximum per page and paginate with the keyset cursor.
+const PAGE_LIMIT = 100;
+
+const FILTER_KEYS = ["all", "in_review", "mismatch", "clarify"] as const;
+
+type FilterKey = (typeof FILTER_KEYS)[number];
 
 const FILTER_LABEL: Record<FilterKey, string> = {
   all: "Todos",
-  in_review: "Por revisar",
+  in_review: "Pendiente de revisión",
   mismatch: "Posible inconsistencia",
   clarify: "Aclaración",
 };
 
-const FILTER_STATUSES: Record<Exclude<FilterKey, "all" | "mismatch">, RequirementStatus[]> = {
-  in_review: ["pendiente_revision", "prevalidado", "recibido"],
-  clarify: ["requiere_aclaracion"],
+/**
+ * Audit fix 2026-06-10 — tabs now filter SERVER-side via the queue
+ * endpoint's ``status`` param, so counts and pagination are truthful
+ * instead of being computed over a truncated page.
+ *
+ * The param accepts a single status, so:
+ * - "Todos" omits it (backend default = every actionable status:
+ *   recibido + pendiente_revision + prevalidado + posible_mismatch).
+ * - "Pendiente de revisión" narrows to ``pendiente_revision`` (the
+ *   old client-side tab also swept in recibido/prevalidado; those
+ *   remain visible under "Todos").
+ * - "Aclaración" narrows to ``requiere_aclaracion`` — which the
+ *   default queue intentionally excludes, so this tab now actually
+ *   shows those rows (it was always empty before).
+ * - "Posible inconsistencia" has NO server equivalent because it
+ *   keys off the per-item ``has_mismatch`` inspection flag, not just
+ *   the status — it stays a client-side filter over LOADED items and
+ *   is labeled as such.
+ */
+const FILTER_SERVER_STATUS: Partial<Record<FilterKey, RequirementStatus>> = {
+  in_review: "pendiente_revision",
+  clarify: "requiere_aclaracion",
 };
 
-function matchesFilter(item: QueueItem, filter: FilterKey): boolean {
-  if (filter === "all") return true;
-  if (filter === "mismatch") {
-    return item.has_mismatch || item.status === "posible_mismatch";
+function isMismatchItem(item: QueueItem): boolean {
+  return item.has_mismatch || item.status === "posible_mismatch";
+}
+
+function parseFilterParam(raw: string | null): FilterKey {
+  return (FILTER_KEYS as readonly string[]).includes(raw ?? "")
+    ? (raw as FilterKey)
+    : "all";
+}
+
+// SLA aging thresholds (hours). <72h is on target, 72h–168h is at
+// risk (amber), >168h (7 days) is out of SLA (red).
+const SLA_WARNING_HOURS = 72;
+const SLA_BREACH_HOURS = 168;
+
+function ageSla(hours: number): { className: string; title: string } {
+  if (hours > SLA_BREACH_HOURS) {
+    return {
+      className: "text-[color:var(--status-error-text)]",
+      title: "Fuera de SLA: más de 7 días esperando decisión",
+    };
   }
-  return FILTER_STATUSES[filter].includes(item.status);
+  if (hours >= SLA_WARNING_HOURS) {
+    return {
+      className: "text-[color:var(--status-warning-text)]",
+      title: "En riesgo: entre 3 y 7 días esperando decisión",
+    };
+  }
+  return {
+    className: "text-[color:var(--text-secondary)]",
+    title: "Dentro del objetivo: menos de 3 días en cola",
+  };
 }
 
 export default function ReviewerQueuePage() {
+  // useSearchParams must live under a Suspense boundary so Next can
+  // statically prerender the shell (same pattern as /admin/buscar).
+  return (
+    <AdminShell unframed>
+      <Suspense fallback={null}>
+        <ReviewerQueueBody />
+      </Suspense>
+    </AdminShell>
+  );
+}
+
+function ReviewerQueueBody() {
   const router = useRouter();
+  const searchParams = useSearchParams();
   const [session, setSession] = useState<AdminSession | null>(null);
   const [queue, setQueue] = useState<QueueResponse | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [reloadKey, setReloadKey] = useState(0);
-  const [filter, setFilter] = useState<FilterKey>("all");
+  // Audit fix 2026-06-10 — tab + institution seed from the URL so
+  // back-navigation from a decision screen restores the filters
+  // instead of resetting to "Todos / todas las instituciones".
+  const [filter, setFilter] = useState<FilterKey>(() =>
+    parseFilterParam(searchParams?.get("tab") ?? null),
+  );
   // Institution filter — empty string means "all institutions" and
   // omits the query param so the backend returns every row. The
   // dropdown options are driven by INSTITUTION_LABELS so they stay in
   // sync with portal/calendar and client/submissions.
-  const [institution, setInstitution] = useState<string>("");
+  const [institution, setInstitution] = useState<string>(
+    () => searchParams?.get("institution") ?? "",
+  );
+  const [loadingMore, setLoadingMore] = useState(false);
+  const [loadMoreError, setLoadMoreError] = useState(false);
+  // Display-only sort. The server always returns oldest-first (FIFO);
+  // "más recientes" just reverses the LOADED rows client-side.
+  const [newestFirst, setNewestFirst] = useState(false);
+
+  const serverStatus = FILTER_SERVER_STATUS[filter];
 
   useEffect(() => {
     const current = readAdminSession();
@@ -95,13 +174,30 @@ export default function ReviewerQueuePage() {
     setSession(current);
   }, [router]);
 
+  // Mirror tab + institution into the URL (replace, not push, so the
+  // history stack stays one entry per page visit).
+  useEffect(() => {
+    const params = new URLSearchParams();
+    if (filter !== "all") params.set("tab", filter);
+    if (institution) params.set("institution", institution);
+    const qs = params.toString();
+    router.replace(`/admin/reviewer${qs ? `?${qs}` : ""}`, { scroll: false });
+  }, [filter, institution, router]);
+
+  // First page fetch. Depends on `serverStatus` (not `filter`) so
+  // toggling between "Todos" and the client-side mismatch filter
+  // reuses the already-loaded pages instead of refetching; changing
+  // to a server-filtered tab resets the list + cursor and refetches.
   useEffect(() => {
     if (!session) return;
     let cancelled = false;
     setLoading(true);
     setError(null);
+    setLoadMoreError(false);
     getReviewerQueue(session.access_token, {
+      status: serverStatus,
       institution: institution || undefined,
+      limit: PAGE_LIMIT,
     })
       .then((payload) => {
         if (!cancelled) setQueue(payload);
@@ -121,48 +217,70 @@ export default function ReviewerQueuePage() {
     return () => {
       cancelled = true;
     };
-  }, [session, reloadKey, router, institution]);
+  }, [session, reloadKey, router, institution, serverStatus]);
 
   const retry = useCallback(() => setReloadKey((k) => k + 1), []);
+
+  // Next-page fetch — APPENDS to the loaded list under the same
+  // filters; the scroll position is untouched. The functional update
+  // only merges when the cursor we requested is still the queue's
+  // current cursor, so a tab/institution change that races a slow
+  // load-more can't splice a stale page into the fresh list.
+  const loadMore = useCallback(() => {
+    if (!session || !queue?.next_cursor || loadingMore) return;
+    const requestedCursor = queue.next_cursor;
+    setLoadingMore(true);
+    setLoadMoreError(false);
+    getReviewerQueue(session.access_token, {
+      status: serverStatus,
+      institution: institution || undefined,
+      limit: PAGE_LIMIT,
+      cursor: requestedCursor,
+    })
+      .then((payload) => {
+        setQueue((prev) =>
+          prev && prev.next_cursor === requestedCursor
+            ? { ...payload, items: [...prev.items, ...payload.items] }
+            : prev,
+        );
+      })
+      .catch((err) => {
+        if (err instanceof ReviewerApiError && err.status === 401) {
+          clearAdminSession();
+          router.replace("/login");
+          return;
+        }
+        setLoadMoreError(true);
+      })
+      .finally(() => setLoadingMore(false));
+  }, [session, queue, loadingMore, serverStatus, institution, router]);
 
   // F1: logout is now provided by the AdminShell header, so this
   // page no longer renders its own Cerrar sesión action.
 
   const items = useMemo(() => queue?.items ?? [], [queue]);
   const filteredItems = useMemo(
-    () => items.filter((item) => matchesFilter(item, filter)),
+    () => (filter === "mismatch" ? items.filter(isMismatchItem) : items),
     [items, filter],
   );
-
-  const counts = useMemo<Record<FilterKey, number>>(() => {
-    const acc: Record<FilterKey, number> = {
-      all: items.length,
-      in_review: 0,
-      mismatch: 0,
-      clarify: 0,
-    };
-    for (const item of items) {
-      if (matchesFilter(item, "in_review")) acc.in_review += 1;
-      if (matchesFilter(item, "mismatch")) acc.mismatch += 1;
-      if (matchesFilter(item, "clarify")) acc.clarify += 1;
-    }
-    return acc;
-  }, [items]);
+  const displayItems = useMemo(
+    () => (newestFirst ? [...filteredItems].reverse() : filteredItems),
+    [filteredItems, newestFirst],
+  );
 
   if (!session) return null;
 
   return (
-    <AdminShell unframed>
-      <div className="mx-auto max-w-6xl space-y-6 px-5 py-8">
-        <PageHeader
-          eyebrow="Mesa de revisión"
-          title="Documentos por revisar"
-          description="Empieza por lo más viejo. Cada documento espera tu decisión humana. La automatización no aprueba ni rechaza nada."
-        />
+    <div className="mx-auto max-w-6xl space-y-6 px-5 py-8">
+      <PageHeader
+        eyebrow="Mesa de revisión"
+        title="Documentos por revisar"
+        description="Empieza por lo más viejo. Cada documento espera tu decisión humana. La automatización no aprueba ni rechaza nada."
+      />
 
       {/* Institution scope filter. Sits above the status tabs so the
           reviewer narrows by authority (SAT / IMSS / INFONAVIT / STPS)
-          before drilling into Por revisar / Inconsistencia / Aclaración.
+          before drilling into Pendiente / Inconsistencia / Aclaración.
           Default "" means all institutions; the API call drops the
           query param entirely in that case. */}
       <div className="flex flex-wrap items-center gap-3">
@@ -229,13 +347,6 @@ export default function ReviewerQueuePage() {
           description="Tu conexión pudo haberse interrumpido. Tu sesión sigue activa."
           onRetry={retry}
         />
-      ) : items.length === 0 ? (
-        <EmptyState
-          icon={Tray}
-          title="No hay documentos por revisar"
-          description="Cuando un proveedor cargue documentación nueva, aparecerá aquí en orden de llegada."
-          variant="muted"
-        />
       ) : (
         <section
           aria-label="Cola de documentos por revisar"
@@ -244,31 +355,64 @@ export default function ReviewerQueuePage() {
           <header className="flex flex-wrap items-center justify-between gap-3 border-b border-[color:var(--border-subtle)] px-5 py-3">
             <Tabs value={filter} onValueChange={(v) => setFilter(v as FilterKey)}>
               <TabsList>
-                {(["all", "in_review", "mismatch", "clarify"] as FilterKey[]).map(
-                  (key) => (
-                    <TabsTrigger key={key} value={key}>
-                      <span>{FILTER_LABEL[key]}</span>
+                {FILTER_KEYS.map((key) => (
+                  <TabsTrigger
+                    key={key}
+                    value={key}
+                    title={
+                      key === "mismatch"
+                        ? "Filtra sobre los documentos ya cargados"
+                        : undefined
+                    }
+                  >
+                    <span>{FILTER_LABEL[key]}</span>
+                    {/* Only the ACTIVE tab shows a count: the server
+                        count for that filter (or, for the client-side
+                        mismatch filter, the matches among loaded rows).
+                        Inactive tabs show none — we no longer fake
+                        per-tab totals from a truncated page. */}
+                    {filter === key && queue ? (
                       <span className="ml-1.5 font-mono text-[10px] tabular-nums opacity-70">
-                        {counts[key]}
+                        {key === "mismatch" ? filteredItems.length : queue.total}
                       </span>
-                    </TabsTrigger>
-                  ),
-                )}
+                    ) : null}
+                  </TabsTrigger>
+                ))}
               </TabsList>
             </Tabs>
-            <Badge variant="outline" className="whitespace-nowrap">
-              Más viejos primero
-            </Badge>
+            <button
+              type="button"
+              onClick={() => setNewestFirst((v) => !v)}
+              title='El orden "más recientes" se aplica sobre los documentos cargados; el servidor entrega lo más viejo primero.'
+              className="inline-flex items-center whitespace-nowrap rounded-full border border-[color:var(--border-default)] px-2.5 py-0.5 text-[11px] font-medium text-[color:var(--text-secondary)] transition-colors duration-fast hover:border-[color:var(--border-strong)] hover:text-[color:var(--text-primary)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[color:var(--border-focus)]/40"
+            >
+              {newestFirst
+                ? "Más recientes primero (cargados)"
+                : "Más viejos primero"}
+            </button>
           </header>
 
-          {filteredItems.length === 0 ? (
+          {displayItems.length === 0 ? (
             <div className="px-5 py-10">
-              <EmptyState
-                icon={Tray}
-                title={`Sin resultados en "${FILTER_LABEL[filter]}"`}
-                description="Cambia el filtro para ver otros documentos en la cola."
-                variant="muted"
-              />
+              {filter === "all" && items.length === 0 ? (
+                <EmptyState
+                  icon={Tray}
+                  title="No hay documentos por revisar"
+                  description="Cuando un proveedor cargue documentación nueva, aparecerá aquí en orden de llegada."
+                  variant="muted"
+                />
+              ) : (
+                <EmptyState
+                  icon={Tray}
+                  title={`Sin resultados en "${FILTER_LABEL[filter]}"`}
+                  description={
+                    filter === "mismatch"
+                      ? "Ningún documento cargado tiene posible inconsistencia. Carga más documentos o cambia el filtro."
+                      : "Cambia el filtro para ver otros documentos en la cola."
+                  }
+                  variant="muted"
+                />
+              )}
             </div>
           ) : (
             <Table>
@@ -278,12 +422,17 @@ export default function ReviewerQueuePage() {
                   <TableHead>Documento</TableHead>
                   <TableHead>Institución · periodo</TableHead>
                   <TableHead>Proveedor</TableHead>
-                  <TableHead className="w-[120px]">Edad</TableHead>
+                  <TableHead
+                    className="w-[120px]"
+                    title="Tiempo en cola. Ámbar: más de 3 días. Rojo: más de 7 días."
+                  >
+                    Edad
+                  </TableHead>
                   <TableHead className="w-[40px]" aria-label="Acción" />
                 </TableRow>
               </TableHeader>
               <TableBody>
-                {filteredItems.map((item) => (
+                {displayItems.map((item) => (
                   <QueueTableRow
                     key={item.submission_id}
                     item={item}
@@ -293,10 +442,52 @@ export default function ReviewerQueuePage() {
               </TableBody>
             </Table>
           )}
+
+          {/* Truthful pagination footer: X = rows actually loaded,
+              Y = the server's real total under the current filters. */}
+          {queue && items.length > 0 ? (
+            <footer className="flex flex-wrap items-center justify-between gap-3 border-t border-[color:var(--border-subtle)] px-5 py-3">
+              <div className="space-y-0.5">
+                <p className="text-[12px] tabular-nums text-[color:var(--text-secondary)]">
+                  Mostrando {items.length} de {queue.total} documentos
+                  {filter === "mismatch"
+                    ? ` · ${filteredItems.length} con posible inconsistencia entre los cargados`
+                    : ""}
+                </p>
+                <p className="text-[11px] text-[color:var(--text-tertiary)]">
+                  Edad:{" "}
+                  <span className="text-[color:var(--status-warning-text)]">
+                    ámbar
+                  </span>{" "}
+                  más de 3 días ·{" "}
+                  <span className="text-[color:var(--status-error-text)]">
+                    rojo
+                  </span>{" "}
+                  más de 7 días en cola
+                </p>
+              </div>
+              {queue.next_cursor ? (
+                <div className="flex items-center gap-3">
+                  {loadMoreError ? (
+                    <span className="text-[12px] text-[color:var(--status-error-text)]">
+                      No pudimos cargar más. Intenta de nuevo.
+                    </span>
+                  ) : null}
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    loading={loadingMore}
+                    onClick={loadMore}
+                  >
+                    Cargar más
+                  </Button>
+                </div>
+              ) : null}
+            </footer>
+          ) : null}
         </section>
       )}
-      </div>
-    </AdminShell>
+    </div>
   );
 }
 
@@ -308,6 +499,7 @@ function QueueTableRow({
   onOpen: () => void;
 }) {
   const ageText = formatAge(item.age_hours);
+  const ageSlaTone = ageSla(item.age_hours);
   const institutionLabel = item.requirement.institution
     ? INSTITUTION_LABELS[item.requirement.institution] ?? item.requirement.institution
     : "—";
@@ -385,7 +577,12 @@ function QueueTableRow({
       </TableCell>
 
       <TableCell>
-        <span className="inline-flex items-center gap-1 font-mono text-[11px] tabular-nums text-[color:var(--text-secondary)]">
+        {/* SLA aging — amber past 72h, red past 168h (7 days). The
+            title carries the meaning for hover/assistive tech. */}
+        <span
+          title={ageSlaTone.title}
+          className={`inline-flex items-center gap-1 font-mono text-[11px] tabular-nums ${ageSlaTone.className}`}
+        >
           <Clock className="h-3 w-3" weight="bold" aria-hidden />
           {ageText}
         </span>

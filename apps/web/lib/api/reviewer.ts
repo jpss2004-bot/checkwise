@@ -88,6 +88,9 @@ export type QueueFilters = {
   status?: RequirementStatus;
   institution?: string;
   limit?: number;
+  /** Keyset cursor from a prior page's ``next_cursor`` — opaque,
+   *  pass back verbatim to fetch the next FIFO page. */
+  cursor?: string;
 };
 
 export async function getReviewerQueue(
@@ -98,6 +101,7 @@ export async function getReviewerQueue(
   if (filters.status) params.set("status", filters.status);
   if (filters.institution) params.set("institution", filters.institution);
   if (filters.limit) params.set("limit", String(filters.limit));
+  if (filters.cursor) params.set("cursor", filters.cursor);
   const qs = params.toString();
   return await fetchJson<QueueResponse>(
     `/api/v1/reviewer/queue${qs ? `?${qs}` : ""}`,
@@ -109,11 +113,34 @@ export async function getReviewerQueue(
 // Detail
 // ---------------------------------------------------------------------------
 
+/**
+ * Vendor identity block — reviewer endpoint only (P1 audit fix,
+ * 2026-06-10). ``vendor_rfc`` is the EXPECTED RFC from the vendor
+ * registry, so the decision screen can compare it against the
+ * OCR-detected RFC and surface a ✓/✗ match without the reviewer
+ * memorizing the queue row.
+ */
+export type ReviewerVendorBlock = {
+  vendor_id: string | null;
+  vendor_name: string | null;
+  vendor_rfc: string | null;
+  persona_type: string | null;
+  client_id: string | null;
+  client_name: string | null;
+  workspace_id: string | null;
+};
+
+/** The reviewer detail = the shared submission detail + the vendor
+ *  identity block (absent on the provider-facing portal endpoint). */
+export type ReviewerSubmissionDetail = SubmissionDetail & {
+  vendor: ReviewerVendorBlock | null;
+};
+
 export async function getReviewerSubmission(
   token: string,
   submissionId: string,
-): Promise<SubmissionDetail> {
-  return await fetchJson<SubmissionDetail>(
+): Promise<ReviewerSubmissionDetail> {
+  return await fetchJson<ReviewerSubmissionDetail>(
     `/api/v1/reviewer/submissions/${submissionId}`,
     token,
   );
@@ -140,6 +167,10 @@ export type DecisionResponse = {
   observations: string | null;
   decided_at: string;
   reviewer_user_id: string;
+  /** Oldest submission still pending review after this decision
+   *  (global FIFO), or null when the queue is drained. Drives the
+   *  "Siguiente documento" auto-advance. */
+  next_pending_submission_id: string | null;
 };
 
 export async function submitDecision(
