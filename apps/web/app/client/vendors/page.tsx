@@ -35,12 +35,13 @@ import {
   ReportsApiError,
 } from "@/lib/api/reports";
 import { useUrlClientId } from "@/lib/workspace/use-url-client-id";
+import { BUCKET_LABELS_ES, semaphoreLabel } from "@/lib/constants/statuses";
 
 const LEVELS = [
   { value: "", label: "Todos" },
-  { value: "green", label: "Verde" },
-  { value: "yellow", label: "Amarillo" },
-  { value: "red", label: "Rojo" },
+  { value: "green", label: semaphoreLabel("green") },
+  { value: "yellow", label: semaphoreLabel("yellow") },
+  { value: "red", label: semaphoreLabel("red") },
 ] as const;
 
 type SemaphoreLevel = "green" | "yellow" | "red";
@@ -190,11 +191,11 @@ export default function ClientVendorsPage() {
         <MetadataStrip
           items={[
             { label: "Proveedores", value: (rows?.length ?? 0).toString(), mono: true },
-            { label: "Verde", value: counts.green.toString(), mono: true, tone: "default" },
-            { label: "Amarillo", value: counts.yellow.toString(), mono: true, tone: counts.yellow > 0 ? "warning" : "default" },
-            { label: "Rojo", value: counts.red.toString(), mono: true, tone: counts.red > 0 ? "warning" : "default" },
-            { label: "Faltantes", value: sums.missing.toString(), mono: true, tone: sums.missing > 0 ? "warning" : "default" },
-            { label: "Vencen ≤14d", value: sums.dueSoon.toString(), mono: true, tone: sums.dueSoon > 0 ? "warning" : "default" },
+            { label: semaphoreLabel("green"), value: counts.green.toString(), mono: true, tone: "default" },
+            { label: semaphoreLabel("yellow"), value: counts.yellow.toString(), mono: true, tone: counts.yellow > 0 ? "warning" : "default" },
+            { label: semaphoreLabel("red"), value: counts.red.toString(), mono: true, tone: counts.red > 0 ? "warning" : "default" },
+            { label: BUCKET_LABELS_ES.missing_required, value: sums.missing.toString(), mono: true, tone: sums.missing > 0 ? "warning" : "default" },
+            { label: BUCKET_LABELS_ES.due_soon, value: sums.dueSoon.toString(), mono: true, tone: sums.dueSoon > 0 ? "warning" : "default" },
           ]}
         />
 
@@ -343,14 +344,14 @@ function buildVendorColumns(
   },
   {
     id: "pending",
-    header: "Revisión",
+    header: BUCKET_LABELS_ES.pending_reviews,
     width: "90px",
     align: "right",
     cell: (row) => <MetricCell value={row.pending_reviews_count} />,
   },
   {
     id: "missing",
-    header: "Faltantes",
+    header: BUCKET_LABELS_ES.missing_required,
     width: "100px",
     align: "right",
     cell: (row) => (
@@ -362,7 +363,7 @@ function buildVendorColumns(
   },
   {
     id: "rejected",
-    header: "Rechazos",
+    header: BUCKET_LABELS_ES.rejected_or_correction,
     width: "100px",
     align: "right",
     cell: (row) => (
@@ -374,7 +375,7 @@ function buildVendorColumns(
   },
   {
     id: "due_soon",
-    header: "Vencen",
+    header: BUCKET_LABELS_ES.due_soon,
     width: "90px",
     align: "right",
     cell: (row) => (
@@ -448,19 +449,19 @@ const SEMAPHORE_META: Record<
   { label: string; tone: string; icon: Icon }
 > = {
   green: {
-    label: "Verde",
+    label: semaphoreLabel("green"),
     tone:
       "bg-[color:var(--status-success-bg)] text-[color:var(--status-success-text)]",
     icon: CheckCircle,
   },
   yellow: {
-    label: "Amarillo",
+    label: semaphoreLabel("yellow"),
     tone:
       "bg-[color:var(--status-warning-bg)] text-[color:var(--status-warning-text)]",
     icon: Warning,
   },
   red: {
-    label: "Rojo",
+    label: semaphoreLabel("red"),
     tone:
       "bg-[color:var(--status-error-bg)] text-[color:var(--status-error-text)]",
     icon: WarningOctagon,

@@ -42,6 +42,7 @@ import {
   type ClientVendorDetail,
 } from "@/lib/api/client";
 import { createReportFromPreset, ReportsApiError } from "@/lib/api/reports";
+import { slotStateLabel } from "@/lib/constants/statuses";
 
 type PageProps = {
   params: Promise<{ vendor_id: string }>;
@@ -234,8 +235,8 @@ function ExpedienteMicroBar({ detail }: { detail: ClientVendorDetail }) {
   const segments: ChartSegment[] = [
     { label: "Aprobados", value: s.completed, tone: "success" },
     { label: "En revisión", value: s.in_review, tone: "info" },
-    { label: "Por atender", value: s.needs_action, tone: "warning" },
-    { label: "Sin iniciar", value: remaining, tone: "neutral" },
+    { label: slotStateLabel("needs_correction"), value: s.needs_action, tone: "warning" },
+    { label: slotStateLabel("missing"), value: remaining, tone: "neutral" },
   ];
   return (
     <div className="space-y-1.5">
@@ -500,8 +501,8 @@ function DocumentBreakdownCard({ detail }: { detail: ClientVendorDetail }) {
     { label: "Aprobados", value: c.approved, tone: "success" },
     { label: "En revisión", value: c.in_review, tone: "info" },
     { label: "Recibidos", value: c.uploaded, tone: "info" },
-    { label: "Necesitan acción", value: c.needs_review, tone: "warning" },
-    { label: "Rechazados", value: c.rejected, tone: "error" },
+    { label: slotStateLabel("needs_correction"), value: c.needs_review, tone: "warning" },
+    { label: slotStateLabel("rejected"), value: c.rejected, tone: "error" },
     { label: "Vencidos", value: c.expired, tone: "error" },
     // D6 — was "Pendientes", which collided with the Dashboard KPI
     // "Faltantes obligatorios" (same numeric definition, different
@@ -509,7 +510,7 @@ function DocumentBreakdownCard({ detail }: { detail: ClientVendorDetail }) {
     // ``pendiente_revision`` reviewer-queue state, NOT this). Renamed
     // to "Sin iniciar" — same word ExpedienteMicroBar above uses for
     // the same set, so the two charts on this page now agree.
-    { label: "Sin iniciar", value: c.pending, tone: "neutral" },
+    { label: slotStateLabel("missing"), value: c.pending, tone: "neutral" },
   ];
   const segments: ChartSegment[] = all.filter((s) => s.value > 0);
   const total = segments.reduce((sum, s) => sum + s.value, 0);

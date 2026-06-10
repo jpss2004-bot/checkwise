@@ -2,6 +2,7 @@
 
 import { Gauge, TrendDown, TrendUp } from "@phosphor-icons/react";
 
+import { semaphoreLabel } from "@/lib/constants/statuses";
 import type { BlockDefinition, BlockProps } from "@/lib/reports/registry";
 
 /**
@@ -36,9 +37,9 @@ export const reportVerdictDefinition: Omit<
 };
 
 const LEVEL: Record<Level, { bar: string; chip: string; print: string }> = {
-  red: { bar: "var(--state-red,#dc2626)", chip: "Riesgo", print: "[Rojo]" },
-  yellow: { bar: "var(--state-yellow,#d97706)", chip: "Atención", print: "[Amarillo]" },
-  green: { bar: "var(--state-green,#16a34a)", chip: "En regla", print: "[Verde]" },
+  red: { bar: "var(--state-red,#dc2626)", chip: semaphoreLabel("red"), print: "[En riesgo]" },
+  yellow: { bar: "var(--state-yellow,#d97706)", chip: semaphoreLabel("yellow"), print: "[En proceso]" },
+  green: { bar: "var(--state-green,#16a34a)", chip: semaphoreLabel("green"), print: "[Al día]" },
 };
 
 export function ReportVerdictBlock({

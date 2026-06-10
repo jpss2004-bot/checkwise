@@ -19,38 +19,27 @@ import {
   type ClientVendorRow,
 } from "@/lib/api/client";
 import { INSTITUTION_LABELS } from "@/lib/api/portal";
-import { statusVariant } from "@/lib/constants/statuses";
+import { statusLabel, statusVariant } from "@/lib/constants/statuses";
 
-// Short, filter-oriented status labels specific to this table's dropdown
-// and badge (e.g. "Aclaración", "N/A") — deliberately terser than the
-// canonical STATUS_LABELS_ES copy. The color tone is no longer declared
-// here: it comes from the central statusVariant() so it can't drift from
-// the dashboard/calendar (Audit F2).
-const STATUS_LABELS: Record<string, string> = {
-  aprobado: "Aprobado",
-  rechazado: "Rechazado",
-  requiere_aclaracion: "Aclaración",
-  pendiente_revision: "En revisión",
-  recibido: "Recibido",
-  prevalidado: "Prevalidado",
-  posible_mismatch: "Posible inconsistencia",
-  vencido: "Vencido",
-  pendiente: "Pendiente",
-  no_aplica: "N/A",
-  excepcion_legal: "Excepción",
-};
-
-// Order matches the reviewer workflow: actionable first, then resolved.
+// Filter dropdown order matches the reviewer workflow: actionable first,
+// then resolved. Labels come from the canonical statusLabel() so this
+// table reads the same word as the calendar, dashboard and reports —
+// no local copy to drift (previously re-introduced raw "Rechazado" /
+// "Prevalidado", 2026-06-10 vocabulary unification).
 const STATUS_OPTIONS: ReadonlyArray<{ value: string; label: string }> = [
   { value: "", label: "Todos los estados" },
-  { value: "pendiente_revision", label: STATUS_LABELS.pendiente_revision },
-  { value: "requiere_aclaracion", label: STATUS_LABELS.requiere_aclaracion },
-  { value: "posible_mismatch", label: STATUS_LABELS.posible_mismatch },
-  { value: "rechazado", label: STATUS_LABELS.rechazado },
-  { value: "aprobado", label: STATUS_LABELS.aprobado },
-  { value: "vencido", label: STATUS_LABELS.vencido },
-  { value: "excepcion_legal", label: STATUS_LABELS.excepcion_legal },
-  { value: "no_aplica", label: STATUS_LABELS.no_aplica },
+  ...(
+    [
+      "pendiente_revision",
+      "requiere_aclaracion",
+      "posible_mismatch",
+      "rechazado",
+      "aprobado",
+      "vencido",
+      "excepcion_legal",
+      "no_aplica",
+    ] as const
+  ).map((value) => ({ value, label: statusLabel(value) })),
 ];
 
 // Institution dropdown options. Mirrors the canonical INSTITUTION_LABELS
@@ -316,7 +305,7 @@ const SUBMISSIONS_COLUMNS: DataTableColumn<ClientSubmissionItem>[] = [
     width: "140px",
     cell: (row) => (
       <Badge variant={statusVariant(row.status)}>
-        {STATUS_LABELS[row.status] ?? row.status}
+        {statusLabel(row.status)}
       </Badge>
     ),
   },

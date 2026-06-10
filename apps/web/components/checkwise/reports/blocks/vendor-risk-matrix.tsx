@@ -101,7 +101,7 @@ const STATE_TONE: Record<
   rejected: {
     bg: "bg-[color:var(--doc-rejected-bg)]",
     text: "text-[color:var(--doc-rejected-text)]",
-    label: "Con observaciones",
+    label: "Requiere corrección",
   },
   expired: {
     bg: "bg-[color:var(--doc-expired-bg)]",
@@ -111,7 +111,7 @@ const STATE_TONE: Record<
   needs_review: {
     bg: "bg-[color:var(--doc-needs-review-bg)]",
     text: "text-[color:var(--doc-needs-review-text)]",
-    label: "Pendiente aclaración",
+    label: "Necesita aclaración",
   },
   empty: {
     bg: "bg-[color:var(--doc-empty-bg)]",

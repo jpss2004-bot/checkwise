@@ -73,8 +73,8 @@ export const RESOLVED_STATUSES: readonly DocumentStatusCode[] = [
 export const STATUS_LABELS_ES: Record<DocumentStatusCode, string> = {
   [DocumentStatus.PENDIENTE]: "Pendiente",
   [DocumentStatus.RECIBIDO]: "Recibido",
-  [DocumentStatus.PENDIENTE_REVISION]: "Esperando revisión",
-  [DocumentStatus.PREVALIDADO]: "Recibido — esperando revisión",
+  [DocumentStatus.PENDIENTE_REVISION]: "En revisión",
+  [DocumentStatus.PREVALIDADO]: "En revisión",
   [DocumentStatus.POSIBLE_MISMATCH]: "Posible inconsistencia",
   [DocumentStatus.APROBADO]: "Aprobado",
   [DocumentStatus.RECHAZADO]: "Requiere corrección",
@@ -161,4 +161,134 @@ export function statusLabel(status: string): string {
 
 export function statusExplainer(status: string): string | null {
   return STATUS_EXPLAINER_ES[status as DocumentStatusCode] ?? null;
+}
+
+// ===========================================================================
+// Canonical vocabulary unification (2026-06-10).
+//
+// Before this, the client portal carried FIVE parallel status vocabularies
+// (DocumentStatus, SlotState, the doc-state badge, the semáforo, and the
+// requirement-count "buckets"), and each screen re-labeled the same concept
+// with different Spanish words — "Prevalidado"/"En revisión"/"Esperando
+// revisión" for one document, "Verde"/"En regla"/"al día" for one semáforo
+// level, etc. The maps below are the single source of truth for the three
+// axes that previously lived as inline per-page maps. Shared concepts are
+// worded IDENTICALLY to STATUS_LABELS_ES above (e.g. rejected →
+// "Requiere corrección", in-review → "En revisión") so a status reads the
+// same on the calendar, Entregas, Reportes, dashboard and vendor surfaces.
+// ===========================================================================
+
+// ---------------------------------------------------------------------------
+// Semáforo — portfolio / vendor health (backend ``semaphore_level``).
+// Canonical labels ratified 2026-06-10: Al día / En proceso / En riesgo.
+// ---------------------------------------------------------------------------
+
+export type SemaphoreLevel = "green" | "yellow" | "red";
+
+export const SEMAPHORE_LABELS_ES: Record<SemaphoreLevel, string> = {
+  green: "Al día",
+  yellow: "En proceso",
+  red: "En riesgo",
+};
+
+export const SEMAPHORE_VARIANT: Record<SemaphoreLevel, StatusVariant> = {
+  green: "success",
+  yellow: "warning",
+  red: "destructive",
+};
+
+export function semaphoreLabel(level: string): string {
+  return SEMAPHORE_LABELS_ES[level as SemaphoreLevel] ?? level;
+}
+
+export function semaphoreVariant(level: string): StatusVariant {
+  return SEMAPHORE_VARIANT[level as SemaphoreLevel] ?? "secondary";
+}
+
+// ---------------------------------------------------------------------------
+// SlotState — the coarse UI projection of DocumentStatus the backend emits
+// for report blocks and the provider expediente grid (apps/api
+// /app/services/evidence_slots.py :: SlotState). Item-level badge labels.
+// Words match STATUS_LABELS_ES for every shared concept.
+// ---------------------------------------------------------------------------
+
+export const SlotState = {
+  MISSING: "missing",
+  UPLOADED: "uploaded",
+  IN_REVIEW: "in_review",
+  POSSIBLE_MISMATCH: "possible_mismatch",
+  APPROVED: "approved",
+  REJECTED: "rejected",
+  NEEDS_CORRECTION: "needs_correction",
+  EXCEPTION: "exception",
+  EXPIRED: "expired",
+  NOT_APPLICABLE: "not_applicable",
+} as const;
+
+export type SlotStateCode = (typeof SlotState)[keyof typeof SlotState];
+
+export const SLOT_STATE_LABELS_ES: Record<SlotStateCode, string> = {
+  [SlotState.MISSING]: "Por entregar",
+  [SlotState.UPLOADED]: "Recibido",
+  [SlotState.IN_REVIEW]: "En revisión",
+  [SlotState.POSSIBLE_MISMATCH]: "Posible inconsistencia",
+  [SlotState.APPROVED]: "Aprobado",
+  [SlotState.REJECTED]: "Requiere corrección",
+  [SlotState.NEEDS_CORRECTION]: "Necesita aclaración",
+  [SlotState.EXCEPTION]: "Aprobado con nota legal",
+  [SlotState.EXPIRED]: "Vencido",
+  [SlotState.NOT_APPLICABLE]: "No aplica",
+};
+
+export const SLOT_STATE_VARIANT: Record<SlotStateCode, StatusVariant> = {
+  [SlotState.MISSING]: "secondary",
+  [SlotState.UPLOADED]: "info",
+  [SlotState.IN_REVIEW]: "info",
+  [SlotState.POSSIBLE_MISMATCH]: "warning",
+  [SlotState.APPROVED]: "success",
+  [SlotState.REJECTED]: "destructive",
+  [SlotState.NEEDS_CORRECTION]: "warning",
+  [SlotState.EXCEPTION]: "success",
+  [SlotState.EXPIRED]: "destructive",
+  [SlotState.NOT_APPLICABLE]: "secondary",
+};
+
+export function slotStateLabel(state: string): string {
+  return SLOT_STATE_LABELS_ES[state as SlotStateCode] ?? state;
+}
+
+export function slotStateVariant(state: string): StatusVariant {
+  return SLOT_STATE_VARIANT[state as SlotStateCode] ?? "secondary";
+}
+
+// ---------------------------------------------------------------------------
+// Requirement "buckets" — the count KPIs the client API returns
+// (missing_required / rejected_or_correction / pending_reviews / due_soon).
+// Count-level wording (a column header / KPI tile), distinct from the
+// item-level badge above: a single missing document reads "Por entregar",
+// but the portfolio count of them reads "Faltantes".
+// ---------------------------------------------------------------------------
+
+export type BucketKey =
+  | "missing_required"
+  | "rejected_or_correction"
+  | "pending_reviews"
+  | "due_soon";
+
+export const BUCKET_LABELS_ES: Record<BucketKey, string> = {
+  missing_required: "Faltantes",
+  rejected_or_correction: "Por corregir",
+  pending_reviews: "En revisión",
+  due_soon: "Por vencer",
+};
+
+export const BUCKET_VARIANT: Record<BucketKey, StatusVariant> = {
+  missing_required: "warning",
+  rejected_or_correction: "destructive",
+  pending_reviews: "info",
+  due_soon: "warning",
+};
+
+export function bucketLabel(key: BucketKey): string {
+  return BUCKET_LABELS_ES[key];
 }

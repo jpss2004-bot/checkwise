@@ -269,7 +269,7 @@ function DonutLegend({
           style={{ backgroundColor: `color-mix(in oklab, ${SEMAPHORE_COLOR.green} 95%, transparent)` }}
           aria-hidden="true"
         />
-        Verde · {green}
+        Al día · {green}
       </li>
       <li className="flex items-center gap-2">
         <span
@@ -277,7 +277,7 @@ function DonutLegend({
           style={{ backgroundColor: `color-mix(in oklab, ${SEMAPHORE_COLOR.yellow} 95%, transparent)` }}
           aria-hidden="true"
         />
-        Amarillo · {yellow}
+        En proceso · {yellow}
       </li>
       <li className="flex items-center gap-2">
         <span
@@ -285,7 +285,7 @@ function DonutLegend({
           style={{ backgroundColor: `color-mix(in oklab, ${SEMAPHORE_COLOR.red} 95%, transparent)` }}
           aria-hidden="true"
         />
-        Rojo · {red}
+        En riesgo · {red}
       </li>
     </ul>
   );

@@ -204,14 +204,14 @@ export default function ClientCalendarPage() {
               { label: "Año", value: data.year.toString(), mono: true },
               { label: "Obligaciones", value: totals.due.toString(), mono: true },
               { label: "Aprobadas", value: totals.approved.toString(), mono: true, tone: "teal" },
-              { label: "Pendientes", value: totals.pending.toString(), mono: true },
+              { label: "En revisión", value: totals.pending.toString(), mono: true },
               {
-                label: "Faltantes+Rechazos",
+                label: "Faltantes + Por corregir",
                 value: (totals.missing + totals.rejected).toString(),
                 mono: true,
                 tone: totals.missing + totals.rejected > 0 ? "warning" : "default",
               },
-              { label: "Vencen ≤14d", value: totals.dueSoon.toString(), mono: true, tone: totals.dueSoon > 0 ? "warning" : "default" },
+              { label: "Por vencer", value: totals.dueSoon.toString(), mono: true, tone: totals.dueSoon > 0 ? "warning" : "default" },
             ]}
           />
 
@@ -272,7 +272,7 @@ export default function ClientCalendarPage() {
                 <MiniBars data={barsApproved} height={100} showValues />
               </div>
               <div>
-                <p className="cw-eyebrow mb-2">Faltantes + rechazos por mes</p>
+                <p className="cw-eyebrow mb-2">Faltantes + por corregir por mes</p>
                 <MiniBars data={barsMissing} height={100} showValues />
               </div>
             </div>
@@ -331,8 +331,8 @@ function MonthRow({
 }) {
   const segments: ChartSegment[] = [
     { label: "Aprobados", value: month.approved_total, tone: "success" },
-    { label: "Pendientes", value: month.pending_total, tone: "info" },
-    { label: "Rechazos", value: month.rejected_or_correction_total, tone: "error" },
+    { label: "En revisión", value: month.pending_total, tone: "info" },
+    { label: "Por corregir", value: month.rejected_or_correction_total, tone: "error" },
     { label: "Faltantes", value: month.missing_total, tone: "warning" },
   ];
 

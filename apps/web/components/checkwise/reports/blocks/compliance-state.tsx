@@ -70,12 +70,12 @@ const BUCKETS: Array<{
 }> = [
   {
     key: "rejected",
-    label: "Con observaciones",
+    label: "Requiere corrección",
     hint: "Documentos devueltos al proveedor para corrección.",
   },
   {
     key: "needs_review",
-    label: "Pendiente aclaración",
+    label: "Necesita aclaración",
     hint: "El proveedor debe atender un comentario antes de avanzar.",
   },
   {
@@ -117,9 +117,9 @@ const LEVEL_DOT: Record<SemaphoreLevel, string> = {
 };
 
 const LEVEL_PRINT: Record<SemaphoreLevel, string> = {
-  red: "[Rojo]",
-  yellow: "[Amarillo]",
-  green: "[Verde]",
+  red: "[En riesgo]",
+  yellow: "[En proceso]",
+  green: "[Al día]",
 };
 
 export const complianceStateDefinition: Omit<

@@ -34,7 +34,10 @@ _SURFACE = "#ffffff"
 _SURFACE_2 = "#f8fafc"
 
 _LEVEL_COLOR = {"red": _RED, "yellow": _AMBER, "green": _GREEN}
-_LEVEL_WORD = {"red": "Riesgo", "yellow": "Atención", "green": "En regla"}
+# Canonical semáforo wording (unified 2026-06-10): matches the web app's
+# SEMAPHORE_LABELS_ES so an exported PDF reads the same as the on-screen
+# report — Al día / En proceso / En riesgo.
+_LEVEL_WORD = {"red": "En riesgo", "yellow": "En proceso", "green": "Al día"}
 _TONE_COLOR = {"red": _RED, "yellow": _AMBER, "green": _GREEN, "info": _BRAND}
 
 # matrix cell document-state → (label, color)
@@ -252,9 +255,9 @@ def _r_radar(data: dict) -> str:
         + '<div class="radar">'
         + _donut(sc.get("green", 0), sc.get("yellow", 0), sc.get("red", 0))
         + '<div class="radar-legend">'
-        + f'<p><span class="lg" style="background:{_GREEN}"></span>Verde · {sc.get("green",0)}</p>'
-        + f'<p><span class="lg" style="background:{_AMBER}"></span>Amarillo · {sc.get("yellow",0)}</p>'
-        + f'<p><span class="lg" style="background:{_RED}"></span>Rojo · {sc.get("red",0)}</p>'
+        + f'<p><span class="lg" style="background:{_GREEN}"></span>Al día · {sc.get("green",0)}</p>'
+        + f'<p><span class="lg" style="background:{_AMBER}"></span>En proceso · {sc.get("yellow",0)}</p>'
+        + f'<p><span class="lg" style="background:{_RED}"></span>En riesgo · {sc.get("red",0)}</p>'
         + f'<p class="micro">{data.get("vendor_count",0)} proveedores · {data.get("overall_compliance_pct",0)}% global</p>'
         + "</div></div></section>"
     )

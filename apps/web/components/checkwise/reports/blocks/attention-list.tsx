@@ -97,18 +97,18 @@ const STATE_META: Record<
   }
 > = {
   rejected: {
-    label: "Con observaciones",
-    print: "[Con observaciones]",
+    label: "Requiere corrección",
+    print: "[Requiere corrección]",
     tone: "red",
   },
   needs_correction: {
-    label: "Pendiente aclaración",
-    print: "[Pendiente aclaración]",
+    label: "Necesita aclaración",
+    print: "[Necesita aclaración]",
     tone: "red",
   },
   possible_mismatch: {
-    label: "Revisar archivo",
-    print: "[Revisar archivo]",
+    label: "Posible inconsistencia",
+    print: "[Posible inconsistencia]",
     tone: "orange",
   },
   expired: { label: "Vencido", print: "[Vencido]", tone: "orange" },

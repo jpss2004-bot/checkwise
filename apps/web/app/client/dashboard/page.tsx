@@ -258,11 +258,11 @@ function ClientHero({ overview }: { overview: ClientOverview }) {
 
 function summaryHeadline(o: ClientOverview): string {
   if (o.red_count > 0)
-    return `Tienes ${o.red_count} proveedor${o.red_count === 1 ? "" : "es"} en rojo`;
+    return `Tienes ${o.red_count} proveedor${o.red_count === 1 ? "" : "es"} en riesgo`;
   if (o.yellow_count > 0)
-    return `Tienes ${o.yellow_count} proveedor${o.yellow_count === 1 ? "" : "es"} en amarillo`;
+    return `Tienes ${o.yellow_count} proveedor${o.yellow_count === 1 ? "" : "es"} en proceso`;
   if (o.green_count > 0)
-    return "Todos tus proveedores están en verde";
+    return "Todos tus proveedores están al día";
   return "No hay proveedores activos para mostrar";
 }
 
@@ -347,8 +347,8 @@ function ClientKpiStrip({ overview }: { overview: ClientOverview }) {
     {
       href: "/client/calendar",
       icon: CalendarBlank,
-      label: "Vencen ≤14 días",
-      caption: "Próximas obligaciones críticas.",
+      label: "Por vencer",
+      caption: "Próximas obligaciones críticas (≤14 días).",
       value: overview.due_soon_total,
       tone:
         overview.due_soon_total > 0 ? "warning" : "default",
@@ -425,9 +425,9 @@ function ClientKpiStrip({ overview }: { overview: ClientOverview }) {
 
 function SemaphoreDistribution({ overview }: { overview: ClientOverview }) {
   const segments: ChartSegment[] = [
-    { label: "Verde · al día", value: overview.green_count, tone: "success" },
-    { label: "Amarillo · pendiente", value: overview.yellow_count, tone: "warning" },
-    { label: "Rojo · crítico", value: overview.red_count, tone: "error" },
+    { label: "Al día", value: overview.green_count, tone: "success" },
+    { label: "En proceso", value: overview.yellow_count, tone: "warning" },
+    { label: "En riesgo", value: overview.red_count, tone: "error" },
   ];
   const total = segments.reduce((sum, s) => sum + s.value, 0);
   return (
