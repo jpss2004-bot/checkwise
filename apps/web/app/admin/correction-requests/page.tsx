@@ -86,6 +86,8 @@ export default function AdminCorrectionRequestsPage() {
   >("pending");
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [loadingMore, setLoadingMore] = useState(false);
+  const [loadMoreError, setLoadMoreError] = useState<string | null>(null);
   const [resolveTarget, setResolveTarget] = useState<{
     row: AdminCorrectionRequest;
     decision: "approve" | "reject";
@@ -93,9 +95,14 @@ export default function AdminCorrectionRequestsPage() {
   const [note, setNote] = useState("");
   const [submitting, setSubmitting] = useState(false);
 
+  // A refresh always restarts from offset 0 (filter changes route
+  // through here), so the loaded list and the derived offset
+  // (rows.length) reset together. The status filter is applied
+  // server-side, so `total` is already scoped to the active filter.
   async function refresh(filter: CorrectionRequestStatus | "" = statusFilter) {
     setLoading(true);
     setError(null);
+    setLoadMoreError(null);
     try {
       const params: { status?: CorrectionRequestStatus; limit: number } = {
         limit: PAGE_LIMIT,
@@ -117,6 +124,42 @@ export default function AdminCorrectionRequestsPage() {
       setRows(null);
     } finally {
       setLoading(false);
+    }
+  }
+
+  // "Cargar más" — fetches the next offset page with the current
+  // filter and APPENDS, so the approve/reject dialogs keep operating
+  // on already-loaded rows.
+  async function loadMore() {
+    if (!rows || loadingMore) return;
+    setLoadingMore(true);
+    setLoadMoreError(null);
+    try {
+      const params: {
+        status?: CorrectionRequestStatus;
+        limit: number;
+        offset: number;
+      } = { limit: PAGE_LIMIT, offset: rows.length };
+      if (statusFilter) params.status = statusFilter;
+      const data = await listCorrectionRequests(params);
+      setRows((current) => {
+        if (!current) return data.items;
+        const seen = new Set(current.map((row) => row.id));
+        return [...current, ...data.items.filter((row) => !seen.has(row.id))];
+      });
+      setTotal(data.total);
+    } catch (err) {
+      if (err instanceof AdminApiError && err.status === 401) {
+        router.replace("/login");
+        return;
+      }
+      setLoadMoreError(
+        err instanceof Error
+          ? err.message
+          : "No pudimos cargar más solicitudes.",
+      );
+    } finally {
+      setLoadingMore(false);
     }
   }
 
@@ -376,6 +419,27 @@ export default function AdminCorrectionRequestsPage() {
           }
           emptyDescription="Cuando un proveedor pida cambiar su correo, teléfono o nombre de contacto desde su portal, la solicitud aparecerá aquí."
         />
+
+        {!loading && rows && rows.length < total ? (
+          <div className="flex flex-col items-center gap-2 py-2">
+            <p className="font-mono text-[10px] uppercase tracking-wide text-[color:var(--text-tertiary)]">
+              Mostrando {rows.length} de {total}
+            </p>
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={loadMore}
+              loading={loadingMore}
+            >
+              Cargar más
+            </Button>
+            {loadMoreError ? (
+              <p className="text-[12px] text-[color:var(--status-error-text)]">
+                {loadMoreError}
+              </p>
+            ) : null}
+          </div>
+        ) : null}
       </section>
 
       <Dialog

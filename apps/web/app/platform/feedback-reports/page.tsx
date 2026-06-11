@@ -107,9 +107,14 @@ export default function AdminFeedbackReportsPage() {
   const [sourceFilter, setSourceFilter] = useState<FeedbackSource | "">("");
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [loadingMore, setLoadingMore] = useState(false);
+  const [loadMoreError, setLoadMoreError] = useState<string | null>(null);
   const [detail, setDetail] = useState<AdminFeedbackReport | null>(null);
   const [detailLoading, setDetailLoading] = useState(false);
 
+  // A refresh always restarts from offset 0 (filter changes route
+  // through here), so the loaded list and the derived offset
+  // (rows.length) reset together.
   async function refresh(
     overrides: {
       status?: FeedbackStatus | "";
@@ -119,6 +124,7 @@ export default function AdminFeedbackReportsPage() {
   ) {
     setLoading(true);
     setError(null);
+    setLoadMoreError(null);
     const eff = {
       status: overrides.status !== undefined ? overrides.status : statusFilter,
       kind: overrides.kind !== undefined ? overrides.kind : kindFilter,
@@ -146,6 +152,42 @@ export default function AdminFeedbackReportsPage() {
       setRows(null);
     } finally {
       setLoading(false);
+    }
+  }
+
+  // "Cargar más" — fetches the next offset page with the current
+  // filters and APPENDS, so the detail dialog's in-place row updates
+  // keep operating on already-loaded rows.
+  async function loadMore() {
+    if (!rows || loadingMore) return;
+    setLoadingMore(true);
+    setLoadMoreError(null);
+    try {
+      const params: {
+        status?: FeedbackStatus;
+        kind?: FeedbackKind;
+        source?: FeedbackSource;
+        limit: number;
+        offset: number;
+      } = { limit: PAGE_LIMIT, offset: rows.length };
+      if (statusFilter) params.status = statusFilter;
+      if (kindFilter) params.kind = kindFilter;
+      if (sourceFilter) params.source = sourceFilter;
+      const data = await listFeedbackReports(params);
+      setRows((current) => {
+        if (!current) return data.items;
+        const seen = new Set(current.map((row) => row.id));
+        return [...current, ...data.items.filter((row) => !seen.has(row.id))];
+      });
+      setTotal(data.total);
+    } catch (err) {
+      setLoadMoreError(
+        err instanceof Error
+          ? err.message
+          : "No pudimos cargar más reportes.",
+      );
+    } finally {
+      setLoadingMore(false);
     }
   }
 
@@ -450,6 +492,27 @@ export default function AdminFeedbackReportsPage() {
             rowKey={(row) => row.id}
             ariaLabel="Reportes de feedback"
           />
+        ) : null}
+
+        {!loading && rows && rows.length < total ? (
+          <div className="flex flex-col items-center gap-2 py-2">
+            <p className="font-mono text-[10px] uppercase tracking-wide text-[color:var(--text-tertiary)]">
+              Mostrando {rows.length} de {total}
+            </p>
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={loadMore}
+              loading={loadingMore}
+            >
+              Cargar más
+            </Button>
+            {loadMoreError ? (
+              <p className="text-[12px] text-[color:var(--status-error-text)]">
+                {loadMoreError}
+              </p>
+            ) : null}
+          </div>
         ) : null}
       </section>
 

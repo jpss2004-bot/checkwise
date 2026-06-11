@@ -197,7 +197,24 @@ function AdminVendorDetail({ vendorId }: { vendorId: string }) {
             items={[
               {
                 label: "Cliente",
-                value: client?.name ?? "—",
+                // MetadataStrip values accept ReactNode, so the client
+                // name links straight to the admin client detail page.
+                // Hover treatment mirrors VendorRef for consistency.
+                value: detail.client_id ? (
+                  <Link
+                    href={`/admin/clients/${encodeURIComponent(detail.client_id)}`}
+                    title={
+                      client?.name
+                        ? `Abrir cliente ${client.name}`
+                        : "Abrir detalle del cliente"
+                    }
+                    className="rounded-sm underline-offset-2 transition-colors hover:underline hover:text-[color:var(--text-brand)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[color:var(--interactive-primary)]"
+                  >
+                    {client?.name ?? "Ver cliente"}
+                  </Link>
+                ) : (
+                  "—"
+                ),
                 tone: "teal",
               },
               { label: "RFC", value: rfc ?? "—", mono: true },

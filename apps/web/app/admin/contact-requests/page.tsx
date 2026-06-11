@@ -61,11 +61,17 @@ export default function AdminContactRequestsPage() {
   );
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [loadingMore, setLoadingMore] = useState(false);
+  const [loadMoreError, setLoadMoreError] = useState<string | null>(null);
   const [updatingId, setUpdatingId] = useState<string | null>(null);
 
+  // A refresh always restarts from offset 0 (filter changes route
+  // through here), so the loaded list and the derived offset
+  // (rows.length) reset together.
   async function refresh(filter = statusFilter) {
     setLoading(true);
     setError(null);
+    setLoadMoreError(null);
     try {
       const params: { status?: ContactRequestStatus; limit: number } = {
         limit: PAGE_LIMIT,
@@ -87,6 +93,42 @@ export default function AdminContactRequestsPage() {
       setRows(null);
     } finally {
       setLoading(false);
+    }
+  }
+
+  // "Cargar más" — fetches the next offset page with the current
+  // filter and APPENDS, so in-place row updates (status dropdown)
+  // keep operating on already-loaded rows.
+  async function loadMore() {
+    if (!rows || loadingMore) return;
+    setLoadingMore(true);
+    setLoadMoreError(null);
+    try {
+      const params: {
+        status?: ContactRequestStatus;
+        limit: number;
+        offset: number;
+      } = { limit: PAGE_LIMIT, offset: rows.length };
+      if (statusFilter) params.status = statusFilter;
+      const data = await listContactRequests(params);
+      setRows((current) => {
+        if (!current) return data.items;
+        const seen = new Set(current.map((row) => row.id));
+        return [...current, ...data.items.filter((row) => !seen.has(row.id))];
+      });
+      setTotal(data.total);
+    } catch (err) {
+      if (err instanceof AdminApiError && err.status === 401) {
+        router.replace("/login");
+        return;
+      }
+      setLoadMoreError(
+        err instanceof Error
+          ? err.message
+          : "No pudimos cargar más solicitudes.",
+      );
+    } finally {
+      setLoadingMore(false);
     }
   }
 
@@ -283,6 +325,27 @@ export default function AdminContactRequestsPage() {
               : "Cada vez que alguien envíe el formulario público de la landing, aparecerá aquí."
           }
         />
+
+        {!loading && rows && rows.length < total ? (
+          <div className="flex flex-col items-center gap-2 py-2">
+            <p className="font-mono text-[10px] uppercase tracking-wide text-[color:var(--text-tertiary)]">
+              Mostrando {rows.length} de {total}
+            </p>
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={loadMore}
+              loading={loadingMore}
+            >
+              Cargar más
+            </Button>
+            {loadMoreError ? (
+              <p className="text-[12px] text-[color:var(--status-error-text)]">
+                {loadMoreError}
+              </p>
+            ) : null}
+          </div>
+        ) : null}
       </section>
     </AdminShell>
   );
