@@ -81,6 +81,12 @@ SUSPICIOUS_GENERATORS: tuple[str, ...] = (
 # (some libraries stamp the two fields milliseconds-to-minutes apart).
 _EDIT_GAP_THRESHOLD = timedelta(minutes=5)
 
+# Incremental-update count at or above which a file reads as "heavily
+# rewritten" — corroborating evidence for the edited-after-creation
+# signal. A single legitimate re-save writes exactly 1 incremental
+# update; 3+ means repeated editing sessions.
+_HEAVY_INCREMENTAL_UPDATES = 3
+
 # Beyond this gap the file was reopened and saved much later — that is
 # not jitter, that is an editing session.
 _EDIT_GAP_HIGH_THRESHOLD = timedelta(days=30)
@@ -304,32 +310,58 @@ def _analyze(
             )
         )
 
-    # --- Edited after creation (medium / high) -----------------------
+    # --- Edited after creation (info / medium / high) ----------------
     # Two signals fold into ONE reason so a single editing session is
     # not double-penalized: the ModDate gap and the incremental-update
     # (%%EOF) count both mean "modified after first write". Raw counts
     # stay in ``forensics`` for the evidence panel.
+    #
+    # Calibration tuning (2026-06-11, prod run on 600 human-approved
+    # documents): a bare ModDate gap fired on 25% of LEGITIMATE
+    # approved docs — portal re-saves, print-to-PDF, scanner OCR
+    # layers and preview apps all touch ModDate. An uncorroborated
+    # gap is therefore INFO ONLY (visible evidence, never elevates the
+    # verdict). It counts toward the risk verdict only when
+    # CORROBORATED by an independent editing signal: the document was
+    # also produced by a consumer editor (suspicious_generator), or
+    # the file shows heavy incremental rewriting (>= 3 incremental
+    # updates — a single re-save writes 1 and is the common benign
+    # case).
+    corroborated = (
+        matched_generator is not None
+        or incremental_updates >= _HEAVY_INCREMENTAL_UPDATES
+    )
     edit_severity: str | None = None
     edit_detail: str | None = None
     if creation_date and mod_date and (mod_date - creation_date) > _EDIT_GAP_THRESHOLD:
         gap = mod_date - creation_date
-        edit_severity = (
-            SEVERITY_HIGH if gap > _EDIT_GAP_HIGH_THRESHOLD else SEVERITY_MEDIUM
-        )
+        if corroborated:
+            edit_severity = (
+                SEVERITY_HIGH if gap > _EDIT_GAP_HIGH_THRESHOLD else SEVERITY_MEDIUM
+            )
+        else:
+            edit_severity = SEVERITY_INFO
         edit_detail = (
             "Documento editado después de su creación — creado el "
             f"{_fmt(creation_date)}, modificado el {_fmt(mod_date)}."
         )
-    if incremental_updates > 0:
-        if edit_severity is None:
-            edit_severity = SEVERITY_MEDIUM
-            edit_detail = (
-                "Documento editado después de su creación — el archivo "
-                f"registra {incremental_updates + 1} escrituras "
-                "incrementales."
+        if not corroborated:
+            edit_detail += (
+                " Sin otras señales de edición; puede deberse a un "
+                "re-guardado legítimo."
             )
-        # else: keep the date-based detail (richer) at its severity;
-        # the raw eof_count is already in forensics.
+    if incremental_updates > 0 and edit_severity is None:
+        # No usable date gap — judge by rewrite volume alone.
+        edit_severity = (
+            SEVERITY_MEDIUM
+            if incremental_updates >= _HEAVY_INCREMENTAL_UPDATES
+            else SEVERITY_INFO
+        )
+        edit_detail = (
+            "Documento editado después de su creación — el archivo "
+            f"registra {incremental_updates + 1} escrituras "
+            "incrementales."
+        )
     if edit_severity is not None and edit_detail is not None:
         reasons.append(
             RiskReason(

@@ -189,32 +189,72 @@ def test_suspicious_generator_list_is_exported() -> None:
 # ---------------------------------------------------------------------------
 
 
-def test_moddate_after_creation_flags_edited(tmp_path: Path) -> None:
+def test_bare_moddate_gap_is_info_only(tmp_path: Path) -> None:
+    """Calibration tuning 2026-06-11: an uncorroborated ModDate gap fired
+    on 25% of legitimately-approved prod documents (portal re-saves,
+    print-to-PDF, OCR layers). It stays visible as evidence but is INFO
+    only and never elevates the verdict."""
     path = _write_pdf(
         tmp_path,
         "edited.pdf",
         metadata={
             "/Producer": "Acrobat Distiller",
             "/CreationDate": "D:20260401120000",
-            "/ModDate": "D:20260401150000",  # +3 h
+            "/ModDate": "D:20260401150000",  # +3 h, no corroboration
         },
     )
     result = _analyze(path)
-    assert result.risk == "suspicious"
+    assert result.risk == "clean"
     reason = next(r for r in result.reasons if r.code == "edited_after_creation")
-    assert reason.severity == "medium"
+    assert reason.severity == "info"
     assert "01/04/2026 12:00" in reason.detail_es
     assert "01/04/2026 15:00" in reason.detail_es
+    assert "re-guardado legítimo" in reason.detail_es
 
 
-def test_moddate_gap_over_30_days_is_high_risk(tmp_path: Path) -> None:
+def test_bare_moddate_gap_over_30_days_stays_info(tmp_path: Path) -> None:
+    # Even a long gap is benign alone — downloaded in January, re-saved
+    # in March before uploading is a common legitimate workflow.
     path = _write_pdf(
         tmp_path,
         "edited-late.pdf",
         metadata={
             "/Producer": "Acrobat Distiller",
             "/CreationDate": "D:20260101120000",
-            "/ModDate": "D:20260315120000",  # +73 days
+            "/ModDate": "D:20260315120000",  # +73 days, no corroboration
+        },
+    )
+    result = _analyze(path)
+    assert result.risk == "clean"
+    reason = next(r for r in result.reasons if r.code == "edited_after_creation")
+    assert reason.severity == "info"
+
+
+def test_corroborated_moddate_gap_is_medium(tmp_path: Path) -> None:
+    """Gap + suspicious generator = corroborated editing → medium."""
+    path = _write_pdf(
+        tmp_path,
+        "edited-canva.pdf",
+        metadata={
+            "/Producer": "Canva",
+            "/CreationDate": "D:20260401120000",
+            "/ModDate": "D:20260401150000",  # +3 h
+        },
+    )
+    result = _analyze(path)
+    reason = next(r for r in result.reasons if r.code == "edited_after_creation")
+    assert reason.severity == "medium"
+    assert result.risk == "suspicious"
+
+
+def test_corroborated_moddate_gap_over_30_days_is_high_risk(tmp_path: Path) -> None:
+    path = _write_pdf(
+        tmp_path,
+        "edited-late-canva.pdf",
+        metadata={
+            "/Producer": "Canva",
+            "/CreationDate": "D:20260101120000",
+            "/ModDate": "D:20260315120000",  # +73 days, corroborated
         },
     )
     result = _analyze(path)
@@ -223,7 +263,8 @@ def test_moddate_gap_over_30_days_is_high_risk(tmp_path: Path) -> None:
     assert reason.severity == "high"
 
 
-def test_multiple_eof_markers_flag_incremental_update(tmp_path: Path) -> None:
+def test_single_incremental_save_is_info_only(tmp_path: Path) -> None:
+    # One incremental update = one re-save: the common benign case.
     path = _write_pdf(
         tmp_path, "incremental.pdf", metadata={"/Producer": "Acrobat Distiller"}
     )
@@ -231,29 +272,47 @@ def test_multiple_eof_markers_flag_incremental_update(tmp_path: Path) -> None:
     result = _analyze(path)
     assert result.forensics["eof_count"] == 2
     assert result.forensics["incremental_updates"] == 1
-    assert result.risk == "suspicious"
+    assert result.risk == "clean"
     reason = next(r for r in result.reasons if r.code == "edited_after_creation")
-    assert reason.severity == "medium"
+    assert reason.severity == "info"
     assert "escrituras incrementales" in reason.detail_es
 
 
+def test_heavy_incremental_rewrites_are_medium(tmp_path: Path) -> None:
+    """3+ incremental updates = repeated editing sessions → medium."""
+    path = _write_pdf(
+        tmp_path, "rewritten.pdf", metadata={"/Producer": "Acrobat Distiller"}
+    )
+    _append_incremental_save(path)
+    _append_incremental_save(path)
+    _append_incremental_save(path)
+    result = _analyze(path)
+    assert result.forensics["incremental_updates"] == 3
+    assert result.risk == "suspicious"
+    reason = next(r for r in result.reasons if r.code == "edited_after_creation")
+    assert reason.severity == "medium"
+
+
 def test_moddate_and_incremental_emit_one_combined_reason(tmp_path: Path) -> None:
-    """Both edit signals fire → ONE reason at the higher severity."""
+    """Both edit signals fire → ONE reason; heavy rewriting corroborates
+    the date gap, so the >30d gap escalates to high."""
     path = _write_pdf(
         tmp_path,
         "both.pdf",
         metadata={
             "/Producer": "Acrobat Distiller",
             "/CreationDate": "D:20260101120000",
-            "/ModDate": "D:20260315120000",  # high (>30 d)
+            "/ModDate": "D:20260315120000",  # >30 d
         },
     )
     _append_incremental_save(path)
+    _append_incremental_save(path)
+    _append_incremental_save(path)  # 3 updates → corroborated
     result = _analyze(path)
     edit_reasons = [r for r in result.reasons if r.code == "edited_after_creation"]
     assert len(edit_reasons) == 1
     assert edit_reasons[0].severity == "high"
-    assert result.forensics["eof_count"] == 2  # raw counts preserved
+    assert result.forensics["eof_count"] == 4  # raw counts preserved
 
 
 # ---------------------------------------------------------------------------
