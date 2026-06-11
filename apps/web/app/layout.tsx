@@ -10,6 +10,14 @@ import "./globals.css";
 
 export const metadata: Metadata = {
   metadataBase: new URL(SITE_URL),
+  // Google Search Console ownership proof (URL-prefix property for
+  // https://checkwise.com.mx). Emits
+  // <meta name="google-site-verification" content="..."> site-wide.
+  // Keep this in place permanently — removing it un-verifies the
+  // property.
+  verification: {
+    google: "OM2B1MII7_akMeN8QrPvNx-mGx6x3bH70sTF1jQW0Wc",
+  },
   title: {
     default: "CheckWise · Plataforma de cumplimiento REPSE",
     template: `%s · ${SITE_NAME}`,
