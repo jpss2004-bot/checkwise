@@ -4,21 +4,26 @@ import { useEffect, useState } from "react";
 import Link from "next/link";
 import {
   ArrowRight,
-  Books,
-  CalendarBlank,
+  CheckCircle,
   ClipboardText,
-  Files,
+  EnvelopeSimple,
   HourglassHigh,
-  IdentificationCard,
-  ListChecks,
-  ListMagnifyingGlass,
-  Storefront,
-  Users,
-  WarningCircle,
+  Megaphone,
+  PencilSimpleLine,
+  Percent,
+  WarningOctagon,
+  XCircle,
 } from "@phosphor-icons/react";
 
-import { RadialGauge } from "@/components/checkwise/charts";
+import { StackedBars, type ChartTone } from "@/components/checkwise/charts";
+import {
+  EmptyState,
+  StatCard,
+  Surface,
+} from "@/components/checkwise/dashboard/stat-card";
+import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import { DataTable } from "@/components/ui/data-table";
 import { MetadataStrip } from "@/components/ui/metadata-strip";
 import {
   ErrorState,
@@ -26,20 +31,47 @@ import {
 } from "@/components/checkwise/portal/state-surfaces";
 
 import { AdminShell } from "../_shell";
-import { getAdminOverview, type AdminOverview } from "@/lib/api/admin";
+import {
+  getAdminOverview,
+  getRollup,
+  type AdminOverview,
+  type AdminRollup,
+  type RollupClientRow,
+  type RollupQueueHealth,
+  type RollupVendorAtRisk,
+} from "@/lib/api/admin";
+import {
+  SEMAPHORE_LABELS_ES,
+  semaphoreLabel,
+  semaphoreVariant,
+  type SemaphoreLevel,
+} from "@/lib/constants/statuses";
 
+/**
+ * Admin dashboard — operations console (P2 audit, 2026-06-10).
+ *
+ * Replaces the vanity workspace-ratio gauge + bare count rows with the
+ * aggregates the ops team actually drives from: queue health with aging
+ * buckets, 7-day throughput, per-client semáforo rollup, the named
+ * vendors at risk, and the three operational inboxes. The launcher
+ * section that duplicated the nav is gone.
+ */
 export default function AdminDashboardPage() {
-  const [data, setData] = useState<AdminOverview | null>(null);
+  const [overview, setOverview] = useState<AdminOverview | null>(null);
+  const [rollup, setRollup] = useState<AdminRollup | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [reloadKey, setReloadKey] = useState(0);
 
   useEffect(() => {
     let cancelled = false;
-    setData(null);
+    setOverview(null);
+    setRollup(null);
     setError(null);
-    getAdminOverview()
-      .then((overview) => {
-        if (!cancelled) setData(overview);
+    Promise.all([getAdminOverview(), getRollup()])
+      .then(([ov, ru]) => {
+        if (cancelled) return;
+        setOverview(ov);
+        setRollup(ru);
       })
       .catch((err: unknown) => {
         if (cancelled) return;
@@ -50,12 +82,14 @@ export default function AdminDashboardPage() {
     };
   }, [reloadKey]);
 
+  const loaded = overview && rollup;
+
   return (
     <AdminShell
       title="Resumen operativo"
-      description="Vista panorámica de la operación: clientes, proveedores, espacios activos y la bandeja de revisión humana."
+      description="Consola de operaciones: salud de la cola de revisión, ritmo del equipo, semáforo por cliente y bandejas pendientes."
       actions={
-        <Button asChild size="sm" variant="outline">
+        <Button asChild size="sm">
           <Link href="/admin/reviewer">
             <ClipboardText className="h-4 w-4" weight="bold" aria-hidden="true" />
             Bandeja de revisión
@@ -69,46 +103,49 @@ export default function AdminDashboardPage() {
           description={error}
           onRetry={() => setReloadKey((k) => k + 1)}
         />
-      ) : !data ? (
+      ) : !loaded ? (
         <DashboardSkeleton />
       ) : (
         <div className="space-y-6">
-          <AdminHero data={data} />
-          <AdminSignals data={data} />
-          <OperationsLauncher />
+          <OpsHero overview={overview} queue={rollup.queue} />
+          <ThroughputStrip throughput={rollup.throughput} />
+          <ClientsRollupSection clients={rollup.clients} />
+          <div className="cw-stagger grid gap-5 lg:grid-cols-3">
+            <VendorsAtRiskCard
+              vendors={rollup.vendors_at_risk}
+              className="lg:col-span-2"
+            />
+            <OperationalInbox inbox={rollup.inbox} />
+          </div>
         </div>
       )}
     </AdminShell>
   );
 }
 
-// ─── Hero (asymmetric, no gradient) ─────────────────────────────
+// ─── Hero — backlog headline + queue health ──────────────────────
 
-function AdminHero({ data }: { data: AdminOverview }) {
+function OpsHero({
+  overview,
+  queue,
+}: {
+  overview: AdminOverview;
+  queue: RollupQueueHealth;
+}) {
   const reviewBacklog =
-    data.pending_reviews_total + data.rejected_or_correction_total;
-  // The gauge headline is a REAL count (active workspaces), not a
-  // synthetic percentage. The ring is a coverage proportion of active
-  // workspaces against vendors, clamped by RadialGauge so it never reads
-  // a misleading ">100%" when a vendor holds more than one workspace.
+    overview.pending_reviews_total + overview.rejected_or_correction_total;
   return (
-    <section className="cw-fade-up grid gap-5 rounded-lg border border-[color:var(--border-default)] bg-[color:var(--surface-raised)] p-5 shadow-xs md:grid-cols-[auto,1fr] md:items-center md:gap-8 md:p-6">
-      <RadialGauge
-        value={data.active_workspaces_total}
-        max={Math.max(1, data.vendors_total)}
-        tone="brand"
-        size={140}
-        thickness={12}
-        label={data.active_workspaces_total.toString()}
-        caption={`espacios activos · ${data.vendors_total} proveedores`}
-      />
+    <section className="cw-fade-up grid gap-5 rounded-lg border border-[color:var(--border-default)] bg-[color:var(--surface-raised)] p-5 shadow-xs md:grid-cols-[1fr,auto] md:items-center md:gap-8 md:p-6">
       <div className="min-w-0 space-y-3">
-        <p className="cw-eyebrow">Panorama · {data.clients_total} clientes · {data.vendors_total} proveedores</p>
+        <p className="cw-eyebrow">
+          Panorama · {overview.clients_total} clientes · {overview.vendors_total}{" "}
+          proveedores
+        </p>
         <p className="text-xl font-semibold leading-tight tracking-tight text-[color:var(--text-primary)]">
-          {heroHeadline(data, reviewBacklog)}
+          {heroHeadline(overview, reviewBacklog)}
         </p>
         <p className="max-w-2xl text-[13px] leading-relaxed text-[color:var(--text-secondary)]">
-          {heroDescription(data, reviewBacklog)}
+          {heroDescription(overview, reviewBacklog)}
         </p>
         <MetadataStrip
           bordered={false}
@@ -116,23 +153,25 @@ function AdminHero({ data }: { data: AdminOverview }) {
           items={[
             {
               label: "Revisar",
-              value: formatCount(data.pending_reviews_total),
+              value: formatCount(overview.pending_reviews_total),
               mono: true,
             },
             {
               label: "Correcciones",
-              value: formatCount(data.rejected_or_correction_total),
+              value: formatCount(overview.rejected_or_correction_total),
               mono: true,
-              tone: data.rejected_or_correction_total > 0 ? "warning" : "default",
+              tone:
+                overview.rejected_or_correction_total > 0 ? "warning" : "default",
             },
             {
-              label: "Audit recientes",
-              value: formatCount(data.recent_audit_events_total),
+              label: "Entregas recientes",
+              value: formatCount(overview.recent_submissions_total),
               mono: true,
             },
           ]}
         />
       </div>
+      <QueueHealthPanel queue={queue} />
     </section>
   );
 }
@@ -161,273 +200,554 @@ function heroDescription(data: AdminOverview, backlog: number): string {
   if (data.recent_submissions_total > 0)
     parts.push(`${data.recent_submissions_total} entregas en el último ciclo`);
   if (data.recent_audit_events_total > 0)
-    parts.push(`${data.recent_audit_events_total} eventos recientes en la bitácora de auditoría`);
+    parts.push(
+      `${data.recent_audit_events_total} eventos recientes en la bitácora de auditoría`,
+    );
   if (parts.length === 0)
     return backlog === 0
       ? "No hay actividad operativa pendiente. Todo está al día."
-      : "Todo bajo control. Revisa la sección inferior para entrar a cada superficie.";
+      : "Todo bajo control. Las secciones inferiores detallan cada cliente.";
   return parts.join(" · ") + ".";
 }
 
-// ─── Vertical signals list (replaces 4-up + 3-up StatCard grids) ──
+// ─── Queue health (replaces the workspace-ratio gauge) ───────────
 
-type SignalRow = {
-  href?: string;
-  icon: typeof IdentificationCard;
+type AgeBucket = {
+  key: string;
   label: string;
-  caption: string;
   value: number;
-  tone?: "default" | "warning" | "teal";
+  tone: ChartTone;
 };
 
-function AdminSignals({ data }: { data: AdminOverview }) {
-  const rows: SignalRow[] = [
+function QueueHealthPanel({ queue }: { queue: RollupQueueHealth }) {
+  const buckets: AgeBucket[] = [
     {
-      href: "/admin/clients",
-      icon: IdentificationCard,
-      label: "Clientes",
-      caption: "Empresas dadas de alta en CheckWise.",
-      value: data.clients_total,
+      key: "under_24h",
+      label: "<24 h",
+      value: queue.age_buckets.under_24h,
+      tone: "success",
     },
     {
-      href: "/admin/vendors",
-      icon: Storefront,
-      label: "Proveedores",
-      caption: "Proveedores REPSE registrados.",
-      value: data.vendors_total,
+      key: "h24_to_72h",
+      label: "1–3 días",
+      value: queue.age_buckets.h24_to_72h,
+      tone: "info",
     },
     {
-      icon: Users,
-      label: "Espacios activos",
-      caption: "Proveedores con expediente vivo.",
-      value: data.active_workspaces_total,
-      tone: "teal",
+      key: "over_72h",
+      label: "3–7 días",
+      value: queue.age_buckets.over_72h,
+      tone: "warning",
     },
     {
-      href: "/admin/reviewer",
-      icon: HourglassHigh,
-      label: "En revisión",
-      caption: "Documentos en cola humana.",
-      value: data.pending_reviews_total,
-    },
-    {
-      icon: WarningCircle,
-      label: "Rechazos / aclaración",
-      caption: "Documentos que requieren acción del proveedor.",
-      value: data.rejected_or_correction_total,
-      tone: data.rejected_or_correction_total > 0 ? "warning" : "default",
-    },
-    {
-      icon: Files,
-      label: "Entregas recientes",
-      caption: "Cargas en los últimos días.",
-      value: data.recent_submissions_total,
-    },
-    {
-      href: "/platform/audit-log",
-      icon: ListMagnifyingGlass,
-      label: "Eventos de auditoría",
-      caption: "Trazabilidad reciente del sistema.",
-      value: data.recent_audit_events_total,
+      key: "over_7d",
+      label: "+7 días",
+      value: queue.age_buckets.over_7d,
+      tone: "error",
     },
   ];
-
   return (
-    <section
-      aria-label="Estado operativo"
-      className="cw-fade-up rounded-lg border border-[color:var(--border-default)] bg-[color:var(--surface-raised)] shadow-xs"
-    >
-      <header className="border-b border-[color:var(--border-subtle)] px-5 py-3">
-        <p className="cw-eyebrow">Estado operativo</p>
-        <p className="text-sm font-semibold text-[color:var(--text-primary)]">
-          Señales agrupadas
-        </p>
-      </header>
-      <ul className="divide-y divide-[color:var(--border-subtle)]">
-        {rows.map((row) => (
-          <li key={row.label}>
-            <SignalRow row={row} />
-          </li>
-        ))}
-      </ul>
-    </section>
-  );
-}
-
-function SignalRow({ row }: { row: SignalRow }) {
-  const Icon = row.icon;
-  const valueTone =
-    row.tone === "warning"
-      ? "text-[color:var(--status-warning-text)]"
-      : row.tone === "teal"
-      ? "text-[color:var(--text-teal)]"
-      : "text-[color:var(--text-primary)]";
-  const content = (
-    <div className="flex items-center gap-3 px-5 py-3 transition-colors hover:bg-[color:var(--surface-hover)]">
-      <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-md bg-[color:var(--surface-sunken)] text-[color:var(--text-secondary)]">
-        <Icon className="h-4 w-4" weight="bold" aria-hidden="true" />
-      </span>
-      <div className="min-w-0 flex-1">
-        <p className="text-[13px] font-semibold text-[color:var(--text-primary)]">
-          {row.label}
-        </p>
-        <p className="text-[11px] text-[color:var(--text-tertiary)]">
-          {row.caption}
-        </p>
-      </div>
-      <span
-        className={`font-mono text-lg font-semibold tabular-nums ${valueTone}`}
-      >
-        {row.value}
-      </span>
-      {row.href ? (
-        <ArrowRight
-          className="h-4 w-4 shrink-0 text-[color:var(--text-tertiary)]"
-          weight="bold"
+    <div className="w-full rounded-md border border-[color:var(--border-subtle)] bg-[color:var(--surface-page)] p-4 md:w-[320px]">
+      <div className="flex items-center justify-between gap-3">
+        <p className="cw-eyebrow">Cola de revisión</p>
+        <HourglassHigh
+          className="h-4 w-4 text-[color:var(--text-tertiary)]"
+          weight="duotone"
           aria-hidden="true"
         />
-      ) : (
-        <span className="h-4 w-4 shrink-0" aria-hidden />
-      )}
+      </div>
+      <div className="mt-2 flex items-baseline gap-2">
+        <span className="font-mono text-4xl font-semibold tabular-nums leading-none text-[color:var(--text-primary)]">
+          {queue.pending_total}
+        </span>
+        <span className="text-[11px] text-[color:var(--text-secondary)]">
+          pendientes
+        </span>
+      </div>
+      <p className="mt-1.5 text-[11px] text-[color:var(--text-tertiary)]">
+        {queue.oldest_age_hours !== null
+          ? `la más antigua lleva ${humanizeHours(queue.oldest_age_hours)} esperando`
+          : "no hay documentos en espera"}
+      </p>
+      {queue.pending_total > 0 ? (
+        <StackedBars
+          segments={buckets}
+          height={8}
+          showLegend={false}
+          className="mt-3"
+        />
+      ) : null}
+      <div className="mt-3 grid grid-cols-2 gap-1.5">
+        {buckets.map((bucket) => (
+          <AgeChip key={bucket.key} bucket={bucket} />
+        ))}
+      </div>
     </div>
   );
-  if (row.href) {
-    return (
-      <Link
-        href={row.href}
-        className="block focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-[color:var(--border-focus)]/40"
-      >
-        {content}
-      </Link>
-    );
-  }
-  return content;
 }
 
-// ─── Operations launcher (vertical bordered list) ────────────────
+function AgeChip({ bucket }: { bucket: AgeBucket }) {
+  const active = bucket.value > 0;
+  const toneClass =
+    active && bucket.tone === "error"
+      ? "border-[color:var(--status-error-border)] bg-[color:var(--status-error-bg)] text-[color:var(--status-error-text)]"
+      : active && bucket.tone === "warning"
+        ? "border-[color:var(--status-warning-border)] bg-[color:var(--status-warning-bg)] text-[color:var(--status-warning-text)]"
+        : active
+          ? "border-[color:var(--border-default)] bg-[color:var(--surface-raised)] text-[color:var(--text-secondary)]"
+          : "border-[color:var(--border-subtle)] bg-[color:var(--surface-raised)] text-[color:var(--text-tertiary)]";
+  return (
+    <span
+      className={`flex items-center justify-between gap-2 rounded-md border px-2 py-1 text-[10px] font-medium ${toneClass}`}
+    >
+      <span>{bucket.label}</span>
+      <span className="font-mono text-[11px] tabular-nums">{bucket.value}</span>
+    </span>
+  );
+}
 
-function OperationsLauncher() {
-  const items: {
-    href: string;
-    icon: typeof IdentificationCard;
-    label: string;
-    helper: string;
-  }[] = [
-    {
-      href: "/admin/clients",
-      icon: IdentificationCard,
-      label: "Clientes",
-      helper: "Alta, edición y estatus.",
-    },
-    {
-      href: "/admin/vendors",
-      icon: Storefront,
-      label: "Proveedores",
-      helper: "Registro, contacto y persona.",
-    },
-    {
-      href: "/admin/requirements",
-      icon: Books,
-      label: "Requisitos",
-      helper: "Catálogo regulatorio REPSE.",
-    },
-    {
-      href: "/admin/calendar",
-      icon: CalendarBlank,
-      label: "Calendario",
-      helper: "Periodos y obligaciones.",
-    },
-    {
-      href: "/admin/reviewer",
-      icon: ListChecks,
-      label: "Bandeja",
-      helper: "Cola de revisión humana.",
-    },
-    {
-      href: "/platform/audit-log",
-      icon: ListMagnifyingGlass,
-      label: "Bitácora de auditoría",
-      helper: "Eventos del sistema.",
-    },
-  ];
+/** <48h reads in hours ("31h"); anything older reads in days ("4d"). */
+function humanizeHours(hours: number): string {
+  if (hours < 48) return `${Math.max(1, Math.round(hours))}h`;
+  return `${Math.round(hours / 24)}d`;
+}
+
+// ─── Throughput (últimos 7 días) ─────────────────────────────────
+
+function ThroughputStrip({
+  throughput,
+}: {
+  throughput: AdminRollup["throughput"];
+}) {
+  const approved = throughput.approved_last_7d;
+  const rejected = throughput.rejected_last_7d;
+  const resolved = approved + rejected;
+  const rejectionRate =
+    resolved === 0 ? null : Math.round((rejected / resolved) * 100);
   return (
     <section
-      aria-label="Superficies operativas"
-      className="cw-fade-up rounded-lg border border-[color:var(--border-default)] bg-[color:var(--surface-raised)] shadow-xs"
+      aria-label="Ritmo de revisión"
+      className="cw-stagger grid gap-3 sm:grid-cols-3"
     >
-      <header className="border-b border-[color:var(--border-subtle)] px-5 py-3">
-        <p className="cw-eyebrow">Superficies operativas</p>
-        <p className="text-sm font-semibold text-[color:var(--text-primary)]">
-          Cada cambio queda firmado en la bitácora de auditoría
-        </p>
-      </header>
-      <ul className="divide-y divide-[color:var(--border-subtle)]">
-        {items.map((item) => (
-          <li key={item.href}>
-            <Link
-              href={item.href}
-              className="flex items-center gap-3 px-5 py-3 transition-colors hover:bg-[color:var(--surface-hover)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-[color:var(--border-focus)]/40"
-            >
-              <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-md bg-[color:var(--surface-brand-muted)] text-[color:var(--text-brand)]">
-                <item.icon className="h-4 w-4" weight="bold" aria-hidden="true" />
-              </span>
-              <div className="min-w-0 flex-1">
-                <p className="text-[13px] font-semibold text-[color:var(--text-primary)]">
-                  {item.label}
-                </p>
-                <p className="text-[11px] text-[color:var(--text-tertiary)]">
-                  {item.helper}
-                </p>
-              </div>
-              <ArrowRight
-                className="h-4 w-4 shrink-0 text-[color:var(--text-tertiary)]"
-                weight="bold"
-                aria-hidden="true"
-              />
-            </Link>
-          </li>
-        ))}
-      </ul>
+      <StatCard
+        compact
+        label="Aprobados"
+        value={approved}
+        caption="últimos 7 días"
+        icon={CheckCircle}
+        tone={approved > 0 ? "success" : "neutral"}
+      />
+      <StatCard
+        compact
+        label="Rechazados"
+        value={rejected}
+        caption="últimos 7 días"
+        icon={XCircle}
+        tone={rejected > 0 ? "error" : "neutral"}
+      />
+      <StatCard
+        compact
+        label="Tasa de rechazo"
+        value={rejectionRate === null ? "—" : `${rejectionRate}%`}
+        caption="rechazados entre resueltos · últimos 7 días"
+        icon={Percent}
+        tone={rejectionRate !== null && rejectionRate >= 20 ? "warning" : "neutral"}
+      />
     </section>
   );
 }
+
+// ─── Per-client rollup table ─────────────────────────────────────
+
+function ClientsRollupSection({ clients }: { clients: RollupClientRow[] }) {
+  return (
+    <section className="space-y-3">
+      <header className="space-y-0.5">
+        <h2 className="text-[13px] font-semibold uppercase tracking-wide text-[color:var(--text-primary)]">
+          Clientes por estado
+        </h2>
+        <p className="text-xs text-[color:var(--text-secondary)]">
+          Semáforo y pendientes de cada cartera, ordenados de mayor a menor
+          riesgo.
+        </p>
+      </header>
+      <DataTable<RollupClientRow>
+        items={clients}
+        columns={[
+          {
+            id: "client",
+            header: "Cliente",
+            cell: (row) => (
+              <Link
+                href={`/admin/clients/${row.client_id}`}
+                className="font-medium text-[color:var(--text-primary)] hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[color:var(--border-focus)]/40"
+              >
+                {row.client_name}
+              </Link>
+            ),
+          },
+          {
+            id: "vendors",
+            header: "Proveedores",
+            width: "100px",
+            align: "right",
+            cell: (row) => (
+              <span className="font-mono text-[12px] tabular-nums text-[color:var(--text-secondary)]">
+                {row.vendors_total}
+              </span>
+            ),
+          },
+          {
+            id: "semaphore",
+            header: "Semáforo",
+            width: "150px",
+            cell: (row) => <SemaphoreChips row={row} />,
+          },
+          {
+            id: "compliance",
+            header: "Cumplimiento",
+            width: "150px",
+            cell: (row) => <CompliancePct pct={row.compliance_pct} />,
+          },
+          {
+            id: "missing",
+            header: "Faltantes",
+            width: "90px",
+            align: "right",
+            cell: (row) => (
+              <CountCell value={row.missing_required_total} tone="warning" />
+            ),
+          },
+          {
+            id: "reviews",
+            header: "En revisión",
+            width: "100px",
+            align: "right",
+            cell: (row) => (
+              <CountCell value={row.pending_reviews_total} tone="info" />
+            ),
+          },
+          {
+            id: "due_soon",
+            header: "Por vencer ≤14 d",
+            width: "130px",
+            align: "right",
+            cell: (row) => (
+              <CountCell value={row.due_soon_total} tone="warning" />
+            ),
+          },
+        ]}
+        rowKey={(row) => row.client_id}
+        ariaLabel="Clientes por estado"
+        caption="Rollup de cumplimiento por cliente, ordenado del de mayor riesgo al de menor."
+        emptyTitle="Sin clientes activos"
+        emptyDescription="Cuando haya clientes con proveedores, su semáforo aparecerá aquí."
+        metaBadge={`${clients.length} cliente${clients.length === 1 ? "" : "s"}`}
+      />
+    </section>
+  );
+}
+
+/**
+ * Compact green/yellow/red distribution. Counts at zero render as
+ * muted outline chips so the eye lands only on the buckets that exist.
+ */
+function SemaphoreChips({ row }: { row: RollupClientRow }) {
+  const chips: { level: SemaphoreLevel; count: number }[] = [
+    { level: "green", count: row.green_count },
+    { level: "yellow", count: row.yellow_count },
+    { level: "red", count: row.red_count },
+  ];
+  return (
+    <div className="flex items-center gap-1.5">
+      {chips.map((chip) => (
+        <Badge
+          key={chip.level}
+          variant={chip.count > 0 ? semaphoreVariant(chip.level) : "outline"}
+          title={SEMAPHORE_LABELS_ES[chip.level]}
+          className="font-mono tabular-nums"
+        >
+          {chip.count}
+          <span className="sr-only"> {SEMAPHORE_LABELS_ES[chip.level]}</span>
+        </Badge>
+      ))}
+    </div>
+  );
+}
+
+function CompliancePct({ pct }: { pct: number }) {
+  const clamped = Math.max(0, Math.min(100, pct));
+  const barColor =
+    clamped >= 85
+      ? "var(--status-success-text)"
+      : clamped >= 60
+        ? "var(--status-warning-text)"
+        : "var(--status-error-text)";
+  return (
+    <div className="flex items-center gap-2">
+      <span className="w-9 text-right font-mono text-[12px] tabular-nums text-[color:var(--text-primary)]">
+        {Math.round(clamped)}%
+      </span>
+      <span
+        className="h-1.5 w-16 overflow-hidden rounded-full bg-[color:var(--surface-sunken)]"
+        aria-hidden="true"
+      >
+        <span
+          className="block h-full rounded-full transition-[width] duration-700 ease-out"
+          style={{ width: `${clamped}%`, background: barColor }}
+        />
+      </span>
+    </div>
+  );
+}
+
+function CountCell({
+  value,
+  tone = "default",
+}: {
+  value: number;
+  tone?: "default" | "warning" | "info";
+}) {
+  if (value === 0) {
+    return (
+      <span className="font-mono text-[12px] tabular-nums text-[color:var(--text-tertiary)]">
+        —
+      </span>
+    );
+  }
+  const toneClass =
+    tone === "warning"
+      ? "text-[color:var(--status-warning-text)]"
+      : tone === "info"
+        ? "text-[color:var(--status-info-text)]"
+        : "text-[color:var(--text-primary)]";
+  return (
+    <span className={`font-mono text-[12px] font-semibold tabular-nums ${toneClass}`}>
+      {value}
+    </span>
+  );
+}
+
+// ─── Vendors at risk ─────────────────────────────────────────────
+
+function VendorsAtRiskCard({
+  vendors,
+  className,
+}: {
+  vendors: RollupVendorAtRisk[];
+  className?: string;
+}) {
+  const rows = vendors.slice(0, 8);
+  return (
+    <Surface
+      title="Proveedores en riesgo"
+      description="Los expedientes con peor semáforo de toda la cartera."
+      icon={WarningOctagon}
+      className={className}
+      bodyClassName={rows.length > 0 ? "p-0" : undefined}
+    >
+      {rows.length === 0 ? (
+        <EmptyState
+          icon={CheckCircle}
+          title="Ningún proveedor en riesgo"
+          description="Toda la cartera está en verde. Nada que perseguir hoy."
+        />
+      ) : (
+        <ul className="divide-y divide-[color:var(--border-subtle)]">
+          {rows.map((vendor) => (
+            <li
+              key={vendor.vendor_id}
+              className="flex flex-wrap items-center justify-between gap-3 px-5 py-3"
+            >
+              <div className="min-w-0 flex-1">
+                <p className="truncate text-[13px] font-semibold text-[color:var(--text-primary)]">
+                  <Link
+                    href={`/admin/vendors/${vendor.vendor_id}`}
+                    className="hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[color:var(--border-focus)]/40"
+                  >
+                    {vendor.vendor_name}
+                  </Link>
+                </p>
+                <p className="truncate text-[11px] text-[color:var(--text-tertiary)]">
+                  {vendor.client_name} · última actividad{" "}
+                  {lastActivityLabel(vendor.last_activity_at)}
+                </p>
+              </div>
+              <div className="flex shrink-0 flex-col items-end gap-1">
+                <div className="flex items-center gap-2">
+                  <span className="font-mono text-[12px] tabular-nums text-[color:var(--text-secondary)]">
+                    {Math.round(vendor.compliance_pct)}%
+                  </span>
+                  <Badge variant={semaphoreVariant(vendor.semaphore_level)}>
+                    {semaphoreLabel(vendor.semaphore_level)}
+                  </Badge>
+                </div>
+                <p className="font-mono text-[10px] tabular-nums text-[color:var(--text-tertiary)]">
+                  {vendor.missing_required_count} faltantes ·{" "}
+                  {vendor.rejected_or_correction_count} por corregir
+                </p>
+              </div>
+            </li>
+          ))}
+        </ul>
+      )}
+    </Surface>
+  );
+}
+
+/** "hace 3h" / "hace 2d" style humanizer; falls back to an es-MX date. */
+function lastActivityLabel(iso: string | null): string {
+  if (!iso) return "sin registro";
+  const then = new Date(iso).getTime();
+  if (Number.isNaN(then)) return "sin registro";
+  const mins = Math.max(0, Math.round((Date.now() - then) / 60000));
+  if (mins < 60) return `hace ${Math.max(1, mins)} min`;
+  const hours = Math.floor(mins / 60);
+  if (hours < 48) return `hace ${hours}h`;
+  const days = Math.floor(hours / 24);
+  if (days < 30) return `hace ${days}d`;
+  return `el ${new Date(iso).toLocaleDateString("es-MX", {
+    day: "2-digit",
+    month: "short",
+    year: "numeric",
+  })}`;
+}
+
+// ─── Operational inbox ───────────────────────────────────────────
+
+function OperationalInbox({ inbox }: { inbox: AdminRollup["inbox"] }) {
+  const rows: {
+    href: string;
+    icon: typeof EnvelopeSimple;
+    label: string;
+    caption: string;
+    value: number;
+  }[] = [
+    {
+      href: "/admin/contact-requests",
+      icon: EnvelopeSimple,
+      label: "Solicitudes de contacto",
+      caption: "Leads del formulario público sin atender.",
+      value: inbox.contact_requests_pending,
+    },
+    {
+      href: "/admin/correction-requests",
+      icon: PencilSimpleLine,
+      label: "Correcciones pendientes",
+      caption: "Cambios de datos propuestos por proveedores.",
+      value: inbox.correction_requests_pending,
+    },
+    {
+      href: "/platform/feedback-reports",
+      icon: Megaphone,
+      label: "Feedback nuevo",
+      caption: "Reportes de bugs y mejoras sin triage.",
+      value: inbox.feedback_reports_new,
+    },
+  ];
+  return (
+    <Surface
+      title="Bandeja operativa"
+      description="Pendientes fuera de la cola documental."
+      bodyClassName="p-0"
+    >
+      <ul className="divide-y divide-[color:var(--border-subtle)]">
+        {rows.map((row) => {
+          const Icon = row.icon;
+          const muted = row.value === 0;
+          return (
+            <li key={row.href}>
+              <Link
+                href={row.href}
+                className="flex items-center gap-3 px-5 py-3 transition-colors hover:bg-[color:var(--surface-hover)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-[color:var(--border-focus)]/40"
+              >
+                <span
+                  className={`flex h-8 w-8 shrink-0 items-center justify-center rounded-md ${
+                    muted
+                      ? "bg-[color:var(--surface-sunken)] text-[color:var(--text-tertiary)]"
+                      : "bg-[color:var(--surface-brand-muted)] text-[color:var(--text-brand)]"
+                  }`}
+                >
+                  <Icon className="h-4 w-4" weight="bold" aria-hidden="true" />
+                </span>
+                <div className="min-w-0 flex-1">
+                  <p
+                    className={`text-[13px] font-semibold ${
+                      muted
+                        ? "text-[color:var(--text-secondary)]"
+                        : "text-[color:var(--text-primary)]"
+                    }`}
+                  >
+                    {row.label}
+                  </p>
+                  <p className="text-[11px] text-[color:var(--text-tertiary)]">
+                    {row.caption}
+                  </p>
+                </div>
+                <span
+                  className={`font-mono text-lg font-semibold tabular-nums ${
+                    muted
+                      ? "text-[color:var(--text-tertiary)]"
+                      : "text-[color:var(--text-primary)]"
+                  }`}
+                >
+                  {row.value}
+                </span>
+                <ArrowRight
+                  className="h-4 w-4 shrink-0 text-[color:var(--text-tertiary)]"
+                  weight="bold"
+                  aria-hidden="true"
+                />
+              </Link>
+            </li>
+          );
+        })}
+      </ul>
+    </Surface>
+  );
+}
+
+// ─── Loading skeleton ────────────────────────────────────────────
 
 function DashboardSkeleton() {
   return (
     <div className="space-y-6" aria-busy="true" aria-live="polite">
-      <span className="sr-only">Cargando resumen operativo…</span>
+      <span className="sr-only">Cargando la consola de operaciones…</span>
       <div className="rounded-lg border border-[color:var(--border-default)] bg-[color:var(--surface-raised)] p-5 shadow-xs">
-        <div className="grid gap-5 md:grid-cols-[auto,1fr] md:items-center">
-          <Skeleton className="h-[140px] w-[140px] rounded-full" />
+        <div className="grid gap-5 md:grid-cols-[1fr,320px] md:items-center">
           <div className="space-y-2">
             <Skeleton className="h-3 w-3/12" />
             <Skeleton className="h-6 w-9/12" />
             <Skeleton className="h-3 w-8/12" />
+            <Skeleton className="h-3 w-5/12" />
           </div>
+          <Skeleton className="h-[148px] w-full rounded-md" />
         </div>
       </div>
-      {[0, 1].map((g) => (
-        <div
-          key={g}
-          className="rounded-lg border border-[color:var(--border-default)] bg-[color:var(--surface-raised)] shadow-xs"
-        >
-          <div className="border-b border-[color:var(--border-subtle)] px-5 py-3">
-            <Skeleton className="h-3 w-2/12" />
-          </div>
-          <div className="divide-y divide-[color:var(--border-subtle)]">
-            {Array.from({ length: 4 }).map((_, i) => (
-              <div key={i} className="flex items-center gap-3 px-5 py-3">
-                <Skeleton className="h-8 w-8 rounded-md" />
-                <div className="flex-1 space-y-1">
-                  <Skeleton className="h-3 w-4/12" />
-                  <Skeleton className="h-3 w-6/12" />
-                </div>
-                <Skeleton className="h-5 w-10" />
-              </div>
-            ))}
-          </div>
+      <div className="grid gap-3 sm:grid-cols-3">
+        {[0, 1, 2].map((i) => (
+          <Skeleton key={i} className="h-[88px] rounded-lg" />
+        ))}
+      </div>
+      <div className="rounded-lg border border-[color:var(--border-default)] bg-[color:var(--surface-raised)] shadow-xs">
+        <div className="border-b border-[color:var(--border-subtle)] px-5 py-3">
+          <Skeleton className="h-3 w-2/12" />
         </div>
-      ))}
+        <div className="divide-y divide-[color:var(--border-subtle)]">
+          {Array.from({ length: 5 }).map((_, i) => (
+            <div key={i} className="flex items-center gap-3 px-5 py-3">
+              <Skeleton className="h-4 w-4/12" />
+              <Skeleton className="h-4 w-2/12" />
+              <Skeleton className="h-4 w-2/12" />
+              <Skeleton className="h-4 w-2/12" />
+            </div>
+          ))}
+        </div>
+      </div>
+      <div className="grid gap-5 lg:grid-cols-3">
+        <Skeleton className="h-56 rounded-lg lg:col-span-2" />
+        <Skeleton className="h-56 rounded-lg" />
+      </div>
     </div>
   );
 }

@@ -1027,3 +1027,297 @@ def test_reviewer_queue_returns_approved_rejected_counts(
     # approved, 3 rejected. The stale rows are excluded.
     assert body["approved_last_7d_count"] == 3
     assert body["rejected_last_7d_count"] == 3
+
+
+# ---------------------------------------------------------------------------
+# P2 (2026-06-10 audit) — ops-console rollup + per-client compliance
+# ---------------------------------------------------------------------------
+
+
+def _seed_rollup_world(db_factory) -> dict:
+    """One client with two vendors:
+
+    * ``Vendor Rojo`` — workspace with zero submissions → semáforo red
+      ("sin avance": 0 required slots on track).
+    * ``Vendor Amarillo`` — one *approved* onboarding submission
+      (``ONB-CONT-001``, a required expediente slot) → some progress,
+      rest pending, nothing actionable → semáforo yellow.
+
+    Plus two queue-pending submissions (``pendiente_revision``) on the
+    red vendor — one fresh, one 30h old — whose requirement codes are
+    NOT in the compliance catalog so they don't perturb the slot math.
+    """
+    from datetime import timedelta
+
+    from app.models.entities import utc_now
+
+    db = db_factory()
+    try:
+        institution = Institution(code="sat_rollup", name="SAT Rollup")
+        db.add(institution)
+        db.flush()
+        client = Client(name="Cliente Rollup", rfc="ROL260101AB1")
+        db.add(client)
+        db.flush()
+        period = Period(
+            code="2026-M05",
+            period_key="2026-M05",
+            year=2026,
+            month=5,
+            period_type="mensual",
+        )
+        db.add(period)
+        db.flush()
+        requirement = Requirement(
+            code="rollup_req",
+            name="Rollup Req",
+            institution_id=institution.id,
+            load_type="pdf",
+            frequency="mensual",
+            risk_level="medium",
+            is_active=True,
+            current_version=1,
+        )
+        db.add(requirement)
+        db.flush()
+
+        red_vendor = Vendor(
+            client_id=client.id,
+            name="Vendor Rojo",
+            rfc="ROJ260101AB1",
+            persona_type="moral",
+        )
+        yellow_vendor = Vendor(
+            client_id=client.id,
+            name="Vendor Amarillo",
+            rfc="AMA260101AB1",
+            persona_type="moral",
+        )
+        db.add_all([red_vendor, yellow_vendor])
+        db.flush()
+        db.add_all(
+            [
+                ProviderWorkspace(
+                    client_id=client.id,
+                    vendor_id=red_vendor.id,
+                    persona_type="moral",
+                    display_name="Vendor Rojo",
+                    access_token="tok-rollup-red",
+                ),
+                ProviderWorkspace(
+                    client_id=client.id,
+                    vendor_id=yellow_vendor.id,
+                    persona_type="moral",
+                    display_name="Vendor Amarillo",
+                    access_token="tok-rollup-yellow",
+                ),
+            ]
+        )
+        db.flush()
+
+        now = utc_now()
+        # Yellow vendor: one approved required onboarding slot.
+        db.add(
+            Submission(
+                client_id=client.id,
+                vendor_id=yellow_vendor.id,
+                institution_id=institution.id,
+                requirement_id=requirement.id,
+                period_id=period.id,
+                status="aprobado",
+                load_type="pdf",
+                requirement_code="ONB-CONT-001",
+                created_at=now,
+                updated_at=now,
+            )
+        )
+        # Queue-pending submissions: one fresh, one 30h old.
+        for idx, ts in enumerate((now, now - timedelta(hours=30))):
+            db.add(
+                Submission(
+                    client_id=client.id,
+                    vendor_id=red_vendor.id,
+                    institution_id=institution.id,
+                    requirement_id=requirement.id,
+                    period_id=period.id,
+                    status="pendiente_revision",
+                    load_type="pdf",
+                    requirement_code=f"rollup_queue_{idx}",
+                    period_key="2026-M05",
+                    created_at=ts,
+                    updated_at=ts,
+                )
+            )
+        db.commit()
+        return {
+            "client_id": client.id,
+            "red_vendor_id": red_vendor.id,
+            "yellow_vendor_id": yellow_vendor.id,
+        }
+    finally:
+        db.close()
+
+
+def test_rollup_returns_client_semaphore_and_queue_blocks(
+    api_client: TestClient, db_factory
+) -> None:
+    seeded = _seed_rollup_world(db_factory)
+    token = _admin_token(api_client, db_factory)
+    resp = api_client.get("/api/v1/admin/rollup", headers=_h(token))
+    assert resp.status_code == 200, resp.text
+    body = resp.json()
+
+    # --- clients block ---
+    row = next(c for c in body["clients"] if c["client_id"] == seeded["client_id"])
+    assert row["client_name"] == "Cliente Rollup"
+    assert row["vendors_total"] == 2
+    assert row["red_count"] == 1
+    assert row["yellow_count"] == 1
+    assert row["green_count"] == 0
+    # Both vendors are far from compliant — the averaged pct must sit
+    # at the bottom of the scale (the yellow vendor's single approved
+    # slot rounds the client average to ~0-2%).
+    assert 0 <= row["compliance_pct"] < 100
+    assert row["missing_required_total"] > 0
+    for key in ("pending_reviews_total", "due_soon_total"):
+        assert key in row
+
+    # --- queue block ---
+    queue = body["queue"]
+    assert queue["pending_total"] == 2
+    assert queue["oldest_age_hours"] is not None
+    assert queue["oldest_age_hours"] >= 30
+    buckets = queue["age_buckets"]
+    assert buckets["under_24h"] == 1
+    assert buckets["h24_to_72h"] == 1
+    assert buckets["over_72h"] == 0
+    assert buckets["over_7d"] == 0
+
+    # --- throughput block (the approved ONB doc is inside the window) ---
+    assert body["throughput"]["approved_last_7d"] >= 1
+    assert body["throughput"]["rejected_last_7d"] == 0
+
+    # --- inbox block ---
+    inbox = body["inbox"]
+    for key in (
+        "contact_requests_pending",
+        "correction_requests_pending",
+        "feedback_reports_new",
+    ):
+        assert inbox[key] == 0
+
+
+def test_rollup_queue_is_empty_safe(api_client: TestClient, db_factory) -> None:
+    """With nothing seeded the queue block is all zeros and
+    ``oldest_age_hours`` is null, not 0."""
+    token = _admin_token(api_client, db_factory)
+    resp = api_client.get("/api/v1/admin/rollup", headers=_h(token))
+    assert resp.status_code == 200, resp.text
+    queue = resp.json()["queue"]
+    assert queue["pending_total"] == 0
+    assert queue["oldest_age_hours"] is None
+
+
+def test_rollup_vendors_at_risk_orders_red_before_yellow_and_excludes_green(
+    api_client: TestClient, db_factory
+) -> None:
+    seeded = _seed_rollup_world(db_factory)
+    token = _admin_token(api_client, db_factory)
+    resp = api_client.get("/api/v1/admin/rollup", headers=_h(token))
+    assert resp.status_code == 200, resp.text
+    risk = resp.json()["vendors_at_risk"]
+
+    assert [r["vendor_id"] for r in risk] == [
+        seeded["red_vendor_id"],
+        seeded["yellow_vendor_id"],
+    ]
+    assert [r["semaphore_level"] for r in risk] == ["red", "yellow"]
+    assert all(r["semaphore_level"] != "green" for r in risk)
+    # The yellow vendor has activity (its approved upload); ISO string.
+    yellow_row = risk[1]
+    assert yellow_row["last_activity_at"] is not None
+    assert yellow_row["client_id"] == seeded["client_id"]
+    assert yellow_row["client_name"] == "Cliente Rollup"
+
+
+def test_client_compliance_returns_per_vendor_rows_worst_first(
+    api_client: TestClient, db_factory
+) -> None:
+    seeded = _seed_rollup_world(db_factory)
+    token = _admin_token(api_client, db_factory)
+    resp = api_client.get(
+        f"/api/v1/admin/clients/{seeded['client_id']}/compliance",
+        headers=_h(token),
+    )
+    assert resp.status_code == 200, resp.text
+    body = resp.json()
+    assert body["client_id"] == seeded["client_id"]
+    assert body["client_name"] == "Cliente Rollup"
+    assert len(body["vendors"]) == 2
+
+    # Ordering: red first, then yellow.
+    assert [v["semaphore_level"] for v in body["vendors"]] == ["red", "yellow"]
+    assert body["vendors"][0]["vendor_id"] == seeded["red_vendor_id"]
+    assert body["vendors"][1]["vendor_id"] == seeded["yellow_vendor_id"]
+
+    for vendor_row in body["vendors"]:
+        for key in (
+            "vendor_id",
+            "vendor_name",
+            "vendor_rfc",
+            "workspace_id",
+            "workspace_status",
+            "semaphore_level",
+            "compliance_pct",
+            "missing_required_count",
+            "rejected_or_correction_count",
+            "pending_reviews_count",
+            "due_soon_count",
+            "last_activity_at",
+        ):
+            assert key in vendor_row
+    red_row = body["vendors"][0]
+    yellow_row = body["vendors"][1]
+    assert red_row["compliance_pct"] == 0
+    assert yellow_row["compliance_pct"] > 0
+    assert yellow_row["last_activity_at"] is not None
+
+
+def test_client_compliance_404s_on_bogus_id(
+    api_client: TestClient, db_factory
+) -> None:
+    token = _admin_token(api_client, db_factory)
+    resp = api_client.get(
+        "/api/v1/admin/clients/no-such-client/compliance", headers=_h(token)
+    )
+    assert resp.status_code == 404
+    assert resp.json()["detail"] == "Cliente no encontrado."
+
+
+@pytest.mark.parametrize(
+    "path",
+    [
+        "/api/v1/admin/rollup",
+        "/api/v1/admin/clients/whatever/compliance",
+    ],
+)
+def test_rollup_and_compliance_reject_unauthenticated(
+    api_client: TestClient, path: str
+) -> None:
+    resp = api_client.get(path)
+    assert resp.status_code == 401
+
+
+@pytest.mark.parametrize(
+    "path",
+    [
+        "/api/v1/admin/rollup",
+        "/api/v1/admin/clients/whatever/compliance",
+    ],
+)
+def test_rollup_and_compliance_reject_reviewer_only(
+    api_client: TestClient, db_factory, path: str
+) -> None:
+    token = _reviewer_token(api_client, db_factory)
+    resp = api_client.get(path, headers=_h(token))
+    assert resp.status_code == 403

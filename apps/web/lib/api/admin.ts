@@ -468,6 +468,97 @@ export type AdminRequirement = {
   updated_at: string | null;
 };
 
+// ---------------------------------------------------------------------------
+// Ops-console rollup (P2 audit, 2026-06-10) — the aggregate data the admin
+// dashboard renders: per-client semáforo rollup, queue health, 7-day
+// throughput, named vendors at risk, and operational inbox counts.
+// ---------------------------------------------------------------------------
+
+export type RollupClientRow = {
+  client_id: string;
+  client_name: string;
+  vendors_total: number;
+  green_count: number;
+  yellow_count: number;
+  red_count: number;
+  compliance_pct: number;
+  missing_required_total: number;
+  pending_reviews_total: number;
+  due_soon_total: number;
+};
+
+export type RollupQueueHealth = {
+  pending_total: number;
+  /** Age in hours of the oldest pending submission; null when empty. */
+  oldest_age_hours: number | null;
+  /** Exclusive buckets: under_24h <24h · h24_to_72h 24–72h ·
+   *  over_72h 72h–7d · over_7d >7d. */
+  age_buckets: {
+    under_24h: number;
+    h24_to_72h: number;
+    over_72h: number;
+    over_7d: number;
+  };
+};
+
+export type RollupVendorAtRisk = {
+  vendor_id: string;
+  vendor_name: string;
+  client_id: string;
+  client_name: string;
+  semaphore_level: "green" | "yellow" | "red";
+  compliance_pct: number;
+  missing_required_count: number;
+  rejected_or_correction_count: number;
+  last_activity_at: string | null;
+};
+
+export type AdminRollup = {
+  /** Worst first: red_count desc, then compliance_pct asc. */
+  clients: RollupClientRow[];
+  queue: RollupQueueHealth;
+  throughput: { approved_last_7d: number; rejected_last_7d: number };
+  /** Top 8 red/yellow vendors only (empty when all green). */
+  vendors_at_risk: RollupVendorAtRisk[];
+  inbox: {
+    contact_requests_pending: number;
+    correction_requests_pending: number;
+    feedback_reports_new: number;
+  };
+};
+
+export async function getRollup(): Promise<AdminRollup> {
+  return fetchJson("/api/v1/admin/rollup");
+}
+
+export type ClientComplianceVendorRow = {
+  vendor_id: string;
+  vendor_name: string;
+  vendor_rfc: string | null;
+  workspace_id: string;
+  workspace_status: string;
+  semaphore_level: "green" | "yellow" | "red";
+  compliance_pct: number;
+  missing_required_count: number;
+  rejected_or_correction_count: number;
+  pending_reviews_count: number;
+  due_soon_count: number;
+  last_activity_at: string | null;
+};
+
+export type ClientCompliance = {
+  client_id: string;
+  client_name: string;
+  /** Red → yellow → green, compliance_pct asc within level. */
+  vendors: ClientComplianceVendorRow[];
+};
+
+export async function getClientCompliance(
+  clientId: string,
+): Promise<ClientCompliance> {
+  return fetchJson(`/api/v1/admin/clients/${clientId}/compliance`);
+}
+
 /** Institution catalog row for form dropdowns (P0 audit fix — the
  *  requirements form previously demanded a raw institution UUID). */
 export type AdminInstitution = {

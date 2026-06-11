@@ -48,6 +48,12 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from app.api.v1.auth import CurrentUser, require_role
+from app.api.v1.client import (
+    _last_activity_timestamps_bulk,
+    _portfolio_slot_inputs,
+    _vendor_compliance,
+)
+from app.api.v1.reviewer import QUEUE_STATUSES
 from app.constants.roles import MembershipRole
 from app.constants.statuses import DocumentStatus
 from app.core.compliance_catalog import (
@@ -350,6 +356,406 @@ def get_overview(db: DbSession, current: AdminUser) -> AdminOverview:
         rejected_or_correction_total=rejected_or_correction_total,
         recent_submissions_total=recent_submissions_total,
         recent_audit_events_total=recent_audit_events_total,
+    )
+
+
+# ---------------------------------------------------------------------------
+# Ops-console rollup (P2 of the 2026-06-10 audit)
+#
+# Reuses the per-vendor compliance machinery from ``client.py``
+# (``_portfolio_slot_inputs`` + ``_vendor_compliance`` +
+# ``_last_activity_timestamps_bulk``) so the admin dashboard's
+# red/yellow/green semantics match the client portal exactly.
+# Cross-router imports are the established pattern here (client.py
+# imports from portal.py; client_users.py imports from client.py).
+# ---------------------------------------------------------------------------
+
+
+_SEMAPHORE_LEVEL_ORDER: Final[dict[str, int]] = {"red": 0, "yellow": 1, "green": 2}
+
+
+class RollupClientRow(BaseModel):
+    client_id: str
+    client_name: str
+    vendors_total: int
+    green_count: int
+    yellow_count: int
+    red_count: int
+    compliance_pct: int
+    missing_required_total: int
+    pending_reviews_total: int
+    due_soon_total: int
+
+
+class RollupQueueAgeBuckets(BaseModel):
+    """Exclusive buckets: ``over_72h`` is 72h < age <= 7d; older
+    submissions fall only into ``over_7d``."""
+
+    under_24h: int
+    h24_to_72h: int
+    over_72h: int
+    over_7d: int
+
+
+class RollupQueue(BaseModel):
+    pending_total: int
+    oldest_age_hours: int | None
+    age_buckets: RollupQueueAgeBuckets
+
+
+class RollupThroughput(BaseModel):
+    approved_last_7d: int
+    rejected_last_7d: int
+
+
+class RollupVendorAtRisk(BaseModel):
+    vendor_id: str
+    vendor_name: str
+    client_id: str
+    client_name: str
+    semaphore_level: Literal["green", "yellow", "red"]
+    compliance_pct: int
+    missing_required_count: int
+    rejected_or_correction_count: int
+    last_activity_at: str | None
+
+
+class RollupInbox(BaseModel):
+    contact_requests_pending: int
+    correction_requests_pending: int
+    feedback_reports_new: int
+
+
+class AdminRollup(BaseModel):
+    clients: list[RollupClientRow]
+    queue: RollupQueue
+    throughput: RollupThroughput
+    vendors_at_risk: list[RollupVendorAtRisk]
+    inbox: RollupInbox
+
+
+class AdminClientComplianceVendorRow(BaseModel):
+    vendor_id: str
+    vendor_name: str
+    vendor_rfc: str | None
+    workspace_id: str
+    workspace_status: str
+    semaphore_level: Literal["green", "yellow", "red"]
+    compliance_pct: int
+    missing_required_count: int
+    rejected_or_correction_count: int
+    pending_reviews_count: int
+    due_soon_count: int
+    last_activity_at: str | None
+
+
+class AdminClientComplianceResponse(BaseModel):
+    client_id: str
+    client_name: str
+    vendors: list[AdminClientComplianceVendorRow]
+
+
+def _as_utc(ts: datetime) -> datetime:
+    """Normalize a DB timestamp (naive on SQLite) to aware UTC."""
+    return ts.replace(tzinfo=UTC) if ts.tzinfo is None else ts
+
+
+def _client_vendor_compliance_rows(
+    db: Session, client: Client, *, today: date, year: int
+) -> list[dict]:
+    """Per-workspace compliance summaries for one client.
+
+    Mirrors ``client.client_overview`` / ``client.client_vendors``:
+    one ``_portfolio_slot_inputs`` prefetch (a single submissions
+    query for the whole client) feeds ``_vendor_compliance`` per
+    workspace, so query count stays constant in the vendor count.
+    Each row is ``{vendor, workspace, summary, last_activity_at}``
+    where ``last_activity_at`` is the most recent of the vendor's
+    last submission / last reviewer decision (ISO string or None).
+    """
+    workspaces = list(
+        db.scalars(
+            select(ProviderWorkspace)
+            .where(ProviderWorkspace.client_id == client.id)
+            .order_by(ProviderWorkspace.created_at.desc())
+        )
+    )
+    if not workspaces:
+        return []
+    vendor_ids = [w.vendor_id for w in workspaces]
+    vendors = {
+        v.id: v for v in db.scalars(select(Vendor).where(Vendor.id.in_(vendor_ids)))
+    }
+    subs_by_vendor, institutions_by_id = _portfolio_slot_inputs(db, client.id)
+    last_sub_map, last_review_map = _last_activity_timestamps_bulk(db, vendor_ids)
+
+    rows: list[dict] = []
+    for ws in workspaces:
+        vendor = vendors.get(ws.vendor_id)
+        if vendor is None:
+            continue
+        summary = _vendor_compliance(
+            db,
+            ws,
+            today=today,
+            year=year,
+            prefetched_submissions=subs_by_vendor.get(ws.vendor_id, []),
+            institutions_by_id=institutions_by_id,
+        )
+        activity_candidates = [
+            _as_utc(ts)
+            for ts in (last_sub_map.get(vendor.id), last_review_map.get(vendor.id))
+            if ts is not None
+        ]
+        last_activity = max(activity_candidates) if activity_candidates else None
+        rows.append(
+            {
+                "vendor": vendor,
+                "workspace": ws,
+                "summary": summary,
+                "last_activity_at": (
+                    last_activity.isoformat() if last_activity else None
+                ),
+            }
+        )
+    return rows
+
+
+@router.get("/rollup", response_model=AdminRollup)
+def get_rollup(db: DbSession, current: AdminUser) -> AdminRollup:
+    """Everything the ops-console dashboard renders, in one call.
+
+    Per-client semáforo rollup (worst first), reviewer-queue ageing,
+    7-day throughput (mirrors the reviewer queue's stat-strip
+    counters), the 8 worst at-risk vendors (red, then yellow —
+    green vendors are not "at risk" and are excluded), and the
+    triage inbox counters.
+    """
+    _ = current
+    today = date.today()
+    year = today.year
+    now = datetime.now(UTC)
+
+    # --- Per-client compliance rollup + at-risk vendor collection ----
+    clients = list(db.scalars(select(Client).order_by(Client.created_at.desc())))
+    client_rows: list[RollupClientRow] = []
+    risk_rows: list[RollupVendorAtRisk] = []
+    for cl in clients:
+        vendor_rows = _client_vendor_compliance_rows(db, cl, today=today, year=year)
+        vendors_total = int(
+            db.scalar(select(func.count(Vendor.id)).where(Vendor.client_id == cl.id))
+            or 0
+        )
+        green = yellow = red = 0
+        missing_required_total = 0
+        pending_reviews_total = 0
+        due_soon_total = 0
+        pct_sum = 0
+        for row in vendor_rows:
+            summary = row["summary"]
+            level = summary["semaphore_level"]
+            if level == "green":
+                green += 1
+            elif level == "yellow":
+                yellow += 1
+            else:
+                red += 1
+            missing_required_total += summary["missing_required_count"]
+            pending_reviews_total += summary["pending_reviews_count"]
+            due_soon_total += summary["due_soon_count"]
+            pct_sum += summary["compliance_pct"]
+            if level in ("red", "yellow"):
+                vendor = row["vendor"]
+                risk_rows.append(
+                    RollupVendorAtRisk(
+                        vendor_id=vendor.id,
+                        vendor_name=vendor.name,
+                        client_id=cl.id,
+                        client_name=cl.name,
+                        semaphore_level=level,
+                        compliance_pct=summary["compliance_pct"],
+                        missing_required_count=summary["missing_required_count"],
+                        rejected_or_correction_count=summary[
+                            "rejected_or_correction_count"
+                        ],
+                        last_activity_at=row["last_activity_at"],
+                    )
+                )
+        # Same average ``client_overview`` uses: mean of per-vendor pct,
+        # 100 when the client has no workspaces yet.
+        compliance_pct = round(pct_sum / len(vendor_rows)) if vendor_rows else 100
+        client_rows.append(
+            RollupClientRow(
+                client_id=cl.id,
+                client_name=cl.name,
+                vendors_total=vendors_total,
+                green_count=green,
+                yellow_count=yellow,
+                red_count=red,
+                compliance_pct=compliance_pct,
+                missing_required_total=missing_required_total,
+                pending_reviews_total=pending_reviews_total,
+                due_soon_total=due_soon_total,
+            )
+        )
+
+    client_rows.sort(key=lambda r: (-r.red_count, r.compliance_pct))
+    risk_rows.sort(
+        key=lambda r: (_SEMAPHORE_LEVEL_ORDER[r.semaphore_level], r.compliance_pct)
+    )
+    vendors_at_risk = risk_rows[:8]
+
+    # --- Reviewer queue ageing ----------------------------------------
+    pending_created = list(
+        db.scalars(
+            select(Submission.created_at).where(Submission.status.in_(QUEUE_STATUSES))
+        )
+    )
+    under_24h = h24_to_72h = over_72h = over_7d = 0
+    oldest_age_hours: int | None = None
+    for ts in pending_created:
+        age_hours = max(0.0, (now - _as_utc(ts)).total_seconds() / 3600)
+        if age_hours < 24:
+            under_24h += 1
+        elif age_hours <= 72:
+            h24_to_72h += 1
+        elif age_hours <= 24 * 7:
+            over_72h += 1
+        else:
+            over_7d += 1
+        whole_hours = int(age_hours)  # same floor as reviewer.py age_hours
+        if oldest_age_hours is None or whole_hours > oldest_age_hours:
+            oldest_age_hours = whole_hours
+
+    # --- 7-day throughput (mirrors reviewer.list_queue's counters) ----
+    cutoff = now - timedelta(days=7)
+    approved_last_7d = int(
+        db.scalar(
+            select(func.count(Submission.id)).where(
+                Submission.status.in_(
+                    (
+                        DocumentStatus.APROBADO.value,
+                        DocumentStatus.EXCEPCION_LEGAL.value,
+                    )
+                ),
+                Submission.updated_at >= cutoff,
+            )
+        )
+        or 0
+    )
+    rejected_last_7d = int(
+        db.scalar(
+            select(func.count(Submission.id)).where(
+                Submission.status == DocumentStatus.RECHAZADO.value,
+                Submission.updated_at >= cutoff,
+            )
+        )
+        or 0
+    )
+
+    # --- Triage inbox --------------------------------------------------
+    contact_requests_pending = int(
+        db.scalar(
+            select(func.count())
+            .select_from(ContactRequest)
+            .where(ContactRequest.status == "new")
+        )
+        or 0
+    )
+    # Correction requests live as audit rows; ``pending`` is in
+    # ``event_metadata.status`` and JSON-column WHEREs are not portable
+    # across SQLite (tests) / Postgres (prod) — same constraint as
+    # ``list_correction_requests``. Fetch only the metadata column and
+    # count in Python (cheaper than the list endpoint's full ORM scan,
+    # but still O(rows); fine at current volume).
+    correction_requests_pending = 0
+    for (meta,) in db.execute(
+        select(AuditLog.event_metadata).where(
+            AuditLog.action == "correction_request.submitted"
+        )
+    ):
+        meta_status = (
+            meta.get("status", "pending") if isinstance(meta, dict) else "pending"
+        )
+        if meta_status == "pending":
+            correction_requests_pending += 1
+    feedback_reports_new = int(
+        db.scalar(
+            select(func.count())
+            .select_from(FeedbackReport)
+            .where(FeedbackReport.status == "new")
+        )
+        or 0
+    )
+
+    return AdminRollup(
+        clients=client_rows,
+        queue=RollupQueue(
+            pending_total=len(pending_created),
+            oldest_age_hours=oldest_age_hours,
+            age_buckets=RollupQueueAgeBuckets(
+                under_24h=under_24h,
+                h24_to_72h=h24_to_72h,
+                over_72h=over_72h,
+                over_7d=over_7d,
+            ),
+        ),
+        throughput=RollupThroughput(
+            approved_last_7d=approved_last_7d,
+            rejected_last_7d=rejected_last_7d,
+        ),
+        vendors_at_risk=vendors_at_risk,
+        inbox=RollupInbox(
+            contact_requests_pending=contact_requests_pending,
+            correction_requests_pending=correction_requests_pending,
+            feedback_reports_new=feedback_reports_new,
+        ),
+    )
+
+
+@router.get(
+    "/clients/{client_id}/compliance",
+    response_model=AdminClientComplianceResponse,
+)
+def get_client_compliance(
+    client_id: str, db: DbSession, current: AdminUser
+) -> AdminClientComplianceResponse:
+    """Per-vendor compliance rows for the admin client-detail page.
+
+    Same machinery as ``/admin/rollup`` scoped to one client. Rows are
+    ordered worst-first: red, then yellow, then green, with
+    ``compliance_pct`` ascending within each level.
+    """
+    _ = current
+    client = db.get(Client, client_id)
+    if client is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, detail="Cliente no encontrado.")
+    today = date.today()
+    rows = _client_vendor_compliance_rows(db, client, today=today, year=today.year)
+    vendor_rows = [
+        AdminClientComplianceVendorRow(
+            vendor_id=row["vendor"].id,
+            vendor_name=row["vendor"].name,
+            vendor_rfc=row["vendor"].rfc,
+            workspace_id=row["workspace"].id,
+            workspace_status=row["workspace"].status,
+            semaphore_level=row["summary"]["semaphore_level"],
+            compliance_pct=row["summary"]["compliance_pct"],
+            missing_required_count=row["summary"]["missing_required_count"],
+            rejected_or_correction_count=row["summary"][
+                "rejected_or_correction_count"
+            ],
+            pending_reviews_count=row["summary"]["pending_reviews_count"],
+            due_soon_count=row["summary"]["due_soon_count"],
+            last_activity_at=row["last_activity_at"],
+        )
+        for row in rows
+    ]
+    vendor_rows.sort(
+        key=lambda r: (_SEMAPHORE_LEVEL_ORDER[r.semaphore_level], r.compliance_pct)
+    )
+    return AdminClientComplianceResponse(
+        client_id=client.id, client_name=client.name, vendors=vendor_rows
     )
 
 
