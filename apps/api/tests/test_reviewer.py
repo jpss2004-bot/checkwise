@@ -15,6 +15,7 @@ from app.main import app
 from app.models import (
     Client,
     Document,
+    DocumentInspection,
     DocumentStatusHistory,
     Institution,
     Membership,
@@ -114,12 +115,17 @@ def _seed_submission(
     period_key: str = "2026-M03",
     requirement_name: str = "Declaración mensual de IVA",
     age_hours: int = 6,
+    authenticity_risk: str | None = None,
+    risk_reasons: list | None = None,
+    forensics: dict | None = None,
 ) -> str:
     """Inserts the minimum row graph needed for a reviewer queue item.
 
     Each call mints unique RFC / requirement code suffixes so the same
     test can seed multiple submissions without unique-constraint
-    clashes.
+    clashes. Passing ``authenticity_risk`` also creates the
+    ``DocumentInspection`` row carrying the Phase-A forensics verdict;
+    by default no inspection row exists (legacy / pre-forensics shape).
     """
     global _SEED_COUNTER
     _SEED_COUNTER += 1
@@ -215,6 +221,17 @@ def _seed_submission(
             sha256="a" * 64,
         )
         db.add(document)
+        if authenticity_risk is not None:
+            db.flush()
+            db.add(
+                DocumentInspection(
+                    document_id=document.id,
+                    is_pdf=True,
+                    authenticity_risk=authenticity_risk,
+                    risk_reasons=risk_reasons,
+                    forensics=forensics,
+                )
+            )
         db.commit()
         return submission.id
     finally:
@@ -354,6 +371,120 @@ def test_queue_filter_by_institution(api_client: TestClient, db_factory) -> None
     )
     payload = response.json()
     assert {item["submission_id"] for item in payload["items"]} == {sat_id}
+
+
+# ---------------------------------------------------------------------------
+# Authenticity verdict (document-revalidation Phase A)
+# ---------------------------------------------------------------------------
+
+
+_SAMPLE_REASONS = [
+    {
+        "code": "suspicious_generator",
+        "severity": "medium",
+        "detail_es": (
+            "Generado con Canva — los documentos oficiales no se "
+            "producen con editores de diseño."
+        ),
+    }
+]
+_SAMPLE_FORENSICS = {"producer": "Canva", "eof_count": 1, "has_javascript": False}
+
+
+def test_queue_exposes_authenticity_risk(api_client: TestClient, db_factory) -> None:
+    _seed_user(db_factory, email="rev@x.mx", role="reviewer")
+    token = _login(api_client, "rev@x.mx", "Hunter2 Correct horse")
+    flagged_id = _seed_submission(
+        db_factory, period_key="2026-M01", authenticity_risk="high_risk"
+    )
+    legacy_id = _seed_submission(db_factory, period_key="2026-M02")
+
+    response = api_client.get(
+        "/api/v1/reviewer/queue", headers={"Authorization": f"Bearer {token}"}
+    )
+    assert response.status_code == 200, response.text
+    by_id = {item["submission_id"]: item for item in response.json()["items"]}
+    assert by_id[flagged_id]["authenticity_risk"] == "high_risk"
+    # Legacy row without inspection → not analyzed → null, not "clean".
+    assert by_id[legacy_id]["authenticity_risk"] is None
+
+
+def test_queue_filters_by_risk(api_client: TestClient, db_factory) -> None:
+    _seed_user(db_factory, email="rev@x.mx", role="reviewer")
+    token = _login(api_client, "rev@x.mx", "Hunter2 Correct horse")
+    _seed_submission(db_factory, period_key="2026-M01", authenticity_risk="clean")
+    risky_id = _seed_submission(
+        db_factory, period_key="2026-M02", authenticity_risk="high_risk"
+    )
+    _seed_submission(db_factory, period_key="2026-M03")  # not analyzed
+
+    response = api_client.get(
+        "/api/v1/reviewer/queue",
+        params={"risk": "high_risk"},
+        headers={"Authorization": f"Bearer {token}"},
+    )
+    assert response.status_code == 200, response.text
+    payload = response.json()
+    assert {item["submission_id"] for item in payload["items"]} == {risky_id}
+    assert payload["total"] == 1
+
+
+def test_queue_rejects_unknown_risk_value(
+    api_client: TestClient, db_factory
+) -> None:
+    _seed_user(db_factory, email="rev@x.mx", role="reviewer")
+    token = _login(api_client, "rev@x.mx", "Hunter2 Correct horse")
+    response = api_client.get(
+        "/api/v1/reviewer/queue",
+        params={"risk": "muy_sospechoso"},
+        headers={"Authorization": f"Bearer {token}"},
+    )
+    assert response.status_code == 422
+
+
+def test_detail_includes_authenticity_block(
+    api_client: TestClient, db_factory
+) -> None:
+    _seed_user(db_factory, email="rev@x.mx", role="reviewer")
+    token = _login(api_client, "rev@x.mx", "Hunter2 Correct horse")
+    submission_id = _seed_submission(
+        db_factory,
+        authenticity_risk="suspicious",
+        risk_reasons=_SAMPLE_REASONS,
+        forensics=_SAMPLE_FORENSICS,
+    )
+    response = api_client.get(
+        f"/api/v1/reviewer/submissions/{submission_id}",
+        headers={"Authorization": f"Bearer {token}"},
+    )
+    assert response.status_code == 200, response.text
+    authenticity = response.json()["authenticity"]
+    assert authenticity == {
+        "risk": "suspicious",
+        "reasons": _SAMPLE_REASONS,
+        "forensics": _SAMPLE_FORENSICS,
+        "analyzed": True,
+    }
+
+
+def test_detail_authenticity_unanalyzed_for_legacy_rows(
+    api_client: TestClient, db_factory
+) -> None:
+    _seed_user(db_factory, email="rev@x.mx", role="reviewer")
+    token = _login(api_client, "rev@x.mx", "Hunter2 Correct horse")
+    submission_id = _seed_submission(db_factory)  # no inspection row at all
+    response = api_client.get(
+        f"/api/v1/reviewer/submissions/{submission_id}",
+        headers={"Authorization": f"Bearer {token}"},
+    )
+    assert response.status_code == 200, response.text
+    authenticity = response.json()["authenticity"]
+    assert authenticity == {
+        "risk": None,
+        "reasons": [],
+        "forensics": None,
+        "analyzed": False,
+    }
 
 
 # ---------------------------------------------------------------------------

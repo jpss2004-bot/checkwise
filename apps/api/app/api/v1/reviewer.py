@@ -102,6 +102,11 @@ class QueueItem(BaseModel):
     provider: QueueProvider
     signal_count: int
     has_mismatch: bool
+    # Phase A — document-revalidation authenticity verdict from the
+    # intake forensics pass ("clean" | "suspicious" | "high_risk").
+    # ``None`` means not analyzed (legacy rows / analyzer failure), so
+    # older client builds that ignore the field stay compatible.
+    authenticity_risk: str | None = None
 
 
 class QueueResponse(BaseModel):
@@ -188,6 +193,9 @@ def get_queue(
     limit: Annotated[int, Query(ge=1, le=100)] = 50,
     institution: Annotated[str | None, Query()] = None,
     submission_status: Annotated[str | None, Query(alias="status")] = None,
+    risk: Annotated[
+        Literal["clean", "suspicious", "high_risk"] | None, Query()
+    ] = None,
     cursor: Annotated[str | None, Query()] = None,
 ) -> QueueResponse:
     """List submissions waiting on a human decision.
@@ -195,10 +203,16 @@ def get_queue(
     Default ordering is FIFO (oldest first) — the reviewer should clear
     the queue from the top. ``status`` defaults to *any of* the queue
     statuses; passing one narrows it. ``institution`` is the institution
-    code (e.g. ``sat``, ``imss``). ``cursor`` is the opaque keyset
-    cursor from a previous page's ``next_cursor``; pass it back to get
-    the next page under the same FIFO ordering.
+    code (e.g. ``sat``, ``imss``). ``risk`` narrows to submissions whose
+    document carries that authenticity verdict from the intake
+    forensics pass. ``cursor`` is the opaque keyset cursor from a
+    previous page's ``next_cursor``; pass it back to get the next page
+    under the same FIFO ordering.
     """
+
+    # Imported locally (matching the batch-lookup below) to dodge a
+    # circular dependency through the API package's router init order.
+    from app.models import DocumentInspection
 
     statuses = (submission_status,) if submission_status else QUEUE_STATUSES
     # Eager-load every relationship the per-row build touches so the queue
@@ -220,7 +234,10 @@ def get_queue(
             selectinload(Submission.validations),
         )
     )
-    count_stmt = select(func.count(Submission.id)).where(
+    # ``count(distinct …)`` so the optional risk filter's join through
+    # Document never double-counts a multi-document submission; without
+    # joins it is equivalent to ``count(id)``.
+    count_stmt = select(func.count(func.distinct(Submission.id))).where(
         Submission.status.in_(statuses)
     )
     if institution:
@@ -230,6 +247,29 @@ def get_queue(
         count_stmt = count_stmt.join(
             Institution, Submission.institution_id == Institution.id
         ).where(Institution.code == institution)
+
+    if risk:
+        # Server-side authenticity filter: join through the submission's
+        # documents to their inspection verdicts. ``distinct()`` guards
+        # against duplicate rows when a multi-file submission has more
+        # than one document at the requested risk level.
+        stmt = (
+            stmt.join(Document, Document.submission_id == Submission.id)
+            .join(
+                DocumentInspection,
+                DocumentInspection.document_id == Document.id,
+            )
+            .where(DocumentInspection.authenticity_risk == risk)
+            .distinct()
+        )
+        count_stmt = (
+            count_stmt.join(Document, Document.submission_id == Submission.id)
+            .join(
+                DocumentInspection,
+                DocumentInspection.document_id == Document.id,
+            )
+            .where(DocumentInspection.authenticity_risk == risk)
+        )
 
     if cursor:
         cursor_created_at, cursor_id = _decode_queue_cursor(cursor)
@@ -263,13 +303,12 @@ def get_queue(
 
     # Batch the document-inspection lookup: collect the first document per
     # queued submission, then fetch all their inspections in one IN query
-    # (was one SELECT per row).
-    from app.models import DocumentInspection
-
+    # (was one SELECT per row). The row carries both the mismatch reason
+    # and the Phase-A authenticity verdict.
     first_doc_by_sub: dict[str, Document] = {
         sub.id: sub.documents[0] for sub in submissions if sub.documents
     }
-    mismatch_by_doc: dict[str, str | None] = {}
+    inspection_by_doc: dict[str, DocumentInspection] = {}
     if first_doc_by_sub:
         doc_ids = [doc.id for doc in first_doc_by_sub.values()]
         for insp in db.scalars(
@@ -277,7 +316,7 @@ def get_queue(
                 DocumentInspection.document_id.in_(doc_ids)
             )
         ):
-            mismatch_by_doc.setdefault(insp.document_id, insp.mismatch_reason)
+            inspection_by_doc.setdefault(insp.document_id, insp)
 
     items: list[QueueItem] = []
     now = utc_now()
@@ -287,8 +326,11 @@ def get_queue(
         requirement = sub.requirement
         institution_row = sub.institution
         document = first_doc_by_sub.get(sub.id)
+        inspection = (
+            inspection_by_doc.get(document.id) if document is not None else None
+        )
         inspection_mismatch: str | None = (
-            mismatch_by_doc.get(document.id) if document is not None else None
+            inspection.mismatch_reason if inspection is not None else None
         )
         signal_count = sum(
             1 for v in sub.validations if v.severity in ("warning", "error")
@@ -323,6 +365,9 @@ def get_queue(
                 ),
                 signal_count=int(signal_count),
                 has_mismatch=bool(inspection_mismatch),
+                authenticity_risk=(
+                    inspection.authenticity_risk if inspection is not None else None
+                ),
             )
         )
 
@@ -603,6 +648,18 @@ def get_submission(
         "supersedes_submission_id": submission.supersedes_submission_id,
         "superseded_by_submission_id": superseded_by_id,
         "suggested_action": _suggested_action(submission.status),
+        # Phase A — document-revalidation authenticity block. Reviewer-
+        # facing only (the provider portal never exposes it). ``analyzed``
+        # is False for legacy rows or when the forensics pass failed open
+        # at intake; the UI renders that as "sin analizar".
+        "authenticity": {
+            "risk": inspection.authenticity_risk if inspection else None,
+            "reasons": list(inspection.risk_reasons or []) if inspection else [],
+            "forensics": inspection.forensics if inspection else None,
+            "analyzed": bool(
+                inspection is not None and inspection.authenticity_risk is not None
+            ),
+        },
         # Phase 2 — shadow-analysis comparison block. Only present on
         # this reviewer endpoint; the provider-facing portal endpoint
         # never exposes shadow data. ``shadow.completed_at IS None``

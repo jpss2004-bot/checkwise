@@ -68,6 +68,10 @@ export type QueueItem = {
   };
   signal_count: number;
   has_mismatch: boolean;
+  /** Phase A document revalidation — authenticity verdict from the
+   *  local PDF-forensics analyzer. null = not analyzed (legacy rows
+   *  or analyzer failure; intake is fail-open). */
+  authenticity_risk: "clean" | "suspicious" | "high_risk" | null;
 };
 
 export type QueueResponse = {
@@ -91,6 +95,8 @@ export type QueueFilters = {
   /** Keyset cursor from a prior page's ``next_cursor`` — opaque,
    *  pass back verbatim to fetch the next FIFO page. */
   cursor?: string;
+  /** Phase A — server-side authenticity-risk filter. */
+  risk?: "clean" | "suspicious" | "high_risk";
 };
 
 export async function getReviewerQueue(
@@ -102,6 +108,7 @@ export async function getReviewerQueue(
   if (filters.institution) params.set("institution", filters.institution);
   if (filters.limit) params.set("limit", String(filters.limit));
   if (filters.cursor) params.set("cursor", filters.cursor);
+  if (filters.risk) params.set("risk", filters.risk);
   const qs = params.toString();
   return await fetchJson<QueueResponse>(
     `/api/v1/reviewer/queue${qs ? `?${qs}` : ""}`,
@@ -130,10 +137,29 @@ export type ReviewerVendorBlock = {
   workspace_id: string | null;
 };
 
+/** Phase A document revalidation — one named reason the forensics
+ *  analyzer flagged. ``detail_es`` is reviewer-facing Spanish. */
+export type AuthenticityReason = {
+  code: string;
+  severity: "info" | "medium" | "high";
+  detail_es: string;
+};
+
+/** The authenticity verdict block on the reviewer detail. ``analyzed``
+ *  is false for legacy rows or when the fail-open analyzer errored. */
+export type AuthenticityBlock = {
+  risk: "clean" | "suspicious" | "high_risk" | null;
+  reasons: AuthenticityReason[];
+  forensics: Record<string, unknown> | null;
+  analyzed: boolean;
+};
+
 /** The reviewer detail = the shared submission detail + the vendor
- *  identity block (absent on the provider-facing portal endpoint). */
+ *  identity block + the authenticity verdict (both absent on the
+ *  provider-facing portal endpoint). */
 export type ReviewerSubmissionDetail = SubmissionDetail & {
   vendor: ReviewerVendorBlock | null;
+  authenticity: AuthenticityBlock | null;
 };
 
 export async function getReviewerSubmission(

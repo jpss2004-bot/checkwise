@@ -419,6 +419,15 @@ def test_workspace_upload_writes_document_inspection(api_client: TestClient) -> 
         )
         assert inspection is not None
         assert inspection.is_pdf is True
+        # Phase A — the intake forensics pass populates the authenticity
+        # verdict on the same row. The pypdf-built blank page is benign:
+        # producer "pypdf", single %%EOF, no JS, non-monthly period key.
+        assert inspection.authenticity_risk == "clean"
+        assert inspection.risk_reasons == []
+        assert inspection.forensics is not None
+        assert inspection.forensics["producer"] == "pypdf"
+        assert inspection.forensics["eof_count"] == 1
+        assert inspection.forensics["has_javascript"] is False
     finally:
         db.close()
 

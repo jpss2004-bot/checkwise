@@ -9,6 +9,9 @@ re-validation flows).
 
 from __future__ import annotations
 
+import logging
+from pathlib import Path
+
 from fastapi import BackgroundTasks, HTTPException, UploadFile, status
 from sqlalchemy import select
 from sqlalchemy.orm import Session
@@ -42,6 +45,7 @@ from app.services.client_notifications import (
     notify_provider_uploaded,
 )
 from app.services.document_analysis.shadow_runner import run_shadow_analysis
+from app.services.document_forensics import analyze_pdf_forensics
 from app.services.document_intelligence import DocumentSignals, analyze_document_text
 from app.services.metadata_export import export_metadata_table_after_upload
 from app.services.pdf_validation import (
@@ -53,6 +57,37 @@ from app.services.prevalidation import build_initial_validations
 from app.services.requirement_service import ResolvedPeriod, ResolvedRequirement
 from app.services.storage import StoredFile
 from app.services.validation_events import add_validation_event
+
+logger = logging.getLogger(__name__)
+
+
+def _forensics_columns_fail_open(
+    path: Path,
+    *,
+    period_key: str | None,
+    pdf_metadata: dict | None,
+) -> tuple[str | None, list | None, dict | None]:
+    """Run the authenticity analyzer; NEVER let it block an upload.
+
+    Returns the ``(authenticity_risk, risk_reasons, forensics)`` triple
+    for the :class:`DocumentInspection` row. The analyzer is itself
+    contracted to swallow everything, but intake mirrors the other
+    fail-open steps (OCR, metadata export) with its own belt-and-
+    suspenders try/except: on any failure the verdict stays NULL
+    ("sin analizar") and the upload proceeds untouched.
+    """
+    try:
+        result = analyze_pdf_forensics(
+            path, period_key=period_key, pdf_metadata=pdf_metadata
+        )
+        return (
+            result.risk,
+            result.reasons_payload(),
+            result.forensics or None,
+        )
+    except Exception:  # noqa: BLE001 — analysis errors never block intake.
+        logger.exception("Forensics analysis failed open (file=%s)", path)
+        return None, None, None
 
 PDF_MIME_TYPES = frozenset(
     {
@@ -545,6 +580,14 @@ def finalize_intake_submission(
     db.add(document)
     db.flush()
 
+    # Phase A — authenticity forensics. Reviewer-facing verdict only:
+    # never alters statuses, validations or prevalidation signals.
+    authenticity_risk, risk_reasons, forensics_payload = _forensics_columns_fail_open(
+        stored_file.path,
+        period_key=resolved_period.canonical_period_key,
+        pdf_metadata=pdf_inspection.metadata,
+    )
+
     inspection = DocumentInspection(
         document_id=document.id,
         is_pdf=pdf_inspection.is_pdf,
@@ -563,6 +606,9 @@ def finalize_intake_submission(
         mismatch_reason=document_signals.mismatch_reason,
         inspection_error=pdf_inspection.error,
         raw_metadata=pdf_inspection.metadata,
+        authenticity_risk=authenticity_risk,
+        risk_reasons=risk_reasons,
+        forensics=forensics_payload,
     )
     db.add(inspection)
 
@@ -999,6 +1045,16 @@ def finalize_multi_document_submission(
         db.flush()
         shadow_batch.append((document.id, str(stored.path)))
 
+        # Phase A — authenticity forensics (reviewer-facing verdict
+        # only; see the single-file site for the fail-open contract).
+        authenticity_risk, risk_reasons, forensics_payload = (
+            _forensics_columns_fail_open(
+                stored.path,
+                period_key=resolved_period.canonical_period_key,
+                pdf_metadata=pdf_inspection.metadata,
+            )
+        )
+
         inspection_row = DocumentInspection(
             document_id=document.id,
             is_pdf=pdf_inspection.is_pdf,
@@ -1017,6 +1073,9 @@ def finalize_multi_document_submission(
             mismatch_reason=document_signals.mismatch_reason,
             inspection_error=pdf_inspection.error,
             raw_metadata=pdf_inspection.metadata,
+            authenticity_risk=authenticity_risk,
+            risk_reasons=risk_reasons,
+            forensics=forensics_payload,
         )
         db.add(inspection_row)
 

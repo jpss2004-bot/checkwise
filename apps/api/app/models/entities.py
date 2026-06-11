@@ -390,6 +390,19 @@ class DocumentInspection(TimestampMixin, Base):
     shadow_error: Mapped[str | None] = mapped_column(Text)
     shadow_completed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
 
+    # Phase A — document-revalidation authenticity verdict, produced by
+    # ``document_forensics.analyze_pdf_forensics`` at intake. Reviewer-
+    # facing only: it never alters statuses or prevalidation signals.
+    # ``authenticity_risk`` is "clean" | "suspicious" | "high_risk";
+    # NULL means *not analyzed* (legacy rows, or the analyzer failed —
+    # intake fails open). ``risk_reasons`` is a list of
+    # ``{"code", "severity", "detail_es"}`` sorted high→info;
+    # ``forensics`` keeps the raw findings dict (producer, dates,
+    # %%EOF count, JavaScript flags, …) as evidence.
+    authenticity_risk: Mapped[str | None] = mapped_column(String(20))
+    risk_reasons: Mapped[list | None] = mapped_column(JSON)
+    forensics: Mapped[dict | None] = mapped_column(JSON)
+
     document: Mapped[Document] = relationship(back_populates="inspection")
 
 
