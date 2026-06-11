@@ -154,12 +154,39 @@ export type AuthenticityBlock = {
   analyzed: boolean;
 };
 
+/** Phase B document revalidation — one QR code decoded from the PDF.
+ *  ``official`` is true only when the host is on the government-domain
+ *  allowlist; the UI must NEVER render a clickable link for
+ *  non-official hosts (a malicious upload could embed a phishing QR). */
+export type VerificationQrCode = {
+  page: number;
+  content: string;
+  is_url: boolean;
+  host: string | null;
+  official: boolean;
+  institution_guess: "sat" | "imss" | "infonavit" | "stps" | null;
+};
+
+export type VerificationFolio = {
+  kind: string;
+  value: string;
+};
+
+/** QR/folio verification anchors on the reviewer detail. ``analyzed``
+ *  is false for legacy rows (pre-0039) or extraction failure. */
+export type VerificationBlock = {
+  qr_codes: VerificationQrCode[];
+  folios: VerificationFolio[];
+  analyzed: boolean;
+};
+
 /** The reviewer detail = the shared submission detail + the vendor
- *  identity block + the authenticity verdict (both absent on the
- *  provider-facing portal endpoint). */
+ *  identity block + the authenticity verdict + verification anchors
+ *  (all absent on the provider-facing portal endpoint). */
 export type ReviewerSubmissionDetail = SubmissionDetail & {
   vendor: ReviewerVendorBlock | null;
   authenticity: AuthenticityBlock | null;
+  verification: VerificationBlock | null;
 };
 
 export async function getReviewerSubmission(

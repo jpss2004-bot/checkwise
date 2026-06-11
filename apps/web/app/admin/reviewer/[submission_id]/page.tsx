@@ -6,6 +6,7 @@ import { useRouter } from "next/navigation";
 import {
   ArrowLeft,
   ArrowRight,
+  ArrowSquareOut,
   CheckCircle,
   DownloadSimple,
   FileText,
@@ -44,6 +45,8 @@ import {
   submitDecision,
   type AuthenticityReason,
   type ReviewerSubmissionDetail,
+  type VerificationFolio,
+  type VerificationQrCode,
 } from "@/lib/api/reviewer";
 import { personaLabel } from "@/lib/constants/labels";
 import {
@@ -242,6 +245,7 @@ export default function ReviewerSubmissionPage({ params }: PageProps) {
             <StatusHeader detail={detail} decidedHint={decided?.new_status ?? null} />
             <VendorIdentityStrip detail={detail} />
             <VerdictCard detail={detail} />
+            <VerificationCard detail={detail} />
             <ReviewerSubmissionPreview detail={detail} session={session} />
             <LineageStrip detail={detail} />
             <LecturaDelDocumento detail={detail} />
@@ -688,6 +692,246 @@ function VerdictCard({ detail }: { detail: ReviewerSubmissionDetail }) {
             ) : null}
           </div>
         ) : null}
+      </CardContent>
+    </Card>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Phase B — verificación oficial (QR + folios, 2026-06-11)
+// ---------------------------------------------------------------------------
+
+/** Uppercase institution label for the "Verificar en …" button. Falls
+ *  back to "portal oficial" when the backend couldn't guess. */
+const QR_INSTITUTION_LABELS: Record<
+  NonNullable<VerificationQrCode["institution_guess"]>,
+  string
+> = {
+  sat: "SAT",
+  imss: "IMSS",
+  infonavit: "INFONAVIT",
+  stps: "STPS",
+};
+
+/** Known folio kinds → reviewer-facing Spanish labels. Unknown kinds
+ *  are humanized (underscores → spaces, first letter capitalized) so a
+ *  new backend extractor never renders a raw snake_case key. */
+const FOLIO_KIND_LABELS: Record<string, string> = {
+  cfdi_uuid: "Folio fiscal (CFDI)",
+  sat_opinion_folio: "Folio SAT",
+  imss_opinion_folio: "Folio IMSS",
+};
+
+function folioKindLabel(kind: string): string {
+  const known = FOLIO_KIND_LABELS[kind];
+  if (known) return known;
+  const humanized = kind.replace(/_/g, " ").trim();
+  return humanized.charAt(0).toUpperCase() + humanized.slice(1);
+}
+
+/** Cap raw QR payloads at ~80 chars for display; the full value lives
+ *  in the row's ``title`` attribute. */
+function truncateQrContent(content: string, max = 80): string {
+  return content.length <= max ? content : `${content.slice(0, max)}…`;
+}
+
+const QR_DISPLAY_CAP = 5;
+
+/**
+ * One decoded QR row.
+ *
+ * SECURITY RULE (non-negotiable): a clickable link may ONLY be rendered
+ * when ``qr.official === true``. The backend allowlists government
+ * domains (sat.gob.mx, imss.gob.mx, infonavit.org.mx, stps.gob.mx,
+ * gob.mx) before setting that flag. Anything else — even a perfectly
+ * plausible-looking URL — is rendered as INERT text, because a
+ * malicious upload could embed a phishing QR and the reviewer must not
+ * be handed a clickable trap on the decision screen. Non-official QRs
+ * on official documents already raise a "Requiere corrección"-style
+ * reason in the Autenticidad card, so this row stays factual, not
+ * alarmist.
+ */
+function QrRow({ qr }: { qr: VerificationQrCode }) {
+  if (qr.official && qr.is_url) {
+    const institution = qr.institution_guess
+      ? QR_INSTITUTION_LABELS[qr.institution_guess]
+      : "portal oficial";
+    return (
+      <li className="flex flex-wrap items-center justify-between gap-x-3 gap-y-1.5 rounded-md border border-[color:var(--border-subtle)] bg-[color:var(--surface-page)] px-3 py-2">
+        <div className="min-w-0">
+          <p className="truncate font-mono text-xs text-[color:var(--text-secondary)]">
+            {qr.host}
+          </p>
+          <p className="text-[11px] text-[color:var(--text-tertiary)]">
+            página {qr.page}
+          </p>
+        </div>
+        <Button asChild size="sm" variant="outline">
+          <a href={qr.content} target="_blank" rel="noopener noreferrer">
+            Verificar en {institution}
+            <ArrowSquareOut className="h-3.5 w-3.5" aria-hidden />
+          </a>
+        </Button>
+      </li>
+    );
+  }
+
+  if (qr.is_url) {
+    // Non-official URL → inert text, never an anchor (see rule above).
+    return (
+      <li
+        title={qr.content}
+        className="rounded-md border border-[color:var(--border-subtle)] bg-[color:var(--surface-page)] px-3 py-2"
+      >
+        <div className="flex items-center gap-2">
+          <span
+            aria-hidden
+            className="h-1.5 w-1.5 shrink-0 rounded-full bg-[color:var(--status-warning-text)]"
+          />
+          <span className="min-w-0 truncate font-mono text-xs text-[color:var(--text-primary)]">
+            {qr.host ?? "—"}
+          </span>
+          <span className="ml-auto shrink-0 text-[11px] text-[color:var(--text-tertiary)]">
+            página {qr.page}
+          </span>
+        </div>
+        <p className="mt-1 text-[11px] text-[color:var(--status-warning-text)]">
+          QR apunta a un dominio NO oficial
+        </p>
+        <p className="mt-0.5 break-all font-mono text-[11px] text-[color:var(--text-tertiary)]">
+          {truncateQrContent(qr.content)}
+        </p>
+      </li>
+    );
+  }
+
+  // Plain payload (not a URL at all) — e.g. CFDI sello strings.
+  return (
+    <li
+      title={qr.content}
+      className="rounded-md border border-[color:var(--border-subtle)] bg-[color:var(--surface-page)] px-3 py-2"
+    >
+      <div className="flex items-center justify-between gap-3">
+        <p className="text-[11px] text-[color:var(--text-tertiary)]">
+          Contenido QR (no es URL)
+        </p>
+        <span className="shrink-0 text-[11px] text-[color:var(--text-tertiary)]">
+          página {qr.page}
+        </span>
+      </div>
+      <p className="mt-0.5 break-all font-mono text-xs text-[color:var(--text-secondary)]">
+        {truncateQrContent(qr.content)}
+      </p>
+    </li>
+  );
+}
+
+/** One extracted folio with click-to-copy (TraceabilityCard idiom:
+ *  brief "Copiado" confirmation, quiet failure when the Clipboard API
+ *  is blocked). */
+function FolioRow({ folio }: { folio: VerificationFolio }) {
+  const [copied, setCopied] = useState(false);
+
+  const copy = async () => {
+    try {
+      await navigator.clipboard.writeText(folio.value);
+      setCopied(true);
+      setTimeout(() => setCopied(false), 1800);
+    } catch {
+      setCopied(false);
+    }
+  };
+
+  return (
+    <li className="flex flex-wrap items-center justify-between gap-x-3 gap-y-1.5 rounded-md border border-[color:var(--border-subtle)] bg-[color:var(--surface-page)] px-3 py-2">
+      <div className="min-w-0">
+        <p className="text-[11px] font-medium uppercase tracking-wide text-[color:var(--text-tertiary)]">
+          {folioKindLabel(folio.kind)}
+        </p>
+        <p className="break-all font-mono text-xs text-[color:var(--text-primary)]">
+          {folio.value}
+        </p>
+      </div>
+      <button
+        type="button"
+        onClick={copy}
+        className="shrink-0 rounded-md border border-[color:var(--border-default)] bg-[color:var(--surface-page)] px-2.5 py-1 text-xs font-medium text-[color:var(--text-primary)] hover:bg-[color:var(--surface-hover)]"
+      >
+        {copied ? "Copiado ✓" : "Copiar"}
+      </button>
+    </li>
+  );
+}
+
+/**
+ * Phase B document revalidation — verification anchors. Surfaces the
+ * QR codes and folios extracted from the PDF so the reviewer can jump
+ * to the institution's own verification portal (official QRs) or paste
+ * a folio into it (CFDI/SAT/IMSS folios) instead of trusting the file
+ * on its face. Hidden entirely for legacy/unanalyzed rows; when the
+ * analyzer ran and found nothing, the empty state says so explicitly —
+ * absence of anchors on a doc that should have them is itself a signal.
+ */
+function VerificationCard({ detail }: { detail: ReviewerSubmissionDetail }) {
+  const verification = detail.verification;
+  // Legacy rows (pre-0039) or extraction failure → nothing to assert
+  // either way; don't render a card that can only say "no sé".
+  if (!verification || !verification.analyzed) return null;
+
+  const qrCodes = verification.qr_codes;
+  const folios = verification.folios;
+  const visibleQrs = qrCodes.slice(0, QR_DISPLAY_CAP);
+  const hiddenQrCount = qrCodes.length - visibleQrs.length;
+
+  return (
+    <Card aria-label="Verificación oficial">
+      <CardHeader>
+        <CardTitle>Verificación oficial</CardTitle>
+        <p className="mt-1 text-xs text-[color:var(--text-tertiary)]">
+          Códigos QR y folios extraídos del documento para verificarlo en la
+          fuente oficial.
+        </p>
+      </CardHeader>
+      <CardContent className="space-y-4">
+        {qrCodes.length === 0 && folios.length === 0 ? (
+          <p className="text-sm text-[color:var(--text-secondary)]">
+            No se encontraron códigos QR ni folios en el documento.
+          </p>
+        ) : (
+          <>
+            {qrCodes.length > 0 ? (
+              <div>
+                <p className="text-xs font-medium uppercase tracking-wide text-[color:var(--text-tertiary)]">
+                  Códigos QR ({qrCodes.length})
+                </p>
+                <ul className="mt-2 space-y-2">
+                  {visibleQrs.map((qr, index) => (
+                    <QrRow key={`${qr.page}-${index}`} qr={qr} />
+                  ))}
+                </ul>
+                {hiddenQrCount > 0 ? (
+                  <p className="mt-2 text-[11px] text-[color:var(--text-tertiary)]">
+                    y {hiddenQrCount}{" "}
+                    {hiddenQrCount === 1 ? "código más" : "códigos más"} no
+                    mostrados
+                  </p>
+                ) : null}
+              </div>
+            ) : null}
+            {folios.length > 0 ? (
+              <div>
+                <p className="text-xs font-medium uppercase tracking-wide text-[color:var(--text-tertiary)]">
+                  Folios ({folios.length})
+                </p>
+                <ul className="mt-2 space-y-2">
+                  {folios.map((folio, index) => (
+                    <FolioRow key={`${folio.kind}-${index}`} folio={folio} />
+                  ))}
+                </ul>
+              </div>
+            ) : null}
+          </>
+        )}
       </CardContent>
     </Card>
   );
