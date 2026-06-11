@@ -149,6 +149,78 @@ export async function provisionUser(
 }
 
 // ---------------------------------------------------------------------------
+// User management (P3 audit, 2026-06-10) — list / disable / reset-password
+// for EXISTING users. Until this, provisioning was a write-only door: no
+// surface could list users, disable a departed employee, or reset a
+// forgotten password.
+// ---------------------------------------------------------------------------
+
+export type AdminUserRow = {
+  user_id: string;
+  email: string;
+  full_name: string;
+  status: string;
+  /** True while the user hasn't rotated their temp password. */
+  must_change_password: boolean;
+  last_login_at: string | null;
+  created_at: string;
+  /** Distinct active membership roles, sorted. */
+  roles: string[];
+  organizations: { id: string; name: string; kind: string }[];
+};
+
+export type AdminUsersList = {
+  items: AdminUserRow[];
+  /** Real count for the q/status/role filters, independent of limit. */
+  total: number;
+};
+
+export async function listUsers(params?: {
+  q?: string;
+  status?: "active" | "disabled";
+  role?: string;
+  limit?: number;
+  offset?: number;
+}): Promise<AdminUsersList> {
+  const qs = new URLSearchParams();
+  for (const [key, value] of Object.entries(params ?? {})) {
+    if (value !== undefined && value !== null && value !== "") {
+      qs.set(key, String(value));
+    }
+  }
+  const suffix = qs.toString() ? `?${qs.toString()}` : "";
+  return fetchJson(`/api/v1/admin/users${suffix}`);
+}
+
+export async function updateUserStatus(
+  userId: string,
+  status: "active" | "disabled",
+): Promise<{ user_id: string; status: string }> {
+  return fetchJson(`/api/v1/admin/users/${userId}`, {
+    method: "PATCH",
+    body: JSON.stringify({ status }),
+  });
+}
+
+/** ``temp_password`` is plaintext, returned ONCE for the admin's
+ *  confirmation screen — the backend stores only the bcrypt hash. */
+export type AdminResetPasswordResponse = {
+  user_id: string;
+  email: string;
+  temp_password: string;
+  email_status: string;
+  email_error: string | null;
+};
+
+export async function resetUserPassword(
+  userId: string,
+): Promise<AdminResetPasswordResponse> {
+  return fetchJson(`/api/v1/admin/users/${userId}/reset-password`, {
+    method: "POST",
+  });
+}
+
+// ---------------------------------------------------------------------------
 // Vendors
 // ---------------------------------------------------------------------------
 
@@ -325,8 +397,10 @@ export type MetadataExportItem = {
 
 export type MetadataExportList = {
   items: MetadataExportItem[];
+  /** Real count of matching rows (P3 — was len(items)). */
   total: number;
   limit: number;
+  offset: number;
 };
 
 export type MetadataExportSheetPreview = {
@@ -372,10 +446,12 @@ export type ClientMetadataResponse = {
 export async function listMetadataExports(params?: {
   result?: "completed" | "skipped" | "failed";
   limit?: number;
+  offset?: number;
 }): Promise<MetadataExportList> {
   const qs = new URLSearchParams();
   if (params?.result) qs.set("result", params.result);
   if (params?.limit !== undefined) qs.set("limit", String(params.limit));
+  if (params?.offset !== undefined) qs.set("offset", String(params.offset));
   const suffix = qs.toString() ? `?${qs.toString()}` : "";
   return fetchJson(`/api/v1/admin/metadata-exports${suffix}`);
 }
@@ -690,6 +766,9 @@ export async function getAdminCalendar(params?: {
 export type AdminAuditLogItem = {
   id: string;
   actor_id: string | null;
+  /** Resolved user email for actor_id, null when the actor isn't a
+   *  user row (P3 audit fix — the page previously showed raw UUIDs). */
+  actor_email: string | null;
   actor_type: string;
   action: string;
   entity_type: string;
@@ -702,19 +781,24 @@ export type AdminAuditLogItem = {
 
 export type AdminAuditLogResponse = {
   items: AdminAuditLogItem[];
+  /** Real count of rows matching the filters (P3 — was len(items)). */
   total: number;
   limit: number;
+  offset: number;
 };
 
 export async function listAuditLog(params?: {
   actor_id?: string;
   actor_type?: string;
+  /** Case-insensitive PREFIX match (e.g. "admin.user" matches
+   *  admin.user_disabled). */
   action?: string;
   entity_type?: string;
   entity_id?: string;
   date_from?: string;
   date_to?: string;
   limit?: number;
+  offset?: number;
 }): Promise<AdminAuditLogResponse> {
   const qs = new URLSearchParams();
   for (const [key, value] of Object.entries(params ?? {})) {

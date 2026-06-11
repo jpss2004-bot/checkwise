@@ -43,7 +43,7 @@ from xml.etree import ElementTree as ET
 from fastapi import APIRouter, Depends, HTTPException, Query, Response, status
 from fastapi.responses import FileResponse
 from pydantic import BaseModel, EmailStr, Field
-from sqlalchemy import and_, func, select, tuple_
+from sqlalchemy import and_, func, or_, select, tuple_
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
@@ -73,6 +73,7 @@ from app.models import (
     Institution,
     Membership,
     Organization,
+    PasswordHistory,
     Period,
     ProviderWorkspace,
     Requirement,
@@ -87,7 +88,10 @@ from app.services.auth import (
     generate_temp_password,
     hash_password,
 )
-from app.services.email_delivery import send_welcome_with_temp_password_email
+from app.services.email_delivery import (
+    send_owner_reset_temp_password_email,
+    send_welcome_with_temp_password_email,
+)
 from app.services.search_service import SearchHit, search_submissions
 
 router = APIRouter(prefix="/admin", tags=["admin"])
@@ -1135,6 +1139,286 @@ def provision_user(
         organization_id=organization_id,
         vendor_id=vendor_id,
         workspace_id=workspace_id,
+    )
+
+
+# ---------------------------------------------------------------------------
+# P3 (2026-06-10 audit) — user management: list / disable / reset password
+# ---------------------------------------------------------------------------
+#
+# Until now POST /admin/users (create) was the ONLY user surface — no
+# way to list accounts, lock one out, or reissue credentials. These
+# three endpoints close the lifecycle, mirroring the client-side
+# 3-seat flow in ``app.api.v1.client_users`` (temp password +
+# ``must_change_password`` + password-history push + reset email).
+
+
+class AdminUserOrgItem(BaseModel):
+    id: str
+    name: str
+    kind: str
+
+
+class AdminUserItem(BaseModel):
+    user_id: str
+    email: str
+    full_name: str
+    status: str
+    must_change_password: bool
+    last_login_at: str | None
+    created_at: str
+    roles: list[str]
+    """Distinct ACTIVE membership roles, sorted."""
+    organizations: list[AdminUserOrgItem]
+    """Organizations of the user's active memberships."""
+
+
+class AdminUsersListResponse(BaseModel):
+    items: list[AdminUserItem]
+    total: int
+    """Real count for the q/status/role filters (not len(items))."""
+
+
+class AdminUserStatusPayload(BaseModel):
+    status: Literal["active", "disabled"]
+
+
+class AdminUserStatusResponse(BaseModel):
+    user_id: str
+    status: str
+
+
+class AdminUserResetPasswordResponse(BaseModel):
+    """``temp_password`` is plaintext, returned ONCE for the admin's
+    confirmation screen — the User row only stores the bcrypt hash."""
+
+    user_id: str
+    email: str
+    temp_password: str
+    email_status: str
+    email_error: str | None = None
+
+
+def _admin_user_filters(
+    q: str | None, status_value: str | None, role: str | None
+) -> list:
+    filters: list = []
+    if q and q.strip():
+        needle = f"%{q.strip()}%"
+        filters.append(
+            or_(User.email.ilike(needle), User.full_name.ilike(needle))
+        )
+    if status_value:
+        filters.append(User.status == status_value)
+    if role:
+        filters.append(
+            User.id.in_(
+                select(Membership.user_id).where(
+                    Membership.role == role,
+                    Membership.status == "active",
+                )
+            )
+        )
+    return filters
+
+
+@router.get("/users", response_model=AdminUsersListResponse)
+def list_users(
+    db: DbSession,
+    current: AdminUser,
+    q: str | None = None,
+    status_filter: Annotated[
+        Literal["active", "disabled"] | None, Query(alias="status")
+    ] = None,
+    role: str | None = None,
+    limit: Annotated[int, Query(ge=1, le=200)] = 50,
+    offset: Annotated[int, Query(ge=0)] = 0,
+) -> AdminUsersListResponse:
+    """Paged user directory for the admin console.
+
+    * ``q`` — case-insensitive substring match on email OR full_name.
+    * ``status`` — ``active`` | ``disabled``.
+    * ``role`` — users holding that role on an ACTIVE membership.
+    * ``total`` is the real count for the filters, independent of
+      the page window. Newest accounts first.
+
+    Memberships + organizations for the page are bulk-loaded with a
+    single IN query (no per-row lookups).
+    """
+    _ = current
+    filters = _admin_user_filters(q, status_filter, role)
+
+    count_stmt = select(func.count()).select_from(User)
+    page_stmt = select(User)
+    if filters:
+        count_stmt = count_stmt.where(and_(*filters))
+        page_stmt = page_stmt.where(and_(*filters))
+    total = int(db.scalar(count_stmt) or 0)
+    rows = list(
+        db.scalars(
+            page_stmt.order_by(User.created_at.desc())
+            .offset(offset)
+            .limit(limit)
+        )
+    )
+
+    user_ids = [u.id for u in rows]
+    roles_by_user: dict[str, set[str]] = {uid: set() for uid in user_ids}
+    orgs_by_user: dict[str, dict[str, Organization]] = {
+        uid: {} for uid in user_ids
+    }
+    if user_ids:
+        membership_rows = db.execute(
+            select(Membership, Organization)
+            .join(Organization, Organization.id == Membership.organization_id)
+            .where(
+                Membership.user_id.in_(user_ids),
+                Membership.status == "active",
+            )
+        ).all()
+        for membership, org in membership_rows:
+            roles_by_user[membership.user_id].add(membership.role)
+            orgs_by_user[membership.user_id].setdefault(org.id, org)
+
+    items = [
+        AdminUserItem(
+            user_id=u.id,
+            email=u.email,
+            full_name=u.full_name,
+            status=u.status,
+            must_change_password=u.must_change_password,
+            last_login_at=(
+                u.last_login_at.isoformat() if u.last_login_at else None
+            ),
+            created_at=u.created_at.isoformat() if u.created_at else "",
+            roles=sorted(roles_by_user.get(u.id, set())),
+            organizations=[
+                AdminUserOrgItem(id=org.id, name=org.name, kind=org.kind)
+                for org in orgs_by_user.get(u.id, {}).values()
+            ],
+        )
+        for u in rows
+    ]
+    return AdminUsersListResponse(items=items, total=total)
+
+
+@router.patch("/users/{user_id}", response_model=AdminUserStatusResponse)
+def update_user_status(
+    user_id: str,
+    payload: AdminUserStatusPayload,
+    db: DbSession,
+    current: AdminUser,
+) -> AdminUserStatusResponse:
+    """Disable (reversible lockout) or reactivate a user account.
+
+    The auth dependency re-reads the User row per request, so a
+    disable locks the account out immediately. Self-disable is
+    rejected — an admin cannot saw off the branch they sit on.
+    """
+    target = db.get(User, user_id)
+    if target is None:
+        raise HTTPException(
+            status.HTTP_404_NOT_FOUND, detail="Usuario no encontrado."
+        )
+    if payload.status == "disabled" and target.id == current.user.id:
+        raise HTTPException(
+            status.HTTP_409_CONFLICT,
+            detail="No puedes desactivar tu propia cuenta.",
+        )
+
+    before_status = target.status
+    target.status = payload.status
+    db.flush()
+
+    _audit_admin(
+        db,
+        actor=current,
+        action=(
+            "admin.user_disabled"
+            if payload.status == "disabled"
+            else "admin.user_reactivated"
+        ),
+        entity_type="user",
+        entity_id=target.id,
+        before={"status": before_status},
+        after={"status": payload.status, "user_email": target.email},
+    )
+    db.commit()
+    return AdminUserStatusResponse(user_id=target.id, status=payload.status)
+
+
+@router.post(
+    "/users/{user_id}/reset-password",
+    response_model=AdminUserResetPasswordResponse,
+    summary="Issue fresh temp credentials to a user (internal_admin)",
+)
+def reset_user_password(
+    user_id: str,
+    db: DbSession,
+    current: AdminUser,
+) -> AdminUserResetPasswordResponse:
+    """Admin-issued temp credentials for a locked-out user.
+
+    Mirrors the owner-driven flow in ``client_users``: push the old
+    hash to the password history, bcrypt a fresh temp password onto
+    the row, force ``must_change_password``, and email the temp
+    credentials. Email delivery NEVER fails the request — the
+    plaintext is returned once so the admin can hand it over out of
+    band when SMTP skipped/failed.
+    """
+    target = db.get(User, user_id)
+    if target is None:
+        raise HTTPException(
+            status.HTTP_404_NOT_FOUND, detail="Usuario no encontrado."
+        )
+    if target.status != "active":
+        raise HTTPException(
+            status.HTTP_409_CONFLICT,
+            detail="Reactiva al usuario antes de restablecer su contraseña.",
+        )
+
+    temp_password = generate_temp_password()
+    # Record the hash being replaced (lazily, like client_users /
+    # auth._apply_password_change — the next regular change trims).
+    if target.password_hash:
+        db.add(
+            PasswordHistory(
+                user_id=target.id, password_hash=target.password_hash
+            )
+        )
+    target.password_hash = hash_password(temp_password)
+    target.must_change_password = True
+    db.flush()
+
+    login_url = f"{settings.FRONTEND_BASE_URL.rstrip('/')}/login"
+    delivery = send_owner_reset_temp_password_email(
+        to_email=target.email,
+        full_name=target.full_name,
+        login_url=login_url,
+        temp_password=temp_password,
+        organization_name=None,
+    )
+
+    _audit_admin(
+        db,
+        actor=current,
+        action="admin.user_password_reset",
+        entity_type="user",
+        entity_id=target.id,
+        before=None,
+        after={
+            "user_email": target.email,
+            "email_delivery_status": delivery.status,
+        },
+    )
+    db.commit()
+
+    return AdminUserResetPasswordResponse(
+        user_id=target.id,
+        email=target.email,
+        temp_password=temp_password,
+        email_status=delivery.status,
+        email_error=delivery.error,
     )
 
 
@@ -2382,7 +2666,9 @@ class MetadataExportListItem(BaseModel):
 class MetadataExportListResponse(BaseModel):
     items: list[MetadataExportListItem]
     total: int
+    """Real count of export events matching the filter."""
     limit: int
+    offset: int
 
 
 class MetadataExportSheetPreview(BaseModel):
@@ -2434,18 +2720,107 @@ def list_metadata_exports(
         Query(description="Filter by metadata export event result."),
     ] = None,
     limit: Annotated[int, Query(ge=1, le=200)] = 50,
+    offset: Annotated[int, Query(ge=0)] = 0,
 ) -> MetadataExportListResponse:
-    """List XLSX metadata exports generated by provider uploads."""
+    """List XLSX metadata exports generated by provider uploads.
+
+    ``total`` is the real count of events matching the filter; the
+    page's related entities (submission, document, client, vendor,
+    requirement) are bulk-loaded with one IN query per entity type
+    instead of ~5 ``db.get`` lookups per row.
+    """
     _ = current
-    stmt = select(ValidationEvent).where(
-        ValidationEvent.event_type == "metadata_table_exported"
-    )
+    filters = [ValidationEvent.event_type == "metadata_table_exported"]
     if result:
-        stmt = stmt.where(ValidationEvent.result == result)
-    stmt = stmt.order_by(ValidationEvent.created_at.desc()).limit(limit)
+        filters.append(ValidationEvent.result == result)
+    total = int(
+        db.scalar(
+            select(func.count()).select_from(ValidationEvent).where(*filters)
+        )
+        or 0
+    )
+    stmt = (
+        select(ValidationEvent)
+        .where(*filters)
+        .order_by(ValidationEvent.created_at.desc())
+        .offset(offset)
+        .limit(limit)
+    )
     rows = list(db.scalars(stmt))
-    items = [_metadata_export_item(db, row) for row in rows]
-    return MetadataExportListResponse(items=items, total=len(items), limit=limit)
+
+    # ---- Bulk-load the page's related entities (one IN query each). ----
+    submission_ids = {r.submission_id for r in rows if r.submission_id}
+    document_ids = {r.document_id for r in rows if r.document_id}
+    submissions: dict[str, Submission] = {}
+    if submission_ids:
+        submissions = {
+            s.id: s
+            for s in db.scalars(
+                select(Submission).where(Submission.id.in_(submission_ids))
+            )
+        }
+    documents: dict[str, Document] = {}
+    if document_ids:
+        documents = {
+            d.id: d
+            for d in db.scalars(
+                select(Document).where(Document.id.in_(document_ids))
+            )
+        }
+    client_ids = {s.client_id for s in submissions.values() if s.client_id}
+    vendor_ids = {s.vendor_id for s in submissions.values() if s.vendor_id}
+    requirement_ids = {
+        s.requirement_id for s in submissions.values() if s.requirement_id
+    }
+    clients: dict[str, Client] = {}
+    if client_ids:
+        clients = {
+            c.id: c
+            for c in db.scalars(select(Client).where(Client.id.in_(client_ids)))
+        }
+    vendors: dict[str, Vendor] = {}
+    if vendor_ids:
+        vendors = {
+            v.id: v
+            for v in db.scalars(select(Vendor).where(Vendor.id.in_(vendor_ids)))
+        }
+    requirements: dict[str, Requirement] = {}
+    if requirement_ids:
+        requirements = {
+            r.id: r
+            for r in db.scalars(
+                select(Requirement).where(Requirement.id.in_(requirement_ids))
+            )
+        }
+
+    items = []
+    for event in rows:
+        submission = submissions.get(event.submission_id)
+        items.append(
+            _build_metadata_export_item(
+                event,
+                submission=submission,
+                document=(
+                    documents.get(event.document_id)
+                    if event.document_id
+                    else None
+                ),
+                client=(
+                    clients.get(submission.client_id) if submission else None
+                ),
+                vendor=(
+                    vendors.get(submission.vendor_id) if submission else None
+                ),
+                requirement=(
+                    requirements.get(submission.requirement_id)
+                    if submission
+                    else None
+                ),
+            )
+        )
+    return MetadataExportListResponse(
+        items=items, total=total, limit=limit, offset=offset
+    )
 
 
 @router.get(
@@ -2575,12 +2950,37 @@ def _get_metadata_export_event(db: Session, export_event_id: str) -> ValidationE
 def _metadata_export_item(
     db: Session, event: ValidationEvent
 ) -> MetadataExportListItem:
-    payload = event.payload or {}
+    """Single-event item (detail/preview paths). The list endpoint
+    bulk-loads the relations instead — see ``list_metadata_exports``."""
     submission = db.get(Submission, event.submission_id)
-    document = db.get(Document, event.document_id) if event.document_id else None
-    client = db.get(Client, submission.client_id) if submission else None
-    vendor = db.get(Vendor, submission.vendor_id) if submission else None
-    requirement = db.get(Requirement, submission.requirement_id) if submission else None
+    return _build_metadata_export_item(
+        event,
+        submission=submission,
+        document=(
+            db.get(Document, event.document_id) if event.document_id else None
+        ),
+        client=db.get(Client, submission.client_id) if submission else None,
+        vendor=db.get(Vendor, submission.vendor_id) if submission else None,
+        requirement=(
+            db.get(Requirement, submission.requirement_id)
+            if submission
+            else None
+        ),
+    )
+
+
+def _build_metadata_export_item(
+    event: ValidationEvent,
+    *,
+    submission: Submission | None,
+    document: Document | None,
+    client: Client | None,
+    vendor: Vendor | None,
+    requirement: Requirement | None,
+) -> MetadataExportListItem:
+    """Pure item builder over prefetched relations (no db access —
+    except the deliberate per-row filesystem ``exists()`` checks)."""
+    payload = event.payload or {}
     path = _metadata_export_file_path(event)
     file_exists = bool(path and path.exists())
     return MetadataExportListItem(
@@ -2764,6 +3164,9 @@ def _client_metadata_documents_from_sheet(
 class AuditLogItem(BaseModel):
     id: str
     actor_id: str | None
+    actor_email: str | None = None
+    """Resolved ``User.email`` for ``actor_id`` (null when the actor
+    id isn't a user id — e.g. system events or workspace tokens)."""
     actor_type: str
     action: str
     entity_type: str
@@ -2779,7 +3182,9 @@ class AuditLogItem(BaseModel):
 class AuditLogResponse(BaseModel):
     items: list[AuditLogItem]
     total: int
+    """Real count of rows matching the filters (not len(items))."""
     limit: int
+    offset: int
 
 
 @router.get("/audit-log", response_model=AuditLogResponse)
@@ -2794,14 +3199,23 @@ def list_audit_log(
     date_from: datetime | None = None,
     date_to: datetime | None = None,
     limit: Annotated[int, Query(ge=1, le=200)] = 50,
+    offset: Annotated[int, Query(ge=0)] = 0,
 ) -> AuditLogResponse:
     """Filtered audit-log explorer.
 
     Newest first. Filters compose as AND. Default limit 50, hard cap
-    200. Returns at most ``limit`` rows; the total count is the
-    matching row count (or capped at ``limit`` if the DB doesn't make
-    the full count cheap — Phase 7 returns the rendered length to keep
-    the surface simple).
+    200; ``offset`` pages through the filtered set and ``total`` is
+    the real matching row count (a separate COUNT over the same
+    filters), so the UI can render proper pagination.
+
+    ``action`` is a case-insensitive PREFIX match —
+    ``action=admin.user`` finds ``admin.user_disabled``,
+    ``admin.user.provisioned``, etc. Strictly more forgiving than the
+    old exact match (any previously-exact value still matches itself).
+
+    ``actor_email`` is resolved per item by bulk-loading the page's
+    distinct actor_ids against ``users`` (one IN query); null when
+    the actor_id isn't a user id.
     """
     _ = current
     filters = []
@@ -2810,7 +3224,7 @@ def list_audit_log(
     if actor_type:
         filters.append(AuditLog.actor_type == actor_type)
     if action:
-        filters.append(AuditLog.action == action)
+        filters.append(AuditLog.action.ilike(f"{action}%"))
     if entity_type:
         filters.append(AuditLog.entity_type == entity_type)
     if entity_id:
@@ -2819,15 +3233,34 @@ def list_audit_log(
         filters.append(AuditLog.created_at >= date_from)
     if date_to:
         filters.append(AuditLog.created_at <= date_to)
+    count_stmt = select(func.count()).select_from(AuditLog)
     stmt = select(AuditLog)
     if filters:
+        count_stmt = count_stmt.where(and_(*filters))
         stmt = stmt.where(and_(*filters))
-    stmt = stmt.order_by(AuditLog.created_at.desc()).limit(limit)
+    total = int(db.scalar(count_stmt) or 0)
+    stmt = (
+        stmt.order_by(AuditLog.created_at.desc()).offset(offset).limit(limit)
+    )
     rows = list(db.scalars(stmt))
+
+    actor_ids = {row.actor_id for row in rows if row.actor_id}
+    email_by_user_id: dict[str, str] = {}
+    if actor_ids:
+        email_by_user_id = {
+            user_id: email
+            for user_id, email in db.execute(
+                select(User.id, User.email).where(User.id.in_(actor_ids))
+            )
+        }
+
     items = [
         AuditLogItem(
             id=row.id,
             actor_id=row.actor_id,
+            actor_email=(
+                email_by_user_id.get(row.actor_id) if row.actor_id else None
+            ),
             actor_type=row.actor_type,
             action=row.action,
             entity_type=row.entity_type,
@@ -2839,7 +3272,7 @@ def list_audit_log(
         )
         for row in rows
     ]
-    return AuditLogResponse(items=items, total=len(items), limit=limit)
+    return AuditLogResponse(items=items, total=total, limit=limit, offset=offset)
 
 
 # ---------------------------------------------------------------------------

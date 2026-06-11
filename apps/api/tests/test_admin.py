@@ -1321,3 +1321,479 @@ def test_rollup_and_compliance_reject_reviewer_only(
     token = _reviewer_token(api_client, db_factory)
     resp = api_client.get(path, headers=_h(token))
     assert resp.status_code == 403
+
+
+# ---------------------------------------------------------------------------
+# P3 (2026-06-10 audit) — user management: list / disable / reset password
+# ---------------------------------------------------------------------------
+
+
+def _seed_directory_user(
+    db_factory,
+    *,
+    email: str,
+    full_name: str = "Usuario Directorio",
+    role: str | None = None,
+    org_name: str | None = None,
+    org_kind: str = "client",
+    user_status: str = "active",
+) -> str:
+    """Insert a plain User (optionally with one active membership in a
+    fresh org) and return its id."""
+    db = db_factory()
+    try:
+        user = User(
+            email=email,
+            password_hash=hash_password("Seeded!2026"),
+            full_name=full_name,
+            status=user_status,
+        )
+        db.add(user)
+        db.flush()
+        if role is not None:
+            org = Organization(name=org_name or "Org Directorio", kind=org_kind)
+            db.add(org)
+            db.flush()
+            db.add(
+                Membership(
+                    user_id=user.id,
+                    organization_id=org.id,
+                    role=role,
+                    status="active",
+                )
+            )
+        db.commit()
+        return user.id
+    finally:
+        db.close()
+
+
+def _user_id_by_email(db_factory, email: str) -> str:
+    db = db_factory()
+    try:
+        user = db.scalar(select(User).where(User.email == email))
+        assert user is not None
+        return user.id
+    finally:
+        db.close()
+
+
+def _seed_user_directory(db_factory) -> dict[str, str]:
+    """Three users sharing the ``@seeded.test`` domain so ``q=`` can
+    scope assertions away from the login fixture's admin account."""
+    return {
+        "ana": _seed_directory_user(
+            db_factory,
+            email="ana@seeded.test",
+            full_name="Ana Dir",
+            role="client_admin",
+            org_name="Cliente Uno",
+            org_kind="client",
+        ),
+        "beto": _seed_directory_user(
+            db_factory,
+            email="beto@seeded.test",
+            full_name="Beto Dir",
+            role="reviewer",
+            org_name="LegalShelf Interna",
+            org_kind="internal",
+        ),
+        "carla": _seed_directory_user(
+            db_factory,
+            email="carla@seeded.test",
+            full_name="Carla Distinta",
+            user_status="disabled",
+        ),
+    }
+
+
+def test_admin_users_list_returns_roles_orgs_and_filters(
+    api_client: TestClient, db_factory
+) -> None:
+    token = _admin_token(api_client, db_factory)
+    seeded = _seed_user_directory(db_factory)
+
+    # Scope to the seeded trio via q (the login fixture adds its own
+    # admin user).
+    resp = api_client.get(
+        "/api/v1/admin/users?q=@seeded.test", headers=_h(token)
+    )
+    assert resp.status_code == 200, resp.text
+    body = resp.json()
+    assert body["total"] == 3
+    assert len(body["items"]) == 3
+    by_email = {item["email"]: item for item in body["items"]}
+    assert set(by_email) == {
+        "ana@seeded.test",
+        "beto@seeded.test",
+        "carla@seeded.test",
+    }
+
+    ana = by_email["ana@seeded.test"]
+    assert ana["user_id"] == seeded["ana"]
+    assert ana["full_name"] == "Ana Dir"
+    assert ana["status"] == "active"
+    assert ana["must_change_password"] is False
+    assert ana["last_login_at"] is None
+    assert ana["created_at"]
+    assert ana["roles"] == ["client_admin"]
+    assert ana["organizations"] == [
+        {
+            "id": ana["organizations"][0]["id"],
+            "name": "Cliente Uno",
+            "kind": "client",
+        }
+    ]
+    # No-membership user → empty roles/orgs, not missing keys.
+    carla = by_email["carla@seeded.test"]
+    assert carla["roles"] == []
+    assert carla["organizations"] == []
+
+    # q= substring of email.
+    only_ana = api_client.get(
+        "/api/v1/admin/users?q=ana@seeded", headers=_h(token)
+    ).json()
+    assert only_ana["total"] == 1
+    assert only_ana["items"][0]["user_id"] == seeded["ana"]
+
+    # q= substring of full_name (case-insensitive).
+    by_name = api_client.get(
+        "/api/v1/admin/users?q=distinta", headers=_h(token)
+    ).json()
+    assert by_name["total"] == 1
+    assert by_name["items"][0]["user_id"] == seeded["carla"]
+
+    # status= filter.
+    disabled = api_client.get(
+        "/api/v1/admin/users?q=@seeded.test&status=disabled",
+        headers=_h(token),
+    ).json()
+    assert disabled["total"] == 1
+    assert disabled["items"][0]["user_id"] == seeded["carla"]
+
+    # role= filter (active membership role).
+    reviewers = api_client.get(
+        "/api/v1/admin/users?q=@seeded.test&role=reviewer", headers=_h(token)
+    ).json()
+    assert reviewers["total"] == 1
+    assert reviewers["items"][0]["user_id"] == seeded["beto"]
+
+
+def test_admin_users_total_is_real_count_independent_of_limit(
+    api_client: TestClient, db_factory
+) -> None:
+    token = _admin_token(api_client, db_factory)
+    _seed_user_directory(db_factory)
+
+    page = api_client.get(
+        "/api/v1/admin/users?q=@seeded.test&limit=2", headers=_h(token)
+    ).json()
+    assert len(page["items"]) == 2
+    assert page["total"] == 3
+
+    # offset pages through the remainder.
+    rest = api_client.get(
+        "/api/v1/admin/users?q=@seeded.test&limit=2&offset=2",
+        headers=_h(token),
+    ).json()
+    assert len(rest["items"]) == 1
+    assert rest["total"] == 3
+    page_ids = {item["user_id"] for item in page["items"]}
+    assert rest["items"][0]["user_id"] not in page_ids
+
+
+def test_admin_can_disable_and_reactivate_user(
+    api_client: TestClient, db_factory
+) -> None:
+    token = _admin_token(api_client, db_factory)
+    target_id = _seed_directory_user(db_factory, email="target@seeded.test")
+
+    resp = api_client.patch(
+        f"/api/v1/admin/users/{target_id}",
+        json={"status": "disabled"},
+        headers=_h(token),
+    )
+    assert resp.status_code == 200, resp.text
+    assert resp.json() == {"user_id": target_id, "status": "disabled"}
+    db = db_factory()
+    try:
+        assert db.get(User, target_id).status == "disabled"
+    finally:
+        db.close()
+    row = _assert_audit_admin(
+        db_factory, action="admin.user_disabled", entity_id=target_id
+    )
+    assert (row.before or {}).get("status") == "active"
+    assert (row.after or {}).get("status") == "disabled"
+
+    resp = api_client.patch(
+        f"/api/v1/admin/users/{target_id}",
+        json={"status": "active"},
+        headers=_h(token),
+    )
+    assert resp.status_code == 200, resp.text
+    assert resp.json() == {"user_id": target_id, "status": "active"}
+    db = db_factory()
+    try:
+        assert db.get(User, target_id).status == "active"
+    finally:
+        db.close()
+    row = _assert_audit_admin(
+        db_factory, action="admin.user_reactivated", entity_id=target_id
+    )
+    assert (row.before or {}).get("status") == "disabled"
+
+
+def test_admin_cannot_disable_own_account(
+    api_client: TestClient, db_factory
+) -> None:
+    token = _admin_token(api_client, db_factory)
+    own_id = _user_id_by_email(db_factory, "adm@checkwise.test")
+    resp = api_client.patch(
+        f"/api/v1/admin/users/{own_id}",
+        json={"status": "disabled"},
+        headers=_h(token),
+    )
+    assert resp.status_code == 409
+    assert resp.json()["detail"] == "No puedes desactivar tu propia cuenta."
+    db = db_factory()
+    try:
+        assert db.get(User, own_id).status == "active"
+    finally:
+        db.close()
+
+
+def test_admin_patch_user_404_on_missing(
+    api_client: TestClient, db_factory
+) -> None:
+    token = _admin_token(api_client, db_factory)
+    resp = api_client.patch(
+        "/api/v1/admin/users/no-such-user",
+        json={"status": "disabled"},
+        headers=_h(token),
+    )
+    assert resp.status_code == 404
+
+
+def test_admin_can_reset_user_password(
+    api_client: TestClient, db_factory
+) -> None:
+    from app.models import PasswordHistory
+
+    token = _admin_token(api_client, db_factory)
+    target_id = _seed_directory_user(db_factory, email="reset@seeded.test")
+    db = db_factory()
+    try:
+        old_hash = db.get(User, target_id).password_hash
+    finally:
+        db.close()
+
+    resp = api_client.post(
+        f"/api/v1/admin/users/{target_id}/reset-password", headers=_h(token)
+    )
+    assert resp.status_code == 200, resp.text
+    body = resp.json()
+    assert body["user_id"] == target_id
+    assert body["email"] == "reset@seeded.test"
+    assert body["temp_password"]
+    assert body["email_status"] in {"sent", "skipped", "failed"}
+    assert "email_error" in body
+
+    db = db_factory()
+    try:
+        target = db.get(User, target_id)
+        assert target.must_change_password is True
+        assert target.password_hash != old_hash
+        history = list(
+            db.scalars(
+                select(PasswordHistory).where(
+                    PasswordHistory.user_id == target_id
+                )
+            )
+        )
+        assert len(history) == 1
+        assert history[0].password_hash == old_hash
+    finally:
+        db.close()
+    _assert_audit_admin(
+        db_factory,
+        action="admin.user_password_reset",
+        entity_id=target_id,
+        before_must_be_none=True,
+    )
+
+    # The temp password actually logs in (and is flagged for rotation).
+    login = api_client.post(
+        "/api/v1/auth/login",
+        json={"email": "reset@seeded.test", "password": body["temp_password"]},
+    )
+    assert login.status_code == 200, login.text
+
+
+def test_admin_reset_password_409_on_disabled_target(
+    api_client: TestClient, db_factory
+) -> None:
+    token = _admin_token(api_client, db_factory)
+    target_id = _seed_directory_user(
+        db_factory, email="locked@seeded.test", user_status="disabled"
+    )
+    resp = api_client.post(
+        f"/api/v1/admin/users/{target_id}/reset-password", headers=_h(token)
+    )
+    assert resp.status_code == 409
+    assert (
+        resp.json()["detail"]
+        == "Reactiva al usuario antes de restablecer su contraseña."
+    )
+
+
+def test_admin_reset_password_404_on_missing(
+    api_client: TestClient, db_factory
+) -> None:
+    token = _admin_token(api_client, db_factory)
+    resp = api_client.post(
+        "/api/v1/admin/users/no-such-user/reset-password", headers=_h(token)
+    )
+    assert resp.status_code == 404
+
+
+@pytest.mark.parametrize(
+    ("method", "path", "body"),
+    [
+        ("GET", "/api/v1/admin/users", None),
+        ("PATCH", "/api/v1/admin/users/whatever", {"status": "disabled"}),
+        ("POST", "/api/v1/admin/users/whatever/reset-password", None),
+    ],
+)
+def test_user_management_rejects_unauthenticated(
+    api_client: TestClient, method: str, path: str, body: dict | None
+) -> None:
+    resp = api_client.request(method, path, json=body)
+    assert resp.status_code == 401
+
+
+@pytest.mark.parametrize(
+    ("method", "path", "body"),
+    [
+        ("GET", "/api/v1/admin/users", None),
+        ("PATCH", "/api/v1/admin/users/whatever", {"status": "disabled"}),
+        ("POST", "/api/v1/admin/users/whatever/reset-password", None),
+    ],
+)
+def test_user_management_rejects_reviewer_only(
+    api_client: TestClient, db_factory, method: str, path: str, body: dict | None
+) -> None:
+    token = _reviewer_token(api_client, db_factory)
+    resp = api_client.request(method, path, json=body, headers=_h(token))
+    assert resp.status_code == 403
+
+
+# ---------------------------------------------------------------------------
+# P3 (2026-06-10 audit) — audit-log offset / real total / prefix / actor_email
+# ---------------------------------------------------------------------------
+
+
+def test_audit_log_offset_pages_and_total_is_real_count(
+    api_client: TestClient, db_factory
+) -> None:
+    token = _admin_token(api_client, db_factory)
+    for i in range(3):
+        client_id = _seed_client_via_db(db_factory, name=f"PageCli{i}")
+        api_client.patch(
+            f"/api/v1/admin/clients/{client_id}",
+            json={"name": f"PageCli{i} Renombrado"},
+            headers=_h(token),
+        )
+
+    page1 = api_client.get(
+        "/api/v1/admin/audit-log?action=admin.client.updated&limit=2",
+        headers=_h(token),
+    ).json()
+    assert len(page1["items"]) == 2
+    assert page1["total"] == 3  # real filtered count, not len(items)
+    assert page1["limit"] == 2
+    assert page1["offset"] == 0
+
+    page2 = api_client.get(
+        "/api/v1/admin/audit-log?action=admin.client.updated&limit=2&offset=2",
+        headers=_h(token),
+    ).json()
+    assert len(page2["items"]) == 1
+    assert page2["total"] == 3
+    assert page2["offset"] == 2
+    page1_ids = {item["id"] for item in page1["items"]}
+    assert page2["items"][0]["id"] not in page1_ids
+
+
+def test_audit_log_action_filter_is_prefix_match(
+    api_client: TestClient, db_factory
+) -> None:
+    token = _admin_token(api_client, db_factory)
+    target_id = _seed_directory_user(db_factory, email="prefix@seeded.test")
+    api_client.patch(
+        f"/api/v1/admin/users/{target_id}",
+        json={"status": "disabled"},
+        headers=_h(token),
+    )
+    # Unrelated action that must NOT match the admin.user prefix.
+    client_id = _seed_client_via_db(db_factory, name="PrefixCli")
+    api_client.patch(
+        f"/api/v1/admin/clients/{client_id}",
+        json={"name": "PrefixCli Renombrado"},
+        headers=_h(token),
+    )
+
+    body = api_client.get(
+        "/api/v1/admin/audit-log?action=admin.user", headers=_h(token)
+    ).json()
+    actions = {item["action"] for item in body["items"]}
+    assert "admin.user_disabled" in actions
+    assert all(action.startswith("admin.user") for action in actions)
+
+    # An exact value still matches itself (strictly more forgiving).
+    exact = api_client.get(
+        "/api/v1/admin/audit-log?action=admin.user_disabled",
+        headers=_h(token),
+    ).json()
+    assert {item["action"] for item in exact["items"]} == {
+        "admin.user_disabled"
+    }
+
+
+def test_audit_log_resolves_actor_email(
+    api_client: TestClient, db_factory
+) -> None:
+    token = _admin_token(api_client, db_factory)
+    client_id = _seed_client_via_db(db_factory, name="ActorCli")
+    api_client.patch(
+        f"/api/v1/admin/clients/{client_id}",
+        json={"name": "ActorCli Renombrado"},
+        headers=_h(token),
+    )
+
+    body = api_client.get(
+        "/api/v1/admin/audit-log?action=admin.client.updated",
+        headers=_h(token),
+    ).json()
+    assert body["items"]
+    assert body["items"][0]["actor_email"] == "adm@checkwise.test"
+
+    # A row whose actor_id is not a user id resolves to null.
+    db = db_factory()
+    try:
+        db.add(
+            AuditLog(
+                action="system.cron.fired",
+                entity_type="system",
+                entity_id="cron",
+                actor_type="system",
+                actor_id="not-a-user-id",
+            )
+        )
+        db.commit()
+    finally:
+        db.close()
+    system_rows = api_client.get(
+        "/api/v1/admin/audit-log?action=system.cron.fired", headers=_h(token)
+    ).json()
+    assert system_rows["items"][0]["actor_email"] is None
