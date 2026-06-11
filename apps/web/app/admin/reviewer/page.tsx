@@ -13,6 +13,7 @@ import {
 
 import { AdminShell } from "../_shell";
 import { VendorRef } from "@/components/checkwise/vendor-ref";
+import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { PageHeader } from "@/components/ui/page-header";
 import {
@@ -96,6 +97,24 @@ function parseFilterParam(raw: string | null): FilterKey {
     : "all";
 }
 
+// Phase A document revalidation — authenticity-risk filter. Empty
+// string = "Todos" (param omitted, backend returns every row).
+const RISK_VALUES = ["clean", "suspicious", "high_risk"] as const;
+
+type RiskKey = (typeof RISK_VALUES)[number];
+
+const RISK_LABEL: Record<RiskKey, string> = {
+  clean: "Limpio",
+  suspicious: "Sospechoso",
+  high_risk: "Alto riesgo",
+};
+
+function parseRiskParam(raw: string | null): RiskKey | "" {
+  return (RISK_VALUES as readonly string[]).includes(raw ?? "")
+    ? (raw as RiskKey)
+    : "";
+}
+
 // SLA aging thresholds (hours). <72h is on target, 72h–168h is at
 // risk (amber), >168h (7 days) is out of SLA (red).
 const SLA_WARNING_HOURS = 72;
@@ -153,6 +172,11 @@ function ReviewerQueueBody() {
   const [institution, setInstitution] = useState<string>(
     () => searchParams?.get("institution") ?? "",
   );
+  // Phase A — authenticity-risk filter. Server-side (the queue
+  // endpoint's ``risk`` param), URL-persisted like tab/institution.
+  const [risk, setRisk] = useState<RiskKey | "">(() =>
+    parseRiskParam(searchParams?.get("risk") ?? null),
+  );
   const [loadingMore, setLoadingMore] = useState(false);
   const [loadMoreError, setLoadMoreError] = useState(false);
   // Display-only sort. The server always returns oldest-first (FIFO);
@@ -174,15 +198,16 @@ function ReviewerQueueBody() {
     setSession(current);
   }, [router]);
 
-  // Mirror tab + institution into the URL (replace, not push, so the
-  // history stack stays one entry per page visit).
+  // Mirror tab + institution + risk into the URL (replace, not push,
+  // so the history stack stays one entry per page visit).
   useEffect(() => {
     const params = new URLSearchParams();
     if (filter !== "all") params.set("tab", filter);
     if (institution) params.set("institution", institution);
+    if (risk) params.set("risk", risk);
     const qs = params.toString();
     router.replace(`/admin/reviewer${qs ? `?${qs}` : ""}`, { scroll: false });
-  }, [filter, institution, router]);
+  }, [filter, institution, risk, router]);
 
   // First page fetch. Depends on `serverStatus` (not `filter`) so
   // toggling between "Todos" and the client-side mismatch filter
@@ -197,6 +222,7 @@ function ReviewerQueueBody() {
     getReviewerQueue(session.access_token, {
       status: serverStatus,
       institution: institution || undefined,
+      risk: risk || undefined,
       limit: PAGE_LIMIT,
     })
       .then((payload) => {
@@ -217,7 +243,7 @@ function ReviewerQueueBody() {
     return () => {
       cancelled = true;
     };
-  }, [session, reloadKey, router, institution, serverStatus]);
+  }, [session, reloadKey, router, institution, serverStatus, risk]);
 
   const retry = useCallback(() => setReloadKey((k) => k + 1), []);
 
@@ -234,6 +260,7 @@ function ReviewerQueueBody() {
     getReviewerQueue(session.access_token, {
       status: serverStatus,
       institution: institution || undefined,
+      risk: risk || undefined,
       limit: PAGE_LIMIT,
       cursor: requestedCursor,
     })
@@ -253,7 +280,7 @@ function ReviewerQueueBody() {
         setLoadMoreError(true);
       })
       .finally(() => setLoadingMore(false));
-  }, [session, queue, loadingMore, serverStatus, institution, router]);
+  }, [session, queue, loadingMore, serverStatus, institution, risk, router]);
 
   // F1: logout is now provided by the AdminShell header, so this
   // page no longer renders its own Cerrar sesión action.
@@ -304,10 +331,33 @@ function ReviewerQueueBody() {
             </option>
           ))}
         </Select>
-        {institution ? (
+        {/* Phase A — authenticity-risk filter. Server-side via the
+            queue endpoint's ``risk`` param; "" means all rows. */}
+        <label
+          htmlFor="reviewer-risk"
+          className="font-mono text-[10px] uppercase tracking-[0.2em] text-[color:var(--text-tertiary)]"
+        >
+          Riesgo
+        </label>
+        <Select
+          id="reviewer-risk"
+          value={risk}
+          onChange={(e) => setRisk(parseRiskParam(e.target.value))}
+          className="h-9 max-w-[180px] text-[13px]"
+          aria-label="Filtrar bandeja por riesgo de autenticidad"
+        >
+          <option value="">Todos</option>
+          <option value="high_risk">{RISK_LABEL.high_risk}</option>
+          <option value="suspicious">{RISK_LABEL.suspicious}</option>
+          <option value="clean">{RISK_LABEL.clean}</option>
+        </Select>
+        {institution || risk ? (
           <button
             type="button"
-            onClick={() => setInstitution("")}
+            onClick={() => {
+              setInstitution("");
+              setRisk("");
+            }}
             className="font-mono text-[10px] uppercase tracking-[0.18em] text-[color:var(--text-teal)] underline-offset-2 hover:underline"
           >
             Limpiar
@@ -419,6 +469,12 @@ function ReviewerQueueBody() {
               <TableHeader>
                 <TableRow>
                   <TableHead className="w-[160px]">Estado</TableHead>
+                  <TableHead
+                    className="w-[110px]"
+                    title="Riesgo de autenticidad según el análisis forense del PDF"
+                  >
+                    Riesgo
+                  </TableHead>
                   <TableHead>Documento</TableHead>
                   <TableHead>Institución · periodo</TableHead>
                   <TableHead>Proveedor</TableHead>
@@ -516,9 +572,23 @@ function QueueTableRow({
       tabIndex={0}
       role="link"
       aria-label={`Abrir ${item.requirement.name ?? "documento"} de ${item.provider.vendor_name}`}
-      className="cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-[color:var(--border-focus)]/40"
+      className={`cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-[color:var(--border-focus)]/40${
+        item.authenticity_risk === "high_risk"
+          ? " bg-[color:var(--status-error-bg)]"
+          : ""
+      }`}
     >
-      <TableCell>
+      {/* Phase A — high-risk rows get a left accent so they pop while
+          scanning; the bg tint above keeps the whole row warm. The
+          accent lives on the first CELL (not the <tr>) because
+          border-collapse swallows row-level side borders. */}
+      <TableCell
+        className={
+          item.authenticity_risk === "high_risk"
+            ? "border-l-2 border-l-[color:var(--status-error-border)]"
+            : undefined
+        }
+      >
         <div className="flex flex-col gap-1.5">
           <RequirementStatusBadge status={item.status} />
           {item.has_mismatch ? (
@@ -528,6 +598,10 @@ function QueueTableRow({
             </span>
           ) : null}
         </div>
+      </TableCell>
+
+      <TableCell>
+        <RiskBadge risk={item.authenticity_risk} />
       </TableCell>
 
       <TableCell>
@@ -596,6 +670,53 @@ function QueueTableRow({
         />
       </TableCell>
     </TableRow>
+  );
+}
+
+/**
+ * Phase A — compact authenticity-risk badge for queue rows. Clean rows
+ * stay visually QUIET (outline badge with a small success dot) so the
+ * eye only catches the warning/destructive states; "—" for rows the
+ * fail-open analyzer never touched.
+ */
+function RiskBadge({ risk }: { risk: QueueItem["authenticity_risk"] }) {
+  if (!risk) {
+    return (
+      <span
+        className="text-[color:var(--text-tertiary)]"
+        title="Sin análisis forense"
+        aria-label="Sin análisis forense"
+      >
+        —
+      </span>
+    );
+  }
+  if (risk === "clean") {
+    return (
+      <Badge variant="outline" className="whitespace-nowrap">
+        <span
+          aria-hidden
+          className="h-1.5 w-1.5 shrink-0 rounded-full bg-[color:var(--status-success-text)]"
+        />
+        {RISK_LABEL.clean}
+      </Badge>
+    );
+  }
+  return (
+    <Badge
+      variant={risk === "high_risk" ? "destructive" : "warning"}
+      className="whitespace-nowrap"
+    >
+      <span
+        aria-hidden
+        className={`h-1.5 w-1.5 shrink-0 rounded-full ${
+          risk === "high_risk"
+            ? "bg-[color:var(--status-error-text)]"
+            : "bg-[color:var(--status-warning-text)]"
+        }`}
+      />
+      {RISK_LABEL[risk]}
+    </Badge>
   );
 }
 

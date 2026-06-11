@@ -42,6 +42,7 @@ import {
   reviewerDocumentDownloadUrl,
   ReviewerApiError,
   submitDecision,
+  type AuthenticityReason,
   type ReviewerSubmissionDetail,
 } from "@/lib/api/reviewer";
 import { personaLabel } from "@/lib/constants/labels";
@@ -240,6 +241,7 @@ export default function ReviewerSubmissionPage({ params }: PageProps) {
           <div className="space-y-5 lg:col-span-2">
             <StatusHeader detail={detail} decidedHint={decided?.new_status ?? null} />
             <VendorIdentityStrip detail={detail} />
+            <VerdictCard detail={detail} />
             <ReviewerSubmissionPreview detail={detail} session={session} />
             <LineageStrip detail={detail} />
             <LecturaDelDocumento detail={detail} />
@@ -470,6 +472,225 @@ function VendorIdentityStrip({ detail }: { detail: ReviewerSubmissionDetail }) {
   ];
 
   return <MetadataStrip items={items} />;
+}
+
+// ---------------------------------------------------------------------------
+// Phase A — verdict card (Coincidencia + Autenticidad, 2026-06-11)
+// ---------------------------------------------------------------------------
+
+/**
+ * Pull the requirement-match confidence the same way
+ * <LecturaDelDocumento/> picks its primary signals (AI shadow signals
+ * when the shadow run produced them, heuristic otherwise), so the big
+ * percentage in the verdict card can never disagree with the
+ * "Confianza" chip the Lectura shows below it.
+ */
+function matchConfidence(detail: SubmissionDetail): number | null {
+  const payload = detail.shadow_analysis ?? null;
+  if (!payload) return null;
+  const signals = payload.shadow?.signals ?? payload.heuristic?.signals ?? null;
+  const conf = signals?.requirement_match_confidence;
+  return conf === null || conf === undefined ? null : conf;
+}
+
+/** Canonical Spanish labels + badge tones for the authenticity risk. */
+const RISK_META: Record<
+  "clean" | "suspicious" | "high_risk",
+  { label: string; variant: "success" | "warning" | "destructive" }
+> = {
+  clean: { label: "Limpio", variant: "success" },
+  suspicious: { label: "Sospechoso", variant: "warning" },
+  high_risk: { label: "Alto riesgo", variant: "destructive" },
+};
+
+/** Tone bands for the match percentage: ≥85 success, 60–84 warning,
+ *  <60 destructive. */
+function confidenceBandClass(pct: number): string {
+  if (pct >= 85) return "text-[color:var(--status-success-text)]";
+  if (pct >= 60) return "text-[color:var(--status-warning-text)]";
+  return "text-[color:var(--status-error-text)]";
+}
+
+const REASON_SEVERITY_DOT: Record<AuthenticityReason["severity"], string> = {
+  high: "bg-[color:var(--status-error-text)]",
+  medium: "bg-[color:var(--status-warning-text)]",
+  info: "bg-[color:var(--text-tertiary)]",
+};
+
+/**
+ * Render one forensics value. ``*_date`` keys get an es-MX date when
+ * parseable; everything else falls back to a mono string.
+ */
+function formatForensicValue(key: string, value: unknown): string {
+  if (key.endsWith("_date") && typeof value === "string") {
+    const parsed = new Date(value);
+    if (!Number.isNaN(parsed.getTime())) {
+      return parsed.toLocaleDateString("es-MX", {
+        day: "2-digit",
+        month: "short",
+        year: "numeric",
+      });
+    }
+  }
+  if (typeof value === "string") return value;
+  if (typeof value === "number" || typeof value === "boolean") {
+    return String(value);
+  }
+  try {
+    return JSON.stringify(value) ?? String(value);
+  } catch {
+    return String(value);
+  }
+}
+
+/**
+ * Phase A document revalidation — the headline verdict. TWO separate
+ * scores, deliberately never blended into one number:
+ *
+ *   1. **Coincidencia** — how confident the lectura is that this is
+ *      the EXPECTED document (type + RFC + periodo). Same value the
+ *      Lectura card's confidence chip shows.
+ *   2. **Autenticidad** — whether the PDF-forensics analyzer thinks
+ *      the file itself was tampered with, with the analyzer's named
+ *      reasons listed under the badge.
+ *
+ * A 98% match can still be high-risk (real document, edited dates)
+ * and a 40% match can be clean (wrong document, untouched file) —
+ * blending them would hide exactly the cases the reviewer must catch.
+ */
+function VerdictCard({ detail }: { detail: ReviewerSubmissionDetail }) {
+  const [forensicsOpen, setForensicsOpen] = useState(false);
+
+  const confidence = matchConfidence(detail);
+  const pct = confidence === null ? null : Math.round(confidence * 100);
+
+  const auth = detail.authenticity;
+  const analyzed = auth?.analyzed === true;
+  const riskMeta = analyzed && auth?.risk ? RISK_META[auth.risk] : null;
+  const reasons = riskMeta ? auth?.reasons ?? [] : [];
+
+  // Forensic evidence only makes sense when the analyzer actually ran;
+  // null values are noise (absent extractors), so they're hidden.
+  const forensicEntries =
+    analyzed && auth?.forensics
+      ? Object.entries(auth.forensics).filter(
+          ([, value]) => value !== null && value !== undefined,
+        )
+      : [];
+
+  return (
+    <Card aria-label="Veredicto del documento">
+      <CardHeader>
+        <CardTitle>Veredicto del documento</CardTitle>
+        <p className="mt-1 text-xs text-[color:var(--text-tertiary)]">
+          Dos lecturas independientes: que sea el documento correcto y que el
+          archivo no esté alterado.
+        </p>
+      </CardHeader>
+      <CardContent className="space-y-4">
+        <div className="grid gap-3 sm:grid-cols-2">
+          {/* Coincidencia — is this the document we expected? */}
+          <div className="rounded-md border border-[color:var(--border-subtle)] bg-[color:var(--surface-page)] p-4">
+            <p className="text-xs font-medium uppercase tracking-wide text-[color:var(--text-tertiary)]">
+              Coincidencia
+            </p>
+            {pct !== null ? (
+              <>
+                <p
+                  className={`mt-1 text-3xl font-semibold tabular-nums ${confidenceBandClass(pct)}`}
+                >
+                  {pct}%
+                </p>
+                <p className="mt-1 text-xs text-[color:var(--text-secondary)]">
+                  que sea el documento esperado (tipo · RFC · periodo)
+                </p>
+              </>
+            ) : (
+              <p className="mt-2 text-sm font-medium text-[color:var(--text-secondary)]">
+                Sin análisis de coincidencia
+              </p>
+            )}
+          </div>
+
+          {/* Autenticidad — was the file tampered with? */}
+          <div className="rounded-md border border-[color:var(--border-subtle)] bg-[color:var(--surface-page)] p-4">
+            <p className="text-xs font-medium uppercase tracking-wide text-[color:var(--text-tertiary)]">
+              Autenticidad
+            </p>
+            <div className="mt-1.5">
+              {riskMeta ? (
+                <Badge variant={riskMeta.variant}>{riskMeta.label}</Badge>
+              ) : (
+                <Badge variant="secondary">Sin analizar</Badge>
+              )}
+            </div>
+            {riskMeta ? (
+              reasons.length > 0 ? (
+                <ul className="mt-2.5 space-y-1.5">
+                  {reasons.map((reason) => (
+                    <li
+                      key={reason.code}
+                      title={reason.code}
+                      className="flex items-start gap-2 text-xs text-[color:var(--text-secondary)]"
+                    >
+                      <span
+                        aria-hidden
+                        className={`mt-1 h-1.5 w-1.5 shrink-0 rounded-full ${REASON_SEVERITY_DOT[reason.severity]}`}
+                      />
+                      <span className="min-w-0 break-words">
+                        {reason.detail_es}
+                      </span>
+                    </li>
+                  ))}
+                </ul>
+              ) : (
+                <p className="mt-2 text-xs text-[color:var(--text-tertiary)]">
+                  Sin señales de alteración detectadas.
+                </p>
+              )
+            ) : (
+              <p className="mt-2 text-xs text-[color:var(--text-tertiary)]">
+                El análisis forense no se ejecutó para este documento.
+              </p>
+            )}
+          </div>
+        </div>
+
+        {/* Collapsed forensic evidence — TraceabilityCard idiom. */}
+        {forensicEntries.length > 0 ? (
+          <div className="rounded-md border border-[color:var(--border-subtle)]">
+            <button
+              type="button"
+              onClick={() => setForensicsOpen((v) => !v)}
+              aria-expanded={forensicsOpen}
+              className="flex w-full items-center justify-between px-3 py-2 text-left"
+            >
+              <span className="text-sm font-medium text-[color:var(--text-primary)]">
+                Evidencia forense
+              </span>
+              <span className="text-xs text-muted-foreground">
+                {forensicsOpen ? "Ocultar" : "Mostrar"}
+              </span>
+            </button>
+            {forensicsOpen ? (
+              <div className="space-y-2 border-t border-[color:var(--border-subtle)] px-3 py-3">
+                {forensicEntries.map(([key, value]) => (
+                  <p key={key} className="text-xs text-[color:var(--text-secondary)]">
+                    <span className="font-medium text-[color:var(--text-primary)]">
+                      {key}:
+                    </span>{" "}
+                    <span className="break-all font-mono">
+                      {formatForensicValue(key, value)}
+                    </span>
+                  </p>
+                ))}
+              </div>
+            ) : null}
+          </div>
+        ) : null}
+      </CardContent>
+    </Card>
+  );
 }
 
 // ---------------------------------------------------------------------------
