@@ -6,9 +6,10 @@ import {
 } from "@/components/checkwise/legal/legal-doc-shell";
 
 export const metadata: Metadata = {
-  title: "Aviso de consentimiento informado · CheckWise",
+  title: "Aviso de consentimiento informado",
   description:
     "Aviso de consentimiento informado para compartir tu evidencia REPSE con la empresa contratante a través de CheckWise.",
+  alternates: { canonical: "/legal/consentimiento" },
 };
 
 /**

@@ -6,9 +6,10 @@ import {
 } from "@/components/checkwise/legal/legal-doc-shell";
 
 export const metadata: Metadata = {
-  title: "Términos de uso · CheckWise",
+  title: "Términos de uso",
   description:
     "Términos de uso de la plataforma CheckWise operada por LegalShelf, S.A. de C.V.",
+  alternates: { canonical: "/legal/terminos" },
 };
 
 const EMAIL_LINK_CLASS =

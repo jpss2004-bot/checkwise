@@ -6,9 +6,10 @@ import {
 } from "@/components/checkwise/legal/legal-doc-shell";
 
 export const metadata: Metadata = {
-  title: "Política de privacidad · CheckWise",
+  title: "Política de privacidad",
   description:
     "Política de privacidad de CheckWise (LegalShelf) como encargado del tratamiento, conforme a la Ley Federal de Protección de Datos Personales en Posesión de los Particulares.",
+  alternates: { canonical: "/legal/privacidad" },
 };
 
 const EMAIL_LINK_CLASS =
