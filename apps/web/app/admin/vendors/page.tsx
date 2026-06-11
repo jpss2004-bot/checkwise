@@ -1,6 +1,7 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { Suspense, useEffect, useMemo, useState } from "react";
+import { useRouter, useSearchParams } from "next/navigation";
 import {
   Buildings,
   DownloadSimple,
@@ -35,6 +36,18 @@ import {
 } from "@/lib/api/admin";
 
 export default function AdminVendorsPage() {
+  // useSearchParams must live under a Suspense boundary so Next can
+  // statically prerender the shell (same pattern as /admin/reviewer).
+  return (
+    <Suspense fallback={null}>
+      <AdminVendorsBody />
+    </Suspense>
+  );
+}
+
+function AdminVendorsBody() {
+  const router = useRouter();
+  const searchParams = useSearchParams();
   const [rows, setRows] = useState<AdminVendor[]>([]);
   const [clients, setClients] = useState<AdminClient[]>([]);
   const [loading, setLoading] = useState(true);
@@ -42,7 +55,20 @@ export default function AdminVendorsPage() {
   const [editing, setEditing] = useState<AdminVendor | null>(null);
   const [createOpen, setCreateOpen] = useState(false);
   const [search, setSearch] = useState("");
-  const [clientFilter, setClientFilter] = useState("");
+  // Audit fix 2026-06-10 — the client filter seeds from `?client_id=`
+  // so deep links (e.g. the "Proveedores" quick link on the client
+  // detail page) land pre-scoped, and mirrors back to the URL so the
+  // filtered view is shareable and survives back-navigation.
+  const [clientFilter, setClientFilter] = useState(
+    () => searchParams?.get("client_id") ?? "",
+  );
+
+  useEffect(() => {
+    const params = new URLSearchParams();
+    if (clientFilter) params.set("client_id", clientFilter);
+    const qs = params.toString();
+    router.replace(`/admin/vendors${qs ? `?${qs}` : ""}`, { scroll: false });
+  }, [clientFilter, router]);
 
   async function refresh() {
     setError(null);

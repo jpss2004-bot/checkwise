@@ -118,7 +118,15 @@ export default function AdminClientsPage() {
               header: "Nombre",
               cell: (row) => (
                 <p className="font-medium text-[color:var(--text-primary)]">
-                  {row.name}
+                  {/* Same affordance as VendorRef: the entity name is the
+                      navigation into its detail page. */}
+                  <Link
+                    href={`/admin/clients/${row.id}`}
+                    title={`Abrir la ficha de ${row.name}`}
+                    className="rounded-sm underline-offset-2 transition-colors hover:text-[color:var(--text-brand)] hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[color:var(--interactive-primary)]"
+                  >
+                    {row.name}
+                  </Link>
                 </p>
               ),
             },
