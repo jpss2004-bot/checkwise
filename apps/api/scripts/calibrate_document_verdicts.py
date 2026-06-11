@@ -23,6 +23,11 @@ Signals replayed (from ``DocumentInspection``)
       rows). With ``--recompute-forensics`` the analyzer is re-run fresh
       against the stored file when it still exists on disk, so legacy
       rows get a verdict for calibration too.
+    * verification (Phase B) — with ``--recompute-forensics`` the
+      QR/folio extractor ALSO runs fresh per document, and the report
+      adds ``qr_found_rate`` / ``qr_official_rate`` / folio kind counts
+      per requirement code and overall. This measures real-world QR
+      coverage so ``missing_expected_qr`` can be promoted above info.
 
 IMPORTANT CAVEAT (also stamped into the report header): human rejections
 are frequently period/type mismatches, illegible scans or wrong-document
@@ -117,6 +122,15 @@ class CalibrationRecord:
     authenticity_risk: str | None  # clean | suspicious | high_risk | None
     risk_recomputed: bool = False
     risk_reason_codes: list[str] = field(default_factory=list)
+    # Phase B — fresh QR/folio extraction (``--recompute-forensics``
+    # only; verification anchors are not replayed from stored columns
+    # because legacy rows predate them). ``qr_count is None`` means
+    # "not scanned"; these feed :func:`verification_stats`, which
+    # measures real-world QR coverage so ``missing_expected_qr`` can be
+    # promoted from info once the found-rate justifies it.
+    qr_count: int | None = None
+    qr_all_official: bool | None = None  # None until ≥1 QR decoded
+    folio_kinds: list[str] = field(default_factory=list)
 
 
 # ---------------------------------------------------------------------------
@@ -294,6 +308,34 @@ def top_risk_reasons(
     return counter.most_common(limit)
 
 
+def verification_stats(records: list[CalibrationRecord]) -> dict[str, Any]:
+    """Phase-B QR/folio coverage for one cohort (recomputed rows only).
+
+        qr_found_rate    — share of scanned docs with ≥1 decoded QR.
+        qr_official_rate — of the QR-bearing docs, share where EVERY
+            decoded QR resolves to an official government domain.
+        folio_kinds      — counts per extracted folio kind.
+
+    This is the measurement that decides whether ``missing_expected_qr``
+    can be promoted above info: only once real-world docs reliably
+    carry a decodable QR does its absence become evidence.
+    """
+    scanned = [r for r in records if r.qr_count is not None]
+    qr_bearing = [r for r in scanned if (r.qr_count or 0) >= 1]
+    all_official = sum(1 for r in qr_bearing if r.qr_all_official)
+    folio_counter: Counter[str] = Counter()
+    for r in scanned:
+        folio_counter.update(r.folio_kinds)
+    return {
+        "scanned": len(scanned),
+        "qr_found": len(qr_bearing),
+        "qr_found_rate": _ratio(len(qr_bearing), len(scanned)),
+        "qr_all_official": all_official,
+        "qr_official_rate": _ratio(all_official, len(qr_bearing)),
+        "folio_kinds": dict(folio_counter.most_common()),
+    }
+
+
 def compute_group_metrics(records: list[CalibrationRecord]) -> dict[str, Any]:
     """Full metric bundle for one cohort (a requirement code, or overall)."""
     return {
@@ -307,6 +349,7 @@ def compute_group_metrics(records: list[CalibrationRecord]) -> dict[str, Any]:
         "authenticity": authenticity_confusion(records),
         "auto_approve": auto_approve_simulation(records),
         "coverage": coverage_stats(records),
+        "verification": verification_stats(records),
     }
 
 
@@ -369,6 +412,7 @@ def collect_records(
     recomputed = 0
     recompute_file_missing = 0
     recompute_failed = 0
+    verification_scanned = 0
 
     for submission, document, inspection in db.execute(stmt):
         confidence: float | None = None
@@ -376,6 +420,9 @@ def collect_records(
         risk: str | None = None
         reason_codes: list[str] = []
         risk_recomputed = False
+        qr_count: int | None = None
+        qr_all_official: bool | None = None
+        folio_kinds: list[str] = []
 
         if inspection is not None:
             if inspection.shadow_confidence is not None:
@@ -390,21 +437,41 @@ def collect_records(
                     reason_codes.append(str(reason["code"]))
 
         if recompute_forensics:
-            fresh = _recompute_forensics(
-                storage,
-                storage_key=document.storage_key,
-                period_key=submission.period_key,
-                pdf_metadata=(inspection.raw_metadata if inspection else None),
-            )
-            if fresh is None:
+            path = _resolve_stored_path(storage, document.storage_key)
+            if path is None:
                 recompute_file_missing += 1
-            elif fresh.risk is None:
-                recompute_failed += 1
             else:
-                risk = fresh.risk
-                reason_codes = [reason.code for reason in fresh.reasons]
-                risk_recomputed = True
-                recomputed += 1
+                fresh = _recompute_forensics(
+                    path,
+                    period_key=submission.period_key,
+                    pdf_metadata=(inspection.raw_metadata if inspection else None),
+                )
+                if fresh.risk is None:
+                    recompute_failed += 1
+                else:
+                    risk = fresh.risk
+                    reason_codes = [reason.code for reason in fresh.reasons]
+                    risk_recomputed = True
+                    recomputed += 1
+
+                # Phase B — fresh QR/folio extraction over the same file
+                # (verification is never stored for legacy rows, so the
+                # coverage measurement only exists on recompute runs).
+                verification = _recompute_verification(
+                    path,
+                    detected_institution=(
+                        inspection.detected_institution if inspection else None
+                    ),
+                )
+                if verification.analyzed:
+                    verification_scanned += 1
+                    qr_count = len(verification.qr_codes)
+                    qr_all_official = (
+                        all(qr.get("official") for qr in verification.qr_codes)
+                        if verification.qr_codes
+                        else None
+                    )
+                    folio_kinds = [folio["kind"] for folio in verification.folios]
 
         records.append(
             CalibrationRecord(
@@ -419,6 +486,9 @@ def collect_records(
                 authenticity_risk=risk,
                 risk_recomputed=risk_recomputed,
                 risk_reason_codes=reason_codes,
+                qr_count=qr_count,
+                qr_all_official=qr_all_official,
+                folio_kinds=folio_kinds,
             )
         )
 
@@ -428,25 +498,43 @@ def collect_records(
         "recomputed": recomputed,
         "recompute_file_missing": recompute_file_missing,
         "recompute_failed": recompute_failed,
+        "verification_scanned": verification_scanned,
     }
     return records, meta
 
 
-def _recompute_forensics(storage, *, storage_key, period_key, pdf_metadata):
+def _resolve_stored_path(storage, storage_key) -> Path | None:
     """Resolve the stored file like the reviewer download endpoint does
-    (``storage.open_for_read(Document.storage_key)``) and re-run the
-    Phase-A analyzer. Returns ``None`` when the file is gone; a
-    ``ForensicsResult`` with ``risk=None`` when analysis failed open."""
-    from app.services.document_forensics import analyze_pdf_forensics
-
+    (``storage.open_for_read`` returns a local ``Path``, NOT a context
+    manager). ``None`` when the blob is gone — a coverage gap, not a
+    crash."""
     try:
         path = storage.open_for_read(storage_key)
     except Exception:  # noqa: BLE001 — missing blob == coverage gap, not a crash.
         return None
-    if not path.exists():
-        return None
+    return path if path.exists() else None
+
+
+def _recompute_forensics(path, *, period_key, pdf_metadata):
+    """Re-run the Phase-A analyzer against a resolved local file.
+    Returns a ``ForensicsResult`` with ``risk=None`` when analysis
+    failed open."""
+    from app.services.document_forensics import analyze_pdf_forensics
+
     return analyze_pdf_forensics(
         path, period_key=period_key, pdf_metadata=pdf_metadata
+    )
+
+
+def _recompute_verification(path, *, detected_institution):
+    """Re-run the Phase-B QR/folio extractor against a resolved local
+    file. ``extracted_text=None`` makes the service re-extract the text
+    layer itself (the inspection row does not retain it). Fail-open:
+    ``analyzed=False`` when extraction errored."""
+    from app.services.document_verification import extract_verification
+
+    return extract_verification(
+        path, detected_institution=detected_institution, extracted_text=None
     )
 
 
@@ -532,6 +620,29 @@ def _group_section(name: str, metrics: dict[str, Any]) -> list[str]:
         f"{_pct(auto['approved_clearance'])}",
         "",
     ]
+    ver = metrics["verification"]
+    if ver["scanned"]:
+        folio_cells = (
+            ", ".join(f"`{kind}` × {count}" for kind, count in ver["folio_kinds"].items())
+            or "ninguno"
+        )
+        lines += [
+            "**Verificación QR/folios** (Fase B — solo filas escaneadas en frío)",
+            "",
+            f"- Con QR decodificado: {ver['qr_found']}/{ver['scanned']} "
+            f"= {_pct(ver['qr_found_rate'])}",
+            f"- De los docs con QR, 100% dominios oficiales: "
+            f"{ver['qr_all_official']}/{ver['qr_found']} "
+            f"= {_pct(ver['qr_official_rate'])}",
+            f"- Folios extraídos: {folio_cells}",
+            "",
+        ]
+    else:
+        lines += [
+            "**Verificación QR/folios**: sin escaneo en esta corrida "
+            "(requiere `--recompute-forensics`).",
+            "",
+        ]
     return lines
 
 
@@ -624,10 +735,21 @@ def build_report(
         f"- Auto-approve global (match ≥ {AUTO_APPROVE_MATCH_THRESHOLD}, "
         f"clean): precisión {_pct(auto['precision'], 2)}, liberaría "
         f"{_pct(auto['approved_clearance'])} de los aprobados",
+        (
+            f"- Verificación QR (Fase B, en frío): QR en "
+            f"{overall['verification']['qr_found']}/"
+            f"{overall['verification']['scanned']} "
+            f"= {_pct(overall['verification']['qr_found_rate'])}; "
+            f"100% oficial entre los que tienen QR: "
+            f"{_pct(overall['verification']['qr_official_rate'])}"
+            if replay_meta.get("recompute_forensics")
+            else "- Verificación QR (Fase B): sin escaneo "
+            "(corre con `--recompute-forensics`)"
+        ),
         f"- Códigos que CUMPLEN la barra de ≥ "
         f"{_pct(AUTO_APPROVE_PRECISION_BAR, 0)}: "
         + (", ".join(f"`{c}`" for c in codes_meeting_bar) or "ninguno"),
-        f"- Códigos que NO cumplen: "
+        "- Códigos que NO cumplen: "
         + (", ".join(f"`{c}`" for c in codes_missing_bar) or "ninguno"),
         "",
         "## Métricas globales",
@@ -674,8 +796,9 @@ def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         "--recompute-forensics",
         action="store_true",
         help=(
-            "Re-run analyze_pdf_forensics against stored files still on disk "
-            "(gives legacy rows a verdict). Reads files only — no DB writes."
+            "Re-run analyze_pdf_forensics AND the Phase-B QR/folio extractor "
+            "against stored files still on disk (gives legacy rows a verdict "
+            "and measures QR coverage). Reads files only — no DB writes."
         ),
     )
     parser.add_argument(
@@ -752,6 +875,17 @@ def main(argv: list[str] | None = None) -> int:
         f"{_pct(AUTO_APPROVE_PRECISION_BAR, 0)}: "
         + (", ".join(meeting) if meeting else "ninguno")
     )
+    if replay_meta["recompute_forensics"]:
+        ver = overall["verification"]
+        print(
+            f"Verificación QR (Fase B): {ver['qr_found']}/{ver['scanned']} con QR "
+            f"({_pct(ver['qr_found_rate'])}) | 100% oficial entre los con QR: "
+            f"{_pct(ver['qr_official_rate'])} | folios: "
+            + (
+                ", ".join(f"{k}×{v}" for k, v in ver["folio_kinds"].items())
+                or "ninguno"
+            )
+        )
     return 0
 
 

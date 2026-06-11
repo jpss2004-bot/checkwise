@@ -660,6 +660,12 @@ def get_submission(
                 inspection is not None and inspection.authenticity_risk is not None
             ),
         },
+        # Phase B — QR/folio verification anchors. Reviewer-facing only.
+        # ``analyzed`` is False for legacy rows (NULL column) — the UI
+        # renders that as "sin analizar". The verification risk reasons
+        # already live inside ``authenticity.reasons`` (merged at
+        # intake); this block carries the extracted anchors themselves.
+        "verification": _build_verification_payload(inspection),
         # Phase 2 — shadow-analysis comparison block. Only present on
         # this reviewer endpoint; the provider-facing portal endpoint
         # never exposes shadow data. ``shadow.completed_at IS None``
@@ -667,6 +673,23 @@ def get_submission(
         # is a denormalized copy of the inspection columns so the
         # comparison card can render before the shadow call finishes.
         "shadow_analysis": _build_shadow_analysis_payload(inspection),
+    }
+
+
+def _build_verification_payload(inspection) -> dict:  # noqa: ANN001
+    """Shape the Phase-B QR/folio block for the reviewer detail.
+
+    Legacy rows (no inspection, or inspection without the
+    ``verification`` column populated) come back empty with
+    ``analyzed=False``.
+    """
+    verification = inspection.verification if inspection is not None else None
+    if not verification:
+        return {"qr_codes": [], "folios": [], "analyzed": False}
+    return {
+        "qr_codes": list(verification.get("qr_codes") or []),
+        "folios": list(verification.get("folios") or []),
+        "analyzed": True,
     }
 
 

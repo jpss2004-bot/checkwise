@@ -51,6 +51,31 @@ SEVERITY_HIGH = "high"
 
 _SEVERITY_ORDER = {SEVERITY_HIGH: 0, SEVERITY_MEDIUM: 1, SEVERITY_INFO: 2}
 
+
+def severity_rank(severity: str) -> int:
+    """Sort key for reasons: high → medium → info (unknown values last)."""
+    return _SEVERITY_ORDER.get(severity, 9)
+
+
+def rollup_authenticity_risk(reasons: list[RiskReason]) -> str:
+    """Max-severity verdict rollup over a set of named reasons.
+
+    The SINGLE source of truth for the ``authenticity_risk`` verdict:
+    Phase A (`_analyze` below) rolls up the forensics reasons, and the
+    intake merge in ``submission_service`` re-rolls the combined
+    forensics + Phase-B verification reasons through this same function
+    so the two phases can never drift.
+
+        * any high   → ``high_risk``
+        * any medium → ``suspicious``
+        * else       → ``clean`` (info reasons never elevate)
+    """
+    if any(reason.severity == SEVERITY_HIGH for reason in reasons):
+        return RISK_HIGH
+    if any(reason.severity == SEVERITY_MEDIUM for reason in reasons):
+        return RISK_SUSPICIOUS
+    return RISK_CLEAN
+
 # Producer/Creator substrings (lower-cased match) of consumer design and
 # editing tools that official SAT / IMSS / INFONAVIT documents are never
 # generated with. A match means a human re-built or re-touched the file:
@@ -415,13 +440,8 @@ def _analyze(
             )
         )
 
-    reasons.sort(key=lambda reason: _SEVERITY_ORDER.get(reason.severity, 9))
+    reasons.sort(key=lambda reason: severity_rank(reason.severity))
 
-    if any(reason.severity == SEVERITY_HIGH for reason in reasons):
-        risk = RISK_HIGH
-    elif any(reason.severity == SEVERITY_MEDIUM for reason in reasons):
-        risk = RISK_SUSPICIOUS
-    else:
-        risk = RISK_CLEAN
-
-    return ForensicsResult(risk=risk, reasons=reasons, forensics=forensics)
+    return ForensicsResult(
+        risk=rollup_authenticity_risk(reasons), reasons=reasons, forensics=forensics
+    )

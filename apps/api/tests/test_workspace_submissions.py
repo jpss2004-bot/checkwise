@@ -428,6 +428,126 @@ def test_workspace_upload_writes_document_inspection(api_client: TestClient) -> 
         assert inspection.forensics["producer"] == "pypdf"
         assert inspection.forensics["eof_count"] == 1
         assert inspection.forensics["has_javascript"] is False
+        # Phase B — the verification extractor also ran: the blank page
+        # has no images, no QR and no text (so no detected institution
+        # and therefore no missing_expected_qr reason either).
+        assert inspection.verification is not None
+        assert inspection.verification["qr_codes"] == []
+        assert inspection.verification["folios"] == []
+        assert inspection.verification["error"] is None
+        assert inspection.verification["pages_scanned"] == 1
+    finally:
+        db.close()
+
+
+def _sat_text_pdf_bytes() -> bytes:
+    """Hand-assembled single-page PDF whose text layer names the SAT.
+
+    pypdf's writer cannot draw text and Pillow pages carry no text
+    layer, so the intake heuristics can only detect an institution on a
+    manually built file (same technique as tests/test_document_forensics).
+    """
+    stream = (
+        b"BT /F1 18 Tf 72 720 Td "
+        b"(Opinion de cumplimiento SAT ejercicio 2026) Tj ET"
+    )
+    objects = [
+        b"<< /Type /Catalog /Pages 2 0 R >>",
+        b"<< /Type /Pages /Kids [3 0 R] /Count 1 >>",
+        b"<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] "
+        b"/Contents 4 0 R /Resources << /Font << /F1 5 0 R >> >> >>",
+        b"<< /Length "
+        + str(len(stream)).encode()
+        + b" >>\nstream\n"
+        + stream
+        + b"\nendstream",
+        b"<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>",
+    ]
+    out = bytearray(b"%PDF-1.4\n")
+    offsets: list[int] = []
+    for index, body in enumerate(objects, start=1):
+        offsets.append(len(out))
+        out += f"{index} 0 obj\n".encode() + body + b"\nendobj\n"
+    xref_pos = len(out)
+    out += b"xref\n0 6\n0000000000 65535 f \n"
+    for offset in offsets:
+        out += f"{offset:010d} 00000 n \n".encode()
+    out += (
+        b"trailer\n<< /Size 6 /Root 1 0 R >>\nstartxref\n"
+        + str(xref_pos).encode()
+        + b"\n%%EOF\n"
+    )
+    return bytes(out)
+
+
+def _sat_pdf_with_qr_bytes(url: str) -> bytes:
+    """SAT-text page + a second page carrying a QR image XObject."""
+    import zxingcpp
+    from PIL import Image
+    from pypdf import PdfReader
+
+    barcode = zxingcpp.create_barcode(url, zxingcpp.BarcodeFormat.QRCode)
+    qr = Image.fromarray(zxingcpp.write_barcode_to_image(barcode))
+    page = Image.new("RGB", (612, 792), "white")
+    page.paste(qr.convert("RGB").resize((220, 220), Image.NEAREST), (60, 60))
+    qr_pdf = BytesIO()
+    page.save(qr_pdf, format="PDF")
+
+    writer = PdfWriter()
+    writer.append(PdfReader(BytesIO(_sat_text_pdf_bytes())))
+    writer.append(PdfReader(BytesIO(qr_pdf.getvalue())))
+    out = BytesIO()
+    writer.write(out)
+    return out.getvalue()
+
+
+def test_workspace_upload_merges_verification_reasons_into_rollup(
+    api_client: TestClient,
+) -> None:
+    """Phase B end-to-end: a SAT-looking document whose QR points at a
+    non-official domain must store the QR evidence in ``verification``,
+    merge ``qr_non_official_domain`` into ``risk_reasons`` and elevate
+    the Phase-A verdict to ``suspicious`` via the shared rollup."""
+    ws = _setup_workspace(api_client)
+    data, _ = _canonical_intake_payload()
+    response = api_client.post(
+        f"/api/v1/portal/workspaces/{ws['workspace_id']}/submissions",
+        data=data,
+        files={
+            "file": (
+                "opinion.pdf",
+                _sat_pdf_with_qr_bytes("https://sat-verifica.example.com/doc/1"),
+                "application/pdf",
+            )
+        },
+    )
+    assert response.status_code == 202, response.text
+    submission_id = response.json()["submission_id"]
+
+    factory = api_client.app.state.testing_session  # type: ignore[attr-defined]
+    db: Session = factory()
+    try:
+        doc = db.scalar(select(Document).where(Document.submission_id == submission_id))
+        assert doc is not None
+        inspection = db.scalar(
+            select(DocumentInspection).where(DocumentInspection.document_id == doc.id)
+        )
+        assert inspection is not None
+        assert inspection.detected_institution == "sat"
+
+        assert inspection.verification is not None
+        qr_codes = inspection.verification["qr_codes"]
+        assert len(qr_codes) == 1
+        assert qr_codes[0]["page"] == 2
+        assert qr_codes[0]["host"] == "sat-verifica.example.com"
+        assert qr_codes[0]["is_url"] is True
+        assert qr_codes[0]["official"] is False
+
+        reason_codes = [r["code"] for r in inspection.risk_reasons]
+        assert "qr_non_official_domain" in reason_codes
+        # Forensics alone is clean (pypdf producer, single %%EOF); the
+        # medium verification reason drives the merged verdict.
+        assert inspection.authenticity_risk == "suspicious"
     finally:
         db.close()
 

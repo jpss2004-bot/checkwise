@@ -28,8 +28,8 @@ from app.models import (
 )
 from scripts.calibrate_document_verdicts import (
     CalibrationRecord,
-    auto_approve_simulation,
     authenticity_confusion,
+    auto_approve_simulation,
     build_report,
     collect_records,
     compute_group_metrics,
@@ -37,6 +37,7 @@ from scripts.calibrate_document_verdicts import (
     rank_auc,
     threshold_metrics,
     top_risk_reasons,
+    verification_stats,
 )
 
 # ---------------------------------------------------------------------------
@@ -190,6 +191,40 @@ def test_coverage_and_reasons() -> None:
     reasons = top_risk_reasons(TINY)
     assert reasons[0] == ("generador_sospechoso", 2)
     assert ("js_embebido", 1) in reasons
+
+
+def test_verification_stats_phase_b() -> None:
+    """qr_found_rate / qr_official_rate / folio kind counts (Phase B)."""
+    records = [
+        # Scanned, one official QR, a CFDI folio.
+        _rec(approved=True, confidence=0.9, risk="clean"),
+        _rec(approved=True, confidence=0.9, risk="clean"),
+        _rec(approved=False, confidence=0.2, risk="clean"),
+        _rec(approved=True, confidence=0.9, risk="clean"),  # not scanned
+    ]
+    records[0].qr_count = 1
+    records[0].qr_all_official = True
+    records[0].folio_kinds = ["cfdi_uuid", "sat_opinion_folio"]
+    records[1].qr_count = 2
+    records[1].qr_all_official = False  # one QR off-domain
+    records[1].folio_kinds = ["cfdi_uuid"]
+    records[2].qr_count = 0
+    records[2].qr_all_official = None
+
+    stats = verification_stats(records)
+    assert stats["scanned"] == 3  # the 4th record was never scanned
+    assert stats["qr_found"] == 2
+    assert stats["qr_found_rate"] == pytest.approx(2 / 3)
+    assert stats["qr_all_official"] == 1
+    assert stats["qr_official_rate"] == pytest.approx(1 / 2)
+    assert stats["folio_kinds"] == {"cfdi_uuid": 2, "sat_opinion_folio": 1}
+
+    # No scans at all (run without --recompute-forensics): rates are n/a.
+    empty = verification_stats([_rec(approved=True)])
+    assert empty["scanned"] == 0
+    assert empty["qr_found_rate"] is None
+    assert empty["qr_official_rate"] is None
+    assert empty["folio_kinds"] == {}
 
 
 def test_compute_group_metrics_bundle_shape() -> None:

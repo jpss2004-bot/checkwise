@@ -118,6 +118,7 @@ def _seed_submission(
     authenticity_risk: str | None = None,
     risk_reasons: list | None = None,
     forensics: dict | None = None,
+    verification: dict | None = None,
 ) -> str:
     """Inserts the minimum row graph needed for a reviewer queue item.
 
@@ -221,7 +222,7 @@ def _seed_submission(
             sha256="a" * 64,
         )
         db.add(document)
-        if authenticity_risk is not None:
+        if authenticity_risk is not None or verification is not None:
             db.flush()
             db.add(
                 DocumentInspection(
@@ -230,6 +231,7 @@ def _seed_submission(
                     authenticity_risk=authenticity_risk,
                     risk_reasons=risk_reasons,
                     forensics=forensics,
+                    verification=verification,
                 )
             )
         db.commit()
@@ -483,6 +485,86 @@ def test_detail_authenticity_unanalyzed_for_legacy_rows(
         "risk": None,
         "reasons": [],
         "forensics": None,
+        "analyzed": False,
+    }
+
+
+_SAMPLE_VERIFICATION = {
+    "qr_codes": [
+        {
+            "page": 1,
+            "content": "https://verificacfdi.facturaelectronica.sat.gob.mx/x?id=1",
+            "is_url": True,
+            "host": "verificacfdi.facturaelectronica.sat.gob.mx",
+            "official": True,
+            "institution_guess": "sat",
+        }
+    ],
+    "folios": [{"kind": "cfdi_uuid", "value": "AD662D33-6934-459C-A128-BDF0393E0F44"}],
+    "pages_scanned": 1,
+    "images_scanned": 2,
+    "error": None,
+}
+
+
+def test_detail_includes_verification_block(
+    api_client: TestClient, db_factory
+) -> None:
+    _seed_user(db_factory, email="rev@x.mx", role="reviewer")
+    token = _login(api_client, "rev@x.mx", "Hunter2 Correct horse")
+    submission_id = _seed_submission(
+        db_factory,
+        authenticity_risk="clean",
+        risk_reasons=[],
+        verification=_SAMPLE_VERIFICATION,
+    )
+    response = api_client.get(
+        f"/api/v1/reviewer/submissions/{submission_id}",
+        headers={"Authorization": f"Bearer {token}"},
+    )
+    assert response.status_code == 200, response.text
+    verification = response.json()["verification"]
+    assert verification == {
+        "qr_codes": _SAMPLE_VERIFICATION["qr_codes"],
+        "folios": _SAMPLE_VERIFICATION["folios"],
+        "analyzed": True,
+    }
+
+
+def test_detail_verification_empty_for_legacy_rows(
+    api_client: TestClient, db_factory
+) -> None:
+    _seed_user(db_factory, email="rev@x.mx", role="reviewer")
+    token = _login(api_client, "rev@x.mx", "Hunter2 Correct horse")
+    # Inspection row predating Phase B: authenticity present, NULL
+    # verification column.
+    submission_id = _seed_submission(db_factory, authenticity_risk="clean")
+    response = api_client.get(
+        f"/api/v1/reviewer/submissions/{submission_id}",
+        headers={"Authorization": f"Bearer {token}"},
+    )
+    assert response.status_code == 200, response.text
+    assert response.json()["verification"] == {
+        "qr_codes": [],
+        "folios": [],
+        "analyzed": False,
+    }
+
+
+def test_detail_verification_absent_inspection_row(
+    api_client: TestClient, db_factory
+) -> None:
+    _seed_user(db_factory, email="rev@x.mx", role="reviewer")
+    token = _login(api_client, "rev@x.mx", "Hunter2 Correct horse")
+    submission_id = _seed_submission(db_factory)  # no inspection row at all
+    response = api_client.get(
+        f"/api/v1/reviewer/submissions/{submission_id}",
+        headers={"Authorization": f"Bearer {token}"},
+    )
+    assert response.status_code == 200, response.text
+    assert response.json()["verification"] == {
+        "qr_codes": [],
+        "folios": [],
         "analyzed": False,
     }
 

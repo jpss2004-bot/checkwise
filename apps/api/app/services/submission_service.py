@@ -45,8 +45,13 @@ from app.services.client_notifications import (
     notify_provider_uploaded,
 )
 from app.services.document_analysis.shadow_runner import run_shadow_analysis
-from app.services.document_forensics import analyze_pdf_forensics
+from app.services.document_forensics import (
+    analyze_pdf_forensics,
+    rollup_authenticity_risk,
+    severity_rank,
+)
 from app.services.document_intelligence import DocumentSignals, analyze_document_text
+from app.services.document_verification import extract_verification
 from app.services.metadata_export import export_metadata_table_after_upload
 from app.services.pdf_validation import (
     PdfInspectionResult,
@@ -61,33 +66,56 @@ from app.services.validation_events import add_validation_event
 logger = logging.getLogger(__name__)
 
 
-def _forensics_columns_fail_open(
+def _authenticity_columns_fail_open(
     path: Path,
     *,
     period_key: str | None,
     pdf_metadata: dict | None,
-) -> tuple[str | None, list | None, dict | None]:
-    """Run the authenticity analyzer; NEVER let it block an upload.
+    detected_institution: str | None,
+    extracted_text: str | None,
+) -> tuple[str | None, list | None, dict | None, dict | None]:
+    """Run the authenticity analyzer + QR/folio extractor; NEVER block.
 
-    Returns the ``(authenticity_risk, risk_reasons, forensics)`` triple
-    for the :class:`DocumentInspection` row. The analyzer is itself
-    contracted to swallow everything, but intake mirrors the other
-    fail-open steps (OCR, metadata export) with its own belt-and-
-    suspenders try/except: on any failure the verdict stays NULL
-    ("sin analizar") and the upload proceeds untouched.
+    Returns the ``(authenticity_risk, risk_reasons, forensics,
+    verification)`` quadruple for the :class:`DocumentInspection` row.
+    Phase A forensics and Phase B verification each fail open on their
+    own; their named reasons are MERGED (sorted high→info) and the
+    verdict re-rolled through the shared
+    ``rollup_authenticity_risk`` so one phase's medium finding elevates
+    the same single reviewer-facing verdict. When NEITHER pass produced
+    a result the verdict stays NULL ("sin analizar").
+
+    Both analyzers are contracted to swallow everything, but intake
+    mirrors the other fail-open steps (OCR, metadata export) with its
+    own belt-and-suspenders try/except: on any failure all columns stay
+    NULL and the upload proceeds untouched.
     """
     try:
-        result = analyze_pdf_forensics(
+        forensics_result = analyze_pdf_forensics(
             path, period_key=period_key, pdf_metadata=pdf_metadata
         )
+        verification_result = extract_verification(
+            path,
+            detected_institution=detected_institution,
+            extracted_text=extracted_text,
+        )
+        merged_reasons = sorted(
+            [*forensics_result.reasons, *verification_result.reasons],
+            key=lambda reason: severity_rank(reason.severity),
+        )
+        if forensics_result.analyzed or verification_result.analyzed:
+            risk: str | None = rollup_authenticity_risk(merged_reasons)
+        else:
+            risk = None
         return (
-            result.risk,
-            result.reasons_payload(),
-            result.forensics or None,
+            risk,
+            [reason.as_dict() for reason in merged_reasons],
+            forensics_result.forensics or None,
+            verification_result.payload or None,
         )
     except Exception:  # noqa: BLE001 — analysis errors never block intake.
-        logger.exception("Forensics analysis failed open (file=%s)", path)
-        return None, None, None
+        logger.exception("Authenticity analysis failed open (file=%s)", path)
+        return None, None, None, None
 
 PDF_MIME_TYPES = frozenset(
     {
@@ -580,12 +608,17 @@ def finalize_intake_submission(
     db.add(document)
     db.flush()
 
-    # Phase A — authenticity forensics. Reviewer-facing verdict only:
-    # never alters statuses, validations or prevalidation signals.
-    authenticity_risk, risk_reasons, forensics_payload = _forensics_columns_fail_open(
-        stored_file.path,
-        period_key=resolved_period.canonical_period_key,
-        pdf_metadata=pdf_inspection.metadata,
+    # Phase A forensics + Phase B QR/folio verification. Reviewer-facing
+    # verdict only: never alters statuses, validations or prevalidation
+    # signals.
+    authenticity_risk, risk_reasons, forensics_payload, verification_payload = (
+        _authenticity_columns_fail_open(
+            stored_file.path,
+            period_key=resolved_period.canonical_period_key,
+            pdf_metadata=pdf_inspection.metadata,
+            detected_institution=document_signals.detected_institution,
+            extracted_text=pdf_inspection.text_sample,
+        )
     )
 
     inspection = DocumentInspection(
@@ -609,6 +642,7 @@ def finalize_intake_submission(
         authenticity_risk=authenticity_risk,
         risk_reasons=risk_reasons,
         forensics=forensics_payload,
+        verification=verification_payload,
     )
     db.add(inspection)
 
@@ -1045,13 +1079,16 @@ def finalize_multi_document_submission(
         db.flush()
         shadow_batch.append((document.id, str(stored.path)))
 
-        # Phase A — authenticity forensics (reviewer-facing verdict
-        # only; see the single-file site for the fail-open contract).
-        authenticity_risk, risk_reasons, forensics_payload = (
-            _forensics_columns_fail_open(
+        # Phase A forensics + Phase B QR/folio verification (reviewer-
+        # facing verdict only; see the single-file site for the
+        # fail-open contract).
+        authenticity_risk, risk_reasons, forensics_payload, verification_payload = (
+            _authenticity_columns_fail_open(
                 stored.path,
                 period_key=resolved_period.canonical_period_key,
                 pdf_metadata=pdf_inspection.metadata,
+                detected_institution=document_signals.detected_institution,
+                extracted_text=pdf_inspection.text_sample,
             )
         )
 
@@ -1076,6 +1113,7 @@ def finalize_multi_document_submission(
             authenticity_risk=authenticity_risk,
             risk_reasons=risk_reasons,
             forensics=forensics_payload,
+            verification=verification_payload,
         )
         db.add(inspection_row)
 

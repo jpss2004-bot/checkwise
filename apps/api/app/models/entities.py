@@ -403,6 +403,16 @@ class DocumentInspection(TimestampMixin, Base):
     risk_reasons: Mapped[list | None] = mapped_column(JSON)
     forensics: Mapped[dict | None] = mapped_column(JSON)
 
+    # Phase B — QR/folio verification anchors, produced by
+    # ``document_verification.extract_verification`` at intake. Shape:
+    # ``{"qr_codes": [...], "folios": [...], "pages_scanned": int,
+    # "images_scanned": int, "error": str|None}``. NULL means *not
+    # analyzed* (legacy rows, or intake failed open before the
+    # extractor ran). Verification risk reasons are MERGED into
+    # ``risk_reasons`` above and folded into the ``authenticity_risk``
+    # rollup — this column only keeps the extracted anchors/evidence.
+    verification: Mapped[dict | None] = mapped_column(JSON)
+
     document: Mapped[Document] = relationship(back_populates="inspection")
 
 

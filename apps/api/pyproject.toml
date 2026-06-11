@@ -31,6 +31,14 @@ dependencies = [
   # tightens.
   "openpyxl>=3.1",
   "pydantic-settings>=2.2",
+  # Phase B (document revalidation, 2026-06-11) — QR decoding from the
+  # image XObjects embedded in uploaded PDFs. zxing-cpp ships a
+  # self-contained wheel (no system deps). Pillow decodes those
+  # embedded images for the scanner; it was previously only a
+  # transitive dep, but Render installs via `pip install -e .` so the
+  # direct use in document_verification must be declared.
+  "zxing-cpp>=2.2",
+  "pillow>=10.0",
   "python-multipart>=0.0.9",
   # M4 (2026-06-02) — Redis backend for the shared rate limiter.
   # Optional at runtime: when ``settings.REDIS_URL`` is empty the
