@@ -9,6 +9,7 @@ import {
   List,
   ListMagnifyingGlass,
   UserPlus,
+  UsersThree,
   X,
   type Icon,
 } from "@phosphor-icons/react";
@@ -41,13 +42,9 @@ import {
  * memory note 2026-05-26).
  */
 
-// A ``/platform/users`` listing surface would be useful but requires
-// a new ``GET /api/v1/admin/users`` backend endpoint we don't have
-// yet. Left out of the nav for now; ``/platform/users/new`` is the
-// only user-management action surfaced. When the listing lands,
-// insert it here between ``Resumen`` and ``Nuevo usuario``.
 const NAV: { href: string; label: string; icon: Icon }[] = [
   { href: "/platform/dashboard", label: "Resumen", icon: Gauge },
+  { href: "/platform/users", label: "Usuarios", icon: UsersThree },
   { href: "/platform/users/new", label: "Nuevo usuario", icon: UserPlus },
   { href: "/platform/audit-log", label: "Audit log", icon: ListMagnifyingGlass },
   { href: "/platform/feedback-reports", label: "Feedback", icon: Bug },
@@ -95,6 +92,14 @@ export function PlatformShell({
   useEffect(() => {
     setDrawerOpen(false);
   }, [pathname]);
+
+  // Single active nav item: the LONGEST matching href wins, so
+  // ``/platform/users/new`` lights up "Nuevo usuario" without also
+  // lighting up its "/platform/users" prefix sibling.
+  const activeHref = NAV.filter(
+    (item) =>
+      pathname === item.href || pathname?.startsWith(item.href + "/"),
+  ).sort((a, b) => b.href.length - a.href.length)[0]?.href;
 
   function onLogout() {
     clearAdminSession();
@@ -150,8 +155,7 @@ export function PlatformShell({
           className="mx-auto hidden max-w-7xl gap-1 overflow-x-auto px-3 pb-2 lg:flex"
         >
           {NAV.map((item) => {
-            const isActive =
-              pathname === item.href || pathname?.startsWith(item.href + "/");
+            const isActive = item.href === activeHref;
             const IconComponent = item.icon;
             return (
               <Link
@@ -195,8 +199,7 @@ export function PlatformShell({
           >
             <p className="cw-eyebrow mb-2">Navegación</p>
             {NAV.map((item) => {
-              const isActive =
-                pathname === item.href || pathname?.startsWith(item.href + "/");
+              const isActive = item.href === activeHref;
               const IconComponent = item.icon;
               return (
                 <Link

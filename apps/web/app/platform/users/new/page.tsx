@@ -12,6 +12,7 @@ import {
   PaperPlaneTilt,
   ShieldCheck,
   Storefront,
+  UsersThree,
   type Icon,
 } from "@phosphor-icons/react";
 
@@ -147,12 +148,20 @@ export default function AdminNewUserPage() {
       title="Nuevo usuario"
       description="Crea una cuenta nueva de cliente, proveedor o administrador. CheckWise genera una contraseña temporal, la muestra una vez en pantalla y la envía por correo."
       actions={
-        <Button asChild size="sm" variant="outline">
-          <Link href="/admin/clients">
-            <ArrowLeft className="h-3.5 w-3.5" weight="bold" aria-hidden="true" />
-            Volver a clientes
-          </Link>
-        </Button>
+        <>
+          <Button asChild size="sm" variant="outline">
+            <Link href="/platform/users">
+              <UsersThree className="h-3.5 w-3.5" weight="bold" aria-hidden="true" />
+              Ver usuarios
+            </Link>
+          </Button>
+          <Button asChild size="sm" variant="outline">
+            <Link href="/admin/clients">
+              <ArrowLeft className="h-3.5 w-3.5" weight="bold" aria-hidden="true" />
+              Volver a clientes
+            </Link>
+          </Button>
+        </>
       }
     >
       <div className="space-y-6">
