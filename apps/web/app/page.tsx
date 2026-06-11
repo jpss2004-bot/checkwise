@@ -1,7 +1,6 @@
-"use client";
-
+import type { Metadata } from "next";
 import Link from "next/link";
-import { ArrowUpRight } from "@phosphor-icons/react";
+import { ArrowUpRight } from "@phosphor-icons/react/dist/ssr";
 
 import { BrandLogo } from "@/components/checkwise/brand-logo";
 import { FeedbackLauncher } from "@/components/feedback/feedback-launcher";
@@ -13,11 +12,65 @@ import { HumanReviewSection } from "@/components/marketing/human-review-section"
 import { MarketingNav } from "@/components/marketing/marketing-nav";
 import { Reveal } from "@/components/marketing/motion-helpers";
 import { MotionPreferenceProvider } from "@/components/marketing/motion-preference";
+import { SITE_NAME, SITE_URL } from "@/lib/site";
 import { APP_VERSION, BUILD_SHA } from "@/lib/version";
+
+// The page itself is a server component (every imported section carries
+// its own "use client" pragma) so crawlers get the canonical tag, the
+// structured data and the full hero copy in the initial HTML.
+export const metadata: Metadata = {
+  alternates: { canonical: "/" },
+};
+
+/**
+ * Organization + WebSite + SoftwareApplication graph for the landing
+ * page. Only claims we can stand behind — no ratings, no pricing.
+ */
+const STRUCTURED_DATA = {
+  "@context": "https://schema.org",
+  "@graph": [
+    {
+      "@type": "Organization",
+      "@id": `${SITE_URL}/#organization`,
+      name: SITE_NAME,
+      url: SITE_URL,
+      logo: `${SITE_URL}/og.png`,
+      parentOrganization: { "@type": "Organization", name: "Legal Shelf" },
+      address: {
+        "@type": "PostalAddress",
+        addressLocality: "Ciudad de México",
+        addressCountry: "MX",
+      },
+    },
+    {
+      "@type": "WebSite",
+      "@id": `${SITE_URL}/#website`,
+      name: SITE_NAME,
+      url: SITE_URL,
+      inLanguage: "es-MX",
+      publisher: { "@id": `${SITE_URL}/#organization` },
+    },
+    {
+      "@type": "SoftwareApplication",
+      name: SITE_NAME,
+      url: SITE_URL,
+      applicationCategory: "BusinessApplication",
+      operatingSystem: "Web",
+      inLanguage: "es-MX",
+      description:
+        "Plataforma de cumplimiento REPSE: calendario de obligaciones, expediente auditable, revisión humana y reportes asistidos por IA para proveedores y clientes.",
+      publisher: { "@id": `${SITE_URL}/#organization` },
+    },
+  ],
+} as const;
 
 export default function PublicHome() {
   return (
     <MotionPreferenceProvider>
+      <script
+        type="application/ld+json"
+        dangerouslySetInnerHTML={{ __html: JSON.stringify(STRUCTURED_DATA) }}
+      />
       <main className="min-h-[100dvh] bg-[color:var(--surface-page)]">
         <MarketingNav />
         <HeroSection />
