@@ -488,6 +488,9 @@ function DockComposer({
   };
   return (
     <footer className="border-t border-white/10 bg-[color:var(--surface-brand)]/95 px-4 py-3">
+      <p className="mb-1.5 font-mono text-[10px] uppercase tracking-wide text-white/45">
+        Sugerencias
+      </p>
       <div className="mb-2 flex flex-wrap gap-1.5">
         {WISE_QUICK_QUESTIONS.map((q) => (
           <button

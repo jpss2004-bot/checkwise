@@ -16,6 +16,7 @@ import {
 import {
   WiseDockHeader,
   WiseDockShell,
+  WiseWelcome,
 } from "@/components/checkwise/wise/wise-dock-shell";
 
 /**
@@ -229,6 +230,23 @@ function DockBody({
   turns: ChatTurn[];
   scrollRef: React.RefObject<HTMLDivElement | null>;
 }) {
+  // Fresh state — only the seeded greeting is present. Rather than
+  // anchor a lone bubble to the top of the tall drawer, center a calm
+  // welcome so the panel reads as intentional until the chat starts.
+  const isFresh =
+    turns.length === 1 &&
+    turns[0].kind === "wise" &&
+    turns[0].id === "wise-greet-client";
+  if (isFresh) {
+    return (
+      <div
+        ref={scrollRef}
+        className="flex flex-1 flex-col items-center justify-center gap-4 overflow-y-auto px-8 text-center"
+      >
+        <WiseWelcome body="Pregúntame lo que quieras sobre el cumplimiento de tu portafolio." />
+      </div>
+    );
+  }
   return (
     <div ref={scrollRef} className="flex-1 overflow-y-auto px-5 py-4">
       <ul className="space-y-3" aria-live="polite">
@@ -287,6 +305,9 @@ function DockComposer({
   };
   return (
     <footer className="border-t border-white/10 bg-[color:var(--surface-brand)]/95 px-4 py-3">
+      <p className="mb-1.5 font-mono text-[10px] uppercase tracking-wide text-white/45">
+        Sugerencias
+      </p>
       <div className="mb-2 flex flex-wrap gap-1.5">
         {CLIENT_QUICK_QUESTIONS.map((q) => (
           <button

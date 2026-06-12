@@ -152,8 +152,12 @@ export function WiseDockShell({
     }
     if (!collapsed) {
       setMounted(true);
-      const raf = window.requestAnimationFrame(() => setEntered(true));
-      return () => window.cancelAnimationFrame(raf);
+      // Flip ``entered`` a tick after mount so the browser commits the
+      // off-screen "from" state first and the slide-in transition runs.
+      // A short timeout (not requestAnimationFrame) so it still fires
+      // when rAF is throttled on a backgrounded/non-painting tab.
+      const t = window.setTimeout(() => setEntered(true), 30);
+      return () => window.clearTimeout(t);
     }
     setEntered(false);
     exitTimer.current = window.setTimeout(() => {
@@ -310,6 +314,33 @@ export function WiseDockShell({
 // surface wants the brand glow + sparkle icon + an audience pill + a
 // close affordance. Entries can compose their own header if they need
 // something different, but this default covers portal and cliente.
+
+// ─── Welcome hero ───────────────────────────────────────────────
+//
+// Centered greeting for the drawer's fresh state. The right-edge drawer
+// is full height, so a lone greeting bubble pinned to the top leaves a
+// large void; this fills it with a calm sparkle medallion + greeting
+// until the conversation starts.
+
+export function WiseWelcome({ body }: { body: string }) {
+  return (
+    <>
+      <span
+        aria-hidden="true"
+        className="relative inline-flex h-14 w-14 items-center justify-center rounded-2xl bg-[color:var(--text-teal)]/15 text-[color:var(--text-teal)]"
+      >
+        <span className="absolute inset-0 rounded-2xl bg-[color:var(--text-teal)] opacity-20 blur-xl" />
+        <Sparkle className="relative h-7 w-7" weight="fill" />
+      </span>
+      <div className="space-y-1.5">
+        <p className="text-[16px] font-semibold text-white">Hola, soy Wise</p>
+        <p className="mx-auto max-w-[15rem] text-[13px] leading-relaxed text-white/65">
+          {body}
+        </p>
+      </div>
+    </>
+  );
+}
 
 export interface WiseDockHeaderProps {
   title: string;
