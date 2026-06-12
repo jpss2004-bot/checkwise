@@ -20,6 +20,7 @@ Usage:
 
 from __future__ import annotations
 
+import hashlib
 import os
 import sys
 import uuid
@@ -51,6 +52,13 @@ from app.models import (  # noqa: E402
     Vendor,
 )
 from app.services.auth import hash_password  # noqa: E402
+from app.services.storage import get_storage_service  # noqa: E402
+
+# Content-addressed prefix for the small placeholder PDFs this seeder
+# materialises. Mirrors seed_demo_sandbox's ``<prefix>/_blobs/<sha>.pdf``
+# convention so the keys are scheme-less and resolve cleanly through
+# ``LocalStorageService.open_for_read`` / the S3 backend alike.
+_DEV_SEED_STORAGE_PREFIX = "dev-seed"
 
 DEMO_USER_EMAIL = "ada@legalshelf.mx"
 DEMO_USER_PASSWORD = "demo1234"
@@ -697,6 +705,65 @@ def _seed_submissions(db, *, client_id: str, vendor_id: str) -> int:
     return inserted
 
 
+def _make_demo_pdf(title: str) -> bytes:
+    """Build a tiny but *valid* single-page PDF carrying ``title``.
+
+    The historical seed wrote a bogus ``local://demo/<id>.pdf`` storage
+    key and never persisted any bytes, so every reviewer/client/portal
+    document preview and every expediente/audit ZIP 404'd or came back
+    empty on a freshly seeded local stack. We now emit a real PDF (with
+    a correct xref table so the browser's native viewer accepts it) and
+    store it, so the document-serving surfaces work end-to-end after a
+    plain ``dev_seed`` run.
+    """
+    # Strip characters that would break the content stream's (text)
+    # literal; latin-1 with replacement keeps the stream length honest.
+    safe = title.replace("\\", " ").replace("(", " ").replace(")", " ")[:80]
+    stream = b"BT /F1 18 Tf 72 720 Td (" + safe.encode("latin-1", "replace") + b") Tj ET"
+    objects = [
+        b"<< /Type /Catalog /Pages 2 0 R >>",
+        b"<< /Type /Pages /Kids [3 0 R] /Count 1 >>",
+        b"<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] "
+        b"/Resources << /Font << /F1 4 0 R >> >> /Contents 5 0 R >>",
+        b"<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>",
+        b"<< /Length " + str(len(stream)).encode() + b" >>\nstream\n" + stream + b"\nendstream",
+    ]
+    out = bytearray(b"%PDF-1.4\n")
+    offsets: list[int] = []
+    for index, body in enumerate(objects, start=1):
+        offsets.append(len(out))
+        out += str(index).encode() + b" 0 obj\n" + body + b"\nendobj\n"
+    xref_pos = len(out)
+    size = len(objects) + 1
+    out += b"xref\n0 " + str(size).encode() + b"\n0000000000 65535 f \n"
+    for offset in offsets:
+        out += b"%010d 00000 n \n" % offset
+    out += (
+        b"trailer\n<< /Size " + str(size).encode() + b" /Root 1 0 R >>\n"
+        b"startxref\n" + str(xref_pos).encode() + b"\n%%EOF"
+    )
+    return bytes(out)
+
+
+def _store_demo_pdf(title: str) -> tuple[str, str, int]:
+    """Persist a placeholder PDF and return ``(storage_key, sha256, size)``.
+
+    Content-addressed so identical titles dedupe to one blob; the key is
+    scheme-less (``dev-seed/_blobs/<sha>.pdf``) and saved through the
+    active storage backend, so it resolves the same way a real upload
+    would on both the local-disk and S3 backends.
+    """
+    data = _make_demo_pdf(title)
+    digest = hashlib.sha256(data).hexdigest()
+    storage_key = f"{_DEV_SEED_STORAGE_PREFIX}/_blobs/{digest}.pdf"
+    get_storage_service().save_bytes(
+        storage_key=storage_key,
+        data=data,
+        content_type="application/pdf",
+    )
+    return storage_key, digest, len(data)
+
+
 def _insert_demo_submission(
     db,
     *,
@@ -754,13 +821,14 @@ def _insert_demo_submission(
     db.add(submission)
     db.flush()
 
+    storage_key, sha256, size_bytes = _store_demo_pdf(spec["filename"])
     doc = Document(
         submission_id=submission.id,
-        storage_key=f"local://demo/{submission.id}.pdf",
+        storage_key=storage_key,
         original_filename=spec["filename"],
         mime_type="application/pdf",
-        size_bytes=128_000,
-        sha256=("d" + code + (spec.get("filename") or "")).ljust(64, "0")[:64].replace(":", "_"),
+        size_bytes=size_bytes,
+        sha256=sha256,
     )
     db.add(doc)
     db.flush()
