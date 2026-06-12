@@ -41,7 +41,7 @@ export function HumanReviewSection() {
     >
       <div
         aria-hidden="true"
-        className="pointer-events-none absolute inset-0 opacity-[0.07]"
+        className="cw-band-drift pointer-events-none absolute inset-0 opacity-[0.07]"
         style={{
           backgroundImage:
             "repeating-linear-gradient(0deg, rgba(255,255,255,0.6) 0 1px, transparent 1px 64px)",
@@ -65,7 +65,7 @@ export function HumanReviewSection() {
               No lo reemplaza.
             </span>
           </h2>
-          <p className="mt-4 max-w-[48ch] text-[15px] leading-[1.6] text-[color:var(--text-inverse)]/82">
+          <p className="mt-4 max-w-[48ch] text-[15px] leading-[1.6] text-[color:var(--text-inverse-secondary)]">
             La IA ayuda a explicar, redactar y convertir estados en reportes.
             Las decisiones críticas siguen en manos del equipo CheckWise, con actor,
             acción y cambio firmado.
@@ -141,7 +141,8 @@ export function HumanReviewSection() {
                 focus={{ position: "top center" }}
               />
               <div className="rounded-[12px] border border-white/12 bg-white/[0.04] p-4">
-                <p className="font-mono text-[10px] uppercase tracking-[0.2em] text-white/55">
+                <p className="inline-flex items-center gap-1.5 font-mono text-[10px] uppercase tracking-[0.2em] text-[color:var(--text-inverse-muted)]">
+                  <span className="cw-pulse-soft inline-block h-1.5 w-1.5 rounded-full bg-[hsl(var(--brand-teal))]" />
                   Auditoría viva
                 </p>
                 <div className="mt-4 space-y-4">
@@ -233,10 +234,10 @@ function TruthList({
 }) {
   return (
     <div className="border-t border-white/15 pt-4">
-      <p className="inline-flex items-center gap-2 font-mono text-[10px] uppercase tracking-[0.2em] text-white/60">
+      <p className="inline-flex items-center gap-2 font-mono text-[10px] uppercase tracking-[0.2em] text-[color:var(--text-inverse-muted)]">
         <Icon
           className={`h-3.5 w-3.5 ${
-            tone === "ai" ? "text-[hsl(var(--brand-teal))]" : "text-white/70"
+            tone === "ai" ? "text-[hsl(var(--brand-teal))]" : "text-[color:var(--text-inverse-secondary)]"
           }`}
           weight="fill"
           aria-hidden="true"
@@ -247,7 +248,7 @@ function TruthList({
         {items.map((item) => (
           <li
             key={item}
-            className="flex items-start gap-2 text-[13.5px] leading-[1.5] text-white/86"
+            className="flex items-start gap-2 text-[13.5px] leading-[1.5] text-[color:var(--text-inverse-secondary)]"
           >
             <span
               aria-hidden="true"
@@ -272,14 +273,14 @@ function Signal({
 }) {
   return (
     <div className="flex items-start gap-3">
-      <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-md bg-white/8 text-[hsl(var(--brand-teal))]">
+      <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-md bg-white/[0.10] text-[hsl(var(--brand-teal))]">
         <Icon className="h-3.5 w-3.5" weight="fill" aria-hidden="true" />
       </span>
       <div>
-        <p className="font-mono text-[9px] uppercase tracking-[0.18em] text-white/45">
+        <p className="font-mono text-[9px] uppercase tracking-[0.18em] text-[color:var(--text-inverse-muted)]">
           {label}
         </p>
-        <p className="mt-1 text-[13px] font-medium leading-tight text-white/88">
+        <p className="mt-1 text-[13px] font-medium leading-tight text-[color:var(--text-inverse-secondary)]">
           {value}
         </p>
       </div>
@@ -304,10 +305,10 @@ function Statement({
       >
         {n}
       </span>
-      <p className="font-mono text-[10px] uppercase tracking-[0.2em] text-[color:var(--text-inverse)]/55">
+      <p className="font-mono text-[10px] uppercase tracking-[0.2em] text-[color:var(--text-inverse-muted)]">
         {kicker}
       </p>
-      <p className="mt-1.5 max-w-[44ch] text-[14.5px] leading-[1.55] text-[color:var(--text-inverse)]/92">
+      <p className="mt-1.5 max-w-[44ch] text-[14.5px] leading-[1.55] text-[color:var(--text-inverse-secondary)]">
         {body}
       </p>
     </li>

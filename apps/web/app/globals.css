@@ -106,6 +106,14 @@
   --text-tertiary:        hsl(var(--gray-400));
   --text-disabled:        hsl(var(--gray-300));
   --text-inverse:         hsl(0 0% 100%);
+  /* Inverse text scale for navy/dark bands. Solid values (not white at
+     low alpha) so contrast on --surface-brand is guaranteed: secondary
+     ≈ 9:1, muted ≈ 5.4:1 against #013557 — both clear WCAG AA for the
+     small mono labels and body copy used on the AI-review band. Using
+     these instead of `text-white/55` is what keeps text the right
+     colour in context. */
+  --text-inverse-secondary: hsl(196 30% 88%);
+  --text-inverse-muted:     hsl(201 22% 73%);
   --text-link:            hsl(var(--navy-700));
   --text-brand:           hsl(var(--navy-800));
   --text-teal:            hsl(var(--teal-600));
@@ -595,6 +603,66 @@ pre {
     );
     transform: translateX(-100%);
     animation: shimmer 3.6s var(--ease-standard) infinite;
+  }
+}
+
+/* ── On-brand motion accents ──────────────────────────────────────
+   Not decoration for its own sake: each reinforces a product idea
+   (live audit, a compliance signal travelling a pipeline) and all
+   collapse to static under reduced-motion via the reset block above. */
+
+/* A teal pulse that travels left→right along the prevention rail —
+   reads as a compliance signal moving through detect→prove. */
+@keyframes cw-travel {
+  0%   { transform: translateX(-8%); opacity: 0; }
+  12%  { opacity: 1; }
+  88%  { opacity: 1; }
+  100% { transform: translateX(108%); opacity: 0; }
+}
+
+/* Very slow vertical drift for the navy audit band's hairline texture,
+   so the section feels alive without pulling focus from the copy. */
+@keyframes cw-band-drift {
+  from { background-position: 0 0; }
+  to   { background-position: 0 64px; }
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  .cw-rail-pulse {
+    animation: cw-travel 5.2s var(--ease-standard) infinite;
+  }
+  .cw-band-drift {
+    animation: cw-band-drift 22s linear infinite;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .cw-rail-pulse,
+  .cw-band-drift {
+    animation: none !important;
+  }
+}
+
+/* ── FAQ disclosure ───────────────────────────────────────────────
+   Progressive enhancement: where the browser supports it, the native
+   <details> answer animates open/closed instead of snapping. Browsers
+   without ::details-content / interpolate-size simply keep the instant
+   toggle, so this costs nothing and needs no JS. */
+:root {
+  interpolate-size: allow-keywords;
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  details.cw-faq::details-content {
+    block-size: 0;
+    overflow: clip;
+    content-visibility: hidden;
+    transition:
+      block-size 320ms var(--ease-enter),
+      content-visibility 320ms allow-discrete;
+  }
+  details.cw-faq[open]::details-content {
+    block-size: auto;
   }
 }
 

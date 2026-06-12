@@ -40,7 +40,7 @@ export function TrustSection() {
       className="bg-[color:var(--surface-brand)]"
     >
       <div className="mx-auto flex max-w-[1320px] flex-col items-center gap-7 px-5 py-9 lg:flex-row lg:gap-12">
-        <p className="shrink-0 text-center font-mono text-[10px] uppercase leading-[1.7] tracking-[0.2em] text-[color:var(--text-inverse)]/55 lg:max-w-[20ch] lg:text-left">
+        <p className="shrink-0 text-center font-mono text-[10px] uppercase leading-[1.7] tracking-[0.2em] text-[color:var(--text-inverse-muted)] lg:max-w-[20ch] lg:text-left">
           Confían en Legal Shelf, la firma detrás de CheckWise
         </p>
         <ul className="flex flex-1 flex-wrap items-center justify-center gap-x-12 gap-y-7 lg:justify-between">
