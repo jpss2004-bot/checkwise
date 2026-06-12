@@ -606,18 +606,23 @@ pre {
      • [data-wise-drawer-mounted] — panel is in the DOM (open + slide-out)
 */
 :root {
-  /* Keep in sync with the drawer's sm:w-[480px] panel width. */
-  --wise-drawer-w: 480px;
+  /* Keep in sync with the drawer's lg:w-[380px] panel width. A gentle
+     ~380px gutter — narrow enough that content only nudges aside. */
+  --wise-drawer-w: 380px;
 }
 
-/* Content push. Only on wide viewports (≥1440px) does the open drawer
-   reserve space so nothing is ever covered; on narrower laptops it
-   overlays the right edge instead. Applied to each shell's main column
-   via the ``wise-push-target`` class. */
+/* Content push. At every desktop width (≥1024px / lg, where the panel
+   is a right-edge drawer rather than a bottom sheet) the open drawer
+   reserves its width on the right so page content shifts left and the
+   header controls (search, notifications, profile, nav) are never
+   covered. Below lg the panel is a bottom sheet, which never overlaps
+   the top bar, so no push is needed. Applied to each shell's main
+   column via the ``wise-push-target`` class. The curve + duration match
+   the drawer's slide so content and panel move in lockstep. */
 .wise-push-target {
-  transition: padding-right 380ms var(--ease-enter);
+  transition: padding-right 380ms cubic-bezier(0.22, 1, 0.36, 1);
 }
-@media (min-width: 1440px) {
+@media (min-width: 1024px) {
   html[data-wise-drawer-open="true"] .wise-push-target {
     padding-right: var(--wise-drawer-w);
   }

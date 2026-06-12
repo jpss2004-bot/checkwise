@@ -270,7 +270,7 @@ export function WiseDockShell({
             aria-hidden="true"
             onClick={close}
             className={cn(
-              "fixed inset-0 z-40 bg-[color:var(--surface-brand)]/40 backdrop-blur-sm transition-opacity duration-300 sm:hidden",
+              "fixed inset-0 z-40 bg-[color:var(--surface-brand)]/40 backdrop-blur-sm transition-opacity duration-300 lg:hidden",
               entered ? "opacity-100" : "opacity-0",
             )}
           />
@@ -282,19 +282,22 @@ export function WiseDockShell({
             className={cn(
               "wise-drawer fixed z-50 flex flex-col overflow-hidden bg-[color:var(--surface-brand)] text-white shadow-2xl",
               "transition-transform duration-[380ms] ease-[cubic-bezier(0.22,1,0.36,1)] will-change-transform",
-              // Mobile: bottom sheet — full width, rounded top, ~78vh so
-              // the user can still see what's behind the dock.
+              // Below lg (mobile + small tablet): bottom sheet — full
+              // width, rounded top, ~78vh so the user can still see
+              // what's behind the dock, and it never covers the top bar.
               "inset-x-0 bottom-0 max-h-[78vh] rounded-t-2xl",
-              // Desktop / tablet: full-height 480px drawer flush to the
-              // right edge, rounded + bordered on the left. ``top-0
-              // bottom-0`` (not ``inset-y-0``) so it pins to the full
-              // viewport height without colliding with the mobile
-              // ``bottom-0`` utility.
-              "sm:left-auto sm:right-0 sm:top-0 sm:bottom-0 sm:max-h-none sm:w-[480px] sm:rounded-l-2xl sm:rounded-r-none sm:border-l sm:border-white/10",
-              // Enter / exit transforms. Mobile slides on Y, desktop on X.
+              // Desktop (≥lg): full-height 380px drawer flush to the
+              // right edge, rounded + bordered on the left. The page is
+              // pushed left by this width (globals.css) so nothing is
+              // covered. ``top-0 bottom-0`` (not ``inset-y-0``) so it
+              // pins to the full viewport height without colliding with
+              // the bottom-sheet ``bottom-0`` utility.
+              "lg:left-auto lg:right-0 lg:top-0 lg:bottom-0 lg:max-h-none lg:w-[380px] lg:rounded-l-2xl lg:rounded-r-none lg:border-l lg:border-white/10",
+              // Enter / exit transforms. Bottom sheet slides on Y,
+              // desktop drawer on X.
               entered
-                ? "translate-y-0 sm:translate-x-0"
-                : "translate-y-full sm:translate-y-0 sm:translate-x-full",
+                ? "translate-y-0 lg:translate-x-0"
+                : "translate-y-full lg:translate-y-0 lg:translate-x-full",
               panelClassName,
             )}
           >
@@ -375,9 +378,10 @@ export function WiseDockHeader({ title, pill, onClose }: WiseDockHeaderProps) {
         aria-label="Cerrar"
         className="relative inline-flex h-8 w-8 items-center justify-center rounded-md text-white/70 transition-colors hover:bg-white/10 hover:text-white"
       >
-        {/* Caret on desktop (slides back to the edge) / X on mobile. */}
-        <CaretRight className="hidden h-4 w-4 sm:block" weight="bold" />
-        <X className="h-4 w-4 sm:hidden" weight="bold" />
+        {/* Caret on the desktop drawer (slides back to the edge) / X on
+            the bottom sheet (<lg). */}
+        <CaretRight className="hidden h-4 w-4 lg:block" weight="bold" />
+        <X className="h-4 w-4 lg:hidden" weight="bold" />
       </button>
     </header>
   );
