@@ -112,8 +112,11 @@ function DashboardInner({ session }: { session: PortalSession }) {
       getOnboarding(session).catch((err) => {
         // Non-fatal, but don't swallow it silently — a recurring
         // failure here means the empty-state checklist degrades with no
-        // signal (audit 2026-06-09).
-        console.warn("[portal/dashboard] onboarding fetch failed:", err);
+        // signal (audit 2026-06-09). Dev-only so the prod console stays
+        // clean (audit 2026-06-12).
+        if (process.env.NODE_ENV !== "production") {
+          console.warn("[portal/dashboard] onboarding fetch failed:", err);
+        }
         return null;
       }),
     ])

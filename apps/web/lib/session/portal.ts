@@ -10,10 +10,6 @@
  *   * `fetchCurrentSession()` (async) — hits /me, caches in-memory
  *   * `readPortalSession()` (sync) — returns the in-memory cache or null
  *   * `clearPortalSession()` — async: posts /logout + clears cache
- *   * `writePortalSession()` — transition shim used only by the
- *     mocked /activate flow until P1-1 wires real activation to
- *     /portal/access. It populates the in-memory cache but does NOT
- *     persist anywhere; a reload bounces the user back to /.
  *
  * Note: localStorage is no longer touched. Any stale entry under
  * `checkwise.portal.session.v1` is cleared on first `fetchCurrentSession`.
@@ -148,23 +144,4 @@ export async function fetchCurrentSession(): Promise<PortalSession | null> {
 export async function clearPortalSession(): Promise<void> {
   cached = null;
   await postPortalLogout();
-}
-
-/**
- * Transition shim. Used only by the mocked /activate flow to
- * populate the in-memory cache when activation succeeds without
- * actually minting a backend session. Logs a deprecation hint and
- * does NOT persist anywhere — a reload bounces the user to /.
- *
- * TODO[backend-integration]: when P1-1 wires activation to a real
- * /api/v1/activation/* endpoint that returns a cookie, remove this
- * shim entirely.
- */
-export function writePortalSession(session: PortalSession): void {
-  if (typeof console !== "undefined") {
-    console.warn(
-      "[checkwise] writePortalSession is a transition shim; the real session is the httpOnly cookie minted by POST /api/v1/portal/enter.",
-    );
-  }
-  cached = session;
 }

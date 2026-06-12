@@ -272,6 +272,9 @@ export function FeedbackLauncher({
         toast.error("No se pudo generar la captura automática. Adjunta una imagen.");
       }
     } catch (err) {
+      // Intentional console.error (not a leftover): the feedback
+      // console-capture interceptor records it, so the capture failure
+      // itself shows up in the submitted report's console log.
       console.error("feedback: auto-capture failed", err);
       toast.error("No pudimos capturar la página. Adjunta una imagen.");
     } finally {

@@ -14,7 +14,12 @@
  * Spec: docs/CHECKWISE_1_6.md
  */
 
-import type { InvitationRole } from "@/lib/email/welcome";
+/**
+ * Role carried by an invitation / workspace session. Lived in
+ * `lib/email/welcome.ts` until that mock email builder was deleted
+ * (audit 2026-06-12 — the real welcome email renders server-side).
+ */
+export type InvitationRole = "provider" | "client";
 
 /**
  * Sensitive identifiers that map a user to a tenant + relationship.
@@ -23,8 +28,18 @@ import type { InvitationRole } from "@/lib/email/welcome";
  * intent to change them goes through a ProfileCorrectionRequest with
  * `requires_admin_review = true`.
  *
- * TODO[security-backend]: backend must verify every value below
- * against the authenticated session — never trust the client copy.
+ * Backend verification — AUDITED 2026-06-12, invariant holds. Of these
+ * fields only `workspace_id` (path param on /portal/*) and `client_id`
+ * (query param on /client/*) are ever transmitted; `role`, `tenant_id`
+ * and `provider_id` never leave the browser. The backend re-validates
+ * both transmitted values against the session on every endpoint:
+ * `current_portal_workspace` rejects any workspace the session user
+ * doesn't own (portal.py — owner_user_id check) and
+ * `_resolve_client_id` rejects any client outside the user's
+ * memberships (client.py — 403 on mismatch; internal_admin is the
+ * deliberate cross-tenant exception). Keep it that way: any NEW
+ * endpoint accepting one of these identifiers must go through those
+ * same dependencies, never use the raw value in a query.
  */
 export interface ProtectedWorkspaceFields {
   /** Internal workspace handle. */
