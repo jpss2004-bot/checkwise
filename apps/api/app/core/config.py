@@ -1,10 +1,18 @@
 from __future__ import annotations
 
 from functools import lru_cache
+from pathlib import Path
 from typing import Any
 
 from pydantic import field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
+
+# apps/api service root (this file lives at app/core/config.py).
+# Relative filesystem settings anchor here instead of the process CWD —
+# "./storage" used to resolve against wherever uvicorn / a seed script /
+# a cron happened to be launched from, scattering files across three
+# different storage directories (audit 2026-06-12).
+_API_ROOT = Path(__file__).resolve().parents[2]
 
 
 class Settings(BaseSettings):
@@ -27,6 +35,20 @@ class Settings(BaseSettings):
     LOCAL_STORAGE_PATH: str = "./storage"
     AUTO_METADATA_EXPORT_ENABLED: bool = True
     METADATA_EXPORT_PATH: str = "./metadata_exports"
+
+    @field_validator("LOCAL_STORAGE_PATH", "METADATA_EXPORT_PATH")
+    @classmethod
+    def _anchor_relative_paths(cls, value: str) -> str:
+        """Resolve relative paths against the apps/api service root.
+
+        Absolute values (operator overrides, tests using tmp_path) pass
+        through untouched; relative ones — including the defaults — land
+        at a deterministic location regardless of the launch CWD.
+        """
+        path = Path(value).expanduser()
+        if not path.is_absolute():
+            path = _API_ROOT / path
+        return str(path.resolve())
 
     # S3-compatible object storage (used when STORAGE_BACKEND == "s3").
     # AWS_S3_ENDPOINT is the bucket endpoint URL — set it for Cloudflare R2,
@@ -330,7 +352,14 @@ class Settings(BaseSettings):
     AUTO_APPROVE_UNLOCKED_REQUIREMENT_CODES: str = ""
     AUTO_APPROVE_MIN_CONFIDENCE: float = 0.97
 
-    model_config = SettingsConfigDict(env_file=".env", env_file_encoding="utf-8", extra="ignore")
+    # env_file anchors to the apps/api root for the same reason the
+    # storage paths do (audit 2026-06-12): a CWD-relative ".env" meant a
+    # server launched from the repo root silently ran with default
+    # settings — different auth secret, no R2 creds — while one launched
+    # from apps/api picked up the real config.
+    model_config = SettingsConfigDict(
+        env_file=str(_API_ROOT / ".env"), env_file_encoding="utf-8", extra="ignore"
+    )
 
     # Render (and many hosts) accept env vars set to an empty string as
     # "the var exists with an empty value". pydantic-settings 2.13 stopped

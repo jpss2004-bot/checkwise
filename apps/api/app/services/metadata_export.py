@@ -11,6 +11,7 @@ from app.core.config import settings
 from app.core.metadata_rules import all_metadata_rules, metadata_rule_by_code
 from app.models import Client, Contract, Document, Vendor
 from app.models import Institution as InstitutionModel
+from app.services.metadata_store import persist_export, sync_client_latest_exports
 from app.services.requirement_service import ResolvedPeriod, ResolvedRequirement
 from app.services.storage import StoredFile
 from tools.export_pdf_metadata_table import (
@@ -103,6 +104,11 @@ def export_metadata_table_after_upload(
             enable_ocr=False,
         )
         shutil.copyfile(output_path, latest_path)
+        # Mirror both workbooks to durable storage BEFORE the master
+        # rebuild — Render's disk is ephemeral, and the rebuild must be
+        # able to recover the full slot set after a deploy.
+        persist_export(output_path)
+        persist_export(latest_path)
         master_path = rebuild_client_master_metadata_export(client_name=client.name)
     except Exception as exc:  # noqa: BLE001 - surfaced as telemetry, not a provider error
         return MetadataExportResult(
@@ -126,7 +132,13 @@ def rebuild_client_master_metadata_export(*, client_name: str) -> Path | None:
     The master intentionally reads only each slot's ``latest_metadata.xlsx``
     so it represents the current state rather than every historical upload.
     """
-    client_root = Path(settings.METADATA_EXPORT_PATH) / _slug(client_name)
+    client_slug = _slug(client_name)
+    client_root = Path(settings.METADATA_EXPORT_PATH) / client_slug
+    # Pull any per-slot workbooks the local disk lost (deploy/restart on
+    # ephemeral storage) back from the mirror, otherwise this rebuild
+    # would aggregate only the post-deploy uploads and overwrite the
+    # previous, complete master with the impoverished result.
+    sync_client_latest_exports(client_slug)
     if not client_root.exists():
         return None
 
@@ -138,6 +150,7 @@ def rebuild_client_master_metadata_export(*, client_name: str) -> Path | None:
 
     master_path = client_root / "client_master_metadata.xlsx"
     write_client_master_xlsx(rows, master_path, client_name=client_name)
+    persist_export(master_path)
     return master_path
 
 

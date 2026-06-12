@@ -75,6 +75,16 @@ class StorageService(Protocol):
         """Return a local path the caller can read for the duration of the request."""
         ...
 
+    def list_keys(self, prefix: str) -> list[str]:  # pragma: no cover - protocol stub
+        """Return every storage key under ``prefix`` (recursive).
+
+        Added for the metadata-export mirror (audit 2026-06-12): after a
+        deploy wipes Render's ephemeral disk, the master-workbook rebuild
+        needs to discover which per-slot workbooks exist in the durable
+        backend before it can re-materialize them locally.
+        """
+        ...
+
     def presigned_download_url(
         self,
         storage_key: str,
@@ -188,6 +198,16 @@ class LocalStorageService:
 
     def open_for_read(self, storage_key: str) -> Path:
         return self.base_path / storage_key
+
+    def list_keys(self, prefix: str) -> list[str]:
+        root = self.base_path / prefix
+        if not root.is_dir():
+            return []
+        return sorted(
+            str(item.relative_to(self.base_path).as_posix())
+            for item in root.rglob("*")
+            if item.is_file()
+        )
 
     def presigned_download_url(
         self,
@@ -314,6 +334,13 @@ class S3StorageService:
         temp_path = Path(name)
         self._client.download_file(Bucket=self.bucket, Key=storage_key, Filename=str(temp_path))
         return temp_path
+
+    def list_keys(self, prefix: str) -> list[str]:
+        keys: list[str] = []
+        paginator = self._client.get_paginator("list_objects_v2")
+        for page in paginator.paginate(Bucket=self.bucket, Prefix=prefix):
+            keys.extend(obj["Key"] for obj in page.get("Contents", []))
+        return keys
 
     def presigned_download_url(
         self,

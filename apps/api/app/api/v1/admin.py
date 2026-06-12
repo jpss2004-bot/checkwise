@@ -92,6 +92,7 @@ from app.services.email_delivery import (
     send_owner_reset_temp_password_email,
     send_welcome_with_temp_password_email,
 )
+from app.services.metadata_store import ensure_local_export, mirror_enabled
 from app.services.search_service import SearchHit, search_submissions
 
 router = APIRouter(prefix="/admin", tags=["admin"])
@@ -2835,6 +2836,8 @@ def preview_metadata_export(
     event = _get_metadata_export_event(db, export_event_id)
     item = _metadata_export_item(db, event)
     path = _metadata_export_file_path(event)
+    if path is not None:
+        ensure_local_export(path)
     if path is None or not path.exists():
         raise HTTPException(
             status.HTTP_404_NOT_FOUND,
@@ -2854,6 +2857,8 @@ def download_metadata_export(
     _ = current
     event = _get_metadata_export_event(db, export_event_id)
     path = _metadata_export_file_path(event)
+    if path is not None:
+        ensure_local_export(path)
     if path is None or not path.exists():
         raise HTTPException(
             status.HTTP_404_NOT_FOUND,
@@ -2878,7 +2883,7 @@ def preview_client_master_metadata_export(
     client = db.get(Client, client_id)
     if client is None:
         raise HTTPException(status.HTTP_404_NOT_FOUND, detail="Cliente no encontrado.")
-    path = _client_master_file_path(client)
+    path = ensure_local_export(_client_master_file_path(client))
     if not path.exists():
         raise HTTPException(
             status.HTTP_404_NOT_FOUND,
@@ -2901,7 +2906,7 @@ def get_client_metadata(
     client = db.get(Client, client_id)
     if client is None:
         raise HTTPException(status.HTTP_404_NOT_FOUND, detail="Cliente no encontrado.")
-    path = _client_master_file_path(client)
+    path = ensure_local_export(_client_master_file_path(client))
     documents: list[ClientMetadataDocument] = []
     if path.exists():
         sheets = _read_xlsx_preview(path, max_rows_per_sheet=500, max_columns=20)
@@ -2925,7 +2930,7 @@ def download_client_master_metadata_export(
     client = db.get(Client, client_id)
     if client is None:
         raise HTTPException(status.HTTP_404_NOT_FOUND, detail="Cliente no encontrado.")
-    path = _client_master_file_path(client)
+    path = ensure_local_export(_client_master_file_path(client))
     if not path.exists():
         raise HTTPException(
             status.HTTP_404_NOT_FOUND,
@@ -2982,7 +2987,13 @@ def _build_metadata_export_item(
     except the deliberate per-row filesystem ``exists()`` checks)."""
     payload = event.payload or {}
     path = _metadata_export_file_path(event)
-    file_exists = bool(path and path.exists())
+    # Optimistic when the durable mirror is on: a completed export that
+    # the (ephemeral) local disk lost is still downloadable — the
+    # preview/download endpoints re-materialize it on demand. Probing
+    # the mirror per row would add a network round-trip per list item.
+    file_exists = bool(path and path.exists()) or bool(
+        path is not None and mirror_enabled() and event.result == "completed"
+    )
     return MetadataExportListItem(
         id=event.id,
         submission_id=event.submission_id,
@@ -3002,7 +3013,13 @@ def _build_metadata_export_item(
         or (_display_export_path(str(_client_master_file_path(client))) if client else None),
         file_exists=file_exists,
         preview_available=event.result == "completed" and file_exists,
-        master_available=bool(client and _client_master_file_path(client).exists()),
+        master_available=bool(
+            client
+            and (
+                _client_master_file_path(client).exists()
+                or (mirror_enabled() and event.result == "completed")
+            )
+        ),
         reason=payload.get("reason") or event.message,
         created_at=event.created_at,
     )
