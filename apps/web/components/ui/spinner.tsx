@@ -1,4 +1,8 @@
-import { CircleNotch } from "@phosphor-icons/react";
+// dist/ssr build: no IconContext, so the spinner (and therefore
+// Button) can render inside server components — the marketing article
+// pages use Button outside any "use client" tree. Nothing in the app
+// sets IconContext, so the two builds render identically.
+import { CircleNotch } from "@phosphor-icons/react/dist/ssr";
 
 import { cn } from "@/lib/utils";
 
