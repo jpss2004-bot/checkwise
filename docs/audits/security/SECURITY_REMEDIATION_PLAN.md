@@ -6,7 +6,7 @@ Scope: smallest production-safe patch addressing the known cybersecurity
 risks documented at the start of this pass. No restructuring, no
 dependency churn, no auth migration.
 
-Companion to: [docs/REPO_CLEANUP_PLAN.md](../../REPO_CLEANUP_PLAN.md) §11.
+Companion to: [docs/_archive/REPO_CLEANUP_PLAN.md](../../_archive/REPO_CLEANUP_PLAN.md) §11.
 
 ---
 

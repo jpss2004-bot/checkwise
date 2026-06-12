@@ -145,9 +145,9 @@ CheckWise/
 │       ├── routing/                  post-login (decision helper)
 │       ├── session/                  admin · portal · with-portal-session HOC
 │       └── workspace/                resolver · types
-├── docs/                             14 docs incl. DESIGN_SYSTEM, CHECKWISE_1_5,
-│                                     CHECKWISE_1_6, ONBOARDING_V1, ARCHITECTURE,
-│                                     DATA_MODEL, ROADMAP, PROVIDER_PORTAL_FLOW, …
+├── docs/                             DESIGN_SYSTEM, ARCHITECTURE, ROADMAP,
+│                                     PROVIDER_PORTAL_FLOW, … (superseded docs
+│                                     live under docs/_archive/)
 ├── scripts/                          register-design-skills + reports/ generators
 ├── brand_assets/                     CANONICAL CheckWise logos (see README)
 ├── demo_assets/                      screenshots + demo guide PDF
@@ -217,7 +217,7 @@ Production blockers and the full integration plan live in [docs/CHECKWISE_1_6.md
 ## Where to go next
 
 - Architecture overview → [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md)
-- Data model → [docs/DATA_MODEL.md](docs/DATA_MODEL.md)
+- Data model (historical summary; Alembic migrations are the source of truth) → [docs/_archive/DATA_MODEL.md](docs/_archive/DATA_MODEL.md)
 - Regulatory framework → [docs/REGULATORY_MODEL.md](docs/REGULATORY_MODEL.md)
 - Provider portal walkthrough → [docs/PROVIDER_PORTAL_FLOW.md](docs/PROVIDER_PORTAL_FLOW.md)
 - Roadmap → [docs/ROADMAP.md](docs/ROADMAP.md)

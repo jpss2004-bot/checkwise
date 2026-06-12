@@ -24,7 +24,7 @@ Fecha: 19 de mayo de 2026
 
 - Frontend: `apps/web/app/**/*.tsx`, `apps/web/lib/api/*.ts`, session guards y redirects.
 - Backend: `apps/api/app/api/v1/*.py`, `apps/api/app/services/*.py`, modelos, constantes y configuración.
-- Docs: `API_CONTRACT_MAP.md`, `ARCHITECTURE.md`, `DATA_MODEL.md`, `REPORTS_ARCHITECTURE.md`, `_archive/handoffs-2026-05/REPORTS_AUDIT_2026-05-18.md`, `codex-route-workflow-audit/*`, `_archive/handoffs-2026-05/PROD_AUDIT_2026-05-18.md`.
+- Docs: `API_CONTRACT_MAP.md`, `ARCHITECTURE.md`, `_archive/DATA_MODEL.md`, `REPORTS_ARCHITECTURE.md`, `_archive/handoffs-2026-05/REPORTS_AUDIT_2026-05-18.md`, `_archive/codex-route-workflow-audit/*`, `_archive/handoffs-2026-05/PROD_AUDIT_2026-05-18.md`.
 - Brand: `apps/web/app/globals.css`, `docs/DESIGN_SYSTEM.md`, `apps/web/public/checkwise-logo.png`.
 
 ## Supuestos y límites

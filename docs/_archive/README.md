@@ -24,6 +24,13 @@ archive serves.
 | `PROVIDER_REPORTS_REDESIGN_AUDIT.md` | superseded | Audit closed; findings absorbed into `handoffs-2026-05/PROVIDER_REPORTS_SESSION_HANDOFF.md`. |
 | `PROVIDER_REPORTS_REDESIGN_PLAN.md` | superseded | Plan shipped; live behavior documented under `REPORTS_*.md`. |
 | `handoffs-2026-05/` | superseded | 13 dated handoffs and audit snapshots from the 2026-05 stabilization push, archived in the 2026-06-02 cleanup (`AUDIT_NEXT_SESSION_READINESS.md`, `AUTH_ROLE_FLOW_AUDIT_2026-05-18.md`, `FRIDAY_MEETING_ACTION_MATRIX.md`, `FULL_SYSTEM_AUDIT.md`, `MONDAY_READINESS_AUDIT.md`, `NEXT_SESSION_HANDOFF.md`, `PROD_AUDIT_2026-05-18.md`, `PROVIDER_REPORTS_AI_AUDIT_2026-05-19.md`, `PROVIDER_REPORTS_SESSION_HANDOFF.md`, `PROVIDER_REPORTS_VISUAL_AUDIT_2026-05-19.md`, `REPORTS_AUDIT_2026-05-18.md`, `STABILIZATION_AUDIT_2026-05-18.md`, `USER_TEST_READINESS.md`). |
+| `NATIVE_INTAKE_ARCHITECTURE.md` | superseded | Phase 1 intake strategy; the live intake is the multi-stage wizard documented in root docs. Archived 2026-06-12 (hygiene batch of `audits/FULL_SYSTEM_AUDIT_2026-06-12.md`). |
+| `JOTFORM_EXIT_STRATEGY.md` | superseded | JotForm exit completed; native intake shipped. Archived 2026-06-12. |
+| `ONBOARDING_V1.md` | superseded | V1 onboarding flow; superseded by the current onboarding + activation surfaces. Archived 2026-06-12. |
+| `UPLOAD_VALIDATION_STRATEGY.md` | superseded | Early validation strategy; absorbed into the live validation rules + prevalidation pipeline. Archived 2026-06-12. |
+| `DATA_MODEL.md` | superseded | Pre-redesign data-model summary; Alembic migrations are the source of truth. Archived 2026-06-12. |
+| `REPO_CLEANUP_PLAN.md` | completed | Cleanup stages 0–4 executed (monorepo move done); stage 5 ideas folded into the 2026-06-12 audit. Archived 2026-06-12. |
+| `codex-route-workflow-audit/` | superseded | 2026-05 Codex route/redirect audit artifacts (13 files + screenshots); findings absorbed into the admin-portal audit work. Archived 2026-06-12. |
 
 ## When to move something here
 

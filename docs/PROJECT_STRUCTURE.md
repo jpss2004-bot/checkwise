@@ -1,7 +1,7 @@
 # CheckWise Project Structure
 
 Date: 2026-05-21
-Companion to: [REPO_CLEANUP_PLAN.md](REPO_CLEANUP_PLAN.md)
+Companion to: [_archive/REPO_CLEANUP_PLAN.md](_archive/REPO_CLEANUP_PLAN.md) (stages 0–4 completed; archived 2026-06-12)
 
 This document is the contract for "where things live" in the CheckWise
 repo. New work must follow it. If a placement question is ambiguous,
@@ -192,7 +192,7 @@ Folder responsibilities:
     inspo maps.
   - `docs/claude/` — notes about Claude Code skills, prompts,
     workflows used to build CheckWise.
-  - `docs/codex-route-workflow-audit/` — Codex audits.
+  - `docs/_archive/codex-route-workflow-audit/` — Codex audits (archived 2026-06-12).
   - `docs/system-workflow-map/` — system-flow assets.
   - `docs/audit-screenshots/<date-slug>/` — one folder per audit
     session, holds final screenshots, voice, music, and the rendered
