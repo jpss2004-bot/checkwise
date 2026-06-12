@@ -230,7 +230,9 @@ export default function RepsePage() {
           : un calendario de obligaciones por requisito, periodo e
           institución, un expediente auditable por proveedor, revisión
           documental con apoyo de IA y validación humana, y reportes listos
-          para una inspección. Eso es exactamente lo que hace CheckWise.
+          para una inspección. Es la diferencia entre dar seguimiento y
+          hacer prevención de riesgos REPSE — y es exactamente lo que hace
+          CheckWise.
         </p>
       </ArticleSection>
 

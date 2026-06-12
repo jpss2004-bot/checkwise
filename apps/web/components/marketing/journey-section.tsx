@@ -106,8 +106,9 @@ export function JourneySection() {
             </h2>
           </div>
           <p className="text-[14px] leading-[1.65] text-[color:var(--text-secondary)] md:text-right">
-            El producto no organiza archivos por carpeta: organiza obligaciones
-            por proveedor, periodo, institución, estado y decisión.
+            El producto no organiza archivos por carpeta: organiza el control
+            documental REPSE por proveedor, periodo, institución, estado y
+            decisión.
           </p>
         </Reveal>
 

@@ -53,6 +53,7 @@ export function MarketingFooter() {
           links={[
             { label: "Qué es el REPSE", href: "/repse" },
             { label: "Software de cumplimiento REPSE", href: "/software-repse" },
+            { label: "Prevención REPSE", href: "/#prevencion" },
             { label: "Preguntas frecuentes", href: "/#faq" },
           ]}
         />

@@ -48,6 +48,16 @@ export const FAQ_ITEMS: readonly FaqItem[] = [
       "Es un software que centraliza el control documental de la subcontratación especializada: calendario de obligaciones por requisito y periodo, expediente digital por proveedor, revisión de documentos, semáforo de riesgo y reportes listos para auditoría. CheckWise es una plataforma de cumplimiento REPSE construida en México por el equipo de Legal Shelf.",
   },
   {
+    question: "¿Cómo previene CheckWise las multas y la responsabilidad solidaria?",
+    answer:
+      "Anticipándose: el calendario de obligaciones y el semáforo del portafolio detectan documentos faltantes, vencidos o inconsistentes antes de la fecha límite, cuando todavía se pueden corregir. La prevención REPSE consiste en eso — encontrar el riesgo en tu operación antes de que lo encuentre la autoridad, en lugar de reaccionar cuando la multa ya existe.",
+  },
+  {
+    question: "¿Cómo ayuda CheckWise en una auditoría o inspección REPSE?",
+    answer:
+      "Cada documento vive ligado a su requisito, periodo e institución, con la decisión de revisión firmada y su historial de reemplazos. Ante una auditoría REPSE, generas el reporte ejecutivo y el paquete de evidencia en PDF, Excel o HTML directamente del expediente — sin reconstruir meses de correos y carpetas compartidas.",
+  },
+  {
     question: "¿CheckWise sustituye al abogado o emite resoluciones legales?",
     answer:
       "No. CheckWise es una plataforma de control documental: organiza la evidencia, la analiza con apoyo de inteligencia artificial y la valida con revisión humana, dejando un registro auditable de cada decisión. No emite resoluciones legales ni garantiza el cumplimiento automático; la decisión legal siempre la toma una persona.",

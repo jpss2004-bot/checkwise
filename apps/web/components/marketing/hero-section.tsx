@@ -48,7 +48,7 @@ export function HeroSection() {
             className="inline-flex items-center gap-2 rounded-full border border-[color:var(--border-default)] bg-[color:var(--surface-raised)]/90 px-2.5 py-1 font-mono text-[10px] uppercase tracking-[0.2em] text-[color:var(--text-secondary)] shadow-[0_12px_28px_-24px_hsl(var(--brand-navy)/0.45)] backdrop-blur-sm"
           >
             <span className="cw-pulse-soft inline-block h-1.5 w-1.5 rounded-full bg-[color:var(--text-teal)]" />
-            CheckWise · cumplimiento REPSE
+            CheckWise · cumplimiento y prevención REPSE
           </motion.div>
 
           <motion.h1

@@ -19,21 +19,27 @@ export const metadata: Metadata = {
     google: "OM2B1MII7_akMeN8QrPvNx-mGx6x3bH70sTF1jQW0Wc",
   },
   title: {
-    default: "CheckWise · Plataforma de cumplimiento REPSE",
+    default: "CheckWise · Plataforma de cumplimiento y prevención REPSE",
     template: `%s · ${SITE_NAME}`,
   },
   description:
-    "CheckWise es el software de cumplimiento REPSE para empresas y proveedores en México: calendario de obligaciones, expediente auditable, revisión humana y reportes asistidos por IA.",
+    "CheckWise es la plataforma de cumplimiento y prevención REPSE: monitorea a tus proveedores, evita multas y responsabilidad solidaria, y llega a cada auditoría con el expediente listo.",
   applicationName: SITE_NAME,
   keywords: [
     "REPSE",
     "cumplimiento REPSE",
     "plataforma REPSE",
+    "plataforma cumplimiento REPSE",
+    "prevención REPSE",
+    "prevención de riesgos REPSE",
     "software REPSE",
+    "gestión REPSE",
+    "auditoría REPSE",
     "control documental REPSE",
+    "cumplimiento de proveedores",
+    "proveedores REPSE",
     "registro REPSE",
     "servicios especializados",
-    "proveedores",
     "obligaciones patronales",
     "responsabilidad solidaria",
     "STPS",
@@ -49,9 +55,9 @@ export const metadata: Metadata = {
     siteName: SITE_NAME,
     locale: "es_MX",
     url: SITE_URL,
-    title: "CheckWise · Plataforma de cumplimiento REPSE",
+    title: "CheckWise · Plataforma de cumplimiento y prevención REPSE",
     description:
-      "Calendario de obligaciones, expediente auditable, revisión humana y reportes asistidos por IA para el cumplimiento REPSE de tus proveedores.",
+      "Monitorea el cumplimiento REPSE de tus proveedores, evita multas y responsabilidad solidaria, y llega a cada auditoría con el expediente listo.",
     images: [
       {
         url: "/og.png",
@@ -63,9 +69,9 @@ export const metadata: Metadata = {
   },
   twitter: {
     card: "summary_large_image",
-    title: "CheckWise · Plataforma de cumplimiento REPSE",
+    title: "CheckWise · Plataforma de cumplimiento y prevención REPSE",
     description:
-      "Calendario de obligaciones, expediente auditable, revisión humana y reportes asistidos por IA para el cumplimiento REPSE de tus proveedores.",
+      "Monitorea el cumplimiento REPSE de tus proveedores, evita multas y responsabilidad solidaria, y llega a cada auditoría con el expediente listo.",
     images: ["/og.png"],
   },
   icons: { icon: "/favicon.png" },

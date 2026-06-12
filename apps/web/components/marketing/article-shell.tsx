@@ -1,8 +1,9 @@
 import Link from "next/link";
 import type { ReactNode } from "react";
-import { ArrowRight } from "@phosphor-icons/react/dist/ssr";
+import { ArrowRight, ArrowUpRight } from "@phosphor-icons/react/dist/ssr";
 
 import { Button } from "@/components/ui/button";
+import { DEMO_BOOKING_URL } from "@/lib/marketing/booking";
 import { SITE_URL } from "@/lib/site";
 
 import { MarketingFooter } from "./marketing-footer";
@@ -131,12 +132,27 @@ export function ArticleCta({
       <p className="mt-2 max-w-[58ch] text-[14.5px] leading-[1.6] text-[color:var(--text-secondary)]">
         {body}
       </p>
-      <Button asChild size="sm" className="mt-5 h-10 rounded-full px-5">
-        <Link href="/#contacto">
-          Solicitar demo
-          <ArrowRight className="h-3.5 w-3.5" weight="bold" aria-hidden="true" />
-        </Link>
-      </Button>
+      <div className="mt-5 flex flex-wrap items-center gap-x-5 gap-y-3">
+        <Button asChild size="sm" className="h-10 rounded-full px-5">
+          <Link href="/#contacto">
+            Solicitar demo
+            <ArrowRight className="h-3.5 w-3.5" weight="bold" aria-hidden="true" />
+          </Link>
+        </Button>
+        <a
+          href={DEMO_BOOKING_URL}
+          target="_blank"
+          rel="noreferrer noopener"
+          className="group inline-flex items-center gap-1 text-[13px] font-medium text-[color:var(--text-secondary)] transition-colors hover:text-[color:var(--text-primary)]"
+        >
+          o agenda 30 minutos directamente
+          <ArrowUpRight
+            className="h-3 w-3 transition-transform group-hover:translate-x-0.5 group-hover:-translate-y-0.5"
+            weight="bold"
+            aria-hidden="true"
+          />
+        </a>
+      </div>
     </aside>
   );
 }

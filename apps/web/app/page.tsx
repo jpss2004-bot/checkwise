@@ -1,4 +1,5 @@
 import type { Metadata } from "next";
+import { ArrowUpRight } from "@phosphor-icons/react/dist/ssr";
 
 import { FeedbackLauncher } from "@/components/feedback/feedback-launcher";
 import { ContactForm } from "@/components/marketing/contact-form";
@@ -9,8 +10,11 @@ import { JourneySection } from "@/components/marketing/journey-section";
 import { HumanReviewSection } from "@/components/marketing/human-review-section";
 import { MarketingFooter } from "@/components/marketing/marketing-footer";
 import { MarketingNav } from "@/components/marketing/marketing-nav";
+import { PreventionSection } from "@/components/marketing/prevention-section";
 import { Reveal } from "@/components/marketing/motion-helpers";
 import { MotionPreferenceProvider } from "@/components/marketing/motion-preference";
+import { TrustSection } from "@/components/marketing/trust-section";
+import { DEMO_BOOKING_URL } from "@/lib/marketing/booking";
 import { FAQ_ITEMS } from "@/lib/marketing/faq";
 import { SITE_NAME, SITE_URL } from "@/lib/site";
 
@@ -85,8 +89,10 @@ export default function PublicHome() {
       <main className="min-h-[100dvh] bg-[color:var(--surface-page)]">
         <MarketingNav />
         <HeroSection />
+        <TrustSection />
         <FeaturesSection />
         <JourneySection />
+        <PreventionSection />
         <HumanReviewSection />
         <FaqSection />
         <RequestInformation />
@@ -173,6 +179,27 @@ function RequestInformation() {
             <div className="rounded-b-[10px] border border-[color:var(--border-default)] border-t-0 bg-[color:var(--surface-raised)] px-6 py-8 shadow-[0_22px_50px_-32px_hsl(var(--brand-navy)/0.22)] sm:px-10 sm:py-10">
               <ContactForm />
             </div>
+
+            {/* Direct-booking alternative — the conversion path the old
+                site relied on. One quiet line, not a competing card:
+                the form stays primary, the calendar removes friction
+                for visitors who already decided. */}
+            <p className="mt-5 text-center text-[13px] text-[color:var(--text-secondary)]">
+              ¿Prefieres elegir horario directamente?{" "}
+              <a
+                href={DEMO_BOOKING_URL}
+                target="_blank"
+                rel="noreferrer noopener"
+                className="group inline-flex items-center gap-1 font-medium text-[color:var(--text-teal)] underline-offset-2 hover:underline"
+              >
+                Agenda 30 minutos con el equipo
+                <ArrowUpRight
+                  className="h-3 w-3 transition-transform group-hover:translate-x-0.5 group-hover:-translate-y-0.5"
+                  weight="bold"
+                  aria-hidden="true"
+                />
+              </a>
+            </p>
           </div>
         </Reveal>
       </div>

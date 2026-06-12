@@ -43,7 +43,7 @@ export default function SoftwareRepsePage() {
           </span>
         </>
       }
-      intro="Cumplir REPSE no falla por desconocimiento de la norma: falla por operación. Decenas de proveedores, cientos de documentos por cuatrimestre y un riesgo fiscal que recae en quien contrata. Esto es lo que una plataforma de cumplimiento REPSE tiene que resolver."
+      intro="Cumplir REPSE no falla por desconocimiento de la norma: falla por operación. Decenas de proveedores, cientos de documentos por cuatrimestre y un riesgo fiscal que recae en quien contrata. Esto es lo que una plataforma de cumplimiento REPSE tiene que resolver — empezando por la prevención del riesgo, no solo el seguimiento."
       breadcrumbName="Software de cumplimiento REPSE"
       path="/software-repse"
     >
