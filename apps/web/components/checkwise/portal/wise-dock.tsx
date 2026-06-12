@@ -314,6 +314,7 @@ export function WiseDock({
       tabAriaLabel={`Abrir Wise · ${AUDIENCE_PILL[audience]}`}
       hasWarning={hasWarning}
       className={className}
+      onOpenChange={onOpenChange}
       onFirstRender={() => {
         void postWiseEvent(session, "wise.first_render", {
           audience,
@@ -326,14 +327,12 @@ export function WiseDock({
         // fetch until first open so the chat is fast to mount on
         // pages where the user never engages with Wise.
         setHasOpenedOnce(true);
-        onOpenChange?.(true);
         void postWiseEvent(session, "wise.opened", {
           audience,
           route: pageContext.route,
         });
       }}
       onClose={() => {
-        onOpenChange?.(false);
         void postWiseEvent(session, "wise.collapsed", {
           audience,
           route: pageContext.route,

@@ -66,6 +66,12 @@ export interface WiseDockShellProps {
   /** Fired every time the user transitions from expanded → collapsed
    *  (tab, Esc, backdrop, close button). */
   onClose?: () => void;
+  /** State-sync callback fired whenever the open/closed state changes —
+   *  including the initial hydration, unlike onOpen/onClose which only
+   *  fire on user-driven transitions. Use this (not onOpen) when a host
+   *  needs to mirror Wise's state on mount too, e.g. the provider portal
+   *  collapsing its sidebar when Wise is already open on load. */
+  onOpenChange?: (open: boolean) => void;
 
   /** Render slots. Receive `close` so the entry's header close button
    *  and composer can request collapse without re-implementing it. */
@@ -85,12 +91,14 @@ export function WiseDockShell({
   onFirstRender,
   onOpen,
   onClose,
+  onOpenChange,
   renderHeader,
   renderBody,
   renderComposer,
 }: WiseDockShellProps) {
   const [collapsed, setCollapsed] = React.useState<boolean>(true);
   const [hydrated, setHydrated] = React.useState(false);
+  const reportedOpenRef = React.useRef<boolean | null>(null);
   // ``mounted`` keeps the panel in the DOM for the duration of the
   // open + slide-out window; ``entered`` drives the in-place transform
   // + staggered content reveal. Splitting them lets the exit animate.
@@ -202,6 +210,20 @@ export function WiseDockShell({
     },
     [],
   );
+
+  // Report open-state changes to the host — including the initial
+  // hydrated state, which onOpen/onClose miss (they only fire on
+  // user-driven transitions). Guarded by ``reportedOpenRef`` so it fires
+  // only on an actual change, never on every re-render: re-firing the
+  // same value would clobber a host's restore bookkeeping (e.g. the
+  // portal's sidebar ``wiseRestoreRef``).
+  React.useEffect(() => {
+    if (!hydrated) return;
+    const open = !collapsed;
+    if (reportedOpenRef.current === open) return;
+    reportedOpenRef.current = open;
+    onOpenChange?.(open);
+  }, [collapsed, hydrated, onOpenChange]);
 
   // Esc closes when expanded.
   React.useEffect(() => {
