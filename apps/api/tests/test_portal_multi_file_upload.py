@@ -497,3 +497,113 @@ def test_supersedes_prior_submission_still_works_with_multi_doc_batch(
         ), "prior submission should be marked as replaced"
     finally:
         db.close()
+
+
+# ---------------------------------------------------------------------------
+# Phase C — per-file soft match feedback (match-only)
+# ---------------------------------------------------------------------------
+
+
+def _text_pdf_bytes(line: str) -> bytes:
+    """Hand-assembled single-page PDF whose text layer carries ``line``.
+
+    pypdf's writer cannot draw text, so the intake heuristics can only
+    read signals from a manually built file (same technique as
+    tests/test_workspace_submissions). ``line`` must be ASCII without
+    parentheses (PDF string literal).
+    """
+    stream = b"BT /F1 18 Tf 72 720 Td (" + line.encode("ascii") + b") Tj ET"
+    objects = [
+        b"<< /Type /Catalog /Pages 2 0 R >>",
+        b"<< /Type /Pages /Kids [3 0 R] /Count 1 >>",
+        b"<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] "
+        b"/Contents 4 0 R /Resources << /Font << /F1 5 0 R >> >> >>",
+        b"<< /Length "
+        + str(len(stream)).encode()
+        + b" >>\nstream\n"
+        + stream
+        + b"\nendstream",
+        b"<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>",
+    ]
+    out = bytearray(b"%PDF-1.4\n")
+    offsets: list[int] = []
+    for index, body in enumerate(objects, start=1):
+        offsets.append(len(out))
+        out += f"{index} 0 obj\n".encode() + body + b"\nendobj\n"
+    xref_pos = len(out)
+    out += b"xref\n0 6\n0000000000 65535 f \n"
+    for offset in offsets:
+        out += f"{offset:010d} 00000 n \n".encode()
+    out += (
+        b"trailer\n<< /Size 6 /Root 1 0 R >>\nstartxref\n"
+        + str(xref_pos).encode()
+        + b"\n%%EOF\n"
+    )
+    return bytes(out)
+
+
+def test_multi_file_per_document_match_feedback(api_client: TestClient) -> None:
+    """Each batch entry carries its own match_feedback: the wrong-looking
+    file warns (naming the requested requirement, in Spanish), the
+    well-matched file stays silent — and nothing reviewer-only leaks."""
+    settings.MULTI_FILE_UPLOAD_ENABLED = True
+    ws = _setup_workspace(api_client)
+    resp = _post_batch(
+        api_client,
+        ws["workspace_id"],
+        files=[
+            (
+                "opinion-sat.pdf",
+                _text_pdf_bytes("Opinion de cumplimiento SAT ejercicio 2026"),
+                "application/pdf",
+            ),
+            (
+                "cuotas.pdf",
+                _text_pdf_bytes(
+                    "Cuotas obrero patronales IMSS registro patronal 2026"
+                ),
+                "application/pdf",
+            ),
+        ],
+    )
+    assert resp.status_code == 202, resp.text
+    payload = resp.json()
+    by_name = {doc["original_filename"]: doc for doc in payload["documents"]}
+
+    wrong = by_name["opinion-sat.pdf"]
+    assert wrong["document_signals"]["mismatch_reason"]
+    feedback = wrong["match_feedback"]
+    assert feedback is not None
+    assert "Cuotas obrero patronales" in feedback["warning_es"]
+    assert "no necesitas hacer nada" in feedback["warning_es"]
+    assert feedback["expected_label"] == "Cuotas obrero patronales"
+    # Match-only wording: never authenticity/forensic language.
+    for term in ("autenticidad", "riesgo", "falsific", "forense", "sospech"):
+        assert term not in feedback["warning_es"].lower()
+
+    clean = by_name["cuotas.pdf"]
+    assert clean["document_signals"]["mismatch_reason"] is None
+    confidence = clean["document_signals"]["requirement_match_confidence"]
+    assert confidence is not None and confidence >= 0.7
+    assert clean["match_feedback"] is None
+
+    # Anti-tipping: no reviewer-only keys anywhere in the provider response.
+    def _assert_no_forbidden_keys(node: object) -> None:
+        forbidden = {
+            "authenticity",
+            "authenticity_risk",
+            "risk_reasons",
+            "forensics",
+            "verification",
+            "shadow",
+        }
+        if isinstance(node, dict):
+            leaked = forbidden.intersection(node.keys())
+            assert not leaked, f"provider response leaked reviewer-only keys: {leaked}"
+            for value in node.values():
+                _assert_no_forbidden_keys(value)
+        elif isinstance(node, list):
+            for item in node:
+                _assert_no_forbidden_keys(item)
+
+    _assert_no_forbidden_keys(payload)

@@ -46,10 +46,12 @@ import { Textarea } from "@/components/ui/textarea";
 import { RequirementStatusBadge } from "@/components/checkwise/portal/requirement-status-badge";
 import { ValidationSignal } from "@/components/checkwise/validation-summary";
 import { GroupedValidationSummary } from "@/components/checkwise/portal/grouped-validation-summary";
+import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import {
   checkDuplicateBySha256,
   type CalendarAcceptedDocument,
   type DuplicateCheck,
+  type MatchFeedback,
   type RequirementStatus,
 } from "@/lib/api/portal";
 import { DocumentStatus } from "@/lib/constants/statuses";
@@ -94,7 +96,19 @@ type SubmissionResponse = {
     mismatch_reason?: string | null;
     anomaly_codes: string[];
   } | null;
+  /** Soft match feedback (2026-06-11). Non-null = "this file probably
+   *  isn't the requested document" — informational only; the upload is
+   *  accepted and queued for normal review. Never blocks. */
+  match_feedback?: MatchFeedback | null;
   message: string;
+};
+
+/** Per-file match feedback collected from the batch response so the
+ *  confirmation view can show a compact warning row next to the file
+ *  that triggered it. */
+type BatchFileFeedback = {
+  filename: string;
+  feedback: MatchFeedback;
 };
 
 type IntakeForm = {
@@ -284,6 +298,10 @@ export function IntakeWizard({
   const [additionalFilesError, setAdditionalFilesError] = useState<string | null>(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [result, setResult] = useState<SubmissionResponse | null>(null);
+  // Soft match feedback per batch file (2026-06-11). Empty for single
+  // uploads (the single path reads ``result.match_feedback`` directly)
+  // and for batches where every file matched.
+  const [batchFeedback, setBatchFeedback] = useState<BatchFileFeedback[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [unlockedOverride, setUnlockedOverride] = useState(false);
   const [filePreviewUrl, setFilePreviewUrl] = useState<string | null>(null);
@@ -599,6 +617,7 @@ export function IntakeWizard({
 
     setIsSubmitting(true);
     setResult(null);
+    setBatchFeedback([]);
     setError(null);
 
     const normalizedForm: IntakeForm = {
@@ -718,6 +737,7 @@ export function IntakeWizard({
           document_signals?: SubmissionResponse["document_signals"];
           validations: ValidationSignal[];
           validation_events?: SubmissionResponse["validation_events"];
+          match_feedback?: MatchFeedback | null;
         };
         type MultiSubmissionResponse = {
           submission_id: string;
@@ -732,6 +752,18 @@ export function IntakeWizard({
         );
         const flattenedEvents = batch.documents.flatMap(
           (doc) => doc.validation_events ?? [],
+        );
+        // Soft match feedback is kept per-file (with the filename) so
+        // the confirmation can point at the exact file instead of the
+        // flattened primary-document view. Intentionally NOT copied into
+        // the flattened result's ``match_feedback`` to avoid rendering
+        // the same warning twice.
+        setBatchFeedback(
+          batch.documents.flatMap((doc) =>
+            doc.match_feedback
+              ? [{ filename: doc.original_filename, feedback: doc.match_feedback }]
+              : [],
+          ),
         );
         setResult({
           submission_id: batch.submission_id,
@@ -836,6 +868,7 @@ export function IntakeWizard({
               result={result}
               error={error}
               successContinue={successContinue}
+              batchFeedback={batchFeedback}
             />
           ) : null}
 
@@ -944,6 +977,7 @@ export function IntakeWizard({
                 variant="outline"
                 onClick={() => {
                   setResult(null);
+                  setBatchFeedback([]);
                   setFile(null);
                   setStep(0);
                 }}
@@ -1725,10 +1759,14 @@ function ConfirmationStep({
   result,
   error,
   successContinue,
+  batchFeedback,
 }: {
   result: SubmissionResponse | null;
   error: string | null;
   successContinue?: IntakeSuccessContinue;
+  /** Per-file soft match feedback from the batch endpoint. Empty/absent
+   *  for single uploads or when every file matched. */
+  batchFeedback?: BatchFileFeedback[];
 }) {
   if (error) {
     return (
@@ -1806,6 +1844,50 @@ function ConfirmationStep({
           <RequirementStatusBadge status={result.status as RequirementStatus} />
         </div>
       </div>
+
+      {/* Soft match feedback (2026-06-11). Informational only — the
+          upload SUCCEEDED and is queued for normal review, so this is a
+          warning Alert next to the success hero, never an error and
+          never a new blocking state. Renders nothing when the backend
+          sent no feedback. */}
+      {result.match_feedback ? (
+        <Alert variant="warning" className="cw-fade-up">
+          <div className="min-w-0">
+            <AlertTitle>Revisa el archivo</AlertTitle>
+            <AlertDescription>{result.match_feedback.warning_es}</AlertDescription>
+          </div>
+        </Alert>
+      ) : null}
+      {batchFeedback && batchFeedback.length > 0 ? (
+        <Alert variant="warning" className="cw-fade-up">
+          <div className="min-w-0 flex-1">
+            <AlertTitle>
+              {batchFeedback.length === 1
+                ? "Revisa uno de tus archivos"
+                : "Revisa algunos de tus archivos"}
+            </AlertTitle>
+            <ul className="mt-2 space-y-2">
+              {batchFeedback.map((entry, idx) => (
+                <li
+                  key={`${entry.filename}-${idx}`}
+                  className="flex items-start gap-2 text-[13px] leading-5"
+                >
+                  <FileText
+                    className="mt-0.5 h-4 w-4 shrink-0"
+                    aria-hidden="true"
+                  />
+                  <span className="min-w-0">
+                    <span className="font-semibold break-words">
+                      {entry.filename}
+                    </span>
+                    <span className="opacity-90"> — {entry.feedback.warning_es}</span>
+                  </span>
+                </li>
+              ))}
+            </ul>
+          </div>
+        </Alert>
+      ) : null}
 
       <div className="cw-fade-up rounded-md border border-primary/25 bg-primary/5 p-5">
         <p className="text-xs font-medium uppercase tracking-wide text-primary">

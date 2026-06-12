@@ -48,6 +48,30 @@ class SupportInfo(BaseModel):
     message: str
 
 
+class MatchFeedback(BaseModel):
+    """Phase C — provider-facing soft feedback at upload time (match only).
+
+    Populated when the intake heuristic is confident the provider
+    attached the wrong file for the requirement (low
+    ``requirement_match_confidence`` or an explicit
+    ``mismatch_reason``), so an honest mistake is caught before a
+    review cycle is burned. ``None`` when there is no match concern.
+
+    ANTI-TIPPING CONTRACT (agreed with product, 2026-06-11): this block
+    carries ONLY requirement-match information. Authenticity / forensic
+    / QR-verification risk signals are reviewer-facing and must NEVER
+    appear here or anywhere else in a provider-facing response — a
+    flagged document routes silently to human review.
+    """
+
+    confidence: float | None = None
+    warning_es: str
+    # Display name of the requirement the provider was asked for
+    # ("Comprobante de pago bancario", …) so the frontend can render
+    # the expectation next to the warning without re-resolving the slot.
+    expected_label: str | None = None
+
+
 class SubmissionResponse(BaseModel):
     submission_id: str
     document_id: str
@@ -60,6 +84,9 @@ class SubmissionResponse(BaseModel):
     document_signals: DocumentSignalsSummary | None = None
     support: SupportInfo | None = None
     message: str
+    # Phase C — soft match-only feedback (see MatchFeedback docstring).
+    # Additive + default None so pre-Phase-C clients are unaffected.
+    match_feedback: MatchFeedback | None = None
 
 
 # Stage 2.7-b — Multi-document submission response.
@@ -82,6 +109,10 @@ class DocumentBatchEntry(BaseModel):
     document_signals: DocumentSignalsSummary | None = None
     validations: list[ValidationSignal]
     validation_events: list[ValidationEventSummary] = []
+    # Phase C — per-file soft match-only feedback (see MatchFeedback
+    # docstring). Lives on the entry, not the envelope, because each
+    # attached file is matched against the slot independently.
+    match_feedback: MatchFeedback | None = None
 
 
 class MultiSubmissionResponse(BaseModel):

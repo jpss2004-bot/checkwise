@@ -288,6 +288,19 @@ export async function getSlotState(
   );
 }
 
+/** Provider-facing soft match feedback (2026-06-11). Non-null means
+ *  "this file probably isn't the requested document" — a friendly,
+ *  informational warning. The upload is still accepted and queued for
+ *  normal review; this never blocks. Match-only by design: authenticity
+ *  and risk signals are never provider-facing. Returned on the single
+ *  upload response and on each ``documents[]`` entry of the batch
+ *  response. */
+export type MatchFeedback = {
+  confidence: number | null;
+  warning_es: string;
+  expected_label: string | null;
+};
+
 export type SubmissionRequirementSummary = {
   code: string | null;
   name: string | null;

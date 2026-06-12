@@ -440,17 +440,15 @@ def test_workspace_upload_writes_document_inspection(api_client: TestClient) -> 
         db.close()
 
 
-def _sat_text_pdf_bytes() -> bytes:
-    """Hand-assembled single-page PDF whose text layer names the SAT.
+def _text_pdf_bytes(line: str) -> bytes:
+    """Hand-assembled single-page PDF whose text layer carries ``line``.
 
     pypdf's writer cannot draw text and Pillow pages carry no text
-    layer, so the intake heuristics can only detect an institution on a
+    layer, so the intake heuristics can only read signals from a
     manually built file (same technique as tests/test_document_forensics).
+    ``line`` must be ASCII without parentheses (PDF string literal).
     """
-    stream = (
-        b"BT /F1 18 Tf 72 720 Td "
-        b"(Opinion de cumplimiento SAT ejercicio 2026) Tj ET"
-    )
+    stream = b"BT /F1 18 Tf 72 720 Td (" + line.encode("ascii") + b") Tj ET"
     objects = [
         b"<< /Type /Catalog /Pages 2 0 R >>",
         b"<< /Type /Pages /Kids [3 0 R] /Count 1 >>",
@@ -478,6 +476,11 @@ def _sat_text_pdf_bytes() -> bytes:
         + b"\n%%EOF\n"
     )
     return bytes(out)
+
+
+def _sat_text_pdf_bytes() -> bytes:
+    """Text PDF that names the SAT — mismatches any non-SAT requirement."""
+    return _text_pdf_bytes("Opinion de cumplimiento SAT ejercicio 2026")
 
 
 def _sat_pdf_with_qr_bytes(url: str) -> bytes:
@@ -1066,3 +1069,198 @@ def test_workspace_upload_auto_supersedes_current_occupant(
         )
         == 1
     )
+
+
+# ---------------------------------------------------------------------------
+# Phase C — provider-facing soft match feedback (match-only)
+# ---------------------------------------------------------------------------
+#
+# The upload response may carry ``match_feedback`` when the synchronous
+# intake heuristic believes the provider attached the wrong file
+# (explicit ``mismatch_reason`` or quite-low
+# ``requirement_match_confidence``). The upload is never blocked.
+# Anti-tipping contract: the feedback is MATCH-ONLY — authenticity /
+# forensics / QR risk signals must never surface to the provider.
+
+
+def _assert_no_forbidden_keys(node: object) -> None:
+    """Recursively assert no authenticity/forensic key leaks into a payload."""
+    forbidden = {
+        "authenticity",
+        "authenticity_risk",
+        "risk_reasons",
+        "forensics",
+        "verification",
+        "shadow",
+    }
+    if isinstance(node, dict):
+        leaked = forbidden.intersection(node.keys())
+        assert not leaked, f"provider response leaked reviewer-only keys: {leaked}"
+        for value in node.values():
+            _assert_no_forbidden_keys(value)
+    elif isinstance(node, list):
+        for item in node:
+            _assert_no_forbidden_keys(item)
+
+
+def test_workspace_upload_wrong_document_carries_match_feedback(
+    api_client: TestClient,
+) -> None:
+    """A SAT opinión uploaded against the INFONAVIT comprobante slot gets a
+    soft Spanish warning naming the requested requirement — and still lands
+    in the review queue (202, status unchanged from today's derivation)."""
+    ws = _setup_workspace(api_client)
+    data, catalog_item = _canonical_intake_payload()
+    response = api_client.post(
+        f"/api/v1/portal/workspaces/{ws['workspace_id']}/submissions",
+        data=data,
+        files={"file": ("opinion-sat.pdf", _sat_text_pdf_bytes(), "application/pdf")},
+    )
+    assert response.status_code == 202, response.text
+    body = response.json()
+    # The intake heuristic flagged an institution mismatch (sat ≠ infonavit).
+    assert body["document_signals"]["mismatch_reason"]
+    feedback = body["match_feedback"]
+    assert feedback is not None
+    # Friendly, actionable Spanish naming the requested requirement.
+    assert catalog_item.name in feedback["warning_es"]
+    assert "no necesitas hacer nada" in feedback["warning_es"]
+    assert feedback["expected_label"] == catalog_item.name
+    # The mismatch reason itself (already provider-safe Spanish) is reused.
+    assert body["document_signals"]["mismatch_reason"] in feedback["warning_es"]
+    # Upload was NOT blocked — it routes to review like any other upload.
+    assert body["status"] == "pendiente_revision"
+    # Match-only wording: never authenticity/forensic language.
+    for term in ("autenticidad", "riesgo", "falsific", "forense", "sospech"):
+        assert term not in feedback["warning_es"].lower()
+
+
+def test_workspace_upload_clean_confident_match_feedback_is_none(
+    api_client: TestClient,
+) -> None:
+    """A document whose text matches the requirement well carries no
+    feedback — no noise on good uploads."""
+    ws = _setup_workspace(api_client)
+    data, _ = _canonical_intake_payload()
+    pdf = _text_pdf_bytes(
+        "Comprobante de pago bancario INFONAVIT aportaciones bimestre 2026"
+    )
+    response = api_client.post(
+        f"/api/v1/portal/workspaces/{ws['workspace_id']}/submissions",
+        data=data,
+        files={"file": ("comprobante.pdf", pdf, "application/pdf")},
+    )
+    assert response.status_code == 202, response.text
+    body = response.json()
+    assert body["document_signals"]["mismatch_reason"] is None
+    confidence = body["document_signals"]["requirement_match_confidence"]
+    assert confidence is not None and confidence >= 0.7
+    assert body["match_feedback"] is None
+
+
+def test_workspace_upload_borderline_confidence_no_feedback(
+    api_client: TestClient,
+) -> None:
+    """Mid-range confidence (here 0.65 — above the 0.35 floor, below the
+    0.7 prevalidation floor) stays silent: review queue only, no warning."""
+    ws = _setup_workspace(api_client)
+    data, _ = _canonical_intake_payload()
+    # 'comprobante' hits, 'bancario' does not → token score 0.5;
+    # INFONAVIT present → institution score 1.0 → 0.5*0.7 + 0.3 = 0.65.
+    pdf = _text_pdf_bytes("Pago INFONAVIT aportaciones comprobante 2026")
+    response = api_client.post(
+        f"/api/v1/portal/workspaces/{ws['workspace_id']}/submissions",
+        data=data,
+        files={"file": ("recibo.pdf", pdf, "application/pdf")},
+    )
+    assert response.status_code == 202, response.text
+    body = response.json()
+    assert body["document_signals"]["mismatch_reason"] is None
+    assert body["document_signals"]["requirement_match_confidence"] == pytest.approx(
+        0.65
+    )
+    assert body["match_feedback"] is None
+    assert body["status"] == "pendiente_revision"
+
+
+def test_workspace_upload_response_never_exposes_authenticity_fields(
+    api_client: TestClient,
+) -> None:
+    """Anti-tipping: even when the document trips the Phase A/B risk rollup
+    (non-official QR domain → 'suspicious'), the provider-facing response
+    contains no authenticity/risk/forensics/verification keys anywhere."""
+    ws = _setup_workspace(api_client)
+    data, _ = _canonical_intake_payload()
+    response = api_client.post(
+        f"/api/v1/portal/workspaces/{ws['workspace_id']}/submissions",
+        data=data,
+        files={
+            "file": (
+                "opinion.pdf",
+                _sat_pdf_with_qr_bytes("https://sat-verifica.example.com/doc/1"),
+                "application/pdf",
+            )
+        },
+    )
+    assert response.status_code == 202, response.text
+    body = response.json()
+    _assert_no_forbidden_keys(body)
+    # The risky document routed silently: any feedback present is match-only.
+    feedback = body.get("match_feedback")
+    if feedback is not None:
+        for term in ("autenticidad", "riesgo", "qr", "verificacion", "sospech"):
+            assert term not in feedback["warning_es"].lower()
+
+
+def test_build_match_feedback_thresholds() -> None:
+    """Unit coverage of the 0.35 floor + mismatch_reason precedence."""
+    from app.services.document_intelligence import DocumentSignals
+    from app.services.submission_service import (
+        _MATCH_FEEDBACK_CONFIDENCE_FLOOR,
+        build_match_feedback,
+    )
+
+    assert _MATCH_FEEDBACK_CONFIDENCE_FLOOR == 0.35
+
+    # Borderline / confident scores stay silent.
+    for confidence in (0.35, 0.6, 0.9):
+        assert (
+            build_match_feedback(
+                DocumentSignals(requirement_match_confidence=confidence),
+                requirement_name="Comprobante de pago bancario",
+            )
+            is None
+        )
+    # Unknown confidence without a mismatch stays silent too.
+    assert (
+        build_match_feedback(
+            DocumentSignals(requirement_match_confidence=None),
+            requirement_name="Comprobante de pago bancario",
+        )
+        is None
+    )
+
+    # Quite-low confidence warns, naming the requirement.
+    low = build_match_feedback(
+        DocumentSignals(requirement_match_confidence=0.1),
+        requirement_name="Comprobante de pago bancario",
+    )
+    assert low is not None
+    assert low.confidence == 0.1
+    assert "«Comprobante de pago bancario»" in low.warning_es
+    assert low.expected_label == "Comprobante de pago bancario"
+
+    # An explicit mismatch_reason warns even with a passable score.
+    mismatch = build_match_feedback(
+        DocumentSignals(
+            requirement_match_confidence=0.45,
+            mismatch_reason=(
+                "El documento parece 'opinion_cumplimiento_sat', pero el "
+                "requisito esperado sugiere 'infonavit_pago'."
+            ),
+        ),
+        requirement_name="Comprobante de pago bancario",
+    )
+    assert mismatch is not None
+    assert mismatch.warning_es.startswith("El documento parece")
+    assert "«Comprobante de pago bancario»" in mismatch.warning_es

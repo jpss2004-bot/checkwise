@@ -34,6 +34,7 @@ from app.schemas.submissions import (
     DocumentBatchEntry,
     DocumentInspectionSummary,
     DocumentSignalsSummary,
+    MatchFeedback,
     MultiSubmissionResponse,
     SubmissionResponse,
     SupportInfo,
@@ -160,6 +161,61 @@ def assert_pdf_upload(file: UploadFile) -> None:
 #                                             don't alarm the provider)
 _PREVALIDATION_CONFIDENCE_FLOOR = 0.7
 _MISMATCH_CONFIDENCE_FLOOR = 0.5
+
+# Phase C — provider-facing soft match feedback. Below this
+# ``requirement_match_confidence`` the upload response carries a
+# ``MatchFeedback`` warning ("this doesn't look like the requested
+# document — double-check the attachment"). Deliberately conservative:
+# prod calibration showed the intake heuristic separates well at >= 0.5,
+# so only quite-low scores warrant bothering the provider. An explicit
+# ``mismatch_reason`` from DocumentSignals always triggers the feedback
+# regardless of the score. The upload is NEVER blocked either way — it
+# lands in the review queue exactly as before.
+_MATCH_FEEDBACK_CONFIDENCE_FLOOR = 0.35
+
+
+def build_match_feedback(
+    document_signals: DocumentSignals,
+    *,
+    requirement_name: str,
+) -> MatchFeedback | None:
+    """Build the Phase C soft, match-only warning for the upload response.
+
+    Returns ``None`` when there is no match concern. MATCH-ONLY by
+    contract: this function reads exclusively the requirement-match
+    signals (``mismatch_reason`` / ``requirement_match_confidence``).
+    Authenticity / forensics / QR risk signals must never feed a
+    provider-facing message — a risky document routes silently to
+    review (anti-tipping contract, see ``MatchFeedback``).
+    """
+    confidence = document_signals.requirement_match_confidence
+    next_steps = (
+        "Verifica que adjuntaste el documento correcto; si es el correcto, "
+        "no necesitas hacer nada — pasará a revisión normal."
+    )
+    if document_signals.mismatch_reason:
+        # ``mismatch_reason`` is already plain provider-safe Spanish
+        # ("El documento parece X, pero…"); reuse it and add the
+        # requested-document name + the reassuring next step.
+        warning = (
+            f"{document_signals.mismatch_reason} "
+            f"El documento solicitado es «{requirement_name}». {next_steps}"
+        )
+        return MatchFeedback(
+            confidence=confidence,
+            warning_es=warning,
+            expected_label=requirement_name,
+        )
+    if confidence is not None and confidence < _MATCH_FEEDBACK_CONFIDENCE_FLOOR:
+        warning = (
+            f"Este archivo no parece ser «{requirement_name}». {next_steps}"
+        )
+        return MatchFeedback(
+            confidence=confidence,
+            warning_es=warning,
+            expected_label=requirement_name,
+        )
+    return None
 
 
 def status_from_inspection(
@@ -873,6 +929,9 @@ def finalize_intake_submission(
             institution_code=institution.code,
             period_code=period_code,
             org_id=client.id,
+            # Phase C — alto/crítico requirements always qualify for the
+            # escalation tier (bounded by the escalation daily cap).
+            requirement_risk_level=resolved_requirement.requirement.risk_level,
         )
 
     return SubmissionResponse(
@@ -917,6 +976,10 @@ def finalize_intake_submission(
             message="Contacta soporte si no sabes qué documento subir o detectas una alerta.",
         ),
         message=submission_message(final_status),
+        match_feedback=build_match_feedback(
+            document_signals,
+            requirement_name=resolved_requirement.canonical_name,
+        ),
     )
 
 
@@ -1200,6 +1263,10 @@ def finalize_multi_document_submission(
                     )
                     for event in validation_events
                 ],
+                match_feedback=build_match_feedback(
+                    document_signals,
+                    requirement_name=resolved_requirement.canonical_name,
+                ),
             )
         )
 
@@ -1333,6 +1400,9 @@ def finalize_multi_document_submission(
                 institution_code=institution.code,
                 period_code=period_code,
                 org_id=client.id,
+                # Phase C — alto/crítico requirements always qualify for
+                # the escalation tier (bounded by the escalation cap).
+                requirement_risk_level=resolved_requirement.requirement.risk_level,
             )
 
     return MultiSubmissionResponse(
