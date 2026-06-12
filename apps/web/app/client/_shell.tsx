@@ -267,9 +267,9 @@ export function ClientShell({
   return (
     <div
       data-density="dense"
-      // ``wise-push-target``: on ≥1440px the open Wise drawer reserves
-      // 480px on the right so it never covers the console; below that it
-      // overlays. See globals.css.
+      // ``wise-push-target``: at ≥1024px the open Wise drawer reserves
+      // 380px on the right so it never covers the console top bar; below
+      // that Wise is a bottom sheet (no push). See globals.css.
       className="wise-push-target min-h-screen bg-[color:var(--surface-page)]"
     >
       <header className="sticky top-0 z-30 border-b border-[color:var(--border-subtle)] bg-[color:var(--surface-raised)]/95 backdrop-blur supports-[backdrop-filter]:bg-[color:var(--surface-raised)]/85">

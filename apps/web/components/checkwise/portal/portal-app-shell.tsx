@@ -336,9 +336,9 @@ export function PortalAppShell({
       ) : null}
 
       {/* ── Main column ───────────────────────────────────────── */}
-      {/* ``wise-push-target``: on ≥1440px the open Wise drawer reserves
-          480px on the right so it never covers the workspace; below
-          that it overlays. See globals.css. */}
+      {/* ``wise-push-target``: at ≥1024px the open Wise drawer reserves
+          380px on the right so it never covers the workspace top bar;
+          below that Wise is a bottom sheet (no push). See globals.css. */}
       <div className="wise-push-target flex min-w-0 flex-1 flex-col">
         <TopBar
           session={session}
