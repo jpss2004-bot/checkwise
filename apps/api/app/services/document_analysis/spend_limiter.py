@@ -61,6 +61,32 @@ def check_org_daily_quota(org_id: str | None) -> bool:
     )
 
 
+def check_org_escalation_daily_quota(org_id: str | None) -> bool:
+    """Return True when an escalation-tier call is within the org's quota.
+
+    Phase C: the triage tier (cheap model) is bounded by
+    ``check_org_daily_quota`` above; escalation re-runs on the stronger
+    model are bounded by this separate, smaller cap
+    (``DOCUMENT_ANALYSIS_ESCALATION_DAILY_CAP_PER_ORG``, default 50).
+    The two counters use distinct bucket keys (per-tier counter) so a
+    busy-but-clean org never starves its escalation budget and vice
+    versa.
+
+    Same contract as the triage check: call exactly once per attempted
+    escalation, BEFORE the provider call. ``False`` means skip the
+    escalation gracefully — the triage result stands and the skip is
+    noted in ``shadow_signals['_tiers']``. Setting the cap to 0
+    disables it (always allow).
+    """
+    limit = settings.DOCUMENT_ANALYSIS_ESCALATION_DAILY_CAP_PER_ORG
+    if limit <= 0:
+        return True
+    bucket = f"docanalysis:escalation:org:{hash_identifier(org_id or '__none__')}"
+    return _doc_analysis_daily_limiter.check(
+        bucket, limit=limit, window_seconds=_WINDOW_SECONDS_DAY
+    )
+
+
 def reset_daily_quota() -> None:
-    """Test hook. Drops every bucket in this limiter's namespace."""
+    """Test hook. Drops every bucket in this limiter's namespace (both tiers)."""
     _doc_analysis_daily_limiter.reset()

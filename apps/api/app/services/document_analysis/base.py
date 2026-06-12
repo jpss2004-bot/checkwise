@@ -89,6 +89,15 @@ class AnalysisResult:
     # surfaced to providers. Kept small (no full document content) so
     # the JSON column does not balloon.
     raw_meta: dict | None = None
+    # Phase C — LLM authenticity judgment. ``None`` for providers that
+    # do not produce one (heuristic) or when the run failed. Shape:
+    #     {"concerns": [{"concern": str, "severity": "low"|"medium"}],
+    #      "looks_fabricated": bool,
+    #      "confidence": float | None}
+    # ``shadow_runner._persist_shadow_result`` translates this into
+    # ``llm_authenticity_concern`` RiskReasons (capped at medium) and
+    # re-rolls ``DocumentInspection.authenticity_risk``.
+    authenticity: dict | None = None
 
 
 class DocumentAnalysisProvider(Protocol):

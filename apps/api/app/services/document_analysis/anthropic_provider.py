@@ -53,6 +53,7 @@ from app.services.document_analysis.base import (
 )
 from app.services.document_analysis.prompt_registry import (
     PromptBundle,
+    get_escalation_prompt,
     get_prompt_for_requirement,
 )
 from app.services.document_intelligence import DocumentSignals
@@ -156,6 +157,58 @@ _RECORD_TOOL: dict[str, Any] = {
                     "No se muestra al proveedor."
                 ),
             },
+            # Phase C — authenticity judgment (additive). Conservative
+            # by design: an empty list is the expected output for the
+            # vast majority of documents.
+            "authenticity_concerns": {
+                "type": "array",
+                "items": {
+                    "type": "object",
+                    "additionalProperties": False,
+                    "properties": {
+                        "concern": {
+                            "type": "string",
+                            "description": (
+                                "Frase corta en español neutro para el "
+                                "equipo legal describiendo la señal de "
+                                "posible fabricación observada."
+                            ),
+                        },
+                        "severity": {
+                            "type": "string",
+                            "enum": ["low", "medium"],
+                            "description": (
+                                "low = detalle menor que vale la pena "
+                                "revisar; medium = señal clara de "
+                                "posible fabricación."
+                            ),
+                        },
+                    },
+                    "required": ["concern", "severity"],
+                },
+                "description": (
+                    "Señales concretas de fabricación observadas en el "
+                    "documento. Vacío cuando no observaste ninguna (lo "
+                    "normal)."
+                ),
+            },
+            "looks_fabricated": {
+                "type": "boolean",
+                "description": (
+                    "True sólo cuando la evidencia combinada sugiere que "
+                    "el documento fue fabricado o alterado. En caso de "
+                    "duda, false."
+                ),
+            },
+            "authenticity_confidence": {
+                "type": "number",
+                "minimum": 0.0,
+                "maximum": 1.0,
+                "description": (
+                    "0.0–1.0. Confianza en que el documento es auténtico "
+                    "(1.0 = sin señales de fabricación)."
+                ),
+            },
         },
         "required": [
             "detected_institution",
@@ -167,6 +220,9 @@ _RECORD_TOOL: dict[str, Any] = {
             "mismatch_reason",
             "anomaly_codes",
             "summary_for_reviewer",
+            "authenticity_concerns",
+            "looks_fabricated",
+            "authenticity_confidence",
         ],
     },
 }
@@ -181,7 +237,21 @@ class AnthropicDocumentAnalysisProvider:
     API key are missing; the factory catches that and falls back.
     """
 
-    def __init__(self, api_key: str | None = None) -> None:
+    def __init__(
+        self,
+        api_key: str | None = None,
+        *,
+        model: str | None = None,
+        deep_authenticity: bool = False,
+    ) -> None:
+        """Build a provider for one analysis tier.
+
+        ``model`` overrides ``DOCUMENT_ANALYSIS_MODEL`` (the factory
+        passes ``DOCUMENT_ANALYSIS_TRIAGE_MODEL`` for the triage tier).
+        ``deep_authenticity=True`` selects the escalation tier: the
+        requirement-specific extraction prompt is replaced by the
+        deeper, authenticity-focused ``authenticity_deep`` prompt.
+        """
         key = (api_key or settings.ANTHROPIC_API_KEY or "").strip()
         if not key:
             raise ProviderUnavailableError(
@@ -195,7 +265,8 @@ class AnthropicDocumentAnalysisProvider:
             ) from exc
 
         self._client = Anthropic(api_key=key)
-        self._model = (settings.DOCUMENT_ANALYSIS_MODEL or "claude-sonnet-4-6").strip()
+        self._model = (model or settings.DOCUMENT_ANALYSIS_MODEL or "claude-sonnet-4-6").strip()
+        self._deep_authenticity = bool(deep_authenticity)
         self._timeout = float(settings.DOCUMENT_ANALYSIS_TIMEOUT_SECONDS or 30.0)
         self._max_file_bytes = int(settings.DOCUMENT_ANALYSIS_MAX_FILE_MB or 30) * 1024 * 1024
         self._max_pages = int(settings.DOCUMENT_ANALYSIS_MAX_PAGES or 100)
@@ -219,10 +290,13 @@ class AnthropicDocumentAnalysisProvider:
         org_id: str | None = None,
     ) -> AnalysisResult:
         _ = org_id  # already enforced by the spend limiter upstream
-        prompt = get_prompt_for_requirement(
-            requirement_code=requirement_code,
-            requirement_name=requirement_name,
-        )
+        if self._deep_authenticity:
+            prompt = get_escalation_prompt()
+        else:
+            prompt = get_prompt_for_requirement(
+                requirement_code=requirement_code,
+                requirement_name=requirement_name,
+            )
         start = time.monotonic()
 
         preflight_error = self._preflight(pdf_path)
@@ -277,7 +351,7 @@ class AnthropicDocumentAnalysisProvider:
         except Exception as exc:  # noqa: BLE001 — categorise everything as a known failure
             return self._failure(prompt, start, self._categorise_exception(exc))
 
-        signals, raw_meta = self._parse_response(response)
+        signals, raw_meta, authenticity = self._parse_response(response)
         elapsed_ms = int((time.monotonic() - start) * 1000)
 
         if signals is None:
@@ -297,6 +371,7 @@ class AnthropicDocumentAnalysisProvider:
             signals=signals,
             error=None,
             raw_meta=raw_meta,
+            authenticity=authenticity,
         )
 
     # ------------------------------------------------------------------
@@ -345,7 +420,9 @@ class AnthropicDocumentAnalysisProvider:
             "con la confianza. La decisión final la toma el equipo legal."
         )
 
-    def _parse_response(self, response: Any) -> tuple[DocumentSignals | None, dict]:
+    def _parse_response(
+        self, response: Any
+    ) -> tuple[DocumentSignals | None, dict, dict | None]:
         raw_meta: dict[str, Any] = {
             "stop_reason": str(getattr(response, "stop_reason", "")),
             "model": str(getattr(response, "model", "")),
@@ -367,7 +444,7 @@ class AnthropicDocumentAnalysisProvider:
                 try:
                     payload = json.loads(payload)
                 except (TypeError, ValueError):
-                    return None, raw_meta
+                    return None, raw_meta, None
             try:
                 signals = DocumentSignals(
                     detected_institution=payload.get("detected_institution"),
@@ -384,11 +461,58 @@ class AnthropicDocumentAnalysisProvider:
                     anomaly_codes=list(payload.get("anomaly_codes") or []),
                 )
             except (TypeError, ValueError):
-                return None, raw_meta
+                return None, raw_meta, None
             raw_meta["summary_for_reviewer"] = payload.get("summary_for_reviewer")
-            return signals, raw_meta
+            return signals, raw_meta, self._parse_authenticity(payload)
 
-        return None, raw_meta
+        return None, raw_meta, None
+
+    @staticmethod
+    def _parse_authenticity(payload: dict) -> dict | None:
+        """Extract the Phase-C authenticity judgment, tolerantly.
+
+        Returns ``None`` when the model returned none of the
+        authenticity fields (e.g., a cached/replayed v1-prompt run);
+        otherwise a normalised dict. Malformed entries are dropped
+        rather than failing the whole extraction — authenticity is an
+        additive signal and must never cost us the base signals.
+        """
+        if not any(
+            key in payload
+            for key in (
+                "authenticity_concerns",
+                "looks_fabricated",
+                "authenticity_confidence",
+            )
+        ):
+            return None
+
+        concerns: list[dict[str, str]] = []
+        for item in payload.get("authenticity_concerns") or []:
+            if not isinstance(item, dict):
+                continue
+            concern = str(item.get("concern") or "").strip()
+            if not concern:
+                continue
+            severity = item.get("severity")
+            if severity not in ("low", "medium"):
+                severity = "medium"
+            concerns.append({"concern": concern, "severity": severity})
+
+        try:
+            confidence = (
+                float(payload["authenticity_confidence"])
+                if payload.get("authenticity_confidence") is not None
+                else None
+            )
+        except (TypeError, ValueError):
+            confidence = None
+
+        return {
+            "concerns": concerns,
+            "looks_fabricated": bool(payload.get("looks_fabricated")),
+            "confidence": confidence,
+        }
 
     def _categorise_exception(self, exc: BaseException) -> str:
         """Map an SDK exception to one of the public ``error`` codes."""

@@ -278,11 +278,21 @@ class Settings(BaseSettings):
     # skip the provider and record ``shadow_error=unsupported_size_or_type``.
     # ─────────────────────────────────────────────────────────────────
     DOCUMENT_ANALYSIS_PROVIDER: str = "disabled"
+    # Phase C — tiered analysis. Every shadow-analyzed upload runs the
+    # cheap TRIAGE model first; suspicious results (or high-stakes
+    # requirements) re-run on the stronger escalation model below.
+    # ``DOCUMENT_ANALYSIS_MODEL`` keeps its name for Render env compat
+    # but is now the **escalation** model, not the per-upload default.
     DOCUMENT_ANALYSIS_MODEL: str = "claude-sonnet-4-6"
+    DOCUMENT_ANALYSIS_TRIAGE_MODEL: str = "claude-haiku-4-5"
     DOCUMENT_ANALYSIS_TIMEOUT_SECONDS: float = 30.0
     DOCUMENT_ANALYSIS_MAX_FILE_MB: int = 30
     DOCUMENT_ANALYSIS_MAX_PAGES: int = 100
     DOCUMENT_ANALYSIS_DAILY_CAP_PER_ORG: int = 200
+    # Phase C — separate daily cap for escalation-tier (expensive model)
+    # re-runs. Counted independently of the triage cap; 0 disables.
+    # Exhaustion skips the escalation gracefully (triage result stands).
+    DOCUMENT_ANALYSIS_ESCALATION_DAILY_CAP_PER_ORG: int = 50
 
     # Phase 3 — pilot-cohort allowlist. CSV of ``client.id`` values
     # that are allowed to receive shadow analysis. Empty string (the

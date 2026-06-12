@@ -31,13 +31,30 @@ _PROMPTS_DIR = Path(__file__).parent / "prompts"
 # Canonical slug → prompt-file stem (without ``.md``). Bump the version
 # suffix when prompts change so the persisted ``shadow_prompt_version``
 # disambiguates old rows from new ones.
+#
+# v2 (Phase C): every extraction prompt additionally instructs the model
+# to inspect for fabrication signals and report them via the new
+# ``authenticity_concerns`` / ``looks_fabricated`` /
+# ``authenticity_confidence`` tool fields. The v1 files stay on disk so
+# persisted ``shadow_prompt_version`` values remain replayable.
+#
+# ``authenticity_deep`` is the escalation-tier prompt: a deeper,
+# authenticity-focused pass run on the stronger model when the triage
+# tier (or the deterministic verdict / requirement risk level) flags
+# the document. It is requirement-agnostic — the requirement context
+# still arrives via the user prompt.
 _SLUG_TO_PROMPT: dict[str, str] = {
-    "csf_sat": "csf_sat.v1",
-    "opinion_32d_sat": "opinion_32d.v1",
-    "repse_stps": "repse_stps.v1",
-    "imss_pago": "imss_pago.v1",
-    "base": "base.v1",
+    "csf_sat": "csf_sat.v2",
+    "opinion_32d_sat": "opinion_32d.v2",
+    "repse_stps": "repse_stps.v2",
+    "imss_pago": "imss_pago.v2",
+    "base": "base.v2",
+    "authenticity_deep": "authenticity_deep.v1",
 }
+
+# Slugs that are not requirement extraction prompts (never returned by
+# requirement resolution; excluded from the supported-scope listing).
+_INTERNAL_SLUGS = {"base", "authenticity_deep"}
 
 
 @dataclass(frozen=True)
@@ -125,10 +142,21 @@ def get_prompt_for_requirement(
     return _PROMPTS[slug]
 
 
+def get_escalation_prompt() -> PromptBundle:
+    """Return the deep authenticity prompt for the escalation tier.
+
+    Requirement-agnostic by design: the escalation pass re-examines a
+    document the triage tier (or a deterministic signal) flagged, so
+    one focused forensic prompt covers every requirement type. The
+    requirement context still rides in the per-call user prompt.
+    """
+    return _PROMPTS["authenticity_deep"]
+
+
 def all_supported_slugs() -> list[str]:
     """Return every requirement slug we explicitly support.
 
     Used by the docs/Phase-2 report to enumerate the initial scope
     without re-hardcoding it.
     """
-    return [slug for slug in _SLUG_TO_PROMPT if slug != "base"]
+    return [slug for slug in _SLUG_TO_PROMPT if slug not in _INTERNAL_SLUGS]

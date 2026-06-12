@@ -36,7 +36,9 @@ from app.services.document_analysis.heuristic import HeuristicDocumentAnalysisPr
 logger = logging.getLogger(__name__)
 
 
-def build_document_analysis_provider() -> DocumentAnalysisProvider | None:
+def build_document_analysis_provider(
+    tier: str = "triage",
+) -> DocumentAnalysisProvider | None:
     """Return the configured shadow-analysis provider, or None.
 
     The router-level intake pipeline (``submission_service``) is
@@ -44,6 +46,17 @@ def build_document_analysis_provider() -> DocumentAnalysisProvider | None:
     classifier exactly as today. This factory only powers the
     background shadow runner: when it returns ``None`` the runner is
     a no-op.
+
+    Phase C tiers:
+        ``tier="triage"`` (default) — the cheap per-upload pass.
+            Anthropic backends use ``DOCUMENT_ANALYSIS_TRIAGE_MODEL``
+            (default ``claude-haiku-4-5``).
+        ``tier="escalation"`` — the deeper authenticity-focused re-run.
+            Anthropic backends use ``DOCUMENT_ANALYSIS_MODEL`` (the
+            historical setting name, kept for Render env compat) plus
+            the ``authenticity_deep`` prompt. There is NO heuristic
+            fallback for this tier — when Claude is unavailable the
+            escalation is skipped gracefully (returns ``None``).
 
     Settings:
         DOCUMENT_ANALYSIS_PROVIDER:
@@ -60,6 +73,9 @@ def build_document_analysis_provider() -> DocumentAnalysisProvider | None:
     if provider_name in {"disabled", ""}:
         return None
     if provider_name == "heuristic":
+        # The heuristic has no escalation tier — only the triage slot.
+        if tier == "escalation":
+            return None
         return HeuristicDocumentAnalysisProvider()
     if provider_name in {"anthropic", "shadow"}:
         # Import lazily so a missing anthropic SDK in a heuristic-only
@@ -69,8 +85,22 @@ def build_document_analysis_provider() -> DocumentAnalysisProvider | None:
                 AnthropicDocumentAnalysisProvider,
             )
 
-            return AnthropicDocumentAnalysisProvider()
+            if tier == "escalation":
+                return AnthropicDocumentAnalysisProvider(
+                    model=settings.DOCUMENT_ANALYSIS_MODEL,
+                    deep_authenticity=True,
+                )
+            return AnthropicDocumentAnalysisProvider(
+                model=settings.DOCUMENT_ANALYSIS_TRIAGE_MODEL,
+            )
         except ProviderUnavailableError as exc:
+            if tier == "escalation":
+                logger.warning(
+                    "Anthropic escalation provider unavailable (%s); "
+                    "skipping escalation tier.",
+                    exc,
+                )
+                return None
             logger.warning(
                 "Anthropic document-analysis provider unavailable (%s); "
                 "falling back to heuristic provider for shadow runs.",
