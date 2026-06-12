@@ -267,7 +267,10 @@ export function ClientShell({
   return (
     <div
       data-density="dense"
-      className="min-h-screen bg-[color:var(--surface-page)]"
+      // ``wise-push-target``: on ≥1440px the open Wise drawer reserves
+      // 480px on the right so it never covers the console; below that it
+      // overlays. See globals.css.
+      className="wise-push-target min-h-screen bg-[color:var(--surface-page)]"
     >
       <header className="sticky top-0 z-30 border-b border-[color:var(--border-subtle)] bg-[color:var(--surface-raised)]/95 backdrop-blur supports-[backdrop-filter]:bg-[color:var(--surface-raised)]/85">
         <div className="mx-auto flex max-w-7xl items-center gap-3 px-5 py-2.5">

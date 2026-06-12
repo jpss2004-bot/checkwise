@@ -1,7 +1,7 @@
 "use client";
 
 import * as React from "react";
-import { CaretDown, Sparkle, X } from "@phosphor-icons/react";
+import { CaretRight, Sparkle, X } from "@phosphor-icons/react";
 
 import { cn } from "@/lib/utils";
 
@@ -9,10 +9,11 @@ import { cn } from "@/lib/utils";
  * Wise dock shell — surface-agnostic chrome.
  *
  * Owns ONLY structural behavior shared by every Wise surface (portal,
- * cliente, future admin): the floating FAB, the desktop floating-card
- * + mobile bottom-sheet panel, the localStorage-persisted collapsed
- * state, Esc-to-close, the mobile backdrop, and the three lifecycle
- * callbacks (first render, open, close).
+ * cliente, future admin): the closed edge tab, the desktop right-edge
+ * drawer + mobile bottom-sheet panel, the localStorage-persisted
+ * collapsed state, Esc-to-close, the mobile backdrop, the enter/exit
+ * animation, and the three lifecycle callbacks (first render, open,
+ * close).
  *
  * Owns NOTHING about the conversation:
  *   • Audience, intents, message bubbles → entry component's body.
@@ -22,29 +23,38 @@ import { cn } from "@/lib/utils";
  * Entries inject those via the three render-prop slots. Each slot is a
  * function (not a node) so re-renders triggered inside the slot don't
  * remount the shell.
+ *
+ * Phase 6 (2026-06-12) — Wise moved from a bottom-left floating dock to
+ * a right-edge drawer. Closed, it shows a thin vertical tab on the
+ * right edge; open, it slides in a full-height 480px panel. On wide
+ * viewports (≥1440px) the drawer PUSHES page content left (see the
+ * ``--wise-drawer-w`` / ``[data-wise-drawer-open]`` rules in
+ * globals.css + the ``wise-push-target`` class on each shell's main
+ * column) so nothing is ever covered; on narrower laptops it overlays.
+ * Mobile keeps the bottom sheet.
  */
+
+/** Keep in sync with the ``transition-transform`` duration on the
+ *  drawer panel below. The exit timer waits this long (+ a frame of
+ *  slack) before unmounting so the slide-out animation can finish. */
+const DRAWER_ANIM_MS = 380;
 
 export interface WiseDockShellProps {
   /** localStorage key for the collapsed/expanded preference. MUST be
    *  unique per surface so portal and cliente prefs don't bleed. */
   storageKey: string;
-  /** First-visit default. Portal defaults to expanded so onboarding
-   *  gets help loud; quieter surfaces may prefer collapsed. */
+  /** First-visit default. Defaults to collapsed (tab only) so the
+   *  drawer never covers the page until the user reaches for it. */
   defaultCollapsed?: boolean;
   /** Accessible label on the dialog element. */
   ariaLabel: string;
-  /** Accessible label on the collapsed FAB. */
-  fabAriaLabel: string;
-  /** Show the small warning pulse on the FAB. The shell never decides
+  /** Accessible label on the closed edge tab. */
+  tabAriaLabel: string;
+  /** Show the small warning pulse on the tab. The shell never decides
    *  this — the entry computes it from its own message state. */
   hasWarning?: boolean;
-  /** Which corner the FAB + panel anchor to. ``left`` (default) keeps
-   *  Wise away from bottom-right workflow actions. ``right`` is kept
-   *  for surfaces that explicitly need right anchoring. */
-  placement?: "left" | "right";
   className?: string;
-  /** Optional override for the expanded panel. Use this when the FAB
-   *  needs a surface-specific offset, e.g. a desktop sidebar. */
+  /** Optional override for the expanded drawer panel. */
   panelClassName?: string;
 
   /** Fired once per mount (after hydration completes). Use to send
@@ -54,7 +64,7 @@ export interface WiseDockShellProps {
    *  Use to lazy-fetch data on first open + emit analytics. */
   onOpen?: () => void;
   /** Fired every time the user transitions from expanded → collapsed
-   *  (button, Esc, backdrop). */
+   *  (tab, Esc, backdrop, close button). */
   onClose?: () => void;
 
   /** Render slots. Receive `close` so the entry's header close button
@@ -66,11 +76,10 @@ export interface WiseDockShellProps {
 
 export function WiseDockShell({
   storageKey,
-  defaultCollapsed = false,
+  defaultCollapsed = true,
   ariaLabel,
-  fabAriaLabel,
+  tabAriaLabel,
   hasWarning = false,
-  placement = "left",
   className,
   panelClassName,
   onFirstRender,
@@ -82,7 +91,13 @@ export function WiseDockShell({
 }: WiseDockShellProps) {
   const [collapsed, setCollapsed] = React.useState<boolean>(true);
   const [hydrated, setHydrated] = React.useState(false);
+  // ``mounted`` keeps the panel in the DOM for the duration of the
+  // open + slide-out window; ``entered`` drives the in-place transform
+  // + staggered content reveal. Splitting them lets the exit animate.
+  const [mounted, setMounted] = React.useState(false);
+  const [entered, setEntered] = React.useState(false);
   const firedFirstRender = React.useRef(false);
+  const exitTimer = React.useRef<number | null>(null);
 
   // Hydrate from localStorage on mount. First-ever visit honors the
   // entry's `defaultCollapsed` preference; subsequent visits stick to
@@ -125,6 +140,65 @@ export function WiseDockShell({
     [storageKey, onOpen, onClose],
   );
 
+  // Drive the mount → enter → exit lifecycle off the logical collapsed
+  // state. Opening mounts then flips ``entered`` on the next frame so
+  // the CSS transition runs. Closing flips ``entered`` off immediately
+  // (slide-out) and unmounts once the animation window elapses.
+  React.useEffect(() => {
+    if (!hydrated) return;
+    if (exitTimer.current !== null) {
+      window.clearTimeout(exitTimer.current);
+      exitTimer.current = null;
+    }
+    if (!collapsed) {
+      setMounted(true);
+      const raf = window.requestAnimationFrame(() => setEntered(true));
+      return () => window.cancelAnimationFrame(raf);
+    }
+    setEntered(false);
+    exitTimer.current = window.setTimeout(() => {
+      setMounted(false);
+      exitTimer.current = null;
+    }, DRAWER_ANIM_MS + 40);
+    return () => {
+      if (exitTimer.current !== null) {
+        window.clearTimeout(exitTimer.current);
+        exitTimer.current = null;
+      }
+    };
+  }, [collapsed, hydrated]);
+
+  // Reflect open state on <html> so the page can react in pure CSS:
+  //   • ``[data-wise-drawer-open]`` → content push (≥1440px) + the
+  //     feedback launcher stepping aside.
+  //   • ``[data-wise-drawer-mounted]`` → ``overflow-x: clip`` for the
+  //     duration of the slide so the off-screen panel never spawns a
+  //     transient horizontal scrollbar.
+  React.useEffect(() => {
+    if (!hydrated) return;
+    document.documentElement.dataset.wiseDrawerOpen = collapsed
+      ? "false"
+      : "true";
+  }, [collapsed, hydrated]);
+
+  React.useEffect(() => {
+    if (!hydrated) return;
+    const root = document.documentElement;
+    if (mounted) root.dataset.wiseDrawerMounted = "true";
+    else delete root.dataset.wiseDrawerMounted;
+  }, [mounted, hydrated]);
+
+  // Clean the global flags if the dock unmounts mid-open (e.g. route
+  // change tearing down the shell) so a stale push/clip never sticks.
+  React.useEffect(
+    () => () => {
+      const root = document.documentElement;
+      delete root.dataset.wiseDrawerOpen;
+      delete root.dataset.wiseDrawerMounted;
+    },
+    [],
+  );
+
   // Esc closes when expanded.
   React.useEffect(() => {
     if (collapsed) return;
@@ -143,67 +217,80 @@ export function WiseDockShell({
 
   return (
     <>
-      {/* Collapsed FAB — always rendered, fades when expanded so the
-          transition reads as "the FAB expanded into the panel" rather
-          than "two separate things popped in and out". */}
+      {/* Closed affordance — a thin vertical tab pinned to the right
+          edge. Peeks left on hover. Sits at z-40 so the open drawer
+          (z-50) cleanly covers it; fades out rather than translating
+          off-screen to avoid any overflow. */}
       <button
         type="button"
-        aria-label={fabAriaLabel}
+        aria-label={tabAriaLabel}
         aria-expanded={!collapsed}
         onClick={() => setCollapsedAndPersist(false)}
         className={cn(
-          "group fixed z-40 inline-flex h-14 w-14 items-center justify-center rounded-full shadow-lg transition-all duration-fast",
+          "group fixed right-0 top-1/2 z-40 flex -translate-y-1/2 flex-col items-center gap-2 rounded-l-2xl border border-r-0 border-white/10 py-4 pl-2.5 pr-1.5 shadow-lg",
           "bg-[color:var(--surface-brand)] text-white",
-          "hover:scale-105 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[color:var(--text-teal)]/60 focus-visible:ring-offset-2",
-          // ``left``: bottom-left floating icon, away from bottom-right
-          // submit/download/review actions. ``right`` remains available
-          // for legacy surfaces that explicitly request it.
-          placement === "right"
-            ? "bottom-4 right-[4.75rem] sm:right-[8.75rem]"
-            : "bottom-5 left-5 sm:bottom-6 sm:left-6",
+          "transition-[transform,opacity,padding,box-shadow] duration-300 ease-out",
+          "hover:-translate-x-1 hover:pr-2.5 hover:shadow-xl",
+          "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[color:var(--text-teal)]/60 focus-visible:ring-offset-2",
           collapsed
-            ? "pointer-events-auto scale-100 opacity-100"
-            : "pointer-events-none scale-90 opacity-0",
+            ? "pointer-events-auto opacity-100"
+            : "pointer-events-none opacity-0",
           className,
         )}
       >
         <span
           aria-hidden="true"
-          className="absolute inset-0 rounded-full bg-[color:var(--text-teal)] opacity-15 blur-md transition-opacity group-hover:opacity-30"
+          className="absolute inset-0 rounded-l-2xl bg-[color:var(--text-teal)] opacity-0 blur-md transition-opacity duration-300 group-hover:opacity-20"
         />
-        <Sparkle className="relative h-6 w-6 text-[color:var(--text-teal)]" weight="fill" />
+        <Sparkle
+          className="relative h-5 w-5 text-[color:var(--text-teal)]"
+          weight="fill"
+        />
+        <span className="relative text-[11px] font-semibold uppercase tracking-wide [writing-mode:vertical-rl]">
+          Wise
+        </span>
         {hasWarning ? (
           <span
             aria-hidden="true"
-            className="absolute right-1 top-1 h-2.5 w-2.5 rounded-full bg-[color:var(--status-warning-text)] ring-2 ring-[color:var(--surface-brand)]"
+            className="absolute -left-1 top-2 h-2.5 w-2.5 rounded-full bg-[color:var(--status-warning-text)] ring-2 ring-[color:var(--surface-brand)]"
           />
         ) : null}
       </button>
 
-      {/* Expanded panel — desktop floating card pinned bottom-left,
-          mobile bottom sheet with backdrop. */}
-      {!collapsed ? (
+      {/* Expanded panel — mobile bottom sheet (with backdrop) / desktop
+          right-edge full-height drawer. */}
+      {mounted ? (
         <>
           {/* Mobile-only backdrop. Clicking it collapses the dock. */}
           <div
             aria-hidden="true"
             onClick={close}
-            className="fixed inset-0 z-40 bg-[color:var(--surface-brand)]/40 backdrop-blur-sm sm:hidden"
+            className={cn(
+              "fixed inset-0 z-40 bg-[color:var(--surface-brand)]/40 backdrop-blur-sm transition-opacity duration-300 sm:hidden",
+              entered ? "opacity-100" : "opacity-0",
+            )}
           />
           <section
             role="dialog"
             aria-modal="false"
             aria-label={ariaLabel}
+            data-entered={entered ? "true" : "false"}
             className={cn(
-              "fixed z-50 flex flex-col overflow-hidden bg-[color:var(--surface-brand)] text-white shadow-2xl",
-              // Mobile: bottom sheet — full width, rounded top corners,
-              // ~78vh max so the user can still see what they were
-              // doing behind the dock.
+              "wise-drawer fixed z-50 flex flex-col overflow-hidden bg-[color:var(--surface-brand)] text-white shadow-2xl",
+              "transition-transform duration-[380ms] ease-[cubic-bezier(0.22,1,0.36,1)] will-change-transform",
+              // Mobile: bottom sheet — full width, rounded top, ~78vh so
+              // the user can still see what's behind the dock.
               "inset-x-0 bottom-0 max-h-[78vh] rounded-t-2xl",
-              // Desktop: floating card mirroring the FAB corner, ~380px.
-              placement === "right"
-                ? "sm:inset-x-auto sm:bottom-6 sm:right-6 sm:max-h-[min(620px,calc(100vh-6rem))] sm:w-[380px] sm:rounded-2xl"
-                : "sm:inset-x-auto sm:bottom-6 sm:left-6 sm:max-h-[min(620px,calc(100vh-6rem))] sm:w-[380px] sm:rounded-2xl",
+              // Desktop / tablet: full-height 480px drawer flush to the
+              // right edge, rounded + bordered on the left. ``top-0
+              // bottom-0`` (not ``inset-y-0``) so it pins to the full
+              // viewport height without colliding with the mobile
+              // ``bottom-0`` utility.
+              "sm:left-auto sm:right-0 sm:top-0 sm:bottom-0 sm:max-h-none sm:w-[480px] sm:rounded-l-2xl sm:rounded-r-none sm:border-l sm:border-white/10",
+              // Enter / exit transforms. Mobile slides on Y, desktop on X.
+              entered
+                ? "translate-y-0 sm:translate-x-0"
+                : "translate-y-full sm:translate-y-0 sm:translate-x-full",
               panelClassName,
             )}
           >
@@ -251,24 +338,16 @@ export function WiseDockHeader({ title, pill, onClose }: WiseDockHeaderProps) {
           </p>
         </div>
       </div>
-      <div className="relative flex items-center gap-1">
-        <button
-          type="button"
-          onClick={onClose}
-          aria-label="Minimizar"
-          className="hidden h-8 w-8 items-center justify-center rounded-md text-white/70 transition-colors hover:bg-white/10 hover:text-white sm:inline-flex"
-        >
-          <CaretDown className="h-4 w-4" weight="bold" />
-        </button>
-        <button
-          type="button"
-          onClick={onClose}
-          aria-label="Cerrar"
-          className="inline-flex h-8 w-8 items-center justify-center rounded-md text-white/70 transition-colors hover:bg-white/10 hover:text-white sm:hidden"
-        >
-          <X className="h-4 w-4" weight="bold" />
-        </button>
-      </div>
+      <button
+        type="button"
+        onClick={onClose}
+        aria-label="Cerrar"
+        className="relative inline-flex h-8 w-8 items-center justify-center rounded-md text-white/70 transition-colors hover:bg-white/10 hover:text-white"
+      >
+        {/* Caret on desktop (slides back to the edge) / X on mobile. */}
+        <CaretRight className="hidden h-4 w-4 sm:block" weight="bold" />
+        <X className="h-4 w-4 sm:hidden" weight="bold" />
+      </button>
     </header>
   );
 }

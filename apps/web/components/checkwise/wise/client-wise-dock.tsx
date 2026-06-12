@@ -171,9 +171,9 @@ export function ClientWiseDock({ className }: ClientWiseDockProps) {
   return (
     <WiseDockShell
       storageKey={STORAGE_KEY}
-      defaultCollapsed={false}
+      defaultCollapsed
       ariaLabel="Wise — copiloto del portafolio"
-      fabAriaLabel="Abrir Wise · Portafolio"
+      tabAriaLabel="Abrir Wise · Portafolio"
       className={className}
       onFirstRender={() => {
         void postClientWiseEvent(

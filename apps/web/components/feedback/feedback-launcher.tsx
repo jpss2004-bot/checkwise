@@ -413,7 +413,9 @@ export function FeedbackLauncher({
         disabled={capturing}
         onClick={openWithCapture}
         className={cn(
-          "fixed bottom-4 right-4 z-50",
+          // ``feedback-launcher-fab``: lets the Wise drawer hide this
+          // while it owns the right gutter (see globals.css).
+          "feedback-launcher-fab fixed bottom-4 right-4 z-50",
           "inline-flex items-center gap-2 rounded-full",
           "border border-[color:var(--border-strong)]",
           "bg-[color:var(--surface-overlay)] px-3.5 py-2",

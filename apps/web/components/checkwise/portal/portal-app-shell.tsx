@@ -336,7 +336,10 @@ export function PortalAppShell({
       ) : null}
 
       {/* ── Main column ───────────────────────────────────────── */}
-      <div className="flex min-w-0 flex-1 flex-col">
+      {/* ``wise-push-target``: on ≥1440px the open Wise drawer reserves
+          480px on the right so it never covers the workspace; below
+          that it overlays. See globals.css. */}
+      <div className="wise-push-target flex min-w-0 flex-1 flex-col">
         <TopBar
           session={session}
           pct={pct}
@@ -358,7 +361,7 @@ export function PortalAppShell({
           page still passes ``dashboard`` + ``onboarding`` as props
           to avoid a redundant refetch — every other page lets the
           dock manage its own data. */}
-      <WiseDock session={session} sidebarCollapsed={sidebarCollapsed} />
+      <WiseDock session={session} />
       <FeedbackLauncher />
     </div>
   );

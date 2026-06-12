@@ -597,3 +597,81 @@ pre {
     animation: shimmer 3.6s var(--ease-standard) infinite;
   }
 }
+
+/* ── Wise drawer ──────────────────────────────────────────────────
+   The Wise copilot is a right-edge drawer (see wise-dock-shell.tsx).
+   These rules let the page react to its open/closed state in pure CSS
+   via attributes the shell sets on <html>:
+     • [data-wise-drawer-open]    — drawer is logically open
+     • [data-wise-drawer-mounted] — panel is in the DOM (open + slide-out)
+*/
+:root {
+  /* Keep in sync with the drawer's sm:w-[480px] panel width. */
+  --wise-drawer-w: 480px;
+}
+
+/* Content push. Only on wide viewports (≥1440px) does the open drawer
+   reserve space so nothing is ever covered; on narrower laptops it
+   overlays the right edge instead. Applied to each shell's main column
+   via the ``wise-push-target`` class. */
+.wise-push-target {
+  transition: padding-right 380ms var(--ease-enter);
+}
+@media (min-width: 1440px) {
+  html[data-wise-drawer-open="true"] .wise-push-target {
+    padding-right: var(--wise-drawer-w);
+  }
+}
+
+/* Clip horizontal overflow while the panel is mounted so the off-screen
+   (translate-x-full) slide-in/out never spawns a transient scrollbar.
+   ``clip`` doesn't create a scroll container, so page sticky + inner
+   scroll containers are unaffected. */
+html[data-wise-drawer-mounted="true"] {
+  overflow-x: clip;
+}
+
+/* The drawer owns the right gutter while open, so the bottom-right
+   feedback launcher steps aside to avoid overlapping it. */
+.feedback-launcher-fab {
+  transition:
+    opacity 200ms ease-out,
+    transform 200ms var(--ease-enter);
+}
+html[data-wise-drawer-open="true"] .feedback-launcher-fab {
+  opacity: 0;
+  transform: translateY(0.75rem);
+  pointer-events: none;
+}
+
+/* Staggered content reveal inside the drawer — header, body, composer
+   ease up in sequence once the panel has slid into place. */
+.wise-drawer > * {
+  opacity: 0;
+  transform: translateY(10px);
+}
+.wise-drawer[data-entered="true"] > * {
+  opacity: 1;
+  transform: none;
+}
+@media (prefers-reduced-motion: no-preference) {
+  .wise-drawer > * {
+    transition:
+      opacity 420ms var(--ease-enter),
+      transform 420ms var(--ease-enter);
+  }
+  .wise-drawer[data-entered="true"] > *:nth-child(2) {
+    transition-delay: 70ms;
+  }
+  .wise-drawer[data-entered="true"] > *:nth-child(3) {
+    transition-delay: 130ms;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .wise-push-target,
+  .wise-drawer,
+  .wise-drawer > * {
+    transition: none !important;
+  }
+}
