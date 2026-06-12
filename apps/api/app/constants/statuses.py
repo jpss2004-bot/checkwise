@@ -57,16 +57,26 @@ RESOLVED_STATUSES: tuple[DocumentStatus, ...] = (
 )
 
 
+# Canonical Spanish display labels. MUST stay word-for-word identical to
+# the web app's glossary (apps/web/lib/constants/statuses.ts ::
+# STATUS_LABELS_ES, vocabulary unification 2026-06-10) so a status reads
+# the same in /catalogs responses, PDF exports and on-screen badges.
+# Status CODES never change — only the display strings are unified:
+#   - recibido / pendiente_revision / prevalidado collapse to
+#     "En revisión" (a client can't act on the distinction),
+#   - rechazado reads "Requiere corrección" (Audit P1-02 softening),
+#   - excepcion_legal reads "Aprobado con nota legal" (it's a positive
+#     outcome, not an alarm).
 STATUS_LABELS_ES: dict[DocumentStatus, str] = {
     DocumentStatus.PENDIENTE: "Pendiente",
-    DocumentStatus.RECIBIDO: "Recibido",
-    DocumentStatus.PENDIENTE_REVISION: "Pendiente de revisión",
-    DocumentStatus.PREVALIDADO: "Prevalidado",
-    DocumentStatus.POSIBLE_MISMATCH: "Posible mismatch",
+    DocumentStatus.RECIBIDO: "En revisión",
+    DocumentStatus.PENDIENTE_REVISION: "En revisión",
+    DocumentStatus.PREVALIDADO: "En revisión",
+    DocumentStatus.POSIBLE_MISMATCH: "Posible inconsistencia",
     DocumentStatus.APROBADO: "Aprobado",
-    DocumentStatus.RECHAZADO: "Rechazado",
+    DocumentStatus.RECHAZADO: "Requiere corrección",
     DocumentStatus.VENCIDO: "Vencido",
     DocumentStatus.NO_APLICA: "No aplica",
-    DocumentStatus.REQUIERE_ACLARACION: "Requiere aclaración",
-    DocumentStatus.EXCEPCION_LEGAL: "Excepción legal",
+    DocumentStatus.REQUIERE_ACLARACION: "Necesita aclaración",
+    DocumentStatus.EXCEPCION_LEGAL: "Aprobado con nota legal",
 }

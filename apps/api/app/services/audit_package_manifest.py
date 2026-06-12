@@ -25,6 +25,7 @@ import tempfile
 from datetime import UTC, datetime
 from pathlib import Path
 
+from app.constants.statuses import STATUS_LABELS_ES
 from app.models import Client
 from app.services.audit_package import AuditPackageEntry, AuditPackageFilters
 
@@ -48,21 +49,13 @@ _INSTITUTION_LABELS: dict[str, str] = {
     "corporativo": "Documentación Corporativa",
 }
 
-# Spanish labels for the canonical document statuses. Mirrors the
-# frontend RequirementStatusBadge map so a forensic comparison stays
-# in lockstep.
+# Spanish labels for the canonical document statuses. Derived from the
+# single backend glossary (constants/statuses.py, kept in lockstep with
+# the web app's STATUS_LABELS_ES) — this used to be a hand-copied map
+# and drifted from the 2026-06-10 vocabulary unification (audit
+# 2026-06-12).
 _STATUS_LABELS: dict[str, str] = {
-    "aprobado": "Aprobado",
-    "rechazado": "Requiere corrección",
-    "requiere_aclaracion": "Necesita aclaración",
-    "pendiente_revision": "En revisión humana",
-    "prevalidado": "Prevalidado",
-    "posible_mismatch": "Posible inconsistencia",
-    "recibido": "Recibido",
-    "vencido": "Vencido",
-    "no_aplica": "No aplica",
-    "excepcion_legal": "Excepción legal",
-    "pendiente": "Pendiente",
+    status.value: label for status, label in STATUS_LABELS_ES.items()
 }
 
 

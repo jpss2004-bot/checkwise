@@ -40,25 +40,28 @@ _LEVEL_COLOR = {"red": _RED, "yellow": _AMBER, "green": _GREEN}
 _LEVEL_WORD = {"red": "En riesgo", "yellow": "En proceso", "green": "Al día"}
 _TONE_COLOR = {"red": _RED, "yellow": _AMBER, "green": _GREEN, "info": _BRAND}
 
-# matrix cell document-state → (label, color)
+# matrix cell document-state → (label, color). Wording matches the web
+# app's DOC_STATE_LABELS (vocabulary unification 2026-06-10) so the
+# exported PDF reads the same as the on-screen report (audit 2026-06-12).
 _CELL = {
     "approved": ("Aprobado", _GREEN),
     "in_review": ("En revisión", _AMBER),
-    "needs_review": ("Observación", _AMBER),
-    "uploaded": ("Recibido", _AMBER),
-    "rejected": ("Rechazado", _RED),
+    "needs_review": ("Necesita aclaración", _AMBER),
+    "uploaded": ("En revisión", _AMBER),
+    "rejected": ("Requiere corrección", _RED),
     "expired": ("Vencido", _RED),
     "pending": ("Por entregar", _FAINT),
     "empty": ("—", _FAINT),
 }
+# Slot-state labels — matches SLOT_STATE_LABELS_ES in the web app.
 _SLOT_LABEL = {
-    "rejected": "Rechazado",
-    "needs_correction": "Requiere aclaración",
+    "rejected": "Requiere corrección",
+    "needs_correction": "Necesita aclaración",
     "possible_mismatch": "Posible inconsistencia",
     "expired": "Vencido",
-    "missing": "Faltante",
+    "missing": "Por entregar",
     "in_review": "En revisión",
-    "uploaded": "Recibido",
+    "uploaded": "En revisión",
 }
 
 
