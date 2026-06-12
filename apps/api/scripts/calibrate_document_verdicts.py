@@ -28,6 +28,12 @@ Signals replayed (from ``DocumentInspection``)
       adds ``qr_found_rate`` / ``qr_official_rate`` / folio kind counts
       per requirement code and overall. This measures real-world QR
       coverage so ``missing_expected_qr`` can be promoted above info.
+    * image tampering (Phase D) — with ``--recompute-forensics`` the
+      ELA/copy-move checks ALSO run fresh on SCANNED docs only
+      (``is_probably_scanned``), and the report adds the tamper-flag
+      rate on human-approved scanned docs (the FPR proxy that decides
+      whether ``ela_anomaly`` / ``copy_move_detected`` ever get
+      promoted past medium) plus per-code counts.
 
 IMPORTANT CAVEAT (also stamped into the report header): human rejections
 are frequently period/type mismatches, illegible scans or wrong-document
@@ -131,6 +137,15 @@ class CalibrationRecord:
     qr_count: int | None = None
     qr_all_official: bool | None = None  # None until ≥1 QR decoded
     folio_kinds: list[str] = field(default_factory=list)
+    # Phase D — image tamper forensics (``--recompute-forensics`` only,
+    # and ONLY on scanned docs — born-digital PDFs have no scan raster).
+    # ``tamper_scanned`` marks the doc as in-scope; ``tamper_analyzed``
+    # means the analyzer actually produced a verdict (it fails open).
+    # The flag rate on human-APPROVED scanned docs is the FPR proxy
+    # that decides whether these checks ever get promoted past medium.
+    tamper_scanned: bool = False
+    tamper_analyzed: bool = False
+    tamper_codes: list[str] = field(default_factory=list)
 
 
 # ---------------------------------------------------------------------------
@@ -336,6 +351,36 @@ def verification_stats(records: list[CalibrationRecord]) -> dict[str, Any]:
     }
 
 
+def image_tamper_stats(records: list[CalibrationRecord]) -> dict[str, Any]:
+    """Phase-D image-forensics coverage + FPR proxy (recomputed rows only).
+
+        approved_flag_rate — share of human-APPROVED scanned docs the
+            tamper checks flag. THE number that decides whether
+            ``ela_anomaly`` / ``copy_move_detected`` ever get promoted
+            past medium: a human accepted these documents, so (modulo
+            the header caveat) flags here are friction, not fraud.
+        per_code — flag counts per reason code over analyzed docs.
+    """
+    scanned = [r for r in records if r.tamper_scanned]
+    analyzed = [r for r in scanned if r.tamper_analyzed]
+    flagged = [r for r in analyzed if r.tamper_codes]
+    approved = [r for r in analyzed if r.human_approved]
+    approved_flagged = [r for r in approved if r.tamper_codes]
+    per_code: Counter[str] = Counter()
+    for r in analyzed:
+        per_code.update(set(r.tamper_codes))
+    return {
+        "scanned_docs": len(scanned),
+        "analyzed": len(analyzed),
+        "flagged": len(flagged),
+        "flag_rate": _ratio(len(flagged), len(analyzed)),
+        "approved_analyzed": len(approved),
+        "approved_flagged": len(approved_flagged),
+        "approved_flag_rate": _ratio(len(approved_flagged), len(approved)),
+        "per_code": dict(per_code.most_common()),
+    }
+
+
 def compute_group_metrics(records: list[CalibrationRecord]) -> dict[str, Any]:
     """Full metric bundle for one cohort (a requirement code, or overall)."""
     return {
@@ -350,6 +395,7 @@ def compute_group_metrics(records: list[CalibrationRecord]) -> dict[str, Any]:
         "auto_approve": auto_approve_simulation(records),
         "coverage": coverage_stats(records),
         "verification": verification_stats(records),
+        "image_tamper": image_tamper_stats(records),
     }
 
 
@@ -413,6 +459,7 @@ def collect_records(
     recompute_file_missing = 0
     recompute_failed = 0
     verification_scanned = 0
+    image_tamper_analyzed = 0
 
     for submission, document, inspection in db.execute(stmt):
         confidence: float | None = None
@@ -423,6 +470,9 @@ def collect_records(
         qr_count: int | None = None
         qr_all_official: bool | None = None
         folio_kinds: list[str] = []
+        tamper_scanned = False
+        tamper_analyzed = False
+        tamper_codes: list[str] = []
 
         if inspection is not None:
             if inspection.shadow_confidence is not None:
@@ -473,6 +523,18 @@ def collect_records(
                     )
                     folio_kinds = [folio["kind"] for folio in verification.folios]
 
+                # Phase D — image tamper forensics, scanned docs ONLY
+                # (born-digital PDFs have no scan raster to inspect).
+                # The service's own caps (3 pages, largest image,
+                # 1200px long edge) keep this cheap per document.
+                if inspection is not None and inspection.is_probably_scanned:
+                    tamper_scanned = True
+                    tamper = _recompute_image_tampering(path)
+                    if tamper.analyzed:
+                        image_tamper_analyzed += 1
+                        tamper_analyzed = True
+                        tamper_codes = [reason.code for reason in tamper.reasons]
+
         records.append(
             CalibrationRecord(
                 submission_id=submission.id,
@@ -489,6 +551,9 @@ def collect_records(
                 qr_count=qr_count,
                 qr_all_official=qr_all_official,
                 folio_kinds=folio_kinds,
+                tamper_scanned=tamper_scanned,
+                tamper_analyzed=tamper_analyzed,
+                tamper_codes=tamper_codes,
             )
         )
 
@@ -499,6 +564,7 @@ def collect_records(
         "recompute_file_missing": recompute_file_missing,
         "recompute_failed": recompute_failed,
         "verification_scanned": verification_scanned,
+        "image_tamper_analyzed": image_tamper_analyzed,
     }
     return records, meta
 
@@ -536,6 +602,15 @@ def _recompute_verification(path, *, detected_institution):
     return extract_verification(
         path, detected_institution=detected_institution, extracted_text=None
     )
+
+
+def _recompute_image_tampering(path):
+    """Run the Phase-D image tamper checks against a resolved local
+    file (scanned docs only — the caller gates on
+    ``is_probably_scanned``). Fail-open: ``analyzed=False`` on error."""
+    from app.services.document_image_forensics import analyze_image_tampering
+
+    return analyze_image_tampering(path)
 
 
 # ---------------------------------------------------------------------------
@@ -643,6 +718,31 @@ def _group_section(name: str, metrics: dict[str, Any]) -> list[str]:
             "(requiere `--recompute-forensics`).",
             "",
         ]
+    tamper = metrics["image_tamper"]
+    if tamper["scanned_docs"]:
+        code_cells = (
+            ", ".join(f"`{code}` × {count}" for code, count in tamper["per_code"].items())
+            or "ninguno"
+        )
+        lines += [
+            "**Forense de imagen** (Fase D — solo documentos escaneados)",
+            "",
+            f"- Analizados: {tamper['analyzed']}/{tamper['scanned_docs']} escaneados",
+            f"- Marcados: {tamper['flagged']}/{tamper['analyzed']} "
+            f"= {_pct(tamper['flag_rate'])}",
+            f"- Marcados entre APROBADOS (proxy de falsos positivos — la "
+            f"cifra que decide si estos códigos suben de medium): "
+            f"{tamper['approved_flagged']}/{tamper['approved_analyzed']} "
+            f"= {_pct(tamper['approved_flag_rate'])}",
+            f"- Por código: {code_cells}",
+            "",
+        ]
+    else:
+        lines += [
+            "**Forense de imagen** (Fase D): sin documentos escaneados "
+            "analizados en esta corrida (requiere `--recompute-forensics`).",
+            "",
+        ]
     return lines
 
 
@@ -744,6 +844,15 @@ def build_report(
             f"{_pct(overall['verification']['qr_official_rate'])}"
             if replay_meta.get("recompute_forensics")
             else "- Verificación QR (Fase B): sin escaneo "
+            "(corre con `--recompute-forensics`)"
+        ),
+        (
+            f"- Forense de imagen (Fase D, escaneados): marcados entre "
+            f"aprobados {overall['image_tamper']['approved_flagged']}/"
+            f"{overall['image_tamper']['approved_analyzed']} "
+            f"= {_pct(overall['image_tamper']['approved_flag_rate'])}"
+            if replay_meta.get("recompute_forensics")
+            else "- Forense de imagen (Fase D): sin análisis "
             "(corre con `--recompute-forensics`)"
         ),
         f"- Códigos que CUMPLEN la barra de ≥ "
@@ -883,6 +992,17 @@ def main(argv: list[str] | None = None) -> int:
             f"{_pct(ver['qr_official_rate'])} | folios: "
             + (
                 ", ".join(f"{k}×{v}" for k, v in ver["folio_kinds"].items())
+                or "ninguno"
+            )
+        )
+        tamper = overall["image_tamper"]
+        print(
+            f"Forense de imagen (Fase D): {tamper['analyzed']}/"
+            f"{tamper['scanned_docs']} escaneados analizados | marcados entre "
+            f"aprobados: {tamper['approved_flagged']}/{tamper['approved_analyzed']} "
+            f"({_pct(tamper['approved_flag_rate'])}) | por código: "
+            + (
+                ", ".join(f"{k}×{v}" for k, v in tamper["per_code"].items())
                 or "ninguno"
             )
         )

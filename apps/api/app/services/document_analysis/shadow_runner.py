@@ -53,11 +53,17 @@ from app.services.document_analysis.spend_limiter import (
 from app.services.document_forensics import (
     RISK_HIGH,
     RISK_SUSPICIOUS,
+    SEVERITY_HIGH,
     SEVERITY_INFO,
     SEVERITY_MEDIUM,
     RiskReason,
     rollup_authenticity_risk,
     severity_rank,
+)
+from app.services.document_image_forensics import (
+    IMAGE_TAMPER_REASON_CODES,
+    ImageTamperResult,
+    analyze_image_tampering,
 )
 from app.services.validation_events import add_validation_event
 
@@ -164,11 +170,13 @@ def run_shadow_analysis(
 
     final_result = triage_result
     tiers: dict | None = None
+    image_result: ImageTamperResult | None = None
 
+    current_risk, is_probably_scanned = _inspection_trigger_context(document_id)
     triggers = _escalation_triggers(
         triage_result,
         requirement_risk_level=requirement_risk_level,
-        document_id=document_id,
+        current_authenticity_risk=current_risk,
     )
     if triggers:
         tiers = {"triage": _tier_meta(triage_result), "escalation": None}
@@ -192,11 +200,26 @@ def run_shadow_analysis(
             # provider unavailable). The triage result stands.
             tiers["escalation"] = {**escalation_result, "triggers": triggers}
 
+        # Phase D — pixel-level tamper forensics. Pure-local (no LLM
+        # spend), but CPU-heavy and false-positive-prone, so it rides
+        # the same "something already looks off" gate as the deep LLM
+        # pass — and only on scanned documents (born-digital PDFs have
+        # no scan raster to inspect). Independent of the escalation
+        # provider outcome: a cap-skip or provider error never blocks
+        # the local checks.
+        image_result, image_forensics_meta = _run_image_forensics(
+            pdf_path=pdf_path,
+            is_probably_scanned=is_probably_scanned,
+            document_id=document_id,
+        )
+        tiers["image_forensics"] = image_forensics_meta
+
     _persist_shadow_result(
         document_id=document_id,
         submission_id=submission_id,
         result=final_result,
         tiers=tiers,
+        image_result=image_result,
     )
 
 
@@ -235,7 +258,7 @@ def _escalation_triggers(
     triage_result: AnalysisResult,
     *,
     requirement_risk_level: str | None,
-    document_id: str,
+    current_authenticity_risk: str | None,
 ) -> list[str]:
     """Return the list of fired escalation triggers (empty = no escalation).
 
@@ -265,7 +288,7 @@ def _escalation_triggers(
     if confidence is not None and confidence < _TRIAGE_CONFIDENCE_ESCALATION_THRESHOLD:
         triggers.append("low_match_confidence")
 
-    if _current_authenticity_risk(document_id) in {RISK_SUSPICIOUS, RISK_HIGH}:
+    if current_authenticity_risk in {RISK_SUSPICIOUS, RISK_HIGH}:
         triggers.append("deterministic_risk")
 
     if (requirement_risk_level or "").strip().lower() in _HIGH_STAKES_RISK_LEVELS:
@@ -337,30 +360,72 @@ def _tier_meta(result: AnalysisResult) -> dict:
     }
 
 
-def _current_authenticity_risk(document_id: str) -> str | None:
-    """Read the inspection row's current deterministic verdict.
+def _inspection_trigger_context(document_id: str) -> tuple[str | None, bool]:
+    """Read the inspection row's deterministic verdict + scanned flag.
 
-    Opens (and closes) its own short-lived session: the runner has no
-    ambient session, and the read must never block or fail the run —
-    any error reads as "no verdict".
+    One short-lived session for both values: ``authenticity_risk``
+    feeds the deterministic-risk escalation trigger and
+    ``is_probably_scanned`` gates the Phase-D image forensics. The
+    runner has no ambient session, and the read must never block or
+    fail the run — any error reads as "no verdict, not scanned".
     """
     db = SessionLocal()
     try:
         from sqlalchemy import select
 
-        return db.scalar(
-            select(DocumentInspection.authenticity_risk).where(
-                DocumentInspection.document_id == document_id
-            )
-        )
+        row = db.execute(
+            select(
+                DocumentInspection.authenticity_risk,
+                DocumentInspection.is_probably_scanned,
+            ).where(DocumentInspection.document_id == document_id)
+        ).first()
+        if row is None:
+            return None, False
+        return row[0], bool(row[1])
     except Exception:  # noqa: BLE001 — a read failure must not abort the shadow run
         logger.exception(
-            "Failed reading authenticity_risk for escalation trigger; document_id=%s",
+            "Failed reading inspection context for escalation triggers; document_id=%s",
             document_id,
         )
-        return None
+        return None, False
     finally:
         db.close()
+
+
+def _run_image_forensics(
+    *,
+    pdf_path: str,
+    is_probably_scanned: bool,
+    document_id: str,
+) -> tuple[ImageTamperResult | None, dict]:
+    """Run Phase-D image tamper forensics, or return a skip marker.
+
+    Returns ``(result, bookkeeping)`` where the bookkeeping dict is
+    stored under ``shadow_signals['_tiers']['image_forensics']``. A
+    ``None`` result means "nothing to merge" (not scanned / analysis
+    failed open) — the persisted verdict is untouched. Never raises.
+    """
+    if not is_probably_scanned:
+        return None, {"ran": False, "skipped": "not_scanned"}
+    try:
+        result = analyze_image_tampering(Path(pdf_path))
+    except Exception as exc:  # noqa: BLE001 — defence in depth; the service already fails open
+        logger.exception(
+            "Image-tamper forensics raised; document_id=%s", document_id
+        )
+        return None, {"ran": False, "skipped": f"error:{type(exc).__name__}"}
+    duration_ms = result.evidence.get("duration_ms")
+    if not result.analyzed:
+        return None, {
+            "ran": False,
+            "skipped": result.error or "analysis_failed",
+            "duration_ms": duration_ms,
+        }
+    return result, {
+        "ran": True,
+        "findings": len(result.reasons),
+        "duration_ms": duration_ms,
+    }
 
 
 # ---------------------------------------------------------------------------
@@ -476,6 +541,80 @@ def _merge_llm_authenticity(
 
 
 # ---------------------------------------------------------------------------
+# Image-forensics merge (Phase D)
+# ---------------------------------------------------------------------------
+
+
+def _merge_image_forensics(
+    inspection: DocumentInspection, result: ImageTamperResult | None
+) -> None:
+    """Merge Phase-D tamper findings into the row's verdict.
+
+    Mirrors ``_merge_llm_authenticity`` exactly:
+
+    * ``result is None`` / ``analyzed=False`` (not scanned, analysis
+      failed open) → strict no-op; the stored verdict is untouched.
+    * Otherwise strip every prior ``ela_anomaly`` / ``copy_move_detected``
+      reason (re-runs replace, never accumulate), append the new ones
+      (defensively capped at medium — image forensics alone can never
+      push a document to ``high_risk``), sort high→info, and re-roll
+      through the shared ``rollup_authenticity_risk``.
+    * Deterministic / LLM reasons pass through verbatim.
+    * A clean run with nothing stale to strip leaves the row completely
+      untouched — including ``authenticity_risk=None`` ("sin analizar")
+      rows, which must not be flipped to ``clean`` by a pass that only
+      looked at the scan pixels.
+
+    The raw per-page evidence lands under
+    ``inspection.forensics['image_forensics']`` whenever the merge
+    writes anything, so the reviewer evidence panel can show it.
+    """
+    if result is None or not result.analyzed:
+        return
+
+    prior = [r for r in (inspection.risk_reasons or []) if isinstance(r, dict)]
+    kept = [r for r in prior if r.get("code") not in IMAGE_TAMPER_REASON_CODES]
+    had_image_reasons = len(kept) != len(prior)
+
+    new_reasons = [
+        RiskReason(
+            code=reason.code,
+            severity=(
+                SEVERITY_MEDIUM
+                if reason.severity == SEVERITY_HIGH
+                else reason.severity
+            ),
+            detail_es=reason.detail_es,
+        )
+        for reason in result.reasons
+    ]
+    if not new_reasons and not had_image_reasons:
+        return
+
+    merged = sorted(
+        [*kept, *(reason.as_dict() for reason in new_reasons)],
+        key=lambda reason: severity_rank(str(reason.get("severity") or "")),
+    )
+    inspection.risk_reasons = merged
+
+    forensics = dict(inspection.forensics or {})
+    forensics["image_forensics"] = result.evidence
+    inspection.forensics = forensics
+
+    if new_reasons or inspection.authenticity_risk is not None:
+        inspection.authenticity_risk = rollup_authenticity_risk(
+            [
+                RiskReason(
+                    code=str(reason.get("code") or ""),
+                    severity=str(reason.get("severity") or ""),
+                    detail_es=str(reason.get("detail_es") or ""),
+                )
+                for reason in merged
+            ]
+        )
+
+
+# ---------------------------------------------------------------------------
 # Persistence helpers
 # ---------------------------------------------------------------------------
 
@@ -486,6 +625,7 @@ def _persist_shadow_result(
     submission_id: str,
     result: AnalysisResult,
     tiers: dict | None = None,
+    image_result: ImageTamperResult | None = None,
 ) -> None:
     """Write the AnalysisResult to ``document_inspections.shadow_*``.
 
@@ -503,6 +643,11 @@ def _persist_shadow_result(
       ``llm_authenticity_concern`` RiskReasons and merged into the
       row's ``risk_reasons`` / ``authenticity_risk`` (see
       ``_merge_llm_authenticity``).
+
+    Phase D addition: ``image_result`` (tamper findings from the local
+    image forensics, escalation path only) merges through
+    ``_merge_image_forensics`` with the same strip-and-replace rules
+    under its own reason codes, so LLM and image reasons coexist.
     """
     db = SessionLocal()
     try:
@@ -541,6 +686,7 @@ def _persist_shadow_result(
             shadow_signals_blob["_tiers"] = tiers
 
         _merge_llm_authenticity(inspection, result)
+        _merge_image_forensics(inspection, image_result)
 
         inspection.shadow_provider_id = result.provider_id
         inspection.shadow_prompt_version = result.prompt_version
