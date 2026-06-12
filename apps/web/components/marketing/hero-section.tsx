@@ -1,7 +1,8 @@
 "use client";
 
+import { useEffect, useRef, useState } from "react";
 import Link from "next/link";
-import { motion } from "motion/react";
+import { animate, motion, useInView } from "motion/react";
 import {
   ArrowRight,
   CalendarCheck,
@@ -117,7 +118,11 @@ export function HeroSection() {
                   {item.label}
                 </p>
                 <p className="mt-1 text-[24px] font-semibold tracking-[-0.03em] text-[color:var(--text-primary)]">
-                  {item.value}
+                  {/^\d+$/.test(item.value) ? (
+                    <CountUp value={Number(item.value)} reduce={reduce} />
+                  ) : (
+                    item.value
+                  )}
                 </p>
                 <p className="mt-1 text-[12.5px] leading-[1.45] text-[color:var(--text-secondary)]">
                   {item.detail}
@@ -162,5 +167,35 @@ export function HeroSection() {
         </div>
       </div>
     </section>
+  );
+}
+
+/**
+ * Count-up for the hero proof stats. Reads as live data being tallied
+ * rather than a static figure. Animates from 0 the first time it enters
+ * the viewport; reduced-motion users get the final value immediately.
+ */
+function CountUp({ value, reduce }: { value: number; reduce: boolean }) {
+  const ref = useRef<HTMLSpanElement>(null);
+  const inView = useInView(ref, { once: true, amount: 0.6 });
+  // Initialise to the real value so the server-rendered HTML (and any
+  // no-JS visitor) shows the true figure, never a misleading "0". The
+  // count-up is a client-only enhancement that runs once on first view.
+  const [display, setDisplay] = useState(value);
+
+  useEffect(() => {
+    if (reduce || !inView) return;
+    const controls = animate(0, value, {
+      duration: 1.1,
+      ease: EASE_ENTER,
+      onUpdate: (v) => setDisplay(Math.round(v)),
+    });
+    return () => controls.stop();
+  }, [inView, value, reduce]);
+
+  return (
+    <span ref={ref} className="tabular-nums">
+      {display}
+    </span>
   );
 }
