@@ -7,10 +7,14 @@ import { ArrowRight, List, X } from "@phosphor-icons/react";
 import { BrandLogo } from "@/components/checkwise/brand-logo";
 import { Button } from "@/components/ui/button";
 
+// Hrefs are absolute ("/#sistema") so the nav also works from the
+// public content pages (/repse, /software-repse); on the landing the
+// browser treats them as same-document fragment jumps, unchanged.
 const NAV_ITEMS = [
-  { href: "#sistema", label: "Sistema" },
-  { href: "#evidencia", label: "Evidencia" },
-  { href: "#ai-revision", label: "AI + revisión" },
+  { href: "/#sistema", label: "Sistema" },
+  { href: "/#evidencia", label: "Evidencia" },
+  { href: "/#ai-revision", label: "AI + revisión" },
+  { href: "/repse", label: "Guía REPSE" },
 ] as const;
 
 /**
@@ -102,7 +106,7 @@ export function MarketingNav() {
             <Link href="/login">Iniciar sesión</Link>
           </Button>
           <Button asChild size="sm" className="h-11 rounded-full md:h-8">
-            <Link href="#contacto" onClick={() => setMenuOpen(false)}>
+            <Link href="/#contacto" onClick={() => setMenuOpen(false)}>
               <span className="sm:hidden">Demo</span>
               <span className="hidden sm:inline">Solicitar demo</span>
               <ArrowRight className="h-3.5 w-3.5" weight="bold" aria-hidden="true" />
