@@ -31,6 +31,7 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { MetadataStrip, type MetadataItem } from "@/components/ui/metadata-strip";
 import { PageHeader } from "@/components/ui/page-header";
 import { toast } from "@/components/ui/toast";
+import { safeReturnTo, withReturnTo } from "@/lib/navigation/return-to";
 import {
   clearAdminSession,
   readAdminSession,
@@ -63,6 +64,25 @@ type PageProps = {
 };
 
 const REVIEWER_ROLES = ["reviewer", "internal_admin"] as const;
+const REVIEWER_RETURN_PREFIXES = [
+  "/admin/reviewer",
+  "/admin/vendors",
+  "/admin/clients",
+] as const;
+
+function reviewerDetailHref(submissionId: string, returnToHref: string): string {
+  return withReturnTo(`/admin/reviewer/${submissionId}`, returnToHref);
+}
+
+function returnLabel(returnToHref: string): string {
+  return returnToHref.startsWith("/admin/reviewer") ? "Bandeja" : "Volver";
+}
+
+function returnLongLabel(returnToHref: string): string {
+  return returnToHref.startsWith("/admin/reviewer")
+    ? "Volver a la bandeja"
+    : "Volver";
+}
 
 export default function ReviewerSubmissionPage({ params }: PageProps) {
   const { submission_id } = use(params);
@@ -72,6 +92,7 @@ export default function ReviewerSubmissionPage({ params }: PageProps) {
   const [loading, setLoading] = useState(true);
   const [errorKind, setErrorKind] = useState<"not_found" | "network" | null>(null);
   const [reloadKey, setReloadKey] = useState(0);
+  const [returnToHref, setReturnToHref] = useState("/admin/reviewer");
 
   const [decided, setDecided] = useState<{
     new_status: string;
@@ -80,6 +101,13 @@ export default function ReviewerSubmissionPage({ params }: PageProps) {
      *  documento". Null when the queue is drained. */
     next_pending_submission_id: string | null;
   } | null>(null);
+
+  useEffect(() => {
+    const raw = new URLSearchParams(window.location.search).get("returnTo");
+    setReturnToHref(
+      safeReturnTo(raw, REVIEWER_RETURN_PREFIXES, "/admin/reviewer"),
+    );
+  }, [submission_id]);
 
   useEffect(() => {
     const current = readAdminSession();
@@ -189,12 +217,12 @@ export default function ReviewerSubmissionPage({ params }: PageProps) {
       }
       if (event.key === "Enter" || event.key.toLowerCase() === "n") {
         event.preventDefault();
-        router.push(`/admin/reviewer/${nextId}`);
+        router.push(reviewerDetailHref(nextId!, returnToHref));
       }
     }
     window.addEventListener("keydown", onKeyDown);
     return () => window.removeEventListener("keydown", onKeyDown);
-  }, [decided, router]);
+  }, [decided, returnToHref, router]);
 
   if (!session) return null;
 
@@ -215,9 +243,9 @@ export default function ReviewerSubmissionPage({ params }: PageProps) {
         description="Revisa señales automáticas, contexto del proveedor y la línea de tiempo. Tu decisión queda en el audit log."
         actions={
           <Button asChild variant="outline" size="sm">
-            <Link href="/admin/reviewer">
+            <Link href={returnToHref}>
               <ArrowLeft className="h-4 w-4" aria-hidden />
-              Bandeja
+              {returnLabel(returnToHref)}
             </Link>
           </Button>
         }
@@ -231,9 +259,9 @@ export default function ReviewerSubmissionPage({ params }: PageProps) {
           description="El enlace puede haber expirado o el documento ya no existe."
           action={
             <Button asChild>
-              <Link href="/admin/reviewer">
+              <Link href={returnToHref}>
                 <ArrowLeft className="h-4 w-4" aria-hidden />
-                Volver a la bandeja
+                {returnLongLabel(returnToHref)}
               </Link>
             </Button>
           }
@@ -253,10 +281,10 @@ export default function ReviewerSubmissionPage({ params }: PageProps) {
             <PrevalidationEvidenceCard detail={detail} />
             <VerificationCard detail={detail} />
             <ReviewerSubmissionPreview detail={detail} session={session} />
-            <LineageStrip detail={detail} />
+            <LineageStrip detail={detail} returnToHref={returnToHref} />
             <LecturaDelDocumento detail={detail} />
             <ProviderCard detail={detail} />
-            <PreviousAttemptsCard detail={detail} />
+            <PreviousAttemptsCard detail={detail} returnToHref={returnToHref} />
             <SubmissionTimeline detail={detail} audience="admin" />
           </div>
           <div className="space-y-5">
@@ -286,7 +314,10 @@ export default function ReviewerSubmissionPage({ params }: PageProps) {
                         className="w-full"
                         onClick={() =>
                           router.push(
-                            `/admin/reviewer/${decided.next_pending_submission_id}`,
+                            reviewerDetailHref(
+                              decided.next_pending_submission_id!,
+                              returnToHref,
+                            ),
                           )
                         }
                       >
@@ -294,9 +325,9 @@ export default function ReviewerSubmissionPage({ params }: PageProps) {
                         <ArrowRight className="h-4 w-4" aria-hidden />
                       </Button>
                       <Button asChild variant="outline" className="w-full">
-                        <Link href="/admin/reviewer">
+                        <Link href={returnToHref}>
                           <ArrowLeft className="h-4 w-4" aria-hidden />
-                          Volver a la bandeja
+                          {returnLongLabel(returnToHref)}
                         </Link>
                       </Button>
                       <p className="text-center text-[11px] text-[color:var(--text-tertiary)]">
@@ -310,9 +341,9 @@ export default function ReviewerSubmissionPage({ params }: PageProps) {
                         por revisar.
                       </p>
                       <Button asChild className="mt-4">
-                        <Link href="/admin/reviewer">
+                        <Link href={returnToHref}>
                           <ArrowLeft className="h-4 w-4" aria-hidden />
-                          Volver a la bandeja
+                          {returnLongLabel(returnToHref)}
                         </Link>
                       </Button>
                     </>
@@ -357,7 +388,13 @@ export default function ReviewerSubmissionPage({ params }: PageProps) {
  * ``supersedes_submission_id`` / ``superseded_by_submission_id``.
  * Returns null when the submission stands alone.
  */
-function LineageStrip({ detail }: { detail: SubmissionDetail }) {
+function LineageStrip({
+  detail,
+  returnToHref,
+}: {
+  detail: SubmissionDetail;
+  returnToHref: string;
+}) {
   if (!detail.supersedes_submission_id && !detail.superseded_by_submission_id) {
     return null;
   }
@@ -372,7 +409,10 @@ function LineageStrip({ detail }: { detail: SubmissionDetail }) {
             Reemplaza intento anterior:
           </span>{" "}
           <Link
-            href={`/admin/reviewer/${detail.supersedes_submission_id}`}
+            href={reviewerDetailHref(
+              detail.supersedes_submission_id,
+              returnToHref,
+            )}
             className="font-mono text-xs text-[color:var(--text-brand)] underline-offset-2 hover:underline"
           >
             {detail.supersedes_submission_id}
@@ -385,7 +425,10 @@ function LineageStrip({ detail }: { detail: SubmissionDetail }) {
             Reemplazado por intento más reciente:
           </span>{" "}
           <Link
-            href={`/admin/reviewer/${detail.superseded_by_submission_id}`}
+            href={reviewerDetailHref(
+              detail.superseded_by_submission_id,
+              returnToHref,
+            )}
             className="font-mono text-xs text-[color:var(--text-brand)] underline-offset-2 hover:underline"
           >
             {detail.superseded_by_submission_id}
@@ -1085,7 +1128,13 @@ function VerificationCard({ detail }: { detail: ReviewerSubmissionDetail }) {
  * a time instead. Each row links straight to the sibling decision
  * screen. Hidden when the submission is the first attempt.
  */
-function PreviousAttemptsCard({ detail }: { detail: SubmissionDetail }) {
+function PreviousAttemptsCard({
+  detail,
+  returnToHref,
+}: {
+  detail: SubmissionDetail;
+  returnToHref: string;
+}) {
   const attempts = detail.previous_attempts ?? [];
   if (attempts.length === 0) return null;
   return (
@@ -1100,7 +1149,7 @@ function PreviousAttemptsCard({ detail }: { detail: SubmissionDetail }) {
           {attempts.map((attempt) => (
             <li key={attempt.submission_id}>
               <Link
-                href={`/admin/reviewer/${attempt.submission_id}`}
+                href={reviewerDetailHref(attempt.submission_id, returnToHref)}
                 className="flex items-center justify-between gap-3 rounded-md border border-[color:var(--border-subtle)] bg-[color:var(--surface-page)] px-3 py-2 transition-colors hover:bg-[color:var(--surface-hover)]"
               >
                 <div className="min-w-0">

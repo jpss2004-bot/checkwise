@@ -1799,6 +1799,7 @@ def client_get_submission_document(
     db: DbSession,
     current: ClientUser,
     download: bool = False,
+    proxy: bool = False,
 ) -> Response:
     """Serve a submission's PDF inline (default) or as an attachment.
 
@@ -1872,7 +1873,7 @@ def client_get_submission_document(
         document.storage_key,
         content_disposition=disposition_header,
     )
-    if presigned is not None:
+    if presigned is not None and not proxy:
         from fastapi.responses import RedirectResponse
 
         return RedirectResponse(presigned, status_code=status.HTTP_302_FOUND)

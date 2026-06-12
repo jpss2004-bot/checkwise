@@ -38,14 +38,14 @@ export interface WiseDockShellProps {
   /** Show the small warning pulse on the FAB. The shell never decides
    *  this — the entry computes it from its own message state. */
   hasWarning?: boolean;
-  /** Which corner the FAB + panel anchor to. ``left`` (default) is the
-   *  bottom-left floating icon used on surfaces with no left sidebar
-   *  (e.g. the client portal). ``right`` stacks the FAB above the
-   *  bottom-right feedback launcher and opens the panel bottom-right —
-   *  used on the provider portal, whose left sidebar owns the
-   *  bottom-left corner. */
+  /** Which corner the FAB + panel anchor to. ``left`` (default) keeps
+   *  Wise away from bottom-right workflow actions. ``right`` is kept
+   *  for surfaces that explicitly need right anchoring. */
   placement?: "left" | "right";
   className?: string;
+  /** Optional override for the expanded panel. Use this when the FAB
+   *  needs a surface-specific offset, e.g. a desktop sidebar. */
+  panelClassName?: string;
 
   /** Fired once per mount (after hydration completes). Use to send
    *  analytics; the shell never calls the network. */
@@ -72,6 +72,7 @@ export function WiseDockShell({
   hasWarning = false,
   placement = "left",
   className,
+  panelClassName,
   onFirstRender,
   onOpen,
   onClose,
@@ -154,12 +155,9 @@ export function WiseDockShell({
           "group fixed z-40 inline-flex h-14 w-14 items-center justify-center rounded-full shadow-lg transition-all duration-fast",
           "bg-[color:var(--surface-brand)] text-white",
           "hover:scale-105 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[color:var(--text-teal)]/60 focus-visible:ring-offset-2",
-          // ``left`` (client, no sidebar): bottom-left floating icon.
-          // ``right`` (provider): bottom-right, SIDE-BY-SIDE to the left of
-          // the FeedbackLauncher pill (bottom-4 right-4 — ~110px wide with
-          // its "Reportar" label on sm+, icon-only ~42px below). The
-          // responsive offset leaves a clear gap so the two never touch,
-          // and both stay off the left sidebar.
+          // ``left``: bottom-left floating icon, away from bottom-right
+          // submit/download/review actions. ``right`` remains available
+          // for legacy surfaces that explicitly request it.
           placement === "right"
             ? "bottom-4 right-[4.75rem] sm:right-[8.75rem]"
             : "bottom-5 left-5 sm:bottom-6 sm:left-6",
@@ -206,6 +204,7 @@ export function WiseDockShell({
               placement === "right"
                 ? "sm:inset-x-auto sm:bottom-6 sm:right-6 sm:max-h-[min(620px,calc(100vh-6rem))] sm:w-[380px] sm:rounded-2xl"
                 : "sm:inset-x-auto sm:bottom-6 sm:left-6 sm:max-h-[min(620px,calc(100vh-6rem))] sm:w-[380px] sm:rounded-2xl",
+              panelClassName,
             )}
           >
             {renderHeader(close)}

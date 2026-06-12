@@ -2,6 +2,7 @@
 
 import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
+import { useRouter, useSearchParams } from "next/navigation";
 import {
   Buildings,
   CalendarBlank,
@@ -42,6 +43,7 @@ import {
 import { INSTITUTION_LABELS } from "@/lib/api/portal";
 import { statusLabel, statusVariant } from "@/lib/constants/statuses";
 import { useUrlClientId } from "@/lib/workspace/use-url-client-id";
+import { withReturnTo } from "@/lib/navigation/return-to";
 
 const MONTH_SHORT = [
   "Ene",
@@ -71,20 +73,45 @@ const INSTITUTION_ICON: Record<string, Icon> = {
 
 const INSTITUTION_ORDER = ["sat", "imss", "infonavit", "stps_repse"] as const;
 
+function parseCalendarYear(raw: string | null): number {
+  const fallback = new Date().getFullYear() || 2026;
+  const parsed = Number(raw);
+  if (!Number.isFinite(parsed)) return fallback;
+  return Math.min(2030, Math.max(2021, Math.trunc(parsed)));
+}
+
 // Status labels and color tones now live in the central dictionary so a
 // vocabulary or color change in one place propagates across every
 // surface. See apps/web/lib/constants/statuses.ts.
 
 export default function ClientCalendarPage() {
+  const router = useRouter();
+  const searchParams = useSearchParams();
   const urlClientId = useUrlClientId();
-  const [year, setYear] = useState(new Date().getFullYear() || 2026);
+  const [year, setYear] = useState(() =>
+    parseCalendarYear(searchParams?.get("year") ?? null),
+  );
   const [data, setData] = useState<ClientCalendar | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [expandedMonth, setExpandedMonth] = useState<number | null>(null);
   // Item 3 — vendor multi-select. Empty list = portfolio-wide view.
-  const [vendorFilter, setVendorFilter] = useState<string[]>([]);
+  const [vendorFilter, setVendorFilter] = useState<string[]>(() =>
+    searchParams?.getAll("vendor_id") ?? [],
+  );
   const [vendorsList, setVendorsList] =
     useState<ClientVendorListResponse | null>(null);
+  const calendarHref = useMemo(() => {
+    const params = new URLSearchParams();
+    if (urlClientId) params.set("client_id", urlClientId);
+    if (year !== new Date().getFullYear()) params.set("year", String(year));
+    for (const vendorId of vendorFilter) params.append("vendor_id", vendorId);
+    const qs = params.toString();
+    return `/client/calendar${qs ? `?${qs}` : ""}`;
+  }, [urlClientId, vendorFilter, year]);
+
+  useEffect(() => {
+    router.replace(calendarHref, { scroll: false });
+  }, [calendarHref, router]);
 
   useEffect(() => {
     let cancelled = false;
@@ -307,6 +334,7 @@ export default function ClientCalendarPage() {
                         prev === m.month ? null : m.month,
                       )
                     }
+                    returnToHref={calendarHref}
                   />
                 ))}
               </tbody>
@@ -323,11 +351,13 @@ function MonthRow({
   year,
   expanded,
   onToggle,
+  returnToHref,
 }: {
   month: ClientCalendarMonth;
   year: number;
   expanded: boolean;
   onToggle: () => void;
+  returnToHref: string;
 }) {
   const segments: ChartSegment[] = [
     { label: "Aprobados", value: month.approved_total, tone: "success" },
@@ -434,7 +464,7 @@ function MonthRow({
       {expanded ? (
         <tr className="border-b border-[color:var(--border-subtle)] last:border-0 bg-[color:var(--surface-sunken)]">
           <td colSpan={7} className="px-4 py-3">
-            <ExpandedDetail items={month.items} />
+            <ExpandedDetail items={month.items} returnToHref={returnToHref} />
           </td>
         </tr>
       ) : null}
@@ -442,7 +472,13 @@ function MonthRow({
   );
 }
 
-function ExpandedDetail({ items }: { items: ClientCalendarItem[] }) {
+function ExpandedDetail({
+  items,
+  returnToHref,
+}: {
+  items: ClientCalendarItem[];
+  returnToHref: string;
+}) {
   if (items.length === 0) {
     return (
       <p className="text-xs text-[color:var(--text-tertiary)]">
@@ -475,7 +511,10 @@ function ExpandedDetail({ items }: { items: ClientCalendarItem[] }) {
               />
             </p>
             <Link
-              href={`/client/vendors/${g.rows[0].vendor_id}`}
+              href={withReturnTo(
+                `/client/vendors/${g.rows[0].vendor_id}`,
+                returnToHref,
+              )}
               className="text-[11px] font-medium text-[color:var(--text-brand)] hover:underline"
               title="Abrir el expediente del proveedor"
             >

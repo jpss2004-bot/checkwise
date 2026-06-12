@@ -19,6 +19,7 @@ import { RequirementStatusBadge } from "@/components/checkwise/portal/requiremen
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { MetadataStrip } from "@/components/ui/metadata-strip";
+import { withReturnTo } from "@/lib/navigation/return-to";
 import {
   adminVendorExpedienteZipUrl,
   getClient,
@@ -152,6 +153,14 @@ function AdminVendorDetail({ vendorId }: { vendorId: string }) {
   const persona = str(vendor?.persona_type);
   const vendorStatus = str(vendor?.status);
   const repse = str(vendor?.repse_id);
+  const vendorsHref = clientId
+    ? `/admin/vendors?client_id=${encodeURIComponent(clientId)}`
+    : "/admin/vendors";
+  const currentVendorHref = clientId
+    ? `/admin/vendors/${encodeURIComponent(vendorId)}?client_id=${encodeURIComponent(clientId)}`
+    : `/admin/vendors/${encodeURIComponent(vendorId)}`;
+  const reviewerHref = (submissionId: string) =>
+    withReturnTo(`/admin/reviewer/${submissionId}`, currentVendorHref);
   return (
     <AdminShell
       title={detail ? vendorName : "Proveedor"}
@@ -163,7 +172,7 @@ function AdminVendorDetail({ vendorId }: { vendorId: string }) {
       actions={
         <div className="flex flex-wrap gap-2">
           <Button asChild variant="outline" size="sm">
-            <Link href="/admin/vendors">
+            <Link href={vendorsHref}>
               <ArrowLeft className="h-4 w-4" aria-hidden="true" />
               Proveedores
             </Link>
@@ -194,7 +203,7 @@ function AdminVendorDetail({ vendorId }: { vendorId: string }) {
           description="Este proveedor no tiene un expediente registrado o no está disponible para tu alcance."
           action={
             <Button asChild variant="outline" size="sm">
-              <Link href="/admin/vendors">Volver a proveedores</Link>
+              <Link href={vendorsHref}>Volver a proveedores</Link>
             </Button>
           }
         />
@@ -356,7 +365,7 @@ function AdminVendorDetail({ vendorId }: { vendorId: string }) {
                 {detail.recent_submissions.map((sub) => (
                   <li key={sub.submission_id}>
                     <Link
-                      href={`/admin/reviewer/${sub.submission_id}`}
+                      href={reviewerHref(sub.submission_id)}
                       className="flex items-center gap-3 py-2.5 transition-colors hover:bg-[color:var(--surface-hover)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-[color:var(--border-focus)]/40"
                     >
                       <div className="min-w-0 flex-1">
@@ -396,7 +405,7 @@ function AdminVendorDetail({ vendorId }: { vendorId: string }) {
                 {detail.contracts.map((doc) => (
                   <li key={doc.submission_id}>
                     <Link
-                      href={`/admin/reviewer/${doc.submission_id}`}
+                      href={reviewerHref(doc.submission_id)}
                       className="flex items-center gap-3 py-2.5 transition-colors hover:bg-[color:var(--surface-hover)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-[color:var(--border-focus)]/40"
                     >
                       <div className="min-w-0 flex-1">

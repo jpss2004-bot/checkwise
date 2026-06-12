@@ -24,12 +24,12 @@ import { SubmissionTimeline } from "@/components/checkwise/portal/submission-tim
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { PageHeader } from "@/components/ui/page-header";
+import { toast } from "@/components/ui/toast";
 import {
   fetchSubmissionDocumentBlob,
   getSubmissionDetail,
   INSTITUTION_LABELS,
   PortalApiError,
-  submissionDownloadUrl,
   type RequirementStatus,
   type SubmissionDetail,
   type SubmissionPreviousAttempt,
@@ -109,9 +109,9 @@ export default function SubmissionDetailPage({ params }: PageProps) {
           actions={
             <>
               <Button asChild variant="outline" size="sm">
-                <Link href="/portal/dashboard">
+                <Link href="/portal/calendar">
                   <ArrowLeft className="h-4 w-4" aria-hidden="true" />
-                  Calendario
+                  Volver al calendario
                 </Link>
               </Button>
               <Button asChild variant="outline" size="sm">
@@ -132,7 +132,7 @@ export default function SubmissionDetailPage({ params }: PageProps) {
             description="El enlace puede haber expirado, o el documento pertenece a otro expediente. Regresa al calendario para verlo desde ahí."
             action={
               <Button asChild>
-                <Link href="/portal/dashboard">
+                <Link href="/portal/calendar">
                   <ArrowLeft className="h-4 w-4" aria-hidden="true" />
                   Volver al calendario
                 </Link>
@@ -146,7 +146,7 @@ export default function SubmissionDetailPage({ params }: PageProps) {
             onRetry={retry}
             secondary={
               <Button asChild variant="outline" size="sm">
-                <Link href="/portal/dashboard">
+                <Link href="/portal/calendar">
                   <ArrowLeft className="h-4 w-4" aria-hidden="true" />
                   Calendario
                 </Link>
@@ -263,7 +263,7 @@ function StatusHero({ detail }: { detail: SubmissionDetail }) {
           </Button>
         ) : (
           <Button asChild variant="outline" className="self-start sm:self-auto">
-            <Link href="/portal/dashboard">
+            <Link href="/portal/calendar">
               {CTA_LABEL[detail.suggested_action]}
               <ArrowRight className="h-4 w-4" aria-hidden="true" />
             </Link>
@@ -580,6 +580,7 @@ function SubmissionPreview({
   // submission id change so we never leak object URLs.
   const [blobUrl, setBlobUrl] = useState<string | null>(null);
   const [loadError, setLoadError] = useState(false);
+  const [downloading, setDownloading] = useState(false);
   const submissionId = detail.submission_id;
   const documentId = detail.document?.document_id ?? null;
 
@@ -610,14 +611,28 @@ function SubmissionPreview({
   }, [session, submissionId, documentId]);
 
   if (!detail.document) return null;
-  // Phase 5 / Slice 5A — "Descargar PDF" anchor. Points at the same
-  // backend endpoint as the preview iframe but with ?download=1 so
-  // the browser triggers a save dialog AND the backend writes a
-  // ``provider.document_downloaded`` audit row. The anchor is a
-  // top-level navigation (``target=_blank``) so cookie auth carries
-  // even when the iframe Blob path can't (the iframe uses Bearer
-  // JWT via fetch; a plain anchor cannot set headers).
-  const downloadHref = submissionDownloadUrl(session, detail.submission_id);
+
+  async function handleDownload() {
+    if (downloading) return;
+    setDownloading(true);
+    try {
+      const url = await fetchSubmissionDocumentBlob(session, submissionId, {
+        download: true,
+      });
+      const anchor = document.createElement("a");
+      anchor.href = url;
+      anchor.download = detail.document?.filename ?? "documento.pdf";
+      document.body.appendChild(anchor);
+      anchor.click();
+      anchor.remove();
+      window.setTimeout(() => URL.revokeObjectURL(url), 60_000);
+    } catch {
+      toast.error("No pudimos descargar el PDF.");
+    } finally {
+      setDownloading(false);
+    }
+  }
+
   return (
     <Card>
       <CardHeader>
@@ -626,20 +641,18 @@ function SubmissionPreview({
             <FileText className="h-4 w-4 text-muted-foreground" aria-hidden="true" />
             <CardTitle>Vista previa del documento</CardTitle>
           </div>
-          <Button asChild size="sm" variant="outline">
-            <a
-              href={downloadHref}
-              target="_blank"
-              rel="noreferrer"
-              download={detail.document.filename}
-            >
-              <DownloadSimple
-                className="h-3.5 w-3.5"
-                weight="bold"
-                aria-hidden="true"
-              />
-              Descargar PDF
-            </a>
+          <Button
+            size="sm"
+            variant="outline"
+            loading={downloading}
+            onClick={handleDownload}
+          >
+            <DownloadSimple
+              className="h-3.5 w-3.5"
+              weight="bold"
+              aria-hidden="true"
+            />
+            Descargar PDF
           </Button>
         </div>
         <p className="mt-1 text-sm text-muted-foreground">

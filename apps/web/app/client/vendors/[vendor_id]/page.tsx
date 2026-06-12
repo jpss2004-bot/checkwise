@@ -31,10 +31,10 @@ import {
 } from "@/components/checkwise/dashboard/stat-card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import { safeReturnTo } from "@/lib/navigation/return-to";
 
 import { ClientShell } from "../../_shell";
 import {
-  clientSubmissionDocumentUrl,
   clientVendorExpedienteZipUrl,
   fetchClientSubmissionDocumentBlob,
   getClientVendorDetail,
@@ -49,6 +49,20 @@ type PageProps = {
   params: Promise<{ vendor_id: string }>;
 };
 
+const CLIENT_VENDOR_RETURN_PREFIXES = [
+  "/client/vendors",
+  "/client/calendar",
+  "/client/dashboard",
+  "/client/auditoria",
+] as const;
+
+function clientVendorReturnLabel(href: string): string {
+  if (href.startsWith("/client/calendar")) return "Volver al calendario";
+  if (href.startsWith("/client/dashboard")) return "Volver al dashboard";
+  if (href.startsWith("/client/auditoria")) return "Volver a auditoría";
+  return "Volver a proveedores";
+}
+
 export default function ClientVendorDetailPage({ params }: PageProps) {
   const { vendor_id } = use(params);
   const [detail, setDetail] = useState<ClientVendorDetail | null>(null);
@@ -56,6 +70,7 @@ export default function ClientVendorDetailPage({ params }: PageProps) {
   const router = useRouter();
   const [generating, setGenerating] = useState(false);
   const [downloadingZip, setDownloadingZip] = useState(false);
+  const [vendorsReturnHref, setVendorsReturnHref] = useState("/client/vendors");
 
   const onDownloadExpediente = useCallback(async () => {
     if (downloadingZip) return;
@@ -89,6 +104,13 @@ export default function ClientVendorDetailPage({ params }: PageProps) {
       );
     }
   }, [generating, router, vendor_id]);
+
+  useEffect(() => {
+    const raw = new URLSearchParams(window.location.search).get("returnTo");
+    setVendorsReturnHref(
+      safeReturnTo(raw, CLIENT_VENDOR_RETURN_PREFIXES, "/client/vendors"),
+    );
+  }, [vendor_id]);
 
   useEffect(() => {
     let cancelled = false;
@@ -165,9 +187,9 @@ export default function ClientVendorDetailPage({ params }: PageProps) {
             Descargar expediente
           </Button>
           <Button asChild size="sm" variant="outline">
-            <Link href="/client/vendors">
+            <Link href={vendorsReturnHref}>
               <ArrowLeft className="h-4 w-4" weight="bold" aria-hidden="true" />
-              Volver
+              {clientVendorReturnLabel(vendorsReturnHref)}
             </Link>
           </Button>
         </>
@@ -315,6 +337,7 @@ function ContractDocumentsCard({ detail }: { detail: ClientVendorDetail }) {
 
 function ContractRow({ contract }: { contract: ClientVendorContractDoc }) {
   const [viewing, setViewing] = useState(false);
+  const [downloading, setDownloading] = useState(false);
   const [viewError, setViewError] = useState<string | null>(null);
 
   async function onView() {
@@ -336,9 +359,27 @@ function ContractRow({ contract }: { contract: ClientVendorContractDoc }) {
     }
   }
 
-  const downloadHref = clientSubmissionDocumentUrl(contract.submission_id, {
-    download: true,
-  });
+  async function onDownload() {
+    if (downloading) return;
+    setDownloading(true);
+    setViewError(null);
+    try {
+      const url = await fetchClientSubmissionDocumentBlob(contract.submission_id, {
+        download: true,
+      });
+      const anchor = document.createElement("a");
+      anchor.href = url;
+      anchor.download = contract.filename ?? "documento.pdf";
+      document.body.appendChild(anchor);
+      anchor.click();
+      anchor.remove();
+      setTimeout(() => URL.revokeObjectURL(url), 60_000);
+    } catch {
+      setViewError("No pudimos descargar el contrato. Intenta de nuevo.");
+    } finally {
+      setDownloading(false);
+    }
+  }
 
   const sizeText =
     contract.size_bytes != null
@@ -380,20 +421,19 @@ function ContractRow({ contract }: { contract: ClientVendorContractDoc }) {
           <Eye className="h-3.5 w-3.5" weight="bold" aria-hidden="true" />
           {viewing ? "Abriendo…" : "Ver"}
         </Button>
-        <Button asChild size="sm" variant="outline">
-          <a
-            href={downloadHref}
-            target="_blank"
-            rel="noreferrer"
-            download={contract.filename ?? undefined}
-          >
-            <DownloadSimple
-              className="h-3.5 w-3.5"
-              weight="bold"
-              aria-hidden="true"
-            />
-            Descargar
-          </a>
+        <Button
+          type="button"
+          size="sm"
+          variant="outline"
+          onClick={onDownload}
+          disabled={downloading}
+        >
+          <DownloadSimple
+            className="h-3.5 w-3.5"
+            weight="bold"
+            aria-hidden="true"
+          />
+          {downloading ? "Descargando…" : "Descargar"}
         </Button>
       </div>
     </li>

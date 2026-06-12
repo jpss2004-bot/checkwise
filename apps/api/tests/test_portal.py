@@ -1139,6 +1139,45 @@ def test_document_inline_preview_does_not_audit(
         db.close()
 
 
+def test_document_proxy_param_streams_instead_of_redirecting(
+    api_client: TestClient,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Preview Blob fetches use ``?proxy=1`` so browser CORS settings
+    on presigned storage cannot break the iframe/download flow."""
+    from app.api.v1 import portal as portal_api
+
+    access = _setup_workspace_session(api_client)
+    submitted = _submit_canonical(api_client, vendor_rfc=access["vendor_rfc"])
+    real_storage = portal_api.get_storage_service()
+
+    class RedirectingStorage:
+        def presigned_download_url(self, *args, **kwargs):  # noqa: ANN002, ANN003
+            return "https://storage.example.test/imss.pdf"
+
+        def open_for_read(self, storage_key: str):
+            return real_storage.open_for_read(storage_key)
+
+    monkeypatch.setattr(
+        portal_api,
+        "get_storage_service",
+        lambda: RedirectingStorage(),
+    )
+
+    base = (
+        f"/api/v1/portal/workspaces/{access['workspace_id']}"
+        f"/submissions/{submitted['submission_id']}/document"
+    )
+    redirected = api_client.get(base, follow_redirects=False)
+    assert redirected.status_code == 302
+    assert redirected.headers["location"] == "https://storage.example.test/imss.pdf"
+
+    proxied = api_client.get(f"{base}?proxy=1")
+    assert proxied.status_code == 200, proxied.text
+    assert proxied.headers["content-type"].startswith("application/pdf")
+    assert proxied.content.startswith(b"%PDF")
+
+
 # ---------------------------------------------------------------------------
 # Phase 5 / Slice 5B — expediente ZIP
 # ---------------------------------------------------------------------------

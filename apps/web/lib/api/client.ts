@@ -627,10 +627,11 @@ export type ClientVendorExpedienteFilters = {
  */
 export function clientSubmissionDocumentUrl(
   submissionId: string,
-  opts: { download?: boolean } = {},
+  opts: { download?: boolean; proxy?: boolean } = {},
 ): string {
   const params = new URLSearchParams();
   if (opts.download) params.set("download", "1");
+  if (opts.proxy) params.set("proxy", "1");
   const qs = params.toString();
   const base = `${API_BASE_URL}/api/v1/client/submissions/${encodeURIComponent(submissionId)}/document`;
   return qs ? `${base}?${qs}` : base;
@@ -654,10 +655,13 @@ export async function fetchClientSubmissionDocumentBlob(
   }
   const headers = new Headers();
   headers.set("Authorization", `Bearer ${session.access_token}`);
-  const response = await fetch(clientSubmissionDocumentUrl(submissionId, opts), {
-    headers,
-    credentials: "include",
-  });
+  const response = await fetch(
+    clientSubmissionDocumentUrl(submissionId, { ...opts, proxy: true }),
+    {
+      headers,
+      credentials: "include",
+    },
+  );
   if (!response.ok) {
     const detail = await response.text().catch(() => "");
     throw new ClientApiError(response.status, detail || response.statusText);

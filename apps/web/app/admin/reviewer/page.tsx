@@ -27,6 +27,7 @@ import {
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Select } from "@/components/ui/select";
 import { RequirementStatusBadge } from "@/components/checkwise/portal/requirement-status-badge";
+import { withReturnTo } from "@/lib/navigation/return-to";
 import {
   EmptyState,
   ErrorState,
@@ -141,6 +142,32 @@ function parseRfcParam(raw: string | null): RfcKey | "" {
     : "";
 }
 
+function reviewerQueueHref({
+  filter,
+  institution,
+  risk,
+  rfc,
+  clientId,
+  vendorId,
+}: {
+  filter: FilterKey;
+  institution: string;
+  risk: RiskKey | "";
+  rfc: RfcKey | "";
+  clientId: string;
+  vendorId: string;
+}): string {
+  const params = new URLSearchParams();
+  if (filter !== "all") params.set("tab", filter);
+  if (institution) params.set("institution", institution);
+  if (risk) params.set("risk", risk);
+  if (rfc) params.set("rfc", rfc);
+  if (clientId) params.set("client_id", clientId);
+  if (vendorId) params.set("vendor_id", vendorId);
+  const qs = params.toString();
+  return `/admin/reviewer${qs ? `?${qs}` : ""}`;
+}
+
 // SLA aging thresholds (hours). <72h is on target, 72h–168h is at
 // risk (amber), >168h (7 days) is out of SLA (red).
 const SLA_WARNING_HOURS = 72;
@@ -226,6 +253,23 @@ function ReviewerQueueBody() {
       ? vendors.filter((vendor) => vendor.client_id === clientId)
       : vendors;
   }, [clientId, facets]);
+  const currentQueueHref = useMemo(
+    () =>
+      reviewerQueueHref({
+        filter,
+        institution,
+        risk,
+        rfc,
+        clientId,
+        vendorId,
+      }),
+    [clientId, filter, institution, rfc, risk, vendorId],
+  );
+  const reviewerDetailHref = useCallback(
+    (submissionId: string) =>
+      withReturnTo(`/admin/reviewer/${submissionId}`, currentQueueHref),
+    [currentQueueHref],
+  );
 
   useEffect(() => {
     const current = readAdminSession();
@@ -268,16 +312,8 @@ function ReviewerQueueBody() {
   // Mirror tab + institution + risk/provider/client into the URL (replace, not push,
   // so the history stack stays one entry per page visit).
   useEffect(() => {
-    const params = new URLSearchParams();
-    if (filter !== "all") params.set("tab", filter);
-    if (institution) params.set("institution", institution);
-    if (risk) params.set("risk", risk);
-    if (rfc) params.set("rfc", rfc);
-    if (clientId) params.set("client_id", clientId);
-    if (vendorId) params.set("vendor_id", vendorId);
-    const qs = params.toString();
-    router.replace(`/admin/reviewer${qs ? `?${qs}` : ""}`, { scroll: false });
-  }, [clientId, filter, institution, rfc, risk, router, vendorId]);
+    router.replace(currentQueueHref, { scroll: false });
+  }, [currentQueueHref, router]);
 
   // First page fetch. Depends on `serverStatus` (not `filter`) so
   // toggling between "Todos" and the client-side mismatch filter
@@ -637,7 +673,7 @@ function ReviewerQueueBody() {
                   <QueueTableRow
                     key={item.submission_id}
                     item={item}
-                    onOpen={() => router.push(`/admin/reviewer/${item.submission_id}`)}
+                    onOpen={() => router.push(reviewerDetailHref(item.submission_id))}
                   />
                 ))}
               </TableBody>

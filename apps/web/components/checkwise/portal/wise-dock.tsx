@@ -95,6 +95,9 @@ interface WiseDockProps {
   messages?: WiseMessage[];
   dashboard?: DashboardPayload;
   onboarding?: OnboardingSummary | null;
+  /** Desktop provider shell offset. The sidebar is hidden below lg,
+   *  so mobile/tablet keep the plain bottom-left placement. */
+  sidebarCollapsed?: boolean;
   className?: string;
 }
 
@@ -108,6 +111,7 @@ export function WiseDock({
   messages: messagesProp,
   dashboard: dashboardProp,
   onboarding: onboardingProp,
+  sidebarCollapsed = false,
   className,
 }: WiseDockProps) {
   // Phase 4: dock self-fetches when the host page doesn't pass these
@@ -309,10 +313,14 @@ export function WiseDock({
       ariaLabel="Wise — copiloto de cumplimiento"
       fabAriaLabel={`Abrir Wise · ${AUDIENCE_PILL[audience]}`}
       hasWarning={hasWarning}
-      // Provider portal has a left sidebar that owns the bottom-left
-      // corner; anchor Wise bottom-right so the two never overlap.
-      placement="right"
-      className={className}
+      placement="left"
+      className={cn(
+        sidebarCollapsed ? "lg:left-[6.5rem]" : "lg:left-[17.5rem]",
+        className,
+      )}
+      panelClassName={
+        sidebarCollapsed ? "lg:left-[6.5rem]" : "lg:left-[17.5rem]"
+      }
       onFirstRender={() => {
         void postWiseEvent(session, "wise.first_render", {
           audience,

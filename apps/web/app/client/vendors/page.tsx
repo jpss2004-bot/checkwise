@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useState } from "react";
 import Link from "next/link";
-import { useRouter } from "next/navigation";
+import { useRouter, useSearchParams } from "next/navigation";
 import {
   ArrowRight,
   ChartBar,
@@ -36,6 +36,7 @@ import {
 } from "@/lib/api/reports";
 import { useUrlClientId } from "@/lib/workspace/use-url-client-id";
 import { BUCKET_LABELS_ES, semaphoreLabel } from "@/lib/constants/statuses";
+import { withReturnTo } from "@/lib/navigation/return-to";
 
 const LEVELS = [
   { value: "", label: "Todos" },
@@ -46,14 +47,34 @@ const LEVELS = [
 
 type SemaphoreLevel = "green" | "yellow" | "red";
 
+function parseSemaphoreLevel(raw: string | null): SemaphoreLevel | "" {
+  return raw === "green" || raw === "yellow" || raw === "red" ? raw : "";
+}
+
 export default function ClientVendorsPage() {
+  const router = useRouter();
+  const searchParams = useSearchParams();
   const urlClientId = useUrlClientId();
   const [rows, setRows] = useState<ClientVendorRow[] | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  const [search, setSearch] = useState("");
-  const [level, setLevel] = useState<SemaphoreLevel | "">("");
+  const [search, setSearch] = useState(() => searchParams?.get("q") ?? "");
+  const [level, setLevel] = useState<SemaphoreLevel | "">(() =>
+    parseSemaphoreLevel(searchParams?.get("level") ?? null),
+  );
   const [unreadByVendor, setUnreadByVendor] = useState<Record<string, number>>({});
+  const vendorsHref = useMemo(() => {
+    const params = new URLSearchParams();
+    if (urlClientId) params.set("client_id", urlClientId);
+    if (search.trim()) params.set("q", search.trim());
+    if (level) params.set("level", level);
+    const qs = params.toString();
+    return `/client/vendors${qs ? `?${qs}` : ""}`;
+  }, [level, search, urlClientId]);
+
+  useEffect(() => {
+    router.replace(vendorsHref, { scroll: false });
+  }, [router, vendorsHref]);
 
   async function refresh() {
     setLoading(true);
@@ -107,7 +128,6 @@ export default function ClientVendorsPage() {
     );
   }, [rows]);
 
-  const router = useRouter();
   const [generatingVendorId, setGeneratingVendorId] = useState<string | null>(null);
 
   const onGenerateReport = useCallback(
@@ -133,8 +153,14 @@ export default function ClientVendorsPage() {
   );
 
   const columns = useMemo(
-    () => buildVendorColumns(unreadByVendor, onGenerateReport, generatingVendorId),
-    [unreadByVendor, onGenerateReport, generatingVendorId],
+    () =>
+      buildVendorColumns(
+        unreadByVendor,
+        onGenerateReport,
+        generatingVendorId,
+        vendorsHref,
+      ),
+    [unreadByVendor, onGenerateReport, generatingVendorId, vendorsHref],
   );
 
   return (
@@ -299,6 +325,7 @@ function buildVendorColumns(
   unreadByVendor: Record<string, number>,
   onGenerateReport: (vendorId: string) => void,
   generatingVendorId: string | null,
+  returnToHref: string,
 ): DataTableColumn<ClientVendorRow>[] {
   return [
   {
@@ -431,7 +458,7 @@ function buildVendorColumns(
         </Button>
         <Button asChild size="sm" variant="outline">
           <Link
-            href={`/client/vendors/${row.vendor_id}`}
+            href={withReturnTo(`/client/vendors/${row.vendor_id}`, returnToHref)}
             className="inline-flex items-center gap-1"
           >
             Ver

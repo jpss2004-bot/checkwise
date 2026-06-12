@@ -478,8 +478,14 @@ export async function getSubmissionDetail(
 export function submissionDocumentUrl(
   session: PortalSession,
   submissionId: string,
+  opts: { download?: boolean; proxy?: boolean } = {},
 ): string {
-  return `${API_BASE_URL}/api/v1/portal/workspaces/${session.workspace_id}/submissions/${submissionId}/document`;
+  const params = new URLSearchParams();
+  if (opts.download) params.set("download", "1");
+  if (opts.proxy) params.set("proxy", "1");
+  const qs = params.toString();
+  const base = `${API_BASE_URL}/api/v1/portal/workspaces/${session.workspace_id}/submissions/${submissionId}/document`;
+  return qs ? `${base}?${qs}` : base;
 }
 
 /**
@@ -506,7 +512,7 @@ export function submissionDownloadUrl(
   session: PortalSession,
   submissionId: string,
 ): string {
-  return `${submissionDocumentUrl(session, submissionId)}?download=1`;
+  return submissionDocumentUrl(session, submissionId, { download: true });
 }
 
 /**
@@ -571,6 +577,7 @@ function _buildExpedienteQuery(filters: ExpedienteZipFilters): string {
 export async function fetchSubmissionDocumentBlob(
   session: PortalSession,
   submissionId: string,
+  opts: { download?: boolean } = {},
 ): Promise<string> {
   const headers = new Headers();
   const adminSession = readAdminSession();
@@ -583,10 +590,16 @@ export async function fetchSubmissionDocumentBlob(
   ) {
     headers.set("X-Workspace-Token", session.access_token);
   }
-  const response = await fetch(submissionDocumentUrl(session, submissionId), {
-    headers,
-    credentials: "include",
-  });
+  const response = await fetch(
+    submissionDocumentUrl(session, submissionId, {
+      download: opts.download,
+      proxy: true,
+    }),
+    {
+      headers,
+      credentials: "include",
+    },
+  );
   if (!response.ok) {
     const detail = await response.text().catch(() => "");
     throw new PortalApiError(response.status, detail || response.statusText);

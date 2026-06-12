@@ -358,7 +358,7 @@ export function PortalAppShell({
           page still passes ``dashboard`` + ``onboarding`` as props
           to avoid a redundant refetch — every other page lets the
           dock manage its own data. */}
-      <WiseDock session={session} />
+      <WiseDock session={session} sidebarCollapsed={sidebarCollapsed} />
       <FeedbackLauncher />
     </div>
   );

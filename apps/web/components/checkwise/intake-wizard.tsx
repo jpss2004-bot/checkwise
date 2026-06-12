@@ -1942,7 +1942,7 @@ function ConfirmationStep({
             </Button>
           ) : (
             <Button asChild className="active:scale-[0.98]">
-              <Link href="/portal/dashboard">
+              <Link href="/portal/calendar">
                 <Calendar className="h-4 w-4" aria-hidden="true" />
                 Ver mi calendario
                 <ArrowRight className="h-4 w-4" aria-hidden="true" />

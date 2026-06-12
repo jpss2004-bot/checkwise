@@ -421,6 +421,71 @@ def test_client_download_writes_audit_row(
         db.close()
 
 
+def test_client_document_proxy_param_streams_instead_of_redirecting(
+    api_client: TestClient,
+    db_factory,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Client contract previews fetch with ``?proxy=1`` so a presigned
+    storage redirect cannot break the Blob URL flow."""
+    from app.services import storage as storage_module
+
+    client_id = _seed_client(db_factory)
+    vendor_id, _ws_id = _seed_vendor_with_workspace(
+        db_factory, client_id=client_id
+    )
+    inst_id = _seed_institution(db_factory, code="interno_cliente")
+    req_id = _seed_requirement(
+        db_factory,
+        code="ONB-CONT-001",
+        name="Contrato firmado",
+        institution_id=inst_id,
+    )
+    sub_id = _seed_submission(
+        db_factory,
+        client_id=client_id,
+        vendor_id=vendor_id,
+        requirement_id=req_id,
+        requirement_code="ONB-CONT-001",
+        institution_id=inst_id,
+    )
+    email, pw = _seed_user(
+        db_factory, role="client_admin", client_id=client_id, email_prefix="ca"
+    )
+    token = _login(api_client, email, pw)
+    real_storage = storage_module.get_storage_service()
+
+    class RedirectingStorage:
+        def presigned_download_url(self, *args, **kwargs):  # noqa: ANN002, ANN003
+            return "https://storage.example.test/contract.pdf"
+
+        def open_for_read(self, storage_key: str):
+            return real_storage.open_for_read(storage_key)
+
+    monkeypatch.setattr(
+        storage_module,
+        "get_storage_service",
+        lambda: RedirectingStorage(),
+    )
+
+    base = f"/api/v1/client/submissions/{sub_id}/document"
+    redirected = api_client.get(
+        base,
+        headers=_h(token),
+        follow_redirects=False,
+    )
+    assert redirected.status_code == 302
+    assert (
+        redirected.headers["location"]
+        == "https://storage.example.test/contract.pdf"
+    )
+
+    proxied = api_client.get(f"{base}?proxy=1", headers=_h(token))
+    assert proxied.status_code == 200, proxied.text
+    assert proxied.headers["content-type"].startswith("application/pdf")
+    assert proxied.content.startswith(b"%PDF")
+
+
 def test_client_cannot_download_another_clients_document(
     api_client: TestClient, db_factory
 ) -> None:

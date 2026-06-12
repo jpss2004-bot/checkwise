@@ -2038,6 +2038,7 @@ def get_workspace_submission_document(
     db: DbSession,
     workspace: Annotated[ProviderWorkspace, Depends(current_portal_workspace)],
     download: bool = False,
+    proxy: bool = False,
 ) -> Response:
     """Serve the PDF a provider uploaded for a given submission.
 
@@ -2126,7 +2127,7 @@ def get_workspace_submission_document(
         document.storage_key,
         content_disposition=disposition_header,
     )
-    if presigned is not None:
+    if presigned is not None and not proxy:
         from fastapi.responses import RedirectResponse
 
         return RedirectResponse(presigned, status_code=status.HTTP_302_FOUND)
