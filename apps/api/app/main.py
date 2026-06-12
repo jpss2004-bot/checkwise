@@ -99,6 +99,11 @@ def create_app() -> FastAPI:
             "X-Requested-With",
             "X-Workspace-Token",
         ],
+        # Without this the browser hides ``Content-Disposition`` from
+        # cross-origin fetch responses, so blob downloads (expediente /
+        # auditoría ZIPs) silently lose the server-side filename and
+        # fall back to a generic one (audit 2026-06-12).
+        expose_headers=["Content-Disposition"],
     )
     app.add_middleware(SecurityHeadersMiddleware)
 

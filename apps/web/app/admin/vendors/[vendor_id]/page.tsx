@@ -24,6 +24,7 @@ import {
   getClient,
   type AdminClient,
 } from "@/lib/api/admin";
+import { downloadAuthenticatedFile } from "@/lib/api/download";
 import {
   getClientVendorDetail,
   type ClientVendorDetail,
@@ -94,6 +95,26 @@ function AdminVendorDetail({ vendorId }: { vendorId: string }) {
     null,
   );
   const [reloadKey, setReloadKey] = useState(0);
+  const [downloadingZip, setDownloadingZip] = useState(false);
+  const [downloadError, setDownloadError] = useState<string | null>(null);
+
+  async function onDownloadExpediente() {
+    if (downloadingZip) return;
+    setDownloadingZip(true);
+    setDownloadError(null);
+    try {
+      await downloadAuthenticatedFile(
+        adminVendorExpedienteZipUrl(vendorId),
+        "expediente.zip",
+      );
+    } catch (e) {
+      setDownloadError(
+        e instanceof Error ? e.message : "No pudimos preparar la descarga.",
+      );
+    } finally {
+      setDownloadingZip(false);
+    }
+  }
 
   useEffect(() => {
     let cancelled = false;
@@ -148,20 +169,24 @@ function AdminVendorDetail({ vendorId }: { vendorId: string }) {
             </Link>
           </Button>
           {detail ? (
-            <Button asChild size="sm">
-              <a
-                href={adminVendorExpedienteZipUrl(vendorId)}
-                target="_blank"
-                rel="noopener noreferrer"
-              >
-                <DownloadSimple className="h-4 w-4" aria-hidden="true" />
-                Descargar expediente
-              </a>
+            <Button
+              size="sm"
+              onClick={onDownloadExpediente}
+              disabled={downloadingZip}
+              title="Descargar el expediente completo del proveedor"
+            >
+              <DownloadSimple className="h-4 w-4" aria-hidden="true" />
+              {downloadingZip ? "Preparando…" : "Descargar expediente"}
             </Button>
           ) : null}
         </div>
       }
     >
+      {downloadError ? (
+        <p className="mb-4 rounded-md border border-[color:var(--status-warning-border)] bg-[color:var(--status-warning-bg)] p-3 text-sm text-[color:var(--status-warning-text)]">
+          {downloadError}
+        </p>
+      ) : null}
       {errorKind === "not_found" ? (
         <EmptyState
           icon={Storefront}

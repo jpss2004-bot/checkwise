@@ -33,6 +33,7 @@ import {
   type AuditPackageTreeResponse,
   type ClientVendorListResponse,
 } from "@/lib/api/client";
+import { downloadAuthenticatedFile, saveBlob } from "@/lib/api/download";
 import { INSTITUTION_LABELS } from "@/lib/api/portal";
 import { useUrlClientId } from "@/lib/workspace/use-url-client-id";
 
@@ -225,8 +226,9 @@ export default function ClientAuditoriaPage() {
   }, [selectionCleared]);
 
   // Filter-only fallback URL (GET) used when the user has NOT tweaked
-  // the per-document selection. The tree picker submits via POST so
-  // the bearer header carries and the body can hold hundreds of ids.
+  // the per-document selection. Both paths fetch with the Bearer
+  // header — a top-level navigation cannot carry the staff JWT and
+  // the endpoint has no cookie fallback (audit 2026-06-12).
   const downloadUrl = clientAuditPackageZipUrl({
     client_id: urlClientId,
     period_from: periodFrom || null,
@@ -273,30 +275,23 @@ export default function ClientAuditoriaPage() {
       selectedIds === null ||
       (selectedIds.size === treeAllIds.size &&
         Array.from(treeAllIds).every((id) => selectedIds.has(id)));
-    if (everythingSelected) {
-      window.open(downloadUrl, "_blank", "noopener,noreferrer");
-      return;
-    }
     setDownloading(true);
     setDownloadError(null);
     try {
-      const { blob, filename } = await downloadClientAuditPackageZipPost({
-        client_id: urlClientId,
-        period_from: periodFrom || null,
-        period_to: periodTo || null,
-        institutions,
-        statuses,
-        vendor_ids: vendorIds,
-        submission_ids: Array.from(effectiveSelection),
-      });
-      const url = URL.createObjectURL(blob);
-      const a = document.createElement("a");
-      a.href = url;
-      a.download = filename;
-      document.body.appendChild(a);
-      a.click();
-      a.remove();
-      setTimeout(() => URL.revokeObjectURL(url), 60_000);
+      if (everythingSelected) {
+        await downloadAuthenticatedFile(downloadUrl, "auditoria.zip");
+      } else {
+        const { blob, filename } = await downloadClientAuditPackageZipPost({
+          client_id: urlClientId,
+          period_from: periodFrom || null,
+          period_to: periodTo || null,
+          institutions,
+          statuses,
+          vendor_ids: vendorIds,
+          submission_ids: Array.from(effectiveSelection),
+        });
+        saveBlob(blob, filename);
+      }
     } catch (err) {
       setDownloadError(
         err instanceof Error

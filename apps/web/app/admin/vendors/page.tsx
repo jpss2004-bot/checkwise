@@ -34,6 +34,7 @@ import {
   listVendors,
   updateVendor,
 } from "@/lib/api/admin";
+import { downloadAuthenticatedFile } from "@/lib/api/download";
 
 export default function AdminVendorsPage() {
   // useSearchParams must live under a Suspense boundary so Next can
@@ -62,6 +63,28 @@ function AdminVendorsBody() {
   const [clientFilter, setClientFilter] = useState(
     () => searchParams?.get("client_id") ?? "",
   );
+  // Vendor id whose expediente ZIP is being fetched; the row button
+  // must carry the staff JWT, so it downloads via fetch+Blob instead
+  // of a plain navigation (audit 2026-06-12).
+  const [downloadingId, setDownloadingId] = useState<string | null>(null);
+
+  async function onDownloadExpediente(vendorId: string) {
+    if (downloadingId) return;
+    setDownloadingId(vendorId);
+    setError(null);
+    try {
+      await downloadAuthenticatedFile(
+        adminVendorExpedienteZipUrl(vendorId),
+        "expediente.zip",
+      );
+    } catch (err) {
+      setError(
+        err instanceof Error ? err.message : "No pudimos preparar la descarga.",
+      );
+    } finally {
+      setDownloadingId(null);
+    }
+  }
 
   useEffect(() => {
     const params = new URLSearchParams();
@@ -276,20 +299,21 @@ function AdminVendorsBody() {
               align: "right",
               cell: (row) => (
                 <div className="flex items-center justify-end gap-2">
-                  <Button asChild size="sm" variant="outline">
-                    <a
-                      href={adminVendorExpedienteZipUrl(row.id)}
-                      target="_blank"
-                      rel="noreferrer"
-                      title="Descargar el expediente completo del proveedor"
-                    >
-                      <DownloadSimple
-                        className="h-3.5 w-3.5"
-                        weight="bold"
-                        aria-hidden="true"
-                      />
-                      Descargar expediente
-                    </a>
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    onClick={() => onDownloadExpediente(row.id)}
+                    disabled={downloadingId !== null}
+                    title="Descargar el expediente completo del proveedor"
+                  >
+                    <DownloadSimple
+                      className="h-3.5 w-3.5"
+                      weight="bold"
+                      aria-hidden="true"
+                    />
+                    {downloadingId === row.id
+                      ? "Preparando…"
+                      : "Descargar expediente"}
                   </Button>
                   <Button
                     size="sm"

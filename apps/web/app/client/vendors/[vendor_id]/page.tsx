@@ -41,6 +41,7 @@ import {
   type ClientVendorContractDoc,
   type ClientVendorDetail,
 } from "@/lib/api/client";
+import { downloadAuthenticatedFile } from "@/lib/api/download";
 import { createReportFromPreset, ReportsApiError } from "@/lib/api/reports";
 import { slotStateLabel } from "@/lib/constants/statuses";
 
@@ -54,6 +55,24 @@ export default function ClientVendorDetailPage({ params }: PageProps) {
   const [error, setError] = useState<string | null>(null);
   const router = useRouter();
   const [generating, setGenerating] = useState(false);
+  const [downloadingZip, setDownloadingZip] = useState(false);
+
+  const onDownloadExpediente = useCallback(async () => {
+    if (downloadingZip) return;
+    setDownloadingZip(true);
+    try {
+      await downloadAuthenticatedFile(
+        clientVendorExpedienteZipUrl(vendor_id),
+        "expediente.zip",
+      );
+    } catch (e) {
+      setError(
+        e instanceof Error ? e.message : "No pudimos preparar la descarga.",
+      );
+    } finally {
+      setDownloadingZip(false);
+    }
+  }, [downloadingZip, vendor_id]);
 
   const onGenerateReport = useCallback(async () => {
     if (generating) return;
@@ -102,8 +121,10 @@ export default function ClientVendorDetailPage({ params }: PageProps) {
         <>
           {/* Phase 5 / Slice 5C — client-scoped vendor expediente
               ZIP. No filter UI here yet (V1) — the modal lives on
-              the provider dashboard. Cookie-auth navigation pattern
-              (target=_blank). The backend audits the request as
+              the provider dashboard. Fetched with the staff JWT via
+              downloadAuthenticatedFile — a plain navigation cannot
+              carry the Bearer header (audit 2026-06-12). The backend
+              audits the request as
               ``client.vendor_expediente_downloaded`` so the
               forensic trail distinguishes this from a provider
               self-pull. */}
@@ -121,19 +142,27 @@ export default function ClientVendorDetailPage({ params }: PageProps) {
             )}
             Generar reporte
           </Button>
-          <Button asChild size="sm" variant="outline">
-            <a
-              href={clientVendorExpedienteZipUrl(vendor_id)}
-              target="_blank"
-              rel="noreferrer"
-            >
+          <Button
+            size="sm"
+            variant="outline"
+            onClick={onDownloadExpediente}
+            disabled={downloadingZip}
+            title="Descargar el expediente completo del proveedor"
+          >
+            {downloadingZip ? (
+              <CircleNotch
+                className="h-4 w-4 animate-spin"
+                weight="bold"
+                aria-hidden="true"
+              />
+            ) : (
               <DownloadSimple
                 className="h-4 w-4"
                 weight="bold"
                 aria-hidden="true"
               />
-              Descargar expediente
-            </a>
+            )}
+            Descargar expediente
           </Button>
           <Button asChild size="sm" variant="outline">
             <Link href="/client/vendors">

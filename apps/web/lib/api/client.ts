@@ -666,6 +666,12 @@ export async function fetchClientSubmissionDocumentBlob(
   return URL.createObjectURL(blob);
 }
 
+/**
+ * Absolute URL of the vendor expediente ZIP endpoint. Auth is
+ * Bearer-only — pass this URL to ``downloadAuthenticatedFile``
+ * (``lib/api/download.ts``); a plain ``<a href>`` navigation cannot
+ * carry the staff JWT and 401s (audit 2026-06-12).
+ */
 export function clientVendorExpedienteZipUrl(
   vendorId: string,
   filters: ClientVendorExpedienteFilters = {},
@@ -794,10 +800,12 @@ export async function getClientAuditPackagePreview(
 }
 
 /**
- * Absolute URL of the cross-vendor audit-package ZIP endpoint. The
- * caller follows this URL as a top-level navigation (``<a target="_blank">``)
- * so the bearer cookie carries. Backend renders the INDICE.pdf cover
- * and writes a ``client.audit_package_downloaded`` audit row.
+ * Absolute URL of the cross-vendor audit-package ZIP endpoint. Auth
+ * is Bearer-only — there is no session cookie on the staff surfaces,
+ * so this URL must be fetched via ``downloadAuthenticatedFile``
+ * (``lib/api/download.ts``), never followed as a navigation (audit
+ * 2026-06-12). Backend renders the INDICE.pdf cover and writes a
+ * ``client.audit_package_downloaded`` audit row.
  */
 export function clientAuditPackageZipUrl(
   filters: AuditPackageFilters = {},
