@@ -28,6 +28,7 @@ from sqlalchemy.orm import Session, selectinload
 from app.api.v1.auth import CurrentUser, require_any_role
 from app.constants.roles import MembershipRole
 from app.constants.statuses import DocumentStatus, ReviewerAction
+from app.core.config import settings
 from app.db.session import get_db
 from app.models import (
     Document,
@@ -137,6 +138,14 @@ class DecisionRequest(BaseModel):
     # audit timeline keeps reading cleanly; observations go into
     # AuditLog.metadata + the notification body only.
     observations: str | None = Field(default=None, max_length=2000)
+    # Phase E — suggestion-acceptance telemetry. When the detail
+    # endpoint showed an ``approval_suggestion`` and the UI knows
+    # whether the reviewer followed it, it reports that here. The flag
+    # only lands in the decision's audit-log metadata (acceptance-rate
+    # measurement for the auto-approve unlock case); it never changes
+    # decision behavior. ``None`` (the default) means "no suggestion
+    # interaction reported" and writes nothing.
+    accepted_suggestion: bool | None = None
 
 
 class DecisionResponse(BaseModel):
@@ -673,6 +682,82 @@ def get_submission(
         # is a denormalized copy of the inspection columns so the
         # comparison card can render before the shadow call finishes.
         "shadow_analysis": _build_shadow_analysis_payload(inspection),
+        # Phase E — advisory approval suggestion. Computed from data
+        # already loaded above (no extra queries). ``None`` only when
+        # there is no inspection row at all; otherwise the block always
+        # carries the per-criterion flags so the UI can explain WHY a
+        # document is (not) suggested. Reviewer-facing and advisory
+        # only — it never changes a status.
+        "approval_suggestion": _build_approval_suggestion(submission, inspection),
+    }
+
+
+def _build_approval_suggestion(submission, inspection) -> dict | None:  # noqa: ANN001
+    """Shape the Phase-E approval-suggestion block for the reviewer detail.
+
+    ``suggested`` is True only when ALL of:
+
+    * best available confidence (shadow preferred, heuristic fallback)
+      ≥ ``AUTO_APPROVE_SUGGEST_CONFIDENCE``;
+    * the authenticity verdict is an explicit ``clean`` (NULL = not
+      analyzed = not suggestible);
+    * the requirement cadence is recurring (mensual/…/anual — never
+      alta_inicial / unica_vez / evento);
+    * the submission is still in a reviewable queue status.
+
+    Legacy rows without an inspection return ``None``.
+    """
+    from app.services.auto_approval import (
+        best_confidence,
+        is_recurring_cadence,
+        resolve_submission_cadence,
+    )
+
+    if inspection is None:
+        return None
+
+    confidence, confidence_source = best_confidence(inspection)
+    match_ok = (
+        confidence is not None
+        and confidence >= settings.AUTO_APPROVE_SUGGEST_CONFIDENCE
+    )
+    risk_clean = inspection.authenticity_risk == "clean"
+    recurring = is_recurring_cadence(resolve_submission_cadence(submission))
+    in_queue = submission.status in QUEUE_STATUSES
+    suggested = match_ok and risk_clean and recurring and in_queue
+
+    if suggested:
+        source_label = "IA" if confidence_source == "shadow" else "heurística"
+        detail_es = (
+            f"Coincidencia {round(confidence * 100)}% ({source_label}), "
+            "autenticidad limpia y documento recurrente — sugerimos aprobar."
+        )
+    else:
+        missing: list[str] = []
+        if not match_ok:
+            missing.append(
+                "confianza de coincidencia insuficiente"
+                if confidence is not None
+                else "sin confianza de coincidencia disponible"
+            )
+        if not risk_clean:
+            missing.append("autenticidad no verificada como limpia")
+        if not recurring:
+            missing.append("el documento no es recurrente")
+        if not in_queue:
+            missing.append("el envío ya no está en cola de revisión")
+        detail_es = "Sin sugerencia de aprobación: " + "; ".join(missing) + "."
+
+    return {
+        "suggested": suggested,
+        "confidence": confidence,
+        "confidence_source": confidence_source,
+        "criteria": {
+            "match_ok": match_ok,
+            "risk_clean": risk_clean,
+            "recurring": recurring,
+        },
+        "detail_es": detail_es,
     }
 
 
@@ -775,6 +860,7 @@ def submit_decision(
         reason=payload.reason,
         observations=payload.observations,
         reviewer_user_id=current.user.id,
+        accepted_suggestion=payload.accepted_suggestion,
     )
 
     # Phase 7 cutover (Slice C) — fire the unified-fabric envelope

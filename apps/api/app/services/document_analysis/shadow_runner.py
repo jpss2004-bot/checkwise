@@ -722,6 +722,30 @@ def _persist_shadow_result(
         )
 
         db.commit()
+
+        # Phase E — auto-approval hook. Runs AFTER the commit above so
+        # eligibility sees the final post-LLM merged verdict, and is
+        # wrapped in its own fail-open guard: an engine failure logs
+        # and never disturbs the already-persisted shadow result. The
+        # engine ships dark (``AUTO_APPROVE_ENABLED=False``) so this
+        # is a cheap no-op until an operator unlocks it.
+        try:
+            from app.services.auto_approval import maybe_auto_approve
+
+            outcome = maybe_auto_approve(db, submission_id)
+            if outcome.attempted:
+                logger.info(
+                    "Auto-approval outcome submission_id=%s approved=%s reason=%s",
+                    submission_id,
+                    outcome.approved,
+                    outcome.reason,
+                )
+        except Exception:  # noqa: BLE001 — fail-open; shadow persistence already landed
+            logger.exception(
+                "Auto-approval hook crashed; shadow result already persisted. "
+                "submission_id=%s",
+                submission_id,
+            )
     except Exception:  # noqa: BLE001 — never let a background failure crash the worker
         logger.exception("Failed to persist shadow analysis result; document_id=%s", document_id)
         db.rollback()

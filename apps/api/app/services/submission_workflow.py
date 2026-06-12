@@ -184,6 +184,16 @@ def _validate_transition(submission: Submission, target: ReviewerAction) -> None
     _ = target
 
 
+# Phase E — canonical Spanish reason stamped on every automatic
+# approval. Flows verbatim into ``DocumentStatusHistory.reason``,
+# ``ValidationEvent.message`` and both notification bodies so the
+# client/provider-facing timeline reads distinctly from a human
+# reviewer's approval.
+AUTO_APPROVAL_REASON_ES = (
+    "Aprobado automáticamente por el sistema de validación documental."
+)
+
+
 def apply_reviewer_decision(
     db: Session,
     *,
@@ -192,6 +202,7 @@ def apply_reviewer_decision(
     reason: str | None,
     reviewer_user_id: str,
     observations: str | None = None,
+    accepted_suggestion: bool | None = None,
 ) -> TransitionResult:
     """Apply a reviewer decision to a submission as an atomic transition.
 
@@ -236,6 +247,117 @@ def apply_reviewer_decision(
 
     _validate_transition(submission, action_enum)
 
+    audit_metadata: dict = {
+        "reviewer_action": action_enum.value,
+        "reason": cleaned_reason,
+        # Slice 9A — observations are stored only on the audit
+        # log + the notification bodies; intentionally NOT on
+        # DocumentStatusHistory.reason / ValidationEvent.message
+        # so the provider-facing timeline keeps reading as one
+        # clean reason per row.
+        "observations": cleaned_observations,
+    }
+    # Phase E — suggestion-acceptance telemetry. Only present when the
+    # client explicitly reported whether the reviewer followed the
+    # approval suggestion; absence of the key means "no suggestion
+    # interaction was reported", which is the pre-Phase-E behavior.
+    if accepted_suggestion is not None:
+        audit_metadata["suggestion"] = {
+            "shown": True,
+            "accepted": bool(accepted_suggestion),
+        }
+
+    return _apply_decision_transition(
+        db,
+        submission=submission,
+        action_enum=action_enum,
+        reason=cleaned_reason,
+        observations=cleaned_observations,
+        history_actor=f"reviewer:{reviewer_user_id}",
+        event_actor_type="reviewer",
+        event_payload_extra={"reviewer_user_id": reviewer_user_id},
+        audit_action="submission.reviewer_decision",
+        audit_actor_type="reviewer",
+        audit_actor_id=reviewer_user_id,
+        audit_metadata_extra=audit_metadata,
+        result_reviewer_user_id=reviewer_user_id,
+        notification_reviewer_user_id=reviewer_user_id,
+    )
+
+
+def apply_system_auto_approval(
+    db: Session,
+    *,
+    submission: Submission,
+    evidence: dict,
+) -> TransitionResult:
+    """Apply an automatic approval with system actor semantics (Phase E).
+
+    Same atomic transition + side effects as a reviewer's approve
+    (``Submission.status`` / ``Document.status`` → ``aprobado``,
+    ``DocumentStatusHistory``, ``ValidationEvent``, ``AuditLog``,
+    client + provider notifications, email/WhatsApp best-effort), but:
+
+    * History/event actor is ``"system"`` (no ``reviewer:<id>``).
+    * The audit action is ``system.auto_approved`` and its metadata
+      carries the FULL eligibility evidence snapshot assembled by
+      :func:`app.services.auto_approval.maybe_auto_approve`.
+    * The reason is :data:`AUTO_APPROVAL_REASON_ES`, so every
+      downstream timeline reads distinctly from a human approval.
+
+    Raises the same 409s as a reviewer decision when the submission is
+    terminal or in a non-decidable status — callers (the auto-approval
+    engine) pre-validate eligibility and treat any raise as a no-op.
+    """
+    _validate_transition(submission, ReviewerAction.APPROVE)
+    return _apply_decision_transition(
+        db,
+        submission=submission,
+        action_enum=ReviewerAction.APPROVE,
+        reason=AUTO_APPROVAL_REASON_ES,
+        observations=None,
+        history_actor="system",
+        event_actor_type="system",
+        event_payload_extra={"source": "auto_approval"},
+        audit_action="system.auto_approved",
+        audit_actor_type="system",
+        audit_actor_id=None,
+        audit_metadata_extra=dict(evidence),
+        result_reviewer_user_id="system",
+        notification_reviewer_user_id=None,
+    )
+
+
+def _apply_decision_transition(
+    db: Session,
+    *,
+    submission: Submission,
+    action_enum: ReviewerAction,
+    reason: str | None,
+    observations: str | None,
+    history_actor: str,
+    event_actor_type: str,
+    event_payload_extra: dict,
+    audit_action: str,
+    audit_actor_type: str,
+    audit_actor_id: str | None,
+    audit_metadata_extra: dict,
+    result_reviewer_user_id: str,
+    notification_reviewer_user_id: str | None,
+) -> TransitionResult:
+    """Shared decision-application core (reviewer + system callers).
+
+    Owns the status mutation and EVERY downstream side effect so the
+    Phase-E auto-approve engine cannot drift from the human path:
+    history, validation event, audit log, client/provider
+    notifications, transactional email and WhatsApp all live here
+    exactly once. Callers differ only in actor semantics (who decided)
+    and audit framing (action + metadata). Commits internally; the
+    whole batch succeeds or rolls back as a unit.
+    """
+    cleaned_reason = reason
+    cleaned_observations = observations
+
     previous_status = submission.status
     target_status = REVIEWER_DECISION_STATUS[action_enum]
     new_status_value = target_status.value
@@ -263,7 +385,7 @@ def apply_reviewer_decision(
             from_status=previous_status,
             to_status=new_status_value,
             reason=cleaned_reason,
-            actor=f"reviewer:{reviewer_user_id}",
+            actor=history_actor,
         )
     )
 
@@ -276,9 +398,9 @@ def apply_reviewer_decision(
         result=action_enum.value,
         severity="info" if action_enum == ReviewerAction.APPROVE else "warning",
         message=cleaned_reason,
-        actor_type="reviewer",
+        actor_type=event_actor_type,
         payload={
-            "reviewer_user_id": reviewer_user_id,
+            **event_payload_extra,
             "from_status": previous_status,
             "to_status": new_status_value,
         },
@@ -286,22 +408,15 @@ def apply_reviewer_decision(
 
     add_audit_event(
         db,
-        action="submission.reviewer_decision",
+        action=audit_action,
         entity_type="submission",
         entity_id=submission.id,
-        actor_type="reviewer",
-        actor_id=reviewer_user_id,
+        actor_type=audit_actor_type,
+        actor_id=audit_actor_id,
         before={"status": previous_status},
         after={"status": new_status_value},
         metadata={
-            "reviewer_action": action_enum.value,
-            "reason": cleaned_reason,
-            # Slice 9A — observations are stored only on the audit
-            # log + the notification bodies; intentionally NOT on
-            # DocumentStatusHistory.reason / ValidationEvent.message
-            # so the provider-facing timeline keeps reading as one
-            # clean reason per row.
-            "observations": cleaned_observations,
+            **audit_metadata_extra,
             "document_id": document_id,
         },
     )
@@ -362,8 +477,8 @@ def apply_reviewer_decision(
         )
 
         reviewer_name: str | None = None
-        if reviewer_user_id:
-            reviewer_user = db.get(_User, reviewer_user_id)
+        if notification_reviewer_user_id:
+            reviewer_user = db.get(_User, notification_reviewer_user_id)
             if reviewer_user is not None:
                 reviewer_name = reviewer_user.full_name or reviewer_user.email
 
@@ -391,6 +506,6 @@ def apply_reviewer_decision(
         action=action_enum.value,
         reason=cleaned_reason,
         observations=cleaned_observations,
-        reviewer_user_id=reviewer_user_id,
+        reviewer_user_id=result_reviewer_user_id,
         decided_at=submission.updated_at,
     )

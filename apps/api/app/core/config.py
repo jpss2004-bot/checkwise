@@ -303,6 +303,33 @@ class Settings(BaseSettings):
     # exactly as today. Whitespace + blank entries are tolerated.
     DOCUMENT_ANALYSIS_PILOT_ORG_IDS: str = ""
 
+    # ─────────────────────────────────────────────────────────────────
+    # Phase E — document-revalidation approval suggestion + auto-approve.
+    #
+    # ``AUTO_APPROVE_SUGGEST_CONFIDENCE`` gates the reviewer-facing
+    # "sugerimos aprobar" hint on the detail endpoint (live, advisory
+    # only — never changes a status by itself).
+    #
+    # The auto-approve engine ships DARK:
+    #   * ``AUTO_APPROVE_ENABLED`` is the master kill switch (default
+    #     OFF — nothing is ever auto-approved until an operator flips
+    #     it deliberately).
+    #   * ``AUTO_APPROVE_UNLOCKED_REQUIREMENT_CODES`` is a CSV
+    #     allowlist of requirement codes unlocked for auto-approval.
+    #     Codes are added MANUALLY, one at a time, from calibration-
+    #     harness reports proving ≥99% precision for that document
+    #     type. Empty (the default) means no type is unlocked even
+    #     with the master flag on.
+    #   * ``AUTO_APPROVE_MIN_CONFIDENCE`` is the per-document floor on
+    #     the best available match confidence (shadow preferred,
+    #     heuristic fallback). Deliberately stricter than the
+    #     suggestion threshold.
+    # ─────────────────────────────────────────────────────────────────
+    AUTO_APPROVE_SUGGEST_CONFIDENCE: float = 0.9
+    AUTO_APPROVE_ENABLED: bool = False
+    AUTO_APPROVE_UNLOCKED_REQUIREMENT_CODES: str = ""
+    AUTO_APPROVE_MIN_CONFIDENCE: float = 0.97
+
     model_config = SettingsConfigDict(env_file=".env", env_file_encoding="utf-8", extra="ignore")
 
     # Render (and many hosts) accept env vars set to an empty string as
