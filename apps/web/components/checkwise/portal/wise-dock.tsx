@@ -96,6 +96,9 @@ interface WiseDockProps {
   dashboard?: DashboardPayload;
   onboarding?: OnboardingSummary | null;
   className?: string;
+  /** Notifies the host shell when Wise expands/collapses, so the portal
+   *  can collapse its left sidebar to make room for the drawer. */
+  onOpenChange?: (open: boolean) => void;
 }
 
 type ChatTurn =
@@ -109,6 +112,7 @@ export function WiseDock({
   dashboard: dashboardProp,
   onboarding: onboardingProp,
   className,
+  onOpenChange,
 }: WiseDockProps) {
   // Phase 4: dock self-fetches when the host page doesn't pass these
   // in (i.e. every page except /portal/dashboard). The fetch defers
@@ -322,12 +326,14 @@ export function WiseDock({
         // fetch until first open so the chat is fast to mount on
         // pages where the user never engages with Wise.
         setHasOpenedOnce(true);
+        onOpenChange?.(true);
         void postWiseEvent(session, "wise.opened", {
           audience,
           route: pageContext.route,
         });
       }}
       onClose={() => {
+        onOpenChange?.(false);
         void postWiseEvent(session, "wise.collapsed", {
           audience,
           route: pageContext.route,

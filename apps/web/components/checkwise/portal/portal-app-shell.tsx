@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import {
   Bell,
   Bug,
@@ -142,6 +142,9 @@ export function PortalAppShell({
     }
   }, []);
   function toggleSidebar() {
+    // A manual toggle cancels any pending Wise auto-restore — the user
+    // has taken control of the rail.
+    wiseRestoreRef.current = null;
     setSidebarCollapsed((prev) => {
       const next = !prev;
       try {
@@ -154,6 +157,39 @@ export function PortalAppShell({
       }
       return next;
     });
+  }
+
+  // Junta 2026-06-12 — opening Wise on a tight screen collapses the
+  // left rail to its icon-only width so the drawer's 380px gutter
+  // doesn't crowd the content. We remember the rail's prior state and
+  // restore it when Wise closes. Only fires below 1440px (wide screens
+  // have room for both); never writes localStorage (it's a temporary
+  // courtesy, not the user's saved preference). ``wiseRestoreRef`` is
+  // null when there's nothing to restore.
+  const wiseRestoreRef = useRef<boolean | null>(null);
+  function handleWiseOpenChange(open: boolean) {
+    if (open) {
+      const tight =
+        typeof window !== "undefined" &&
+        window.matchMedia("(max-width: 1439px)").matches;
+      if (!tight) return;
+      setSidebarCollapsed((prev) => {
+        if (prev) {
+          // Already collapsed — nothing to restore later.
+          wiseRestoreRef.current = null;
+          return prev;
+        }
+        wiseRestoreRef.current = false;
+        return true;
+      });
+    } else {
+      setSidebarCollapsed((prev) => {
+        if (wiseRestoreRef.current === null) return prev;
+        const restored = wiseRestoreRef.current;
+        wiseRestoreRef.current = null;
+        return restored;
+      });
+    }
   }
   // Phase 4 / Slice 4B — unread-count for the Notificaciones nav
   // badge. Best-effort: a fetch failure leaves the badge hidden
@@ -361,7 +397,7 @@ export function PortalAppShell({
           page still passes ``dashboard`` + ``onboarding`` as props
           to avoid a redundant refetch — every other page lets the
           dock manage its own data. */}
-      <WiseDock session={session} />
+      <WiseDock session={session} onOpenChange={handleWiseOpenChange} />
       <FeedbackLauncher />
     </div>
   );
