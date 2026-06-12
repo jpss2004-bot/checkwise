@@ -240,6 +240,38 @@ services:
       - key: SLACK_FEEDBACK_CHANNEL_ID
         sync: false
 
+      # ---- Provider correction-request delivery (Stage 2.7) ----
+      # Optional Slack incoming-webhook URL for Tier-B correction
+      # requests (contact email/phone/name changes from the workspace
+      # context bar). Empty = audit-log persistence only. May reuse
+      # the contact-form webhook or point at a dedicated channel.
+      - key: SLACK_CORRECTION_WEBHOOK_URL
+        sync: false
+
+      # ---- Feature flags / kill switches (audit 2026-06-12) ----
+      # Documented here so an operator can flip them from the Render
+      # dashboard without reading the code. Full descriptions live in
+      # .env.example. These are NOT secrets — explicit values keep a
+      # Blueprint sync from prompting for input.
+      #
+      # Multi-file submissions (contract + anexos). Backend half of the
+      # kill switch; the frontend dropzone is gated separately by
+      # NEXT_PUBLIC_MULTI_FILE_UPLOAD_ENABLED on Vercel. Set BOTH to
+      # false to roll the feature back without a deploy.
+      - key: MULTI_FILE_UPLOAD_ENABLED
+        value: "true"
+      # Collapsed recurring catalog v2 — dark-shipped; v1 stays
+      # authoritative while false.
+      - key: RECURRING_CATALOG_V2
+        value: "false"
+      # Phase E auto-approve engine — ships DARK. Flip only per the
+      # calibration procedure in .env.example (per-requirement-code
+      # unlock backed by ≥99% measured precision).
+      - key: AUTO_APPROVE_ENABLED
+        value: "false"
+      - key: AUTO_APPROVE_UNLOCKED_REQUIREMENT_CODES
+        value: ""
+
   # ──────────────────────────────────────────────────────────────────
   # Phase 6 / Slice 6C — Renewal reminder cron
   # ──────────────────────────────────────────────────────────────────
