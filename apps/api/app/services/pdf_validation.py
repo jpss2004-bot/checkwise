@@ -37,7 +37,12 @@ class PdfInspectionResult:
     ocr_processor_name: str | None = None
 
 
-def inspect_pdf(path: Path, *, max_text_pages: int = 3) -> PdfInspectionResult:
+def inspect_pdf(
+    path: Path,
+    *,
+    max_text_pages: int = 10,
+    max_text_chars: int = 20_000,
+) -> PdfInspectionResult:
     header = path.read_bytes()[:5]
     if header != b"%PDF-":
         return PdfInspectionResult(
@@ -75,6 +80,8 @@ def inspect_pdf(path: Path, *, max_text_pages: int = 3) -> PdfInspectionResult:
         chunks: list[str] = []
         for page in pages[:max_text_pages]:
             chunks.append(page.extract_text() or "")
+            if sum(len(chunk) for chunk in chunks) >= max_text_chars:
+                break
     except Exception as exc:
         return PdfInspectionResult(
             is_pdf=True,
@@ -93,7 +100,7 @@ def inspect_pdf(path: Path, *, max_text_pages: int = 3) -> PdfInspectionResult:
         is_corrupt=False,
         is_encrypted=reader.is_encrypted,
         page_count=page_count,
-        text_sample=text_sample[:5000],
+        text_sample=text_sample[:max_text_chars],
         text_char_count=text_char_count,
         has_text=has_text,
         is_probably_scanned=page_count > 0 and not has_text,
@@ -158,7 +165,8 @@ def _cached_ocr_client() -> DocumentAiOcrClient | None:
 def inspect_pdf_with_ocr_fallback(
     path: Path,
     *,
-    max_text_pages: int = 3,
+    max_text_pages: int = 10,
+    max_text_chars: int = 20_000,
     ocr_client: DocumentAiOcrClient | None | object = ...,
 ) -> PdfInspectionResult:
     """Run ``inspect_pdf`` and OCR the file if it looks like a scan.
@@ -168,7 +176,11 @@ def inspect_pdf_with_ocr_fallback(
     OCR-success path, or leave at the sentinel to use the cached
     production client.
     """
-    result = inspect_pdf(path, max_text_pages=max_text_pages)
+    result = inspect_pdf(
+        path,
+        max_text_pages=max_text_pages,
+        max_text_chars=max_text_chars,
+    )
     if not result.is_probably_scanned:
         return result
 
@@ -201,7 +213,7 @@ def inspect_pdf_with_ocr_fallback(
 
     return replace(
         result,
-        text_sample=text[:5000],
+        text_sample=text[:max_text_chars],
         text_char_count=len(text),
         has_text=len(text) >= _PDF_TEXT_MIN_CHARS,
         # is_probably_scanned stays True — the audit trail records

@@ -3,6 +3,10 @@ from __future__ import annotations
 from app.core.config import settings
 from app.schemas.submissions import ValidationSignal
 from app.services.document_intelligence import (
+    PERIOD_ALIGNMENT_ABSENT,
+    PERIOD_ALIGNMENT_MATCH,
+    PERIOD_ALIGNMENT_MISMATCH,
+    PERIOD_ALIGNMENT_NO_EXPECTED,
     RFC_ALIGNMENT_ABSENT,
     RFC_ALIGNMENT_HOMOCLAVE_MISMATCH,
     RFC_ALIGNMENT_MATCH,
@@ -61,7 +65,17 @@ def _vendor_match_signal(document_signals: DocumentSignals | None) -> Validation
             requires_human_review=True,
         )
     if alignment == RFC_ALIGNMENT_ABSENT:
-        message = "No detectamos RFC en el documento. Un revisor lo confirmará."
+        return ValidationSignal(
+            rule_code="vendor_match",
+            rule_type="fiscal",
+            result="fail",
+            severity="error",
+            message=(
+                "No pudimos detectar un RFC en el documento. Sube una versión "
+                "más clara o el archivo correcto para poder prevalidarlo."
+            ),
+            requires_human_review=True,
+        )
     elif alignment == RFC_ALIGNMENT_NO_EXPECTED:
         message = (
             "El proveedor no tiene RFC registrado para comparar. "
@@ -75,6 +89,48 @@ def _vendor_match_signal(document_signals: DocumentSignals | None) -> Validation
     return ValidationSignal(
         rule_code="vendor_match",
         rule_type="fiscal",
+        result="pending",
+        severity="warning",
+        message=message,
+        requires_human_review=True,
+    )
+
+
+def _period_match_signal(document_signals: DocumentSignals | None) -> ValidationSignal:
+    alignment = document_signals.period_alignment if document_signals else None
+    if alignment == PERIOD_ALIGNMENT_MATCH:
+        return ValidationSignal(
+            rule_code="period_match",
+            rule_type="temporal",
+            result="pass",
+            severity="info",
+            message="El periodo detectado coincide con el periodo esperado.",
+            requires_human_review=True,
+        )
+    if alignment == PERIOD_ALIGNMENT_MISMATCH:
+        return ValidationSignal(
+            rule_code="period_match",
+            rule_type="temporal",
+            result="warning",
+            severity="warning",
+            message=(
+                "El periodo detectado no coincide con el periodo esperado. "
+                "Un revisor lo validará antes de decidir."
+            ),
+            requires_human_review=True,
+        )
+    if alignment == PERIOD_ALIGNMENT_ABSENT:
+        message = "No detectamos el periodo esperado en el documento. Un revisor lo confirmará."
+    elif alignment == PERIOD_ALIGNMENT_NO_EXPECTED:
+        message = "No hay periodo esperado registrado para comparar. Un revisor lo confirmará."
+    else:
+        message = (
+            "Pendiente: un revisor confirmará que el documento "
+            "corresponde al periodo."
+        )
+    return ValidationSignal(
+        rule_code="period_match",
+        rule_type="temporal",
         result="pending",
         severity="warning",
         message=message,
@@ -215,17 +271,7 @@ def build_initial_validations(
             requires_human_review=duplicate_found,
         ),
         _vendor_match_signal(document_signals),
-        ValidationSignal(
-            rule_code="period_match",
-            rule_type="temporal",
-            result="pending",
-            severity="warning",
-            message=(
-                "Pendiente: un revisor confirmará que el documento "
-                "corresponde al periodo."
-            ),
-            requires_human_review=True,
-        ),
+        _period_match_signal(document_signals),
         ValidationSignal(
             rule_code="requirement_match",
             rule_type="regulatoria",

@@ -1271,7 +1271,7 @@ function ReviewerSubmissionPreview({
       document.body.appendChild(anchor);
       anchor.click();
       anchor.remove();
-      window.setTimeout(() => URL.revokeObjectURL(url), 1000);
+      window.setTimeout(() => URL.revokeObjectURL(url), 60_000);
     } catch {
       toast.error("No pudimos descargar el PDF.");
     } finally {

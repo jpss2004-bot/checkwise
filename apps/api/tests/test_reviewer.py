@@ -9,6 +9,7 @@ from sqlalchemy import create_engine, select
 from sqlalchemy.orm import Session, sessionmaker
 from sqlalchemy.pool import StaticPool
 
+from app.core.config import settings
 from app.db.base import Base
 from app.db.session import get_db
 from app.main import app
@@ -888,6 +889,44 @@ def test_document_endpoint_404_when_storage_missing(
         headers={"Authorization": f"Bearer {token}"},
     )
     assert response.status_code == 404
+
+
+def test_document_endpoint_streams_non_ascii_filename(
+    api_client: TestClient, db_factory, monkeypatch, tmp_path
+) -> None:
+    """Accented PDF names must not break preview/download headers."""
+    monkeypatch.setattr(settings, "LOCAL_STORAGE_PATH", str(tmp_path))
+    _seed_user(db_factory, email="rev@x.mx", role="reviewer")
+    token = _login(api_client, "rev@x.mx", "Hunter2 Correct horse")
+    submission_id = _seed_submission(db_factory)
+    storage_key = "documents/demo/liquidacion.pdf"
+    filename = "ÁNGEL ELÍAS GARCÍA Liquidación.pdf"
+    file_path = tmp_path / storage_key
+    file_path.parent.mkdir(parents=True)
+    file_path.write_bytes(b"%PDF-1.4\n1 0 obj\n<<>>\nendobj\n%%EOF\n")
+
+    db = db_factory()
+    try:
+        document = db.scalar(
+            select(Document).where(Document.submission_id == submission_id).limit(1)
+        )
+        assert document is not None
+        document.storage_key = storage_key
+        document.original_filename = filename
+        db.commit()
+    finally:
+        db.close()
+
+    response = api_client.get(
+        f"/api/v1/reviewer/submissions/{submission_id}/document",
+        params={"proxy": "1"},
+        headers={"Authorization": f"Bearer {token}"},
+    )
+
+    assert response.status_code == 200, response.text
+    assert response.headers["content-type"].startswith("application/pdf")
+    assert "filename*=utf-8''" in response.headers["content-disposition"].lower()
+    assert response.content.startswith(b"%PDF-")
 
 
 # ---------------------------------------------------------------------------

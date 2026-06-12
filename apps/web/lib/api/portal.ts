@@ -329,6 +329,7 @@ export type SubmissionDocumentSummary = {
   detected_rfcs?: string[];
   expected_rfc?: string | null;
   rfc_alignment?: RfcAlignment | null;
+  identity_alignment?: IdentityAlignment | null;
   mismatch_reason: string | null;
 };
 
@@ -383,8 +384,10 @@ export type ShadowAnalysisSignals = {
   detected_rfcs: string[];
   expected_rfc?: string | null;
   rfc_alignment?: RfcAlignment | null;
+  identity_alignment?: IdentityAlignment | null;
   detected_dates: string[];
   period_mentions: string[];
+  period_alignment?: PeriodAlignment | null;
   requirement_match_confidence: number | null;
   mismatch_reason: string | null;
   anomaly_codes?: string[];
@@ -397,6 +400,16 @@ export type RfcAlignment =
   | "mismatch"
   | "absent"
   | "no_expected";
+
+export type IdentityAlignment =
+  | "match"
+  | "homoclave_mismatch"
+  | "client_match"
+  | "mismatch"
+  | "absent"
+  | "no_expected";
+
+export type PeriodAlignment = "match" | "mismatch" | "absent" | "no_expected";
 
 export type ShadowAnalysisPayload = {
   heuristic: {

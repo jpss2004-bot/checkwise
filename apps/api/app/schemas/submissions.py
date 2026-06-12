@@ -29,8 +29,10 @@ class DocumentSignalsSummary(BaseModel):
     detected_rfcs: list[str] = []
     expected_rfc: str | None = None
     rfc_alignment: str | None = None
+    identity_alignment: str | None = None
     detected_dates: list[str] = []
     period_mentions: list[str] = []
+    period_alignment: str | None = None
     requirement_match_confidence: float | None = None
     mismatch_reason: str | None = None
     anomaly_codes: list[str] = []

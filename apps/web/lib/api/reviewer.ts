@@ -343,7 +343,14 @@ export async function fetchReviewerSubmissionDocumentBlob(
     },
   );
   if (!response.ok) {
-    const detail = await response.text().catch(() => "");
+    const raw = await response.text().catch(() => "");
+    let detail = raw;
+    try {
+      const parsed = JSON.parse(raw) as { detail?: unknown };
+      if (typeof parsed.detail === "string") detail = parsed.detail;
+    } catch {
+      // Keep the raw body when the API did not return JSON.
+    }
     throw new ReviewerApiError(
       response.status,
       detail || response.statusText,

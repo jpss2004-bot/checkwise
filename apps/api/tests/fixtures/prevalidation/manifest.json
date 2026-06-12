@@ -25,6 +25,8 @@
         "anomaly_codes": [
           "possible_institution_mismatch"
         ],
+        "period_alignment": "match",
+        "identity_alignment": "no_expected",
         "is_probably_scanned": false,
         "has_text": true,
         "page_count": 1
@@ -48,9 +50,9 @@
         "detected_document_type": null,
         "requirement_match_confidence": 1.0,
         "mismatch_reason": null,
-        "anomaly_codes": [
-          "period_not_confirmed"
-        ],
+        "anomaly_codes": [],
+        "period_alignment": "match",
+        "identity_alignment": "no_expected",
         "is_probably_scanned": false,
         "has_text": true,
         "page_count": 1
@@ -77,6 +79,8 @@
         "anomaly_codes": [
           "possible_institution_mismatch"
         ],
+        "period_alignment": "match",
+        "identity_alignment": "no_expected",
         "is_probably_scanned": false,
         "has_text": true,
         "page_count": 1
@@ -90,7 +94,7 @@
       "period_key": "2025-M03",
       "input_requirement": "Cuotas obrero patronales",
       "input_institution": "imss",
-      "current_status": "prevalidado",
+      "current_status": "pendiente_revision",
       "acceptable_statuses": [
         "prevalidado",
         "pendiente_revision"
@@ -98,11 +102,13 @@
       "current_signals": {
         "detected_institution": null,
         "detected_document_type": null,
-        "requirement_match_confidence": 1.0,
+        "requirement_match_confidence": 0.49,
         "mismatch_reason": null,
         "anomaly_codes": [
           "period_not_confirmed"
         ],
+        "period_alignment": "mismatch",
+        "identity_alignment": "no_expected",
         "is_probably_scanned": false,
         "has_text": true,
         "page_count": 2
@@ -116,7 +122,7 @@
       "period_key": "2025-M03",
       "input_requirement": "Resumen de liquidación",
       "input_institution": "imss",
-      "current_status": "prevalidado",
+      "current_status": "pendiente_revision",
       "acceptable_statuses": [
         "prevalidado",
         "pendiente_revision"
@@ -124,11 +130,13 @@
       "current_signals": {
         "detected_institution": null,
         "detected_document_type": "infonavit_pago",
-        "requirement_match_confidence": 1.0,
+        "requirement_match_confidence": 0.49,
         "mismatch_reason": null,
         "anomaly_codes": [
           "period_not_confirmed"
         ],
+        "period_alignment": "mismatch",
+        "identity_alignment": "no_expected",
         "is_probably_scanned": false,
         "has_text": true,
         "page_count": 1
@@ -142,7 +150,7 @@
       "period_key": "2025-M07",
       "input_requirement": "Cuotas obrero patronales",
       "input_institution": "infonavit",
-      "current_status": "prevalidado",
+      "current_status": "pendiente_revision",
       "acceptable_statuses": [
         "prevalidado",
         "pendiente_revision"
@@ -150,11 +158,13 @@
       "current_signals": {
         "detected_institution": null,
         "detected_document_type": null,
-        "requirement_match_confidence": 1.0,
+        "requirement_match_confidence": 0.49,
         "mismatch_reason": null,
         "anomaly_codes": [
           "period_not_confirmed"
         ],
+        "period_alignment": "mismatch",
+        "identity_alignment": "no_expected",
         "is_probably_scanned": false,
         "has_text": true,
         "page_count": 1
@@ -168,7 +178,7 @@
       "period_key": "2025-M07",
       "input_requirement": "Resumen de liquidación",
       "input_institution": "infonavit",
-      "current_status": "prevalidado",
+      "current_status": "pendiente_revision",
       "acceptable_statuses": [
         "prevalidado",
         "pendiente_revision"
@@ -176,11 +186,13 @@
       "current_signals": {
         "detected_institution": null,
         "detected_document_type": "infonavit_pago",
-        "requirement_match_confidence": 1.0,
+        "requirement_match_confidence": 0.49,
         "mismatch_reason": null,
         "anomaly_codes": [
           "period_not_confirmed"
         ],
+        "period_alignment": "mismatch",
+        "identity_alignment": "no_expected",
         "is_probably_scanned": false,
         "has_text": true,
         "page_count": 1
@@ -204,9 +216,9 @@
         "detected_document_type": null,
         "requirement_match_confidence": 0.0,
         "mismatch_reason": null,
-        "anomaly_codes": [
-          "period_not_confirmed"
-        ],
+        "anomaly_codes": [],
+        "period_alignment": "match",
+        "identity_alignment": "no_expected",
         "is_probably_scanned": false,
         "has_text": true,
         "page_count": 1
@@ -230,9 +242,9 @@
         "detected_document_type": null,
         "requirement_match_confidence": 0.82,
         "mismatch_reason": null,
-        "anomaly_codes": [
-          "period_not_confirmed"
-        ],
+        "anomaly_codes": [],
+        "period_alignment": "match",
+        "identity_alignment": "no_expected",
         "is_probably_scanned": false,
         "has_text": true,
         "page_count": 3
@@ -259,6 +271,8 @@
         "anomaly_codes": [
           "possible_institution_mismatch"
         ],
+        "period_alignment": "match",
+        "identity_alignment": "no_expected",
         "is_probably_scanned": false,
         "has_text": true,
         "page_count": 1
@@ -285,6 +299,8 @@
         "anomaly_codes": [
           "possible_institution_mismatch"
         ],
+        "period_alignment": "match",
+        "identity_alignment": "no_expected",
         "is_probably_scanned": false,
         "has_text": true,
         "page_count": 2
@@ -308,9 +324,9 @@
         "detected_document_type": null,
         "requirement_match_confidence": 1.0,
         "mismatch_reason": null,
-        "anomaly_codes": [
-          "period_not_confirmed"
-        ],
+        "anomaly_codes": [],
+        "period_alignment": "match",
+        "identity_alignment": "no_expected",
         "is_probably_scanned": false,
         "has_text": true,
         "page_count": 1
@@ -334,9 +350,9 @@
         "detected_document_type": null,
         "requirement_match_confidence": 1.0,
         "mismatch_reason": null,
-        "anomaly_codes": [
-          "period_not_confirmed"
-        ],
+        "anomaly_codes": [],
+        "period_alignment": "match",
+        "identity_alignment": "no_expected",
         "is_probably_scanned": false,
         "has_text": true,
         "page_count": 1
@@ -360,9 +376,9 @@
         "detected_document_type": null,
         "requirement_match_confidence": 1.0,
         "mismatch_reason": null,
-        "anomaly_codes": [
-          "period_not_confirmed"
-        ],
+        "anomaly_codes": [],
+        "period_alignment": "match",
+        "identity_alignment": "no_expected",
         "is_probably_scanned": false,
         "has_text": true,
         "page_count": 1
@@ -386,9 +402,9 @@
         "detected_document_type": "infonavit_pago",
         "requirement_match_confidence": 0.65,
         "mismatch_reason": null,
-        "anomaly_codes": [
-          "period_not_confirmed"
-        ],
+        "anomaly_codes": [],
+        "period_alignment": "match",
+        "identity_alignment": "no_expected",
         "is_probably_scanned": false,
         "has_text": true,
         "page_count": 1
@@ -410,11 +426,13 @@
       "current_signals": {
         "detected_institution": "imss",
         "detected_document_type": "imss_pago",
-        "requirement_match_confidence": 0.53,
+        "requirement_match_confidence": 0.49,
         "mismatch_reason": null,
         "anomaly_codes": [
           "period_not_confirmed"
         ],
+        "period_alignment": "mismatch",
+        "identity_alignment": "no_expected",
         "is_probably_scanned": false,
         "has_text": true,
         "page_count": 8
@@ -428,7 +446,7 @@
       "period_key": "2025-M09",
       "input_requirement": "Resumen de liquidación",
       "input_institution": "imss",
-      "current_status": "prevalidado",
+      "current_status": "pendiente_revision",
       "acceptable_statuses": [
         "prevalidado",
         "pendiente_revision"
@@ -436,11 +454,13 @@
       "current_signals": {
         "detected_institution": null,
         "detected_document_type": "infonavit_pago",
-        "requirement_match_confidence": 1.0,
+        "requirement_match_confidence": 0.49,
         "mismatch_reason": null,
         "anomaly_codes": [
           "period_not_confirmed"
         ],
+        "period_alignment": "mismatch",
+        "identity_alignment": "no_expected",
         "is_probably_scanned": false,
         "has_text": true,
         "page_count": 1
@@ -467,6 +487,8 @@
         "anomaly_codes": [
           "possible_institution_mismatch"
         ],
+        "period_alignment": "match",
+        "identity_alignment": "no_expected",
         "is_probably_scanned": false,
         "has_text": true,
         "page_count": 1
@@ -490,9 +512,9 @@
         "detected_document_type": "infonavit_pago",
         "requirement_match_confidence": 0.65,
         "mismatch_reason": null,
-        "anomaly_codes": [
-          "period_not_confirmed"
-        ],
+        "anomaly_codes": [],
+        "period_alignment": "match",
+        "identity_alignment": "no_expected",
         "is_probably_scanned": false,
         "has_text": true,
         "page_count": 1
@@ -517,8 +539,11 @@
         "requirement_match_confidence": 0.45,
         "mismatch_reason": "La institución detectada 'imss' no coincide con 'infonavit'.",
         "anomaly_codes": [
-          "possible_institution_mismatch"
+          "possible_institution_mismatch",
+          "period_not_confirmed"
         ],
+        "period_alignment": "mismatch",
+        "identity_alignment": "no_expected",
         "is_probably_scanned": false,
         "has_text": true,
         "page_count": 10
@@ -532,7 +557,7 @@
       "period_key": "2025-M09",
       "input_requirement": "Resumen de liquidación",
       "input_institution": "infonavit",
-      "current_status": "prevalidado",
+      "current_status": "pendiente_revision",
       "acceptable_statuses": [
         "prevalidado",
         "pendiente_revision"
@@ -540,11 +565,13 @@
       "current_signals": {
         "detected_institution": null,
         "detected_document_type": "infonavit_pago",
-        "requirement_match_confidence": 1.0,
+        "requirement_match_confidence": 0.49,
         "mismatch_reason": null,
         "anomaly_codes": [
           "period_not_confirmed"
         ],
+        "period_alignment": "mismatch",
+        "identity_alignment": "no_expected",
         "is_probably_scanned": false,
         "has_text": true,
         "page_count": 1
@@ -568,9 +595,9 @@
         "detected_document_type": null,
         "requirement_match_confidence": 0.0,
         "mismatch_reason": null,
-        "anomaly_codes": [
-          "period_not_confirmed"
-        ],
+        "anomaly_codes": [],
+        "period_alignment": "match",
+        "identity_alignment": "no_expected",
         "is_probably_scanned": false,
         "has_text": true,
         "page_count": 1
@@ -594,9 +621,9 @@
         "detected_document_type": null,
         "requirement_match_confidence": 0.0,
         "mismatch_reason": null,
-        "anomaly_codes": [
-          "period_not_confirmed"
-        ],
+        "anomaly_codes": [],
+        "period_alignment": "match",
+        "identity_alignment": "no_expected",
         "is_probably_scanned": false,
         "has_text": true,
         "page_count": 1
@@ -620,9 +647,9 @@
         "detected_document_type": null,
         "requirement_match_confidence": 0.82,
         "mismatch_reason": null,
-        "anomaly_codes": [
-          "period_not_confirmed"
-        ],
+        "anomaly_codes": [],
+        "period_alignment": "match",
+        "identity_alignment": "no_expected",
         "is_probably_scanned": false,
         "has_text": true,
         "page_count": 3
@@ -646,9 +673,9 @@
         "detected_document_type": null,
         "requirement_match_confidence": 1.0,
         "mismatch_reason": null,
-        "anomaly_codes": [
-          "period_not_confirmed"
-        ],
+        "anomaly_codes": [],
+        "period_alignment": "match",
+        "identity_alignment": "no_expected",
         "is_probably_scanned": false,
         "has_text": true,
         "page_count": 3
@@ -675,6 +702,8 @@
         "anomaly_codes": [
           "possible_institution_mismatch"
         ],
+        "period_alignment": "match",
+        "identity_alignment": "no_expected",
         "is_probably_scanned": false,
         "has_text": true,
         "page_count": 2
@@ -698,9 +727,9 @@
         "detected_document_type": null,
         "requirement_match_confidence": 1.0,
         "mismatch_reason": null,
-        "anomaly_codes": [
-          "period_not_confirmed"
-        ],
+        "anomaly_codes": [],
+        "period_alignment": "match",
+        "identity_alignment": "no_expected",
         "is_probably_scanned": false,
         "has_text": true,
         "page_count": 1
@@ -714,7 +743,7 @@
       "period_key": "2025-M09",
       "input_requirement": "CFDI de pago de cuotas",
       "input_institution": "imss",
-      "current_status": "prevalidado",
+      "current_status": "pendiente_revision",
       "acceptable_statuses": [
         "prevalidado",
         "pendiente_revision"
@@ -722,11 +751,13 @@
       "current_signals": {
         "detected_institution": null,
         "detected_document_type": null,
-        "requirement_match_confidence": 1.0,
+        "requirement_match_confidence": 0.49,
         "mismatch_reason": null,
         "anomaly_codes": [
           "period_not_confirmed"
         ],
+        "period_alignment": "mismatch",
+        "identity_alignment": "no_expected",
         "is_probably_scanned": false,
         "has_text": true,
         "page_count": 1
@@ -753,6 +784,8 @@
         "anomaly_codes": [
           "pdf_without_readable_text"
         ],
+        "period_alignment": "absent",
+        "identity_alignment": "no_expected",
         "is_probably_scanned": true,
         "has_text": false,
         "page_count": 1
@@ -772,13 +805,15 @@
         "pendiente_revision"
       ],
       "current_signals": {
-        "detected_institution": "imss",
+        "detected_institution": null,
         "detected_document_type": "imss_pago",
-        "requirement_match_confidence": 0.53,
+        "requirement_match_confidence": 0.49,
         "mismatch_reason": null,
         "anomaly_codes": [
           "period_not_confirmed"
         ],
+        "period_alignment": "mismatch",
+        "identity_alignment": "no_expected",
         "is_probably_scanned": false,
         "has_text": true,
         "page_count": 21
@@ -792,7 +827,7 @@
       "period_key": "2025-M09",
       "input_requirement": "Resumen de liquidación",
       "input_institution": "imss",
-      "current_status": "prevalidado",
+      "current_status": "pendiente_revision",
       "acceptable_statuses": [
         "prevalidado",
         "pendiente_revision"
@@ -800,11 +835,13 @@
       "current_signals": {
         "detected_institution": null,
         "detected_document_type": "infonavit_pago",
-        "requirement_match_confidence": 1.0,
+        "requirement_match_confidence": 0.69,
         "mismatch_reason": null,
         "anomaly_codes": [
           "period_not_confirmed"
         ],
+        "period_alignment": "absent",
+        "identity_alignment": "no_expected",
         "is_probably_scanned": false,
         "has_text": true,
         "page_count": 1
@@ -829,8 +866,11 @@
         "requirement_match_confidence": 0.0,
         "mismatch_reason": "La institución detectada 'sat' no coincide con 'infonavit'.",
         "anomaly_codes": [
-          "possible_institution_mismatch"
+          "possible_institution_mismatch",
+          "period_not_confirmed"
         ],
+        "period_alignment": "mismatch",
+        "identity_alignment": "no_expected",
         "is_probably_scanned": false,
         "has_text": true,
         "page_count": 1
@@ -854,9 +894,9 @@
         "detected_document_type": "imss_pago",
         "requirement_match_confidence": 0.65,
         "mismatch_reason": null,
-        "anomaly_codes": [
-          "period_not_confirmed"
-        ],
+        "anomaly_codes": [],
+        "period_alignment": "match",
+        "identity_alignment": "no_expected",
         "is_probably_scanned": false,
         "has_text": true,
         "page_count": 1
@@ -876,13 +916,15 @@
         "pendiente_revision"
       ],
       "current_signals": {
-        "detected_institution": "imss",
+        "detected_institution": null,
         "detected_document_type": "imss_pago",
-        "requirement_match_confidence": 0.45,
-        "mismatch_reason": "La institución detectada 'imss' no coincide con 'infonavit'.",
+        "requirement_match_confidence": 0.49,
+        "mismatch_reason": null,
         "anomaly_codes": [
-          "possible_institution_mismatch"
+          "period_not_confirmed"
         ],
+        "period_alignment": "mismatch",
+        "identity_alignment": "no_expected",
         "is_probably_scanned": false,
         "has_text": true,
         "page_count": 20
@@ -896,7 +938,7 @@
       "period_key": "2025-M09",
       "input_requirement": "Resumen de liquidación",
       "input_institution": "infonavit",
-      "current_status": "prevalidado",
+      "current_status": "pendiente_revision",
       "acceptable_statuses": [
         "prevalidado",
         "pendiente_revision"
@@ -904,11 +946,13 @@
       "current_signals": {
         "detected_institution": null,
         "detected_document_type": "infonavit_pago",
-        "requirement_match_confidence": 1.0,
+        "requirement_match_confidence": 0.69,
         "mismatch_reason": null,
         "anomaly_codes": [
           "period_not_confirmed"
         ],
+        "period_alignment": "absent",
+        "identity_alignment": "no_expected",
         "is_probably_scanned": false,
         "has_text": true,
         "page_count": 1
@@ -932,9 +976,9 @@
         "detected_document_type": null,
         "requirement_match_confidence": 0.35,
         "mismatch_reason": null,
-        "anomaly_codes": [
-          "period_not_confirmed"
-        ],
+        "anomaly_codes": [],
+        "period_alignment": "match",
+        "identity_alignment": "no_expected",
         "is_probably_scanned": false,
         "has_text": true,
         "page_count": 1
@@ -958,9 +1002,9 @@
         "detected_document_type": null,
         "requirement_match_confidence": 0.35,
         "mismatch_reason": null,
-        "anomaly_codes": [
-          "period_not_confirmed"
-        ],
+        "anomaly_codes": [],
+        "period_alignment": "match",
+        "identity_alignment": "no_expected",
         "is_probably_scanned": false,
         "has_text": true,
         "page_count": 1
@@ -982,11 +1026,13 @@
       "current_signals": {
         "detected_institution": "sat",
         "detected_document_type": null,
-        "requirement_match_confidence": 0.53,
+        "requirement_match_confidence": 0.49,
         "mismatch_reason": null,
         "anomaly_codes": [
           "period_not_confirmed"
         ],
+        "period_alignment": "mismatch",
+        "identity_alignment": "no_expected",
         "is_probably_scanned": false,
         "has_text": true,
         "page_count": 36
@@ -1010,9 +1056,9 @@
         "detected_document_type": null,
         "requirement_match_confidence": 0.17,
         "mismatch_reason": null,
-        "anomaly_codes": [
-          "period_not_confirmed"
-        ],
+        "anomaly_codes": [],
+        "period_alignment": "match",
+        "identity_alignment": "no_expected",
         "is_probably_scanned": false,
         "has_text": true,
         "page_count": 29
@@ -1036,9 +1082,9 @@
         "detected_document_type": null,
         "requirement_match_confidence": 0.7,
         "mismatch_reason": null,
-        "anomaly_codes": [
-          "period_not_confirmed"
-        ],
+        "anomaly_codes": [],
+        "period_alignment": "match",
+        "identity_alignment": "no_expected",
         "is_probably_scanned": false,
         "has_text": true,
         "page_count": 29

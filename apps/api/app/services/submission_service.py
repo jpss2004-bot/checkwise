@@ -51,7 +51,11 @@ from app.services.document_forensics import (
     rollup_authenticity_risk,
     severity_rank,
 )
-from app.services.document_intelligence import DocumentSignals, analyze_document_text
+from app.services.document_intelligence import (
+    RFC_ALIGNMENT_ABSENT,
+    DocumentSignals,
+    analyze_document_text,
+)
 from app.services.document_verification import extract_verification
 from app.services.metadata_export import export_metadata_table_after_upload
 from app.services.pdf_validation import (
@@ -227,6 +231,11 @@ def status_from_inspection(
         return DocumentStatus.REQUIERE_ACLARACION
 
     confidence = document_signals.requirement_match_confidence or 0.0
+    if (
+        document_signals.expected_rfc
+        and document_signals.rfc_alignment == RFC_ALIGNMENT_ABSENT
+    ):
+        return DocumentStatus.REQUIERE_ACLARACION
 
     if document_signals.mismatch_reason:
         if confidence >= _MISMATCH_CONFIDENCE_FLOOR:
@@ -623,6 +632,9 @@ def finalize_intake_submission(
         expected_institution=institution.code,
         expected_period=period_code,
         expected_rfc=vendor.rfc,
+        expected_vendor_name=vendor.name,
+        expected_client_name=client.name,
+        expected_client_rfc=client.rfc,
     )
     final_status = status_from_inspection(pdf_inspection, document_signals)
 
@@ -969,8 +981,10 @@ def finalize_intake_submission(
             detected_rfcs=document_signals.detected_rfcs,
             expected_rfc=document_signals.expected_rfc,
             rfc_alignment=document_signals.rfc_alignment,
+            identity_alignment=document_signals.identity_alignment,
             detected_dates=document_signals.detected_dates,
             period_mentions=document_signals.period_mentions,
+            period_alignment=document_signals.period_alignment,
             requirement_match_confidence=document_signals.requirement_match_confidence,
             mismatch_reason=document_signals.mismatch_reason,
             anomaly_codes=document_signals.anomaly_codes,
@@ -1096,6 +1110,9 @@ def finalize_multi_document_submission(
             expected_institution=institution.code,
             expected_period=period_code,
             expected_rfc=vendor.rfc,
+            expected_vendor_name=vendor.name,
+            expected_client_name=client.name,
+            expected_client_rfc=client.rfc,
         )
         per_file_status = status_from_inspection(pdf_inspection, document_signals)
         inspections.append((stored, pdf_inspection, document_signals, per_file_status))
@@ -1256,8 +1273,10 @@ def finalize_multi_document_submission(
                     detected_rfcs=document_signals.detected_rfcs,
                     expected_rfc=document_signals.expected_rfc,
                     rfc_alignment=document_signals.rfc_alignment,
+                    identity_alignment=document_signals.identity_alignment,
                     detected_dates=document_signals.detected_dates,
                     period_mentions=document_signals.period_mentions,
+                    period_alignment=document_signals.period_alignment,
                     requirement_match_confidence=document_signals.requirement_match_confidence,
                     mismatch_reason=document_signals.mismatch_reason,
                     anomaly_codes=document_signals.anomaly_codes,
