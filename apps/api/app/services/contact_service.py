@@ -224,6 +224,57 @@ def _format_slack_blocks(*, row_id: str, payload: dict) -> list[dict]:
     ]
 
 
+def deliver_booking_intent_to_slack(*, source: str, user_agent: str | None) -> None:
+    """Best-effort Slack ping when a visitor engages the demo scheduler.
+
+    The actual booking lands in Google Calendar (no row on our side);
+    this beacon just gives the team an early intent signal. Same
+    webhook, same never-raise contract as ``deliver_to_slack``.
+    """
+    url = (settings.SLACK_CONTACT_WEBHOOK_URL or "").strip()
+    if not url:
+        logger.debug("contact: slack webhook not configured; skip booking intent")
+        return
+
+    ua = (user_agent or "").strip()
+    if len(ua) > 200:
+        ua = ua[:200].rstrip() + "…"
+    blocks = [
+        {
+            "type": "section",
+            "text": {
+                "type": "mrkdwn",
+                "text": (
+                    ":calendar: *Alguien abrió el agendador de demo (30 min)*\n"
+                    f"Origen: `{source}` · Navegador: {ua or '_desconocido_'}\n"
+                    "_La confirmación llega por Google Calendar si concreta la cita._"
+                ),
+            },
+        }
+    ]
+    fallback = f"CheckWise · intención de agendar demo · {source}"
+    body = json.dumps({"blocks": blocks, "text": fallback}).encode("utf-8")
+    req = urllib.request.Request(
+        url,
+        data=body,
+        headers={"Content-Type": "application/json"},
+        method="POST",
+    )
+    try:
+        with urllib.request.urlopen(req, timeout=5) as resp:
+            if resp.status >= 400:
+                logger.warning(
+                    "contact: booking-intent slack delivery returned status=%s",
+                    resp.status,
+                )
+    except urllib.error.URLError as exc:
+        logger.warning("contact: booking-intent slack delivery failed err=%s", exc)
+    except Exception as exc:  # noqa: BLE001 — defensive; never propagate
+        logger.warning(
+            "contact: booking-intent slack delivery unexpected error err=%s", exc
+        )
+
+
 # ─── Helper for endpoint composition ────────────────────────────
 
 

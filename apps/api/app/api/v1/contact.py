@@ -27,9 +27,14 @@ from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Request,
 from sqlalchemy.orm import Session
 
 from app.db.session import get_db
-from app.schemas.contact import ContactRequestCreate, ContactRequestPublicResponse
+from app.schemas.contact import (
+    BookingIntentCreate,
+    ContactRequestCreate,
+    ContactRequestPublicResponse,
+)
 from app.services.contact_service import (
     create_contact_request,
+    deliver_booking_intent_to_slack,
     deliver_to_slack,
     hash_ip,
     record_and_check_rate,
@@ -117,3 +122,35 @@ def post_contact_request(
         request_id=row.id,
         created_at=row.created_at,
     )
+
+
+@router.post(
+    "/booking-intent",
+    status_code=status.HTTP_202_ACCEPTED,
+    summary="Record that a visitor engaged the embedded demo scheduler",
+)
+def post_booking_intent(
+    payload: BookingIntentCreate,
+    request: Request,
+    background: BackgroundTasks,
+) -> dict[str, bool]:
+    """No-PII intent beacon for the landing's embedded Google Calendar.
+
+    Nothing is persisted — the booking record lives in Google Calendar.
+    We only relay a Slack ping so the team sees intent before the
+    invite lands. Over-quota calls are dropped silently (always 202):
+    a 429 on a tracking beacon would only surface noise in the
+    visitor's console for something they never asked for. The rate
+    bucket is namespaced so beacon traffic can't starve the real
+    contact form's allowance.
+    """
+    ip_h = hash_ip(_client_ip(request))
+    rate_key = f"booking:{ip_h}" if ip_h else None
+    if record_and_check_rate(rate_key):
+        user_agent = (request.headers.get("user-agent") or "")[:512] or None
+        background.add_task(
+            deliver_booking_intent_to_slack,
+            source=payload.source,
+            user_agent=user_agent,
+        )
+    return {"ok": True}

@@ -52,6 +52,23 @@ class ContactRequestCreate(BaseModel):
         return value
 
 
+class BookingIntentCreate(BaseModel):
+    """Inbound body for ``POST /api/v1/contact/booking-intent``.
+
+    A no-PII beacon fired when a landing visitor engages with the
+    embedded demo scheduler. The booking itself lives in Google
+    Calendar; this only carries a short self-identifying source tag.
+    """
+
+    source: str = Field(default="landing", min_length=1, max_length=60)
+
+    @field_validator("source")
+    @classmethod
+    def _strip_source(cls, value: str) -> str:
+        trimmed = value.strip()
+        return trimmed or "landing"
+
+
 class ContactRequestPublicResponse(BaseModel):
     """Response body returned to the unauthenticated submitter.
 
