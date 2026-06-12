@@ -37,13 +37,16 @@ class DocumentSignals:
     rfc_alignment: str | None = None
     period_alignment: str | None = None
     identity_alignment: str | None = None
+    evidence: dict | None = None
 
 
 DOCUMENT_TYPE_KEYWORDS = {
     "opinion_cumplimiento_sat": ["opinion de cumplimiento", "32-d", "sat"],
     "factura_cfdi": ["cfdi", "factura", "uuid", "comprobante fiscal"],
     "nomina_cfdi": ["nomina", "recibo de nomina", "percepciones", "deducciones"],
+    "imss_liquidacion": ["resumen de liquidacion", "liquidacion", "imss"],
     "imss_pago": ["imss", "cuotas obrero", "registro patronal"],
+    "infonavit_liquidacion": ["resumen de liquidacion", "liquidacion", "infonavit"],
     "infonavit_pago": ["infonavit", "aportaciones", "amortizaciones"],
     "repse_constancia": ["repse", "registro de prestadoras", "stps"],
     "contrato": ["contrato", "prestacion de servicios", "vigencia"],
@@ -68,6 +71,11 @@ RFC_LABEL_RE = re.compile(
     r"[^A-ZÑ&0-9]{0,12}([A-ZÑ&0-9\s.\-/]{12,48})",
     re.IGNORECASE,
 )
+REGISTRO_PATRONAL_RE = re.compile(
+    r"(?:registro\s+patronal|reg\.\s*patronal|rp)[:\s.\-]*([A-Z0-9\s.\-/]{8,18})",
+    re.IGNORECASE,
+)
+REPSE_ID_RE = re.compile(r"\b[A-Z]{3}\d{2}/\d{4}/\d{4}\b", re.IGNORECASE)
 DATE_RE = re.compile(r"\b(?:\d{1,2}[/-]\d{1,2}[/-]\d{2,4}|\d{4}[/-]\d{1,2}[/-]\d{1,2})\b")
 PERIOD_RE = re.compile(
     r"\b(?:20\d{2}[-/ ]?(?:0?[1-9]|1[0-2])|"
@@ -119,6 +127,34 @@ def analyze_document_text(
     anomalies: list[str] = []
 
     if not normalized_text:
+        evidence = build_document_evidence(
+            text=text,
+            expected_requirement=expected_requirement,
+            expected_institution=expected_institution,
+            expected_period=expected_period,
+            expected_rfc=expected_rfc,
+            expected_vendor_name=expected_vendor_name,
+            expected_client_name=expected_client_name,
+            expected_client_rfc=expected_client_rfc,
+            detected_institution=None,
+            detected_document_type=None,
+            detected_rfcs=[],
+            detected_dates=[],
+            period_mentions=[],
+            requirement_match_confidence=0.0,
+            mismatch_reason=None,
+            anomaly_codes=["pdf_without_readable_text"],
+            rfc_alignment=compute_rfc_alignment([], expected_rfc),
+            period_alignment=compute_period_alignment(expected_period, text),
+            identity_alignment=compute_identity_alignment(
+                [],
+                text,
+                expected_provider_rfc=expected_rfc,
+                expected_provider_name=expected_vendor_name,
+                expected_client_rfc=expected_client_rfc,
+                expected_client_name=expected_client_name,
+            ),
+        )
         return DocumentSignals(
             requirement_match_confidence=0.0,
             mismatch_reason=None,
@@ -134,9 +170,14 @@ def analyze_document_text(
                 expected_client_rfc=expected_client_rfc,
                 expected_client_name=expected_client_name,
             ),
+            evidence=evidence,
         )
 
-    detected_type = _best_keyword_match(normalized_text, DOCUMENT_TYPE_KEYWORDS)
+    detected_type = _detect_requirement_specific_document_type(
+        normalized_text,
+        normalized_requirement,
+        expected_institution,
+    ) or _best_keyword_match(normalized_text, DOCUMENT_TYPE_KEYWORDS)
     detected_institution = _best_keyword_match(normalized_text, INSTITUTION_KEYWORDS)
     rfcs = extract_rfcs(text)
     rfc_alignment = compute_rfc_alignment(rfcs, expected_rfc)
@@ -172,7 +213,10 @@ def analyze_document_text(
     confidence = round((token_score * 0.7) + (institution_score * 0.3), 2)
 
     mismatch_reason = None
-    expected_doc_type = _expected_document_type(normalized_requirement)
+    expected_doc_type = _expected_document_type(
+        normalized_requirement,
+        expected_institution=expected_institution,
+    )
     if detected_type and expected_doc_type and detected_type != expected_doc_type:
         anomalies.append("possible_document_type_mismatch")
         mismatch_reason = (
@@ -221,6 +265,28 @@ def analyze_document_text(
             anomalies.append("period_not_confirmed")
         confidence = min(confidence, 0.69)
 
+    evidence = build_document_evidence(
+        text=text,
+        expected_requirement=expected_requirement,
+        expected_institution=expected_institution,
+        expected_period=expected_period,
+        expected_rfc=expected_rfc,
+        expected_vendor_name=expected_vendor_name,
+        expected_client_name=expected_client_name,
+        expected_client_rfc=expected_client_rfc,
+        detected_institution=detected_institution,
+        detected_document_type=detected_type,
+        detected_rfcs=rfcs,
+        detected_dates=dates,
+        period_mentions=period_mentions,
+        requirement_match_confidence=confidence,
+        mismatch_reason=mismatch_reason,
+        anomaly_codes=anomalies,
+        rfc_alignment=rfc_alignment,
+        period_alignment=period_alignment,
+        identity_alignment=identity_alignment,
+    )
+
     return DocumentSignals(
         detected_institution=detected_institution,
         detected_document_type=detected_type,
@@ -234,6 +300,7 @@ def analyze_document_text(
         rfc_alignment=rfc_alignment,
         period_alignment=period_alignment,
         identity_alignment=identity_alignment,
+        evidence=evidence,
     )
 
 
@@ -255,6 +322,19 @@ def extract_rfcs(text: str) -> list[str]:
         compact = normalize_rfc(labeled) or ""
         candidates.update(RFC_RE.findall(compact))
     return sorted(rfc for rfc in candidates if rfc and len(rfc) in (12, 13))
+
+
+def extract_registro_patronal(text: str) -> list[str]:
+    candidates: set[str] = set()
+    for raw in REGISTRO_PATRONAL_RE.findall(text or ""):
+        compact = re.sub(r"[^A-Z0-9]", "", raw.upper())
+        if 8 <= len(compact) <= 12:
+            candidates.add(compact)
+    return sorted(candidates)
+
+
+def extract_repse_ids(text: str) -> list[str]:
+    return sorted({match.upper() for match in REPSE_ID_RE.findall(text or "")})
 
 
 def compute_rfc_alignment(
@@ -378,9 +458,207 @@ def compute_period_alignment(expected_period: str | None, text: str) -> str:
     return PERIOD_ALIGNMENT_MISMATCH
 
 
+def build_document_evidence(
+    *,
+    text: str,
+    expected_requirement: str,
+    expected_institution: str,
+    expected_period: str,
+    expected_rfc: str | None,
+    expected_vendor_name: str | None,
+    expected_client_name: str | None,
+    expected_client_rfc: str | None,
+    detected_institution: str | None,
+    detected_document_type: str | None,
+    detected_rfcs: list[str],
+    detected_dates: list[str],
+    period_mentions: list[str],
+    requirement_match_confidence: float | None,
+    mismatch_reason: str | None,
+    anomaly_codes: list[str],
+    rfc_alignment: str,
+    period_alignment: str,
+    identity_alignment: str,
+) -> dict:
+    normalized_text = _normalize(text)
+    identifiers = {
+        "rfcs": list(detected_rfcs),
+        "registro_patronal": extract_registro_patronal(text),
+        "repse_ids": extract_repse_ids(text),
+        "period_keys": extract_period_keys(text),
+        "dates": list(detected_dates),
+        "period_mentions": list(period_mentions),
+    }
+    expected_doc_type = _expected_document_type(
+        _normalize(expected_requirement),
+        expected_institution=expected_institution,
+    )
+    evidence = {
+        "version": "prevalidation_evidence.v1",
+        "expected": {
+            "provider": {
+                "name": expected_vendor_name,
+                "rfc": normalize_rfc(expected_rfc),
+            },
+            "client": {
+                "name": expected_client_name,
+                "rfc": normalize_rfc(expected_client_rfc),
+            },
+            "requirement": {
+                "name": expected_requirement,
+                "institution": expected_institution,
+                "document_type": expected_doc_type,
+                "period": normalize_period_key(expected_period) or expected_period,
+            },
+        },
+        "extracted": {
+            "institution": detected_institution,
+            "document_type": detected_document_type,
+            "identifiers": identifiers,
+            "text_quality": {
+                "chars": len(text or ""),
+                "has_readable_text": bool(normalized_text),
+            },
+            "flags": {
+                "liquidation_summary": "liquidacion" in normalized_text,
+                "client_name_seen": _name_present(normalized_text, expected_client_name),
+                "provider_name_seen": _name_present(normalized_text, expected_vendor_name),
+            },
+        },
+        "alignment": {
+            "provider_identity": identity_alignment,
+            "rfc": rfc_alignment,
+            "period": period_alignment,
+            "institution": (
+                "match"
+                if detected_institution == expected_institution
+                else "absent"
+                if detected_institution is None
+                else "mismatch"
+            ),
+            "document_type": (
+                "match"
+                if expected_doc_type and detected_document_type == expected_doc_type
+                else "not_expected"
+                if expected_doc_type is None
+                else "absent"
+                if detected_document_type is None
+                else "mismatch"
+            ),
+        },
+        "scores": {
+            "requirement_match_confidence": requirement_match_confidence,
+        },
+        "findings": _evidence_findings(
+            anomaly_codes=anomaly_codes,
+            mismatch_reason=mismatch_reason,
+            identity_alignment=identity_alignment,
+            rfc_alignment=rfc_alignment,
+            period_alignment=period_alignment,
+        ),
+    }
+    return evidence
+
+
 def _keyword_hit_count(text: str, keywords: list[str]) -> int:
     """Number of distinct keywords from ``keywords`` that occur in ``text``."""
     return sum(1 for keyword in keywords if _normalize(keyword) in text)
+
+
+def _detect_requirement_specific_document_type(
+    normalized_text: str,
+    normalized_requirement: str,
+    expected_institution: str,
+) -> str | None:
+    wants_liquidation = "liquidacion" in normalized_requirement
+    has_liquidation = "liquidacion" in normalized_text or "cedula de liquidacion" in normalized_text
+    if not (wants_liquidation or has_liquidation):
+        return None
+    if expected_institution == "imss" or "imss" in normalized_text:
+        return "imss_liquidacion"
+    if expected_institution == "infonavit" or "infonavit" in normalized_text:
+        return "infonavit_liquidacion"
+    return None
+
+
+def _evidence_findings(
+    *,
+    anomaly_codes: list[str],
+    mismatch_reason: str | None,
+    identity_alignment: str,
+    rfc_alignment: str,
+    period_alignment: str,
+) -> list[dict[str, str]]:
+    findings: list[dict[str, str]] = []
+    if mismatch_reason:
+        findings.append(
+            {
+                "code": "requirement_mismatch",
+                "severity": "warning",
+                "detail_es": mismatch_reason,
+            }
+        )
+    if rfc_alignment == RFC_ALIGNMENT_ABSENT:
+        findings.append(
+            {
+                "code": "rfc_not_detected",
+                "severity": "error",
+                "detail_es": "No se detectó RFC aunque el proveedor tiene uno esperado.",
+            }
+        )
+    elif identity_alignment == IDENTITY_ALIGNMENT_CLIENT_MATCH:
+        findings.append(
+            {
+                "code": "identity_matches_client_not_provider",
+                "severity": "warning",
+                "detail_es": (
+                    "El documento parece identificar al cliente, no al proveedor esperado."
+                ),
+            }
+        )
+    elif identity_alignment == IDENTITY_ALIGNMENT_MISMATCH:
+        findings.append(
+            {
+                "code": "provider_identity_mismatch",
+                "severity": "warning",
+                "detail_es": "El RFC detectado no corresponde al proveedor esperado.",
+            }
+        )
+    elif identity_alignment == IDENTITY_ALIGNMENT_HOMOCLAVE_MISMATCH:
+        findings.append(
+            {
+                "code": "provider_identity_homoclave_mismatch",
+                "severity": "warning",
+                "detail_es": "El RFC comparte núcleo con el proveedor, pero difiere en homoclave.",
+            }
+        )
+    if period_alignment == PERIOD_ALIGNMENT_MISMATCH:
+        findings.append(
+            {
+                "code": "period_mismatch",
+                "severity": "warning",
+                "detail_es": "El periodo detectado no coincide con el periodo esperado.",
+            }
+        )
+    elif period_alignment == PERIOD_ALIGNMENT_ABSENT:
+        findings.append(
+            {
+                "code": "period_absent",
+                "severity": "warning",
+                "detail_es": "No se encontró el periodo esperado en el documento.",
+            }
+        )
+    for code in anomaly_codes:
+        if code in {finding["code"] for finding in findings}:
+            continue
+        findings.append(
+            {
+                "code": code,
+                "severity": "info",
+                "detail_es": code.replace("_", " "),
+            }
+        )
+    return findings
 
 
 def _name_present(normalized_text: str, expected_name: str | None) -> bool:
@@ -437,7 +715,19 @@ def _best_keyword_match(text: str, keyword_map: dict[str, list[str]]) -> str | N
     return top[0]
 
 
-def _expected_document_type(requirement: str) -> str | None:
+def _expected_document_type(
+    requirement: str,
+    *,
+    expected_institution: str | None = None,
+) -> str | None:
+    if "liquidacion" in requirement and (
+        "imss" in requirement or expected_institution == "imss"
+    ):
+        return "imss_liquidacion"
+    if "liquidacion" in requirement and (
+        "infonavit" in requirement or expected_institution == "infonavit"
+    ):
+        return "infonavit_liquidacion"
     if "opinion" in requirement and "sat" in requirement:
         return "opinion_cumplimiento_sat"
     if "factura" in requirement or "cfdi" in requirement:

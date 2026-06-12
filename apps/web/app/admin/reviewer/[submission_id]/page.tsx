@@ -250,6 +250,7 @@ export default function ReviewerSubmissionPage({ params }: PageProps) {
             <StatusHeader detail={detail} decidedHint={decided?.new_status ?? null} />
             <VendorIdentityStrip detail={detail} />
             <VerdictCard detail={detail} />
+            <PrevalidationEvidenceCard detail={detail} />
             <VerificationCard detail={detail} />
             <ReviewerSubmissionPreview detail={detail} session={session} />
             <LineageStrip detail={detail} />
@@ -691,6 +692,142 @@ function VerdictCard({ detail }: { detail: ReviewerSubmissionDetail }) {
               </div>
             ) : null}
           </div>
+        ) : null}
+      </CardContent>
+    </Card>
+  );
+}
+
+function alignmentBadge(value: string | null | undefined) {
+  if (value === "match") return <Badge variant="success">Coincide</Badge>;
+  if (value === "client_match") return <Badge variant="warning">Cliente, no proveedor</Badge>;
+  if (value === "homoclave_mismatch") return <Badge variant="warning">Homoclave</Badge>;
+  if (value === "mismatch") return <Badge variant="destructive">No coincide</Badge>;
+  if (value === "absent") return <Badge variant="secondary">No detectado</Badge>;
+  if (value === "no_expected" || value === "not_expected") {
+    return <Badge variant="secondary">No esperado</Badge>;
+  }
+  return <Badge variant="secondary">Sin dato</Badge>;
+}
+
+function evidenceList(values: string[] | undefined): string {
+  return values && values.length ? values.join(", ") : "—";
+}
+
+function EvidenceRow({
+  label,
+  expected,
+  extracted,
+  alignment,
+}: {
+  label: string;
+  expected: string;
+  extracted: string;
+  alignment: string | null | undefined;
+}) {
+  return (
+    <div className="grid gap-2 border-b border-[color:var(--border-subtle)] px-3 py-2.5 text-sm last:border-b-0 md:grid-cols-[1fr_1fr_auto]">
+      <div>
+        <p className="text-xs font-medium uppercase tracking-wide text-[color:var(--text-tertiary)]">
+          {label} esperado
+        </p>
+        <p className="mt-0.5 break-words font-medium text-[color:var(--text-primary)]">
+          {expected}
+        </p>
+      </div>
+      <div>
+        <p className="text-xs font-medium uppercase tracking-wide text-[color:var(--text-tertiary)]">
+          Detectado
+        </p>
+        <p className="mt-0.5 break-words font-mono text-xs text-[color:var(--text-primary)]">
+          {extracted}
+        </p>
+      </div>
+      <div className="flex items-center md:justify-end">
+        {alignmentBadge(alignment)}
+      </div>
+    </div>
+  );
+}
+
+function PrevalidationEvidenceCard({ detail }: { detail: ReviewerSubmissionDetail }) {
+  const evidence = detail.prevalidation_evidence;
+  if (!evidence) return null;
+
+  const identifiers = evidence.extracted.identifiers ?? {};
+  const findings = evidence.findings ?? [];
+  const score = evidence.scores?.requirement_match_confidence;
+  const scoreText =
+    typeof score === "number" ? `${Math.round(score * 100)}%` : "—";
+
+  return (
+    <Card aria-label="Evidencia de prevalidación">
+      <CardHeader>
+        <CardTitle>Evidencia de prevalidación</CardTitle>
+        <p className="mt-1 text-xs text-[color:var(--text-tertiary)]">
+          Contexto esperado contra datos extraídos del PDF.
+        </p>
+      </CardHeader>
+      <CardContent className="space-y-4">
+        <div className="rounded-md border border-[color:var(--border-subtle)]">
+          <EvidenceRow
+            label="Proveedor"
+            expected={`${evidence.expected.provider?.name ?? "—"} · ${
+              evidence.expected.provider?.rfc ?? "—"
+            }`}
+            extracted={evidenceList(identifiers.rfcs)}
+            alignment={evidence.alignment.provider_identity}
+          />
+          <EvidenceRow
+            label="Periodo"
+            expected={evidence.expected.requirement?.period ?? "—"}
+            extracted={evidenceList(identifiers.period_keys)}
+            alignment={evidence.alignment.period}
+          />
+          <EvidenceRow
+            label="Documento"
+            expected={evidence.expected.requirement?.document_type ?? "—"}
+            extracted={evidence.extracted.document_type ?? "—"}
+            alignment={evidence.alignment.document_type}
+          />
+          <EvidenceRow
+            label="Institución"
+            expected={evidence.expected.requirement?.institution ?? "—"}
+            extracted={evidence.extracted.institution ?? "—"}
+            alignment={evidence.alignment.institution}
+          />
+        </div>
+
+        <div className="grid gap-3 sm:grid-cols-3">
+          <Field label="Confianza" value={scoreText} />
+          <Field
+            label="Registro patronal"
+            value={evidenceList(identifiers.registro_patronal)}
+          />
+          <Field label="REPSE" value={evidenceList(identifiers.repse_ids)} />
+        </div>
+
+        {findings.length ? (
+          <ul className="space-y-1.5">
+            {findings.map((finding) => (
+              <li
+                key={`${finding.code}-${finding.detail_es}`}
+                className="flex items-start gap-2 text-xs text-[color:var(--text-secondary)]"
+              >
+                <span
+                  aria-hidden
+                  className={`mt-1 h-1.5 w-1.5 shrink-0 rounded-full ${
+                    finding.severity === "error"
+                      ? "bg-[color:var(--status-error-text)]"
+                      : finding.severity === "warning"
+                        ? "bg-[color:var(--status-warning-text)]"
+                        : "bg-[color:var(--text-tertiary)]"
+                  }`}
+                />
+                <span>{finding.detail_es}</span>
+              </li>
+            ))}
+          </ul>
         ) : null}
       </CardContent>
     </Card>

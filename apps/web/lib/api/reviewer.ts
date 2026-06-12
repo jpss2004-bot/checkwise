@@ -209,6 +209,46 @@ export type VerificationBlock = {
   analyzed: boolean;
 };
 
+export type PrevalidationEvidence = {
+  version: string;
+  expected: {
+    provider?: { name?: string | null; rfc?: string | null };
+    client?: { name?: string | null; rfc?: string | null };
+    requirement?: {
+      name?: string | null;
+      institution?: string | null;
+      document_type?: string | null;
+      period?: string | null;
+    };
+  };
+  extracted: {
+    institution?: string | null;
+    document_type?: string | null;
+    identifiers?: {
+      rfcs?: string[];
+      registro_patronal?: string[];
+      repse_ids?: string[];
+      period_keys?: string[];
+      dates?: string[];
+      period_mentions?: string[];
+    };
+    text_quality?: {
+      chars?: number;
+      has_readable_text?: boolean;
+    };
+    flags?: Record<string, boolean | string | number | null>;
+  };
+  alignment: Record<string, string | null | undefined>;
+  scores?: {
+    requirement_match_confidence?: number | null;
+  };
+  findings?: Array<{
+    code: string;
+    severity: "info" | "warning" | "error";
+    detail_es: string;
+  }>;
+};
+
 /** The reviewer detail = the shared submission detail + the vendor
  *  identity block + the authenticity verdict + verification anchors
  *  (all absent on the provider-facing portal endpoint). */
@@ -234,6 +274,7 @@ export type ReviewerSubmissionDetail = SubmissionDetail & {
   vendor: ReviewerVendorBlock | null;
   authenticity: AuthenticityBlock | null;
   verification: VerificationBlock | null;
+  prevalidation_evidence: PrevalidationEvidence | null;
   approval_suggestion: ApprovalSuggestion | null;
 };
 

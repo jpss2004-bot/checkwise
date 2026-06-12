@@ -1063,6 +1063,66 @@ def test_detail_includes_vendor_block_with_expected_rfc(
     assert payload["vendor"] == expected
 
 
+def test_detail_includes_prevalidation_evidence(
+    api_client: TestClient, db_factory
+) -> None:
+    from app.services.submission_service import PREVALIDATION_EVIDENCE_METADATA_KEY
+
+    _seed_user(db_factory, email="rev-evidence@x.mx", role="reviewer")
+    token = _login(api_client, "rev-evidence@x.mx", "Hunter2 Correct horse")
+    submission_id = _seed_submission(db_factory, rfc_alignment="match")
+
+    evidence = {
+        "version": "prevalidation_evidence.v1",
+        "expected": {
+            "provider": {"name": "Servicios Reviewer", "rfc": "ABC010203XY1"},
+            "requirement": {
+                "name": "Resumen de liquidación IMSS",
+                "institution": "imss",
+                "document_type": "imss_liquidacion",
+                "period": "2026-01",
+            },
+        },
+        "extracted": {
+            "institution": "imss",
+            "document_type": "imss_liquidacion",
+            "identifiers": {"rfcs": ["ABC010203XY1"]},
+        },
+        "alignment": {"provider_identity": "match", "period": "match"},
+        "scores": {"requirement_match_confidence": 0.97},
+        "findings": [],
+    }
+    db = db_factory()
+    try:
+        document = db.scalar(
+            select(Document).where(Document.submission_id == submission_id).limit(1)
+        )
+        assert document is not None
+        inspection = db.scalar(
+            select(DocumentInspection)
+            .where(DocumentInspection.document_id == document.id)
+            .limit(1)
+        )
+        assert inspection is not None
+        inspection.raw_metadata = {PREVALIDATION_EVIDENCE_METADATA_KEY: evidence}
+        db.commit()
+    finally:
+        db.close()
+
+    response = api_client.get(
+        f"/api/v1/reviewer/submissions/{submission_id}",
+        headers={"Authorization": f"Bearer {token}"},
+    )
+
+    assert response.status_code == 200, response.text
+    payload = response.json()
+    assert payload["prevalidation_evidence"]["version"] == "prevalidation_evidence.v1"
+    assert (
+        payload["prevalidation_evidence"]["alignment"]["provider_identity"]
+        == "match"
+    )
+
+
 # ---------------------------------------------------------------------------
 # Decision — next-pending pointer
 # ---------------------------------------------------------------------------

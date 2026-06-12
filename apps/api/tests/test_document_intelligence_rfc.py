@@ -171,3 +171,31 @@ def test_period_alignment_understands_month_name() -> None:
     text = "Resumen de liquidacion del periodo enero de 2026."
 
     assert compute_period_alignment("2026-M01", text) == "match"
+
+
+def test_liquidation_summary_builds_provider_evidence() -> None:
+    signals = analyze_document_text(
+        (
+            "Instituto Mexicano del Seguro Social. Resumen de liquidacion "
+            "cuotas obrero patronales. Registro patronal A123456789. "
+            "RFC ABC010203XY1. Periodo enero de 2026."
+        ),
+        expected_requirement="Resumen de liquidación IMSS",
+        expected_institution="imss",
+        expected_period="2026-M01",
+        expected_rfc="ABC010203XY1",
+        expected_vendor_name="Servicios ABC",
+        expected_client_name="Cliente Demo",
+        expected_client_rfc="CLI010203AB1",
+    )
+
+    assert signals.detected_document_type == "imss_liquidacion"
+    assert signals.rfc_alignment == "match"
+    assert signals.identity_alignment == "match"
+    assert signals.period_alignment == "match"
+    assert signals.requirement_match_confidence is not None
+    assert signals.requirement_match_confidence >= 0.7
+    assert signals.evidence is not None
+    assert signals.evidence["expected"]["provider"]["rfc"] == "ABC010203XY1"
+    assert signals.evidence["extracted"]["identifiers"]["rfcs"] == ["ABC010203XY1"]
+    assert signals.evidence["alignment"]["provider_identity"] == "match"

@@ -732,6 +732,7 @@ def get_submission(
         # already live inside ``authenticity.reasons`` (merged at
         # intake); this block carries the extracted anchors themselves.
         "verification": _build_verification_payload(inspection),
+        "prevalidation_evidence": _build_prevalidation_evidence_payload(inspection),
         # Phase 2 — shadow-analysis comparison block. Only present on
         # this reviewer endpoint; the provider-facing portal endpoint
         # never exposes shadow data. ``shadow.completed_at IS None``
@@ -864,6 +865,16 @@ def _build_verification_payload(inspection) -> dict:  # noqa: ANN001
         "folios": list(verification.get("folios") or []),
         "analyzed": True,
     }
+
+
+def _build_prevalidation_evidence_payload(inspection) -> dict | None:  # noqa: ANN001
+    if inspection is None:
+        return None
+    from app.services.submission_service import PREVALIDATION_EVIDENCE_METADATA_KEY
+
+    raw = inspection.raw_metadata or {}
+    evidence = raw.get(PREVALIDATION_EVIDENCE_METADATA_KEY)
+    return evidence if isinstance(evidence, dict) else None
 
 
 def _build_shadow_analysis_payload(inspection) -> dict | None:  # noqa: ANN001

@@ -70,6 +70,8 @@ from app.services.validation_events import add_validation_event
 
 logger = logging.getLogger(__name__)
 
+PREVALIDATION_EVIDENCE_METADATA_KEY = "_prevalidation_evidence"
+
 
 def _authenticity_columns_fail_open(
     path: Path,
@@ -121,6 +123,17 @@ def _authenticity_columns_fail_open(
     except Exception:  # noqa: BLE001 — analysis errors never block intake.
         logger.exception("Authenticity analysis failed open (file=%s)", path)
         return None, None, None, None
+
+
+def _raw_metadata_with_evidence(
+    pdf_metadata: dict | None,
+    document_signals: DocumentSignals,
+) -> dict:
+    raw = dict(pdf_metadata or {})
+    if document_signals.evidence:
+        raw[PREVALIDATION_EVIDENCE_METADATA_KEY] = document_signals.evidence
+    return raw
+
 
 PDF_MIME_TYPES = frozenset(
     {
@@ -709,7 +722,10 @@ def finalize_intake_submission(
         requirement_match_confidence=document_signals.requirement_match_confidence,
         mismatch_reason=document_signals.mismatch_reason,
         inspection_error=pdf_inspection.error,
-        raw_metadata=pdf_inspection.metadata,
+        raw_metadata=_raw_metadata_with_evidence(
+            pdf_inspection.metadata,
+            document_signals,
+        ),
         authenticity_risk=authenticity_risk,
         risk_reasons=risk_reasons,
         forensics=forensics_payload,
@@ -1197,7 +1213,10 @@ def finalize_multi_document_submission(
             requirement_match_confidence=document_signals.requirement_match_confidence,
             mismatch_reason=document_signals.mismatch_reason,
             inspection_error=pdf_inspection.error,
-            raw_metadata=pdf_inspection.metadata,
+            raw_metadata=_raw_metadata_with_evidence(
+                pdf_inspection.metadata,
+                document_signals,
+            ),
             authenticity_risk=authenticity_risk,
             risk_reasons=risk_reasons,
             forensics=forensics_payload,
