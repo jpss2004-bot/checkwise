@@ -27,6 +27,8 @@ class DocumentSignalsSummary(BaseModel):
     detected_institution: str | None = None
     detected_document_type: str | None = None
     detected_rfcs: list[str] = []
+    expected_rfc: str | None = None
+    rfc_alignment: str | None = None
     detected_dates: list[str] = []
     period_mentions: list[str] = []
     requirement_match_confidence: float | None = None

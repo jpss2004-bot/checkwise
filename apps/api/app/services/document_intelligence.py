@@ -4,6 +4,12 @@ import re
 import unicodedata
 from dataclasses import dataclass, field
 
+RFC_ALIGNMENT_MATCH = "match"
+RFC_ALIGNMENT_HOMOCLAVE_MISMATCH = "homoclave_mismatch"
+RFC_ALIGNMENT_MISMATCH = "mismatch"
+RFC_ALIGNMENT_ABSENT = "absent"
+RFC_ALIGNMENT_NO_EXPECTED = "no_expected"
+
 
 @dataclass(frozen=True)
 class DocumentSignals:
@@ -15,6 +21,8 @@ class DocumentSignals:
     requirement_match_confidence: float | None = None
     mismatch_reason: str | None = None
     anomaly_codes: list[str] = field(default_factory=list)
+    expected_rfc: str | None = None
+    rfc_alignment: str | None = None
 
 
 DOCUMENT_TYPE_KEYWORDS = {
@@ -35,6 +43,12 @@ INSTITUTION_KEYWORDS = {
 }
 
 RFC_RE = re.compile(r"\b[A-ZÑ&]{3,4}\d{6}[A-Z0-9]{3}\b", re.IGNORECASE)
+RFC_SPACED_RE = re.compile(
+    r"\b(?:[A-ZÑ&][\s.\-/]*){3,4}"
+    r"(?:\d[\s.\-/]*){6}"
+    r"(?:[A-Z0-9][\s.\-/]*){3}\b",
+    re.IGNORECASE,
+)
 DATE_RE = re.compile(r"\b(?:\d{1,2}[/-]\d{1,2}[/-]\d{2,4}|\d{4}[/-]\d{1,2}[/-]\d{1,2})\b")
 PERIOD_RE = re.compile(
     r"\b(?:20\d{2}[-/ ]?(?:0?[1-9]|1[0-2])|"
@@ -50,6 +64,7 @@ def analyze_document_text(
     expected_requirement: str,
     expected_institution: str,
     expected_period: str,
+    expected_rfc: str | None = None,
 ) -> DocumentSignals:
     normalized_text = _normalize(text)
     normalized_requirement = _normalize(expected_requirement)
@@ -60,11 +75,13 @@ def analyze_document_text(
             requirement_match_confidence=0.0,
             mismatch_reason=None,
             anomaly_codes=["pdf_without_readable_text"],
+            expected_rfc=normalize_rfc(expected_rfc),
+            rfc_alignment=compute_rfc_alignment([], expected_rfc),
         )
 
     detected_type = _best_keyword_match(normalized_text, DOCUMENT_TYPE_KEYWORDS)
     detected_institution = _best_keyword_match(normalized_text, INSTITUTION_KEYWORDS)
-    rfcs = sorted(set(match.upper() for match in RFC_RE.findall(text)))
+    rfcs = extract_rfcs(text)
     dates = sorted(set(DATE_RE.findall(text)))[:20]
     period_mentions = sorted(set(PERIOD_RE.findall(text)))[:20]
 
@@ -124,7 +141,53 @@ def analyze_document_text(
         requirement_match_confidence=confidence,
         mismatch_reason=mismatch_reason,
         anomaly_codes=anomalies,
+        expected_rfc=normalize_rfc(expected_rfc),
+        rfc_alignment=compute_rfc_alignment(rfcs, expected_rfc),
     )
+
+
+def normalize_rfc(value: str | None) -> str | None:
+    """Normalize RFCs for matching while preserving RFC-specific letters."""
+    if not value:
+        return None
+    normalized = unicodedata.normalize("NFKC", value).upper()
+    compact = re.sub(r"[^A-Z0-9Ñ&]", "", normalized)
+    return compact or None
+
+
+def extract_rfcs(text: str) -> list[str]:
+    """Extract RFC candidates from raw and OCR-spaced text."""
+    candidates = {normalize_rfc(match) for match in RFC_RE.findall(text or "")}
+    candidates.update(normalize_rfc(match) for match in RFC_SPACED_RE.findall(text or ""))
+    return sorted(rfc for rfc in candidates if rfc and len(rfc) in (12, 13))
+
+
+def compute_rfc_alignment(
+    detected_rfcs: list[str] | tuple[str, ...] | set[str],
+    expected_rfc: str | None,
+) -> str:
+    """Compare detected RFC candidates against the provider RFC.
+
+    The return value is advisory only; status derivation still depends
+    exclusively on document/institution match signals.
+    """
+    expected = normalize_rfc(expected_rfc)
+    if not expected:
+        return RFC_ALIGNMENT_NO_EXPECTED
+
+    detected = [rfc for rfc in (normalize_rfc(value) for value in detected_rfcs) if rfc]
+    if not detected:
+        return RFC_ALIGNMENT_ABSENT
+
+    if expected in detected:
+        return RFC_ALIGNMENT_MATCH
+
+    expected_core = expected[:-3]
+    for rfc in detected:
+        if len(rfc) == len(expected) and rfc[:-3] == expected_core:
+            return RFC_ALIGNMENT_HOMOCLAVE_MISMATCH
+
+    return RFC_ALIGNMENT_MISMATCH
 
 
 def _keyword_hit_count(text: str, keywords: list[str]) -> int:

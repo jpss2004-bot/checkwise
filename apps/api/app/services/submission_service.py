@@ -622,6 +622,7 @@ def finalize_intake_submission(
         expected_requirement=resolved_requirement.canonical_name,
         expected_institution=institution.code,
         expected_period=period_code,
+        expected_rfc=vendor.rfc,
     )
     final_status = status_from_inspection(pdf_inspection, document_signals)
 
@@ -689,6 +690,8 @@ def finalize_intake_submission(
         detected_institution=document_signals.detected_institution,
         detected_document_type=document_signals.detected_document_type,
         detected_rfcs=document_signals.detected_rfcs,
+        expected_rfc=document_signals.expected_rfc,
+        rfc_alignment=document_signals.rfc_alignment,
         detected_dates=document_signals.detected_dates,
         period_mentions=document_signals.period_mentions,
         requirement_match_confidence=document_signals.requirement_match_confidence,
@@ -964,6 +967,8 @@ def finalize_intake_submission(
             detected_institution=document_signals.detected_institution,
             detected_document_type=document_signals.detected_document_type,
             detected_rfcs=document_signals.detected_rfcs,
+            expected_rfc=document_signals.expected_rfc,
+            rfc_alignment=document_signals.rfc_alignment,
             detected_dates=document_signals.detected_dates,
             period_mentions=document_signals.period_mentions,
             requirement_match_confidence=document_signals.requirement_match_confidence,
@@ -1090,6 +1095,7 @@ def finalize_multi_document_submission(
             expected_requirement=resolved_requirement.canonical_name,
             expected_institution=institution.code,
             expected_period=period_code,
+            expected_rfc=vendor.rfc,
         )
         per_file_status = status_from_inspection(pdf_inspection, document_signals)
         inspections.append((stored, pdf_inspection, document_signals, per_file_status))
@@ -1167,6 +1173,8 @@ def finalize_multi_document_submission(
             detected_institution=document_signals.detected_institution,
             detected_document_type=document_signals.detected_document_type,
             detected_rfcs=document_signals.detected_rfcs,
+            expected_rfc=document_signals.expected_rfc,
+            rfc_alignment=document_signals.rfc_alignment,
             detected_dates=document_signals.detected_dates,
             period_mentions=document_signals.period_mentions,
             requirement_match_confidence=document_signals.requirement_match_confidence,
@@ -1246,6 +1254,8 @@ def finalize_multi_document_submission(
                     detected_institution=document_signals.detected_institution,
                     detected_document_type=document_signals.detected_document_type,
                     detected_rfcs=document_signals.detected_rfcs,
+                    expected_rfc=document_signals.expected_rfc,
+                    rfc_alignment=document_signals.rfc_alignment,
                     detected_dates=document_signals.detected_dates,
                     period_mentions=document_signals.period_mentions,
                     requirement_match_confidence=document_signals.requirement_match_confidence,

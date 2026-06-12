@@ -40,7 +40,9 @@ import {
 } from "@/lib/session/admin";
 import {
   getReviewerQueue,
+  getReviewerQueueFacets,
   ReviewerApiError,
+  type QueueFacets,
   type QueueItem,
   type QueueResponse,
 } from "@/lib/api/reviewer";
@@ -115,6 +117,30 @@ function parseRiskParam(raw: string | null): RiskKey | "" {
     : "";
 }
 
+const RFC_VALUES = [
+  "match",
+  "homoclave_mismatch",
+  "mismatch",
+  "absent",
+  "no_expected",
+] as const;
+
+type RfcKey = NonNullable<QueueItem["rfc_alignment"]>;
+
+const RFC_LABEL: Record<RfcKey, string> = {
+  match: "Coincide",
+  homoclave_mismatch: "Homoclave dudosa",
+  mismatch: "No coincide",
+  absent: "No detectado",
+  no_expected: "Sin RFC esperado",
+};
+
+function parseRfcParam(raw: string | null): RfcKey | "" {
+  return (RFC_VALUES as readonly string[]).includes(raw ?? "")
+    ? (raw as RfcKey)
+    : "";
+}
+
 // SLA aging thresholds (hours). <72h is on target, 72h–168h is at
 // risk (amber), >168h (7 days) is out of SLA (red).
 const SLA_WARNING_HOURS = 72;
@@ -156,6 +182,7 @@ function ReviewerQueueBody() {
   const searchParams = useSearchParams();
   const [session, setSession] = useState<AdminSession | null>(null);
   const [queue, setQueue] = useState<QueueResponse | null>(null);
+  const [facets, setFacets] = useState<QueueFacets | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [reloadKey, setReloadKey] = useState(0);
@@ -177,6 +204,15 @@ function ReviewerQueueBody() {
   const [risk, setRisk] = useState<RiskKey | "">(() =>
     parseRiskParam(searchParams?.get("risk") ?? null),
   );
+  const [rfc, setRfc] = useState<RfcKey | "">(() =>
+    parseRfcParam(searchParams?.get("rfc") ?? null),
+  );
+  const [clientId, setClientId] = useState<string>(
+    () => searchParams?.get("client_id") ?? "",
+  );
+  const [vendorId, setVendorId] = useState<string>(
+    () => searchParams?.get("vendor_id") ?? "",
+  );
   const [loadingMore, setLoadingMore] = useState(false);
   const [loadMoreError, setLoadMoreError] = useState(false);
   // Display-only sort. The server always returns oldest-first (FIFO);
@@ -184,6 +220,12 @@ function ReviewerQueueBody() {
   const [newestFirst, setNewestFirst] = useState(false);
 
   const serverStatus = FILTER_SERVER_STATUS[filter];
+  const visibleVendors = useMemo(() => {
+    const vendors = facets?.vendors ?? [];
+    return clientId
+      ? vendors.filter((vendor) => vendor.client_id === clientId)
+      : vendors;
+  }, [clientId, facets]);
 
   useEffect(() => {
     const current = readAdminSession();
@@ -198,16 +240,44 @@ function ReviewerQueueBody() {
     setSession(current);
   }, [router]);
 
-  // Mirror tab + institution + risk into the URL (replace, not push,
+  useEffect(() => {
+    if (!session) return;
+    let cancelled = false;
+    getReviewerQueueFacets(session.access_token)
+      .then((payload) => {
+        if (!cancelled) setFacets(payload);
+      })
+      .catch((err) => {
+        if (err instanceof ReviewerApiError && err.status === 401) {
+          clearAdminSession();
+          router.replace("/login");
+        }
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [session, router]);
+
+  useEffect(() => {
+    if (!clientId || !vendorId || visibleVendors.some((v) => v.id === vendorId)) {
+      return;
+    }
+    setVendorId("");
+  }, [clientId, vendorId, visibleVendors]);
+
+  // Mirror tab + institution + risk/provider/client into the URL (replace, not push,
   // so the history stack stays one entry per page visit).
   useEffect(() => {
     const params = new URLSearchParams();
     if (filter !== "all") params.set("tab", filter);
     if (institution) params.set("institution", institution);
     if (risk) params.set("risk", risk);
+    if (rfc) params.set("rfc", rfc);
+    if (clientId) params.set("client_id", clientId);
+    if (vendorId) params.set("vendor_id", vendorId);
     const qs = params.toString();
     router.replace(`/admin/reviewer${qs ? `?${qs}` : ""}`, { scroll: false });
-  }, [filter, institution, risk, router]);
+  }, [clientId, filter, institution, rfc, risk, router, vendorId]);
 
   // First page fetch. Depends on `serverStatus` (not `filter`) so
   // toggling between "Todos" and the client-side mismatch filter
@@ -223,6 +293,9 @@ function ReviewerQueueBody() {
       status: serverStatus,
       institution: institution || undefined,
       risk: risk || undefined,
+      rfc: rfc || undefined,
+      client_id: clientId || undefined,
+      vendor_id: vendorId || undefined,
       limit: PAGE_LIMIT,
     })
       .then((payload) => {
@@ -243,7 +316,7 @@ function ReviewerQueueBody() {
     return () => {
       cancelled = true;
     };
-  }, [session, reloadKey, router, institution, serverStatus, risk]);
+  }, [clientId, session, reloadKey, router, institution, serverStatus, risk, rfc, vendorId]);
 
   const retry = useCallback(() => setReloadKey((k) => k + 1), []);
 
@@ -261,6 +334,9 @@ function ReviewerQueueBody() {
       status: serverStatus,
       institution: institution || undefined,
       risk: risk || undefined,
+      rfc: rfc || undefined,
+      client_id: clientId || undefined,
+      vendor_id: vendorId || undefined,
       limit: PAGE_LIMIT,
       cursor: requestedCursor,
     })
@@ -280,7 +356,7 @@ function ReviewerQueueBody() {
         setLoadMoreError(true);
       })
       .finally(() => setLoadingMore(false));
-  }, [session, queue, loadingMore, serverStatus, institution, risk, router]);
+  }, [clientId, session, queue, loadingMore, serverStatus, institution, risk, rfc, vendorId, router]);
 
   // F1: logout is now provided by the AdminShell header, so this
   // page no longer renders its own Cerrar sesión action.
@@ -351,12 +427,75 @@ function ReviewerQueueBody() {
           <option value="suspicious">{RISK_LABEL.suspicious}</option>
           <option value="clean">{RISK_LABEL.clean}</option>
         </Select>
-        {institution || risk ? (
+        <label
+          htmlFor="reviewer-client"
+          className="font-mono text-[10px] uppercase tracking-[0.2em] text-[color:var(--text-tertiary)]"
+        >
+          Cliente
+        </label>
+        <Select
+          id="reviewer-client"
+          value={clientId}
+          onChange={(e) => setClientId(e.target.value)}
+          className="h-9 max-w-[240px] text-[13px]"
+          aria-label="Filtrar bandeja por cliente"
+        >
+          <option value="">Todos los clientes</option>
+          {(facets?.clients ?? []).map((client) => (
+            <option key={client.id} value={client.id}>
+              {client.name}
+            </option>
+          ))}
+        </Select>
+        <label
+          htmlFor="reviewer-vendor"
+          className="font-mono text-[10px] uppercase tracking-[0.2em] text-[color:var(--text-tertiary)]"
+        >
+          Proveedor
+        </label>
+        <Select
+          id="reviewer-vendor"
+          value={vendorId}
+          onChange={(e) => setVendorId(e.target.value)}
+          className="h-9 max-w-[280px] text-[13px]"
+          aria-label="Filtrar bandeja por proveedor"
+        >
+          <option value="">Todos los proveedores</option>
+          {visibleVendors.map((vendor) => (
+            <option key={vendor.id} value={vendor.id}>
+              {vendor.rfc ? `${vendor.name} · ${vendor.rfc}` : vendor.name}
+            </option>
+          ))}
+        </Select>
+        <label
+          htmlFor="reviewer-rfc"
+          className="font-mono text-[10px] uppercase tracking-[0.2em] text-[color:var(--text-tertiary)]"
+        >
+          RFC
+        </label>
+        <Select
+          id="reviewer-rfc"
+          value={rfc}
+          onChange={(e) => setRfc(parseRfcParam(e.target.value))}
+          className="h-9 max-w-[210px] text-[13px]"
+          aria-label="Filtrar bandeja por resultado RFC"
+        >
+          <option value="">Todos</option>
+          {RFC_VALUES.map((value) => (
+            <option key={value} value={value}>
+              {RFC_LABEL[value]}
+            </option>
+          ))}
+        </Select>
+        {institution || risk || rfc || clientId || vendorId ? (
           <button
             type="button"
             onClick={() => {
               setInstitution("");
               setRisk("");
+              setRfc("");
+              setClientId("");
+              setVendorId("");
             }}
             className="font-mono text-[10px] uppercase tracking-[0.18em] text-[color:var(--text-teal)] underline-offset-2 hover:underline"
           >
@@ -474,6 +613,12 @@ function ReviewerQueueBody() {
                     title="Riesgo de autenticidad según el análisis forense del PDF"
                   >
                     Riesgo
+                  </TableHead>
+                  <TableHead
+                    className="w-[130px]"
+                    title="Comparación advisory entre RFC detectado y RFC del proveedor"
+                  >
+                    RFC
                   </TableHead>
                   <TableHead>Documento</TableHead>
                   <TableHead>Institución · periodo</TableHead>
@@ -605,6 +750,10 @@ function QueueTableRow({
       </TableCell>
 
       <TableCell>
+        <RfcBadge alignment={item.rfc_alignment} />
+      </TableCell>
+
+      <TableCell>
         <p className="font-medium leading-tight text-[color:var(--text-primary)]">
           {item.requirement.name ?? "Documento sin requisito canónico"}
         </p>
@@ -716,6 +865,46 @@ function RiskBadge({ risk }: { risk: QueueItem["authenticity_risk"] }) {
         }`}
       />
       {RISK_LABEL[risk]}
+    </Badge>
+  );
+}
+
+function RfcBadge({ alignment }: { alignment: QueueItem["rfc_alignment"] }) {
+  if (!alignment) {
+    return (
+      <span
+        className="text-[color:var(--text-tertiary)]"
+        title="Sin comparación RFC"
+        aria-label="Sin comparación RFC"
+      >
+        —
+      </span>
+    );
+  }
+  if (alignment === "match") {
+    return (
+      <Badge variant="success" className="whitespace-nowrap">
+        {RFC_LABEL[alignment]}
+      </Badge>
+    );
+  }
+  if (alignment === "mismatch") {
+    return (
+      <Badge variant="destructive" className="whitespace-nowrap">
+        {RFC_LABEL[alignment]}
+      </Badge>
+    );
+  }
+  if (alignment === "homoclave_mismatch") {
+    return (
+      <Badge variant="warning" className="whitespace-nowrap">
+        {RFC_LABEL[alignment]}
+      </Badge>
+    );
+  }
+  return (
+    <Badge variant="secondary" className="whitespace-nowrap">
+      {RFC_LABEL[alignment]}
     </Badge>
   );
 }

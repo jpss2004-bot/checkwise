@@ -2269,6 +2269,21 @@
   },
   {
    "method": "GET",
+   "path": "/api/v1/reviewer/queue/facets",
+   "function": "get_queue_facets",
+   "router": "app.api.v1.reviewer",
+   "file": "api/app/api/v1/reviewer.py",
+   "lineno": 466,
+   "gate": "reviewer_or_admin",
+   "tenant_rule": "cross-tenant (reviewer/admin is global)",
+   "audit_rule": "not_logged (read-only)",
+   "rate_limit_rule": "none (auth-gated)",
+   "error_lang": "es",
+   "must_change_password_allowed": false,
+   "notes": ""
+  },
+  {
+   "method": "GET",
    "path": "/api/v1/reviewer/submissions/{submission_id}",
    "function": "get_submission",
    "router": "app.api.v1.reviewer",

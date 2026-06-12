@@ -2,7 +2,14 @@ from __future__ import annotations
 
 from app.core.config import settings
 from app.schemas.submissions import ValidationSignal
-from app.services.document_intelligence import DocumentSignals
+from app.services.document_intelligence import (
+    RFC_ALIGNMENT_ABSENT,
+    RFC_ALIGNMENT_HOMOCLAVE_MISMATCH,
+    RFC_ALIGNMENT_MATCH,
+    RFC_ALIGNMENT_MISMATCH,
+    RFC_ALIGNMENT_NO_EXPECTED,
+    DocumentSignals,
+)
 from app.services.pdf_validation import PdfInspectionResult
 from app.services.storage import StoredFile
 
@@ -16,6 +23,63 @@ def _format_megabytes(size_bytes: int) -> str:
     """
     mb = size_bytes / 1_048_576  # 1024 * 1024
     return f"{mb:.1f} MB"
+
+
+def _vendor_match_signal(document_signals: DocumentSignals | None) -> ValidationSignal:
+    alignment = document_signals.rfc_alignment if document_signals else None
+    if alignment == RFC_ALIGNMENT_MATCH:
+        return ValidationSignal(
+            rule_code="vendor_match",
+            rule_type="fiscal",
+            result="pass",
+            severity="info",
+            message="El RFC detectado coincide con el proveedor.",
+            requires_human_review=True,
+        )
+    if alignment == RFC_ALIGNMENT_HOMOCLAVE_MISMATCH:
+        return ValidationSignal(
+            rule_code="vendor_match",
+            rule_type="fiscal",
+            result="warning",
+            severity="warning",
+            message=(
+                "Detectamos un RFC con el mismo núcleo del proveedor, "
+                "pero distinta homoclave. Un revisor lo confirmará."
+            ),
+            requires_human_review=True,
+        )
+    if alignment == RFC_ALIGNMENT_MISMATCH:
+        return ValidationSignal(
+            rule_code="vendor_match",
+            rule_type="fiscal",
+            result="warning",
+            severity="warning",
+            message=(
+                "El RFC detectado no coincide con el proveedor. "
+                "Un revisor lo validará antes de decidir."
+            ),
+            requires_human_review=True,
+        )
+    if alignment == RFC_ALIGNMENT_ABSENT:
+        message = "No detectamos RFC en el documento. Un revisor lo confirmará."
+    elif alignment == RFC_ALIGNMENT_NO_EXPECTED:
+        message = (
+            "El proveedor no tiene RFC registrado para comparar. "
+            "Un revisor lo confirmará."
+        )
+    else:
+        message = (
+            "Pendiente: un revisor confirmará que el RFC y la razón "
+            "social coincidan con el proveedor."
+        )
+    return ValidationSignal(
+        rule_code="vendor_match",
+        rule_type="fiscal",
+        result="pending",
+        severity="warning",
+        message=message,
+        requires_human_review=True,
+    )
 
 
 def build_initial_validations(
@@ -150,17 +214,7 @@ def build_initial_validations(
             ),
             requires_human_review=duplicate_found,
         ),
-        ValidationSignal(
-            rule_code="vendor_match",
-            rule_type="fiscal",
-            result="pending",
-            severity="warning",
-            message=(
-                "Pendiente: un revisor confirmará que el RFC y la razón "
-                "social coincidan con el proveedor."
-            ),
-            requires_human_review=True,
-        ),
+        _vendor_match_signal(document_signals),
         ValidationSignal(
             rule_code="period_match",
             rule_type="temporal",

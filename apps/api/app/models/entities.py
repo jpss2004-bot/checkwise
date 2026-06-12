@@ -368,6 +368,8 @@ class DocumentInspection(TimestampMixin, Base):
     detected_institution: Mapped[str | None] = mapped_column(String(80))
     detected_document_type: Mapped[str | None] = mapped_column(String(120))
     detected_rfcs: Mapped[list | None] = mapped_column(JSON)
+    expected_rfc: Mapped[str | None] = mapped_column(String(13))
+    rfc_alignment: Mapped[str | None] = mapped_column(String(40))
     detected_dates: Mapped[list | None] = mapped_column(JSON)
     period_mentions: Mapped[list | None] = mapped_column(JSON)
     requirement_match_confidence: Mapped[float | None] = mapped_column(Float)

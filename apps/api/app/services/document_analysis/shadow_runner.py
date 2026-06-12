@@ -40,9 +40,11 @@ from __future__ import annotations
 import logging
 from pathlib import Path
 
+from sqlalchemy import select
+
 from app.core.config import settings
 from app.db.session import SessionLocal
-from app.models import DocumentInspection
+from app.models import Document, DocumentInspection, Submission, Vendor
 from app.models.entities import utc_now
 from app.services.document_analysis.base import AnalysisResult
 from app.services.document_analysis.factory import build_document_analysis_provider
@@ -65,6 +67,7 @@ from app.services.document_image_forensics import (
     ImageTamperResult,
     analyze_image_tampering,
 )
+from app.services.document_intelligence import compute_rfc_alignment, normalize_rfc
 from app.services.validation_events import add_validation_event
 
 logger = logging.getLogger(__name__)
@@ -667,12 +670,34 @@ def _persist_shadow_result(
                 "detected_institution": result.signals.detected_institution,
                 "detected_document_type": result.signals.detected_document_type,
                 "detected_rfcs": list(result.signals.detected_rfcs or []),
+                "expected_rfc": normalize_rfc(inspection.expected_rfc)
+                or _expected_rfc_for_document(db, document_id),
                 "detected_dates": list(result.signals.detected_dates or []),
                 "period_mentions": list(result.signals.period_mentions or []),
                 "requirement_match_confidence": result.signals.requirement_match_confidence,
                 "mismatch_reason": result.signals.mismatch_reason,
                 "anomaly_codes": list(result.signals.anomaly_codes or []),
             }
+            detected_union = sorted(
+                {
+                    rfc
+                    for rfc in (
+                        normalize_rfc(value)
+                        for value in [
+                            *(inspection.detected_rfcs or []),
+                            *(result.signals.detected_rfcs or []),
+                        ]
+                    )
+                    if rfc
+                }
+            )
+            expected_rfc = shadow_signals_blob["expected_rfc"]
+            inspection.expected_rfc = expected_rfc
+            inspection.rfc_alignment = compute_rfc_alignment(
+                detected_union,
+                expected_rfc,
+            )
+            shadow_signals_blob["rfc_alignment"] = inspection.rfc_alignment
             shadow_confidence = result.signals.requirement_match_confidence
             if result.raw_meta:
                 shadow_signals_blob["_meta"] = result.raw_meta
@@ -751,6 +776,18 @@ def _persist_shadow_result(
         db.rollback()
     finally:
         db.close()
+
+
+def _expected_rfc_for_document(db, document_id: str) -> str | None:  # noqa: ANN001
+    return normalize_rfc(
+        db.scalar(
+            select(Vendor.rfc)
+            .join(Submission, Submission.vendor_id == Vendor.id)
+            .join(Document, Document.submission_id == Submission.id)
+            .where(Document.id == document_id)
+            .limit(1)
+        )
+    )
 
 
 def _persist_shadow_failure(

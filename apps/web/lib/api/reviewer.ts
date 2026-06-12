@@ -5,7 +5,11 @@
  * the ``reviewer`` or ``internal_admin`` role.
  */
 
-import type { RequirementStatus, SubmissionDetail } from "@/lib/api/portal";
+import type {
+  RequirementStatus,
+  RfcAlignment,
+  SubmissionDetail,
+} from "@/lib/api/portal";
 
 const API_BASE_URL =
   process.env.NEXT_PUBLIC_API_BASE_URL ?? "http://127.0.0.1:8000";
@@ -72,6 +76,7 @@ export type QueueItem = {
    *  local PDF-forensics analyzer. null = not analyzed (legacy rows
    *  or analyzer failure; intake is fail-open). */
   authenticity_risk: "clean" | "suspicious" | "high_risk" | null;
+  rfc_alignment: RfcAlignment | null;
 };
 
 export type QueueResponse = {
@@ -97,6 +102,21 @@ export type QueueFilters = {
   cursor?: string;
   /** Phase A — server-side authenticity-risk filter. */
   risk?: "clean" | "suspicious" | "high_risk";
+  /** Advisory RFC alignment verdict from document inspection. */
+  rfc?: RfcAlignment;
+  /** Server-side queue scope by client/provider. */
+  client_id?: string;
+  vendor_id?: string;
+};
+
+export type QueueFacets = {
+  clients: Array<{ id: string; name: string }>;
+  vendors: Array<{
+    id: string;
+    client_id: string;
+    name: string;
+    rfc: string | null;
+  }>;
 };
 
 export async function getReviewerQueue(
@@ -109,11 +129,20 @@ export async function getReviewerQueue(
   if (filters.limit) params.set("limit", String(filters.limit));
   if (filters.cursor) params.set("cursor", filters.cursor);
   if (filters.risk) params.set("risk", filters.risk);
+  if (filters.rfc) params.set("rfc", filters.rfc);
+  if (filters.client_id) params.set("client_id", filters.client_id);
+  if (filters.vendor_id) params.set("vendor_id", filters.vendor_id);
   const qs = params.toString();
   return await fetchJson<QueueResponse>(
     `/api/v1/reviewer/queue${qs ? `?${qs}` : ""}`,
     token,
   );
+}
+
+export async function getReviewerQueueFacets(
+  token: string,
+): Promise<QueueFacets> {
+  return await fetchJson<QueueFacets>("/api/v1/reviewer/queue/facets", token);
 }
 
 // ---------------------------------------------------------------------------
@@ -287,6 +316,10 @@ export function reviewerDocumentDownloadUrl(submissionId: string): string {
   return `${reviewerDocumentUrl(submissionId)}?download=1`;
 }
 
+type DocumentBlobOptions = {
+  download?: boolean;
+};
+
 /**
  * Fetch the submission's PDF with the reviewer JWT and return a Blob
  * URL the iframe can render. Mirrors the portal-side helper but uses
@@ -296,13 +329,19 @@ export function reviewerDocumentDownloadUrl(submissionId: string): string {
 export async function fetchReviewerSubmissionDocumentBlob(
   token: string,
   submissionId: string,
+  options: DocumentBlobOptions = {},
 ): Promise<string> {
   const headers = new Headers();
   headers.set("Authorization", `Bearer ${token}`);
-  const response = await fetch(reviewerDocumentUrl(submissionId), {
-    headers,
-    credentials: "include",
-  });
+  const params = new URLSearchParams({ proxy: "1" });
+  if (options.download) params.set("download", "1");
+  const response = await fetch(
+    `${reviewerDocumentUrl(submissionId)}?${params.toString()}`,
+    {
+      headers,
+      credentials: "include",
+    },
+  );
   if (!response.ok) {
     const detail = await response.text().catch(() => "");
     throw new ReviewerApiError(

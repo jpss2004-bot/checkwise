@@ -326,6 +326,9 @@ export type SubmissionDocumentSummary = {
   is_probably_scanned: boolean | null;
   detected_institution: string | null;
   detected_document_type: string | null;
+  detected_rfcs?: string[];
+  expected_rfc?: string | null;
+  rfc_alignment?: RfcAlignment | null;
   mismatch_reason: string | null;
 };
 
@@ -378,6 +381,8 @@ export type ShadowAnalysisSignals = {
   detected_institution: string | null;
   detected_document_type: string | null;
   detected_rfcs: string[];
+  expected_rfc?: string | null;
+  rfc_alignment?: RfcAlignment | null;
   detected_dates: string[];
   period_mentions: string[];
   requirement_match_confidence: number | null;
@@ -385,6 +390,13 @@ export type ShadowAnalysisSignals = {
   anomaly_codes?: string[];
   _meta?: Record<string, unknown>;
 };
+
+export type RfcAlignment =
+  | "match"
+  | "homoclave_mismatch"
+  | "mismatch"
+  | "absent"
+  | "no_expected";
 
 export type ShadowAnalysisPayload = {
   heuristic: {

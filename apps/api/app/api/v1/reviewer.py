@@ -31,12 +31,14 @@ from app.constants.statuses import DocumentStatus, ReviewerAction
 from app.core.config import settings
 from app.db.session import get_db
 from app.models import (
+    Client,
     Document,
     DocumentStatusHistory,
     Institution,
     Submission,
     Validation,
     ValidationEvent,
+    Vendor,
 )
 from app.models.entities import utc_now
 from app.services.audit_log import add_audit_event
@@ -108,6 +110,7 @@ class QueueItem(BaseModel):
     # ``None`` means not analyzed (legacy rows / analyzer failure), so
     # older client builds that ignore the field stay compatible.
     authenticity_risk: str | None = None
+    rfc_alignment: str | None = None
 
 
 class QueueResponse(BaseModel):
@@ -123,6 +126,23 @@ class QueueResponse(BaseModel):
     # filter set.
     approved_last_7d_count: int = 0
     rejected_last_7d_count: int = 0
+
+
+class QueueFacetClient(BaseModel):
+    id: str
+    name: str
+
+
+class QueueFacetVendor(BaseModel):
+    id: str
+    client_id: str
+    name: str
+    rfc: str | None
+
+
+class QueueFacetsResponse(BaseModel):
+    clients: list[QueueFacetClient]
+    vendors: list[QueueFacetVendor]
 
 
 DECISION_ACTIONS: tuple[str, ...] = tuple(action.value for action in ReviewerAction)
@@ -205,6 +225,13 @@ def get_queue(
     risk: Annotated[
         Literal["clean", "suspicious", "high_risk"] | None, Query()
     ] = None,
+    client_id: Annotated[str | None, Query()] = None,
+    vendor_id: Annotated[str | None, Query()] = None,
+    rfc: Annotated[
+        Literal["match", "homoclave_mismatch", "mismatch", "absent", "no_expected"]
+        | None,
+        Query(),
+    ] = None,
     cursor: Annotated[str | None, Query()] = None,
 ) -> QueueResponse:
     """List submissions waiting on a human decision.
@@ -257,18 +284,31 @@ def get_queue(
             Institution, Submission.institution_id == Institution.id
         ).where(Institution.code == institution)
 
+    if client_id:
+        stmt = stmt.where(Submission.client_id == client_id)
+        count_stmt = count_stmt.where(Submission.client_id == client_id)
+
+    if vendor_id:
+        stmt = stmt.where(Submission.vendor_id == vendor_id)
+        count_stmt = count_stmt.where(Submission.vendor_id == vendor_id)
+
+    inspection_filters = []
     if risk:
-        # Server-side authenticity filter: join through the submission's
-        # documents to their inspection verdicts. ``distinct()`` guards
-        # against duplicate rows when a multi-file submission has more
-        # than one document at the requested risk level.
+        inspection_filters.append(DocumentInspection.authenticity_risk == risk)
+    if rfc:
+        inspection_filters.append(DocumentInspection.rfc_alignment == rfc)
+    if inspection_filters:
+        # Server-side document-inspection filters: join through the
+        # submission's documents to their inspection verdicts.
+        # ``distinct()`` guards against duplicate rows when a multi-file
+        # submission has more than one matching document.
         stmt = (
             stmt.join(Document, Document.submission_id == Submission.id)
             .join(
                 DocumentInspection,
                 DocumentInspection.document_id == Document.id,
             )
-            .where(DocumentInspection.authenticity_risk == risk)
+            .where(*inspection_filters)
             .distinct()
         )
         count_stmt = (
@@ -277,7 +317,7 @@ def get_queue(
                 DocumentInspection,
                 DocumentInspection.document_id == Document.id,
             )
-            .where(DocumentInspection.authenticity_risk == risk)
+            .where(*inspection_filters)
         )
 
     if cursor:
@@ -377,6 +417,9 @@ def get_queue(
                 authenticity_risk=(
                     inspection.authenticity_risk if inspection is not None else None
                 ),
+                rfc_alignment=(
+                    inspection.rfc_alignment if inspection is not None else None
+                ),
             )
         )
 
@@ -421,6 +464,41 @@ def get_queue(
     )
 
 
+@router.get("/queue/facets", response_model=QueueFacetsResponse)
+def get_queue_facets(
+    db: DbSession,
+    current: ReviewerDep,  # noqa: ARG001 - enforces RBAC
+) -> QueueFacetsResponse:
+    """Return client/provider filter options scoped to actionable queue rows."""
+
+    client_rows = db.execute(
+        select(Client.id, Client.name)
+        .join(Submission, Submission.client_id == Client.id)
+        .where(Submission.status.in_(QUEUE_STATUSES))
+        .distinct()
+        .order_by(Client.name.asc())
+    ).all()
+    vendor_rows = db.execute(
+        select(Vendor.id, Vendor.client_id, Vendor.name, Vendor.rfc)
+        .join(Submission, Submission.vendor_id == Vendor.id)
+        .where(Submission.status.in_(QUEUE_STATUSES))
+        .distinct()
+        .order_by(Vendor.name.asc())
+    ).all()
+    return QueueFacetsResponse(
+        clients=[QueueFacetClient(id=row.id, name=row.name) for row in client_rows],
+        vendors=[
+            QueueFacetVendor(
+                id=row.id,
+                client_id=row.client_id,
+                name=row.name,
+                rfc=row.rfc,
+            )
+            for row in vendor_rows
+        ],
+    )
+
+
 # ---------------------------------------------------------------------------
 # Detail (reuses portal's SubmissionDetailResponse shape, but accessed via
 # JWT so cross-tenant reviewers can read it without a workspace token).
@@ -444,7 +522,6 @@ def get_submission(
     # Import locally to dodge a circular dependency through the API
     # package's ``router.py`` initialisation order.
     from app.api.v1.portal import (
-        SubmissionDocumentSummary,
         SubmissionEvent,
         SubmissionHistoryEntry,
         SubmissionPeriodSummary,
@@ -628,28 +705,7 @@ def get_submission(
             period_key=submission.period_key,
             period_type=submission.period.period_type if submission.period else None,
         ).model_dump(),
-        "document": (
-            SubmissionDocumentSummary(
-                document_id=document.id,
-                filename=document.original_filename,
-                sha256=document.sha256,
-                size_bytes=document.size_bytes,
-                page_count=inspection.page_count if inspection else None,
-                has_text=inspection.has_text if inspection else None,
-                is_probably_scanned=(
-                    inspection.is_probably_scanned if inspection else None
-                ),
-                detected_institution=(
-                    inspection.detected_institution if inspection else None
-                ),
-                detected_document_type=(
-                    inspection.detected_document_type if inspection else None
-                ),
-                mismatch_reason=inspection.mismatch_reason if inspection else None,
-            ).model_dump()
-            if document is not None
-            else None
-        ),
+        "document": _build_reviewer_document_payload(document, inspection),
         "reasons": [r.model_dump() for r in reasons],
         "events": [e.model_dump() for e in events],
         "history": [h.model_dump() for h in history],
@@ -690,6 +746,37 @@ def get_submission(
         # only — it never changes a status.
         "approval_suggestion": _build_approval_suggestion(submission, inspection),
     }
+
+
+def _build_reviewer_document_payload(document, inspection) -> dict | None:  # noqa: ANN001
+    from app.api.v1.portal import SubmissionDocumentSummary
+
+    if document is None:
+        return None
+    payload = SubmissionDocumentSummary(
+        document_id=document.id,
+        filename=document.original_filename,
+        sha256=document.sha256,
+        size_bytes=document.size_bytes,
+        page_count=inspection.page_count if inspection else None,
+        has_text=inspection.has_text if inspection else None,
+        is_probably_scanned=(inspection.is_probably_scanned if inspection else None),
+        detected_institution=(inspection.detected_institution if inspection else None),
+        detected_document_type=(
+            inspection.detected_document_type if inspection else None
+        ),
+        mismatch_reason=inspection.mismatch_reason if inspection else None,
+    ).model_dump()
+    payload.update(
+        {
+            "detected_rfcs": list(inspection.detected_rfcs or [])
+            if inspection
+            else [],
+            "expected_rfc": inspection.expected_rfc if inspection else None,
+            "rfc_alignment": inspection.rfc_alignment if inspection else None,
+        }
+    )
+    return payload
 
 
 def _build_approval_suggestion(submission, inspection) -> dict | None:  # noqa: ANN001
@@ -800,6 +887,8 @@ def _build_shadow_analysis_payload(inspection) -> dict | None:  # noqa: ANN001
                 "detected_institution": inspection.detected_institution,
                 "detected_document_type": inspection.detected_document_type,
                 "detected_rfcs": list(inspection.detected_rfcs or []),
+                "expected_rfc": inspection.expected_rfc,
+                "rfc_alignment": inspection.rfc_alignment,
                 "detected_dates": list(inspection.detected_dates or []),
                 "period_mentions": list(inspection.period_mentions or []),
                 "requirement_match_confidence": inspection.requirement_match_confidence,
@@ -924,6 +1013,7 @@ def get_submission_document(
     db: DbSession,
     current: ReviewerDep,
     download: bool = False,
+    proxy: bool = False,
 ) -> Response:
     """Serve the PDF a provider uploaded so the reviewer can see it
     inline before deciding.
@@ -977,7 +1067,7 @@ def get_submission_document(
         document.storage_key,
         content_disposition=disposition_header,
     )
-    if presigned is not None:
+    if presigned is not None and not proxy:
         from fastapi.responses import RedirectResponse
 
         return RedirectResponse(presigned, status_code=status.HTTP_302_FOUND)

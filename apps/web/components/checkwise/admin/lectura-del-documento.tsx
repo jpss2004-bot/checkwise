@@ -134,8 +134,13 @@ function buildVerdict(
   if (!payload) return null;
   const shadow = payload.shadow;
 
-  // Shadow run still in flight
-  if (shadow.completed_at === null && shadow.error === null && !shadow.signals) {
+  // Shadow run still in flight and no heuristic fallback is available.
+  if (
+    shadow.completed_at === null &&
+    shadow.error === null &&
+    !shadow.signals &&
+    !payload.heuristic.signals
+  ) {
     return {
       text: "Procesando la lectura automática del documento…",
       tone: "neutral",

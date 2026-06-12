@@ -119,6 +119,7 @@ def _seed_submission(
     risk_reasons: list | None = None,
     forensics: dict | None = None,
     verification: dict | None = None,
+    rfc_alignment: str | None = None,
 ) -> str:
     """Inserts the minimum row graph needed for a reviewer queue item.
 
@@ -222,7 +223,11 @@ def _seed_submission(
             sha256="a" * 64,
         )
         db.add(document)
-        if authenticity_risk is not None or verification is not None:
+        if (
+            authenticity_risk is not None
+            or verification is not None
+            or rfc_alignment is not None
+        ):
             db.flush()
             db.add(
                 DocumentInspection(
@@ -232,6 +237,8 @@ def _seed_submission(
                     risk_reasons=risk_reasons,
                     forensics=forensics,
                     verification=verification,
+                    expected_rfc=vendor.rfc,
+                    rfc_alignment=rfc_alignment,
                 )
             )
         db.commit()
@@ -375,6 +382,74 @@ def test_queue_filter_by_institution(api_client: TestClient, db_factory) -> None
     assert {item["submission_id"] for item in payload["items"]} == {sat_id}
 
 
+def test_queue_filters_by_client_and_vendor(api_client: TestClient, db_factory) -> None:
+    _seed_user(db_factory, email="rev@x.mx", role="reviewer")
+    token = _login(api_client, "rev@x.mx", "Hunter2 Correct horse")
+    first_id = _seed_submission(db_factory, period_key="2026-M01")
+    second_id = _seed_submission(db_factory, period_key="2026-M02")
+    db = db_factory()
+    try:
+        first = db.get(Submission, first_id)
+        second = db.get(Submission, second_id)
+        assert first is not None and second is not None
+        client_id = first.client_id
+        vendor_id = first.vendor_id
+    finally:
+        db.close()
+
+    by_client = api_client.get(
+        "/api/v1/reviewer/queue",
+        params={"client_id": client_id},
+        headers={"Authorization": f"Bearer {token}"},
+    )
+    by_vendor = api_client.get(
+        "/api/v1/reviewer/queue",
+        params={"vendor_id": vendor_id},
+        headers={"Authorization": f"Bearer {token}"},
+    )
+
+    assert by_client.status_code == 200, by_client.text
+    assert by_vendor.status_code == 200, by_vendor.text
+    assert {item["submission_id"] for item in by_client.json()["items"]} == {first_id}
+    assert {item["submission_id"] for item in by_vendor.json()["items"]} == {first_id}
+
+
+def test_queue_facets_are_scoped_to_actionable_rows(
+    api_client: TestClient, db_factory
+) -> None:
+    _seed_user(db_factory, email="rev@x.mx", role="reviewer")
+    token = _login(api_client, "rev@x.mx", "Hunter2 Correct horse")
+    actionable_id = _seed_submission(db_factory, period_key="2026-M01")
+    terminal_id = _seed_submission(
+        db_factory,
+        period_key="2026-M02",
+        status_="aprobado",
+    )
+    db = db_factory()
+    try:
+        actionable = db.get(Submission, actionable_id)
+        terminal = db.get(Submission, terminal_id)
+        assert actionable is not None and terminal is not None
+        actionable_client_id = actionable.client_id
+        actionable_vendor_id = actionable.vendor_id
+        terminal_client_id = terminal.client_id
+        terminal_vendor_id = terminal.vendor_id
+    finally:
+        db.close()
+
+    response = api_client.get(
+        "/api/v1/reviewer/queue/facets",
+        headers={"Authorization": f"Bearer {token}"},
+    )
+
+    assert response.status_code == 200, response.text
+    payload = response.json()
+    assert {client["id"] for client in payload["clients"]} == {actionable_client_id}
+    assert {vendor["id"] for vendor in payload["vendors"]} == {actionable_vendor_id}
+    assert terminal_client_id not in {client["id"] for client in payload["clients"]}
+    assert terminal_vendor_id not in {vendor["id"] for vendor in payload["vendors"]}
+
+
 # ---------------------------------------------------------------------------
 # Authenticity verdict (document-revalidation Phase A)
 # ---------------------------------------------------------------------------
@@ -428,6 +503,31 @@ def test_queue_filters_by_risk(api_client: TestClient, db_factory) -> None:
     assert response.status_code == 200, response.text
     payload = response.json()
     assert {item["submission_id"] for item in payload["items"]} == {risky_id}
+    assert payload["total"] == 1
+
+
+def test_queue_exposes_and_filters_by_rfc_alignment(
+    api_client: TestClient, db_factory
+) -> None:
+    _seed_user(db_factory, email="rev@x.mx", role="reviewer")
+    token = _login(api_client, "rev@x.mx", "Hunter2 Correct horse")
+    _seed_submission(db_factory, period_key="2026-M01", rfc_alignment="match")
+    mismatch_id = _seed_submission(
+        db_factory,
+        period_key="2026-M02",
+        rfc_alignment="mismatch",
+    )
+
+    response = api_client.get(
+        "/api/v1/reviewer/queue",
+        params={"rfc": "mismatch"},
+        headers={"Authorization": f"Bearer {token}"},
+    )
+
+    assert response.status_code == 200, response.text
+    payload = response.json()
+    assert {item["submission_id"] for item in payload["items"]} == {mismatch_id}
+    assert payload["items"][0]["rfc_alignment"] == "mismatch"
     assert payload["total"] == 1
 
 

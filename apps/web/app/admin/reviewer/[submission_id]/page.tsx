@@ -36,11 +36,14 @@ import {
   readAdminSession,
   type AdminSession,
 } from "@/lib/session/admin";
-import { INSTITUTION_LABELS, type SubmissionDetail } from "@/lib/api/portal";
+import {
+  INSTITUTION_LABELS,
+  type RfcAlignment,
+  type SubmissionDetail,
+} from "@/lib/api/portal";
 import {
   fetchReviewerSubmissionDocumentBlob,
   getReviewerSubmission,
-  reviewerDocumentDownloadUrl,
   ReviewerApiError,
   submitDecision,
   type AuthenticityReason,
@@ -396,10 +399,6 @@ function LineageStrip({ detail }: { detail: SubmissionDetail }) {
 // Vendor identity + RFC match (P1 audit fix, 2026-06-10)
 // ---------------------------------------------------------------------------
 
-type RfcComparison =
-  | { state: "unknown"; expected: string | null; detected: string | null }
-  | { state: "match" | "mismatch"; expected: string; detected: string };
-
 /**
  * Pull the OCR/AI-detected RFCs from the inspection payload, mirroring
  * <LecturaDelDocumento/>'s primary-signal choice (AI shadow signals
@@ -407,37 +406,39 @@ type RfcComparison =
  * comparison never disagrees with the "RFC detectado" row below it.
  */
 function detectedRfcs(detail: SubmissionDetail): string[] {
+  if (detail.document?.detected_rfcs?.length) {
+    return detail.document.detected_rfcs;
+  }
   const payload = detail.shadow_analysis ?? null;
   if (!payload) return [];
   const signals = payload.shadow?.signals ?? payload.heuristic?.signals ?? null;
   return signals?.detected_rfcs ?? [];
 }
 
-/**
- * Case-insensitive, trimmed comparison of the registry's expected RFC
- * against the detected candidates. Any candidate matching counts as a
- * match (multi-RFC documents like contratos list both parties). When
- * either side is missing we surface a neutral "Sin comparación" state
- * instead of a scary ✗.
- */
-function compareRfc(
-  expectedRaw: string | null,
-  detected: string[],
-): RfcComparison {
-  const expected = expectedRaw?.trim() || null;
-  const candidates = detected
-    .map((rfc) => rfc.trim())
-    .filter((rfc) => rfc.length > 0);
-  if (!expected || candidates.length === 0) {
-    return { state: "unknown", expected, detected: candidates[0] ?? null };
-  }
-  const matched = candidates.find(
-    (rfc) => rfc.toUpperCase() === expected.toUpperCase(),
+function rfcAlignment(detail: SubmissionDetail): RfcAlignment | null {
+  return (
+    detail.document?.rfc_alignment ??
+    detail.shadow_analysis?.heuristic?.signals?.rfc_alignment ??
+    detail.shadow_analysis?.shadow?.signals?.rfc_alignment ??
+    null
   );
-  if (matched) {
-    return { state: "match", expected, detected: matched };
+}
+
+function RfcAlignmentBadge({ alignment }: { alignment: RfcAlignment | null }) {
+  if (alignment === "match") return <Badge variant="success">RFC coincide</Badge>;
+  if (alignment === "homoclave_mismatch") {
+    return <Badge variant="warning">Posible error de homoclave</Badge>;
   }
-  return { state: "mismatch", expected, detected: candidates[0] };
+  if (alignment === "mismatch") {
+    return <Badge variant="destructive">RFC no coincide</Badge>;
+  }
+  if (alignment === "absent") {
+    return <Badge variant="secondary">RFC no detectado</Badge>;
+  }
+  if (alignment === "no_expected") {
+    return <Badge variant="secondary">Sin RFC esperado</Badge>;
+  }
+  return <Badge variant="secondary">Sin comparación</Badge>;
 }
 
 /**
@@ -452,7 +453,9 @@ function VendorIdentityStrip({ detail }: { detail: ReviewerSubmissionDetail }) {
   const vendor = detail.vendor;
   if (!vendor) return null;
 
-  const comparison = compareRfc(vendor.vendor_rfc, detectedRfcs(detail));
+  const detected = detectedRfcs(detail);
+  const detectedText = detected.length ? detected.join(", ") : "—";
+  const alignment = rfcAlignment(detail);
 
   const items: MetadataItem[] = [
     { label: "Proveedor", value: vendor.vendor_name ?? "—" },
@@ -464,15 +467,9 @@ function VendorIdentityStrip({ detail }: { detail: ReviewerSubmissionDetail }) {
       value: (
         <span className="inline-flex items-center gap-1.5">
           <span className="font-mono tabular-nums">
-            {comparison.detected ?? "—"}
+            {detectedText}
           </span>
-          {comparison.state === "match" ? (
-            <Badge variant="success">✓ Coincide</Badge>
-          ) : comparison.state === "mismatch" ? (
-            <Badge variant="destructive">✗ No coincide</Badge>
-          ) : (
-            <Badge variant="secondary">Sin comparación</Badge>
-          )}
+          <RfcAlignmentBadge alignment={alignment} />
         </span>
       ),
     },
@@ -1222,6 +1219,7 @@ function ReviewerSubmissionPreview({
 }) {
   const [blobUrl, setBlobUrl] = useState<string | null>(null);
   const [loadError, setLoadError] = useState<string | null>(null);
+  const [downloading, setDownloading] = useState(false);
 
   const submissionId = detail.submission_id;
   const documentId = detail.document?.document_id ?? null;
@@ -1260,6 +1258,27 @@ function ReviewerSubmissionPreview({
     };
   }, [token, submissionId, documentId]);
 
+  const handleDownload = useCallback(async () => {
+    if (!detail.document || downloading) return;
+    setDownloading(true);
+    try {
+      const url = await fetchReviewerSubmissionDocumentBlob(token, submissionId, {
+        download: true,
+      });
+      const anchor = document.createElement("a");
+      anchor.href = url;
+      anchor.download = detail.document.filename;
+      document.body.appendChild(anchor);
+      anchor.click();
+      anchor.remove();
+      window.setTimeout(() => URL.revokeObjectURL(url), 1000);
+    } catch {
+      toast.error("No pudimos descargar el PDF.");
+    } finally {
+      setDownloading(false);
+    }
+  }, [detail.document, downloading, submissionId, token]);
+
   if (!detail.document) {
     return (
       <Card>
@@ -1275,8 +1294,6 @@ function ReviewerSubmissionPreview({
     );
   }
 
-  const downloadHref = reviewerDocumentDownloadUrl(submissionId);
-
   return (
     <Card>
       <CardHeader>
@@ -1288,20 +1305,18 @@ function ReviewerSubmissionPreview({
             />
             <CardTitle>Vista previa del documento</CardTitle>
           </div>
-          <Button asChild size="sm" variant="outline">
-            <a
-              href={downloadHref}
-              target="_blank"
-              rel="noreferrer"
-              download={detail.document.filename}
-            >
-              <DownloadSimple
-                className="h-3.5 w-3.5"
-                weight="bold"
-                aria-hidden="true"
-              />
-              Descargar PDF
-            </a>
+          <Button
+            size="sm"
+            variant="outline"
+            loading={downloading}
+            onClick={handleDownload}
+          >
+            <DownloadSimple
+              className="h-3.5 w-3.5"
+              weight="bold"
+              aria-hidden="true"
+            />
+            Descargar PDF
           </Button>
         </div>
         <p className="mt-1 text-sm text-muted-foreground">
