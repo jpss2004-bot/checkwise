@@ -63,7 +63,16 @@ export async function downloadAuthenticatedFile(
     throw new DownloadError(0, "No pudimos contactar al servidor.");
   }
   if (!response.ok) {
-    const detail = await response.text().catch(() => "");
+    const raw = await response.text().catch(() => "");
+    // FastAPI errors arrive as {"detail": "..."} — surface the Spanish
+    // detail, not the JSON envelope.
+    let detail = raw;
+    try {
+      const parsed = JSON.parse(raw) as { detail?: unknown };
+      if (typeof parsed.detail === "string") detail = parsed.detail;
+    } catch {
+      // Not JSON — keep the raw body.
+    }
     throw new DownloadError(response.status, detail || response.statusText);
   }
   const disp = response.headers.get("Content-Disposition") || "";

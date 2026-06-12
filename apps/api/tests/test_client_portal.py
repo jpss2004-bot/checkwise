@@ -2166,3 +2166,47 @@ def test_portfolio_correct_and_flat_at_volume(api_client, db_factory):
     overview = api_client.get("/api/v1/client/overview", headers=_h(token)).json()
     assert overview["vendors_total"] == 25
     assert overview["green_count"] + overview["yellow_count"] + overview["red_count"] == 25
+
+
+def test_client_audit_package_zip_fails_loudly_when_manifest_render_breaks(
+    api_client: TestClient, db_factory, monkeypatch
+) -> None:
+    """Audit 2026-06-12 — a manifest (INDICE.pdf) render crash used to be
+    swallowed, silently shipping a legally incomplete ZIP. It must now
+    surface as a 502 with an actionable Spanish message. The
+    ``skip_manifest`` paths (used by tests/CI) never enter the renderer
+    and stay unaffected."""
+    client_id = _seed_client(db_factory)
+    _, ws = _seed_vendor_with_workspace(db_factory, client_id=client_id)
+    _seed_approved_submission_for_workspace(api_client, db_factory, ws)
+
+    _, email, pw = _seed_user_with_role(
+        db_factory, role="client_admin", client_id=client_id, email_prefix="ca-mf"
+    )
+    token = _login(api_client, email, pw)
+
+    import app.services.audit_package_manifest as manifest_mod
+
+    def _boom(**kwargs):  # noqa: ANN003, ANN202
+        raise RuntimeError("chromium exploded")
+
+    monkeypatch.setattr(manifest_mod, "render_audit_manifest", _boom)
+
+    resp = api_client.get(
+        "/api/v1/client/audit-package.zip",
+        headers=_h(token),
+    )
+    assert resp.status_code == 502, resp.text
+    assert "INDICE.pdf" in resp.json()["detail"]
+
+    # No download audit row for the failed attempt.
+    db = db_factory()
+    try:
+        downloads = (
+            db.query(AuditLog)
+            .filter(AuditLog.action == "client.audit_package_downloaded")
+            .count()
+        )
+        assert downloads == 0
+    finally:
+        db.close()

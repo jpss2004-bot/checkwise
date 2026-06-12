@@ -104,6 +104,7 @@ from app.services.evidence_slots import (
     renewal_anchor_date,
     renewal_status,
 )
+from app.services.metadata_store import ensure_local_export
 from app.services.search_service import SearchHit, search_submissions
 
 router = APIRouter(prefix="/client", tags=["client"])
@@ -2587,7 +2588,7 @@ def client_metadata(
     client = db.get(Client, target_id)
     if client is None:
         raise HTTPException(status.HTTP_404_NOT_FOUND, detail="Cliente no encontrado.")
-    path = client_master_file_path(client)
+    path = ensure_local_export(client_master_file_path(client))
     documents: list[ClientMetadataDocument] = []
     if path.exists():
         sheets = read_xlsx_preview(path, max_rows_per_sheet=500, max_columns=20)
@@ -2613,7 +2614,7 @@ def download_client_metadata(
     client = db.get(Client, target_id)
     if client is None:
         raise HTTPException(status.HTTP_404_NOT_FOUND, detail="Cliente no encontrado.")
-    path = client_master_file_path(client)
+    path = ensure_local_export(client_master_file_path(client))
     if not path.exists():
         raise HTTPException(
             status.HTTP_404_NOT_FOUND,
@@ -3063,17 +3064,26 @@ def _stream_audit_package_zip(
                 filters=filters,
                 entries=entries,
             )
-        except Exception:
-            # Don't fail the whole download if the manifest renderer
-            # crashes — the ZIP itself is the legally meaningful
-            # artifact. Log the failure for follow-up; ship the
-            # archive without the cover.
+        except Exception as exc:
+            # The INDICE.pdf is the auditor-facing table of contents —
+            # shipping the ZIP without it used to happen SILENTLY here,
+            # so the client handed over an incomplete package without
+            # knowing (audit 2026-06-12). Fail loudly instead; callers
+            # that explicitly don't want the cover already pass
+            # ``skip_manifest`` and never enter this branch.
             import logging
 
             logging.getLogger("checkwise.audit_package").exception(
-                "[audit_package] manifest rendering failed; serving zip without INDICE.pdf"
+                "[audit_package] manifest rendering failed"
             )
-            manifest_pdf = None
+            raise HTTPException(
+                status_code=status.HTTP_502_BAD_GATEWAY,
+                detail=(
+                    "No pudimos generar el índice (INDICE.pdf) del paquete. "
+                    "Vuelve a intentarlo en unos minutos; si el problema "
+                    "persiste, contacta a soporte."
+                ),
+            ) from exc
 
     add_audit_event(
         db,
