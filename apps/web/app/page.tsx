@@ -1,8 +1,7 @@
 import type { Metadata } from "next";
-import { ArrowUpRight } from "@phosphor-icons/react/dist/ssr";
 
 import { FeedbackLauncher } from "@/components/feedback/feedback-launcher";
-import { ContactForm } from "@/components/marketing/contact-form";
+import { DemoScheduler } from "@/components/marketing/demo-scheduler";
 import { FaqSection } from "@/components/marketing/faq-section";
 import { FeaturesSection } from "@/components/marketing/features-section";
 import { HeroSection } from "@/components/marketing/hero-section";
@@ -14,7 +13,6 @@ import { PreventionSection } from "@/components/marketing/prevention-section";
 import { Reveal } from "@/components/marketing/motion-helpers";
 import { MotionPreferenceProvider } from "@/components/marketing/motion-preference";
 import { TrustSection } from "@/components/marketing/trust-section";
-import { DEMO_BOOKING_URL } from "@/lib/marketing/booking";
 import { FAQ_ITEMS } from "@/lib/marketing/faq";
 import { SITE_NAME, SITE_URL } from "@/lib/site";
 
@@ -163,44 +161,11 @@ function RequestInformation() {
         </Reveal>
 
         <Reveal>
-          <div className="relative">
-            {/* Chrome bar above the form — public-friendly framing.
-                Names what this is (a demo request) instead of leaking
-                the underlying API endpoint. */}
-            <div className="flex items-center gap-2 rounded-t-[10px] border-x border-t border-[color:var(--border-default)] bg-[color:var(--surface-raised)] px-4 py-2.5">
-              <span className="font-mono text-[10px] uppercase tracking-[0.2em] text-[color:var(--text-tertiary)]">
-                Solicitud de demo
-              </span>
-              <span className="ml-auto inline-flex items-center gap-1.5 font-mono text-[10px] uppercase tracking-[0.16em] text-[color:var(--text-teal)]">
-                <span className="cw-pulse-soft inline-block h-1.5 w-1.5 rounded-full bg-[color:var(--text-teal)]" />
-                Respuesta el mismo día hábil
-              </span>
-            </div>
-            <div className="rounded-b-[10px] border border-[color:var(--border-default)] border-t-0 bg-[color:var(--surface-raised)] px-6 py-8 shadow-[0_22px_50px_-32px_hsl(var(--brand-navy)/0.22)] sm:px-10 sm:py-10">
-              <ContactForm />
-            </div>
-
-            {/* Direct-booking alternative — the conversion path the old
-                site relied on. One quiet line, not a competing card:
-                the form stays primary, the calendar removes friction
-                for visitors who already decided. */}
-            <p className="mt-5 text-center text-[13px] text-[color:var(--text-secondary)]">
-              ¿Prefieres elegir horario directamente?{" "}
-              <a
-                href={DEMO_BOOKING_URL}
-                target="_blank"
-                rel="noreferrer noopener"
-                className="group inline-flex items-center gap-1 font-medium text-[color:var(--text-teal)] underline-offset-2 hover:underline"
-              >
-                Agenda 30 minutos con el equipo
-                <ArrowUpRight
-                  className="h-3 w-3 transition-transform group-hover:translate-x-0.5 group-hover:-translate-y-0.5"
-                  weight="bold"
-                  aria-hidden="true"
-                />
-              </a>
-            </p>
-          </div>
+          {/* Dual-path CTA card: embedded 30-min scheduler and contact
+              form behind a segmented toggle, equal weight. The chrome
+              bar lives inside the component because the toggle is part
+              of it. */}
+          <DemoScheduler />
         </Reveal>
       </div>
     </section>

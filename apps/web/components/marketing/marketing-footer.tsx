@@ -2,6 +2,10 @@ import Link from "next/link";
 import { ArrowUpRight } from "@phosphor-icons/react/dist/ssr";
 
 import { BrandLogo } from "@/components/checkwise/brand-logo";
+import {
+  DEMO_BOOKING_LABEL,
+  DEMO_BOOKING_URL,
+} from "@/lib/marketing/booking";
 import { APP_VERSION, BUILD_SHA } from "@/lib/version";
 
 /**
@@ -44,6 +48,7 @@ export function MarketingFooter() {
             { label: "AI + revisión", href: "/#ai-revision" },
             { label: "Iniciar sesión", href: "/login" },
             { label: "Solicitar demo", href: "/#contacto" },
+            { label: DEMO_BOOKING_LABEL, href: DEMO_BOOKING_URL },
           ]}
         />
 

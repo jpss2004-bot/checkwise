@@ -56,6 +56,30 @@ function roleFromInterest(interest: LeadInterest): string {
   return INTEREST_LABELS[interest];
 }
 
+/**
+ * Fire-and-forget intent beacon for the embedded demo scheduler.
+ *
+ * Backed by `POST /api/v1/contact/booking-intent`. The actual booking
+ * lives in Google Calendar; this only tells the team (via Slack) that
+ * someone engaged with the scheduler. No PII, never throws, and the
+ * backend silently drops over-quota calls — a tracking failure must
+ * never affect the visitor.
+ */
+export function trackBookingIntent(source = "landing"): void {
+  try {
+    void fetch(`${API_BASE_URL}/api/v1/contact/booking-intent`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ source }),
+      keepalive: true,
+    }).catch(() => {
+      /* intent beacon is best-effort */
+    });
+  } catch {
+    /* ignore — see above */
+  }
+}
+
 export async function submitContactRequest(
   payload: ContactRequestPayload,
 ): Promise<ContactRequestResult> {
