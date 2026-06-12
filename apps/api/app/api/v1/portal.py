@@ -1547,7 +1547,7 @@ def get_workspace_calendar(
     workspace_id: str,
     db: DbSession,
     workspace: Annotated[ProviderWorkspace, Depends(current_portal_workspace)],
-    year: Annotated[int, Query(ge=MIN_YEAR, le=MAX_YEAR)] = 2026,
+    year: Annotated[int | None, Query(ge=MIN_YEAR, le=MAX_YEAR)] = None,
 ) -> dict:
     """Workspace calendar view (Phase 4 — consumes evidence_slots).
 
@@ -1558,6 +1558,10 @@ def get_workspace_calendar(
     submission for its slot.
     """
     _ = workspace_id  # tenant guard already enforced by dependency
+
+    # Omitted year means "the year we are in" — the previous hardcoded
+    # 2026 default would have gone stale every January.
+    year = year or date.today().year
 
     slots = build_workspace_calendar_slots(db, workspace, year)
     slot_by_key: dict[tuple[str | None, str | None], SlotView] = {

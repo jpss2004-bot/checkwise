@@ -1918,7 +1918,7 @@ def client_calendar(
     db: DbSession,
     current: ClientUser,
     client_id: str | None = None,
-    year: Annotated[int, Query(ge=MIN_YEAR, le=MAX_YEAR)] = 2026,
+    year: Annotated[int | None, Query(ge=MIN_YEAR, le=MAX_YEAR)] = None,
     vendor_ids: Annotated[list[str] | None, Query()] = None,
 ) -> ClientCalendarResponse:
     """Aggregated client calendar.
@@ -1940,6 +1940,10 @@ def client_calendar(
     """
     target_id = _resolve_client_id(db, current, requested=client_id)
     today = date.today()
+    # Omitted year means "the year we are in", same as /overview. The
+    # previous hardcoded 2026 default would have gone stale every
+    # January.
+    year = year or today.year
     workspaces = _scoped_workspaces(db, target_id)
     if vendor_ids:
         wanted = {v for v in vendor_ids if v}

@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import itertools
 from collections.abc import Generator
+from datetime import date
 from io import BytesIO
 
 import pytest
@@ -472,6 +473,29 @@ def test_client_calendar_aggregates_months(
     # At least one month has items (we seeded one workspace).
     populated = [m for m in body["months"] if m["due_total"] > 0]
     assert populated, "expected the seeded vendor to populate at least one month"
+
+
+def test_client_calendar_defaults_to_current_year(
+    api_client: TestClient, db_factory
+) -> None:
+    """Regression — prod bug 2026-06-12.
+
+    An omitted ``year`` param must resolve to the current year, not a
+    hardcoded one. The endpoint previously defaulted to a literal 2026,
+    which would have silently gone stale every January (and the
+    matching frontend bug turned a missing param into MIN_YEAR=2021).
+    """
+    client_id = _seed_client(db_factory)
+    _seed_vendor_with_workspace(db_factory, client_id=client_id)
+    _, email, pw = _seed_user_with_role(
+        db_factory, role="client_admin", client_id=client_id, email_prefix="ca"
+    )
+    token = _login(api_client, email, pw)
+    resp = api_client.get("/api/v1/client/calendar", headers=_h(token))
+    assert resp.status_code == 200, resp.text
+    body = resp.json()
+    assert body["year"] == date.today().year
+    assert len(body["months"]) == 12
 
 
 # ---------------------------------------------------------------------------
