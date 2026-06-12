@@ -44,17 +44,21 @@ export function FaqSection() {
           {FAQ_ITEMS.map((item) => (
             <details
               key={item.question}
-              className="group border-b border-[color:var(--border-subtle)] py-5"
+              className="cw-faq group border-b border-[color:var(--border-subtle)] py-5"
             >
               <summary className="flex cursor-pointer list-none items-start justify-between gap-4 [&::-webkit-details-marker]:hidden">
-                <h3 className="text-[15.5px] font-medium leading-snug text-[color:var(--text-primary)]">
+                <h3 className="text-[15.5px] font-medium leading-snug text-[color:var(--text-primary)] transition-colors group-hover:text-[color:var(--text-teal)] group-open:text-[color:var(--text-teal)]">
                   {item.question}
                 </h3>
-                <CaretDown
+                <span
                   aria-hidden="true"
-                  weight="bold"
-                  className="mt-1 h-3.5 w-3.5 shrink-0 text-[color:var(--text-tertiary)] transition-transform group-open:rotate-180"
-                />
+                  className="mt-0.5 inline-flex h-6 w-6 shrink-0 items-center justify-center rounded-full border border-[color:var(--border-default)] text-[color:var(--text-tertiary)] transition-colors duration-300 group-hover:border-[color:var(--border-ai)] group-hover:text-[color:var(--text-teal)] group-open:border-[color:var(--border-ai)] group-open:bg-[color:var(--surface-teal-muted)] group-open:text-[color:var(--text-teal)]"
+                >
+                  <CaretDown
+                    weight="bold"
+                    className="h-3 w-3 transition-transform duration-300 group-open:rotate-180"
+                  />
+                </span>
               </summary>
               <p className="mt-3 max-w-[58ch] text-[14.5px] leading-[1.65] text-[color:var(--text-secondary)]">
                 {item.answer}
