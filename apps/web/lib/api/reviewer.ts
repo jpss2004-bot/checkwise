@@ -183,10 +183,29 @@ export type VerificationBlock = {
 /** The reviewer detail = the shared submission detail + the vendor
  *  identity block + the authenticity verdict + verification anchors
  *  (all absent on the provider-facing portal endpoint). */
+/** Phase E — the system's pre-computed approval recommendation. The
+ *  reviewer always decides; this only pre-selects and explains. Null
+ *  when there is no document inspection to judge against. */
+export type ApprovalSuggestion = {
+  /** True only when every criterion below passed. */
+  suggested: boolean;
+  /** Best available match confidence, or null when none exists. */
+  confidence: number | null;
+  confidence_source: "shadow" | "heuristic" | null;
+  criteria: {
+    match_ok: boolean;
+    risk_clean: boolean;
+    recurring: boolean;
+  };
+  /** One-sentence Spanish rationale for the suggested action. */
+  detail_es: string;
+};
+
 export type ReviewerSubmissionDetail = SubmissionDetail & {
   vendor: ReviewerVendorBlock | null;
   authenticity: AuthenticityBlock | null;
   verification: VerificationBlock | null;
+  approval_suggestion: ApprovalSuggestion | null;
 };
 
 export async function getReviewerSubmission(
@@ -232,13 +251,23 @@ export async function submitDecision(
   action: DecisionAction,
   reason: string | null,
   observations: string | null = null,
+  /** Phase E — suggestion-acceptance telemetry. Pass true/false when
+   *  the decision screen showed an approval suggestion (accepted vs
+   *  overridden); leave null when no suggestion was shown. Feeds the
+   *  human-agreement rate that gates per-type auto-approve unlock. */
+  acceptedSuggestion: boolean | null = null,
 ): Promise<DecisionResponse> {
   return await fetchJson<DecisionResponse>(
     `/api/v1/reviewer/submissions/${submissionId}/decision`,
     token,
     {
       method: "POST",
-      body: JSON.stringify({ action, reason, observations }),
+      body: JSON.stringify({
+        action,
+        reason,
+        observations,
+        accepted_suggestion: acceptedSuggestion,
+      }),
     },
   );
 }

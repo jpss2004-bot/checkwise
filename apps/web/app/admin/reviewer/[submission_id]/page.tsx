@@ -132,6 +132,7 @@ export default function ReviewerSubmissionPage({ params }: PageProps) {
       action: ReviewerAction,
       reason: string | null,
       observations: string | null,
+      acceptedSuggestion: boolean | null,
     ) => {
       if (!session || !detail) return;
       try {
@@ -141,6 +142,7 @@ export default function ReviewerSubmissionPage({ params }: PageProps) {
           action,
           reason,
           observations,
+          acceptedSuggestion,
         );
         setDecided({
           new_status: result.new_status,
@@ -324,6 +326,7 @@ export default function ReviewerSubmissionPage({ params }: PageProps) {
                 }
                 onSubmit={handleDecision}
                 aiHint={deriveAiHint(detail)}
+                suggestion={detail.approval_suggestion}
               />
             )}
             <TraceabilityCard detail={detail} />

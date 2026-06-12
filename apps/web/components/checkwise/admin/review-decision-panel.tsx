@@ -22,6 +22,7 @@ import {
 } from "@/components/ui/dialog";
 import { Field } from "@/components/ui/field";
 import { Textarea } from "@/components/ui/textarea";
+import type { ApprovalSuggestion } from "@/lib/api/reviewer";
 import { cn } from "@/lib/utils";
 
 /**
@@ -70,9 +71,27 @@ interface ReviewDecisionPanelProps {
     action: ReviewerAction,
     reason: string | null,
     observations: string | null,
+    /**
+     * Phase E — suggestion-acceptance telemetry. `true` when an
+     * approval suggestion (`suggested === true`) was shown AND the
+     * reviewer approves; `false` when such a suggestion was shown but
+     * the reviewer picks any non-approve action (override); `null`
+     * when no `suggested === true` suggestion was on screen.
+     */
+    acceptedSuggestion: boolean | null,
   ) => Promise<void>;
   /** Optional override of the panel surface className. */
   className?: string;
+  /**
+   * Phase E — the system's pre-computed approval recommendation. The
+   * suggestion PRE-SELECTS and EXPLAINS; the reviewer always decides
+   * (suggest-mode — there is no auto-submit). When `suggested === true`
+   * the approve chip is pre-selected so the reviewer can confirm with a
+   * single keystroke; when `suggested === false` the banner lists,
+   * transparently, why the system stayed silent. Pass `null` (or omit)
+   * to render no banner at all.
+   */
+  suggestion?: ApprovalSuggestion | null;
   /**
    * Passive AI suggestion line shown above the action chips. ONLY
    * surfaced when the automatic lectura flagged a concern
@@ -191,14 +210,111 @@ const TONE_ACTIVE: Record<(typeof ACTIONS)[number]["tone"], string> = {
     "border-[color:var(--status-info-border)] bg-[color:var(--status-info-bg)] text-[color:var(--status-info-text)]",
 };
 
+/**
+ * Phase E — the suggestion banner. Two faces:
+ *
+ *   - `suggested === true`: a brand-toned callout that recommends
+ *     approval, shows the one-sentence rationale and a confidence
+ *     figure. The approve chip is pre-selected by the panel; this
+ *     banner only frames it as a recommendation, never a decision.
+ *   - `suggested === false`: a quiet, neutral note that names — as
+ *     muted pills — exactly which criteria kept the system silent, so
+ *     the reviewer sees why no suggestion was made.
+ */
+function SuggestionBanner({ suggestion }: { suggestion: ApprovalSuggestion }) {
+  if (suggestion.suggested) {
+    const pct =
+      suggestion.confidence === null
+        ? null
+        : Math.round(suggestion.confidence * 100);
+    const sourceTag =
+      suggestion.confidence_source === "shadow"
+        ? "(IA)"
+        : suggestion.confidence_source === "heuristic"
+          ? "(heurística)"
+          : null;
+    return (
+      <div
+        role="note"
+        aria-label="Sugerencia de IA"
+        className="rounded-md border border-[color:var(--doc-approved-border)] bg-[color:var(--doc-approved-bg)] px-3 py-2.5"
+      >
+        <div className="flex items-center gap-2">
+          <span className="inline-flex items-center gap-1 rounded-full bg-[color:var(--doc-approved-text)]/10 px-2 py-0.5 text-[11px] font-semibold uppercase tracking-wide text-[color:var(--doc-approved-text)]">
+            <CheckCircle className="h-3 w-3" weight="fill" aria-hidden="true" />
+            Sugerencia de IA
+          </span>
+          {pct !== null ? (
+            <span className="text-[11px] font-medium text-[color:var(--doc-approved-text)]">
+              {pct}% de confianza
+              {sourceTag ? (
+                <span className="ml-1 font-normal text-[color:var(--text-tertiary)]">
+                  {sourceTag}
+                </span>
+              ) : null}
+            </span>
+          ) : null}
+        </div>
+        <p className="mt-1.5 text-xs text-[color:var(--text-primary)]">
+          {suggestion.detail_es}
+        </p>
+        <p className="mt-1 text-[11px] text-[color:var(--text-secondary)]">
+          Recomendación, no decisión. La acción Aprobar quedó preseleccionada —
+          tú confirmas o eliges otra.
+        </p>
+      </div>
+    );
+  }
+
+  // suggested === false — list the failing criteria as muted pills.
+  const failing: string[] = [];
+  if (!suggestion.criteria.match_ok) failing.push("Coincidencia baja");
+  if (!suggestion.criteria.risk_clean) failing.push("Autenticidad no limpia");
+  if (!suggestion.criteria.recurring) failing.push("No recurrente");
+
+  return (
+    <div
+      role="note"
+      aria-label="Sin sugerencia automática"
+      className="rounded-md border border-[color:var(--border-subtle)] bg-[color:var(--surface-sunken)] px-3 py-2.5"
+    >
+      <p className="text-[11px] font-semibold uppercase tracking-wide text-[color:var(--text-tertiary)]">
+        Sin sugerencia automática
+      </p>
+      <p className="mt-1 text-xs text-[color:var(--text-secondary)]">
+        El sistema no preselecciona una acción para este documento.
+      </p>
+      {failing.length > 0 ? (
+        <div className="mt-2 flex flex-wrap gap-1.5">
+          {failing.map((label) => (
+            <span
+              key={label}
+              className="rounded-full border border-[color:var(--border-default)] bg-[color:var(--surface-raised)] px-2 py-0.5 text-[11px] font-medium text-[color:var(--text-tertiary)]"
+            >
+              {label}
+            </span>
+          ))}
+        </div>
+      ) : null}
+    </div>
+  );
+}
+
 export function ReviewDecisionPanel({
   disabled = false,
   disabledReason,
   onSubmit,
   className,
   aiHint,
+  suggestion,
 }: ReviewDecisionPanelProps) {
-  const [action, setAction] = React.useState<ReviewerAction | null>(null);
+  // Phase E — when the system recommends approval, pre-select the
+  // approve chip so the reviewer can confirm with one keystroke/click.
+  // Never auto-submits; any other chip still wins.
+  const suggestsApprove = suggestion?.suggested === true;
+  const [action, setAction] = React.useState<ReviewerAction | null>(
+    suggestsApprove ? "approve" : null,
+  );
   const [reason, setReason] = React.useState("");
   // Phase 9 / Slice 9A — optional reviewer observation. Distinct
   // from the formal reason; lands in the notification body as a
@@ -239,6 +355,13 @@ export function ReviewDecisionPanel({
     setNetworkError(null);
     try {
       const trimmedObservations = observations.trim();
+      // Phase E telemetry — only meaningful when an approval suggestion
+      // was actually shown (suggested === true). Then: accepted when the
+      // reviewer approves, overridden (false) for any other action.
+      // No suggestion shown → null (no signal either way).
+      const acceptedSuggestion = suggestsApprove
+        ? action === "approve"
+        : null;
       await onSubmit(
         action,
         requiresReason ? reason.trim() : null,
@@ -247,6 +370,7 @@ export function ReviewDecisionPanel({
         // "Nota interna" semantics (reason field, not surfaced to
         // provider) and don't send observations.
         requiresReason && trimmedObservations ? trimmedObservations : null,
+        acceptedSuggestion,
       );
       setConfirmOpen(false);
       setAction(null);
@@ -261,7 +385,7 @@ export function ReviewDecisionPanel({
     } finally {
       setSubmitting(false);
     }
-  }, [action, observations, onSubmit, reason, requiresReason]);
+  }, [action, observations, onSubmit, reason, requiresReason, suggestsApprove]);
 
   const attemptSubmit = React.useCallback(() => {
     if (!action || submitting) return;
@@ -371,6 +495,7 @@ export function ReviewDecisionPanel({
       </header>
 
       <div className="space-y-4 p-5">
+        {suggestion ? <SuggestionBanner suggestion={suggestion} /> : null}
         {aiHint ? (
           <div
             role="note"
