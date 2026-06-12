@@ -41,6 +41,11 @@ import {
   type ClientVendorListResponse,
 } from "@/lib/api/client";
 import { INSTITUTION_LABELS } from "@/lib/api/portal";
+import {
+  CALENDAR_MAX_YEAR,
+  CALENDAR_MIN_YEAR,
+  parseCalendarYear,
+} from "@/lib/calendar-year";
 import { statusLabel, statusVariant } from "@/lib/constants/statuses";
 import { useUrlClientId } from "@/lib/workspace/use-url-client-id";
 import { withReturnTo } from "@/lib/navigation/return-to";
@@ -72,13 +77,6 @@ const INSTITUTION_ICON: Record<string, Icon> = {
 };
 
 const INSTITUTION_ORDER = ["sat", "imss", "infonavit", "stps_repse"] as const;
-
-function parseCalendarYear(raw: string | null): number {
-  const fallback = new Date().getFullYear() || 2026;
-  const parsed = Number(raw);
-  if (!Number.isFinite(parsed)) return fallback;
-  return Math.min(2030, Math.max(2021, Math.trunc(parsed)));
-}
 
 // Status labels and color tones now live in the central dictionary so a
 // vocabulary or color change in one place propagates across every
@@ -207,8 +205,8 @@ export default function ClientCalendarPage() {
             // (apps/api/app/core/period_validation.py) instead of the prior
             // 2024 floor which silently blocked 2021-2023 historical
             // periods that the API otherwise serves.
-            min={2021}
-            max={2030}
+            min={CALENDAR_MIN_YEAR}
+            max={CALENDAR_MAX_YEAR}
             value={year}
             onChange={(e) => setYear(Number(e.target.value))}
             className="h-7 w-20 border-0 bg-transparent p-0 font-mono text-sm font-semibold focus-visible:ring-0"
