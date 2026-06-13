@@ -1073,13 +1073,13 @@ class FeedbackReport(TimestampMixin, Base):
 
 
 class WiseEvent(Base):
-    """Provider-side analytics event for the Wise copilot dock.
+    """Analytics event for the Wise copilot dock (provider OR cliente).
 
     Captures every meaningful dock interaction (mount, expand,
-    collapse, suggestion click) so we can answer "did the empty-state
-    hero + Wise dock actually move the time-to-first-upload needle?"
-    Tiny by design — one row per event, FK-scoped to workspace so
-    cross-tenant rollups stay safe.
+    collapse, suggestion click, question, feedback) so we can answer
+    "did the empty-state hero + Wise dock actually move the time-to-
+    first-upload needle?" Tiny by design — one row per event, anchored
+    to a workspace (provider) or a client (cliente).
 
     Conventions match the rest of the schema: 36-char id, timezone-
     aware timestamps, JSON payload for optional structured context
@@ -1089,8 +1089,16 @@ class WiseEvent(Base):
     __tablename__ = "wise_events"
 
     id: Mapped[str] = mapped_column(String(36), primary_key=True, default=new_id)
-    workspace_id: Mapped[str] = mapped_column(
-        ForeignKey("provider_workspaces.id"), nullable=False, index=True
+    # Tenant anchor: provider events set ``workspace_id``, cliente events
+    # set ``client_id`` (the buyer reasons over a portfolio, not one
+    # workspace). Exactly one is populated. ``workspace_id`` became
+    # nullable in migration 0041, which added ``client_id`` so the
+    # cliente dock can persist instead of log-only.
+    workspace_id: Mapped[str | None] = mapped_column(
+        ForeignKey("provider_workspaces.id"), nullable=True, index=True
+    )
+    client_id: Mapped[str | None] = mapped_column(
+        ForeignKey("clients.id"), nullable=True, index=True
     )
     user_id: Mapped[str | None] = mapped_column(
         String(36), ForeignKey("users.id"), nullable=True, index=True

@@ -40,6 +40,7 @@ from app.models import (
     ProviderWorkspace,
     User,
     Vendor,
+    WiseEvent,
     entities,  # noqa: F401 — register mappers
 )
 from app.services.auth import hash_password
@@ -322,6 +323,22 @@ def test_events_accepts_allowed_type(api_client: TestClient) -> None:
     assert resp.status_code == 202, resp.text
     body = resp.json()
     assert body == {"accepted": True, "event_type": "wise.opened"}
+
+    # P2 (2026-06-13) — the event now persists to wise_events, anchored
+    # on client_id with a NULL workspace_id (migration 0041).
+    factory = api_client.app.state.testing_session  # type: ignore[attr-defined]
+    db: Session = factory()
+    try:
+        rows = db.query(WiseEvent).all()
+        assert len(rows) == 1
+        row = rows[0]
+        assert row.client_id == seed["client_id"]
+        assert row.workspace_id is None
+        assert row.user_id == seed["user_id"]
+        assert row.event_type == "wise.opened"
+        assert row.payload == {"route": "/client/dashboard"}
+    finally:
+        db.close()
 
 
 def test_events_rejects_unknown_type(api_client: TestClient) -> None:

@@ -3296,12 +3296,12 @@ class ClientWiseAskResponse(BaseModel):
     status_code=status.HTTP_202_ACCEPTED,
     summary="Record a Wise cliente-side interaction event",
     description=(
-        "Validates and logs a Wise dock interaction event on the "
-        "cliente surface. NOTE: persistence to a dedicated table is "
-        "deferred to M1-follow-up; today the route accepts the event, "
-        "logs it via the standard logger for offline rollups, and "
-        "returns 202. The frontend's analytics interface (always-fire "
-        "+ never-block) is unaffected."
+        "Validates and persists a Wise dock interaction event on the "
+        "cliente surface. As of migration 0041 the event is written to "
+        "the shared ``wise_events`` table anchored on ``client_id`` "
+        "(provider events anchor on ``workspace_id``); the route still "
+        "returns 202 and never blocks the dock. A DB write failure is "
+        "swallowed so analytics can never break the UI."
     ),
 )
 def record_client_wise_event(
@@ -3319,16 +3319,35 @@ def record_client_wise_event(
             ),
         )
     target_id = _resolve_client_id(db, current, requested=client_id)
+
+    # Persist to the shared ``wise_events`` table, anchored on
+    # ``client_id`` (migration 0041 made ``workspace_id`` nullable and
+    # added ``client_id`` for exactly this). Analytics must never break
+    # the dock, so a DB error is logged and swallowed — the route still
+    # returns 202.
+    from app.models import WiseEvent
+
     log = __import__("logging").getLogger("checkwise.wise.client_events")
-    log.info(
-        "wise.client_event",
-        extra={
-            "event_type": payload.event_type,
-            "client_id": target_id,
-            "user_id": current.user.id,
-            "payload": payload.payload,
-        },
-    )
+    try:
+        event = WiseEvent(
+            workspace_id=None,
+            client_id=target_id,
+            user_id=current.user.id,
+            event_type=payload.event_type,
+            payload=payload.payload,
+        )
+        db.add(event)
+        db.commit()
+    except Exception:  # noqa: BLE001 — analytics is best-effort
+        db.rollback()
+        log.warning(
+            "wise.client_event.persist_failed",
+            extra={
+                "event_type": payload.event_type,
+                "client_id": target_id,
+                "user_id": current.user.id,
+            },
+        )
     return ClientWiseEventResponse(accepted=True, event_type=payload.event_type)
 
 
