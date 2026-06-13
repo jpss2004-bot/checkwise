@@ -121,6 +121,14 @@ export function AdminShell({
 
   if (!ready || !session) return null;
 
+  // The Plataforma console gates on ``platform_admin`` /
+  // ``internal_admin`` (backend ``PlatformUser``). A reviewer reaches
+  // this Operaciones shell but holds neither, so don't dangle a switch
+  // into a console the API would 403.
+  const hasPlatform =
+    session.roles.includes("internal_admin") ||
+    session.roles.includes("platform_admin");
+
   return (
     <div
       data-density="dense"
@@ -142,10 +150,14 @@ export function AdminShell({
               email={session.user.email}
               roles={session.roles}
               profileHref={null}
-              shellSwitch={{
-                href: "/platform/dashboard",
-                label: "Cambiar a Plataforma",
-              }}
+              shellSwitch={
+                hasPlatform
+                  ? {
+                      href: "/platform/dashboard",
+                      label: "Cambiar a Plataforma",
+                    }
+                  : null
+              }
               onSignOut={onLogout}
             />
             <button

@@ -75,14 +75,20 @@ export function PlatformShell({
       router.replace("/login");
       return;
     }
-    // For now both shells gate on the same role set as the legacy
-    // /admin namespace. When ``platform_admin`` lands as a real
-    // role, switch this to require it specifically.
+    // Platform/IT surfaces gate on ``platform_admin`` (or the
+    // compliance ``internal_admin``, which migration 0044 backfilled
+    // onto every existing admin). This mirrors the backend
+    // ``PlatformUser`` dep — ``require_any_role(internal_admin,
+    // platform_admin)`` — so the UI never shows a page the API would
+    // 403. A reviewer no longer reaches here; send them to their own
+    // landing surface instead of a dead login bounce.
     if (
       !current.roles.includes("internal_admin") &&
-      !current.roles.includes("reviewer")
+      !current.roles.includes("platform_admin")
     ) {
-      router.replace("/login");
+      router.replace(
+        current.roles.includes("reviewer") ? "/admin/reviewer" : "/login",
+      );
       return;
     }
     setSession(current);
@@ -108,6 +114,13 @@ export function PlatformShell({
 
   if (!ready || !session) return null;
 
+  // Only offer the jump back to Operaciones when the user actually
+  // holds a compliance role there — a future platform-only admin
+  // shouldn't see a switch into a console the API would 403.
+  const hasOperations =
+    session.roles.includes("internal_admin") ||
+    session.roles.includes("reviewer");
+
   return (
     <div
       data-density="dense"
@@ -129,10 +142,14 @@ export function PlatformShell({
               email={session.user.email}
               roles={session.roles}
               profileHref={null}
-              shellSwitch={{
-                href: "/admin/dashboard",
-                label: "Cambiar a Operaciones",
-              }}
+              shellSwitch={
+                hasOperations
+                  ? {
+                      href: "/admin/dashboard",
+                      label: "Cambiar a Operaciones",
+                    }
+                  : null
+              }
               onSignOut={onLogout}
             />
             <button

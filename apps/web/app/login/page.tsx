@@ -299,6 +299,10 @@ function decideDestination(
 function defaultDestination(session: { roles: string[] }): string {
   if (session.roles.includes("internal_admin")) return "/admin/dashboard";
   if (session.roles.includes("reviewer")) return "/admin/reviewer";
+  // A platform-only admin (no compliance role) lands in the IT console.
+  // Users holding both internal_admin and platform_admin already matched
+  // above, so this only catches the pure-platform_admin case.
+  if (session.roles.includes("platform_admin")) return "/platform/dashboard";
   if (session.roles.includes("client_admin")) return "/client/dashboard";
   return "/portal/entra-a-tu-espacio";
 }
@@ -313,13 +317,22 @@ function allowedForRoles(next: string, roles: string[]): boolean {
   if (next.startsWith("/admin/")) {
     return roles.includes("internal_admin") || roles.includes("reviewer");
   }
+  if (next.startsWith("/platform/")) {
+    return (
+      roles.includes("internal_admin") || roles.includes("platform_admin")
+    );
+  }
   if (next.startsWith("/client/")) {
     return roles.includes("client_admin");
   }
   // Non-app routes ("/", "/activate", marketing pages, etc.) are fine
   // for any authenticated user — but those aren't where with-portal-
   // session redirects from, so this branch is mostly defensive.
-  return !next.startsWith("/admin/") && !next.startsWith("/client/");
+  return (
+    !next.startsWith("/admin/") &&
+    !next.startsWith("/platform/") &&
+    !next.startsWith("/client/")
+  );
 }
 
 /**

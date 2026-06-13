@@ -41,6 +41,7 @@ function humanizeCode(code: string): string {
 
 export const ROLE_LABELS_ES: Record<string, string> = {
   internal_admin: "Administrador interno",
+  platform_admin: "Administrador de plataforma",
   reviewer: "Revisor",
   client_admin: "Administrador de cliente",
   provider: "Proveedor",
