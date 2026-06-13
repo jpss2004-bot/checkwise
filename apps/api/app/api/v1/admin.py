@@ -3334,6 +3334,211 @@ def list_audit_log(
 
 
 # ---------------------------------------------------------------------------
+# User detail (platform rework, Phase 2)
+#
+# Lives next to the audit-log explorer rather than the other /users
+# endpoints because the detail response embeds ``AuditLogItem`` — a
+# user's own slice of the audit trail — and Pydantic needs that class
+# defined first. The route order is irrelevant to FastAPI; only the
+# class-definition order matters.
+# ---------------------------------------------------------------------------
+
+
+class AdminUserMembershipItem(BaseModel):
+    membership_id: str
+    organization_id: str
+    organization_name: str
+    organization_kind: str
+    role: str
+    is_primary: bool
+    status: str
+    # Seat picture for ``client`` orgs only (the 3-seat model); NULL on
+    # internal / vendor orgs which carry no cap.
+    seat_limit: int | None = None
+    active_seats: int | None = None
+
+
+class AdminUserDetail(BaseModel):
+    user_id: str
+    email: str
+    full_name: str
+    status: str
+    must_change_password: bool
+    phone: str | None
+    last_login_at: str | None
+    created_at: str
+    updated_at: str
+    # Soft-delete provenance (migration 0042). All NULL on a live account.
+    deleted_at: str | None
+    deleted_by_user_id: str | None
+    deleted_by_email: str | None = None
+    deletion_reason: str | None
+    roles: list[str]
+    """Distinct ACTIVE membership roles, sorted (matches the list view)."""
+    memberships: list[AdminUserMembershipItem]
+    """ALL memberships (active + removed + disabled), active first."""
+    recent_activity: list[AuditLogItem]
+    """The user's own audit slice: events targeting them OR performed by
+    them, newest first. ``activity_total`` is the real count so the UI can
+    link to the full audit-log explorer when it overflows the window."""
+    activity_total: int
+
+
+@router.get("/users/{user_id}", response_model=AdminUserDetail)
+def get_user_detail(
+    user_id: str,
+    db: DbSession,
+    current: PlatformUser,
+    activity_limit: Annotated[int, Query(ge=1, le=100)] = 25,
+) -> AdminUserDetail:
+    """Full picture of one account for the platform user-detail page.
+
+    Identity + every membership (with org name/kind, primary flag and a
+    seat picture for client orgs) + the user's own slice of the audit
+    trail (events targeting them OR performed by them). A soft-deleted
+    account is still returned — the detail page is where a restore would
+    be initiated — with its deletion provenance populated.
+    """
+    _ = current
+    user = db.get(User, user_id)
+    if user is None:
+        raise HTTPException(
+            status.HTTP_404_NOT_FOUND, detail="Usuario no encontrado."
+        )
+
+    # ---- Memberships (all statuses) + their organizations. ----------
+    membership_rows = db.execute(
+        select(Membership, Organization)
+        .join(Organization, Organization.id == Membership.organization_id)
+        .where(Membership.user_id == user_id)
+    ).all()
+
+    # Active-seat counts for the client orgs this user touches, one
+    # grouped query rather than a count per membership.
+    client_org_ids = [
+        org.id for _m, org in membership_rows if org.kind == "client"
+    ]
+    active_seats_by_org: dict[str, int] = {}
+    if client_org_ids:
+        active_seats_by_org = {
+            org_id: int(count)
+            for org_id, count in db.execute(
+                select(Membership.organization_id, func.count())
+                .where(
+                    Membership.organization_id.in_(client_org_ids),
+                    Membership.status == "active",
+                )
+                .group_by(Membership.organization_id)
+            )
+        }
+
+    # Active memberships first, then most-recently-created.
+    def _membership_sort_key(pair: tuple[Membership, Organization]):
+        m, _org = pair
+        return (0 if m.status == "active" else 1, -(m.created_at.timestamp()))
+
+    memberships = [
+        AdminUserMembershipItem(
+            membership_id=m.id,
+            organization_id=org.id,
+            organization_name=org.name,
+            organization_kind=org.kind,
+            role=m.role,
+            is_primary=m.is_primary,
+            status=m.status,
+            seat_limit=(org.seat_limit if org.kind == "client" else None),
+            active_seats=(
+                active_seats_by_org.get(org.id, 0)
+                if org.kind == "client"
+                else None
+            ),
+        )
+        for m, org in sorted(membership_rows, key=_membership_sort_key)
+    ]
+    roles = sorted(
+        {m.role for m, _org in membership_rows if m.status == "active"}
+    )
+
+    # ---- The user's own audit slice. --------------------------------
+    # Events that TARGET this user (entity) or were PERFORMED by them
+    # (actor). Newest first; total is the real matching count.
+    activity_filter = or_(
+        and_(AuditLog.entity_type == "user", AuditLog.entity_id == user_id),
+        AuditLog.actor_id == user_id,
+    )
+    activity_total = int(
+        db.scalar(
+            select(func.count()).select_from(AuditLog).where(activity_filter)
+        )
+        or 0
+    )
+    activity_rows = list(
+        db.scalars(
+            select(AuditLog)
+            .where(activity_filter)
+            .order_by(AuditLog.created_at.desc())
+            .limit(activity_limit)
+        )
+    )
+    actor_ids = {row.actor_id for row in activity_rows if row.actor_id}
+    email_by_user_id: dict[str, str] = {}
+    if actor_ids:
+        email_by_user_id = {
+            uid: email
+            for uid, email in db.execute(
+                select(User.id, User.email).where(User.id.in_(actor_ids))
+            )
+        }
+    recent_activity = [
+        AuditLogItem(
+            id=row.id,
+            actor_id=row.actor_id,
+            actor_email=(
+                email_by_user_id.get(row.actor_id) if row.actor_id else None
+            ),
+            actor_type=row.actor_type,
+            action=row.action,
+            entity_type=row.entity_type,
+            entity_id=row.entity_id,
+            before=row.before,
+            after=row.after,
+            event_metadata=row.event_metadata,
+            created_at=row.created_at,
+        )
+        for row in activity_rows
+    ]
+
+    # Resolve the deleting operator's email for a friendlier display.
+    deleted_by_email: str | None = None
+    if user.deleted_by_user_id:
+        deleted_by_email = db.scalar(
+            select(User.email).where(User.id == user.deleted_by_user_id)
+        )
+
+    return AdminUserDetail(
+        user_id=user.id,
+        email=user.email,
+        full_name=user.full_name,
+        status=user.status,
+        must_change_password=user.must_change_password,
+        phone=user.phone,
+        last_login_at=(
+            user.last_login_at.isoformat() if user.last_login_at else None
+        ),
+        created_at=user.created_at.isoformat() if user.created_at else "",
+        updated_at=user.updated_at.isoformat() if user.updated_at else "",
+        deleted_at=user.deleted_at.isoformat() if user.deleted_at else None,
+        deleted_by_user_id=user.deleted_by_user_id,
+        deleted_by_email=deleted_by_email,
+        deletion_reason=user.deletion_reason,
+        roles=roles,
+        memberships=memberships,
+        recent_activity=recent_activity,
+        activity_total=activity_total,
+    )
+
+
+# ---------------------------------------------------------------------------
 # Junta 2026-05-23 — bulk ZIP per vendor desde el control plane admin
 # ---------------------------------------------------------------------------
 

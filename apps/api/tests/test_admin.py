@@ -1657,10 +1657,100 @@ def test_admin_reset_password_404_on_missing(
     assert resp.status_code == 404
 
 
+# ---------------------------------------------------------------------------
+# Phase 2 (platform rework) — user detail endpoint
+# ---------------------------------------------------------------------------
+
+
+def test_admin_user_detail_full_picture(
+    api_client: TestClient, db_factory
+) -> None:
+    """Detail returns identity, memberships with the client seat picture,
+    active roles, and the user's own audit slice."""
+    token = _admin_token(api_client, db_factory)
+    created = api_client.post(
+        "/api/v1/admin/users",
+        json={
+            "role": "client",
+            "full_name": "Dora Detalle",
+            "email": "dora@detalle-cliente.com",
+            "client_name": "Cliente Detalle SA",
+        },
+        headers=_h(token),
+    )
+    assert created.status_code == 201, created.text
+    user_id = created.json()["user_id"]
+
+    resp = api_client.get(f"/api/v1/admin/users/{user_id}", headers=_h(token))
+    assert resp.status_code == 200, resp.text
+    body = resp.json()
+
+    assert body["user_id"] == user_id
+    assert body["email"] == "dora@detalle-cliente.com"
+    assert body["full_name"] == "Dora Detalle"
+    assert body["status"] == "active"
+    # Freshly provisioned accounts must rotate their temp password.
+    assert body["must_change_password"] is True
+    assert body["deleted_at"] is None
+    assert body["roles"] == ["client_admin"]
+
+    # One active membership in the new client org; the 3-seat model sets
+    # seat_limit=3 and this is its only (primary) occupant.
+    assert len(body["memberships"]) == 1
+    m = body["memberships"][0]
+    assert m["organization_kind"] == "client"
+    assert m["role"] == "client_admin"
+    assert m["is_primary"] is True
+    assert m["status"] == "active"
+    assert m["seat_limit"] == 3
+    assert m["active_seats"] == 1
+
+    # The provisioning event is part of this user's audit slice.
+    actions = {ev["action"] for ev in body["recent_activity"]}
+    assert "admin.user.provisioned" in actions
+    assert body["activity_total"] >= 1
+
+
+def test_admin_user_detail_surfaces_soft_delete_fields(
+    api_client: TestClient, db_factory
+) -> None:
+    """A live account reports null soft-delete provenance (the columns
+    exist and serialize even before Phase 5 wires the delete action)."""
+    token = _admin_token(api_client, db_factory)
+    target_id = _seed_directory_user(
+        db_factory,
+        email="vive@seeded.test",
+        role="reviewer",
+        org_name="LegalShelf Interna",
+        org_kind="internal",
+    )
+    resp = api_client.get(f"/api/v1/admin/users/{target_id}", headers=_h(token))
+    assert resp.status_code == 200, resp.text
+    body = resp.json()
+    assert body["deleted_at"] is None
+    assert body["deleted_by_user_id"] is None
+    assert body["deleted_by_email"] is None
+    assert body["deletion_reason"] is None
+    # Internal org carries no seat cap.
+    assert body["memberships"][0]["seat_limit"] is None
+    assert body["memberships"][0]["active_seats"] is None
+
+
+def test_admin_user_detail_404_on_missing(
+    api_client: TestClient, db_factory
+) -> None:
+    token = _admin_token(api_client, db_factory)
+    resp = api_client.get(
+        "/api/v1/admin/users/no-such-user", headers=_h(token)
+    )
+    assert resp.status_code == 404
+
+
 @pytest.mark.parametrize(
     ("method", "path", "body"),
     [
         ("GET", "/api/v1/admin/users", None),
+        ("GET", "/api/v1/admin/users/whatever", None),
         ("PATCH", "/api/v1/admin/users/whatever", {"status": "disabled"}),
         ("POST", "/api/v1/admin/users/whatever/reset-password", None),
     ],
@@ -1676,6 +1766,7 @@ def test_user_management_rejects_unauthenticated(
     ("method", "path", "body"),
     [
         ("GET", "/api/v1/admin/users", None),
+        ("GET", "/api/v1/admin/users/whatever", None),
         ("PATCH", "/api/v1/admin/users/whatever", {"status": "disabled"}),
         ("POST", "/api/v1/admin/users/whatever/reset-password", None),
     ],
