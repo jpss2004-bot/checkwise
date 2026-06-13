@@ -220,6 +220,59 @@ export async function resetUserPassword(
   });
 }
 
+/** One membership row on the user-detail page. ``seat_limit`` /
+ *  ``active_seats`` are populated only for ``client``-kind orgs (the
+ *  3-seat model); null on internal / vendor orgs. */
+export type AdminUserMembership = {
+  membership_id: string;
+  organization_id: string;
+  organization_name: string;
+  organization_kind: string;
+  role: string;
+  is_primary: boolean;
+  status: string;
+  seat_limit: number | null;
+  active_seats: number | null;
+};
+
+/** Full account picture for /platform/users/[id] (Phase 2). Reuses
+ *  ``AdminAuditLogItem`` for the user's own audit slice. */
+export type AdminUserDetail = {
+  user_id: string;
+  email: string;
+  full_name: string;
+  status: string;
+  must_change_password: boolean;
+  phone: string | null;
+  last_login_at: string | null;
+  created_at: string;
+  updated_at: string;
+  /** Soft-delete provenance (migration 0042); all null on a live account. */
+  deleted_at: string | null;
+  deleted_by_user_id: string | null;
+  deleted_by_email: string | null;
+  deletion_reason: string | null;
+  roles: string[];
+  /** All memberships (active + removed + disabled), active first. */
+  memberships: AdminUserMembership[];
+  /** The user's own audit slice — events targeting them OR by them. */
+  recent_activity: AdminAuditLogItem[];
+  /** Real count, so the UI can link to the full explorer when it overflows. */
+  activity_total: number;
+};
+
+export async function getUser(
+  userId: string,
+  params?: { activity_limit?: number },
+): Promise<AdminUserDetail> {
+  const qs = new URLSearchParams();
+  if (params?.activity_limit !== undefined) {
+    qs.set("activity_limit", String(params.activity_limit));
+  }
+  const suffix = qs.toString() ? `?${qs.toString()}` : "";
+  return fetchJson(`/api/v1/admin/users/${userId}${suffix}`);
+}
+
 // ---------------------------------------------------------------------------
 // Vendors
 // ---------------------------------------------------------------------------

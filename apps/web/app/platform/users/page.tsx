@@ -383,9 +383,12 @@ export default function PlatformUsersPage() {
               id: "full_name",
               header: "Nombre",
               cell: (row) => (
-                <p className="font-medium text-[color:var(--text-primary)]">
-                  {row.full_name || "—"}
-                </p>
+                <Link
+                  href={`/platform/users/${row.user_id}`}
+                  className="font-medium text-[color:var(--text-primary)] underline-offset-2 hover:text-[color:var(--text-brand)] hover:underline"
+                >
+                  {row.full_name || row.email}
+                </Link>
               ),
             },
             {
