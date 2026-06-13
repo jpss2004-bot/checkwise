@@ -40,14 +40,14 @@ from pathlib import Path
 from typing import Annotated, Final, Literal
 from xml.etree import ElementTree as ET
 
-from fastapi import APIRouter, Depends, HTTPException, Query, Response, status
+from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response, status
 from fastapi.responses import FileResponse
 from pydantic import BaseModel, EmailStr, Field
 from sqlalchemy import and_, func, or_, select, tuple_
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
-from app.api.v1.auth import CurrentUser, require_role
+from app.api.v1.auth import CurrentUser, require_any_role, require_role
 from app.api.v1.client import (
     _last_activity_timestamps_bulk,
     _portfolio_slot_inputs,
@@ -62,6 +62,7 @@ from app.core.compliance_catalog import (
     recurring_for_year_v2,
 )
 from app.core.config import settings
+from app.core.rate_limit import client_ip_from_request
 from app.core.period_validation import MAX_YEAR, MIN_YEAR
 from app.db.session import get_db
 from app.models import (
@@ -101,6 +102,22 @@ AdminUser = Annotated[
     CurrentUser, Depends(require_role(MembershipRole.INTERNAL_ADMIN))
 ]
 
+# Platform/IT surfaces (user provisioning, audit log, feedback triage)
+# accept either the compliance ``internal_admin`` or the dedicated
+# ``platform_admin`` role (platform rework, Phase 1). Migration 0044
+# backfilled ``platform_admin`` onto every existing internal_admin, so
+# accepting both keeps today's operators working while letting a future
+# IT-only account reach just these endpoints — not the compliance ones,
+# which stay gated on ``AdminUser``.
+PlatformUser = Annotated[
+    CurrentUser,
+    Depends(
+        require_any_role(
+            MembershipRole.INTERNAL_ADMIN, MembershipRole.PLATFORM_ADMIN
+        )
+    ),
+]
+
 
 # ---------------------------------------------------------------------------
 # Shared helpers
@@ -117,6 +134,7 @@ def _audit_admin(
     before: dict | None,
     after: dict | None,
     extra_metadata: dict | None = None,
+    request: Request | None = None,
 ) -> None:
     """Write the standard admin-operations audit row.
 
@@ -124,10 +142,23 @@ def _audit_admin(
     can filter on ``actor_type='internal_admin'`` or
     ``metadata.source='admin_operations'`` and surface every action a
     LegalShelf operator took. Don't bypass this helper.
+
+    Pass ``request`` to stamp the originating IP + user-agent onto the
+    row (migration 0043). It is optional so existing callers keep
+    working and simply record NULL provenance until they thread it
+    through; new/edited mutations should always pass it.
     """
     metadata = {"source": "admin_operations"}
     if extra_metadata:
         metadata.update(extra_metadata)
+    ip_address: str | None = None
+    user_agent: str | None = None
+    if request is not None:
+        ip_address = client_ip_from_request(request)
+        # AuditLog.user_agent is VARCHAR(512); truncate defensively so a
+        # pathological header never overflows the column on Postgres.
+        ua = request.headers.get("user-agent")
+        user_agent = ua[:512] if ua else None
     add_audit_event(
         db,
         action=action,
@@ -138,6 +169,8 @@ def _audit_admin(
         before=before,
         after=after,
         metadata=metadata,
+        ip_address=ip_address,
+        user_agent=user_agent,
     )
 
 
@@ -884,7 +917,8 @@ class ProvisionUserResponse(BaseModel):
 def provision_user(
     payload: ProvisionUserPayload,
     db: DbSession,
-    current: AdminUser,
+    current: PlatformUser,
+    request: Request,
 ) -> ProvisionUserResponse:
     """Create a new User (client_admin or provider) end-to-end.
 
@@ -1100,6 +1134,7 @@ def provision_user(
             "workspace_id": workspace_id,
             "email_delivery_status": delivery.status,
         },
+        request=request,
     )
 
     # Phase 7 cutover (Slice C) — emit through the unified fabric so
@@ -1226,7 +1261,7 @@ def _admin_user_filters(
 @router.get("/users", response_model=AdminUsersListResponse)
 def list_users(
     db: DbSession,
-    current: AdminUser,
+    current: PlatformUser,
     q: str | None = None,
     status_filter: Annotated[
         Literal["active", "disabled"] | None, Query(alias="status")
@@ -1308,7 +1343,8 @@ def update_user_status(
     user_id: str,
     payload: AdminUserStatusPayload,
     db: DbSession,
-    current: AdminUser,
+    current: PlatformUser,
+    request: Request,
 ) -> AdminUserStatusResponse:
     """Disable (reversible lockout) or reactivate a user account.
 
@@ -1343,6 +1379,7 @@ def update_user_status(
         entity_id=target.id,
         before={"status": before_status},
         after={"status": payload.status, "user_email": target.email},
+        request=request,
     )
     db.commit()
     return AdminUserStatusResponse(user_id=target.id, status=payload.status)
@@ -1356,7 +1393,8 @@ def update_user_status(
 def reset_user_password(
     user_id: str,
     db: DbSession,
-    current: AdminUser,
+    current: PlatformUser,
+    request: Request,
 ) -> AdminUserResetPasswordResponse:
     """Admin-issued temp credentials for a locked-out user.
 
@@ -1411,6 +1449,7 @@ def reset_user_password(
             "user_email": target.email,
             "email_delivery_status": delivery.status,
         },
+        request=request,
     )
     db.commit()
 
@@ -2532,7 +2571,7 @@ def _feedback_to_dict(
 @router.get("/feedback-reports", response_model=FeedbackReportList)
 def list_feedback_reports(
     db: DbSession,
-    current: AdminUser,
+    current: PlatformUser,
     status_filter: Annotated[
         Literal["new", "triaged", "in_progress", "resolved", "wont_fix"] | None,
         Query(alias="status"),
@@ -2576,7 +2615,7 @@ def list_feedback_reports(
     "/feedback-reports/{report_id}", response_model=FeedbackReportAdminItem
 )
 def get_feedback_report(
-    report_id: str, db: DbSession, current: AdminUser
+    report_id: str, db: DbSession, current: PlatformUser
 ) -> FeedbackReportAdminItem:
     """Detail view, including a presigned screenshot URL when available."""
     _ = current
@@ -2595,7 +2634,8 @@ def update_feedback_report_status(
     report_id: str,
     payload: FeedbackReportStatusUpdate,
     db: DbSession,
-    current: AdminUser,
+    current: PlatformUser,
+    request: Request,
 ) -> FeedbackReportAdminItem:
     """Move a feedback report through the triage lifecycle.
 
@@ -2630,6 +2670,7 @@ def update_feedback_report_status(
         entity_id=row.id,
         before=before,
         after=after,
+        request=request,
     )
     db.commit()
     db.refresh(row)
@@ -3207,7 +3248,7 @@ class AuditLogResponse(BaseModel):
 @router.get("/audit-log", response_model=AuditLogResponse)
 def list_audit_log(
     db: DbSession,
-    current: AdminUser,
+    current: PlatformUser,
     actor_id: str | None = None,
     actor_type: str | None = None,
     action: str | None = None,
