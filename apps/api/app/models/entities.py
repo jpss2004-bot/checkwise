@@ -545,6 +545,17 @@ class User(TimestampMixin, Base):
             "contact_preference IN ('email', 'whatsapp', 'both')",
             name="ck_users_contact_preference",
         ),
+        # Partial index over live rows: the default directory query
+        # (migration 0042) is ``WHERE deleted_at IS NULL ORDER BY
+        # created_at DESC``. Indexing only live rows keeps it small and
+        # excludes the growing soft-deleted tail. ``sqlite_where`` twin
+        # so create_all test fixtures build an equivalent index.
+        Index(
+            "ix_users_active_created",
+            "created_at",
+            postgresql_where=text("deleted_at IS NULL"),
+            sqlite_where=text("deleted_at IS NULL"),
+        ),
     )
 
     id: Mapped[str] = mapped_column(String(36), primary_key=True, default=new_id)
@@ -586,6 +597,18 @@ class User(TimestampMixin, Base):
         DateTime(timezone=True)
     )
     legal_consent_version: Mapped[str | None] = mapped_column(String(120))
+    # Soft-delete (migration 0042, platform rework Phase 0 2026-06-13).
+    # A soft-deleted account is hidden from the /platform/users directory
+    # and blocked from login (``get_current_user`` already rejects any
+    # status != 'active'), but the row is retained so an accidental delete
+    # is recoverable for a window before a purge cron hard-deletes it.
+    # ``deleted_by_user_id`` is the internal operator who performed the
+    # delete — a plain id, NOT an FK, so the actor can themselves be
+    # deleted later without orphaning the reference (mirrors
+    # ``AuditLog.actor_id``). ``deletion_reason`` is their optional note.
+    deleted_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    deleted_by_user_id: Mapped[str | None] = mapped_column(String(36))
+    deletion_reason: Mapped[str | None] = mapped_column(String(200))
 
     memberships: Mapped[list[Membership]] = relationship(
         back_populates="user", cascade="all, delete-orphan"
@@ -720,6 +743,13 @@ class AuditLog(Base):
     before: Mapped[dict | None] = mapped_column(JSON)
     after: Mapped[dict | None] = mapped_column(JSON)
     event_metadata: Mapped[dict | None] = mapped_column("metadata", JSON)
+    # Request provenance (migration 0043, platform rework Phase 0). Both
+    # best-effort and nullable: captured from the first ``X-Forwarded-For``
+    # hop (Render terminates TLS ahead of uvicorn). NULL on
+    # system-originated events and on rows written before this column.
+    # ``ip_address`` is sized for an IPv6 literal (45 chars).
+    ip_address: Mapped[str | None] = mapped_column(String(45))
+    user_agent: Mapped[str | None] = mapped_column(String(512))
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), default=utc_now, nullable=False
     )

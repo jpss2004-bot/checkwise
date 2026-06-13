@@ -16,6 +16,8 @@ def add_audit_event(
     before: dict | None = None,
     after: dict | None = None,
     metadata: dict | None = None,
+    ip_address: str | None = None,
+    user_agent: str | None = None,
 ) -> AuditLog:
     event = AuditLog(
         action=action,
@@ -26,6 +28,8 @@ def add_audit_event(
         before=before,
         after=after,
         event_metadata=metadata,
+        ip_address=ip_address,
+        user_agent=user_agent,
     )
     db.add(event)
     return event
