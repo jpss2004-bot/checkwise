@@ -4053,6 +4053,15 @@ class WisePageContextIn(BaseModel):
     period_key: str | None = Field(default=None, max_length=20)
 
 
+class WiseHistoryTurnIn(BaseModel):
+    """P1 (2026-06-12) — one prior dock turn shipped so Wise can resolve
+    follow-up questions ("¿y dónde la descargo?"). Capped tight: the
+    backend only needs the recent back-and-forth, not the whole log."""
+
+    role: Literal["user", "assistant"]
+    content: str = Field(..., max_length=2000)
+
+
 class WiseAskRequest(BaseModel):
     prompt: str = Field(..., max_length=500)
     ctas: list[WiseAskCtaIn] = Field(default_factory=list, max_length=20)
@@ -4066,6 +4075,9 @@ class WiseAskRequest(BaseModel):
     # which screen the user is on + what specific task they're
     # working on. Optional for backward compat.
     page_context: WisePageContextIn | None = None
+    # P1 (2026-06-12): the recent dock conversation (last ~8 turns) so
+    # the model can resolve follow-ups. Optional for backward compat.
+    history: list[WiseHistoryTurnIn] = Field(default_factory=list, max_length=12)
 
 
 class WiseAskResponse(BaseModel):
@@ -4109,7 +4121,12 @@ def ask_wise_endpoint(
             per_hour=settings.AI_HEAVY_RATE_LIMIT_PER_HOUR,
         )
 
-    from app.services.wise.ai import WiseCta, WisePageContext, ask_wise
+    from app.services.wise.ai import (
+        WiseCta,
+        WiseHistoryTurn,
+        WisePageContext,
+        ask_wise,
+    )
     from app.services.wise.context import (
         build_document_focus,
         build_static_context,
@@ -4149,6 +4166,10 @@ def ask_wise_endpoint(
             document_focus = build_document_focus(
                 db, workspace, payload.page_context.submission_id
             )
+    history = [
+        WiseHistoryTurn(role=turn.role, content=turn.content)
+        for turn in payload.history
+    ]
     result = ask_wise(
         prompt=payload.prompt,
         workspace=workspace_ctx,
@@ -4156,6 +4177,7 @@ def ask_wise_endpoint(
         ctas=ctas,
         page_context=page_ctx,
         document_focus=document_focus,
+        history=history,
     )
     return WiseAskResponse(
         body=result.body,

@@ -39,7 +39,9 @@ from app.services.auth import hash_password, issue_access_token
 from app.services.wise.ai import (
     NAVIGATION_CTAS,
     WiseCta,
+    WiseHistoryTurn,
     WisePageContext,
+    _build_messages,
     ask_wise,
 )
 from app.services.wise.context import (
@@ -975,3 +977,135 @@ def test_ask_endpoint_resolves_submission_focus(api_client: TestClient) -> None:
     assert "Documento en pantalla" in user_content
     assert "Opinión de cumplimiento IMSS" in user_content
     assert "opinion-imss-mayo.pdf" in user_content
+
+
+# ─── P1 conversation-history tests (2026-06-12) ─────────────────────
+#
+# Cover the messages-array builder (drops leading assistant turns so
+# the first message is always user) and the end-to-end plumbing of
+# history through ask_wise + the endpoint, so follow-up questions like
+# "¿y dónde la descargo?" reach the model with prior context.
+
+
+def test_build_messages_drops_leading_assistant_turns() -> None:
+    """The Anthropic API requires the first message to be ``user``. The
+    dock seeds the chat with Wise's own welcome bubbles (assistant), so
+    the builder must drop any leading assistant turns."""
+    history = [
+        WiseHistoryTurn(role="assistant", content="Hola, soy Wise."),
+        WiseHistoryTurn(role="assistant", content="Tienes 2 tareas."),
+        WiseHistoryTurn(role="user", content="¿qué es la opinión del SAT?"),
+        WiseHistoryTurn(role="assistant", content="Es un documento del SAT…"),
+    ]
+    messages = _build_messages(history, "¿y dónde la descargo?")
+
+    assert messages[0]["role"] == "user"
+    assert messages[0]["content"] == "¿qué es la opinión del SAT?"
+    assert messages[-1] == {
+        "role": "user",
+        "content": "¿y dónde la descargo?",
+    }
+    # The two leading assistant welcome bubbles are gone.
+    assert [m["role"] for m in messages] == ["user", "assistant", "user"]
+
+
+def test_build_messages_skips_empty_and_handles_no_history() -> None:
+    assert _build_messages(None, "hola") == [
+        {"role": "user", "content": "hola"}
+    ]
+    msgs = _build_messages(
+        [
+            WiseHistoryTurn(role="user", content="  "),
+            WiseHistoryTurn(role="user", content="real"),
+        ],
+        "ahora",
+    )
+    assert msgs == [
+        {"role": "user", "content": "real"},
+        {"role": "user", "content": "ahora"},
+    ]
+
+
+def test_service_ships_history_to_model(api_client: TestClient) -> None:
+    """The prior turns must appear in the Anthropic ``messages`` array,
+    with the current question last, so the model can resolve a
+    follow-up."""
+    ws = _setup_workspace(api_client)
+    factory = api_client.app.state.testing_session  # type: ignore[attr-defined]
+    db: Session = factory()
+    try:
+        workspace = db.get(ProviderWorkspace, ws["workspace_id"])
+        assert workspace is not None
+        workspace_ctx = build_workspace_context(db, workspace)
+    finally:
+        db.close()
+    static_ctx = build_static_context()
+    captured: dict = {}
+
+    class FakeClient:
+        def __init__(self) -> None:
+            def create(**kwargs):
+                captured.update(kwargs)
+                return _stub_anthropic(body="Lo descargas en el portal del SAT.", cta_id=None)
+
+            self.messages = SimpleNamespace(create=create)
+
+    ask_wise(
+        prompt="¿y dónde la descargo?",
+        workspace=workspace_ctx,
+        static=static_ctx,
+        ctas=[],
+        history=[
+            WiseHistoryTurn(role="user", content="¿qué es la opinión del SAT?"),
+            WiseHistoryTurn(role="assistant", content="Es un documento del SAT."),
+        ],
+        client=FakeClient(),  # type: ignore[arg-type]
+    )
+    messages = captured["messages"]
+    assert messages[0]["content"] == "¿qué es la opinión del SAT?"
+    assert messages[1]["role"] == "assistant"
+    # The current question is last and carries the context blocks.
+    assert messages[-1]["role"] == "user"
+    assert "¿y dónde la descargo?" in messages[-1]["content"]
+    assert "Estado actual del proveedor" in messages[-1]["content"]
+
+
+def test_ask_endpoint_accepts_history(api_client: TestClient) -> None:
+    """End-to-end: the dock ships ``history`` and the endpoint plumbs it
+    into the model call."""
+    ws = _setup_workspace(api_client)
+
+    captured: dict = {}
+
+    class FakeClient:
+        def __init__(self, **_: object) -> None:
+            def create(**kwargs):
+                captured.update(kwargs)
+                return _stub_anthropic(body="OK", cta_id=None)
+
+            self.messages = SimpleNamespace(create=create)
+
+    with patch("app.services.wise.ai.Anthropic", FakeClient), patch.object(
+        settings, "ANTHROPIC_API_KEY", "test-key"
+    ):
+        response = api_client.post(
+            f"/api/v1/portal/workspaces/{ws['workspace_id']}/wise/ask",
+            json={
+                "prompt": "¿y eso cómo lo arreglo?",
+                "ctas": [],
+                "history": [
+                    {"role": "assistant", "content": "Hola, soy Wise."},
+                    {"role": "user", "content": "mi opinión IMSS está rechazada"},
+                    {"role": "assistant", "content": "El revisor pidió la página 2."},
+                ],
+            },
+        )
+    assert response.status_code == 200, response.text
+    messages = captured["messages"]
+    # Leading assistant welcome dropped; conversation starts at the user
+    # turn and the current question is last.
+    assert messages[0] == {
+        "role": "user",
+        "content": "mi opinión IMSS está rechazada",
+    }
+    assert "¿y eso cómo lo arreglo?" in messages[-1]["content"]

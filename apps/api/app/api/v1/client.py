@@ -3264,10 +3264,21 @@ class ClientWisePageContextIn(BaseModel):
     period_key: str | None = Field(default=None, max_length=20)
 
 
+class ClientWiseHistoryTurnIn(BaseModel):
+    """P1 (2026-06-12) — one prior cliente dock turn, shipped so Wise can
+    resolve follow-ups across the portfolio conversation."""
+
+    role: Literal["user", "assistant"]
+    content: str = Field(..., max_length=2000)
+
+
 class ClientWiseAskRequest(BaseModel):
     prompt: str = Field(..., max_length=500)
     ctas: list[ClientWiseAskCtaIn] = Field(default_factory=list, max_length=20)
     page_context: ClientWisePageContextIn | None = None
+    history: list[ClientWiseHistoryTurnIn] = Field(
+        default_factory=list, max_length=12
+    )
 
 
 class ClientWiseAskResponse(BaseModel):
@@ -3360,7 +3371,7 @@ def ask_client_wise_endpoint(
     )
 
     from app.models import Report
-    from app.services.wise.ai import WiseCta, WisePageContext
+    from app.services.wise.ai import WiseCta, WiseHistoryTurn, WisePageContext
     from app.services.wise.client_ai import ask_wise_for_client
     from app.services.wise.client_context import (
         build_client_context,
@@ -3408,6 +3419,10 @@ def ask_client_wise_endpoint(
             report_label=report_label,
         )
 
+    history = [
+        WiseHistoryTurn(role=turn.role, content=turn.content)
+        for turn in payload.history
+    ]
     result = ask_wise_for_client(
         prompt=payload.prompt,
         client_context=portfolio_ctx,
@@ -3415,6 +3430,7 @@ def ask_client_wise_endpoint(
         ctas=ctas,
         page_context=page_ctx,
         focus_block=focus_block,
+        history=history,
     )
     return ClientWiseAskResponse(
         body=result.body,

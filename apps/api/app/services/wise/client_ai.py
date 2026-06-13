@@ -32,6 +32,7 @@ from anthropic import Anthropic
 from app.services.wise.ai import (
     WiseAskResult,
     WiseCta,
+    WiseHistoryTurn,
     WisePageContext,
     _build_cta_block,
     _build_page_block,
@@ -126,6 +127,7 @@ def ask_wise_for_client(
     ctas: list[WiseCta],
     page_context: WisePageContext | None = None,
     focus_block: str | None = None,
+    history: list[WiseHistoryTurn] | None = None,
     api_key: str | None = None,
     client: Anthropic | None = None,
 ) -> WiseAskResult:
@@ -175,6 +177,7 @@ def ask_wise_for_client(
         user_message=user_message,
         ctas=merged_ctas,
         respond_tool_name="respond_to_client",
+        history=history,
         api_key=guard.key,
         client=client,
     )

@@ -156,6 +156,23 @@ class WiseAskResult:
     source: str  # "llm" | "fallback"
 
 
+@dataclass(frozen=True)
+class WiseHistoryTurn:
+    """One prior turn of the dock conversation (P1, 2026-06-12).
+
+    The dock ships the recent back-and-forth so the model can resolve
+    follow-ups like "¿y dónde la descargo?" — before this, every
+    ``/wise/ask`` call was single-shot (``messages=[one user turn]``)
+    and the model had no idea what "la" referred to. ``role`` is
+    ``"user"`` or ``"assistant"``; ``content`` is the plain text of the
+    bubble (no CTA/markup). The current question is NOT included here —
+    it rides in the final user message with the fresh context blocks.
+    """
+
+    role: str  # "user" | "assistant"
+    content: str
+
+
 _SYSTEM_RULES = """Eres **Wise**, el copiloto de CheckWise — la plataforma de cumplimiento REPSE de Legal Shelf en México.
 
 Tu trabajo: ayudar al proveedor a resolver dudas concretas sobre **(a)** el estado de su expediente, sus cargas y sus próximos vencimientos, **(b)** los documentos REPSE que CheckWise solicita (qué son, dónde se obtienen, errores comunes), y **(c)** cómo funciona CheckWise (estados de los documentos, semáforo, flujo de revisión, dónde encontrar cada pantalla). Hablas en español **mexicano casual de "tú"**, nunca de "usted".
@@ -257,6 +274,7 @@ def ask_wise(
     ctas: list[WiseCta],
     page_context: WisePageContext | None = None,
     document_focus: WiseDocumentFocus | None = None,
+    history: list[WiseHistoryTurn] | None = None,
     api_key: str | None = None,
     client: Anthropic | None = None,
 ) -> WiseAskResult:
@@ -328,6 +346,7 @@ def ask_wise(
         user_message=user_message,
         ctas=merged_ctas,
         respond_tool_name="respond_to_provider",
+        history=history,
         api_key=guard.key,
         client=client,
     )
@@ -384,12 +403,44 @@ def _validate_prompt_and_key(
     return _PromptGuard(fallback=None, key=key)
 
 
+def _build_messages(
+    history: list[WiseHistoryTurn] | None,
+    user_message: str,
+) -> list[dict[str, str]]:
+    """Assemble the Anthropic ``messages`` array from prior turns + the
+    current (context-rich) user message.
+
+    The Anthropic Messages API requires the first message to use the
+    ``user`` role, so we drop any leading ``assistant`` turns (the dock
+    seeds the conversation with Wise's own welcome bubbles, which would
+    otherwise lead). Consecutive same-role turns are allowed — the API
+    merges them — so no further normalization is needed. Empty turns
+    are skipped. The current question is always the final ``user``
+    message and carries the fresh state/CTA blocks; history turns are
+    plain text only.
+    """
+    messages: list[dict[str, str]] = []
+    for turn in history or []:
+        content = (turn.content or "").strip()
+        if not content:
+            continue
+        role = turn.role if turn.role in ("user", "assistant") else "user"
+        # First message must be user — skip any assistant turns that
+        # would otherwise lead (the seeded welcome bubbles).
+        if not messages and role == "assistant":
+            continue
+        messages.append({"role": role, "content": content})
+    messages.append({"role": "user", "content": user_message})
+    return messages
+
+
 def invoke_and_parse(
     *,
     system_param: list[dict[str, Any]],
     user_message: str,
     ctas: list[WiseCta],
     respond_tool_name: str,
+    history: list[WiseHistoryTurn] | None = None,
     api_key: str,
     client: Anthropic | None = None,
 ) -> WiseAskResult:
@@ -401,6 +452,10 @@ def invoke_and_parse(
     parameterized so each surface can label its tool after the audience
     it speaks to (``respond_to_provider`` vs ``respond_to_client``);
     the schema is the same.
+
+    ``history`` carries the recent dock turns so the model can resolve
+    follow-up questions; it's prepended to the current user message via
+    :func:`_build_messages`.
     """
     try:
         if client is None:
@@ -412,7 +467,7 @@ def invoke_and_parse(
             system=system_param,
             tools=[respond_tool],
             tool_choice={"type": "tool", "name": respond_tool_name},
-            messages=[{"role": "user", "content": user_message}],
+            messages=_build_messages(history, user_message),
         )
     except APIError as err:
         log.warning("wise.ai.api_error", extra={"error": str(err)})
