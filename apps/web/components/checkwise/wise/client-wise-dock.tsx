@@ -17,6 +17,8 @@ import {
 import {
   WiseDockHeader,
   WiseDockShell,
+  WiseFeedbackRow,
+  WiseTypingDots,
   WiseWelcome,
 } from "@/components/checkwise/wise/wise-dock-shell";
 
@@ -75,6 +77,33 @@ const CLIENT_QUICK_QUESTIONS: { id: string; label: string; prompt: string }[] = 
   },
 ];
 
+/**
+ * Quick chips tailored to the cliente screen (P2, 2026-06-13). On a
+ * vendor detail page the chips ask about THAT vendor — the backend
+ * ships a "Proveedor en pantalla" focus block so the LLM answers
+ * concretely. Every other route keeps the portfolio-level chips.
+ */
+function clientQuickQuestionsForRoute(
+  route: string,
+): { id: string; label: string; prompt: string }[] {
+  if (/^\/client\/vendors\/[^/]+$/.test(route)) {
+    return [
+      {
+        id: "vendor-missing",
+        label: "¿Qué le falta?",
+        prompt: "¿Qué documentos le faltan a este proveedor?",
+      },
+      {
+        id: "vendor-why",
+        label: "¿Por qué está en este nivel?",
+        prompt: "¿Por qué este proveedor está en este nivel del semáforo?",
+      },
+      CLIENT_QUICK_QUESTIONS[1], // Próximo a vencer
+    ];
+  }
+  return CLIENT_QUICK_QUESTIONS;
+}
+
 interface ClientWiseDockProps {
   className?: string;
 }
@@ -93,6 +122,10 @@ export function ClientWiseDock({ className }: ClientWiseDockProps) {
     },
   ]);
   const [inputValue, setInputValue] = React.useState("");
+  // P2 (2026-06-13): per-answer thumbs rating, keyed by message id.
+  const [feedbackByMessage, setFeedbackByMessage] = React.useState<
+    Record<string, "up" | "down">
+  >({});
   const scrollRef = React.useRef<HTMLDivElement | null>(null);
   const pageContext = useDerivedClientPageContext();
   const clientId = useClientIdFromUrl();
@@ -174,6 +207,30 @@ export function ClientWiseDock({ className }: ClientWiseDockProps) {
     [clientId, pageContext, turns],
   );
 
+  // P2 — thumbs rating on a cliente Wise answer. Fire-and-forget,
+  // idempotent per message. The event persists to wise_events once
+  // migration 0041 lands; until then the endpoint logs it.
+  const submitFeedback = React.useCallback(
+    (messageId: string, rating: "up" | "down") => {
+      setFeedbackByMessage((prev) => {
+        if (prev[messageId]) return prev;
+        void postClientWiseEvent(
+          "wise.feedback",
+          { message_id: messageId, rating, route: pageContext.route },
+          { client_id: clientId },
+        );
+        return { ...prev, [messageId]: rating };
+      });
+    },
+    [clientId, pageContext.route],
+  );
+
+  // P2 — quick chips tailored to the screen (e.g. vendor detail).
+  const quickQuestions = React.useMemo(
+    () => clientQuickQuestionsForRoute(pageContext.route),
+    [pageContext.route],
+  );
+
   return (
     <WiseDockShell
       storageKey={STORAGE_KEY}
@@ -205,9 +262,17 @@ export function ClientWiseDock({ className }: ClientWiseDockProps) {
       renderHeader={(close) => (
         <WiseDockHeader title="Wise" pill="Portafolio" onClose={close} />
       )}
-      renderBody={() => <DockBody turns={turns} scrollRef={scrollRef} />}
+      renderBody={() => (
+        <DockBody
+          turns={turns}
+          scrollRef={scrollRef}
+          feedbackByMessage={feedbackByMessage}
+          onFeedback={submitFeedback}
+        />
+      )}
       renderComposer={() => (
         <DockComposer
+          quickQuestions={quickQuestions}
           inputValue={inputValue}
           onInputChange={setInputValue}
           onSubmit={(prompt) => {
@@ -259,9 +324,13 @@ const TONE_BAR = {
 function DockBody({
   turns,
   scrollRef,
+  feedbackByMessage,
+  onFeedback,
 }: {
   turns: ChatTurn[];
   scrollRef: React.RefObject<HTMLDivElement | null>;
+  feedbackByMessage: Record<string, "up" | "down">;
+  onFeedback: (messageId: string, rating: "up" | "down") => void;
 }) {
   // Fresh state — only the seeded greeting is present. Rather than
   // anchor a lone bubble to the top of the tall drawer, center a calm
@@ -292,7 +361,11 @@ function DockBody({
                   className={cn("absolute inset-y-0 left-0 w-1", TONE_BAR[turn.tone])}
                 />
                 <div className="space-y-2 pl-2">
-                  <p className="text-[13px] leading-[1.5] text-white">{turn.body}</p>
+                  {turn.id.startsWith("wise-pending-") ? (
+                    <WiseTypingDots />
+                  ) : (
+                    <p className="text-[13px] leading-[1.5] text-white">{turn.body}</p>
+                  )}
                   {turn.ctaLabel && turn.ctaHref ? (
                     <Button
                       asChild
@@ -304,6 +377,13 @@ function DockBody({
                         <ArrowRight className="h-3.5 w-3.5" weight="bold" aria-hidden="true" />
                       </Link>
                     </Button>
+                  ) : null}
+                  {turn.id.startsWith("wise-llm-") ? (
+                    <WiseFeedbackRow
+                      messageId={turn.id}
+                      feedback={feedbackByMessage[turn.id]}
+                      onFeedback={onFeedback}
+                    />
                   ) : null}
                 </div>
               </article>
@@ -324,10 +404,12 @@ function DockBody({
 // ─── Composer (quick chips + text input) ──────────────────────────
 
 function DockComposer({
+  quickQuestions,
   inputValue,
   onInputChange,
   onSubmit,
 }: {
+  quickQuestions: { id: string; label: string; prompt: string }[];
   inputValue: string;
   onInputChange: (value: string) => void;
   onSubmit: (prompt: string) => void;
@@ -342,7 +424,7 @@ function DockComposer({
         Sugerencias
       </p>
       <div className="mb-2 flex flex-wrap gap-1.5">
-        {CLIENT_QUICK_QUESTIONS.map((q) => (
+        {quickQuestions.map((q) => (
           <button
             key={q.id}
             type="button"

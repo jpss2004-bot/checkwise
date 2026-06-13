@@ -919,7 +919,9 @@ export type WiseEventType =
   | "wise.suggestion_clicked"
   | "wise.suggestion_dismissed"
   // Phase 2.a (2026-05-21) — chat composer submits a prompt.
-  | "wise.question_asked";
+  | "wise.question_asked"
+  // P2 (2026-06-13) — thumbs up/down on a Wise answer.
+  | "wise.feedback";
 
 export type WiseEventPayload = Record<string, unknown>;
 

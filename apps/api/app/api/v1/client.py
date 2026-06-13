@@ -3227,6 +3227,8 @@ _CLIENT_WISE_ALLOWED_EVENT_TYPES: frozenset[str] = frozenset(
         "wise.suggestion_clicked",
         "wise.suggestion_dismissed",
         "wise.question_asked",
+        # P2 (2026-06-13): thumbs up/down on a cliente Wise answer.
+        "wise.feedback",
     }
 )
 

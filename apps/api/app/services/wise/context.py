@@ -864,20 +864,26 @@ periodo. Por ejemplo, "Opinión IMSS de mayo 2026" es un slot distinto de
 "Opinión IMSS de junio 2026". Cada slot tiene un solo estado y un solo
 documento "actual" (la última carga válida).
 
-**Estados de documento**:
-- `pendiente`: el slot está vacío, no se ha subido nada.
-- `recibido`: el proveedor acaba de cargar el archivo.
-- `pendiente_revision` / `prevalidado`: la revisión legal está en curso.
-- `aprobado`: el documento cumple, el slot cierra al verde.
-- `rechazado`: el revisor lo regresó porque no cumple. Hay que volver a cargar.
-- `requiere_aclaracion`: el revisor pide una aclaración del proveedor antes de
-  decidir.
-- `posible_mismatch`: las señales automáticas detectaron una inconsistencia
-  (RFC distinto, período incorrecto, archivo bloqueado).
-- `vencido`: el plazo conventional (día 17 del mes para mensuales y bimestrales,
+**Estados de documento** (usa SIEMPRE la etiqueta legible de la izquierda — es
+la que el proveedor ve en pantalla. NUNCA le menciones el código interno entre
+paréntesis; es solo para que tú reconozcas el estado en los bloques de datos):
+- **pendiente (sin subir)**: el slot está vacío, no se ha subido nada.
+- **recibido (en cola de revisión)**: el proveedor acaba de cargar el archivo y
+  está esperando a que un revisor lo tome.
+- **en revisión legal**: un revisor ya está validando el documento (internamente
+  `pendiente_revision` / `prevalidado`).
+- **aprobado**: el documento cumple, el slot cierra al verde.
+- **rechazado**: el revisor lo regresó porque no cumple. Hay que volver a cargar.
+- **requiere aclaración del proveedor**: el revisor pide una aclaración antes de
+  decidir (internamente `requiere_aclaracion`).
+- **posible inconsistencia detectada**: las señales automáticas encontraron algo
+  raro (RFC distinto, período incorrecto, archivo bloqueado) — internamente
+  `posible_mismatch`.
+- **vencido**: el plazo convencional (día 17 del mes para mensuales y bimestrales,
   día 30 para anuales SAT) pasó sin que se cargara el acuse.
-- `excepcion_legal`: el caso no aplica por una razón documentada (e.g. el
-  proveedor no tiene trabajadores).
+- **excepción legal aprobada**: el caso no aplica por una razón documentada (e.g.
+  el proveedor no tiene trabajadores) — internamente `excepcion_legal`.
+- **no aplica**: el requisito no corresponde a este proveedor.
 
 **Reemplazo / supersesión**: cuando un documento se rechaza o requiere
 aclaración, el proveedor vuelve a cargar; CheckWise enlaza la nueva carga con

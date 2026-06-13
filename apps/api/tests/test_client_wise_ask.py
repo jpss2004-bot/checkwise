@@ -337,6 +337,23 @@ def test_events_rejects_unknown_type(api_client: TestClient) -> None:
     assert "wise.does_not_exist" in resp.text
 
 
+def test_events_accepts_feedback_type(api_client: TestClient) -> None:
+    """P2 (2026-06-13) — thumbs feedback is an allowed cliente event."""
+    seed = _seed_client_admin(api_client)
+    token = _login(api_client, seed["email"], seed["password"])
+
+    resp = api_client.post(
+        f"/api/v1/client/wise/events?client_id={seed['client_id']}",
+        json={
+            "event_type": "wise.feedback",
+            "payload": {"message_id": "wise-llm-abc", "rating": "up"},
+        },
+        headers=_h(token),
+    )
+    assert resp.status_code == 202, resp.text
+    assert resp.json() == {"accepted": True, "event_type": "wise.feedback"}
+
+
 # ─── P0 grounding tests (2026-06-12) ────────────────────────────────
 #
 # Cover today's-date anchoring, named missing/attention documents per

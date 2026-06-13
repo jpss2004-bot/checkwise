@@ -1,7 +1,13 @@
 "use client";
 
 import * as React from "react";
-import { CaretRight, Sparkle, X } from "@phosphor-icons/react";
+import {
+  CaretRight,
+  Sparkle,
+  ThumbsDown,
+  ThumbsUp,
+  X,
+} from "@phosphor-icons/react";
 
 import { cn } from "@/lib/utils";
 
@@ -364,6 +370,91 @@ export function WiseWelcome({ body }: { body: string }) {
         </p>
       </div>
     </>
+  );
+}
+
+// ─── Shared message-bubble bits (P2, 2026-06-13) ──────────────────
+//
+// Both docks render an identical "Wise is typing" indicator while a
+// reply is in flight and an identical thumbs row under each answer.
+// They live here so the two surfaces can't drift.
+
+/** Three-dot "Wise is typing" indicator. Staggered ``animate-bounce``
+ *  so each dot lags the previous one — reads as composing, not frozen. */
+export function WiseTypingDots() {
+  return (
+    <span
+      className="flex items-center gap-1 py-1"
+      role="status"
+      aria-label="Wise está escribiendo"
+    >
+      {[0, 150, 300].map((delay) => (
+        <span
+          key={delay}
+          className="h-1.5 w-1.5 animate-bounce rounded-full bg-white/55"
+          style={{ animationDelay: `${delay}ms` }}
+        />
+      ))}
+    </span>
+  );
+}
+
+/** Thumbs up/down on a Wise answer. Once a side is picked the row locks
+ *  to that choice — it's a one-shot quality signal, not a toggle. */
+export function WiseFeedbackRow({
+  messageId,
+  feedback,
+  onFeedback,
+}: {
+  messageId: string;
+  feedback?: "up" | "down";
+  onFeedback: (messageId: string, rating: "up" | "down") => void;
+}) {
+  const rated = feedback !== undefined;
+  return (
+    <div className="flex items-center gap-1.5 pt-0.5">
+      <span className="text-[10px] text-white/40">
+        {rated ? "Gracias por tu opinión." : "¿Te sirvió?"}
+      </span>
+      <button
+        type="button"
+        aria-label="Sí, me sirvió"
+        aria-pressed={feedback === "up"}
+        disabled={rated}
+        onClick={() => onFeedback(messageId, "up")}
+        className={cn(
+          "inline-flex h-6 w-6 items-center justify-center rounded-md transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[color:var(--text-teal)]/50 disabled:cursor-default",
+          feedback === "up"
+            ? "text-[color:var(--text-teal)]"
+            : "text-white/40 hover:text-white/80 disabled:text-white/20",
+        )}
+      >
+        <ThumbsUp
+          className="h-3.5 w-3.5"
+          weight={feedback === "up" ? "fill" : "regular"}
+          aria-hidden="true"
+        />
+      </button>
+      <button
+        type="button"
+        aria-label="No me sirvió"
+        aria-pressed={feedback === "down"}
+        disabled={rated}
+        onClick={() => onFeedback(messageId, "down")}
+        className={cn(
+          "inline-flex h-6 w-6 items-center justify-center rounded-md transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[color:var(--text-teal)]/50 disabled:cursor-default",
+          feedback === "down"
+            ? "text-[color:var(--status-warning-text)]"
+            : "text-white/40 hover:text-white/80 disabled:text-white/20",
+        )}
+      >
+        <ThumbsDown
+          className="h-3.5 w-3.5"
+          weight={feedback === "down" ? "fill" : "regular"}
+          aria-hidden="true"
+        />
+      </button>
+    </div>
   );
 }
 

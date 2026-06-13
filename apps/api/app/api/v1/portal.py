@@ -3906,6 +3906,10 @@ _WISE_ALLOWED_EVENT_TYPES: Final[frozenset[str]] = frozenset(
         # carries ``{audience, intent, prompt}`` so we can compute
         # which intents earn the most engagement.
         "wise.question_asked",
+        # P2 (2026-06-13): thumbs up/down on a Wise answer. ``payload``
+        # carries ``{message_id, rating: "up"|"down", route}`` so we can
+        # measure answer quality and find prompts that earn a thumbs-down.
+        "wise.feedback",
     }
 )
 

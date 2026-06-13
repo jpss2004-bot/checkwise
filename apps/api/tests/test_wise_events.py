@@ -204,6 +204,8 @@ def test_wise_event_accepts_all_known_event_types(api_client: TestClient) -> Non
         "wise.suggestion_clicked",
         "wise.suggestion_dismissed",
         "wise.question_asked",
+        # P2 (2026-06-13) — thumbs feedback on an answer.
+        "wise.feedback",
     }
     for event_type in expected:
         response = api_client.post(
@@ -211,3 +213,22 @@ def test_wise_event_accepts_all_known_event_types(api_client: TestClient) -> Non
             json={"event_type": event_type, "payload": None},
         )
         assert response.status_code == 201, response.text
+
+
+def test_wise_feedback_event_persists_payload(api_client: TestClient) -> None:
+    """A thumbs rating round-trips with its structured payload so we can
+    later query which answers earned a thumbs-down."""
+    ws = _setup_workspace(api_client)
+    response = api_client.post(
+        f"/api/v1/portal/workspaces/{ws['workspace_id']}/wise/events",
+        json={
+            "event_type": "wise.feedback",
+            "payload": {
+                "message_id": "wise-llm-abc",
+                "rating": "down",
+                "route": "/portal/submissions/sub-1",
+            },
+        },
+    )
+    assert response.status_code == 201, response.text
+    assert response.json()["event_type"] == "wise.feedback"

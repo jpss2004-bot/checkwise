@@ -956,7 +956,9 @@ export type ClientWiseEventType =
   | "wise.collapsed"
   | "wise.suggestion_clicked"
   | "wise.suggestion_dismissed"
-  | "wise.question_asked";
+  | "wise.question_asked"
+  // P2 (2026-06-13) — thumbs up/down on a cliente Wise answer.
+  | "wise.feedback";
 
 export type ClientWiseEventPayload = Record<string, unknown>;
 

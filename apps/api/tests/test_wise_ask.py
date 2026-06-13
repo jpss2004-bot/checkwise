@@ -232,6 +232,26 @@ def test_static_context_includes_glossary_and_catalog() -> None:
     assert "calendario" in sections
 
 
+def test_glossary_uses_human_status_labels_not_raw_codes() -> None:
+    """P2 (2026-06-13) — the glossary's status vocabulary must match the
+    human labels the slot lines / document-focus block use (and that the
+    user sees in the UI), and explicitly tell Wise never to surface the
+    raw internal codes."""
+    glossary = build_static_context().glossary
+    # The human labels from _STATE_LABEL_ES appear verbatim.
+    for label in (
+        "pendiente (sin subir)",
+        "recibido (en cola de revisión)",
+        "en revisión legal",
+        "requiere aclaración del proveedor",
+        "posible inconsistencia detectada",
+        "excepción legal aprobada",
+    ):
+        assert label in glossary, f"missing human label: {label}"
+    # And the instruction to never use the raw code is present.
+    assert "NUNCA" in glossary and "código interno" in glossary
+
+
 def test_render_static_block_groups_by_institution() -> None:
     """The rendered static block is what the model actually reads —
     confirm the four canonical institutions appear so Wise can

@@ -29,6 +29,7 @@ import {
   WISE_QUICK_QUESTIONS,
   answerIntent,
   classifyIntent,
+  type WiseQuickQuestion,
 } from "@/lib/wise/intents";
 import {
   buildWiseMessages,
@@ -38,6 +39,8 @@ import {
 import {
   WiseDockHeader,
   WiseDockShell,
+  WiseFeedbackRow,
+  WiseTypingDots,
 } from "@/components/checkwise/wise/wise-dock-shell";
 
 /**
@@ -128,6 +131,11 @@ export function WiseDock({
   const [hasOpenedOnce, setHasOpenedOnce] = React.useState(false);
   const [turns, setTurns] = React.useState<ChatTurn[]>([]);
   const [inputValue, setInputValue] = React.useState("");
+  // P2 (2026-06-13): per-answer thumbs rating, keyed by message id, so
+  // a rated bubble shows its choice and can't be voted on twice.
+  const [feedbackByMessage, setFeedbackByMessage] = React.useState<
+    Record<string, "up" | "down">
+  >({});
   const scrollRef = React.useRef<HTMLDivElement | null>(null);
 
   // Page context: derived live from the URL so the dock knows what
@@ -325,6 +333,33 @@ export function WiseDock({
     [audience, dashboardState, onboardingState, pageContext, session, turns],
   );
 
+  // P2 — record a thumbs rating on a Wise answer. Idempotent per
+  // message (a second click on the same bubble is ignored) and
+  // fire-and-forget like every other dock event.
+  const submitFeedback = React.useCallback(
+    (messageId: string, rating: "up" | "down") => {
+      setFeedbackByMessage((prev) => {
+        if (prev[messageId]) return prev;
+        void postWiseEvent(session, "wise.feedback", {
+          audience,
+          message_id: messageId,
+          rating,
+          route: pageContext.route,
+        });
+        return { ...prev, [messageId]: rating };
+      });
+    },
+    [audience, pageContext.route, session],
+  );
+
+  // P2 — quick chips tailored to the screen the user is on. The four
+  // base chips stay deterministic (exact match in WISE_QUICK_QUESTIONS);
+  // page-specific ones are new prompts that route to the LLM.
+  const quickQuestions = React.useMemo(
+    () => quickQuestionsForRoute(pageContext.route),
+    [pageContext.route],
+  );
+
   const hasWarning = messages.some((m) => m.tone === "warning");
 
   return (
@@ -372,10 +407,13 @@ export function WiseDock({
           session={session}
           audience={audience}
           scrollRef={scrollRef}
+          feedbackByMessage={feedbackByMessage}
+          onFeedback={submitFeedback}
         />
       )}
       renderComposer={() => (
         <DockComposer
+          quickQuestions={quickQuestions}
           inputValue={inputValue}
           onInputChange={setInputValue}
           onSubmit={(prompt) => {
@@ -395,11 +433,15 @@ function DockBody({
   session,
   audience,
   scrollRef,
+  feedbackByMessage,
+  onFeedback,
 }: {
   turns: ChatTurn[];
   session: PortalSession;
   audience: WiseAudience;
   scrollRef: React.RefObject<HTMLDivElement | null>;
+  feedbackByMessage: Record<string, "up" | "down">;
+  onFeedback: (messageId: string, rating: "up" | "down") => void;
 }) {
   if (turns.length === 0) {
     return (
@@ -417,6 +459,8 @@ function DockBody({
             <li key={turn.message.id}>
               <MessageBubble
                 message={turn.message}
+                feedback={feedbackByMessage[turn.message.id]}
+                onFeedback={onFeedback}
                 onCtaClick={() => {
                   void postWiseEvent(session, "wise.suggestion_clicked", {
                     audience,
@@ -441,11 +485,24 @@ function DockBody({
 
 function MessageBubble({
   message,
+  feedback,
+  onFeedback,
   onCtaClick,
 }: {
   message: WiseMessage;
+  feedback?: "up" | "down";
+  onFeedback: (messageId: string, rating: "up" | "down") => void;
   onCtaClick: () => void;
 }) {
+  // P2 — the transient pending placeholder renders an animated typing
+  // indicator instead of a flat "Pensando…" line, so the wait reads as
+  // Wise composing rather than a frozen bubble.
+  const isPending = message.id.startsWith("wise-pending-");
+  // Show thumbs on actual answers (LLM replies + deterministic intent
+  // answers), never on the seeded welcome / suggestion bubbles.
+  const isAnswer =
+    message.id.startsWith("wise-llm-") || message.id.startsWith("wise-answer-");
+
   return (
     <article
       className={cn(
@@ -469,7 +526,11 @@ function MessageBubble({
             <span className="truncate">{message.meta}</span>
           </p>
         ) : null}
-        <p className="text-[13px] leading-[1.5] text-white">{message.body}</p>
+        {isPending ? (
+          <WiseTypingDots />
+        ) : (
+          <p className="text-[13px] leading-[1.5] text-white">{message.body}</p>
+        )}
         {message.reviewerNote ? (
           <blockquote className="flex gap-2 rounded-md border border-white/10 bg-white/[0.05] px-3 py-2 text-[12px] italic leading-snug text-white/85">
             <Quotes
@@ -492,6 +553,13 @@ function MessageBubble({
             </Link>
           </Button>
         ) : null}
+        {isAnswer && !isPending ? (
+          <WiseFeedbackRow
+            messageId={message.id}
+            feedback={feedback}
+            onFeedback={onFeedback}
+          />
+        ) : null}
       </div>
     </article>
   );
@@ -500,10 +568,12 @@ function MessageBubble({
 // ─── Composer (quick chips + text input) ──────────────────────────
 
 function DockComposer({
+  quickQuestions,
   inputValue,
   onInputChange,
   onSubmit,
 }: {
+  quickQuestions: readonly WiseQuickQuestion[];
   inputValue: string;
   onInputChange: (value: string) => void;
   onSubmit: (prompt: string) => void;
@@ -518,7 +588,7 @@ function DockComposer({
         Sugerencias
       </p>
       <div className="mb-2 flex flex-wrap gap-1.5">
-        {WISE_QUICK_QUESTIONS.map((q) => (
+        {quickQuestions.map((q) => (
           <button
             key={q.id}
             type="button"
@@ -553,6 +623,76 @@ function DockComposer({
       </form>
     </footer>
   );
+}
+
+// ─── Helpers: contextual quick chips ──────────────────────────────
+
+/**
+ * Quick-question chips tailored to the screen the user is on.
+ *
+ * The four base chips (``WISE_QUICK_QUESTIONS``) stay deterministic —
+ * an exact match short-circuits to the instant rules-based answer in
+ * ``submitPrompt``. The page-specific chips are NEW prompts, so they
+ * fall through to the LLM, which has the page context + document focus
+ * to answer "¿qué va aquí?" / "¿por qué está así?" about the exact
+ * thing on screen.
+ */
+function quickQuestionsForRoute(
+  route: string,
+): readonly WiseQuickQuestion[] {
+  if (/^\/portal\/submissions\/[^/]+$/.test(route)) {
+    return [
+      {
+        id: "qq-ctx-doc-why",
+        label: "¿Por qué está así?",
+        prompt: "¿Por qué está en este estado este documento?",
+      },
+      {
+        id: "qq-ctx-doc-next",
+        label: "¿Qué hago ahora?",
+        prompt: "¿Qué tengo que hacer ahora con esta carga?",
+      },
+      WISE_QUICK_QUESTIONS[3], // ¿Cómo voy?
+    ];
+  }
+  if (/^\/portal\/upload$/.test(route)) {
+    return [
+      {
+        id: "qq-ctx-up-what",
+        label: "¿Qué va aquí?",
+        prompt: "¿Qué documento tengo que subir aquí?",
+      },
+      {
+        id: "qq-ctx-up-where",
+        label: "¿Dónde lo obtengo?",
+        prompt: "¿Dónde obtengo este documento?",
+      },
+      WISE_QUICK_QUESTIONS[0], // ¿Qué sigue?
+    ];
+  }
+  if (/^\/portal\/onboarding$/.test(route)) {
+    return [
+      {
+        id: "qq-ctx-onb-missing",
+        label: "¿Qué me falta?",
+        prompt: "¿Qué documentos me faltan del expediente inicial?",
+      },
+      WISE_QUICK_QUESTIONS[0], // ¿Qué sigue?
+      WISE_QUICK_QUESTIONS[3], // ¿Cómo voy?
+    ];
+  }
+  if (/^\/portal\/calendar$/.test(route)) {
+    return [
+      {
+        id: "qq-ctx-cal-due",
+        label: "¿Qué vence este mes?",
+        prompt: "¿Qué obligaciones vencen este mes?",
+      },
+      WISE_QUICK_QUESTIONS[2], // ¿Cuándo vence el próximo?
+      WISE_QUICK_QUESTIONS[0], // ¿Qué sigue?
+    ];
+  }
+  return WISE_QUICK_QUESTIONS;
 }
 
 // ─── Helpers: conversation history for the LLM ────────────────────
