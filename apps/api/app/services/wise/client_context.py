@@ -45,6 +45,11 @@ from app.services.evidence_slots import (
     build_workspace_calendar_slots,
     build_workspace_onboarding_slots,
 )
+from app.services.wise.context import (
+    WiseWorkspaceContext,
+    build_workspace_context,
+    render_workspace_block,
+)
 
 
 @dataclass(frozen=True)
@@ -66,6 +71,12 @@ class WiseClientVendorRow:
     pending_reviews_count: int
     missing_required_count: int
     rejected_or_correction_count: int
+    # P0 grounding (2026-06-12) — the NAMES behind the counts, so Wise
+    # can answer "¿qué le falta a X?" with concrete documents instead
+    # of "le faltan 3". Recurring slots carry their period inline
+    # ("Opinión IMSS (2026-M05)"). Render caps how many are shown.
+    missing_names: tuple[str, ...] = ()
+    attention_names: tuple[str, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -82,6 +93,7 @@ class WiseClientContext:
     client_name: str
     client_rfc: str | None
     target_year: int
+    today_iso: str
 
     vendor_count: int
     active_workspace_count: int
@@ -148,19 +160,27 @@ def build_client_context(
         required_views = [s for s in onboarding_slots if s.required] + [
             s for s in calendar_slots if s.required
         ]
-        missing = sum(1 for s in required_views if s.state is SlotState.MISSING)
-        pending = sum(
-            1
-            for s in required_views
-            if s.state in (SlotState.IN_REVIEW, SlotState.UPLOADED)
-        )
         actionable_states = {
             SlotState.REJECTED,
             SlotState.NEEDS_CORRECTION,
             SlotState.POSSIBLE_MISMATCH,
             SlotState.EXPIRED,
         }
-        rejected = sum(1 for s in required_views if s.state in actionable_states)
+        missing_names: list[str] = []
+        attention_names: list[str] = []
+        pending = 0
+        for view in required_views:
+            label = view.requirement_name or view.requirement_code or "—"
+            if view.period_key:
+                label = f"{label} ({view.period_key})"
+            if view.state is SlotState.MISSING:
+                missing_names.append(label)
+            elif view.state in actionable_states:
+                attention_names.append(label)
+            elif view.state in (SlotState.IN_REVIEW, SlotState.UPLOADED):
+                pending += 1
+        missing = len(missing_names)
+        rejected = len(attention_names)
 
         rows.append(
             WiseClientVendorRow(
@@ -173,6 +193,8 @@ def build_client_context(
                 pending_reviews_count=pending,
                 missing_required_count=missing,
                 rejected_or_correction_count=rejected,
+                missing_names=tuple(missing_names),
+                attention_names=tuple(attention_names),
             )
         )
 
@@ -197,6 +219,7 @@ def build_client_context(
         client_name=client_row.name,
         client_rfc=getattr(client_row, "rfc", None),
         target_year=target_year,
+        today_iso=today.isoformat(),
         vendor_count=len(workspaces),
         active_workspace_count=active_count,
         green_count=green,
@@ -210,6 +233,55 @@ def build_client_context(
     )
 
 
+def build_vendor_focus(
+    db: Session,
+    client_row: Client,
+    vendor_id: str,
+) -> WiseWorkspaceContext | None:
+    """Resolve the on-screen vendor into a full workspace context.
+
+    Used when the cliente is on ``/client/vendors/{id}`` — the dock
+    ships the vendor id and we ground Wise with the SAME per-vendor
+    detail the portal Wise sees (named slots + states + due dates +
+    recent uploads + reviewer notes), so "¿qué le falta a este
+    proveedor?" gets a document-level answer.
+
+    Tenant-guarded: the vendor must belong to ``client_row`` and have
+    an active workspace; otherwise returns None and the caller omits
+    the focus block.
+    """
+    workspace = db.scalar(
+        select(ProviderWorkspace).where(
+            ProviderWorkspace.client_id == client_row.id,
+            ProviderWorkspace.vendor_id == vendor_id,
+        )
+    )
+    if workspace is None:
+        return None
+    return build_workspace_context(db, workspace)
+
+
+def render_vendor_focus_block(ctx: WiseWorkspaceContext) -> str:
+    """Render the on-screen vendor as a prompt block.
+
+    Reuses the portal-side workspace renderer (single source of truth
+    for slot lines, due dates, and reviewer notes) under a cliente-
+    shaped heading so the model knows this is the vendor the client
+    is looking at, not the client's own state.
+    """
+    body = render_workspace_block(ctx)
+    body = body.replace(
+        "# Estado actual del proveedor",
+        (
+            "El cliente está viendo el detalle de ESTE proveedor. Si "
+            "pregunta por \"este proveedor\" o pregunta sin nombrar a "
+            "uno, se refiere a él:"
+        ),
+        1,
+    )
+    return "# Proveedor en pantalla\n\n" + body
+
+
 # ─── LLM rendering ─────────────────────────────────────────────────
 
 
@@ -218,6 +290,21 @@ _SEMAPHORE_LABEL = {
     "yellow": "amarillo",
     "red": "rojo",
 }
+
+# How many document names to inline per bucket in a vendor row. The
+# counts are always exact; names beyond the cap collapse to "+N más"
+# so a 50-vendor portfolio block stays within budget.
+_MAX_NAMED_DOCS_PER_BUCKET = 4
+
+
+def _names_suffix(names: tuple[str, ...]) -> str:
+    """Render ": A, B, C (+2 más)" after a count, or "" when empty."""
+    if not names:
+        return ""
+    shown = list(names[:_MAX_NAMED_DOCS_PER_BUCKET])
+    overflow = len(names) - len(shown)
+    suffix = f" (+{overflow} más)" if overflow > 0 else ""
+    return ": " + ", ".join(shown) + suffix
 
 
 def render_client_state_block(ctx: WiseClientContext) -> str:
@@ -234,6 +321,7 @@ def render_client_state_block(ctx: WiseClientContext) -> str:
     if ctx.client_rfc:
         parts.append(f"- RFC: `{ctx.client_rfc}`")
     parts.append(f"- Año fiscal de referencia: {ctx.target_year}")
+    parts.append(f"- Fecha de hoy: {ctx.today_iso}")
     parts.append("")
     parts.append("# Resumen del portafolio")
     parts.append("")
@@ -265,13 +353,15 @@ def render_client_state_block(ctx: WiseClientContext) -> str:
         for row in ordered:
             rfc = f" ({row.vendor_rfc})" if row.vendor_rfc else ""
             sem_label = _SEMAPHORE_LABEL.get(row.semaphore_level, row.semaphore_level)
+            missing = _names_suffix(row.missing_names)
+            attention = _names_suffix(row.attention_names)
             parts.append(
                 f"- **{row.vendor_name}**{rfc} — {row.compliance_pct}% "
                 f"({sem_label}). "
-                f"Faltan {row.missing_required_count}, "
-                f"{row.rejected_or_correction_count} con observación, "
+                f"Faltan {row.missing_required_count}{missing}; "
+                f"{row.rejected_or_correction_count} con observación{attention}; "
                 f"{row.pending_reviews_count} en revisión. "
-                f"workspace_id=`{row.workspace_id}`"
+                f"vendor_id=`{row.vendor_id}`"
             )
     else:
         parts.append("# Proveedores")

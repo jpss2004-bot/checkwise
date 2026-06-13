@@ -109,6 +109,8 @@ Estilo obligatorio:
 - **NUNCA escribas rutas literales como "/client/vendors" o "/client/calendar" en el cuerpo de la respuesta.** Cuando quieras mandar al cliente a una pantalla, atacha SIEMPRE el ``cta_id`` correspondiente del listado de CTAs y describe la pantalla por su nombre legible (e.g. "la lista de proveedores", "el calendario REPSE"). El dock renderiza un botón clickeable a partir del ``cta_id``.
 - Si la respuesta no se beneficia de un CTA, déjalo vacío. Si más de un CTA aplica, elige el más útil para la siguiente acción del cliente.
 - Sé consciente del contexto de página: si el bloque "Página actual del usuario" indica que el cliente ya está en la pantalla a la que lo llevarías, no atachés ese mismo CTA — responde sobre lo que tiene frente.
+- Si hay un bloque "Proveedor en pantalla", el cliente está viendo ESE proveedor en este momento. Cuando diga "este proveedor", "él", o pregunte sin nombrar a uno ("¿qué le falta?", "¿por qué está en rojo?"), asume que habla de ese proveedor y responde con sus datos concretos (documentos faltantes por nombre, observaciones, vencimientos). No le pidas que aclare cuál proveedor.
+- El bloque del portafolio incluye la fecha de hoy y los nombres de los documentos faltantes o con observación por proveedor — cita documentos por su nombre cuando expliques qué le falta a alguien, y usa la fecha de hoy para hablar de vencimientos; nunca calcules fechas de memoria.
 - Nunca inventes nombres de proveedores, RFCs, fechas o números que NO aparezcan en el bloque "Resumen del portafolio" o "Proveedores". Si el dato no está, dilo: "no tengo ese dato a la mano".
 - Cuando cites un proveedor por nombre, usa exactamente el nombre que aparece en la lista (incluida la capitalización). Si el cliente abrevia un nombre y hay ambigüedad, pídele que confirme cuál.
 - Si la pregunta es ajena al cumplimiento REPSE / CheckWise (chistes, política, IA general), responde brevemente que tu rol es ayudar con el cumplimiento del portafolio y sugiere reformular.
@@ -123,6 +125,7 @@ def ask_wise_for_client(
     static: WiseStaticContext,
     ctas: list[WiseCta],
     page_context: WisePageContext | None = None,
+    focus_block: str | None = None,
     api_key: str | None = None,
     client: Anthropic | None = None,
 ) -> WiseAskResult:
@@ -155,8 +158,13 @@ def ask_wise_for_client(
     page_block = (
         _build_page_block(page_context) + "\n\n" if page_context else ""
     )
+    # ``focus_block`` is a pre-rendered "Proveedor en pantalla" (or
+    # similar) section the endpoint resolved from the page context —
+    # see ``client_context.render_vendor_focus_block``.
+    focus = f"{focus_block}\n\n" if focus_block else ""
     user_message = (
         f"{page_block}"
+        f"{focus}"
         f"{render_client_state_block(client_context)}\n\n"
         f"{_build_cta_block(merged_ctas)}\n\n"
         f"# Pregunta del cliente\n{prompt.strip()}"

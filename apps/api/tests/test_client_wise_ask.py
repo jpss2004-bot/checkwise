@@ -335,3 +335,175 @@ def test_events_rejects_unknown_type(api_client: TestClient) -> None:
     )
     assert resp.status_code == 400, resp.text
     assert "wise.does_not_exist" in resp.text
+
+
+# ─── P0 grounding tests (2026-06-12) ────────────────────────────────
+#
+# Cover today's-date anchoring, named missing/attention documents per
+# vendor (so Wise can answer "¿qué le falta a X?" with documents, not
+# counts), and server-side resolution of the on-screen vendor into a
+# "Proveedor en pantalla" focus block.
+
+
+def test_portfolio_block_names_missing_documents(api_client: TestClient) -> None:
+    seed = _seed_client_admin(api_client)
+    factory = api_client.app.state.testing_session  # type: ignore[attr-defined]
+    db: Session = factory()
+    try:
+        from app.models import Client as ClientModel
+        from app.services.wise.client_context import (
+            build_client_context,
+            render_client_state_block,
+        )
+
+        client_row = db.get(ClientModel, seed["client_id"])
+        assert client_row is not None
+        ctx = build_client_context(db, client_row)
+    finally:
+        db.close()
+
+    from datetime import date as _date
+
+    assert ctx.today_iso == _date.today().isoformat()
+    assert ctx.vendors, "expected the seeded vendor in the portfolio"
+    row = ctx.vendors[0]
+    # Brand-new workspace: required onboarding slots are all missing,
+    # and each one must surface by NAME, not just as a count.
+    assert row.missing_required_count > 0
+    assert len(row.missing_names) == row.missing_required_count
+
+    rendered = render_client_state_block(ctx)
+    assert f"Fecha de hoy: {ctx.today_iso}" in rendered
+    # The row inlines document names after the count (capped at 4).
+    assert f"Faltan {row.missing_required_count}: " in rendered
+    assert row.missing_names[0] in rendered
+    # vendor_id (not workspace_id) so the model can match the page
+    # context's on-screen vendor id against the portfolio list.
+    assert f"vendor_id=`{row.vendor_id}`" in rendered
+    assert "workspace_id=" not in rendered
+
+
+def test_vendor_focus_block_renders_named_slots(api_client: TestClient) -> None:
+    seed = _seed_client_admin(api_client)
+    factory = api_client.app.state.testing_session  # type: ignore[attr-defined]
+    db: Session = factory()
+    try:
+        from app.models import Client as ClientModel
+        from app.services.wise.client_context import (
+            build_vendor_focus,
+            render_vendor_focus_block,
+        )
+
+        client_row = db.get(ClientModel, seed["client_id"])
+        assert client_row is not None
+        focus_ctx = build_vendor_focus(db, client_row, seed["vendor_id"])
+        assert focus_ctx is not None
+        rendered = render_vendor_focus_block(focus_ctx)
+
+        # Foreign / unknown vendor ids must resolve to None.
+        assert build_vendor_focus(db, client_row, "no-such-vendor") is None
+    finally:
+        db.close()
+
+    assert rendered.startswith("# Proveedor en pantalla")
+    # The heading of the inner workspace block is replaced by the
+    # cliente-shaped intro so the model doesn't read it as the
+    # caller's own state.
+    assert "# Estado actual del proveedor" not in rendered
+    assert "Servicios Demo SA" in rendered
+    # Named slot lines with Spanish states ride along.
+    assert "pendiente (sin subir)" in rendered
+
+
+def test_ask_endpoint_resolves_vendor_focus(api_client: TestClient) -> None:
+    """End-to-end: the dock ships only the vendor_id from the URL and
+    the endpoint resolves the name + full focus block server-side —
+    no more raw UUID under a misleading 'Documento en contexto' label."""
+    seed = _seed_client_admin(api_client)
+    token = _login(api_client, seed["email"], seed["password"])
+
+    captured: dict = {}
+
+    def _create(**kwargs):
+        captured.update(kwargs)
+        fake_block = SimpleNamespace(
+            type="tool_use",
+            name="respond_to_client",
+            input={"body": "Le faltan documentos del expediente.", "cta_id": ""},
+        )
+        return SimpleNamespace(content=[fake_block])
+
+    fake_client = SimpleNamespace(messages=SimpleNamespace(create=_create))
+
+    with (
+        patch("app.services.wise.ai.Anthropic", return_value=fake_client),
+        patch.object(settings, "ANTHROPIC_API_KEY", "test-key"),
+    ):
+        resp = api_client.post(
+            f"/api/v1/client/wise/ask?client_id={seed['client_id']}",
+            json={
+                "prompt": "¿qué le falta a este proveedor?",
+                "ctas": [],
+                "page_context": {
+                    "route": f"/client/vendors/{seed['vendor_id']}",
+                    "page_label": "Detalle de proveedor",
+                    "vendor_id": seed["vendor_id"],
+                },
+            },
+            headers=_h(token),
+        )
+    assert resp.status_code == 200, resp.text
+
+    user_content = captured["messages"][0]["content"]
+    assert "# Proveedor en pantalla" in user_content
+    assert "Proveedor en pantalla: Servicios Demo SA" in user_content
+    assert "Documento en contexto" not in user_content
+    assert "Carga en contexto" not in user_content
+
+
+def test_ask_endpoint_ignores_foreign_vendor_focus(api_client: TestClient) -> None:
+    """A vendor id from another tenant must not produce a focus block."""
+    seed = _seed_client_admin(api_client)
+    other = _seed_client_admin(
+        api_client,
+        client_name="Cliente Ajeno CW",
+        vendor_name="Proveedor Ajeno SA",
+        vendor_rfc="PAJ260512AB1",
+    )
+    token = _login(api_client, seed["email"], seed["password"])
+
+    captured: dict = {}
+
+    def _create(**kwargs):
+        captured.update(kwargs)
+        fake_block = SimpleNamespace(
+            type="tool_use",
+            name="respond_to_client",
+            input={"body": "No tengo ese dato a la mano.", "cta_id": ""},
+        )
+        return SimpleNamespace(content=[fake_block])
+
+    fake_client = SimpleNamespace(messages=SimpleNamespace(create=_create))
+
+    with (
+        patch("app.services.wise.ai.Anthropic", return_value=fake_client),
+        patch.object(settings, "ANTHROPIC_API_KEY", "test-key"),
+    ):
+        resp = api_client.post(
+            f"/api/v1/client/wise/ask?client_id={seed['client_id']}",
+            json={
+                "prompt": "¿qué le falta a este proveedor?",
+                "ctas": [],
+                "page_context": {
+                    "route": f"/client/vendors/{other['vendor_id']}",
+                    "page_label": "Detalle de proveedor",
+                    "vendor_id": other["vendor_id"],
+                },
+            },
+            headers=_h(token),
+        )
+    assert resp.status_code == 200, resp.text
+
+    user_content = captured["messages"][0]["content"]
+    assert "# Proveedor en pantalla" not in user_content
+    assert "Proveedor Ajeno SA" not in user_content

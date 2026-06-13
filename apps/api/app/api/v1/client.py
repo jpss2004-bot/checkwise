@@ -3359,9 +3359,14 @@ def ask_client_wise_endpoint(
         per_hour=settings.AI_HEAVY_RATE_LIMIT_PER_HOUR,
     )
 
+    from app.models import Report
     from app.services.wise.ai import WiseCta, WisePageContext
     from app.services.wise.client_ai import ask_wise_for_client
-    from app.services.wise.client_context import build_client_context
+    from app.services.wise.client_context import (
+        build_client_context,
+        build_vendor_focus,
+        render_vendor_focus_block,
+    )
     from app.services.wise.context import build_static_context
 
     portfolio_ctx = build_client_context(db, client_row)
@@ -3371,20 +3376,36 @@ def ask_client_wise_endpoint(
         for c in payload.ctas
     ]
     page_ctx: WisePageContext | None = None
+    focus_block: str | None = None
     if payload.page_context is not None:
-        # Reuse the portal WisePageContext shape — its optional
-        # ``submission_id``/``requirement_*`` fields are unused on the
-        # cliente surface; ``vendor_id`` rides in ``requirement_code``
-        # for now so the LLM can read it from the page block without
-        # a parallel page-block renderer. Cleaner separation is a
-        # follow-up if cliente intents grow page-aware behavior.
+        # P0 grounding (2026-06-12) — resolve the on-screen vendor /
+        # report into real names instead of the old piggyback that
+        # rendered raw UUIDs under "Documento en contexto". A vendor
+        # on screen additionally gets a full "Proveedor en pantalla"
+        # block (named slots + states + due dates) so "¿qué le falta a
+        # este proveedor?" earns a document-level answer. Both lookups
+        # are tenant-guarded; a foreign id silently resolves to None.
+        vendor_name: str | None = None
+        if payload.page_context.vendor_id:
+            focus_ctx = build_vendor_focus(
+                db, client_row, payload.page_context.vendor_id
+            )
+            if focus_ctx is not None:
+                vendor_name = focus_ctx.vendor_name
+                focus_block = render_vendor_focus_block(focus_ctx)
+        report_label: str | None = None
+        if payload.page_context.report_id:
+            report = db.get(Report, payload.page_context.report_id)
+            if report is not None and report.client_id == target_id:
+                report_label = f"{report.title} (estado: {report.status})"
         page_ctx = WisePageContext(
             route=payload.page_context.route,
             page_label=payload.page_context.page_label,
-            requirement_code=payload.page_context.vendor_id,
-            requirement_name=None,
-            submission_id=payload.page_context.report_id,
             period_key=payload.page_context.period_key,
+            vendor_id=payload.page_context.vendor_id,
+            vendor_name=vendor_name,
+            report_id=payload.page_context.report_id,
+            report_label=report_label,
         )
 
     result = ask_wise_for_client(
@@ -3393,6 +3414,7 @@ def ask_client_wise_endpoint(
         static=static_ctx,
         ctas=ctas,
         page_context=page_ctx,
+        focus_block=focus_block,
     )
     return ClientWiseAskResponse(
         body=result.body,
