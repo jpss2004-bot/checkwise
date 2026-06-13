@@ -50,6 +50,7 @@ from app.core.compliance_catalog import (
     recurring_where_to_obtain,
 )
 from app.models import ProviderWorkspace, Submission, ValidationEvent
+from app.services.dashboard_compute import due_in_days_for_period
 from app.services.evidence_slots import (
     SlotState,
     SlotView,
@@ -76,6 +77,11 @@ class WiseSlotSnapshot:
     current_submission_id: str | None
     submitted_at_iso: str | None
     reviewer_note: str | None
+    # Days until the conventional deadline for the slot's period (the
+    # same estimate the dashboard's upcoming-deadlines rail uses).
+    # Negative = overdue. None on onboarding slots, which have no
+    # period, and on unparseable period keys.
+    due_in_days: int | None = None
 
 
 @dataclass(frozen=True)
@@ -110,6 +116,7 @@ class WiseCatalogEntry:
 class WiseWorkspaceContext:
     """Per-user dynamic context. Re-built every request, NOT cached."""
 
+    today_iso: str
     vendor_name: str
     vendor_rfc: str
     persona_type: str
@@ -128,6 +135,36 @@ class WiseWorkspaceContext:
     onboarding_slots: tuple[WiseSlotSnapshot, ...]
     calendar_slots: tuple[WiseSlotSnapshot, ...]
     recent_uploads: tuple[WiseRecentUploadSnapshot, ...]
+
+
+@dataclass(frozen=True)
+class WiseDocumentFocus:
+    """The fully-resolved submission the user has on screen.
+
+    The dock ships a bare ``submission_id`` from the URL; the endpoint
+    resolves it (tenant-guarded) into this snapshot so the model knows
+    exactly which document the user is looking at — requirement,
+    period, status, filename, reviewer note, and where the upload sits
+    in its replacement lineage. Without this the prompt only carried
+    an opaque UUID the model couldn't join to anything.
+    """
+
+    submission_id: str
+    requirement_code: str
+    requirement_name: str
+    institution: str
+    period_key: str | None
+    status: str
+    status_label_es: str
+    submitted_at_iso: str | None
+    filename: str | None
+    reviewer_note: str | None
+    comments: str | None
+    # Lineage: how many prior attempts this upload replaces, and the
+    # id of the newer upload that replaced THIS one (None when this
+    # submission is still the current one for its slot).
+    prior_attempts: int
+    superseded_by_submission_id: str | None
 
 
 @dataclass(frozen=True)
@@ -166,6 +203,25 @@ _INSTITUTION_LABEL_ES: dict[str, str] = {
     "infonavit": "INFONAVIT",
     "stps_repse": "STPS / REPSE",
     "interno_cliente": "Interno / Cliente",
+}
+
+
+# Raw ``DocumentStatus`` values (what ``Submission.status`` stores),
+# distinct from the coarser ``SlotState`` map above. Used by the
+# document-focus block, which describes one concrete upload rather
+# than a slot.
+_DOCUMENT_STATUS_LABEL_ES: dict[str, str] = {
+    "pendiente": "pendiente (sin revisar)",
+    "recibido": "recibido (en cola de revisión)",
+    "pendiente_revision": "en revisión legal",
+    "prevalidado": "prevalidado (revisión en curso)",
+    "posible_mismatch": "posible inconsistencia detectada",
+    "aprobado": "aprobado",
+    "rechazado": "rechazado",
+    "vencido": "vencido",
+    "no_aplica": "no aplica",
+    "requiere_aclaracion": "requiere aclaración del proveedor",
+    "excepcion_legal": "excepción legal aprobada",
 }
 
 
@@ -209,7 +265,7 @@ def build_workspace_context(
         for view in onboarding_slots
     )
     calendar_snapshots = tuple(
-        _slot_to_snapshot(view, "calendar", notes_by_submission)
+        _slot_to_snapshot(view, "calendar", notes_by_submission, today=today)
         for view in calendar_slots
     )
 
@@ -225,6 +281,7 @@ def build_workspace_context(
     )
 
     return WiseWorkspaceContext(
+        today_iso=today.isoformat(),
         vendor_name=workspace.display_name or "",
         vendor_rfc=workspace.vendor.rfc if workspace.vendor else "",
         persona_type=persona,
@@ -286,6 +343,85 @@ def build_static_context(
     )
 
 
+def build_document_focus(
+    db: Session,
+    workspace: ProviderWorkspace,
+    submission_id: str,
+) -> WiseDocumentFocus | None:
+    """Resolve the on-screen submission into a grounded snapshot.
+
+    Tenant-guarded: the submission must belong to the workspace's
+    client + vendor pair, otherwise (or when the id doesn't exist)
+    returns None and the caller simply omits the focus block — a
+    stale or hand-edited URL must never leak another tenant's data
+    into the prompt.
+    """
+    submission = db.get(Submission, submission_id)
+    if (
+        submission is None
+        or submission.client_id != workspace.client_id
+        or submission.vendor_id != workspace.vendor_id
+    ):
+        return None
+
+    requirement_name = ""
+    institution_code = ""
+    if submission.requirement is not None:
+        requirement_name = submission.requirement.name
+        institution_code = (
+            submission.requirement.institution.code
+            if submission.requirement.institution is not None
+            else ""
+        )
+
+    filename = None
+    if submission.documents:
+        latest_doc = sorted(
+            submission.documents, key=lambda d: d.created_at, reverse=True
+        )[0]
+        filename = latest_doc.original_filename
+
+    # Walk the lineage backwards to count prior attempts. Defensive
+    # cycle guard mirrors the evidence-slot engine's chain walk.
+    prior_attempts = 0
+    seen: set[str] = {submission.id}
+    cursor = submission
+    while cursor.supersedes_submission_id:
+        if cursor.supersedes_submission_id in seen:
+            break
+        seen.add(cursor.supersedes_submission_id)
+        prior = db.get(Submission, cursor.supersedes_submission_id)
+        if prior is None:
+            break
+        prior_attempts += 1
+        cursor = prior
+
+    superseded_by = db.scalar(
+        select(Submission.id)
+        .where(Submission.supersedes_submission_id == submission.id)
+        .order_by(Submission.created_at.desc())
+        .limit(1)
+    )
+
+    notes = _load_reviewer_notes(db, [submission.id])
+    status_value = submission.status or ""
+    return WiseDocumentFocus(
+        submission_id=submission.id,
+        requirement_code=submission.requirement_code or "",
+        requirement_name=requirement_name or submission.requirement_code or "—",
+        institution=institution_code,
+        period_key=submission.period_key,
+        status=status_value,
+        status_label_es=_DOCUMENT_STATUS_LABEL_ES.get(status_value, status_value),
+        submitted_at_iso=_iso(submission.created_at) if submission.created_at else None,
+        filename=filename,
+        reviewer_note=notes.get(submission.id),
+        comments=(submission.comments or "").strip() or None,
+        prior_attempts=prior_attempts,
+        superseded_by_submission_id=superseded_by,
+    )
+
+
 # ───────────────────────────────────────────────────────────────────
 # Prompt rendering
 # ───────────────────────────────────────────────────────────────────
@@ -330,11 +466,59 @@ def render_static_block(ctx: WiseStaticContext) -> str:
     return "\n".join(parts).strip()
 
 
+def render_document_focus(focus: WiseDocumentFocus) -> str:
+    """Render the on-screen submission as a prompt block.
+
+    This is what lets Wise answer "¿qué pasa con este documento?"
+    without the user re-stating which upload they're looking at.
+    """
+    institution = _INSTITUTION_LABEL_ES.get(
+        focus.institution, focus.institution.upper() if focus.institution else "—"
+    )
+    lines = [
+        "# Documento en pantalla",
+        "",
+        (
+            "El proveedor tiene abierta la página de detalle de ESTA carga. "
+            "Si pregunta por \"este documento\", \"esta carga\" o similar, se "
+            "refiere a esto:"
+        ),
+        "",
+        f"- Documento: {focus.requirement_name} (código `{focus.requirement_code}`)"
+        if focus.requirement_code
+        else f"- Documento: {focus.requirement_name}",
+        f"- Institución: {institution}",
+    ]
+    if focus.period_key:
+        lines.append(f"- Periodo: {focus.period_key}")
+    lines.append(f"- Estado: {focus.status_label_es}")
+    if focus.submitted_at_iso:
+        lines.append(f"- Subido el: {focus.submitted_at_iso[:10]}")
+    if focus.filename:
+        lines.append(f"- Archivo: {focus.filename}")
+    if focus.reviewer_note:
+        lines.append(f"- Observación del revisor: \"{focus.reviewer_note}\"")
+    if focus.comments:
+        lines.append(f"- Comentario del proveedor al subirlo: \"{focus.comments}\"")
+    if focus.prior_attempts:
+        lines.append(
+            f"- Historial: reemplaza {focus.prior_attempts} "
+            f"{'intento anterior' if focus.prior_attempts == 1 else 'intentos anteriores'}"
+        )
+    if focus.superseded_by_submission_id:
+        lines.append(
+            "- OJO: esta carga ya fue reemplazada por una más reciente; "
+            "el estado vigente del slot es el de la carga nueva."
+        )
+    return "\n".join(lines)
+
+
 def render_workspace_block(ctx: WiseWorkspaceContext) -> str:
     """Render the per-request dynamic block."""
     lines = [
         "# Estado actual del proveedor",
         "",
+        f"- Fecha de hoy: {ctx.today_iso}",
         f"- Razón social: {ctx.vendor_name}",
         f"- RFC: {ctx.vendor_rfc}",
         f"- Persona: {'moral' if ctx.persona_type == 'moral' else 'física'}",
@@ -410,6 +594,8 @@ def _slot_to_snapshot(
     view: SlotView,
     kind: str,
     notes_by_submission: dict[str, str],
+    *,
+    today: date | None = None,
 ) -> WiseSlotSnapshot:
     state_value = view.state.value
     return WiseSlotSnapshot(
@@ -427,6 +613,11 @@ def _slot_to_snapshot(
             if view.current_submission_id
             else None
         ),
+        due_in_days=(
+            due_in_days_for_period(view.period_key, today)
+            if today is not None
+            else None
+        ),
     )
 
 
@@ -435,12 +626,37 @@ def _render_slot_line(slot: WiseSlotSnapshot) -> str:
         slot.institution, slot.institution.upper() if slot.institution else "—"
     )
     period = f" (periodo {slot.period_key})" if slot.period_key else ""
+    # Surface the deadline only while it's actionable: open slots that
+    # are due soon or overdue. Approved/exception slots don't need it
+    # and it would only add noise to the block.
+    due = ""
+    if slot.due_in_days is not None and slot.state in (
+        SlotState.MISSING.value,
+        SlotState.UPLOADED.value,
+        SlotState.IN_REVIEW.value,
+        SlotState.REJECTED.value,
+        SlotState.NEEDS_CORRECTION.value,
+        SlotState.POSSIBLE_MISMATCH.value,
+        SlotState.EXPIRED.value,
+    ):
+        due = f" — {_human_due_es(slot.due_in_days)}"
     note = (
         f" — nota del revisor: \"{slot.reviewer_note}\""
         if slot.reviewer_note
         else ""
     )
-    return f"- {institution} · {slot.requirement_name}{period} → {slot.state_label_es}{note}"
+    return f"- {institution} · {slot.requirement_name}{period} → {slot.state_label_es}{due}{note}"
+
+
+def _human_due_es(days: int) -> str:
+    if days < 0:
+        plural = "día" if days == -1 else "días"
+        return f"venció hace {abs(days)} {plural}"
+    if days == 0:
+        return "vence hoy"
+    if days == 1:
+        return "vence mañana"
+    return f"vence en {days} días"
 
 
 def _bucket_counts(

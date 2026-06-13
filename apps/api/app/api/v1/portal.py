@@ -4111,6 +4111,7 @@ def ask_wise_endpoint(
 
     from app.services.wise.ai import WiseCta, WisePageContext, ask_wise
     from app.services.wise.context import (
+        build_document_focus,
         build_static_context,
         build_workspace_context,
     )
@@ -4127,6 +4128,7 @@ def ask_wise_endpoint(
         for c in payload.ctas
     ]
     page_ctx: WisePageContext | None = None
+    document_focus = None
     if payload.page_context is not None:
         page_ctx = WisePageContext(
             route=payload.page_context.route,
@@ -4136,12 +4138,24 @@ def ask_wise_endpoint(
             submission_id=payload.page_context.submission_id,
             period_key=payload.page_context.period_key,
         )
+        # P0 grounding (2026-06-12) — resolve the on-screen submission
+        # into a full "Documento en pantalla" block. Before this, the
+        # prompt carried only the raw UUID, which the model couldn't
+        # join to anything, so on the submission-detail page Wise
+        # didn't actually know which document the user meant. Tenant
+        # guard lives inside the builder; a foreign or unknown id
+        # silently yields no focus block.
+        if payload.page_context.submission_id:
+            document_focus = build_document_focus(
+                db, workspace, payload.page_context.submission_id
+            )
     result = ask_wise(
         prompt=payload.prompt,
         workspace=workspace_ctx,
         static=static_ctx,
         ctas=ctas,
         page_context=page_ctx,
+        document_focus=document_focus,
     )
     return WiseAskResponse(
         body=result.body,

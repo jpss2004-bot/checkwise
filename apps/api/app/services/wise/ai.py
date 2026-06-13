@@ -37,8 +37,10 @@ from anthropic import Anthropic, APIError
 
 from app.core.config import settings
 from app.services.wise.context import (
+    WiseDocumentFocus,
     WiseStaticContext,
     WiseWorkspaceContext,
+    render_document_focus,
     render_static_block,
     render_workspace_block,
 )
@@ -133,6 +135,16 @@ class WisePageContext:
     requirement_name: str | None = None
     submission_id: str | None = None
     period_key: str | None = None
+    # Cliente-surface context (P0 grounding, 2026-06-12). Previously
+    # the cliente endpoint smuggled vendor_id through
+    # ``requirement_code`` and report_id through ``submission_id``,
+    # which rendered raw UUIDs under misleading labels ("Documento en
+    # contexto: <vendor uuid>"). These dedicated fields render under
+    # honest labels; the endpoint resolves the human-readable names.
+    vendor_id: str | None = None
+    vendor_name: str | None = None
+    report_id: str | None = None
+    report_label: str | None = None
 
 
 @dataclass(frozen=True)
@@ -155,6 +167,8 @@ Estilo obligatorio:
 - **NUNCA escribas rutas literales como "/portal/onboarding" o "/portal/calendar" en el cuerpo de la respuesta.** Cuando quieras mandar al usuario a una pantalla, atacha SIEMPRE el ``cta_id`` correspondiente del listado de CTAs y describe la pantalla por su nombre legible (e.g. "tu expediente inicial", "el calendario REPSE"). El dock renderiza un botón clickeable a partir del ``cta_id``; el usuario no debe nunca tener que copiar/pegar una URL.
 - Si la respuesta no se beneficia de un CTA, déjalo vacío. Si más de un CTA aplica, elige el más útil para la siguiente acción del usuario.
 - Sé consciente del contexto de página: si el bloque "Página actual del usuario" indica que ya está en la pantalla a la que llevarías, no atachés ese mismo CTA — responde sobre lo que hay frente al usuario.
+- Si hay un bloque "Documento en pantalla", el proveedor está viendo ESA carga en este momento. Cuando diga "este documento", "esta carga", "esto" o pregunte sin nombrar un documento, asume que habla de ese documento y responde con sus datos (estado, observación del revisor, periodo). No le pidas que aclare cuál documento.
+- El bloque "Estado actual del proveedor" incluye la fecha de hoy y los vencimientos por obligación — usa esos datos para responder "¿cuándo vence…?" con fechas concretas; nunca calcules fechas de memoria.
 - Nunca inventes datos del usuario (números, fechas, RFCs, archivos) ni ``cta_id`` que no aparezcan en el listado. Si el dato no está disponible, dilo: "no tengo ese dato a la mano".
 - Si la pregunta es ajena al cumplimiento REPSE o a CheckWise (chistes, política, IA general), responde brevemente que tu rol es ayudar con el cumplimiento y sugiere reformular.
 
@@ -186,6 +200,12 @@ def _build_page_block(ctx: WisePageContext) -> str:
         lines.append(f"- Periodo en contexto: {ctx.period_key}")
     if ctx.submission_id:
         lines.append(f"- Carga en contexto: `{ctx.submission_id}`")
+    if ctx.vendor_id or ctx.vendor_name:
+        descriptor = ctx.vendor_name or f"`{ctx.vendor_id}`"
+        lines.append(f"- Proveedor en pantalla: {descriptor}")
+    if ctx.report_id or ctx.report_label:
+        descriptor = ctx.report_label or f"`{ctx.report_id}`"
+        lines.append(f"- Reporte en pantalla: {descriptor}")
     return "\n".join(lines)
 
 
@@ -236,6 +256,7 @@ def ask_wise(
     static: WiseStaticContext,
     ctas: list[WiseCta],
     page_context: WisePageContext | None = None,
+    document_focus: WiseDocumentFocus | None = None,
     api_key: str | None = None,
     client: Anthropic | None = None,
 ) -> WiseAskResult:
@@ -291,8 +312,12 @@ def ask_wise(
     page_block = (
         _build_page_block(page_context) + "\n\n" if page_context else ""
     )
+    focus_block = (
+        render_document_focus(document_focus) + "\n\n" if document_focus else ""
+    )
     user_message = (
         f"{page_block}"
+        f"{focus_block}"
         f"{render_workspace_block(workspace)}\n\n"
         f"{_build_cta_block(merged_ctas)}\n\n"
         f"# Pregunta del proveedor\n{prompt.strip()}"

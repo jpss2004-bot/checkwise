@@ -682,3 +682,296 @@ def test_ask_endpoint_accepts_page_context(api_client: TestClient) -> None:
     user_content = captured["messages"][0]["content"]
     assert "/portal/calendar" in user_content
     assert "Calendario REPSE" in user_content
+
+
+# ─── P0 grounding tests (2026-06-12) ────────────────────────────────
+#
+# Cover the document-focus resolution ("Documento en pantalla"), the
+# today's-date line, and the per-slot due dates added so Wise actually
+# knows which document the user is looking at and can answer deadline
+# questions with concrete dates.
+
+
+def _seed_submission(
+    api_client: TestClient,
+    ws: dict,
+    *,
+    status: str = "rechazado",
+    reviewer_note: str | None = "Falta la segunda página del acuse.",
+) -> str:
+    """Seed Institution → Requirement → Period → Submission → Document
+    (+ optional reviewer note) against the workspace's client/vendor
+    pair. Returns the submission id."""
+    from sqlalchemy import select as sa_select
+
+    from app.models import (
+        Document,
+        Institution,
+        Period,
+        Requirement,
+        RequirementVersion,
+        Submission,
+        ValidationEvent,
+    )
+
+    factory = api_client.app.state.testing_session  # type: ignore[attr-defined]
+    db: Session = factory()
+    try:
+        workspace = db.get(ProviderWorkspace, ws["workspace_id"])
+        assert workspace is not None
+        institution = db.scalar(
+            sa_select(Institution).where(Institution.code == "imss")
+        )
+        if institution is None:
+            institution = Institution(code="imss", name="IMSS")
+            db.add(institution)
+            db.flush()
+        requirement = db.scalar(
+            sa_select(Requirement).where(Requirement.code == "wise:test:opinion-imss")
+        )
+        if requirement is None:
+            requirement = Requirement(
+                code="wise:test:opinion-imss",
+                name="Opinión de cumplimiento IMSS",
+                institution_id=institution.id,
+                load_type="mensual",
+                frequency="mensual",
+                risk_level="medium",
+                current_version=1,
+            )
+            db.add(requirement)
+            db.flush()
+        req_version = db.scalar(
+            sa_select(RequirementVersion).where(
+                RequirementVersion.requirement_id == requirement.id
+            )
+        )
+        if req_version is None:
+            req_version = RequirementVersion(requirement_id=requirement.id, version=1)
+            db.add(req_version)
+            db.flush()
+        period = db.scalar(sa_select(Period).where(Period.code == "2026-M05"))
+        if period is None:
+            period = Period(
+                code="2026-M05",
+                year=2026,
+                period_type="mensual",
+                period_key="2026-M05",
+            )
+            db.add(period)
+            db.flush()
+        submission = Submission(
+            client_id=workspace.client_id,
+            vendor_id=workspace.vendor_id,
+            institution_id=institution.id,
+            requirement_id=requirement.id,
+            requirement_version_id=req_version.id,
+            period_id=period.id,
+            status=status,
+            load_type="mensual",
+            requirement_code=requirement.code,
+            period_key="2026-M05",
+        )
+        db.add(submission)
+        db.flush()
+        db.add(
+            Document(
+                submission_id=submission.id,
+                storage_key=f"local://wise/{submission.id}.pdf",
+                original_filename="opinion-imss-mayo.pdf",
+                mime_type="application/pdf",
+                size_bytes=1024,
+                sha256="a" * 64,
+                status=status,
+            )
+        )
+        if reviewer_note:
+            db.add(
+                ValidationEvent(
+                    submission_id=submission.id,
+                    event_type="reviewer_decision",
+                    result="rejected",
+                    severity="warning",
+                    message=reviewer_note,
+                )
+            )
+        db.commit()
+        return submission.id
+    finally:
+        db.close()
+
+
+def test_workspace_block_includes_today_and_due_dates(
+    api_client: TestClient,
+) -> None:
+    """The dynamic block must anchor the model in time: today's date
+    plus a per-slot deadline estimate, so "¿cuándo vence…?" gets a
+    concrete answer instead of a guess from training data."""
+    ws = _setup_workspace(api_client)
+    factory = api_client.app.state.testing_session  # type: ignore[attr-defined]
+    db: Session = factory()
+    try:
+        workspace = db.get(ProviderWorkspace, ws["workspace_id"])
+        assert workspace is not None
+        ctx = build_workspace_context(db, workspace)
+    finally:
+        db.close()
+
+    from datetime import date as _date
+
+    assert ctx.today_iso == _date.today().isoformat()
+    # Brand-new workspace: every required calendar slot is MISSING, so
+    # at least one carries a parseable due estimate.
+    assert any(s.due_in_days is not None for s in ctx.calendar_slots)
+
+    rendered = render_workspace_block(ctx)
+    assert f"Fecha de hoy: {ctx.today_iso}" in rendered
+    assert ("vence" in rendered) or ("venció" in rendered)
+
+
+def test_build_document_focus_resolves_submission(api_client: TestClient) -> None:
+    """The opaque submission_id from the URL must resolve into a full
+    snapshot — requirement, period, Spanish status, filename, and the
+    reviewer's literal note."""
+    from app.services.wise.context import build_document_focus
+
+    ws = _setup_workspace(api_client)
+    submission_id = _seed_submission(api_client, ws)
+
+    factory = api_client.app.state.testing_session  # type: ignore[attr-defined]
+    db: Session = factory()
+    try:
+        workspace = db.get(ProviderWorkspace, ws["workspace_id"])
+        assert workspace is not None
+        focus = build_document_focus(db, workspace, submission_id)
+    finally:
+        db.close()
+
+    assert focus is not None
+    assert focus.requirement_name == "Opinión de cumplimiento IMSS"
+    assert focus.period_key == "2026-M05"
+    assert focus.status_label_es == "rechazado"
+    assert focus.filename == "opinion-imss-mayo.pdf"
+    assert focus.reviewer_note == "Falta la segunda página del acuse."
+    assert focus.prior_attempts == 0
+    assert focus.superseded_by_submission_id is None
+
+
+def test_build_document_focus_rejects_foreign_submission(
+    api_client: TestClient,
+) -> None:
+    """A submission belonging to another tenant must resolve to None —
+    a hand-edited URL can never leak foreign data into the prompt."""
+    from app.services.wise.context import build_document_focus
+
+    ws_a = _setup_workspace(api_client)
+    ws_b = _setup_workspace(
+        api_client,
+        vendor_name="Otro Proveedor SA",
+        vendor_rfc="OTR260512AB1",
+        client_name="Cliente Ajeno Demo",
+    )
+    foreign_submission_id = _seed_submission(api_client, ws_b)
+
+    factory = api_client.app.state.testing_session  # type: ignore[attr-defined]
+    db: Session = factory()
+    try:
+        workspace_a = db.get(ProviderWorkspace, ws_a["workspace_id"])
+        assert workspace_a is not None
+        focus = build_document_focus(db, workspace_a, foreign_submission_id)
+        missing = build_document_focus(db, workspace_a, "no-such-id")
+    finally:
+        db.close()
+
+    assert focus is None
+    assert missing is None
+
+
+def test_service_renders_document_focus_block(api_client: TestClient) -> None:
+    """When a document focus is passed, the prompt must carry the
+    'Documento en pantalla' block with the resolved details so the
+    model knows exactly which upload the user means by "esto"."""
+    from app.services.wise.context import build_document_focus
+
+    ws = _setup_workspace(api_client)
+    submission_id = _seed_submission(api_client, ws)
+
+    factory = api_client.app.state.testing_session  # type: ignore[attr-defined]
+    db: Session = factory()
+    try:
+        workspace = db.get(ProviderWorkspace, ws["workspace_id"])
+        assert workspace is not None
+        workspace_ctx = build_workspace_context(db, workspace)
+        focus = build_document_focus(db, workspace, submission_id)
+    finally:
+        db.close()
+    assert focus is not None
+
+    static_ctx = build_static_context()
+    captured: dict = {}
+
+    class FakeClient:
+        def __init__(self) -> None:
+            def create(**kwargs):
+                captured.update(kwargs)
+                return _stub_anthropic(body="OK", cta_id=None)
+
+            self.messages = SimpleNamespace(create=create)
+
+    ask_wise(
+        prompt="¿qué pasa con este documento?",
+        workspace=workspace_ctx,
+        static=static_ctx,
+        ctas=[],
+        page_context=WisePageContext(
+            route=f"/portal/submissions/{submission_id}",
+            page_label="Detalle de carga",
+            submission_id=submission_id,
+        ),
+        document_focus=focus,
+        client=FakeClient(),  # type: ignore[arg-type]
+    )
+    user_content = captured["messages"][0]["content"]
+    assert "Documento en pantalla" in user_content
+    assert "Opinión de cumplimiento IMSS" in user_content
+    assert "rechazado" in user_content
+    assert "opinion-imss-mayo.pdf" in user_content
+    assert "Falta la segunda página del acuse." in user_content
+
+
+def test_ask_endpoint_resolves_submission_focus(api_client: TestClient) -> None:
+    """End-to-end: the dock ships only the submission_id and the
+    endpoint resolves it into the focus block server-side."""
+    ws = _setup_workspace(api_client)
+    submission_id = _seed_submission(api_client, ws)
+
+    captured: dict = {}
+
+    class FakeClient:
+        def __init__(self, **_: object) -> None:
+            def create(**kwargs):
+                captured.update(kwargs)
+                return _stub_anthropic(body="OK", cta_id=None)
+
+            self.messages = SimpleNamespace(create=create)
+
+    with patch("app.services.wise.ai.Anthropic", FakeClient), patch.object(
+        settings, "ANTHROPIC_API_KEY", "test-key"
+    ):
+        response = api_client.post(
+            f"/api/v1/portal/workspaces/{ws['workspace_id']}/wise/ask",
+            json={
+                "prompt": "¿por qué rechazaron esto?",
+                "ctas": [],
+                "page_context": {
+                    "route": f"/portal/submissions/{submission_id}",
+                    "page_label": "Detalle de carga",
+                    "submission_id": submission_id,
+                },
+            },
+        )
+    assert response.status_code == 200, response.text
+    user_content = captured["messages"][0]["content"]
+    assert "Documento en pantalla" in user_content
+    assert "Opinión de cumplimiento IMSS" in user_content
+    assert "opinion-imss-mayo.pdf" in user_content
