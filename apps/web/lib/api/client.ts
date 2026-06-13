@@ -943,6 +943,13 @@ export type ClientWiseAskResponse = {
   source: "llm" | "fallback";
 };
 
+/** P1 (2026-06-12) — one prior cliente dock turn, shipped so the LLM
+ *  can resolve follow-up questions across the portfolio conversation. */
+export type ClientWiseHistoryTurn = {
+  role: "user" | "assistant";
+  content: string;
+};
+
 export type ClientWiseEventType =
   | "wise.first_render"
   | "wise.opened"
@@ -958,6 +965,7 @@ export async function postClientWiseAsk(
   ctas: ClientWiseAskCta[],
   pageContext?: ClientWisePageContext,
   params?: { client_id?: string },
+  history?: ClientWiseHistoryTurn[],
 ): Promise<ClientWiseAskResponse> {
   return fetchJson<ClientWiseAskResponse>(
     `/api/v1/client/wise/ask${qs(params)}`,
@@ -968,6 +976,7 @@ export async function postClientWiseAsk(
         prompt,
         ctas,
         page_context: pageContext ?? null,
+        history: history ?? [],
       }),
     },
   );

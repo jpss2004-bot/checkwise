@@ -11,6 +11,7 @@ import {
   postClientWiseAsk,
   postClientWiseEvent,
   type ClientWiseAskCta,
+  type ClientWiseHistoryTurn,
   type ClientWisePageContext,
 } from "@/lib/api/client";
 import {
@@ -119,6 +120,10 @@ export function ClientWiseDock({ className }: ClientWiseDockProps) {
         { client_id: clientId },
       );
 
+      // Capture the conversation so far (before the new turns land) so
+      // the model can resolve follow-ups like "¿y ese proveedor?".
+      const history = clientTurnsToHistory(turns);
+
       // Pending bubble so the dock feels responsive while Haiku replies.
       const placeholderId = `wise-pending-${userTurnId}`;
       const placeholder: ChatTurn = {
@@ -134,7 +139,7 @@ export function ClientWiseDock({ className }: ClientWiseDockProps) {
       // a per-page assembler the cliente shell doesn't have yet.
       const ctas: ClientWiseAskCta[] = [];
 
-      postClientWiseAsk(trimmed, ctas, pageContext, { client_id: clientId })
+      postClientWiseAsk(trimmed, ctas, pageContext, { client_id: clientId }, history)
         .then((response) => {
           setTurns((prev) =>
             prev.map((turn) =>
@@ -166,7 +171,7 @@ export function ClientWiseDock({ className }: ClientWiseDockProps) {
           );
         });
     },
-    [clientId, pageContext],
+    [clientId, pageContext, turns],
   );
 
   return (
@@ -213,6 +218,34 @@ export function ClientWiseDock({ className }: ClientWiseDockProps) {
       )}
     />
   );
+}
+
+// ─── Helpers: conversation history for the LLM ────────────────────
+
+/** Trailing turns shipped to ``/client/wise/ask``; backend caps at 12. */
+const CLIENT_WISE_HISTORY_LIMIT = 8;
+
+/**
+ * Map the cliente dock's ``turns`` into ``{role, content}`` history,
+ * keeping the most recent ``CLIENT_WISE_HISTORY_LIMIT``. Skips the
+ * transient "Pensando…" placeholder; the backend drops leading
+ * assistant turns (the seeded greeting) so the Anthropic messages array
+ * always starts with a user turn.
+ */
+function clientTurnsToHistory(turns: ChatTurn[]): ClientWiseHistoryTurn[] {
+  const mapped: ClientWiseHistoryTurn[] = [];
+  for (const turn of turns) {
+    if (turn.kind === "user") {
+      const content = turn.text.trim();
+      if (content) mapped.push({ role: "user", content });
+    } else {
+      const body = (turn.body ?? "").trim();
+      if (body && body !== "Pensando…") {
+        mapped.push({ role: "assistant", content: body });
+      }
+    }
+  }
+  return mapped.slice(-CLIENT_WISE_HISTORY_LIMIT);
 }
 
 // ─── Body ──────────────────────────────────────────────────────────

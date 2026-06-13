@@ -991,6 +991,14 @@ export type WiseAskResponse = {
   source: "llm" | "fallback";
 };
 
+/** P1 (2026-06-12) — one prior dock turn, shipped so the LLM can
+ *  resolve follow-up questions ("¿y dónde la descargo?"). Mirrors the
+ *  backend ``WiseHistoryTurnIn`` schema. */
+export type WiseHistoryTurn = {
+  role: "user" | "assistant";
+  content: string;
+};
+
 /**
  * Ask Wise — LLM-backed free-text reply for the copilot dock.
  *
@@ -1009,6 +1017,7 @@ export async function postWiseAsk(
   prompt: string,
   ctas: WiseAskCta[],
   page_context?: WisePageContext,
+  history?: WiseHistoryTurn[],
 ): Promise<WiseAskResponse> {
   return await fetchJson<WiseAskResponse>(
     `/api/v1/portal/workspaces/${session.workspace_id}/wise/ask`,
@@ -1018,6 +1027,7 @@ export async function postWiseAsk(
         prompt,
         ctas,
         ...(page_context ? { page_context } : {}),
+        ...(history && history.length > 0 ? { history } : {}),
       }),
     },
     session,

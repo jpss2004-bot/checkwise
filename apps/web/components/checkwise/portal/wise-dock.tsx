@@ -21,6 +21,7 @@ import {
   type DashboardPayload,
   type OnboardingSummary,
   type WiseAskCta,
+  type WiseHistoryTurn,
   type WisePageContext,
 } from "@/lib/api/portal";
 import type { PortalSession } from "@/lib/session/portal";
@@ -195,10 +196,19 @@ export function WiseDock({
 
   // Seed the conversation with the initial wise messages so the
   // chat-style scrollback shows the welcome + suggestions first.
-  // Re-seeds when the upstream messages array changes (e.g. a
-  // dashboard refetch surfaces a new action).
+  //
+  // P1 fix (2026-06-12): only seed while the conversation is still
+  // pristine. Previously this re-ran on every ``messages`` identity
+  // change — so a late dashboard/onboarding lazy-fetch landing
+  // mid-chat would wipe the user's conversation and replace it with
+  // the welcome bubbles. Guarding on "has the user said anything yet"
+  // keeps the welcome fresh as data loads but never erases an active
+  // chat.
   React.useEffect(() => {
-    setTurns(messages.map((message) => ({ kind: "wise", message })));
+    setTurns((prev) => {
+      if (prev.some((turn) => turn.kind === "user")) return prev;
+      return messages.map((message) => ({ kind: "wise", message }));
+    });
   }, [messages]);
 
   // Auto-scroll to the bottom whenever a new turn lands so the most
@@ -210,15 +220,21 @@ export function WiseDock({
   }, [turns]);
 
   // Submit a prompt through the hybrid pipeline:
-  //   1. Classify the intent locally. Known intents
-  //      (next_action, deadline, rejection, status, help) reply
-  //      synchronously from the deterministic answerIntent — instant,
-  //      free, on-brand.
-  //   2. ``unknown`` intents fall back to the LLM-backed
-  //      /portal/wise/ask endpoint. We push a placeholder "pensando…"
-  //      bubble first so the dock feels responsive, then swap it in
-  //      place when the reply arrives. Network/auth errors degrade
-  //      to a deterministic apology bubble so the dock never freezes.
+  //   1. Exact quick-chip clicks (the canned questions above the input)
+  //      reply synchronously from the deterministic ``answerIntent`` —
+  //      instant, free, on-brand.
+  //   2. EVERYTHING ELSE — all free text — goes to the LLM-backed
+  //      /portal/wise/ask endpoint, which has the same state the canned
+  //      answers use PLUS the page context and the conversation history.
+  //
+  // P1 change (2026-06-12): the keyword router used to intercept any
+  // free-text prompt that merely *contained* a trigger word ("por qué",
+  // "cuándo", "ahora", "estoy") and answer it with a canned reply that
+  // ignored the rest of the sentence — e.g. "¿Por qué necesito la
+  // opinión del SAT?" got "No tienes documentos rechazados". We now only
+  // short-circuit on an exact match to a quick-chip prompt; real
+  // questions reach the model. ``classifyIntent`` is kept solely for
+  // the analytics label.
   const submitPrompt = React.useCallback(
     (prompt: string) => {
       const trimmed = prompt.trim();
@@ -226,14 +242,18 @@ export function WiseDock({
       const userTurnId = `user-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
       const userTurn: ChatTurn = { kind: "user", id: userTurnId, text: trimmed };
       const intent = classifyIntent(trimmed);
+      const isQuickQuestion = WISE_QUICK_QUESTIONS.some(
+        (q) => q.prompt === trimmed,
+      );
 
       void postWiseEvent(session, "wise.question_asked", {
         audience,
         intent,
         prompt: trimmed.slice(0, 200),
+        source: isQuickQuestion ? "chip" : "freetext",
       });
 
-      if (intent !== "unknown" && dashboardState) {
+      if (isQuickQuestion && intent !== "unknown" && dashboardState) {
         const reply = answerIntent({
           intent,
           session,
@@ -248,11 +268,12 @@ export function WiseDock({
         return;
       }
 
-      // Unknown intent OR dashboard not yet loaded → LLM fallback.
-      // Show a placeholder while we wait. The backend assembles the
-      // full workspace + catalog context from the DB, and we ship
-      // the page context so the model knows what screen the user is
-      // on and what specific task they're in the middle of.
+      // Free text (or a quick chip fired before the dashboard loaded)
+      // → LLM. Show a placeholder while we wait. The backend assembles
+      // the full workspace + catalog context from the DB; we ship the
+      // page context (what screen / document is on the user) and the
+      // recent conversation so follow-ups resolve.
+      const history = turnsToHistory(turns);
       const placeholderId = `wise-pending-${userTurnId}`;
       const placeholder: ChatTurn = {
         kind: "wise",
@@ -265,7 +286,7 @@ export function WiseDock({
       setTurns((prev) => [...prev, userTurn, placeholder]);
 
       const ctas = dashboardState ? buildAllowedCtas(dashboardState) : [];
-      postWiseAsk(session, trimmed, ctas, pageContext)
+      postWiseAsk(session, trimmed, ctas, pageContext, history)
         .then((response) => {
           setTurns((prev) =>
             prev.map((turn) =>
@@ -301,7 +322,7 @@ export function WiseDock({
           );
         });
     },
-    [audience, dashboardState, onboardingState, pageContext, session],
+    [audience, dashboardState, onboardingState, pageContext, session, turns],
   );
 
   const hasWarning = messages.some((m) => m.tone === "warning");
@@ -532,6 +553,39 @@ function DockComposer({
       </form>
     </footer>
   );
+}
+
+// ─── Helpers: conversation history for the LLM ────────────────────
+
+/** Number of trailing turns shipped to ``/wise/ask`` for follow-up
+ *  resolution. Keeps the request small; the backend caps at 12. */
+const WISE_HISTORY_LIMIT = 8;
+
+/**
+ * Map the dock's ``turns`` into the ``{role, content}`` history the
+ * backend expects, keeping only the most recent ``WISE_HISTORY_LIMIT``.
+ *
+ * Both deterministic (quick-chip) and LLM replies are included so a
+ * follow-up after a canned answer still has context. The transient
+ * "Pensando…" placeholder is skipped — it carries no real content. The
+ * backend drops any leading assistant turns (the seeded welcome
+ * bubbles) so the Anthropic messages array always starts with a user
+ * turn.
+ */
+function turnsToHistory(turns: ChatTurn[]): WiseHistoryTurn[] {
+  const mapped: WiseHistoryTurn[] = [];
+  for (const turn of turns) {
+    if (turn.kind === "user") {
+      const content = turn.text.trim();
+      if (content) mapped.push({ role: "user", content });
+    } else {
+      const body = (turn.message.body ?? "").trim();
+      if (body && body !== "Pensando…") {
+        mapped.push({ role: "assistant", content: body });
+      }
+    }
+  }
+  return mapped.slice(-WISE_HISTORY_LIMIT);
 }
 
 // ─── Helpers: allowed CTAs for the LLM ────────────────────────────
