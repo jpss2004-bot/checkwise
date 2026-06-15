@@ -63,6 +63,36 @@ const nextConfig: NextConfig = {
     NEXT_PUBLIC_APP_VERSION: appVersion,
     NEXT_PUBLIC_GIT_SHA: gitSha,
   },
+  // FE-PERF-2 — @phosphor-icons/react is imported via its barrel in 130+
+  // files. Without this, Next pulls a large icon-module graph into dev
+  // compilation and can ship unused icons. optimizePackageImports rewrites
+  // the barrel imports to per-icon deep imports automatically (no code
+  // change), shrinking route bundles and speeding dev refresh.
+  experimental: {
+    optimizePackageImports: ["@phosphor-icons/react"],
+  },
+  // FE-SEC-5 — baseline security headers on every frontend response. The
+  // API (Render) sets its own headers; these protect the user-facing app
+  // (Vercel). A full Content-Security-Policy is the recommended next step
+  // (roll out as Content-Security-Policy-Report-Only first to tune the
+  // script/style/connect origins against the live app), tracked in the
+  // audit report — these five are the zero-risk subset.
+  async headers() {
+    const securityHeaders = [
+      { key: "X-Content-Type-Options", value: "nosniff" },
+      { key: "X-Frame-Options", value: "DENY" },
+      { key: "Referrer-Policy", value: "strict-origin-when-cross-origin" },
+      {
+        key: "Permissions-Policy",
+        value: "camera=(), microphone=(), geolocation=()",
+      },
+      {
+        key: "Strict-Transport-Security",
+        value: "max-age=63072000; includeSubDomains; preload",
+      },
+    ];
+    return [{ source: "/:path*", headers: securityHeaders }];
+  },
   // Operaciones ↔ Plataforma split (2026-05-26). The three IT-side
   // pages moved from /admin/* to /platform/*. Permanent 308 redirects
   // keep old emails, bookmarks, and audit-log links pointing at the
