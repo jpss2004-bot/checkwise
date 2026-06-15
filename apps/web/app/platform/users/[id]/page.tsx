@@ -13,6 +13,7 @@ import {
   Key,
   ListMagnifyingGlass,
   PaperPlaneTilt,
+  PencilSimple,
   Prohibit,
   ArrowCounterClockwise,
   Trash,
@@ -30,6 +31,8 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
 import { Skeleton } from "@/components/ui/skeleton";
 
 import { PlatformShell } from "../../_shell";
@@ -39,6 +42,7 @@ import {
   type AdminUserDetail,
   getUser,
   resetUserPassword,
+  updateUserIdentity,
   updateUserStatus,
 } from "@/lib/api/admin";
 import { roleLabel } from "@/lib/constants/labels";
@@ -150,6 +154,74 @@ export default function PlatformUserDetailPage() {
     useState<AdminResetPasswordResponse | null>(null);
   const [copied, setCopied] = useState(false);
 
+  // Edit-identity dialog
+  const [editOpen, setEditOpen] = useState(false);
+  const [editBusy, setEditBusy] = useState(false);
+  const [editError, setEditError] = useState<string | null>(null);
+  const [editName, setEditName] = useState("");
+  const [editEmail, setEditEmail] = useState("");
+  const [editPhone, setEditPhone] = useState("");
+  // Transient banner after a successful email change (delivery status).
+  const [emailNotice, setEmailNotice] = useState<string | null>(null);
+
+  function openEdit() {
+    if (!user) return;
+    setEditError(null);
+    setEditName(user.full_name);
+    setEditEmail(user.email);
+    setEditPhone(user.phone ?? "");
+    setEditOpen(true);
+  }
+
+  async function onSubmitEdit() {
+    if (!user) return;
+    const body: { full_name?: string; email?: string; phone?: string | null } =
+      {};
+    const name = editName.trim();
+    const email = editEmail.trim().toLowerCase();
+    const phone = editPhone.trim();
+    if (name !== user.full_name) body.full_name = name;
+    if (email !== user.email) body.email = email;
+    if (phone !== (user.phone ?? "")) body.phone = phone || null;
+    if (Object.keys(body).length === 0) {
+      setEditOpen(false);
+      return;
+    }
+    setEditBusy(true);
+    setEditError(null);
+    try {
+      const updated = await updateUserIdentity(user.user_id, body);
+      setUser((u) =>
+        u
+          ? {
+              ...u,
+              full_name: updated.full_name,
+              email: updated.email,
+              phone: updated.phone,
+            }
+          : u,
+      );
+      setEditOpen(false);
+      if (updated.email_changed) {
+        setEmailNotice(
+          updated.notification_status === "sent"
+            ? "Correo actualizado. Avisamos a la dirección anterior y a la nueva."
+            : updated.notification_status === "skipped"
+              ? "Correo actualizado. No se enviaron avisos (correo no configurado)."
+              : "Correo actualizado. Algún aviso no pudo enviarse; verifica con la persona.",
+        );
+      }
+    } catch (err) {
+      if (err instanceof AdminApiError && err.status === 401) {
+        router.replace("/login");
+        return;
+      }
+      setEditError(apiErrorMessage(err, "No pudimos guardar los cambios."));
+    } finally {
+      setEditBusy(false);
+    }
+  }
+
   // Guard against a late response from a previous id overwriting the
   // current one if the operator navigates between detail pages quickly.
   const activeId = useRef<string | undefined>(userId);
@@ -248,6 +320,14 @@ export default function PlatformUserDetailPage() {
           </Button>
           {user && !isDeleted ? (
             <>
+              <Button size="sm" variant="outline" onClick={openEdit}>
+                <PencilSimple
+                  className="h-3.5 w-3.5"
+                  weight="bold"
+                  aria-hidden="true"
+                />
+                Editar
+              </Button>
               <Button
                 size="sm"
                 variant="outline"
@@ -358,6 +438,20 @@ export default function PlatformUserDetailPage() {
               </span>
             )}
           </div>
+
+          {/* Email-change confirmation notice (dismissible). */}
+          {emailNotice ? (
+            <div className="flex items-start justify-between gap-2 rounded-md border border-[color:var(--status-success-border)] bg-[color:var(--status-success-bg)] px-3 py-2.5 text-[12px] text-[color:var(--status-success-text)]">
+              <span>{emailNotice}</span>
+              <button
+                type="button"
+                onClick={() => setEmailNotice(null)}
+                className="shrink-0 font-medium underline-offset-2 hover:underline"
+              >
+                Cerrar
+              </button>
+            </div>
+          ) : null}
 
           {/* Soft-delete banner (read-only until Phase 5 restore). */}
           {isDeleted ? (
@@ -519,6 +613,79 @@ export default function PlatformUserDetailPage() {
           </Surface>
         </div>
       ) : null}
+
+      {/* Edit identity */}
+      <Dialog
+        open={editOpen}
+        onOpenChange={(next) => {
+          if (!next && !editBusy) setEditOpen(false);
+        }}
+      >
+        <DialogContent className="max-w-md">
+          <DialogHeader>
+            <DialogTitle>Editar identidad</DialogTitle>
+            <DialogDescription>
+              Corrige el nombre, el correo o el teléfono. Si cambias el correo,
+              avisaremos tanto a la dirección anterior como a la nueva.
+            </DialogDescription>
+          </DialogHeader>
+
+          <div className="space-y-3">
+            <div className="space-y-1">
+              <Label htmlFor="edit-name">Nombre completo</Label>
+              <Input
+                id="edit-name"
+                value={editName}
+                onChange={(e) => setEditName(e.target.value)}
+                placeholder="María Pérez"
+              />
+            </div>
+            <div className="space-y-1">
+              <Label htmlFor="edit-email">Correo electrónico</Label>
+              <Input
+                id="edit-email"
+                type="email"
+                value={editEmail}
+                onChange={(e) => setEditEmail(e.target.value)}
+                autoComplete="email"
+                placeholder="contacto@empresa.com"
+              />
+            </div>
+            <div className="space-y-1">
+              <Label htmlFor="edit-phone">Teléfono (opcional)</Label>
+              <Input
+                id="edit-phone"
+                type="tel"
+                value={editPhone}
+                onChange={(e) => setEditPhone(e.target.value)}
+                autoComplete="tel"
+                placeholder="+52 55 1234 5678"
+              />
+            </div>
+          </div>
+
+          {editError ? (
+            <div className="flex items-start gap-2 rounded-md border border-[color:var(--status-error-border)] bg-[color:var(--status-error-bg)] px-3 py-2 text-[12px] text-[color:var(--status-error-text)]">
+              <Warning className="mt-0.5 h-3.5 w-3.5 shrink-0" weight="fill" aria-hidden="true" />
+              <span>{editError}</span>
+            </div>
+          ) : null}
+
+          <DialogFooter>
+            <Button
+              type="button"
+              variant="ghost"
+              onClick={() => setEditOpen(false)}
+              disabled={editBusy}
+            >
+              Cancelar
+            </Button>
+            <Button type="button" loading={editBusy} onClick={onSubmitEdit}>
+              Guardar cambios
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
 
       {/* Confirm — reset / disable / reactivate */}
       <Dialog

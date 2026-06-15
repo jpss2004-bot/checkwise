@@ -13,6 +13,7 @@ import {
   ShieldCheck,
   Storefront,
   UsersThree,
+  Warning,
   type Icon,
 } from "@phosphor-icons/react";
 
@@ -24,12 +25,18 @@ import { Label } from "@/components/ui/label";
 
 import { PlatformShell } from "../../_shell";
 import {
+  AdminApiError,
   listClients,
+  provisionConflictUser,
   provisionUser,
+  resetUserPassword,
+  updateUserStatus,
   type AdminClient,
+  type ProvisionConflictUser,
   type ProvisionUserBody,
   type ProvisionUserResponse,
 } from "@/lib/api/admin";
+import { roleLabel } from "@/lib/constants/labels";
 
 /**
  * /admin/users/new — unified add-user flow (item 8 v2).
@@ -68,6 +75,15 @@ export default function AdminNewUserPage() {
   const [result, setResult] = useState<ProvisionUserResponse | null>(null);
   const [copied, setCopied] = useState(false);
 
+  // Duplicate-email resolver: when provisioning hits an existing account,
+  // surface it with guided actions instead of a dead-end error.
+  const [conflict, setConflict] = useState<ProvisionConflictUser | null>(null);
+  const [resolverBusy, setResolverBusy] = useState(false);
+  const [resolverError, setResolverError] = useState<string | null>(null);
+  const [resolverTempPassword, setResolverTempPassword] = useState<
+    string | null
+  >(null);
+
   // Load the client list once — providers need a parent client to
   // anchor under. Non-fatal if the request fails (the dropdown stays
   // empty and the form returns 422 from the backend).
@@ -81,6 +97,9 @@ export default function AdminNewUserPage() {
     e.preventDefault();
     setSubmitting(true);
     setErrMsg(null);
+    setConflict(null);
+    setResolverError(null);
+    setResolverTempPassword(null);
     try {
       const base = {
         full_name: fullName.trim(),
@@ -123,11 +142,56 @@ export default function AdminNewUserPage() {
         window.scrollTo({ top: 0, behavior: "smooth" });
       }
     } catch (err) {
-      setErrMsg(
-        err instanceof Error ? err.message : "No pudimos crear el usuario.",
-      );
+      // Duplicate email → show the existing account + guided actions.
+      const existing = provisionConflictUser(err);
+      if (existing) {
+        setConflict(existing);
+        if (typeof window !== "undefined") {
+          window.scrollTo({ top: 0, behavior: "smooth" });
+        }
+      } else {
+        setErrMsg(
+          err instanceof Error ? err.message : "No pudimos crear el usuario.",
+        );
+      }
     } finally {
       setSubmitting(false);
+    }
+  }
+
+  async function reactivateConflict() {
+    if (!conflict) return;
+    setResolverBusy(true);
+    setResolverError(null);
+    try {
+      const updated = await updateUserStatus(conflict.user_id, "active");
+      setConflict({ ...conflict, status: updated.status });
+    } catch (err) {
+      setResolverError(
+        err instanceof AdminApiError && err.message
+          ? err.message
+          : "No pudimos reactivar la cuenta.",
+      );
+    } finally {
+      setResolverBusy(false);
+    }
+  }
+
+  async function resetConflictPassword() {
+    if (!conflict) return;
+    setResolverBusy(true);
+    setResolverError(null);
+    try {
+      const res = await resetUserPassword(conflict.user_id);
+      setResolverTempPassword(res.temp_password);
+    } catch (err) {
+      setResolverError(
+        err instanceof AdminApiError && err.message
+          ? err.message
+          : "No pudimos restablecer la contraseña.",
+      );
+    } finally {
+      setResolverBusy(false);
     }
   }
 
@@ -165,7 +229,107 @@ export default function AdminNewUserPage() {
       }
     >
       <div className="space-y-6">
-        {!result && (
+        {conflict ? (
+          <Surface title="Esta cuenta ya existe" icon={Warning}>
+            <div className="space-y-4">
+              <p className="text-[13px] text-[color:var(--text-secondary)]">
+                Ya hay una cuenta registrada con{" "}
+                <strong>{conflict.email}</strong>. En vez de crear otra, puedes
+                administrar la existente.
+              </p>
+
+              <div className="rounded-md border border-[color:var(--border-default)] bg-[color:var(--surface-page)] p-4">
+                <div className="flex flex-wrap items-center justify-between gap-2">
+                  <div className="min-w-0">
+                    <p className="font-medium text-[color:var(--text-primary)]">
+                      {conflict.full_name || conflict.email}
+                    </p>
+                    <p className="font-mono text-[11px] text-[color:var(--text-tertiary)]">
+                      {conflict.email}
+                    </p>
+                  </div>
+                  {conflict.status === "active" ? (
+                    <Badge variant="success">Activa</Badge>
+                  ) : (
+                    <Badge variant="secondary">Desactivada</Badge>
+                  )}
+                </div>
+                {conflict.roles.length ? (
+                  <div className="mt-2 flex flex-wrap gap-1">
+                    {conflict.roles.map((code) => (
+                      <Badge key={code} variant="outline">
+                        {roleLabel(code)}
+                      </Badge>
+                    ))}
+                  </div>
+                ) : null}
+              </div>
+
+              {resolverTempPassword ? (
+                <div className="rounded-md border border-[color:var(--border-default)] bg-[color:var(--surface-page)] p-4">
+                  <p className="font-mono text-[10px] uppercase tracking-wide text-[color:var(--text-tertiary)]">
+                    Contraseña temporal — se muestra una sola vez
+                  </p>
+                  <code className="mt-1 block select-all break-all font-mono text-lg font-semibold text-[color:var(--text-primary)]">
+                    {resolverTempPassword}
+                  </code>
+                </div>
+              ) : null}
+
+              {resolverError ? (
+                <p className="rounded-md border border-[color:var(--status-error-border)] bg-[color:var(--status-error-bg)] p-3 text-[12px] text-[color:var(--status-error-text)]">
+                  {resolverError}
+                </p>
+              ) : null}
+
+              <div className="flex flex-wrap gap-2">
+                <Button asChild size="sm">
+                  <Link href={`/platform/users/${conflict.user_id}`}>
+                    Ver y administrar cuenta
+                    <ArrowRight className="h-3.5 w-3.5" weight="bold" aria-hidden="true" />
+                  </Link>
+                </Button>
+                {conflict.status !== "active" ? (
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    loading={resolverBusy}
+                    onClick={reactivateConflict}
+                  >
+                    Reactivar
+                  </Button>
+                ) : null}
+                <Button
+                  size="sm"
+                  variant="outline"
+                  loading={resolverBusy}
+                  disabled={conflict.status !== "active"}
+                  title={
+                    conflict.status !== "active"
+                      ? "Reactiva la cuenta para poder restablecer su contraseña."
+                      : undefined
+                  }
+                  onClick={resetConflictPassword}
+                >
+                  Restablecer contraseña
+                </Button>
+                <Button
+                  size="sm"
+                  variant="ghost"
+                  onClick={() => {
+                    setConflict(null);
+                    setResolverError(null);
+                    setResolverTempPassword(null);
+                  }}
+                >
+                  Usar otro correo
+                </Button>
+              </div>
+            </div>
+          </Surface>
+        ) : null}
+
+        {!result && !conflict && (
           <Surface title="Tipo de cuenta" icon={IdentificationCard}>
             <div className="flex flex-wrap gap-2">
               <RoleButton
@@ -193,7 +357,7 @@ export default function AdminNewUserPage() {
           </Surface>
         )}
 
-        {!result && (
+        {!result && !conflict && (
         <form onSubmit={handleSubmit} className="space-y-6">
           <Surface title="Datos de acceso" icon={IdentificationCard}>
             <div className="grid gap-3 sm:grid-cols-2">

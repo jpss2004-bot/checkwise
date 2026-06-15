@@ -148,6 +148,34 @@ export async function provisionUser(
   });
 }
 
+/** Summary of the pre-existing account returned in the 409 body when
+ *  provisioning hits a duplicate email (Phase 3 resolver). */
+export type ProvisionConflictUser = {
+  user_id: string;
+  full_name: string;
+  email: string;
+  status: string;
+  roles: string[];
+};
+
+/** If ``err`` is the duplicate-email 409 from ``provisionUser``, unwrap
+ *  the existing-account summary so the form can offer guided actions
+ *  (open / reactivate / reset) instead of a dead-end error. Returns null
+ *  for any other error shape. */
+export function provisionConflictUser(
+  err: unknown,
+): ProvisionConflictUser | null {
+  if (!(err instanceof AdminApiError) || err.status !== 409) return null;
+  try {
+    const parsed = JSON.parse(err.message) as {
+      detail?: { existing_user?: ProvisionConflictUser };
+    };
+    return parsed.detail?.existing_user ?? null;
+  } catch {
+    return null;
+  }
+}
+
 // ---------------------------------------------------------------------------
 // User management (P3 audit, 2026-06-10) — list / disable / reset-password
 // for EXISTING users. Until this, provisioning was a write-only door: no
@@ -271,6 +299,31 @@ export async function getUser(
   }
   const suffix = qs.toString() ? `?${qs.toString()}` : "";
   return fetchJson(`/api/v1/admin/users/${userId}${suffix}`);
+}
+
+/** Result of a PATCH identity edit (Phase 3). ``notification_status`` is
+ *  the combined old+new change-email delivery status, null when the
+ *  email didn't change. */
+export type AdminUserIdentityResponse = {
+  user_id: string;
+  full_name: string;
+  email: string;
+  phone: string | null;
+  email_changed: boolean;
+  notification_status: string | null;
+};
+
+/** Edit a user's name / email / phone. Send only the fields you want to
+ *  change. An email change must land on a free address (409 otherwise)
+ *  and notifies both the old and new addresses. */
+export async function updateUserIdentity(
+  userId: string,
+  body: { full_name?: string; email?: string; phone?: string | null },
+): Promise<AdminUserIdentityResponse> {
+  return fetchJson(`/api/v1/admin/users/${userId}/identity`, {
+    method: "PATCH",
+    body: JSON.stringify(body),
+  });
 }
 
 // ---------------------------------------------------------------------------
