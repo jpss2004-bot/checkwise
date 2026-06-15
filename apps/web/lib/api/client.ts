@@ -300,6 +300,8 @@ export type ClientSubmissionItem = {
   institution: string | null;
   period_key: string | null;
   status: string;
+  current_slot_status: string | null;
+  is_current_for_slot: boolean;
   filename: string | null;
   submitted_at: string;
   reviewed_at: string | null;
@@ -310,6 +312,8 @@ export type ClientSubmissionItem = {
 
 export type ClientSubmissionsResponse = {
   client_id: string;
+  scope: "submitted_documents";
+  scope_description: string;
   items: ClientSubmissionItem[];
   total: number;
 };

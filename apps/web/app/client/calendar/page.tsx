@@ -46,7 +46,14 @@ import {
   CALENDAR_MIN_YEAR,
   parseCalendarYear,
 } from "@/lib/calendar-year";
-import { statusLabel, statusVariant } from "@/lib/constants/statuses";
+import {
+  DocumentStatus,
+  SlotState,
+  slotStateLabel,
+  slotStateVariant,
+  statusLabel,
+  statusVariant,
+} from "@/lib/constants/statuses";
 import { useUrlClientId } from "@/lib/workspace/use-url-client-id";
 import { withReturnTo } from "@/lib/navigation/return-to";
 
@@ -81,6 +88,18 @@ const INSTITUTION_ORDER = ["sat", "imss", "infonavit", "stps_repse"] as const;
 // Status labels and color tones now live in the central dictionary so a
 // vocabulary or color change in one place propagates across every
 // surface. See apps/web/lib/constants/statuses.ts.
+function calendarItemStatusDisplay(row: ClientCalendarItem) {
+  if (row.status === DocumentStatus.PENDIENTE && !row.submission_id) {
+    return {
+      label: slotStateLabel(SlotState.MISSING),
+      variant: slotStateVariant(SlotState.MISSING),
+    };
+  }
+  return {
+    label: statusLabel(row.status),
+    variant: statusVariant(row.status),
+  };
+}
 
 export default function ClientCalendarPage() {
   const router = useRouter();
@@ -523,7 +542,7 @@ function ExpandedDetail({
             {g.rows.map((row) => {
               const inst = INSTITUTION_LABELS[row.institution] ?? row.institution;
               const IconComponent = INSTITUTION_ICON[row.institution];
-              const statusText = statusLabel(row.status);
+              const statusDisplay = calendarItemStatusDisplay(row);
               return (
                 <li
                   key={`${row.vendor_id}-${row.requirement_code ?? row.requirement_name}-${row.period_key ?? ""}`}
@@ -547,7 +566,9 @@ function ExpandedDetail({
                       {row.period_label}
                     </span>
                   </div>
-                  <Badge variant={statusVariant(row.status)}>{statusText}</Badge>
+                  <Badge variant={statusDisplay.variant}>
+                    {statusDisplay.label}
+                  </Badge>
                 </li>
               );
             })}
