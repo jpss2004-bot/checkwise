@@ -9,8 +9,6 @@
  *   3. Legacy ``X-Workspace-Token`` header when the caller passes a
  *      PortalSession with a real token (kept for backward compat).
  */
-
-import { readAdminSession } from "@/lib/session/admin";
 import type { PersonaType, PortalSession } from "@/lib/session/portal";
 
 const API_BASE_URL =
@@ -179,11 +177,8 @@ async function fetchJson<T>(
   if (!headers.has("Content-Type") && init.body) {
     headers.set("Content-Type", "application/json");
   }
-  // 1. Bearer JWT — the cross-origin-safe primary path.
-  const adminSession = readAdminSession();
-  if (adminSession?.access_token && !headers.has("Authorization")) {
-    headers.set("Authorization", `Bearer ${adminSession.access_token}`);
-  }
+  // 1. FE-SEC-1: admin/staff auth now rides the httpOnly session cookie
+  //    (credentials:"include" below) — no localStorage bearer header.
   // 2. Legacy X-Workspace-Token still supported when a caller passes one.
   if (
     session &&
@@ -586,10 +581,8 @@ export async function fetchSubmissionDocumentBlob(
   opts: { download?: boolean } = {},
 ): Promise<string> {
   const headers = new Headers();
-  const adminSession = readAdminSession();
-  if (adminSession?.access_token) {
-    headers.set("Authorization", `Bearer ${adminSession.access_token}`);
-  }
+  // FE-SEC-1: admin/staff auth rides the httpOnly session cookie
+  // (credentials:"include" below).
   if (session.access_token && session.access_token !== "cookie-managed") {
     headers.set("X-Workspace-Token", session.access_token);
   }

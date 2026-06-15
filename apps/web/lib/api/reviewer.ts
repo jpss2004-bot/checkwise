@@ -25,15 +25,20 @@ export class ReviewerApiError extends Error {
 
 async function fetchJson<T>(
   path: string,
-  token: string,
+  _token: string,
   init: RequestInit = {},
 ): Promise<T> {
   const headers = new Headers(init.headers ?? {});
   if (!headers.has("Content-Type") && init.body) {
     headers.set("Content-Type", "application/json");
   }
-  headers.set("Authorization", `Bearer ${token}`);
-  const response = await fetch(`${API_BASE_URL}${path}`, { ...init, headers });
+  // FE-SEC-1: auth via the httpOnly session cookie (credentials:include);
+  // the token param is vestigial (kept so callers keep compiling).
+  const response = await fetch(`${API_BASE_URL}${path}`, {
+    ...init,
+    headers,
+    credentials: "include",
+  });
   if (!response.ok) {
     const detail = await response.text().catch(() => "");
     throw new ReviewerApiError(response.status, detail || response.statusText);
@@ -368,12 +373,13 @@ type DocumentBlobOptions = {
  * the returned string when the iframe unmounts.
  */
 export async function fetchReviewerSubmissionDocumentBlob(
-  token: string,
+  _token: string,
   submissionId: string,
   options: DocumentBlobOptions = {},
 ): Promise<string> {
+  // FE-SEC-1: auth via the session cookie (credentials:include below);
+  // token param vestigial.
   const headers = new Headers();
-  headers.set("Authorization", `Bearer ${token}`);
   const params = new URLSearchParams({ proxy: "1" });
   if (options.download) params.set("download", "1");
   const response = await fetch(

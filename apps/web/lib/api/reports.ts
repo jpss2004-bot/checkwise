@@ -30,15 +30,19 @@ export class ReportsApiError extends Error {
 
 async function fetchJson<T>(path: string, init: RequestInit = {}): Promise<T> {
   const session = readAdminSession();
-  if (!session?.access_token) {
+  if (!session) {
     throw new ReportsApiError(401, "No active session.");
   }
   const headers = new Headers(init.headers ?? {});
   if (!headers.has("Content-Type") && init.body) {
     headers.set("Content-Type", "application/json");
   }
-  headers.set("Authorization", `Bearer ${session.access_token}`);
-  const response = await fetch(`${API_BASE_URL}${path}`, { ...init, headers });
+  // FE-SEC-1: auth via the httpOnly session cookie (credentials:include).
+  const response = await fetch(`${API_BASE_URL}${path}`, {
+    ...init,
+    headers,
+    credentials: "include",
+  });
   if (!response.ok) {
     const detail = await response.text().catch(() => "");
     throw new ReportsApiError(response.status, detail || response.statusText);
@@ -455,14 +459,10 @@ async function getReportExportPresignedUrl(
   exportId: string,
   disposition: "attachment" | "inline",
 ): Promise<{ url: string | null; filename: string }> {
-  const session = readAdminSession();
-  const headers: Record<string, string> = {};
-  if (session?.access_token) {
-    headers.Authorization = `Bearer ${session.access_token}`;
-  }
+  // FE-SEC-1: auth via the httpOnly session cookie.
   const response = await fetch(
     `${API_BASE_URL}/api/v1/reports/exports/${exportId}/download-url?disposition=${disposition}`,
-    { headers },
+    { credentials: "include" },
   );
   if (!response.ok) {
     throw new ReportsApiError(
@@ -479,16 +479,13 @@ async function streamExportAsBlob(
   exportId: string,
   filename: string,
 ): Promise<void> {
-  const session = readAdminSession();
+  // FE-SEC-1: auth via the httpOnly session cookie.
   const headers: Record<string, string> = {
     Accept: "application/octet-stream, application/pdf, text/html",
   };
-  if (session?.access_token) {
-    headers.Authorization = `Bearer ${session.access_token}`;
-  }
   const response = await fetch(
     `${API_BASE_URL}/api/v1/reports/exports/${exportId}/download`,
-    { headers },
+    { headers, credentials: "include" },
   );
   if (!response.ok) {
     throw new ReportsApiError(
@@ -585,16 +582,13 @@ export async function fetchReportExportObjectUrl(
   const { url } = await getReportExportPresignedUrl(exportId, "inline");
   if (url) return url;
   // Local-disk storage: stream same-origin and hand back a blob URL.
-  const session = readAdminSession();
+  // FE-SEC-1: auth via the httpOnly session cookie.
   const headers: Record<string, string> = {
     Accept: "application/pdf, application/octet-stream",
   };
-  if (session?.access_token) {
-    headers.Authorization = `Bearer ${session.access_token}`;
-  }
   const response = await fetch(
     `${API_BASE_URL}/api/v1/reports/exports/${exportId}/download`,
-    { headers },
+    { headers, credentials: "include" },
   );
   if (!response.ok) {
     throw new ReportsApiError(
@@ -667,14 +661,10 @@ export function listReportShares(
 }
 
 export async function revokeReportShare(shareId: string): Promise<void> {
-  const session = readAdminSession();
-  const headers: Record<string, string> = {};
-  if (session?.access_token) {
-    headers.Authorization = `Bearer ${session.access_token}`;
-  }
+  // FE-SEC-1: auth via the httpOnly session cookie.
   const response = await fetch(
     `${API_BASE_URL}/api/v1/reports/shares/${shareId}`,
-    { method: "DELETE", headers },
+    { method: "DELETE", credentials: "include" },
   );
   if (response.status !== 204) {
     throw new ReportsApiError(

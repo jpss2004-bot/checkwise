@@ -1,18 +1,22 @@
 /**
- * Admin (internal-staff) session helpers backed by localStorage.
+ * Admin (internal-staff / client / reviewer) session metadata.
  *
- * Patch 6 (Auth + RBAC) introduces real LegalShelf-staff accounts. The
- * frontend stores the bearer JWT plus a small denormalised slice of the
- * user identity so the admin shell can render the header without an
- * extra /auth/me round trip on every navigation.
+ * FE-SEC-1 (audit 2026-06-15): the real bearer JWT is NO LONGER stored
+ * here. Authentication rides an httpOnly cookie the backend sets at
+ * login (mirroring the provider portal); ``access_token`` now carries a
+ * ``"cookie-managed"`` placeholder. localStorage keeps only the
+ * non-credential identity slice (user, roles, expiry) so the shell can
+ * render its header without an extra /auth/me round trip. An XSS can no
+ * longer read a usable credential from localStorage.
  *
- * Intentionally separate from ``portal-session.ts``: the provider
- * portal continues to authenticate via opaque workspace tokens, so a
- * shared user can hold both at the same time (e.g. a LegalShelf staffer
- * looking at their own demo workspace).
+ * Intentionally separate from ``portal-session.ts`` (provider portal),
+ * so a shared user can hold both at once (a staffer viewing their own
+ * demo workspace).
  */
 
 const STORAGE_KEY = "checkwise.admin.session.v1";
+const API_BASE_URL =
+  process.env.NEXT_PUBLIC_API_BASE_URL ?? "http://127.0.0.1:8000";
 
 export type AdminSessionUser = {
   id: string;
@@ -44,7 +48,9 @@ export function readAdminSession(): AdminSession | null {
     const raw = window.localStorage.getItem(STORAGE_KEY);
     if (!raw) return null;
     const parsed = JSON.parse(raw) as AdminSession;
-    if (!parsed.access_token || !parsed.user?.id) return null;
+    // FE-SEC-1: validity is "do we have an identity + is it unexpired",
+    // not "do we hold a token" (the token now lives in the cookie).
+    if (!parsed.user?.id) return null;
     if (isExpired(parsed)) {
       window.localStorage.removeItem(STORAGE_KEY);
       return null;
@@ -63,6 +69,22 @@ export function writeAdminSession(session: AdminSession): void {
 export function clearAdminSession(): void {
   if (typeof window === "undefined") return;
   window.localStorage.removeItem(STORAGE_KEY);
+  // FE-SEC-1: also clear the httpOnly session cookie server-side —
+  // dropping the localStorage metadata alone would leave the cookie
+  // (the real credential) valid. ``keepalive`` lets the request finish
+  // even when the caller redirects to /login immediately after. Fire-
+  // and-forget: a logout must never throw, and the cookie also expires
+  // on its own. The endpoint requires no auth, so it's safe on the
+  // 401-cleanup paths too.
+  try {
+    void fetch(`${API_BASE_URL}/api/v1/auth/logout`, {
+      method: "POST",
+      credentials: "include",
+      keepalive: true,
+    }).catch(() => {});
+  } catch {
+    /* ignore */
+  }
 }
 
 function isExpired(session: AdminSession): boolean {

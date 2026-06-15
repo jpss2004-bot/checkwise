@@ -148,7 +148,7 @@ function ActivateInner() {
       setError(null);
       setSubmitting(true);
       try {
-        const result = await setPassword(stored.access_token, password);
+        const result = await setPassword(password);
         // Refresh local session with the cleared flag so a refresh on
         // any page doesn't bounce the user back to /activate.
         writeAdminSession({

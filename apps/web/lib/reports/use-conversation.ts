@@ -54,13 +54,14 @@ export function useReportConversation(reportId: string): UseReportConversation {
 
   const reload = useCallback(async () => {
     const session = readAdminSession();
-    if (!session?.access_token || !reportId) return;
+    if (!session || !reportId) return;
     setStatus("loading");
     setError(null);
     try {
+      // FE-SEC-1: auth via the httpOnly session cookie.
       const resp = await fetch(
         `${API_BASE_URL}/api/v1/reports/${reportId}/conversation`,
-        { headers: { Authorization: `Bearer ${session.access_token}` } },
+        { credentials: "include" },
       );
       if (!resp.ok) {
         setStatus("error");
@@ -107,7 +108,7 @@ export function useReportConversation(reportId: string): UseReportConversation {
   const send = useCallback(
     async (message: string, canvasSummary?: unknown) => {
       const session = readAdminSession();
-      if (!session?.access_token || !reportId || !message.trim()) return;
+      if (!session || !reportId || !message.trim()) return;
 
       // Optimistic user turn.
       const optimisticUserTurn: ConversationTurn = {
@@ -137,11 +138,12 @@ export function useReportConversation(reportId: string): UseReportConversation {
           `${API_BASE_URL}/api/v1/reports/${reportId}/conversation`,
           {
             method: "POST",
+            // FE-SEC-1: auth via the httpOnly session cookie.
             headers: {
               "Content-Type": "application/json",
-              Authorization: `Bearer ${session.access_token}`,
               Accept: "text/event-stream",
             },
+            credentials: "include",
             body: JSON.stringify({
               message: message.trim(),
               canvas_summary: canvasSummary,
