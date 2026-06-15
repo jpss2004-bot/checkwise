@@ -226,6 +226,11 @@ class Submission(TimestampMixin, Base):
         Index("ix_submissions_client_status", "client_id", "status"),
         Index("ix_submissions_period_id", "period_id"),
         Index("ix_submissions_requirement_id", "requirement_id"),
+        # PERF-7 (audit 2026-06-15, migration 0046). vendor-only predicate
+        # (the (client_id, vendor_id) composite can't serve it) + the
+        # client-scoped ORDER BY created_at DESC lists / history ranges.
+        Index("ix_submissions_vendor_id", "vendor_id"),
+        Index("ix_submissions_client_created", "client_id", "created_at"),
     )
     # NOTE: a unique partial index ``ux_submissions_active_slot`` enforces
     # "one active-genesis submission per evidence slot" in Postgres — see
