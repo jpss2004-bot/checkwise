@@ -42,10 +42,12 @@ from app.services.reports.block_catalog import (
     catalog_by_type,
     planner_tool_list,
 )
+from app.services.reports.blocks.data_fetchers import fetch_ai_recommendation
 from app.services.reports.blocks.prioritized_actions import (
     fetch_prioritized_actions,
 )
 from app.services.reports.context import ReportScope
+from app.services.reports.insights import compute_vendor_insight
 
 # ─── Fixtures ───────────────────────────────────────────────────
 
@@ -258,6 +260,31 @@ def test_builder_returns_shape_for_seeded_workspace(db_factory) -> None:
     assert isinstance(out["items"], list)
 
 
+def test_vendor_insight_findings_include_action_links(db_factory) -> None:
+    vendor_id = _seed_workspace(db_factory)
+    db = db_factory()
+    try:
+        insight = compute_vendor_insight(
+            db,
+            _scope(vendor_id=vendor_id),
+            today=date(2026, 1, 5),
+        )
+    finally:
+        db.close()
+    assert insight is not None
+    linked = [
+        finding
+        for finding in insight["findings"]
+        if finding.get("links")
+    ]
+    assert linked
+    assert all(
+        link["href"].startswith("/portal/upload")
+        for finding in linked
+        for link in finding["links"]
+    )
+
+
 # ─── fetcher ────────────────────────────────────────────────────
 
 
@@ -270,6 +297,22 @@ def test_fetcher_empty_when_no_vendor(db_factory) -> None:
     assert out["items"] == []
     assert out["workspace_id"] is None
     assert out["total_before_filter"] == 0
+
+
+def test_ai_recommendation_carries_prioritized_action_links(db_factory) -> None:
+    vendor_id = _seed_workspace(db_factory)
+    db = db_factory()
+    try:
+        out = fetch_ai_recommendation(
+            {"priority_count": 2, "audience_tone": "client"},
+            _scope(vendor_id=vendor_id),
+            db,
+        )
+    finally:
+        db.close()
+    assert out["action_links"]
+    assert len(out["action_links"]) <= 2
+    assert all(link["href"].startswith("/portal/upload") for link in out["action_links"])
 
 
 def test_fetcher_filters_by_priority(db_factory) -> None:

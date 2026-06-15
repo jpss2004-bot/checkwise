@@ -30,6 +30,7 @@ from app.models.entities import (
     Submission,
     Vendor,
 )
+from app.services.dashboard_compute import build_suggested_actions_for_vendor
 from app.services.reports.blocks.attention_list import fetch_attention_list
 from app.services.reports.blocks.compliance_state import fetch_compliance_state
 from app.services.reports.blocks.prioritized_actions import (
@@ -48,6 +49,28 @@ def _now_iso() -> str:
     the per-block ``FreshnessLabel`` renderer reads this verbatim.
     """
     return datetime.utcnow().isoformat() + "Z"
+
+
+def _action_links_for_vendor(
+    db: Session, *, vendor_id: str | None, limit: int
+) -> list[dict]:
+    if vendor_id is None:
+        return []
+    payload = build_suggested_actions_for_vendor(db, vendor_id=vendor_id)
+    links: list[dict] = []
+    for item in payload.get("items", [])[:limit]:
+        links.append(
+            {
+                "id": item.get("id"),
+                "type": item.get("type"),
+                "priority": item.get("priority"),
+                "title": item.get("title"),
+                "href": item.get("href"),
+                "requirement_code": item.get("requirement_code"),
+                "period_key": item.get("period_key"),
+            }
+        )
+    return links
 
 
 def fetch_executive_summary(
@@ -483,6 +506,11 @@ def fetch_ai_recommendation(
         "upstream_block_summaries": [],  # filled in by executor pre-pass
         "audience_tone": config.get("audience_tone", "internal"),
         "priority_count": int(config.get("priority_count", 3)),
+        "action_links": _action_links_for_vendor(
+            db,
+            vendor_id=scope.vendor_id,
+            limit=int(config.get("priority_count", 3)),
+        ),
     }
 
 

@@ -29,6 +29,35 @@ from app.models import (
 )
 from app.services.reports.context import ReportScope
 
+
+def _action_links_from_items(
+    items: list[dict],
+    *,
+    types: set[str] | None = None,
+    priorities: set[str] | None = None,
+    limit: int = 3,
+) -> list[dict]:
+    links: list[dict] = []
+    for item in items:
+        if types is not None and item.get("type") not in types:
+            continue
+        if priorities is not None and item.get("priority") not in priorities:
+            continue
+        links.append(
+            {
+                "id": item.get("id"),
+                "type": item.get("type"),
+                "priority": item.get("priority"),
+                "title": item.get("title"),
+                "href": item.get("href"),
+                "requirement_code": item.get("requirement_code"),
+                "period_key": item.get("period_key"),
+            }
+        )
+        if len(links) >= limit:
+            break
+    return links
+
 # Renewal cadences (days) keyed by onboarding requirement code — mirrors
 # compliance_catalog.renewal_frequency_days for the renewable pieces.
 _RENEWAL_FREQ_DAYS = {
@@ -196,7 +225,9 @@ def _renewal_finding(db: Session, client_id: str, today: date) -> dict | None:
     }
 
 
-def compute_client_insight(db: Session, scope: ReportScope, *, today: date | None = None) -> dict | None:
+def compute_client_insight(
+    db: Session, scope: ReportScope, *, today: date | None = None
+) -> dict | None:
     """Synthesize the verdict + the 2-3 findings that matter for a client
     portfolio. Returns ``None`` when there's no client scope to reason about."""
     if scope.client_id is None:
@@ -270,11 +301,17 @@ def compute_client_insight(db: Session, scope: ReportScope, *, today: date | Non
         risk_counts.get(worst.vendor_id, 0) > 0
         or worst.semaphore_level in ("red", "yellow")
     ):
+        from app.services.dashboard_compute import build_suggested_actions_for_vendor
+
         has_active = risk_counts.get(worst.vendor_id, 0) > 0
+        action_items = build_suggested_actions_for_vendor(
+            db, vendor_id=worst.vendor_id, today=today
+        ).get("items", [])
         findings.append({
             "tone": "red" if (has_active or worst.semaphore_level == "red") else "yellow",
             "title": f"{worst.vendor_name} es quien más atención necesita",
             "detail": _vendor_issue(db, worst.vendor_id, worst.missing_required_count),
+            "links": _action_links_from_items(action_items, limit=3),
         })
     # 2) Soonest renewal coming due.
     rf = _renewal_finding(db, scope.client_id, today)
@@ -299,7 +336,9 @@ def compute_client_insight(db: Session, scope: ReportScope, *, today: date | Non
     return {"verdict": verdict, "findings": findings[:3]}
 
 
-def compute_vendor_insight(db: Session, scope: ReportScope, *, today: date | None = None) -> dict | None:
+def compute_vendor_insight(
+    db: Session, scope: ReportScope, *, today: date | None = None
+) -> dict | None:
     """Synthesize the verdict + findings for ONE provider (vendor scope).
 
     Same shape as the client insight, but the subject is a single provider:
@@ -310,6 +349,7 @@ def compute_vendor_insight(db: Session, scope: ReportScope, *, today: date | Non
 
     from app.services.dashboard_compute import (
         build_compliance_state_for_vendor,
+        build_suggested_actions_for_vendor,
         build_upcoming_deadlines_for_vendor,
     )
 
@@ -340,9 +380,14 @@ def compute_vendor_insight(db: Session, scope: ReportScope, *, today: date | Non
     in_review = int(counts.get("in_review", 0))
     pending = int(counts.get("pending", 0))
     to_correct = rejected + needs + expired
+    suggested_actions = build_suggested_actions_for_vendor(
+        db, vendor_id=scope.vendor_id, today=today
+    ).get("items", [])
 
     if to_correct:
-        subhead = f"{to_correct} documento{'s' if to_correct != 1 else ''} requiere{'n' if to_correct != 1 else ''} corrección."
+        plural = "s" if to_correct != 1 else ""
+        verb = "requieren" if to_correct != 1 else "requiere"
+        subhead = f"{to_correct} documento{plural} {verb} corrección."
     elif pending:
         subhead = f"{pending} obligación(es) pendientes de cargar."
     else:
@@ -379,6 +424,27 @@ def compute_vendor_insight(db: Session, scope: ReportScope, *, today: date | Non
                 + ", ".join(parts)
                 + ". Debe volver a cargar la versión corregida."
             ),
+            "links": _action_links_from_items(
+                suggested_actions,
+                types={"reupload", "clarify", "verify_mismatch", "regularize"},
+                priorities={"high"},
+                limit=5,
+            ),
+        })
+    elif pending:
+        findings.append({
+            "tone": "yellow",
+            "title": "Obligaciones por entregar",
+            "detail": (
+                f"{pending} obligación(es) pendientes de cargar."
+                if vendor_reads
+                else f"El proveedor tiene {pending} obligación(es) pendientes de cargar."
+            ),
+            "links": _action_links_from_items(
+                suggested_actions,
+                types={"complete_onboarding", "upcoming"},
+                limit=5,
+            ),
         })
     deadlines = build_upcoming_deadlines_for_vendor(db, vendor_id=scope.vendor_id, top=1)
     items = deadlines.get("items", [])
@@ -392,7 +458,11 @@ def compute_vendor_insight(db: Session, scope: ReportScope, *, today: date | Non
         findings.append({
             "tone": "yellow",
             "title": "Próximo vencimiento",
-            "detail": f"{str(it.get('institution', '')).upper()} · {it.get('title', '')} {when}.".strip(),
+            "detail": (
+                f"{str(it.get('institution', '')).upper()} · "
+                f"{it.get('title', '')} {when}."
+            ).strip(),
+            "links": _action_links_from_items([it], limit=1),
         })
     if in_review and len(findings) < 3:
         findings.append({

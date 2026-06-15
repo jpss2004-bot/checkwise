@@ -52,6 +52,7 @@ from app.api.v1.portal import (
     DashboardUpcomingDeadline,
     _bucket_document_state,
     _calendar_deadline_iso,
+    _calendar_reupload_href,
     _calendar_upload_href,
     _compute_attention_today,
     _compute_onboarding_summary,
@@ -60,6 +61,7 @@ from app.api.v1.portal import (
     _compute_upcoming_deadlines,
     _due_in_days_for_period,
     _empty_document_counts,
+    _onboarding_reupload_href,
 )
 from app.constants.roles import MembershipRole
 from app.constants.statuses import DocumentStatus
@@ -570,6 +572,27 @@ class ClientVendorContractDoc(BaseModel):
     size_bytes: int | None
 
 
+class ClientVendorDocumentActionItem(BaseModel):
+    id: str
+    kind: Literal[
+        "missing",
+        "rejected",
+        "needs_correction",
+        "possible_mismatch",
+        "expired",
+        "due_soon",
+    ]
+    requirement_code: str | None
+    requirement_name: str | None
+    institution: str | None
+    period_key: str | None
+    deadline_iso: str | None
+    state: str
+    due_in_days: int | None
+    href: str
+    submission_id: str | None
+
+
 class ClientVendorDetail(BaseModel):
     client_id: str
     vendor_id: str
@@ -585,6 +608,7 @@ class ClientVendorDetail(BaseModel):
     recent_submissions: list[dict]
     recent_reviewer_notes: list[dict]
     contracts: list[ClientVendorContractDoc] = []
+    document_action_items: list[ClientVendorDocumentActionItem] = []
 
 
 class ClientSubmissionItem(BaseModel):
@@ -1395,6 +1419,101 @@ def _contracts_for_workspace(
     return out
 
 
+_CLIENT_VENDOR_ACTIONABLE_STATES: dict[SlotState, str] = {
+    SlotState.MISSING: "missing",
+    SlotState.REJECTED: "rejected",
+    SlotState.NEEDS_CORRECTION: "needs_correction",
+    SlotState.POSSIBLE_MISMATCH: "possible_mismatch",
+    SlotState.EXPIRED: "expired",
+}
+
+
+def _document_action_items_for_workspace(
+    workspace: ProviderWorkspace,
+    *,
+    onboarding_slots: list[SlotView],
+    calendar_slots: list[SlotView],
+    year: int,
+    today: date,
+) -> list[ClientVendorDocumentActionItem]:
+    """Client-facing flat list of provider documents that need follow-up."""
+    items: list[ClientVendorDocumentActionItem] = []
+
+    for view in onboarding_slots:
+        if not view.required:
+            continue
+        kind = _CLIENT_VENDOR_ACTIONABLE_STATES.get(view.state)
+        if kind is None:
+            continue
+        items.append(
+            ClientVendorDocumentActionItem(
+                id=f"doc-action-{view.requirement_code or 'onb'}-onb",
+                kind=kind,  # type: ignore[arg-type]
+                requirement_code=view.requirement_code,
+                requirement_name=view.requirement_name,
+                institution=view.institution,
+                period_key=None,
+                deadline_iso=None,
+                state=view.state.value,
+                due_in_days=None,
+                href=_onboarding_reupload_href(view),
+                submission_id=view.current_submission_id,
+            )
+        )
+
+    view_by_key: dict[tuple[str | None, str | None], SlotView] = {
+        (v.slot_key.requirement_code, v.slot_key.period_key): v
+        for v in calendar_slots
+    }
+    catalog = recurring_for_year(year, normalize_persona_type(workspace.persona_type))
+    for req in catalog:
+        view = view_by_key.get((req.code, req.period_key))
+        if view is None or not view.required:
+            continue
+        due_in = _due_in_days_for_period(view.period_key, today)
+        kind = _CLIENT_VENDOR_ACTIONABLE_STATES.get(view.state)
+        if kind is None and due_in is not None and 0 <= due_in <= 14:
+            if view.state not in _RESOLVED_SLOT_STATES:
+                kind = "due_soon"
+        if kind is None:
+            continue
+        items.append(
+            ClientVendorDocumentActionItem(
+                id=f"doc-action-{view.requirement_code or req.code}-{view.period_key or 'period'}",
+                kind=kind,  # type: ignore[arg-type]
+                requirement_code=view.requirement_code,
+                requirement_name=view.requirement_name,
+                institution=view.institution,
+                period_key=view.period_key,
+                deadline_iso=_calendar_deadline_iso(year, req.due_month, req.due_day),
+                state=view.state.value,
+                due_in_days=due_in,
+                href=_calendar_reupload_href(view),
+                submission_id=view.current_submission_id,
+            )
+        )
+
+    urgency = {
+        "rejected": 0,
+        "needs_correction": 1,
+        "possible_mismatch": 2,
+        "expired": 3,
+        "due_soon": 4,
+        "missing": 5,
+    }
+    items.sort(
+        key=lambda item: (
+            urgency[item.kind],
+            item.due_in_days is None,
+            item.due_in_days if item.due_in_days is not None else 9999,
+            item.institution or "",
+            item.period_key or "",
+            item.requirement_name or "",
+        )
+    )
+    return items
+
+
 def _recent_reviewer_notes_for_workspace(
     db: Session, workspace: ProviderWorkspace, *, limit: int
 ) -> list[dict]:
@@ -1701,6 +1820,13 @@ def client_vendor_detail(
             db, workspace, limit=10
         ),
         contracts=_contracts_for_workspace(db, workspace),
+        document_action_items=_document_action_items_for_workspace(
+            workspace,
+            onboarding_slots=onboarding_slots,
+            calendar_slots=calendar_slots,
+            year=selected_year,
+            today=today,
+        ),
     )
 
 
