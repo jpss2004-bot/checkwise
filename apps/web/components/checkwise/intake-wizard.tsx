@@ -19,7 +19,12 @@ import {
   UserCheck,
 } from "@phosphor-icons/react";
 
-import { institutions, loadTypes, requirementGuides, requirements } from "@/lib/api/catalogs";
+import {
+  institutions,
+  loadTypes,
+  requirementGuides,
+  requirements,
+} from "@/lib/api/catalogs";
 
 // Map an institution dropdown ``value`` (e.g. "sat") to the matching
 // label used inside ``requirementGuides[].institution`` (e.g. "SAT") so
@@ -30,7 +35,8 @@ import { institutions, loadTypes, requirementGuides, requirements } from "@/lib/
 // from silently emptying the list.
 function requirementsForInstitution(institutionValue: string): string[] {
   const label =
-    institutions.find((i) => i.value === institutionValue)?.label ?? institutionValue;
+    institutions.find((i) => i.value === institutionValue)?.label ??
+    institutionValue;
   return requirementGuides
     .filter((guide) => guide.institution === label)
     .map((guide) => guide.name);
@@ -129,7 +135,13 @@ type IntakeForm = {
   period_key: string;
 };
 
-const steps = ["Contexto", "Requisito", "Upload", "Prevalidación", "Confirmación"];
+const steps = [
+  "Contexto",
+  "Requisito",
+  "Upload",
+  "Prevalidación",
+  "Confirmación",
+];
 const maxUploadSizeBytes = 15 * 1024 * 1024;
 // Stage 2.7-b — multi-file caps. Must mirror the backend constants in
 // ``apps/api/app/api/v1/portal.py::MULTI_FILE_MAX_FILES`` and
@@ -205,6 +217,7 @@ export function IntakeWizard({
   successContinue,
   supersedesSubmissionId,
   acceptedDocuments,
+  minimumDocuments,
   replaceWarning,
 }: {
   prefill?: IntakeWizardPrefill;
@@ -226,6 +239,7 @@ export function IntakeWizard({
    *  the wizard surfaces that explicitly. ``undefined`` (default)
    *  means v1 / legacy behavior. */
   acceptedDocuments?: CalendarAcceptedDocument[] | null;
+  minimumDocuments?: "one" | "all" | null;
   /** Audit Tier 1 (2026-06-09) — set to the slot's current state code
    *  when it already holds a settled / in-flight document (``approved`` /
    *  ``in_review`` / ``uploaded``). The wizard then requires an explicit
@@ -253,7 +267,8 @@ export function IntakeWizard({
   // obligation). A provider who wants to upload "both" simply
   // submits twice — the slot accumulates the alternatives through
   // the compatibility join on the backend.
-  const multiFileEnabled = multiFileEnabledRaw && acceptedDocuments === undefined;
+  const multiFileEnabled =
+    multiFileEnabledRaw && acceptedDocuments === undefined;
   // Session 3 self-audit fix (2026-05-21) — when the wizard mounts
   // in v2 alternatives mode, clear ``requirement_name`` so the v1
   // default ("Opinión de cumplimiento SAT positiva", from
@@ -295,7 +310,9 @@ export function IntakeWizard({
   // populated when the multi-file flag is on AND the user opts to
   // attach more than one document for the same requirement+period.
   const [additionalFiles, setAdditionalFiles] = useState<File[]>([]);
-  const [additionalFilesError, setAdditionalFilesError] = useState<string | null>(null);
+  const [additionalFilesError, setAdditionalFilesError] = useState<
+    string | null
+  >(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [result, setResult] = useState<SubmissionResponse | null>(null);
   // Soft match feedback per batch file (2026-06-11). Empty for single
@@ -305,7 +322,9 @@ export function IntakeWizard({
   const [error, setError] = useState<string | null>(null);
   const [unlockedOverride, setUnlockedOverride] = useState(false);
   const [filePreviewUrl, setFilePreviewUrl] = useState<string | null>(null);
-  const [duplicateCheck, setDuplicateCheck] = useState<DuplicateCheck | null>(null);
+  const [duplicateCheck, setDuplicateCheck] = useState<DuplicateCheck | null>(
+    null,
+  );
   const [duplicateChecking, setDuplicateChecking] = useState(false);
 
   const lockedSet = useMemo(() => {
@@ -472,10 +491,7 @@ export function IntakeWizard({
       0,
       MULTI_FILE_MAX_ADDITIONAL,
     );
-    if (
-      additionalFiles.length + accepted.length >
-      MULTI_FILE_MAX_ADDITIONAL
-    ) {
+    if (additionalFiles.length + accepted.length > MULTI_FILE_MAX_ADDITIONAL) {
       rejection = `Solo se permiten hasta ${MULTI_FILE_MAX_ADDITIONAL} archivos adicionales por entrega.`;
     }
     setAdditionalFiles(merged);
@@ -691,7 +707,9 @@ export function IntakeWizard({
       }
     } else {
       endpoint = `${apiBaseUrl}/api/v1/submissions`;
-      Object.entries(normalizedForm).forEach(([key, value]) => body.set(key, value));
+      Object.entries(normalizedForm).forEach(([key, value]) =>
+        body.set(key, value),
+      );
       body.set("initial_status", DocumentStatus.PENDIENTE_REVISION);
       body.set("file", file as File);
     }
@@ -761,7 +779,12 @@ export function IntakeWizard({
         setBatchFeedback(
           batch.documents.flatMap((doc) =>
             doc.match_feedback
-              ? [{ filename: doc.original_filename, feedback: doc.match_feedback }]
+              ? [
+                  {
+                    filename: doc.original_filename,
+                    feedback: doc.match_feedback,
+                  },
+                ]
               : [],
           ),
         );
@@ -784,7 +807,11 @@ export function IntakeWizard({
       }
       setStep(4);
     } catch (submitError) {
-      setError(submitError instanceof Error ? submitError.message : "Error inesperado.");
+      setError(
+        submitError instanceof Error
+          ? submitError.message
+          : "Error inesperado.",
+      );
     } finally {
       setIsSubmitting(false);
     }
@@ -797,8 +824,8 @@ export function IntakeWizard({
           <div>
             <CardTitle>Intake documental nativo</CardTitle>
             <p className="mt-1 text-sm text-muted-foreground">
-              Cada carga queda ligada a cliente, proveedor, periodo, institución, requisito,
-              archivo, validación y revisión humana.
+              Cada carga queda ligada a cliente, proveedor, periodo,
+              institución, requisito, archivo, validación y revisión humana.
             </p>
           </div>
           <Badge variant="outline">PDF-only</Badge>
@@ -833,7 +860,9 @@ export function IntakeWizard({
               acceptedDocuments={acceptedDocuments}
             />
           ) : null}
-          {step === 1 ? <RequirementStep requirement={selectedRequirement} /> : null}
+          {step === 1 ? (
+            <RequirementStep requirement={selectedRequirement} />
+          ) : null}
           {step === 2 ? (
             <UploadStep
               file={file}
@@ -846,7 +875,10 @@ export function IntakeWizard({
               duplicateCheck={duplicateCheck}
               duplicateChecking={duplicateChecking}
               requirement={selectedRequirement}
+              form={form}
               multiFileEnabled={multiFileEnabled}
+              acceptedDocuments={acceptedDocuments}
+              minimumDocuments={minimumDocuments}
               additionalFiles={additionalFiles}
               additionalFilesError={additionalFilesError}
               onAdditionalFilesAdded={addAdditionalFiles}
@@ -927,7 +959,8 @@ export function IntakeWizard({
                   <p className="mt-1 text-sm text-amber-900/80">{error}</p>
                   {step === 3 ? (
                     <p className="mt-1 text-xs text-amber-900/70">
-                      Tu archivo y los datos siguen aquí. Puedes volver a intentarlo.
+                      Tu archivo y los datos siguen aquí. Puedes volver a
+                      intentarlo.
                     </p>
                   ) : null}
                 </div>
@@ -965,7 +998,10 @@ export function IntakeWizard({
                 className="active:scale-[0.98]"
               >
                 {isSubmitting ? (
-                  <CircleNotch className="h-4 w-4 animate-spin" aria-hidden="true" />
+                  <CircleNotch
+                    className="h-4 w-4 animate-spin"
+                    aria-hidden="true"
+                  />
                 ) : (
                   <CloudArrowUp className="h-4 w-4" aria-hidden="true" />
                 )}
@@ -1021,12 +1057,15 @@ function ContextStep({
   const lockedItems = Array.from(lockedSet);
   const lockedItemDisplay = (field: IntakeLockedField): string => {
     if (field === "load_type") {
-      return loadTypes.find((option) => option.value === form.load_type)?.label ?? form.load_type;
+      return (
+        loadTypes.find((option) => option.value === form.load_type)?.label ??
+        form.load_type
+      );
     }
     if (field === "institution_code") {
       return (
-        institutions.find((option) => option.value === form.institution_code)?.label ??
-        form.institution_code
+        institutions.find((option) => option.value === form.institution_code)
+          ?.label ?? form.institution_code
       );
     }
     return form[field] ?? "";
@@ -1040,14 +1079,17 @@ function ContextStep({
         <div className="rounded-md border border-primary/20 bg-primary/5 p-4">
           <div className="flex flex-wrap items-start justify-between gap-3">
             <div className="flex items-start gap-2">
-              <Lock className="mt-0.5 h-4 w-4 text-primary" aria-hidden="true" />
+              <Lock
+                className="mt-0.5 h-4 w-4 text-primary"
+                aria-hidden="true"
+              />
               <div className="min-w-0">
                 <p className="text-sm font-semibold text-primary">
                   Contexto bloqueado para evitar errores
                 </p>
                 <p className="mt-0.5 text-xs text-muted-foreground">
-                  Estos datos vienen de tu sesión y del calendario REPSE. Si necesitas cambiarlos,
-                  desbloquéalos abajo.
+                  Estos datos vienen de tu sesión y del calendario REPSE. Si
+                  necesitas cambiarlos, desbloquéalos abajo.
                 </p>
               </div>
             </div>
@@ -1084,7 +1126,9 @@ function ContextStep({
           className="inline-flex items-center gap-1.5 text-xs font-medium text-primary underline-offset-4 hover:underline"
         >
           <PencilSimple className="h-3 w-3" aria-hidden="true" />
-          {unlocked ? "Volver a bloquear el contexto" : "Necesito cambiar algo del contexto"}
+          {unlocked
+            ? "Volver a bloquear el contexto"
+            : "Necesito cambiar algo del contexto"}
         </button>
       ) : null}
 
@@ -1094,7 +1138,9 @@ function ContextStep({
             <Input
               id="client_name"
               value={form.client_name}
-              onChange={(event) => updateField("client_name", event.target.value)}
+              onChange={(event) =>
+                updateField("client_name", event.target.value)
+              }
               placeholder="Cliente o filial"
               required
             />
@@ -1105,7 +1151,9 @@ function ContextStep({
             <Input
               id="vendor_name"
               value={form.vendor_name}
-              onChange={(event) => updateField("vendor_name", event.target.value)}
+              onChange={(event) =>
+                updateField("vendor_name", event.target.value)
+              }
               placeholder="Razón social del proveedor"
               required
             />
@@ -1116,7 +1164,9 @@ function ContextStep({
             <Input
               id="vendor_rfc"
               value={form.vendor_rfc}
-              onChange={(event) => updateField("vendor_rfc", event.target.value.toUpperCase())}
+              onChange={(event) =>
+                updateField("vendor_rfc", event.target.value.toUpperCase())
+              }
               placeholder="ABC010203AB1"
               minLength={12}
               maxLength={13}
@@ -1129,7 +1179,9 @@ function ContextStep({
             <Input
               id="contract_reference"
               value={form.contract_reference}
-              onChange={(event) => updateField("contract_reference", event.target.value)}
+              onChange={(event) =>
+                updateField("contract_reference", event.target.value)
+              }
               placeholder="Referencia interna"
             />
           </Field>
@@ -1139,7 +1191,9 @@ function ContextStep({
             <Input
               id="period_code"
               value={form.period_code}
-              onChange={(event) => updateField("period_code", event.target.value)}
+              onChange={(event) =>
+                updateField("period_code", event.target.value)
+              }
               placeholder="2026-05 / Ene-Abr 2026"
               required
             />
@@ -1165,7 +1219,9 @@ function ContextStep({
             <Select
               id="institution_code"
               value={form.institution_code}
-              onChange={(event) => updateField("institution_code", event.target.value)}
+              onChange={(event) =>
+                updateField("institution_code", event.target.value)
+              }
             >
               {institutions.map((option) => (
                 <option key={option.value} value={option.value}>
@@ -1230,7 +1286,6 @@ function ContextStep({
     </section>
   );
 }
-
 
 /**
  * Session 3 (2026-05-21) — catalog v2 alternatives radio picker.
@@ -1298,8 +1353,8 @@ function AlternativesPicker({
       </legend>
       <p className="text-xs text-muted-foreground">
         Esta obligación se satisface con cualquiera de los siguientes
-        comprobantes. Elige el que corresponde al archivo que vas a subir;
-        si tienes más de uno, súbelos en entregas separadas.
+        comprobantes. Elige el que corresponde al archivo que vas a subir; si
+        tienes más de uno, súbelos en entregas separadas.
       </p>
       <div className="space-y-2">
         {acceptedDocuments.map((doc) => {
@@ -1342,7 +1397,11 @@ function AlternativesPicker({
   );
 }
 
-function RequirementStep({ requirement }: { requirement: (typeof requirementGuides)[number] }) {
+function RequirementStep({
+  requirement,
+}: {
+  requirement: (typeof requirementGuides)[number];
+}) {
   return (
     <section className="space-y-4">
       <StepHeading title="Requisito esperado" />
@@ -1357,7 +1416,9 @@ function RequirementStep({ requirement }: { requirement: (typeof requirementGuid
         <div className="mt-5 grid gap-4 md:grid-cols-2">
           <div>
             <p className="text-sm font-semibold">Ejemplo válido</p>
-            <p className="mt-1 text-sm text-muted-foreground">{requirement.validExample}</p>
+            <p className="mt-1 text-sm text-muted-foreground">
+              {requirement.validExample}
+            </p>
           </div>
           <div>
             <p className="text-sm font-semibold">Causas comunes de rechazo</p>
@@ -1373,6 +1434,168 @@ function RequirementStep({ requirement }: { requirement: (typeof requirementGuid
   );
 }
 
+function UploadSlotSummary({
+  form,
+  requirement,
+}: {
+  form: IntakeForm;
+  requirement: (typeof requirementGuides)[number];
+}) {
+  const institutionLabel =
+    institutions.find((item) => item.value === form.institution_code)?.label ??
+    form.institution_code ??
+    "—";
+  const loadTypeLabel =
+    loadTypes.find((item) => item.value === form.load_type)?.label ??
+    form.load_type ??
+    requirement.frequency;
+  const periodLabel = form.period_code || form.period_key || "—";
+  return (
+    <section className="rounded-md border border-[color:var(--border-brand)] bg-[color:var(--surface-teal-muted)]/35 p-4">
+      <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+        <div className="min-w-0">
+          <p className="text-xs font-semibold uppercase tracking-wide text-[color:var(--text-brand)]">
+            Entrega seleccionada
+          </p>
+          <p className="mt-1 truncate text-sm font-semibold text-[color:var(--text-primary)]">
+            {form.requirement_name || requirement.name}
+          </p>
+        </div>
+        <div className="grid gap-2 text-sm sm:grid-cols-3">
+          <SummaryChip label="Periodo" value={periodLabel} />
+          <SummaryChip label="Frecuencia" value={loadTypeLabel} />
+          <SummaryChip label="Institución" value={institutionLabel} />
+        </div>
+      </div>
+    </section>
+  );
+}
+
+function SummaryChip({ label, value }: { label: string; value: string }) {
+  return (
+    <div className="rounded-md border border-border bg-white px-3 py-2">
+      <p className="text-[11px] font-medium uppercase tracking-wide text-muted-foreground">
+        {label}
+      </p>
+      <p className="mt-0.5 truncate text-sm font-semibold text-[color:var(--text-primary)]">
+        {value || "—"}
+      </p>
+    </div>
+  );
+}
+
+function ExpectedDocumentsChecklist({
+  acceptedDocuments,
+  minimumDocuments,
+  selectedName,
+  requirement,
+}: {
+  acceptedDocuments?: CalendarAcceptedDocument[] | null;
+  minimumDocuments?: "one" | "all" | null;
+  selectedName: string;
+  requirement: (typeof requirementGuides)[number];
+}) {
+  if (acceptedDocuments === null) {
+    return (
+      <div className="rounded-md border border-border bg-muted/30 p-4 text-sm text-muted-foreground">
+        Cargando el checklist de documentos esperados…
+      </div>
+    );
+  }
+
+  if (acceptedDocuments && acceptedDocuments.length > 0) {
+    const needsAll = minimumDocuments === "all";
+    return (
+      <section className="rounded-md border border-border bg-white p-4">
+        <div className="mb-3">
+          <p className="text-sm font-semibold text-[color:var(--text-primary)]">
+            Documentos esperados
+          </p>
+          <p className="text-xs text-muted-foreground">
+            {needsAll
+              ? "Esta obligación requiere todos los documentos listados; si son PDFs separados, súbelos en entregas separadas."
+              : "Esta obligación se cubre con al menos uno de estos documentos."}
+          </p>
+        </div>
+        <ul className="space-y-3">
+          {acceptedDocuments.map((doc) => {
+            const selected = selectedName === doc.name;
+            return (
+              <li
+                key={doc.name}
+                className="rounded-md border border-border bg-muted/20 p-3"
+              >
+                <div className="flex items-start gap-2">
+                  <CheckCircle
+                    className={`mt-0.5 h-4 w-4 shrink-0 ${
+                      selected ? "text-primary" : "text-muted-foreground"
+                    }`}
+                    weight={selected ? "fill" : "regular"}
+                    aria-hidden="true"
+                  />
+                  <div className="min-w-0">
+                    <p className="text-sm font-medium text-[color:var(--text-primary)]">
+                      {doc.name}
+                    </p>
+                    {doc.anatomy ? (
+                      <p className="mt-1 text-xs text-muted-foreground">
+                        {doc.anatomy}
+                      </p>
+                    ) : null}
+                    {doc.where_to_obtain ? (
+                      <p className="mt-1 text-xs text-muted-foreground">
+                        Fuente: {doc.where_to_obtain}
+                      </p>
+                    ) : null}
+                    {doc.common_errors.length > 0 ? (
+                      <p className="mt-1 text-xs text-muted-foreground">
+                        Evita: {doc.common_errors.slice(0, 2).join("; ")}.
+                      </p>
+                    ) : null}
+                  </div>
+                </div>
+              </li>
+            );
+          })}
+        </ul>
+      </section>
+    );
+  }
+
+  if (!/contrato|anexo/i.test(requirement.name)) return null;
+
+  const contractChecklist = [
+    "Contrato firmado y vigente, con todas las páginas legibles.",
+    "Anexos, convenios modificatorios o alcances que el contrato mencione.",
+    "Evidencia de firma o representación si el PDF no la muestra con claridad.",
+  ];
+  return (
+    <section className="rounded-md border border-border bg-white p-4">
+      <p className="text-sm font-semibold text-[color:var(--text-primary)]">
+        Checklist para contrato y anexos
+      </p>
+      <p className="mt-1 text-xs text-muted-foreground">
+        Sube el contrato como archivo principal y agrega los anexos relacionados
+        en la sección de archivos adicionales.
+      </p>
+      <ul className="mt-3 space-y-2">
+        {contractChecklist.map((item) => (
+          <li key={item} className="flex items-start gap-2 text-sm">
+            <CheckCircle
+              className="mt-0.5 h-4 w-4 shrink-0 text-primary"
+              aria-hidden="true"
+            />
+            <span>{item}</span>
+          </li>
+        ))}
+      </ul>
+      <p className="mt-3 text-xs text-muted-foreground">
+        Ejemplo válido: {requirement.validExample}
+      </p>
+    </section>
+  );
+}
+
 function UploadStep({
   file,
   fileError,
@@ -1384,7 +1607,10 @@ function UploadStep({
   duplicateCheck,
   duplicateChecking,
   requirement,
+  form,
   multiFileEnabled,
+  acceptedDocuments,
+  minimumDocuments,
   additionalFiles,
   additionalFilesError,
   onAdditionalFilesAdded,
@@ -1402,7 +1628,10 @@ function UploadStep({
   duplicateCheck: DuplicateCheck | null;
   duplicateChecking: boolean;
   requirement: (typeof requirementGuides)[number];
+  form: IntakeForm;
   multiFileEnabled: boolean;
+  acceptedDocuments?: CalendarAcceptedDocument[] | null;
+  minimumDocuments?: "one" | "all" | null;
   additionalFiles: File[];
   additionalFilesError: string | null;
   onAdditionalFilesAdded: (picked: FileList | File[] | null) => void;
@@ -1415,6 +1644,13 @@ function UploadStep({
       <StepHeading title="Sube el documento" />
       <div className="grid gap-4 lg:grid-cols-[minmax(0,1fr)_320px]">
         <div className="space-y-4">
+          <UploadSlotSummary form={form} requirement={requirement} />
+          <ExpectedDocumentsChecklist
+            acceptedDocuments={acceptedDocuments}
+            minimumDocuments={minimumDocuments}
+            selectedName={form.requirement_name}
+            requirement={requirement}
+          />
           <label
             htmlFor="native-file"
             onDragOver={(event) => event.preventDefault()}
@@ -1424,12 +1660,16 @@ function UploadStep({
             }}
             className="flex min-h-[180px] cursor-pointer flex-col items-center justify-center rounded-md border border-dashed border-[color:var(--border-brand)] bg-[color:var(--surface-teal-muted)]/40 p-6 text-center transition-colors hover:bg-[color:var(--surface-teal-muted)]/70"
           >
-            <CloudArrowUp className="h-9 w-9 text-[color:var(--text-brand)]" aria-hidden="true" />
+            <CloudArrowUp
+              className="h-9 w-9 text-[color:var(--text-brand)]"
+              aria-hidden="true"
+            />
             <p className="mt-3 text-sm font-semibold text-[color:var(--text-primary)]">
               Arrastra o selecciona el PDF
             </p>
             <p className="mt-1 text-sm text-[color:var(--text-secondary)]">
-              Solo PDF, máximo 15 MB. No subas archivos protegidos con contraseña.
+              Solo PDF, máximo 15 MB. No subas archivos protegidos con
+              contraseña.
             </p>
             <input
               id="native-file"
@@ -1456,7 +1696,10 @@ function UploadStep({
 
           {duplicateChecking ? (
             <div className="flex items-center gap-2 rounded-md border border-border bg-muted/40 p-3 text-xs text-muted-foreground">
-              <CircleNotch className="h-3.5 w-3.5 animate-spin" aria-hidden="true" />
+              <CircleNotch
+                className="h-3.5 w-3.5 animate-spin"
+                aria-hidden="true"
+              />
               Verificando si ya habías subido este mismo archivo…
             </div>
           ) : null}
@@ -1472,7 +1715,9 @@ function UploadStep({
                   <p className="font-medium">Ya habías subido este archivo</p>
                   <p className="mt-1 text-xs">
                     Detectamos una carga anterior con el mismo contenido
-                    {duplicateCheck.filename ? ` (${duplicateCheck.filename})` : ""}
+                    {duplicateCheck.filename
+                      ? ` (${duplicateCheck.filename})`
+                      : ""}
                     {duplicateCheck.requirement_name
                       ? ` para "${duplicateCheck.requirement_name}"`
                       : ""}
@@ -1703,10 +1948,12 @@ function PrevalidationStep({
               aria-hidden="true"
             />
             <div>
-              <p className="font-medium">Este archivo ya existe en tu expediente</p>
+              <p className="font-medium">
+                Este archivo ya existe en tu expediente
+              </p>
               <p className="mt-1 text-xs">
-                Si es a propósito (re-envío para corregir) puedes continuar. Si no,
-                regresa y elige el archivo correcto.
+                Si es a propósito (re-envío para corregir) puedes continuar. Si
+                no, regresa y elige el archivo correcto.
               </p>
             </div>
           </div>
@@ -1724,9 +1971,9 @@ function PrevalidationStep({
               aria-hidden="true"
             />
             <span>
-              Validamos que el archivo se haya recibido completo, que sea
-              un PDF que se pueda leer y que no esté duplicado. Nada se
-              aprueba automáticamente.
+              Validamos que el archivo se haya recibido completo, que sea un PDF
+              que se pueda leer y que no esté duplicado. Nada se aprueba
+              automáticamente.
             </span>
           </li>
           <li className="flex items-start gap-2">
@@ -1784,7 +2031,8 @@ function ConfirmationStep({
             </p>
             <p className="mt-1 text-sm text-amber-900/80">{error}</p>
             <p className="mt-1 text-xs text-amber-900/70">
-              Tu archivo y los datos siguen aquí. Vuelve al paso anterior para reintentar.
+              Tu archivo y los datos siguen aquí. Vuelve al paso anterior para
+              reintentar.
             </p>
           </div>
         </div>
@@ -1838,7 +2086,9 @@ function ConfirmationStep({
             </div>
             <div className="min-w-0">
               <p className="text-base font-semibold">{heroHeadline}</p>
-              <p className="mt-1 text-sm text-muted-foreground">{heroSubcopy}</p>
+              <p className="mt-1 text-sm text-muted-foreground">
+                {heroSubcopy}
+              </p>
             </div>
           </div>
           <RequirementStatusBadge status={result.status as RequirementStatus} />
@@ -1854,7 +2104,9 @@ function ConfirmationStep({
         <Alert variant="warning" className="cw-fade-up">
           <div className="min-w-0">
             <AlertTitle>Revisa el archivo</AlertTitle>
-            <AlertDescription>{result.match_feedback.warning_es}</AlertDescription>
+            <AlertDescription>
+              {result.match_feedback.warning_es}
+            </AlertDescription>
           </div>
         </Alert>
       ) : null}
@@ -1880,7 +2132,10 @@ function ConfirmationStep({
                     <span className="font-semibold break-words">
                       {entry.filename}
                     </span>
-                    <span className="opacity-90"> — {entry.feedback.warning_es}</span>
+                    <span className="opacity-90">
+                      {" "}
+                      — {entry.feedback.warning_es}
+                    </span>
                   </span>
                 </li>
               ))}
@@ -1901,9 +2156,9 @@ function ConfirmationStep({
             <div>
               <p className="font-medium">Validaciones iniciales</p>
               <p className="text-xs text-muted-foreground">
-                Revisamos que el archivo sea un PDF legible, no esté
-                duplicado y no esté protegido con contraseña. Ya
-                corrieron al recibir tu archivo.
+                Revisamos que el archivo sea un PDF legible, no esté duplicado y
+                no esté protegido con contraseña. Ya corrieron al recibir tu
+                archivo.
               </p>
             </div>
           </li>
@@ -1912,10 +2167,12 @@ function ConfirmationStep({
               2
             </span>
             <div>
-              <p className="font-medium">Revisión humana del equipo de cumplimiento</p>
+              <p className="font-medium">
+                Revisión humana del equipo de cumplimiento
+              </p>
               <p className="text-xs text-muted-foreground">
-                Una persona autorizada decide aprobar, rechazar o pedir aclaración.
-                La automatización no aprueba.
+                Una persona autorizada decide aprobar, rechazar o pedir
+                aclaración. La automatización no aprueba.
               </p>
             </div>
           </li>
@@ -1926,8 +2183,8 @@ function ConfirmationStep({
             <div>
               <p className="font-medium">Verás el resultado en tu calendario</p>
               <p className="text-xs text-muted-foreground">
-                Si te piden corregir algo, te llevaremos al detalle del documento
-                con la razón exacta.
+                Si te piden corregir algo, te llevaremos al detalle del
+                documento con la razón exacta.
               </p>
             </div>
           </li>
@@ -2031,11 +2288,15 @@ function formatApiError(payload: unknown): string {
           return null;
         }
         const detailItem = item as { loc?: unknown; msg?: unknown };
-        const message = typeof detailItem.msg === "string" ? detailItem.msg : null;
-        const location =
-          Array.isArray(detailItem.loc)
-            ? detailItem.loc.filter((part: unknown): part is string => typeof part === "string").join(" > ")
-            : null;
+        const message =
+          typeof detailItem.msg === "string" ? detailItem.msg : null;
+        const location = Array.isArray(detailItem.loc)
+          ? detailItem.loc
+              .filter(
+                (part: unknown): part is string => typeof part === "string",
+              )
+              .join(" > ")
+          : null;
         return [location, message].filter(Boolean).join(": ");
       })
       .filter(Boolean);

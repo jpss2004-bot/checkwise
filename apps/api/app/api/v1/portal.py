@@ -47,7 +47,7 @@ from fastapi import (
     status,
 )
 from pydantic import BaseModel, Field
-from sqlalchemy import and_, func, select
+from sqlalchemy import and_, delete, func, select, update
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import Session, selectinload
 
@@ -82,6 +82,7 @@ from app.core.period_validation import (
 from app.core.rate_limit import enforce_ai_heavy_rate_limit
 from app.db.session import get_db
 from app.models import (
+    ClientNotification,
     Document,
     DocumentInspection,
     DocumentStatusHistory,
@@ -1805,6 +1806,7 @@ class SubmissionDetailResponse(BaseModel):
     # the calendar and dashboard payloads, so a single notion of
     # "latest reviewer note" stays canonical.
     reviewer_note: str | None = None
+    can_cancel: bool = False
 
 
 # Statuses that mean "you, the provider, must act now."
@@ -1820,6 +1822,12 @@ _RESOLVED_STATUSES: set[str] = {
     DocumentStatus.EXCEPCION_LEGAL.value,
     DocumentStatus.NO_APLICA.value,
 }
+_CANCELABLE_STATUSES: set[str] = {
+    DocumentStatus.PENDIENTE.value,
+    DocumentStatus.RECIBIDO.value,
+    DocumentStatus.PENDIENTE_REVISION.value,
+    DocumentStatus.PREVALIDADO.value,
+}
 
 
 def _suggested_action(status: str) -> str:
@@ -1830,6 +1838,17 @@ def _suggested_action(status: str) -> str:
     if status in _RESOLVED_STATUSES:
         return "no_action"
     return "wait_for_review"
+
+
+def _submission_can_be_cancelled(db: Session, submission: Submission) -> bool:
+    if submission.status not in _CANCELABLE_STATUSES:
+        return False
+    replacement_exists = db.scalar(
+        select(Submission.id)
+        .where(Submission.supersedes_submission_id == submission.id)
+        .limit(1)
+    )
+    return replacement_exists is None
 
 
 @router.get(
@@ -2029,7 +2048,115 @@ def get_workspace_submission(
         previous_attempts=previous_attempts,
         suggested_action=_suggested_action(submission.status),  # type: ignore[arg-type]
         reviewer_note=_latest_reviewer_note(db, submission.id),
+        can_cancel=_submission_can_be_cancelled(db, submission),
     )
+
+
+@router.delete(
+    "/workspaces/{workspace_id}/submissions/{submission_id}",
+    status_code=status.HTTP_204_NO_CONTENT,
+    summary="Cancel a provider submission before review",
+)
+def cancel_workspace_submission(
+    workspace_id: str,
+    submission_id: str,
+    db: DbSession,
+    workspace: Annotated[ProviderWorkspace, Depends(current_portal_workspace)],
+) -> Response:
+    _ = workspace_id  # tenant guard already enforced by dependency
+    submission = db.scalar(
+        select(Submission).where(Submission.id == submission_id).limit(1)
+    )
+    if submission is None or submission.client_id != workspace.client_id or (
+        submission.vendor_id != workspace.vendor_id
+    ):
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Submission no encontrado para este workspace.",
+        )
+
+    if not _submission_can_be_cancelled(db, submission):
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail=(
+                "Este envío ya no puede cancelarse. Si requiere corrección, "
+                "usa el flujo de reemplazo."
+            ),
+        )
+
+    documents = list(
+        db.scalars(select(Document).where(Document.submission_id == submission.id))
+    )
+    document_ids = [doc.id for doc in documents]
+    storage_keys = [doc.storage_key for doc in documents]
+
+    add_audit_event(
+        db,
+        action="provider.submission_cancelled",
+        entity_type="submission",
+        entity_id=submission.id,
+        actor_type="provider",
+        actor_id=workspace.owner_user_id,
+        before={
+            "status": submission.status,
+            "requirement_code": submission.requirement_code,
+            "period_key": submission.period_key,
+            "document_ids": document_ids,
+            "filenames": [doc.original_filename for doc in documents],
+        },
+        metadata={
+            "workspace_id": workspace.id,
+            "client_id": workspace.client_id,
+            "vendor_id": workspace.vendor_id,
+        },
+    )
+
+    if document_ids:
+        db.execute(
+            delete(DocumentInspection).where(
+                DocumentInspection.document_id.in_(document_ids)
+            )
+        )
+    db.execute(delete(Validation).where(Validation.submission_id == submission.id))
+    db.execute(
+        delete(ValidationEvent).where(ValidationEvent.submission_id == submission.id)
+    )
+    db.execute(
+        delete(DocumentStatusHistory).where(
+            DocumentStatusHistory.submission_id == submission.id
+        )
+    )
+    db.execute(
+        update(ProviderNotification)
+        .where(ProviderNotification.submission_id == submission.id)
+        .values(submission_id=None)
+    )
+    db.execute(
+        update(ClientNotification)
+        .where(ClientNotification.submission_id == submission.id)
+        .values(submission_id=None)
+    )
+    db.execute(delete(Document).where(Document.submission_id == submission.id))
+    db.delete(submission)
+
+    try:
+        db.commit()
+    except SQLAlchemyError as exc:
+        db.rollback()
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="No fue posible cancelar el envío.",
+        ) from exc
+
+    if storage_keys:
+        try:
+            storage = get_storage_service()
+            for storage_key in storage_keys:
+                storage.delete(storage_key)
+        except Exception:  # noqa: BLE001 — DB cancellation already succeeded
+            pass
+
+    return Response(status_code=status.HTTP_204_NO_CONTENT)
 
 
 @router.get(
@@ -3064,6 +3191,7 @@ class DashboardRecentUpload(BaseModel):
     submitted_at: str
     filename: str | None
     href: str
+    can_cancel: bool = False
 
 
 class DashboardResponse(BaseModel):
@@ -3792,6 +3920,7 @@ def _compute_recent_uploads(
                 submitted_at=sub.created_at.isoformat(),
                 filename=filename,
                 href=_recent_upload_href(sub),
+                can_cancel=_submission_can_be_cancelled(db, sub),
             )
         )
     return rows

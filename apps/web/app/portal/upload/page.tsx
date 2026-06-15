@@ -3,7 +3,12 @@
 import { Suspense, useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
-import { ArrowLeft, ArrowRight, CalendarBlank, Info } from "@phosphor-icons/react";
+import {
+  ArrowLeft,
+  ArrowRight,
+  CalendarBlank,
+  Info,
+} from "@phosphor-icons/react";
 
 import {
   IntakeWizard,
@@ -95,10 +100,14 @@ function PortalUploadInner() {
   const [acceptedDocuments, setAcceptedDocuments] = useState<
     CalendarAcceptedDocument[] | null
   >(null);
+  const [minimumDocuments, setMinimumDocuments] = useState<
+    "one" | "all" | null
+  >(null);
 
   useEffect(() => {
     if (!session || !isV2Mode || !requirementCode || !periodKey) {
       setAcceptedDocuments(null);
+      setMinimumDocuments(null);
       return;
     }
     let cancelled = false;
@@ -131,6 +140,7 @@ function PortalUploadInner() {
         // the URL with an unknown code) — the wizard renders a clear
         // "no alternatives loaded" message rather than half-state.
         setAcceptedDocuments(row?.accepts_documents ?? []);
+        setMinimumDocuments(row?.minimum_documents ?? null);
       })
       .catch(() => {
         // Fetch failure → still show the wizard in v2 mode but with
@@ -138,6 +148,7 @@ function PortalUploadInner() {
         // surfaces the failure state to the provider.
         if (cancelled) return;
         setAcceptedDocuments([]);
+        setMinimumDocuments(null);
       });
     return () => {
       cancelled = true;
@@ -148,9 +159,8 @@ function PortalUploadInner() {
   // occupies this slot, so the wizard can confirm before a re-upload
   // supersedes a settled/in-flight document. Non-fatal — on any failure
   // we simply omit the warning rather than block the upload.
-  const [replaceWarning, setReplaceWarning] = useState<DocumentStateCode | null>(
-    null,
-  );
+  const [replaceWarning, setReplaceWarning] =
+    useState<DocumentStateCode | null>(null);
   useEffect(() => {
     if (!session || !requirementCode) {
       setReplaceWarning(null);
@@ -204,7 +214,11 @@ function PortalUploadInner() {
 
   const lockedFields = useMemo<IntakeLockedField[]>(() => {
     if (!session) return [];
-    const fields: IntakeLockedField[] = ["client_name", "vendor_name", "vendor_rfc"];
+    const fields: IntakeLockedField[] = [
+      "client_name",
+      "vendor_name",
+      "vendor_rfc",
+    ];
     if (session.contract_reference) fields.push("contract_reference");
     // In v2 mode the wizard's alternatives picker drives
     // ``requirement_name``, so don't lock it from the URL — the URL
@@ -214,7 +228,14 @@ function PortalUploadInner() {
     if (loadType) fields.push("load_type");
     if (periodLabel) fields.push("period_code");
     return fields;
-  }, [session, requirementName, institutionCode, loadType, periodLabel, isV2Mode]);
+  }, [
+    session,
+    requirementName,
+    institutionCode,
+    loadType,
+    periodLabel,
+    isV2Mode,
+  ]);
 
   if (!session) {
     return null;
@@ -293,8 +314,8 @@ function PortalUploadInner() {
             <AlertDescription>
               Cargar un documento sin contexto puede dejarlo asignado al
               cliente, periodo o institución equivocados. Pasar por el
-              calendario te garantiza que el archivo entra al expediente
-              que esperas.
+              calendario te garantiza que el archivo entra al expediente que
+              esperas.
             </AlertDescription>
           </Alert>
         </main>
@@ -330,15 +351,14 @@ function PortalUploadInner() {
             </>
           }
         />
-        <UploadContextSummary
-          cameFromOnboarding={cameFromOnboarding}
-        />
+        <UploadContextSummary cameFromOnboarding={cameFromOnboarding} />
         <IntakeWizard
           prefill={prefill}
           lockedFields={lockedFields}
           successContinue={successContinue}
           supersedesSubmissionId={supersedesSubmissionId}
           acceptedDocuments={isV2Mode ? acceptedDocuments : undefined}
+          minimumDocuments={isV2Mode ? minimumDocuments : undefined}
           replaceWarning={replaceWarning}
         />
       </main>
@@ -376,13 +396,12 @@ function UploadContextSummary({
           </h2>
           <p className="mt-1 text-[12.5px] leading-relaxed text-[color:var(--text-secondary)]">
             Estos datos vienen del documento que seleccionaste en el{" "}
-            {sourceLabel}. Así evitamos errores de cliente, periodo,
-            institución o requisito.
+            {sourceLabel}. Así evitamos errores de cliente, periodo, institución
+            o requisito.
           </p>
           <p className="mt-1.5 text-[11.5px] text-[color:var(--text-tertiary)]">
-            Si esta información no corresponde al documento que quieres
-            subir, vuelve al {sourceLabel} y selecciona el requisito
-            correcto.
+            Si esta información no corresponde al documento que quieres subir,
+            vuelve al {sourceLabel} y selecciona el requisito correcto.
           </p>
         </div>
       </header>

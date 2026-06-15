@@ -224,6 +224,9 @@ async function fetchJson<T>(
     const detail = await response.text().catch(() => "");
     throw new PortalApiError(response.status, detail || response.statusText);
   }
+  if (response.status === 204) {
+    return null as T;
+  }
   return (await response.json()) as T;
 }
 
@@ -279,7 +282,9 @@ export async function getSlotState(
   session: PortalSession,
   opts: { requirement_code: string; period_key?: string | null },
 ): Promise<SlotState> {
-  const params = new URLSearchParams({ requirement_code: opts.requirement_code });
+  const params = new URLSearchParams({
+    requirement_code: opts.requirement_code,
+  });
   if (opts.period_key) params.set("period_key", opts.period_key);
   return await fetchJson<SlotState>(
     `/api/v1/portal/workspaces/${session.workspace_id}/slot-state?${params.toString()}`,
@@ -447,6 +452,7 @@ export type SubmissionDetail = {
   supersedes_submission_id: string | null;
   /** Phase 4 — id of the newer submission that replaced this one, or null. */
   superseded_by_submission_id: string | null;
+  can_cancel: boolean;
   /** Phase 2 / Slice 2B — the reviewer's plain-Spanish reason for the
    *  most recent decision (reject / clarification / mark-exception),
    *  or null when no reviewer decision has been applied. The page
@@ -584,10 +590,7 @@ export async function fetchSubmissionDocumentBlob(
   if (adminSession?.access_token) {
     headers.set("Authorization", `Bearer ${adminSession.access_token}`);
   }
-  if (
-    session.access_token &&
-    session.access_token !== "cookie-managed"
-  ) {
+  if (session.access_token && session.access_token !== "cookie-managed") {
     headers.set("X-Workspace-Token", session.access_token);
   }
   const response = await fetch(
@@ -618,6 +621,7 @@ export type WorkspaceSubmissionListItem = {
   submitted_at: string;
   filename: string | null;
   href: string;
+  can_cancel: boolean;
 };
 
 export type WorkspaceSubmissionsList = {
@@ -631,6 +635,17 @@ export async function listWorkspaceSubmissions(
   return await fetchJson<WorkspaceSubmissionsList>(
     `/api/v1/portal/workspaces/${session.workspace_id}/submissions`,
     { method: "GET" },
+    session,
+  );
+}
+
+export async function cancelWorkspaceSubmission(
+  session: PortalSession,
+  submissionId: string,
+): Promise<void> {
+  await fetchJson<null>(
+    `/api/v1/portal/workspaces/${session.workspace_id}/submissions/${submissionId}`,
+    { method: "DELETE" },
     session,
   );
 }
@@ -798,7 +813,6 @@ export async function getDashboard(
     session,
   );
 }
-
 
 export type DuplicateCheck = {
   exists: boolean;

@@ -11,6 +11,8 @@ import {
   Clock,
   DownloadSimple,
   FileText,
+  PencilSimple,
+  Trash,
 } from "@phosphor-icons/react";
 
 import { PortalAppShell } from "@/components/checkwise/portal/portal-app-shell";
@@ -26,6 +28,7 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { PageHeader } from "@/components/ui/page-header";
 import { toast } from "@/components/ui/toast";
 import {
+  cancelWorkspaceSubmission,
   fetchSubmissionDocumentBlob,
   getSubmissionDetail,
   INSTITUTION_LABELS,
@@ -54,6 +57,7 @@ export default function SubmissionDetailPage({ params }: PageProps) {
   const [loading, setLoading] = useState(true);
   const [errorKind, setErrorKind] = useState<ErrorKind | null>(null);
   const [reloadKey, setReloadKey] = useState(0);
+  const [canceling, setCanceling] = useState(false);
 
   useEffect(() => {
     let cancelled = false;
@@ -96,6 +100,30 @@ export default function SubmissionDetailPage({ params }: PageProps) {
   }, [session, submission_id, reloadKey]);
 
   const retry = useCallback(() => setReloadKey((k) => k + 1), []);
+
+  const handleCancel = useCallback(async () => {
+    if (!session || !detail || canceling) return;
+    const confirmed = window.confirm(
+      "Cancelar este envío eliminará el PDF y lo quitará de tu historial. Si solo necesitas cambiar el archivo, usa Reemplazar archivo.",
+    );
+    if (!confirmed) return;
+    setCanceling(true);
+    try {
+      await cancelWorkspaceSubmission(session, detail.submission_id);
+      toast.success("Envío cancelado", {
+        description:
+          "El documento se retiró del portal y la obligación vuelve a quedar pendiente.",
+      });
+      router.replace("/portal/submissions");
+    } catch (err) {
+      const description =
+        err instanceof PortalApiError && err.status === 409
+          ? "Este envío ya entró a revisión. Usa el flujo de reemplazo si necesitas corregirlo."
+          : "No pudimos cancelar el envío. Inténtalo de nuevo en unos segundos.";
+      toast.error("No se pudo cancelar", { description });
+      setCanceling(false);
+    }
+  }, [canceling, detail, router, session]);
 
   if (!session) return null;
 
@@ -156,7 +184,11 @@ export default function SubmissionDetailPage({ params }: PageProps) {
         ) : detail ? (
           <div className="grid gap-5 lg:grid-cols-3">
             <div className="space-y-5 lg:col-span-2">
-              <StatusHero detail={detail} />
+              <StatusHero
+                detail={detail}
+                canceling={canceling}
+                onCancel={handleCancel}
+              />
               <ReviewerNoteCard detail={detail} />
               <PrevalidationCard detail={detail} />
               <SubmissionPreview detail={detail} session={session} />
@@ -199,7 +231,15 @@ const CTA_LABEL: Record<SubmissionSuggestedAction, string> = {
   no_action: "Ver mi calendario",
 };
 
-function StatusHero({ detail }: { detail: SubmissionDetail }) {
+function StatusHero({
+  detail,
+  canceling,
+  onCancel,
+}: {
+  detail: SubmissionDetail;
+  canceling: boolean;
+  onCancel: () => void;
+}) {
   const tone = toneForStatus(detail.status);
   const headline =
     STATUS_HEADLINE[detail.status] ?? "Estado actual del documento";
@@ -217,11 +257,7 @@ function StatusHero({ detail }: { detail: SubmissionDetail }) {
         ? "bg-[color:var(--status-success-text)] text-[color:var(--text-inverse)]"
         : "bg-[color:var(--interactive-primary)] text-[color:var(--text-inverse)]";
   const Icon =
-    tone === "attention"
-      ? Warning
-      : tone === "approved"
-        ? CheckCircle
-        : Clock;
+    tone === "attention" ? Warning : tone === "approved" ? CheckCircle : Clock;
   const ctaHref = buildReuploadHref(detail);
   const showPrimaryCta =
     detail.suggested_action === "reupload" ||
@@ -254,27 +290,53 @@ function StatusHero({ detail }: { detail: SubmissionDetail }) {
             </p>
           </div>
         </div>
-        {showPrimaryCta ? (
-          <Button asChild className="self-start sm:self-auto">
-            <Link href={ctaHref}>
-              {CTA_LABEL[detail.suggested_action]}
-              <ArrowRight className="h-4 w-4" aria-hidden="true" />
-            </Link>
-          </Button>
-        ) : (
-          <Button asChild variant="outline" className="self-start sm:self-auto">
-            <Link href="/portal/calendar">
-              {CTA_LABEL[detail.suggested_action]}
-              <ArrowRight className="h-4 w-4" aria-hidden="true" />
-            </Link>
-          </Button>
-        )}
+        <div className="flex flex-col gap-2 sm:items-end">
+          {showPrimaryCta || detail.can_cancel ? (
+            <Button asChild className="self-start sm:self-auto">
+              <Link href={ctaHref}>
+                {detail.can_cancel
+                  ? "Reemplazar archivo"
+                  : CTA_LABEL[detail.suggested_action]}
+                {detail.can_cancel ? (
+                  <PencilSimple className="h-4 w-4" aria-hidden="true" />
+                ) : (
+                  <ArrowRight className="h-4 w-4" aria-hidden="true" />
+                )}
+              </Link>
+            </Button>
+          ) : (
+            <Button
+              asChild
+              variant="outline"
+              className="self-start sm:self-auto"
+            >
+              <Link href="/portal/calendar">
+                {CTA_LABEL[detail.suggested_action]}
+                <ArrowRight className="h-4 w-4" aria-hidden="true" />
+              </Link>
+            </Button>
+          )}
+          {detail.can_cancel ? (
+            <Button
+              type="button"
+              variant="destructive"
+              className="self-start sm:self-auto"
+              loading={canceling}
+              onClick={onCancel}
+            >
+              <Trash className="h-4 w-4" aria-hidden="true" />
+              Cancelar envío
+            </Button>
+          ) : null}
+        </div>
       </div>
     </section>
   );
 }
 
-function toneForStatus(status: RequirementStatus): "attention" | "approved" | "neutral" {
+function toneForStatus(
+  status: RequirementStatus,
+): "attention" | "approved" | "neutral" {
   if (
     status === DocumentStatus.RECHAZADO ||
     status === DocumentStatus.VENCIDO ||
@@ -293,19 +355,22 @@ function toneForStatus(status: RequirementStatus): "attention" | "approved" | "n
 
 function buildReuploadHref(detail: SubmissionDetail): string {
   const params = new URLSearchParams();
-  if (detail.requirement.name) params.set("requirement", detail.requirement.name);
+  if (detail.requirement.name)
+    params.set("requirement", detail.requirement.name);
   if (detail.requirement.requirement_code)
     params.set("requirement_code", detail.requirement.requirement_code);
   if (detail.requirement.institution)
     params.set("institution", detail.requirement.institution);
   if (detail.load_type) params.set("load_type", detail.load_type);
   if (detail.period.code) params.set("period_label", detail.period.code);
-  if (detail.period.period_key) params.set("period_key", detail.period.period_key);
+  if (detail.period.period_key)
+    params.set("period_key", detail.period.period_key);
   // Phase 3 — when the suggested action is to reupload (i.e. this
   // submission is in a replacement-eligible state), thread its id
   // through so the wizard POSTs ``supersedes_submission_id`` and the
   // backend can link the new attempt to this one.
   if (
+    detail.can_cancel ||
     detail.suggested_action === "reupload" ||
     detail.suggested_action === "verify_and_reupload"
   ) {
@@ -330,13 +395,12 @@ function buildReuploadHref(detail: SubmissionDetail): string {
 // the reviewer's words drive the message; for ``posible_mismatch``
 // without a reviewer decision yet, the detector's reason takes over.
 
-const REVIEWER_NOTE_STATUSES: ReadonlySet<RequirementStatus> = new Set<
-  RequirementStatus
->([
-  DocumentStatus.RECHAZADO,
-  DocumentStatus.REQUIERE_ACLARACION,
-  DocumentStatus.POSIBLE_MISMATCH,
-]);
+const REVIEWER_NOTE_STATUSES: ReadonlySet<RequirementStatus> =
+  new Set<RequirementStatus>([
+    DocumentStatus.RECHAZADO,
+    DocumentStatus.REQUIERE_ACLARACION,
+    DocumentStatus.POSIBLE_MISMATCH,
+  ]);
 
 const REVIEWER_NOTE_HEADINGS: Partial<Record<RequirementStatus, string>> = {
   rechazado: "Motivo del rechazo",
@@ -346,11 +410,9 @@ const REVIEWER_NOTE_HEADINGS: Partial<Record<RequirementStatus, string>> = {
 
 function ReviewerNoteCard({ detail }: { detail: SubmissionDetail }) {
   if (!REVIEWER_NOTE_STATUSES.has(detail.status)) return null;
-  const note =
-    detail.reviewer_note ?? detail.document?.mismatch_reason ?? null;
+  const note = detail.reviewer_note ?? detail.document?.mismatch_reason ?? null;
   if (!note) return null;
-  const heading =
-    REVIEWER_NOTE_HEADINGS[detail.status] ?? "Nota del revisor";
+  const heading = REVIEWER_NOTE_HEADINGS[detail.status] ?? "Nota del revisor";
   const sourceLabel = detail.reviewer_note
     ? "Nota del revisor"
     : "Detectado automáticamente";
@@ -472,11 +534,11 @@ function ContextCard({ detail }: { detail: SubmissionDetail }) {
               "—"
             }
           />
-          <Field label="Periodo regulatorio" value={detail.period.period_key ?? "—"} />
           <Field
-            label="Periodo capturado"
-            value={detail.period.code ?? "—"}
+            label="Periodo regulatorio"
+            value={detail.period.period_key ?? "—"}
           />
+          <Field label="Periodo capturado" value={detail.period.code ?? "—"} />
           <Field label="Tipo de carga" value={detail.load_type} />
           <Field label="Carga registrada" value={submittedDate} />
         </dl>
@@ -638,7 +700,10 @@ function SubmissionPreview({
       <CardHeader>
         <div className="flex flex-wrap items-center justify-between gap-2">
           <div className="flex items-center gap-2">
-            <FileText className="h-4 w-4 text-muted-foreground" aria-hidden="true" />
+            <FileText
+              className="h-4 w-4 text-muted-foreground"
+              aria-hidden="true"
+            />
             <CardTitle>Vista previa del documento</CardTitle>
           </div>
           <Button
@@ -656,7 +721,8 @@ function SubmissionPreview({
           </Button>
         </div>
         <p className="mt-1 text-sm text-muted-foreground">
-          {detail.document.filename} · cargado el {formatDate(detail.submitted_at)}
+          {detail.document.filename} · cargado el{" "}
+          {formatDate(detail.submitted_at)}
         </p>
       </CardHeader>
       <CardContent>
@@ -682,8 +748,8 @@ function SubmissionPreview({
           </>
         ) : loadError ? (
           <p className="text-sm text-muted-foreground">
-            No pudimos cargar la vista previa. Recarga la página o
-            inténtalo de nuevo en unos momentos.
+            No pudimos cargar la vista previa. Recarga la página o inténtalo de
+            nuevo en unos momentos.
           </p>
         ) : (
           <div

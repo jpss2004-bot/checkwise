@@ -11,6 +11,7 @@ from sqlalchemy import create_engine, select
 from sqlalchemy.orm import Session, sessionmaker
 from sqlalchemy.pool import StaticPool
 
+from app.constants.statuses import DocumentStatus
 from app.core.config import settings
 from app.db.base import Base
 from app.db.session import get_db
@@ -18,7 +19,9 @@ from app.main import app
 from app.models import (
     AuditLog,
     Client,
+    Document,
     ProviderWorkspace,
+    Submission,
     User,
     Vendor,
     entities,  # noqa: F401
@@ -502,6 +505,118 @@ def test_submission_detail_returns_shape(api_client: TestClient) -> None:
     assert body["previous_attempts"] == []
     # pendiente_revision suggests waiting.
     assert body["suggested_action"] == "wait_for_review"
+
+
+def test_cancel_pending_submission_removes_rows_and_audits(
+    api_client: TestClient,
+) -> None:
+    access = _setup_workspace_session(api_client)
+    headers = {"X-Workspace-Token": access["access_token"]}
+    submitted = _submit_canonical(api_client, vendor_rfc=access["vendor_rfc"])
+    submission_id = submitted["submission_id"]
+
+    factory = api_client.app.state.testing_session  # type: ignore[attr-defined]
+    db: Session = factory()
+    try:
+        submission = db.get(Submission, submission_id)
+        assert submission is not None
+        submission.status = DocumentStatus.PENDIENTE_REVISION.value
+        document = db.scalar(
+            select(Document).where(Document.submission_id == submission_id)
+        )
+        assert document is not None
+        document.status = DocumentStatus.PENDIENTE_REVISION.value
+        db.commit()
+    finally:
+        db.close()
+
+    detail = api_client.get(
+        f"/api/v1/portal/workspaces/{access['workspace_id']}"
+        f"/submissions/{submission_id}",
+        headers=headers,
+    )
+    assert detail.status_code == 200, detail.text
+    assert detail.json()["can_cancel"] is True
+
+    cancel = api_client.delete(
+        f"/api/v1/portal/workspaces/{access['workspace_id']}"
+        f"/submissions/{submission_id}",
+        headers=headers,
+    )
+    assert cancel.status_code == 204, cancel.text
+
+    detail = api_client.get(
+        f"/api/v1/portal/workspaces/{access['workspace_id']}"
+        f"/submissions/{submission_id}",
+        headers=headers,
+    )
+    assert detail.status_code == 404
+
+    db: Session = factory()
+    try:
+        assert db.get(Submission, submission_id) is None
+        assert (
+            db.scalar(
+                select(Document.id).where(Document.submission_id == submission_id)
+            )
+            is None
+        )
+        audit = db.scalar(
+            select(AuditLog).where(
+                AuditLog.action == "provider.submission_cancelled",
+                AuditLog.entity_id == submission_id,
+            )
+        )
+        assert audit is not None
+        assert audit.actor_type == "provider"
+        assert audit.event_metadata["workspace_id"] == access["workspace_id"]
+    finally:
+        db.close()
+
+
+def test_cancel_rejects_reviewed_submission(
+    api_client: TestClient,
+) -> None:
+    access = _setup_workspace_session(api_client)
+    headers = {"X-Workspace-Token": access["access_token"]}
+    submitted = _submit_canonical(api_client, vendor_rfc=access["vendor_rfc"])
+    submission_id = submitted["submission_id"]
+
+    factory = api_client.app.state.testing_session  # type: ignore[attr-defined]
+    db: Session = factory()
+    try:
+        submission = db.get(Submission, submission_id)
+        assert submission is not None
+        submission.status = DocumentStatus.APROBADO.value
+        document = db.scalar(
+            select(Document).where(Document.submission_id == submission_id)
+        )
+        assert document is not None
+        document.status = DocumentStatus.APROBADO.value
+        db.commit()
+    finally:
+        db.close()
+
+    detail = api_client.get(
+        f"/api/v1/portal/workspaces/{access['workspace_id']}"
+        f"/submissions/{submission_id}",
+        headers=headers,
+    )
+    assert detail.status_code == 200, detail.text
+    assert detail.json()["can_cancel"] is False
+
+    cancel = api_client.delete(
+        f"/api/v1/portal/workspaces/{access['workspace_id']}"
+        f"/submissions/{submission_id}",
+        headers=headers,
+    )
+    assert cancel.status_code == 409
+
+    db = factory()
+    try:
+        assert db.get(Submission, submission_id) is not None
+    finally:
+        db.close()
 
 
 def test_submission_detail_lists_previous_attempts_for_same_slot(

@@ -17,17 +17,19 @@
 import { useEffect, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { ArrowRight, FileText, FolderOpen } from "@phosphor-icons/react";
+import { ArrowRight, FileText, FolderOpen, Trash } from "@phosphor-icons/react";
 
 import { PortalAppShell } from "@/components/checkwise/portal/portal-app-shell";
 import { RequirementStatusBadge } from "@/components/checkwise/portal/requirement-status-badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { PageHeader } from "@/components/ui/page-header";
+import { toast } from "@/components/ui/toast";
 import {
   INSTITUTION_LABELS,
   MONTH_LABELS_ES,
   PortalApiError,
+  cancelWorkspaceSubmission,
   listWorkspaceSubmissions,
   type RequirementStatus,
   type WorkspaceSubmissionListItem,
@@ -50,8 +52,11 @@ type Grouped = {
 export default function SubmissionsIndexPage() {
   const router = useRouter();
   const [session, setSession] = useState<PortalSession | null>(null);
-  const [items, setItems] = useState<WorkspaceSubmissionListItem[] | null>(null);
+  const [items, setItems] = useState<WorkspaceSubmissionListItem[] | null>(
+    null,
+  );
   const [errorKind, setErrorKind] = useState<"network" | null>(null);
+  const [cancelingId, setCancelingId] = useState<string | null>(null);
 
   useEffect(() => {
     let cancelled = false;
@@ -103,7 +108,8 @@ export default function SubmissionsIndexPage() {
           <p className="text-sm text-muted-foreground">Cargando documentos…</p>
         ) : errorKind === "network" ? (
           <p className="text-sm text-muted-foreground">
-            No pudimos cargar tu historial. Vuelve a intentarlo en unos segundos.
+            No pudimos cargar tu historial. Vuelve a intentarlo en unos
+            segundos.
           </p>
         ) : items.length === 0 ? (
           <Card>
@@ -125,7 +131,38 @@ export default function SubmissionsIndexPage() {
             </CardContent>
           </Card>
         ) : (
-          <GroupedList groups={groupSubmissions(items)} />
+          <GroupedList
+            groups={groupSubmissions(items)}
+            cancelingId={cancelingId}
+            onCancel={async (item) => {
+              if (!session || cancelingId) return;
+              const confirmed = window.confirm(
+                "Cancelar este envío eliminará el PDF y lo quitará de tu historial. Si solo necesitas cambiar el archivo, abre el detalle y usa Reemplazar archivo.",
+              );
+              if (!confirmed) return;
+              setCancelingId(item.submission_id);
+              try {
+                await cancelWorkspaceSubmission(session, item.submission_id);
+                setItems(
+                  (current) =>
+                    current?.filter(
+                      (row) => row.submission_id !== item.submission_id,
+                    ) ?? [],
+                );
+                toast.success("Envío cancelado", {
+                  description: "La obligación vuelve a quedar pendiente.",
+                });
+              } catch (err) {
+                const description =
+                  err instanceof PortalApiError && err.status === 409
+                    ? "Este envío ya entró a revisión. Ábrelo para reemplazarlo si necesitas corregirlo."
+                    : "No pudimos cancelar el envío. Inténtalo de nuevo en unos segundos.";
+                toast.error("No se pudo cancelar", { description });
+              } finally {
+                setCancelingId(null);
+              }
+            }}
+          />
         )}
       </main>
     </PortalAppShell>
@@ -190,7 +227,9 @@ function groupSubmissions(items: WorkspaceSubmissionListItem[]): Grouped[] {
             })),
         })),
     }))
-    .sort((a, b) => a.institutionLabel.localeCompare(b.institutionLabel, "es-MX"));
+    .sort((a, b) =>
+      a.institutionLabel.localeCompare(b.institutionLabel, "es-MX"),
+    );
 }
 
 function extractYearMonth(item: WorkspaceSubmissionListItem): {
@@ -208,18 +247,32 @@ function extractYearMonth(item: WorkspaceSubmissionListItem): {
     const yearOnly = item.period_key.match(/^(\d{4})/);
     if (yearOnly) {
       const submitted = new Date(item.submitted_at);
-      return { year: Number(yearOnly[1]), monthIndex: submitted.getMonth() + 1 };
+      return {
+        year: Number(yearOnly[1]),
+        monthIndex: submitted.getMonth() + 1,
+      };
     }
   }
   const submitted = new Date(item.submitted_at);
-  return { year: submitted.getFullYear(), monthIndex: submitted.getMonth() + 1 };
+  return {
+    year: submitted.getFullYear(),
+    monthIndex: submitted.getMonth() + 1,
+  };
 }
 
 // ---------------------------------------------------------------------------
 // Rendering
 // ---------------------------------------------------------------------------
 
-function GroupedList({ groups }: { groups: Grouped[] }) {
+function GroupedList({
+  groups,
+  cancelingId,
+  onCancel,
+}: {
+  groups: Grouped[];
+  cancelingId: string | null;
+  onCancel: (item: WorkspaceSubmissionListItem) => void;
+}) {
   return (
     <div className="space-y-6">
       {groups.map((group) => (
@@ -244,33 +297,47 @@ function GroupedList({ groups }: { groups: Grouped[] }) {
                     <ul className="divide-y divide-border rounded-md border border-border bg-white">
                       {monthBlock.items.map((item) => (
                         <li key={item.submission_id}>
-                          <Link
-                            href={`/portal/submissions/${item.submission_id}`}
-                            className="flex items-center gap-3 p-3 hover:bg-muted/30"
-                          >
-                            <FileText
-                              className="h-4 w-4 shrink-0 text-muted-foreground"
-                              aria-hidden="true"
-                            />
-                            <div className="min-w-0 flex-1">
-                              <p className="truncate text-sm font-medium text-foreground">
-                                {item.requirement_name}
-                              </p>
-                              <p className="truncate text-xs text-muted-foreground">
-                                {item.filename ?? "Sin archivo"}
-                                {item.period_key
-                                  ? ` · ${item.period_key}`
-                                  : ""}
-                              </p>
-                            </div>
-                            <RequirementStatusBadge
-                              status={item.status as RequirementStatus}
-                            />
-                            <ArrowRight
-                              className="h-4 w-4 shrink-0 text-muted-foreground"
-                              aria-hidden="true"
-                            />
-                          </Link>
+                          <div className="flex items-center gap-2 p-3 hover:bg-muted/30">
+                            <Link
+                              href={`/portal/submissions/${item.submission_id}`}
+                              className="flex min-w-0 flex-1 items-center gap-3"
+                            >
+                              <FileText
+                                className="h-4 w-4 shrink-0 text-muted-foreground"
+                                aria-hidden="true"
+                              />
+                              <div className="min-w-0 flex-1">
+                                <p className="truncate text-sm font-medium text-foreground">
+                                  {item.requirement_name}
+                                </p>
+                                <p className="truncate text-xs text-muted-foreground">
+                                  {item.filename ?? "Sin archivo"}
+                                  {item.period_key
+                                    ? ` · ${item.period_key}`
+                                    : ""}
+                                </p>
+                              </div>
+                              <RequirementStatusBadge
+                                status={item.status as RequirementStatus}
+                              />
+                              <ArrowRight
+                                className="h-4 w-4 shrink-0 text-muted-foreground"
+                                aria-hidden="true"
+                              />
+                            </Link>
+                            {item.can_cancel ? (
+                              <Button
+                                type="button"
+                                variant="destructive"
+                                size="sm"
+                                loading={cancelingId === item.submission_id}
+                                onClick={() => onCancel(item)}
+                              >
+                                <Trash className="h-4 w-4" aria-hidden="true" />
+                                Cancelar
+                              </Button>
+                            ) : null}
+                          </div>
                         </li>
                       ))}
                     </ul>
