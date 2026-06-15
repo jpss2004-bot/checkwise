@@ -39,7 +39,13 @@ services:
     # Render's Ubuntu base. Adds ~2-3 min to each deploy and ~200MB to
     # the slug; PDF rendering peaks ~150-300MB RAM per render which is
     # workable on starter (512MB) under normal traffic.
-    buildCommand: pip install -e . && playwright install --with-deps chromium
+    # `-c requirements.lock` pins the full transitive dependency tree to
+    # the exact versions validated locally. Without it, `pip install -e .`
+    # resolves whatever is latest at build time — that drift (fastapi
+    # 0.137 lazy router inclusion) silently crash-looped the deploy for
+    # two days on 2026-06-15. Regenerate the lock per its header when
+    # changing deps in pyproject.toml.
+    buildCommand: pip install -e . -c requirements.lock && playwright install --with-deps chromium
     preDeployCommand: alembic upgrade head
     startCommand: uvicorn app.main:app --host 0.0.0.0 --port $PORT
     healthCheckPath: /health
