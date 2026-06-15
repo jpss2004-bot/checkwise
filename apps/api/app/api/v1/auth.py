@@ -32,7 +32,7 @@ from datetime import UTC, datetime, timedelta
 from typing import Annotated
 from urllib.parse import quote
 
-from fastapi import APIRouter, Depends, Header, HTTPException, Request, status
+from fastapi import APIRouter, Depends, Header, HTTPException, Request, Response, status
 from pydantic import BaseModel, Field, field_validator
 from sqlalchemy import select
 from sqlalchemy.orm import Session
@@ -452,12 +452,79 @@ def _enforce_forgot_password_rate_limit(request: Request, email: str) -> None:
         )
 
 
+_SAFE_METHODS = frozenset({"GET", "HEAD", "OPTIONS"})
+
+
+def _enforce_cookie_csrf(request: Request) -> None:
+    """Origin/Referer allowlist check for cookie-authenticated mutating
+    requests (FE-SEC-1). Mirrors ``portal.enforce_portal_csrf``.
+
+    Only reached when a request authenticated via the session COOKIE (no
+    bearer header) on an unsafe method. The cookie is issued
+    ``SameSite=None; Secure`` in prod (cross-site Vercel↔Render), so the
+    browser would otherwise attach it to cross-site form POSTs; this
+    rejects any whose Origin/Referer is not in the allowlist. Bearer
+    (header) auth never reaches here, so the existing flow is unaffected.
+    Fail-closed in non-local; lenient in local for curl/test ergonomics.
+    """
+    allowed = settings.allowed_csrf_origins
+    origin = request.headers.get("origin")
+    if origin:
+        if origin.rstrip("/") in allowed:
+            return
+        raise HTTPException(
+            status.HTTP_403_FORBIDDEN, detail="Origin no permitido para esta sesión."
+        )
+    referer = request.headers.get("referer")
+    if referer:
+        from urllib.parse import urlparse
+
+        parsed = urlparse(referer)
+        if parsed.scheme and parsed.netloc:
+            referer_origin = f"{parsed.scheme}://{parsed.netloc}".rstrip("/")
+            if referer_origin in allowed:
+                return
+        raise HTTPException(
+            status.HTTP_403_FORBIDDEN, detail="Referer no permitido para esta sesión."
+        )
+    if settings.is_local_env:
+        return
+    raise HTTPException(
+        status.HTTP_403_FORBIDDEN,
+        detail="Falta cabecera Origin/Referer para esta sesión.",
+    )
+
+
 def get_current_user(
     request: Request,
     db: DbSession,
     authorization: Annotated[str | None, Header()] = None,
 ) -> CurrentUser:
-    claims = _claims_from_header(authorization)
+    # Bearer header takes precedence (existing flow, byte-for-byte
+    # unchanged). When absent, fall back to the httpOnly session cookie
+    # (FE-SEC-1) — and CSRF-guard it on mutating methods, since the cookie
+    # is ambient/cross-site. The cookie is INERT in prod until the
+    # frontend opts in with credentials:'include'; the header path here is
+    # untouched, so this fallback cannot regress current sessions.
+    if authorization:
+        claims = _claims_from_header(authorization)
+    else:
+        cookie_token = request.cookies.get(settings.AUTH_SESSION_COOKIE_NAME)
+        if not cookie_token:
+            # Preserve the existing "missing credentials" 401 contract.
+            raise HTTPException(
+                status.HTTP_401_UNAUTHORIZED,
+                detail="Falta el encabezado de autorización.",
+            )
+        if request.method.upper() not in _SAFE_METHODS:
+            _enforce_cookie_csrf(request)
+        try:
+            claims = decode_access_token(cookie_token)
+        except TokenError as exc:
+            raise HTTPException(
+                status.HTTP_401_UNAUTHORIZED,
+                detail="Token de autenticación inválido o expirado.",
+            ) from exc
     user = db.get(User, claims.user_id)
     if user is None or user.status != "active":
         raise HTTPException(status.HTTP_401_UNAUTHORIZED, detail="Tu sesión ya no está activa.")
@@ -580,7 +647,9 @@ def _audit_provenance(request: Request) -> tuple[str, str | None]:
 
 
 @router.post("/login", response_model=LoginResponse)
-def login(payload: LoginRequest, request: Request, db: DbSession) -> LoginResponse:
+def login(
+    payload: LoginRequest, request: Request, response: Response, db: DbSession
+) -> LoginResponse:
     # Throttle before doing any DB work so a brute-force flood can't
     # ramp bcrypt CPU into the ground.
     _enforce_login_rate_limit(request, payload.email)
@@ -650,6 +719,21 @@ def login(payload: LoginRequest, request: Request, db: DbSession) -> LoginRespon
 
     token = issue_access_token(
         user_id=user.id, email=user.email, roles=roles, orgs=org_ids
+    )
+    # FE-SEC-1 — also deposit the JWT in an httpOnly cookie so the
+    # frontend can move off localStorage (XSS-exfiltratable). The token is
+    # still returned in the body, so the current header-based flow keeps
+    # working; the browser only stores this cross-site cookie once the
+    # login fetch opts into credentials:'include', so it stays inert in
+    # prod until that frontend cutover lands.
+    response.set_cookie(
+        key=settings.AUTH_SESSION_COOKIE_NAME,
+        value=token,
+        max_age=settings.AUTH_JWT_EXPIRES_MINUTES * 60,
+        httponly=True,
+        secure=settings.cookie_secure,
+        samesite=settings.cookie_samesite,
+        path="/",
     )
     user.last_login_at = utc_now()
     # INFRA-3 — authentication trail: who logged in, from where, when.
@@ -918,6 +1002,25 @@ def reset_password(
 @router.get("/me", response_model=CurrentUser)
 def me(current: Annotated[CurrentUser, Depends(get_current_user)]) -> CurrentUser:
     return current
+
+
+@router.post("/logout", status_code=status.HTTP_204_NO_CONTENT)
+def logout() -> Response:
+    """Clear the httpOnly session cookie (FE-SEC-1).
+
+    Stateless JWTs can't be server-revoked, so logout is a cookie clear:
+    the frontend also drops any in-memory/localStorage token. Safe to
+    call unauthenticated (idempotent). The cookie attributes must match
+    the ones ``login`` set or the browser won't remove it.
+    """
+    resp = Response(status_code=status.HTTP_204_NO_CONTENT)
+    resp.delete_cookie(
+        key=settings.AUTH_SESSION_COOKIE_NAME,
+        path="/",
+        secure=settings.cookie_secure,
+        samesite=settings.cookie_samesite,
+    )
+    return resp
 
 
 @router.post("/set-password", response_model=SetPasswordResponse)

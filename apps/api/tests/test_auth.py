@@ -1130,3 +1130,55 @@ def test_successful_login_resets_failed_count(
         assert db.get(User, user_id).failed_login_count == 0
     finally:
         db.close()
+
+
+# ---------------------------------------------------------------------------
+# FE-SEC-1 — httpOnly session-cookie foundation
+# ---------------------------------------------------------------------------
+
+
+def test_login_sets_session_cookie(api_client: TestClient, db_factory) -> None:
+    """Login deposits the JWT in the httpOnly session cookie (carrying the
+    same token the body returns) so the frontend can move off localStorage."""
+    _, _, password = _seed_user(db_factory)
+    resp = api_client.post(
+        "/api/v1/auth/login",
+        json={"email": "ada@legalshelf.mx", "password": password},
+    )
+    assert resp.status_code == 200, resp.text
+    assert settings.AUTH_SESSION_COOKIE_NAME in resp.cookies
+    assert (
+        resp.cookies[settings.AUTH_SESSION_COOKIE_NAME]
+        == resp.json()["access_token"]
+    )
+
+
+def test_me_authenticates_via_cookie_without_header(
+    api_client: TestClient, db_factory
+) -> None:
+    """get_current_user falls back to the session cookie when no
+    Authorization header is present (the frontend-cutover path)."""
+    _, _, password = _seed_user(db_factory)
+    login = api_client.post(
+        "/api/v1/auth/login",
+        json={"email": "ada@legalshelf.mx", "password": password},
+    )
+    assert login.status_code == 200
+    # TestClient persists the Set-Cookie; deliberately send NO header.
+    resp = api_client.get("/api/v1/auth/me")
+    assert resp.status_code == 200, resp.text
+    assert resp.json()["user"]["email"] == "ada@legalshelf.mx"
+
+
+def test_logout_clears_session_cookie(api_client: TestClient, db_factory) -> None:
+    """Logout returns 204 and emits a deletion Set-Cookie for the session."""
+    _, _, password = _seed_user(db_factory)
+    api_client.post(
+        "/api/v1/auth/login",
+        json={"email": "ada@legalshelf.mx", "password": password},
+    )
+    out = api_client.post("/api/v1/auth/logout")
+    assert out.status_code == 204
+    set_cookie = " ".join(out.headers.get_list("set-cookie")).lower()
+    assert settings.AUTH_SESSION_COOKIE_NAME in set_cookie
+    assert "max-age=0" in set_cookie or 'session=""' in set_cookie

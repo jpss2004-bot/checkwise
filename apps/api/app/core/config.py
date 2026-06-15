@@ -144,6 +144,16 @@ class Settings(BaseSettings):
     PORTAL_SESSION_COOKIE_NAME: str = "checkwise_portal_session"
     PORTAL_SESSION_EXPIRES_MINUTES: int = 60 * 24  # 24h, matches AUTH_JWT default
 
+    # Staff/client session cookie (FE-SEC-1, audit 2026-06-15). The
+    # admin/client/reviewer JWT is moving off ``localStorage`` (XSS-
+    # exfiltratable) onto this httpOnly cookie, mirroring the provider
+    # portal. ``login`` issues it and ``get_current_user`` accepts it as a
+    # fallback to the ``Authorization`` header, so the header flow keeps
+    # working during the staged frontend cutover. ``Secure``/``SameSite``
+    # follow ``cookie_secure``/``cookie_samesite`` (None+Secure in prod
+    # for the Vercel↔Render cross-site setup).
+    AUTH_SESSION_COOKIE_NAME: str = "checkwise_session"
+
     # Reports AI (Phase 3.3+). Anthropic Claude powers the report
     # planner + per-block content generator. Empty string means "no
     # API key configured" — the LLM client factory will fall back to
