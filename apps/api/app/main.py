@@ -36,6 +36,18 @@ class SecurityHeadersMiddleware(BaseHTTPMiddleware):
         response.headers.setdefault(
             "Permissions-Policy", "geolocation=(), microphone=(), camera=()"
         )
+        # INFRA-1 — JSON API responses can carry the strictest possible
+        # CSP (they execute nothing), which satisfies external scanners
+        # and locks down the surface. Scoped to JSON only so it never
+        # touches the Swagger ``/docs`` HTML (local-only) or inline file
+        # responses. The user-facing HTML/JS CSP lives on the Vercel
+        # frontend (next.config.ts), where the needed origins are known.
+        content_type = response.headers.get("content-type", "")
+        if content_type.startswith("application/json"):
+            response.headers.setdefault(
+                "Content-Security-Policy",
+                "default-src 'none'; frame-ancestors 'none'; base-uri 'none'",
+            )
         if not settings.is_local_env:
             response.headers.setdefault(
                 "Strict-Transport-Security",

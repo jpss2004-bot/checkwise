@@ -561,6 +561,23 @@ def _validate_boot_security(settings: Settings) -> None:
             settings.CHECKWISE_ENV,
         )
 
+    # INFRA-2 — soft warning: the in-memory rate limiter keeps its
+    # sliding-window counters per process. On a single uvicorn worker
+    # (today's prod) that's correct, but the moment the worker/instance
+    # count goes above 1 without a shared backend, every brute-force cap
+    # (login, forgot-password, share-unlock, AI cost) silently weakens by
+    # the worker multiple. Provision Redis and set REDIS_URL *before*
+    # scaling out. Log-only so it can't break a deliberate single-worker
+    # deploy.
+    if not settings.REDIS_URL:
+        logging.getLogger("checkwise.config").warning(
+            "REDIS_URL is unset on a non-local deploy (CHECKWISE_ENV=%s). "
+            "The rate limiter is in-memory and only enforces correctly on "
+            "a SINGLE worker/instance. Provision Redis and set REDIS_URL "
+            "before raising the worker or instance count.",
+            settings.CHECKWISE_ENV,
+        )
+
 
 @lru_cache
 def get_settings() -> Settings:

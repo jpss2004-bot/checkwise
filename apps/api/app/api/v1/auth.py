@@ -303,7 +303,15 @@ def _claims_from_header(authorization: str | None) -> TokenClaims:
     try:
         return decode_access_token(token)
     except TokenError as exc:
-        raise HTTPException(status.HTTP_401_UNAUTHORIZED, detail=str(exc)) from exc
+        # INFRA-6 — return a stable, generic message rather than echoing
+        # the JWT library's reason ("Signature verification failed",
+        # "Not enough segments", …). The frontend treats every 401 the
+        # same (clear session → /login), so nothing is lost and decoder
+        # internals stop crossing the trust boundary.
+        raise HTTPException(
+            status.HTTP_401_UNAUTHORIZED,
+            detail="Token de autenticación inválido o expirado.",
+        ) from exc
 
 
 def _as_utc(value: datetime) -> datetime:
@@ -565,6 +573,12 @@ def require_org_role(role: str) -> Callable[..., CurrentUser]:
 # ---------------------------------------------------------------------------
 
 
+def _audit_provenance(request: Request) -> tuple[str, str | None]:
+    """(ip, user_agent) for an audit row. UA truncated to the column width."""
+    ua = request.headers.get("user-agent")
+    return _client_ip(request), (ua[:512] if ua else None)
+
+
 @router.post("/login", response_model=LoginResponse)
 def login(payload: LoginRequest, request: Request, db: DbSession) -> LoginResponse:
     # Throttle before doing any DB work so a brute-force flood can't
@@ -591,6 +605,22 @@ def login(payload: LoginRequest, request: Request, db: DbSession) -> LoginRespon
         verify_password(payload.password, _DUMMY_HASH)
         raise HTTPException(status.HTTP_401_UNAUTHORIZED, detail="Credenciales inválidas.")
     if not verify_password(payload.password, user.password_hash):
+        # INFRA-3 — record the failed attempt against the (known, active)
+        # account so the audit log carries an authentication trail. Commit
+        # it explicitly: _register_failed_login is a no-op (no commit) when
+        # lockout is disabled, so without this the row would roll back.
+        ip, ua = _audit_provenance(request)
+        add_audit_event(
+            db,
+            action="auth.login.failed",
+            entity_type="user",
+            entity_id=user.id,
+            actor_type="anonymous",
+            after={"email": user.email, "reason": "bad_password"},
+            ip_address=ip,
+            user_agent=ua,
+        )
+        db.commit()
         # Count the failure; if it trips the threshold, surface the lock.
         _register_failed_login(db, user)
         if _is_account_locked(user):
@@ -622,6 +652,19 @@ def login(payload: LoginRequest, request: Request, db: DbSession) -> LoginRespon
         user_id=user.id, email=user.email, roles=roles, orgs=org_ids
     )
     user.last_login_at = utc_now()
+    # INFRA-3 — authentication trail: who logged in, from where, when.
+    ip, ua = _audit_provenance(request)
+    add_audit_event(
+        db,
+        action="auth.login.succeeded",
+        entity_type="user",
+        entity_id=user.id,
+        actor_type="user",
+        actor_id=user.id,
+        after={"email": user.email},
+        ip_address=ip,
+        user_agent=ua,
+    )
     # Audit-finding #1 — ``db.flush()`` pushes pending changes to the
     # connection but does NOT persist them. ``get_db`` closes the
     # session without an implicit commit, so without this explicit
