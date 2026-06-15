@@ -1696,6 +1696,342 @@ def update_user_identity(
     )
 
 
+# ---------------------------------------------------------------------------
+# Membership management (platform rework, Phase 4)
+#
+# Grant / revoke roles and transfer the Primary Account Owner from the
+# user-detail page. Mirrors the seat-cap + primary-owner guards proven in
+# ``client_users.py`` but operates platform-wide (any org), gated on
+# PlatformUser rather than the org owner.
+# ---------------------------------------------------------------------------
+
+_DEFAULT_CLIENT_SEAT_LIMIT: Final = 3
+
+# Which org ``kind`` each role may be granted in. Keeps an operator from
+# attaching ``internal_admin`` to a client tenant (or vice-versa).
+_ROLE_ORG_KIND: Final = {
+    MembershipRole.CLIENT_ADMIN.value: "client",
+    MembershipRole.INTERNAL_ADMIN.value: "internal",
+    MembershipRole.REVIEWER.value: "internal",
+    MembershipRole.PLATFORM_ADMIN.value: "internal",
+}
+
+MembershipRoleLiteral = Literal[
+    "client_admin", "internal_admin", "reviewer", "platform_admin"
+]
+
+
+class AdminMembershipGrantPayload(BaseModel):
+    organization_id: str
+    role: MembershipRoleLiteral
+
+
+class AdminMembershipResponse(BaseModel):
+    user_id: str
+    membership_id: str
+    organization_id: str
+    role: str
+    status: str
+    is_primary: bool
+
+
+def _membership_audit_dict(m: Membership) -> dict:
+    return {
+        "membership_id": m.id,
+        "user_id": m.user_id,
+        "organization_id": m.organization_id,
+        "role": m.role,
+        "status": m.status,
+        "is_primary": m.is_primary,
+    }
+
+
+def _seat_count(db: Session, org_id: str) -> int:
+    return int(
+        db.scalar(
+            select(func.count())
+            .select_from(Membership)
+            .where(
+                Membership.organization_id == org_id,
+                Membership.status == "active",
+            )
+        )
+        or 0
+    )
+
+
+@router.post(
+    "/users/{user_id}/memberships", response_model=AdminMembershipResponse
+)
+def grant_user_membership(
+    user_id: str,
+    payload: AdminMembershipGrantPayload,
+    db: DbSession,
+    current: PlatformUser,
+    request: Request,
+) -> AdminMembershipResponse:
+    """Grant a role to a user within an organization.
+
+    Guards: the org must exist and its ``kind`` must match the role
+    (``client_admin``→client, internal roles→internal); client orgs
+    enforce the seat cap (locked ``SELECT … FOR UPDATE`` so concurrent
+    grants can't overshoot). A previously-removed membership for the same
+    (user, org, role) is reactivated rather than re-inserted — the unique
+    constraint spans all statuses. New grants are never primary; transfer
+    ownership via PATCH. Audited ``admin.user.membership_granted``.
+    """
+    user = db.get(User, user_id)
+    if user is None:
+        raise HTTPException(
+            status.HTTP_404_NOT_FOUND, detail="Usuario no encontrado."
+        )
+    if user.deleted_at is not None:
+        raise HTTPException(
+            status.HTTP_409_CONFLICT,
+            detail="No puedes asignar roles a una cuenta eliminada.",
+        )
+
+    # Lock the org row so the seat-cap check below is race-free.
+    org = db.scalars(
+        select(Organization)
+        .where(Organization.id == payload.organization_id)
+        .with_for_update()
+    ).first()
+    if org is None:
+        raise HTTPException(
+            status.HTTP_404_NOT_FOUND, detail="Organización no encontrada."
+        )
+    expected_kind = _ROLE_ORG_KIND[payload.role]
+    if org.kind != expected_kind:
+        raise HTTPException(
+            status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail=(
+                f"El rol '{payload.role}' solo puede asignarse en una "
+                f"organización de tipo '{expected_kind}'."
+            ),
+        )
+
+    existing = db.scalars(
+        select(Membership).where(
+            Membership.user_id == user_id,
+            Membership.organization_id == org.id,
+            Membership.role == payload.role,
+        )
+    ).first()
+    if existing is not None and existing.status == "active":
+        raise HTTPException(
+            status.HTTP_409_CONFLICT,
+            detail="El usuario ya tiene ese rol en esta organización.",
+        )
+
+    # Seat cap applies to client orgs. A reactivation of an existing
+    # member still consumes a seat, so it's checked the same way.
+    if org.kind == "client":
+        limit = org.seat_limit or _DEFAULT_CLIENT_SEAT_LIMIT
+        if _seat_count(db, org.id) >= limit:
+            raise HTTPException(
+                status.HTTP_409_CONFLICT,
+                detail=(
+                    f"La organización alcanzó su límite de {limit} "
+                    "asientos. Libera uno antes de asignar otro."
+                ),
+            )
+
+    if existing is not None:
+        before = _membership_audit_dict(existing)
+        existing.status = "active"
+        membership = existing
+    else:
+        before = None
+        membership = Membership(
+            user_id=user_id,
+            organization_id=org.id,
+            role=payload.role,
+            is_primary=False,
+            status="active",
+        )
+        db.add(membership)
+    db.flush()
+
+    _audit_admin(
+        db,
+        actor=current,
+        action="admin.user.membership_granted",
+        entity_type="membership",
+        entity_id=membership.id,
+        before=before,
+        after=_membership_audit_dict(membership),
+        extra_metadata={"user_id": user_id, "user_email": user.email},
+        request=request,
+    )
+    db.commit()
+    return AdminMembershipResponse(
+        user_id=user_id,
+        membership_id=membership.id,
+        organization_id=membership.organization_id,
+        role=membership.role,
+        status=membership.status,
+        is_primary=membership.is_primary,
+    )
+
+
+def _membership_for_user_or_404(
+    db: Session, user_id: str, membership_id: str
+) -> Membership:
+    membership = db.get(Membership, membership_id)
+    if membership is None or membership.user_id != user_id:
+        raise HTTPException(
+            status.HTTP_404_NOT_FOUND, detail="Membresía no encontrada."
+        )
+    return membership
+
+
+@router.delete(
+    "/users/{user_id}/memberships/{membership_id}",
+    response_model=AdminMembershipResponse,
+)
+def revoke_user_membership(
+    user_id: str,
+    membership_id: str,
+    db: DbSession,
+    current: PlatformUser,
+    request: Request,
+) -> AdminMembershipResponse:
+    """Revoke a role (soft — ``status='removed'``).
+
+    The active Primary Account Owner can't be revoked here; transfer
+    ownership to another member first (PATCH). Already-removed
+    memberships return as-is (idempotent). Audited
+    ``admin.user.membership_revoked``.
+    """
+    membership = _membership_for_user_or_404(db, user_id, membership_id)
+    if membership.is_primary and membership.status == "active":
+        raise HTTPException(
+            status.HTTP_409_CONFLICT,
+            detail=(
+                "Es el titular de la organización. Transfiere la "
+                "titularidad a otro miembro antes de quitar este rol."
+            ),
+        )
+    if membership.status != "removed":
+        before = _membership_audit_dict(membership)
+        membership.status = "removed"
+        db.flush()
+        _audit_admin(
+            db,
+            actor=current,
+            action="admin.user.membership_revoked",
+            entity_type="membership",
+            entity_id=membership.id,
+            before=before,
+            after=_membership_audit_dict(membership),
+            extra_metadata={"user_id": user_id},
+            request=request,
+        )
+        db.commit()
+    return AdminMembershipResponse(
+        user_id=user_id,
+        membership_id=membership.id,
+        organization_id=membership.organization_id,
+        role=membership.role,
+        status=membership.status,
+        is_primary=membership.is_primary,
+    )
+
+
+class AdminMembershipPromotePayload(BaseModel):
+    is_primary: Literal[True]
+
+
+@router.patch(
+    "/users/{user_id}/memberships/{membership_id}",
+    response_model=AdminMembershipResponse,
+)
+def promote_user_membership(
+    user_id: str,
+    membership_id: str,
+    payload: AdminMembershipPromotePayload,
+    db: DbSession,
+    current: PlatformUser,
+    request: Request,
+) -> AdminMembershipResponse:
+    """Make this membership the organization's Primary Account Owner.
+
+    Client orgs only (primary ownership is the 3-seat model's concept).
+    The org is locked and the current primary demoted BEFORE this one is
+    promoted, so the one-active-primary-per-org partial unique index is
+    never transiently violated. Audited ``admin.user.membership_promoted``.
+    """
+    _ = payload  # is_primary is constrained to True by the schema.
+    membership = _membership_for_user_or_404(db, user_id, membership_id)
+    if membership.status != "active":
+        raise HTTPException(
+            status.HTTP_409_CONFLICT,
+            detail="Solo una membresía activa puede ser titular.",
+        )
+    # Lock the org to serialize ownership transfers.
+    org = db.scalars(
+        select(Organization)
+        .where(Organization.id == membership.organization_id)
+        .with_for_update()
+    ).first()
+    if org is None or org.kind != "client":
+        raise HTTPException(
+            status.HTTP_409_CONFLICT,
+            detail="La titularidad solo aplica a organizaciones cliente.",
+        )
+    if membership.is_primary:
+        # Already the owner — no-op.
+        return AdminMembershipResponse(
+            user_id=user_id,
+            membership_id=membership.id,
+            organization_id=membership.organization_id,
+            role=membership.role,
+            status=membership.status,
+            is_primary=True,
+        )
+
+    before = _membership_audit_dict(membership)
+    current_primary = db.scalars(
+        select(Membership).where(
+            Membership.organization_id == org.id,
+            Membership.status == "active",
+            Membership.is_primary.is_(True),
+        )
+    ).first()
+    demoted_id: str | None = None
+    if current_primary is not None and current_primary.id != membership.id:
+        current_primary.is_primary = False
+        demoted_id = current_primary.id
+        db.flush()  # clear the old primary before setting the new one
+    membership.is_primary = True
+    db.flush()
+
+    _audit_admin(
+        db,
+        actor=current,
+        action="admin.user.membership_promoted",
+        entity_type="membership",
+        entity_id=membership.id,
+        before=before,
+        after=_membership_audit_dict(membership),
+        extra_metadata={
+            "user_id": user_id,
+            "demoted_membership_id": demoted_id,
+        },
+        request=request,
+    )
+    db.commit()
+    return AdminMembershipResponse(
+        user_id=user_id,
+        membership_id=membership.id,
+        organization_id=membership.organization_id,
+        role=membership.role,
+        status=membership.status,
+        is_primary=True,
+    )
+
+
 @router.patch("/clients/{client_id}")
 def update_client(
     client_id: str, payload: ClientUpdate, db: DbSession, current: AdminUser

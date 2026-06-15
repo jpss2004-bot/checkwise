@@ -1893,6 +1893,194 @@ def test_provision_duplicate_email_returns_existing_user_summary(
     assert "client_admin" in existing["roles"]
 
 
+# ---------------------------------------------------------------------------
+# Phase 4 (platform rework) — role / membership management
+# ---------------------------------------------------------------------------
+
+
+def _detail(api_client: TestClient, token: str, user_id: str) -> dict:
+    resp = api_client.get(f"/api/v1/admin/users/{user_id}", headers=_h(token))
+    assert resp.status_code == 200, resp.text
+    return resp.json()
+
+
+def test_grant_membership_internal_role(
+    api_client: TestClient, db_factory
+) -> None:
+    token = _admin_token(api_client, db_factory)
+    uid = _seed_directory_user(
+        db_factory,
+        email="grant@seeded.test",
+        role="reviewer",
+        org_name="LegalShelf Interna",
+        org_kind="internal",
+    )
+    org_id = _detail(api_client, token, uid)["memberships"][0]["organization_id"]
+
+    resp = api_client.post(
+        f"/api/v1/admin/users/{uid}/memberships",
+        json={"organization_id": org_id, "role": "platform_admin"},
+        headers=_h(token),
+    )
+    assert resp.status_code == 200, resp.text
+    body = resp.json()
+    assert body["role"] == "platform_admin"
+    assert body["status"] == "active"
+    assert body["is_primary"] is False
+
+    roles = {m["role"] for m in _detail(api_client, token, uid)["memberships"]}
+    assert {"reviewer", "platform_admin"} <= roles
+
+    # Dedup — granting the same active role again is a 409.
+    dup = api_client.post(
+        f"/api/v1/admin/users/{uid}/memberships",
+        json={"organization_id": org_id, "role": "platform_admin"},
+        headers=_h(token),
+    )
+    assert dup.status_code == 409
+
+    # Kind mismatch — client_admin can't live in an internal org.
+    mismatch = api_client.post(
+        f"/api/v1/admin/users/{uid}/memberships",
+        json={"organization_id": org_id, "role": "client_admin"},
+        headers=_h(token),
+    )
+    assert mismatch.status_code == 422
+
+
+def test_grant_membership_reactivates_removed(
+    api_client: TestClient, db_factory
+) -> None:
+    token = _admin_token(api_client, db_factory)
+    uid = _seed_directory_user(
+        db_factory, email="react@seeded.test", role="reviewer", org_kind="internal"
+    )
+    org_id = _detail(api_client, token, uid)["memberships"][0]["organization_id"]
+
+    granted = api_client.post(
+        f"/api/v1/admin/users/{uid}/memberships",
+        json={"organization_id": org_id, "role": "platform_admin"},
+        headers=_h(token),
+    ).json()
+    mid = granted["membership_id"]
+    # Revoke it…
+    api_client.delete(
+        f"/api/v1/admin/users/{uid}/memberships/{mid}", headers=_h(token)
+    )
+    # …then grant the same role again — reactivates the SAME row.
+    again = api_client.post(
+        f"/api/v1/admin/users/{uid}/memberships",
+        json={"organization_id": org_id, "role": "platform_admin"},
+        headers=_h(token),
+    )
+    assert again.status_code == 200, again.text
+    assert again.json()["membership_id"] == mid
+    assert again.json()["status"] == "active"
+
+
+def test_grant_membership_enforces_client_seat_cap(
+    api_client: TestClient, db_factory
+) -> None:
+    token = _admin_token(api_client, db_factory)
+    owner = _provision_client(
+        api_client, token, email="owner@cap-cli.com", client_name="Cap SA"
+    )
+    org_id = _detail(api_client, token, owner)["memberships"][0]["organization_id"]
+
+    # Seat 1 is the owner; fill seats 2 and 3.
+    for i in (2, 3):
+        member = _seed_directory_user(db_factory, email=f"seat{i}@cap-cli.com")
+        ok = api_client.post(
+            f"/api/v1/admin/users/{member}/memberships",
+            json={"organization_id": org_id, "role": "client_admin"},
+            headers=_h(token),
+        )
+        assert ok.status_code == 200, ok.text
+
+    # The 4th grant exceeds the default 3-seat cap.
+    overflow = _seed_directory_user(db_factory, email="seat4@cap-cli.com")
+    capped = api_client.post(
+        f"/api/v1/admin/users/{overflow}/memberships",
+        json={"organization_id": org_id, "role": "client_admin"},
+        headers=_h(token),
+    )
+    assert capped.status_code == 409
+
+
+def test_revoke_membership_and_block_primary(
+    api_client: TestClient, db_factory
+) -> None:
+    token = _admin_token(api_client, db_factory)
+    owner = _provision_client(
+        api_client, token, email="rev-owner@cli.com", client_name="Rev SA"
+    )
+    memberships = _detail(api_client, token, owner)["memberships"]
+    primary = next(m for m in memberships if m["is_primary"])
+
+    # The active Primary Account Owner can't be revoked.
+    blocked = api_client.delete(
+        f"/api/v1/admin/users/{owner}/memberships/{primary['membership_id']}",
+        headers=_h(token),
+    )
+    assert blocked.status_code == 409
+
+    # A non-primary member can be.
+    member = _seed_directory_user(db_factory, email="rev-member@cli.com")
+    granted = api_client.post(
+        f"/api/v1/admin/users/{member}/memberships",
+        json={"organization_id": primary["organization_id"], "role": "client_admin"},
+        headers=_h(token),
+    ).json()
+    removed = api_client.delete(
+        f"/api/v1/admin/users/{member}/memberships/{granted['membership_id']}",
+        headers=_h(token),
+    )
+    assert removed.status_code == 200
+    assert removed.json()["status"] == "removed"
+
+
+def test_promote_membership_transfers_primary(
+    api_client: TestClient, db_factory
+) -> None:
+    token = _admin_token(api_client, db_factory)
+    owner = _provision_client(
+        api_client, token, email="promo-owner@cli.com", client_name="Promo SA"
+    )
+    org_id = _detail(api_client, token, owner)["memberships"][0]["organization_id"]
+    successor = _seed_directory_user(db_factory, email="successor@cli.com")
+    granted = api_client.post(
+        f"/api/v1/admin/users/{successor}/memberships",
+        json={"organization_id": org_id, "role": "client_admin"},
+        headers=_h(token),
+    ).json()
+
+    promoted = api_client.patch(
+        f"/api/v1/admin/users/{successor}/memberships/{granted['membership_id']}",
+        json={"is_primary": True},
+        headers=_h(token),
+    )
+    assert promoted.status_code == 200, promoted.text
+    assert promoted.json()["is_primary"] is True
+
+    # The old owner was demoted (one active primary per org invariant).
+    owner_primary = _detail(api_client, token, owner)["memberships"][0]["is_primary"]
+    assert owner_primary is False
+
+
+def test_membership_404_on_foreign_membership(
+    api_client: TestClient, db_factory
+) -> None:
+    token = _admin_token(api_client, db_factory)
+    uid = _seed_directory_user(
+        db_factory, email="m404@seeded.test", role="reviewer", org_kind="internal"
+    )
+    resp = api_client.delete(
+        f"/api/v1/admin/users/{uid}/memberships/no-such-membership",
+        headers=_h(token),
+    )
+    assert resp.status_code == 404
+
+
 @pytest.mark.parametrize(
     ("method", "path", "body"),
     [
@@ -1901,6 +2089,13 @@ def test_provision_duplicate_email_returns_existing_user_summary(
         ("PATCH", "/api/v1/admin/users/whatever", {"status": "disabled"}),
         ("PATCH", "/api/v1/admin/users/whatever/identity", {"full_name": "X"}),
         ("POST", "/api/v1/admin/users/whatever/reset-password", None),
+        (
+            "POST",
+            "/api/v1/admin/users/whatever/memberships",
+            {"organization_id": "o", "role": "reviewer"},
+        ),
+        ("DELETE", "/api/v1/admin/users/whatever/memberships/m", None),
+        ("PATCH", "/api/v1/admin/users/whatever/memberships/m", {"is_primary": True}),
     ],
 )
 def test_user_management_rejects_unauthenticated(
@@ -1918,6 +2113,13 @@ def test_user_management_rejects_unauthenticated(
         ("PATCH", "/api/v1/admin/users/whatever", {"status": "disabled"}),
         ("PATCH", "/api/v1/admin/users/whatever/identity", {"full_name": "X"}),
         ("POST", "/api/v1/admin/users/whatever/reset-password", None),
+        (
+            "POST",
+            "/api/v1/admin/users/whatever/memberships",
+            {"organization_id": "o", "role": "reviewer"},
+        ),
+        ("DELETE", "/api/v1/admin/users/whatever/memberships/m", None),
+        ("PATCH", "/api/v1/admin/users/whatever/memberships/m", {"is_primary": True}),
     ],
 )
 def test_user_management_rejects_reviewer_only(
