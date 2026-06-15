@@ -39,7 +39,8 @@ from app.api.v1.portal import (
     _compute_semaphore,
     _empty_document_counts,
 )
-from app.models import Client, ProviderWorkspace, Vendor
+from app.core.config import settings
+from app.models import Client, Institution, ProviderWorkspace, Submission, Vendor
 from app.services.evidence_slots import (
     SlotState,
     build_workspace_calendar_slots,
@@ -139,6 +140,25 @@ def build_client_context(
             for v in db.scalars(select(Vendor).where(Vendor.id.in_(vendor_ids)))
         }
 
+    # PERF-2 — prefetch the whole portfolio's submissions in ONE query
+    # (bucketed by vendor) plus the institutions map, instead of letting
+    # each per-vendor slot build issue its own queries (the old O(vendors)
+    # query pattern that powers the Wise dock and every report block).
+    # Behaviour-preserving: the slot builders return identical SlotViews
+    # whether fed prefetched rows or self-querying — the proven
+    # ``_portfolio_slot_inputs`` pattern from the /overview hot path.
+    submissions_by_vendor: dict[str, list[Submission]] = {}
+    if vendor_ids:
+        for sub in db.scalars(
+            select(Submission).where(Submission.client_id == client_row.id)
+        ):
+            submissions_by_vendor.setdefault(sub.vendor_id, []).append(sub)
+    institutions_by_id: dict[str, str] | None = None
+    if settings.RECURRING_CATALOG_V2:
+        institutions_by_id = {
+            inst.id: inst.code for inst in db.scalars(select(Institution))
+        }
+
     rows: list[WiseClientVendorRow] = []
     green = yellow = red = 0
     pending_total = rejected_total = missing_total = 0
@@ -150,8 +170,17 @@ def build_client_context(
         if vendor is None:
             continue
 
-        onboarding_slots = build_workspace_onboarding_slots(db, workspace)
-        calendar_slots = build_workspace_calendar_slots(db, workspace, target_year)
+        vendor_subs = submissions_by_vendor.get(workspace.vendor_id, [])
+        onboarding_slots = build_workspace_onboarding_slots(
+            db, workspace, prefetched_submissions=vendor_subs
+        )
+        calendar_slots = build_workspace_calendar_slots(
+            db,
+            workspace,
+            target_year,
+            prefetched_submissions=vendor_subs,
+            institutions_by_id=institutions_by_id,
+        )
         counts = _empty_document_counts()
         for view in onboarding_slots + calendar_slots:
             _bucket_document_state(counts, view.state)

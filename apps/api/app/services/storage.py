@@ -27,6 +27,7 @@ from pathlib import Path
 from typing import Protocol
 
 from fastapi import UploadFile
+from starlette.concurrency import run_in_threadpool
 
 from app.core.config import settings
 
@@ -282,13 +283,20 @@ class S3StorageService:
         if upload.content_type:
             extra_args["ContentType"] = upload.content_type
 
-        with temp_path.open("rb") as fh:
-            self._client.upload_fileobj(
-                Fileobj=fh,
-                Bucket=self.bucket,
-                Key=storage_key,
-                ExtraArgs=extra_args or None,
-            )
+        def _do_upload() -> None:
+            with temp_path.open("rb") as fh:
+                self._client.upload_fileobj(
+                    Fileobj=fh,
+                    Bucket=self.bucket,
+                    Key=storage_key,
+                    ExtraArgs=extra_args or None,
+                )
+
+        # PERF-6 — boto3 is fully synchronous; calling ``upload_fileobj``
+        # directly in this ``async def`` blocks the event loop for the
+        # entire network PUT, stalling every other request on the worker
+        # (worse with a single uvicorn worker). Offload to a thread.
+        await run_in_threadpool(_do_upload)
 
         return StoredFile(
             storage_key=storage_key,
