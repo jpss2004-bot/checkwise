@@ -44,20 +44,40 @@ class SecurityHeadersMiddleware(BaseHTTPMiddleware):
         return response
 
 
+_HTTP_METHODS = {
+    "get", "put", "post", "delete", "options", "head", "patch", "trace"
+}
+
+
 def _assert_critical_routes(app: FastAPI) -> None:
-    """Fail boot if a deploy is missing routes the frontend depends on."""
+    """Fail boot if a deploy is missing routes the frontend depends on.
+
+    Checks the generated OpenAPI schema rather than walking ``app.routes``
+    directly. FastAPI 0.137+ / Starlette 1.3+ include sub-routers
+    *lazily*: ``app.include_router(...)`` inserts a single opaque
+    ``_IncludedRouter`` entry whose child routes are not flattened onto
+    ``app.routes`` synchronously, so the previous flat scan reported a
+    false negative for every included route (every ``/api/v1/*`` path)
+    and crash-looped the deploy. ``app.openapi()`` forces full route
+    resolution and reflects the real request-time routing table on every
+    FastAPI version we've shipped, old and new.
+    """
     critical = {
-        ("GET", f"{settings.API_V1_PREFIX}/portal/me"),
-        ("POST", f"{settings.API_V1_PREFIX}/portal/enter"),
+        ("get", f"{settings.API_V1_PREFIX}/portal/me"),
+        ("post", f"{settings.API_V1_PREFIX}/portal/enter"),
     }
+    paths = app.openapi().get("paths", {})
     registered = {
-        (method, getattr(route, "path", ""))
-        for route in app.routes
-        for method in (getattr(route, "methods", None) or set())
+        (method.lower(), path)
+        for path, operations in paths.items()
+        for method in operations
+        if method.lower() in _HTTP_METHODS
     }
     missing = sorted(critical - registered)
     if missing:
-        rendered = ", ".join(f"{method} {path}" for method, path in missing)
+        rendered = ", ".join(
+            f"{method.upper()} {path}" for method, path in missing
+        )
         raise RuntimeError(f"Critical API route(s) not registered: {rendered}")
 
 
