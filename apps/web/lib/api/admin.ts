@@ -326,6 +326,56 @@ export async function updateUserIdentity(
   });
 }
 
+/** A grantable membership role and the org kind it belongs in (Phase 4). */
+export type MembershipRoleCode =
+  | "client_admin"
+  | "internal_admin"
+  | "reviewer"
+  | "platform_admin";
+
+export type AdminMembershipResponse = {
+  user_id: string;
+  membership_id: string;
+  organization_id: string;
+  role: string;
+  status: string;
+  is_primary: boolean;
+};
+
+/** Grant a role to a user within an org. 409 if duplicate / seat cap hit,
+ *  422 if the role doesn't match the org kind. */
+export async function grantMembership(
+  userId: string,
+  body: { organization_id: string; role: MembershipRoleCode },
+): Promise<AdminMembershipResponse> {
+  return fetchJson(`/api/v1/admin/users/${userId}/memberships`, {
+    method: "POST",
+    body: JSON.stringify(body),
+  });
+}
+
+/** Revoke a role (soft — status='removed'). 409 if it's the active owner. */
+export async function revokeMembership(
+  userId: string,
+  membershipId: string,
+): Promise<AdminMembershipResponse> {
+  return fetchJson(
+    `/api/v1/admin/users/${userId}/memberships/${membershipId}`,
+    { method: "DELETE" },
+  );
+}
+
+/** Make this membership the org's Primary Account Owner (client orgs). */
+export async function promoteMembership(
+  userId: string,
+  membershipId: string,
+): Promise<AdminMembershipResponse> {
+  return fetchJson(
+    `/api/v1/admin/users/${userId}/memberships/${membershipId}`,
+    { method: "PATCH", body: JSON.stringify({ is_primary: true }) },
+  );
+}
+
 // ---------------------------------------------------------------------------
 // Vendors
 // ---------------------------------------------------------------------------

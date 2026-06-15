@@ -14,6 +14,7 @@ import {
   ListMagnifyingGlass,
   PaperPlaneTilt,
   PencilSimple,
+  Plus,
   Prohibit,
   ArrowCounterClockwise,
   Trash,
@@ -33,6 +34,7 @@ import {
 } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { Select } from "@/components/ui/select";
 import { Skeleton } from "@/components/ui/skeleton";
 
 import { PlatformShell } from "../../_shell";
@@ -40,8 +42,12 @@ import {
   AdminApiError,
   type AdminResetPasswordResponse,
   type AdminUserDetail,
+  type MembershipRoleCode,
   getUser,
+  grantMembership,
+  promoteMembership,
   resetUserPassword,
+  revokeMembership,
   updateUserIdentity,
   updateUserStatus,
 } from "@/lib/api/admin";
@@ -117,6 +123,13 @@ const MEMBERSHIP_STATUS_LABEL: Record<string, string> = {
   disabled: "Desactivada",
 };
 
+/** Roles grantable per org kind — mirrors the backend's _ROLE_ORG_KIND
+ *  guard so the form never offers a combination the API would 422. */
+const ROLES_BY_KIND: Record<string, MembershipRoleCode[]> = {
+  client: ["client_admin"],
+  internal: ["internal_admin", "reviewer", "platform_admin"],
+};
+
 /** Plain-Spanish gloss for the audit actions this page surfaces;
  *  unmapped codes fall back to the raw action so nothing is hidden. */
 const ACTION_LABEL: Record<string, string> = {
@@ -163,6 +176,37 @@ export default function PlatformUserDetailPage() {
   const [editPhone, setEditPhone] = useState("");
   // Transient banner after a successful email change (delivery status).
   const [emailNotice, setEmailNotice] = useState<string | null>(null);
+
+  // Membership editor (Phase 4)
+  const [memberBusy, setMemberBusy] = useState<string | null>(null); // membership_id | "grant"
+  const [memberError, setMemberError] = useState<string | null>(null);
+  const [grantOrgId, setGrantOrgId] = useState("");
+  const [grantRole, setGrantRole] = useState<MembershipRoleCode | "">("");
+
+  function membershipApiError(err: unknown, fallback: string) {
+    if (err instanceof AdminApiError && err.status === 401) {
+      router.replace("/login");
+      return;
+    }
+    setMemberError(apiErrorMessage(err, fallback));
+  }
+
+  async function runMembership(
+    key: string,
+    fn: () => Promise<unknown>,
+    fallback: string,
+  ) {
+    setMemberBusy(key);
+    setMemberError(null);
+    try {
+      await fn();
+      await load(); // re-fetch the full picture (roles, seats, primary)
+    } catch (err) {
+      membershipApiError(err, fallback);
+    } finally {
+      setMemberBusy(null);
+    }
+  }
 
   function openEdit() {
     if (!user) return;
@@ -301,6 +345,29 @@ export default function PlatformUserDetailPage() {
 
   const isDeleted = Boolean(user?.deleted_at);
   const isActive = user?.status === "active";
+
+  // Grant-role form options: the user's distinct orgs, and for the
+  // chosen org the roles valid for its kind that they don't already hold.
+  const orgOptions = user
+    ? Array.from(
+        new Map(
+          user.memberships.map((m) => [m.organization_id, m]),
+        ).values(),
+      )
+    : [];
+  const grantOrg = orgOptions.find((o) => o.organization_id === grantOrgId);
+  const grantRoleChoices: MembershipRoleCode[] =
+    grantOrg && user
+      ? (ROLES_BY_KIND[grantOrg.organization_kind] ?? []).filter(
+          (role) =>
+            !user.memberships.some(
+              (m) =>
+                m.organization_id === grantOrg.organization_id &&
+                m.role === role &&
+                m.status === "active",
+            ),
+        )
+      : [];
 
   return (
     <PlatformShell
@@ -501,7 +568,8 @@ export default function PlatformUserDetailPage() {
                       <th className="py-1.5 pr-3 font-medium">Organización</th>
                       <th className="py-1.5 pr-3 font-medium">Rol</th>
                       <th className="py-1.5 pr-3 font-medium">Asientos</th>
-                      <th className="py-1.5 font-medium">Estatus</th>
+                      <th className="py-1.5 pr-3 font-medium">Estatus</th>
+                      <th className="py-1.5 font-medium text-right">Acciones</th>
                     </tr>
                   </thead>
                   <tbody>
@@ -535,7 +603,7 @@ export default function PlatformUserDetailPage() {
                             ? `${m.active_seats ?? 0} / ${m.seat_limit}`
                             : "—"}
                         </td>
-                        <td className="py-2">
+                        <td className="py-2 pr-3">
                           {m.status === "active" ? (
                             <Badge variant="success">
                               {MEMBERSHIP_STATUS_LABEL[m.status]}
@@ -546,12 +614,148 @@ export default function PlatformUserDetailPage() {
                             </Badge>
                           )}
                         </td>
+                        <td className="py-2 text-right">
+                          {isDeleted ? null : m.is_primary ? (
+                            <span className="text-[10px] uppercase tracking-wide text-[color:var(--text-tertiary)]">
+                              Titular
+                            </span>
+                          ) : m.status === "active" ? (
+                            <span className="flex justify-end gap-1 whitespace-nowrap">
+                              {m.organization_kind === "client" &&
+                              m.role === "client_admin" ? (
+                                <Button
+                                  variant="ghost"
+                                  size="sm"
+                                  loading={memberBusy === m.membership_id}
+                                  onClick={() =>
+                                    runMembership(
+                                      m.membership_id,
+                                      () =>
+                                        promoteMembership(
+                                          user.user_id,
+                                          m.membership_id,
+                                        ),
+                                      "No pudimos transferir la titularidad.",
+                                    )
+                                  }
+                                  title="Hacer titular de la organización"
+                                >
+                                  <Crown
+                                    className="h-3.5 w-3.5"
+                                    weight="bold"
+                                    aria-hidden="true"
+                                  />
+                                  Hacer titular
+                                </Button>
+                              ) : null}
+                              <Button
+                                variant="ghost"
+                                size="sm"
+                                className="text-[color:var(--status-error-text)]"
+                                loading={memberBusy === m.membership_id}
+                                onClick={() =>
+                                  runMembership(
+                                    m.membership_id,
+                                    () =>
+                                      revokeMembership(
+                                        user.user_id,
+                                        m.membership_id,
+                                      ),
+                                    "No pudimos quitar el rol.",
+                                  )
+                                }
+                              >
+                                <Trash
+                                  className="h-3.5 w-3.5"
+                                  weight="bold"
+                                  aria-hidden="true"
+                                />
+                                Quitar
+                              </Button>
+                            </span>
+                          ) : null}
+                        </td>
                       </tr>
                     ))}
                   </tbody>
                 </table>
               </div>
             )}
+
+            {memberError ? (
+              <div className="mt-3 flex items-start gap-2 rounded-md border border-[color:var(--status-error-border)] bg-[color:var(--status-error-bg)] px-3 py-2 text-[12px] text-[color:var(--status-error-text)]">
+                <Warning className="mt-0.5 h-3.5 w-3.5 shrink-0" weight="fill" aria-hidden="true" />
+                <span>{memberError}</span>
+              </div>
+            ) : null}
+
+            {/* Grant a role within an org the user already belongs to. */}
+            {!isDeleted && orgOptions.length > 0 ? (
+              <div className="mt-4 flex flex-wrap items-end gap-2 border-t border-[color:var(--border-subtle)] pt-4">
+                <label className="flex flex-col gap-1 text-[10px] uppercase tracking-wide text-[color:var(--text-tertiary)]">
+                  Organización
+                  <Select
+                    value={grantOrgId}
+                    onChange={(e) => {
+                      setGrantOrgId(e.target.value);
+                      setGrantRole("");
+                      setMemberError(null);
+                    }}
+                    className="h-9 text-[12px]"
+                  >
+                    <option value="">Selecciona…</option>
+                    {orgOptions.map((o) => (
+                      <option key={o.organization_id} value={o.organization_id}>
+                        {o.organization_name}
+                      </option>
+                    ))}
+                  </Select>
+                </label>
+                <label className="flex flex-col gap-1 text-[10px] uppercase tracking-wide text-[color:var(--text-tertiary)]">
+                  Rol a agregar
+                  <Select
+                    value={grantRole}
+                    onChange={(e) =>
+                      setGrantRole(e.target.value as MembershipRoleCode | "")
+                    }
+                    disabled={!grantOrg || grantRoleChoices.length === 0}
+                    className="h-9 text-[12px]"
+                  >
+                    <option value="">
+                      {grantOrg && grantRoleChoices.length === 0
+                        ? "Sin roles disponibles"
+                        : "Selecciona…"}
+                    </option>
+                    {grantRoleChoices.map((role) => (
+                      <option key={role} value={role}>
+                        {roleLabel(role)}
+                      </option>
+                    ))}
+                  </Select>
+                </label>
+                <Button
+                  size="sm"
+                  loading={memberBusy === "grant"}
+                  disabled={!grantOrgId || !grantRole}
+                  onClick={() =>
+                    runMembership(
+                      "grant",
+                      () =>
+                        grantMembership(user.user_id, {
+                          organization_id: grantOrgId,
+                          role: grantRole as MembershipRoleCode,
+                        }),
+                      "No pudimos agregar el rol.",
+                    ).then(() => {
+                      setGrantRole("");
+                    })
+                  }
+                >
+                  <Plus className="h-3.5 w-3.5" weight="bold" aria-hidden="true" />
+                  Agregar rol
+                </Button>
+              </div>
+            ) : null}
           </Surface>
 
           {/* Activity */}
