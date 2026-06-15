@@ -1217,6 +1217,8 @@ class AdminUserItem(BaseModel):
     must_change_password: bool
     last_login_at: str | None
     created_at: str
+    deleted_at: str | None = None
+    """Set when the account is soft-deleted (migration 0042)."""
     roles: list[str]
     """Distinct ACTIVE membership roles, sorted."""
     organizations: list[AdminUserOrgItem]
@@ -1250,9 +1252,17 @@ class AdminUserResetPasswordResponse(BaseModel):
 
 
 def _admin_user_filters(
-    q: str | None, status_value: str | None, role: str | None
+    q: str | None,
+    status_value: str | None,
+    role: str | None,
+    include_deleted: bool = False,
 ) -> list:
     filters: list = []
+    # Soft-deleted accounts (migration 0042) are hidden by default so the
+    # directory shows live accounts only; ``include_deleted`` surfaces the
+    # recoverable tail for the "Eliminados" filter / restore flow.
+    if not include_deleted:
+        filters.append(User.deleted_at.is_(None))
     if q and q.strip():
         needle = f"%{q.strip()}%"
         filters.append(
@@ -1281,6 +1291,7 @@ def list_users(
         Literal["active", "disabled"] | None, Query(alias="status")
     ] = None,
     role: str | None = None,
+    include_deleted: Annotated[bool, Query()] = False,
     limit: Annotated[int, Query(ge=1, le=200)] = 50,
     offset: Annotated[int, Query(ge=0)] = 0,
 ) -> AdminUsersListResponse:
@@ -1289,6 +1300,8 @@ def list_users(
     * ``q`` — case-insensitive substring match on email OR full_name.
     * ``status`` — ``active`` | ``disabled``.
     * ``role`` — users holding that role on an ACTIVE membership.
+    * ``include_deleted`` — when true, also list soft-deleted accounts
+      (hidden by default).
     * ``total`` is the real count for the filters, independent of
       the page window. Newest accounts first.
 
@@ -1296,7 +1309,7 @@ def list_users(
     single IN query (no per-row lookups).
     """
     _ = current
-    filters = _admin_user_filters(q, status_filter, role)
+    filters = _admin_user_filters(q, status_filter, role, include_deleted)
 
     count_stmt = select(func.count()).select_from(User)
     page_stmt = select(User)
@@ -1341,6 +1354,7 @@ def list_users(
                 u.last_login_at.isoformat() if u.last_login_at else None
             ),
             created_at=u.created_at.isoformat() if u.created_at else "",
+            deleted_at=u.deleted_at.isoformat() if u.deleted_at else None,
             roles=sorted(roles_by_user.get(u.id, set())),
             organizations=[
                 AdminUserOrgItem(id=org.id, name=org.name, kind=org.kind)
@@ -2029,6 +2043,222 @@ def promote_user_membership(
         role=membership.role,
         status=membership.status,
         is_primary=True,
+    )
+
+
+# ---------------------------------------------------------------------------
+# Account deletion (platform rework, Phase 5) — recoverable soft-delete.
+#
+# Soft-delete only: a hard purge is deferred because several users.id FKs
+# lack ON DELETE CASCADE (provider_workspaces.owner_user_id, reviewer/
+# author refs on submissions/reports), so a row delete would FK-violate
+# without a reference-nulling strategy. Soft-delete blocks login (the
+# per-request status check) and hides the account, and is fully
+# reversible via restore within the retention window.
+# ---------------------------------------------------------------------------
+
+
+class AdminUserDeletionPreview(BaseModel):
+    user_id: str
+    email: str
+    already_deleted: bool
+    active_memberships: int
+    primary_of_orgs: list[str]
+    """Names of client orgs where the user is the active Primary Owner —
+    deleting drops their seat, leaving those orgs without an owner."""
+    owned_workspaces: int
+    """Provider workspaces owned by this user (orphaned on delete)."""
+    is_last_internal_admin: bool
+    """True if this is the only remaining active internal_admin — a
+    warning, not a block."""
+
+
+class AdminUserDeletePayload(BaseModel):
+    reason: str | None = None
+
+
+class AdminUserDeleteResponse(BaseModel):
+    user_id: str
+    status: str
+    deleted_at: str | None
+
+
+def _deletion_preview(db: Session, user: User) -> AdminUserDeletionPreview:
+    active = db.scalars(
+        select(Membership).where(
+            Membership.user_id == user.id, Membership.status == "active"
+        )
+    ).all()
+    primary_org_names: list[str] = []
+    for m in active:
+        if m.is_primary:
+            org = db.get(Organization, m.organization_id)
+            if org is not None:
+                primary_org_names.append(org.name)
+    owned_workspaces = int(
+        db.scalar(
+            select(func.count())
+            .select_from(ProviderWorkspace)
+            .where(ProviderWorkspace.owner_user_id == user.id)
+        )
+        or 0
+    )
+    internal_admins = int(
+        db.scalar(
+            select(func.count(func.distinct(Membership.user_id))).where(
+                Membership.role == MembershipRole.INTERNAL_ADMIN.value,
+                Membership.status == "active",
+            )
+        )
+        or 0
+    )
+    holds_internal_admin = any(
+        m.role == MembershipRole.INTERNAL_ADMIN.value for m in active
+    )
+    return AdminUserDeletionPreview(
+        user_id=user.id,
+        email=user.email,
+        already_deleted=user.deleted_at is not None,
+        active_memberships=len(active),
+        primary_of_orgs=primary_org_names,
+        owned_workspaces=owned_workspaces,
+        is_last_internal_admin=holds_internal_admin and internal_admins <= 1,
+    )
+
+
+@router.get(
+    "/users/{user_id}/deletion-preview",
+    response_model=AdminUserDeletionPreview,
+)
+def get_user_deletion_preview(
+    user_id: str, db: DbSession, current: PlatformUser
+) -> AdminUserDeletionPreview:
+    """What a soft-delete would affect — so the UI can warn before the
+    operator confirms (orphaned primary orgs / workspaces / last admin)."""
+    _ = current
+    user = db.get(User, user_id)
+    if user is None:
+        raise HTTPException(
+            status.HTTP_404_NOT_FOUND, detail="Usuario no encontrado."
+        )
+    return _deletion_preview(db, user)
+
+
+@router.delete("/users/{user_id}", response_model=AdminUserDeleteResponse)
+def delete_user(
+    user_id: str,
+    db: DbSession,
+    current: PlatformUser,
+    request: Request,
+    payload: AdminUserDeletePayload | None = None,
+) -> AdminUserDeleteResponse:
+    """Soft-delete a user account (recoverable).
+
+    Stamps ``deleted_at`` / ``deleted_by_user_id`` / ``deletion_reason``,
+    flips status to disabled (login is refused immediately by the
+    per-request status check), and marks active memberships removed so
+    seats are freed. Self-deletion is refused. Audited
+    ``admin.user.deleted`` with the membership snapshot in ``before``.
+    """
+    target = db.get(User, user_id)
+    if target is None:
+        raise HTTPException(
+            status.HTTP_404_NOT_FOUND, detail="Usuario no encontrado."
+        )
+    if target.id == current.user.id:
+        raise HTTPException(
+            status.HTTP_409_CONFLICT,
+            detail="No puedes eliminar tu propia cuenta.",
+        )
+    if target.deleted_at is not None:
+        raise HTTPException(
+            status.HTTP_409_CONFLICT, detail="La cuenta ya está eliminada."
+        )
+
+    active = db.scalars(
+        select(Membership).where(
+            Membership.user_id == target.id, Membership.status == "active"
+        )
+    ).all()
+    before = {
+        "status": target.status,
+        "memberships": [_membership_audit_dict(m) for m in active],
+    }
+    reason = (payload.reason.strip()[:200] if payload and payload.reason else None)
+    target.deleted_at = datetime.now(UTC)
+    target.deleted_by_user_id = current.user.id
+    target.deletion_reason = reason
+    target.status = "disabled"
+    for m in active:
+        m.status = "removed"
+    db.flush()
+
+    _audit_admin(
+        db,
+        actor=current,
+        action="admin.user.deleted",
+        entity_type="user",
+        entity_id=target.id,
+        before=before,
+        after={
+            "status": target.status,
+            "deleted_at": target.deleted_at.isoformat(),
+            "deletion_reason": reason,
+            "user_email": target.email,
+        },
+        request=request,
+    )
+    db.commit()
+    return AdminUserDeleteResponse(
+        user_id=target.id,
+        status=target.status,
+        deleted_at=target.deleted_at.isoformat(),
+    )
+
+
+@router.post("/users/{user_id}/restore", response_model=AdminUserDeleteResponse)
+def restore_user(
+    user_id: str,
+    db: DbSession,
+    current: PlatformUser,
+    request: Request,
+) -> AdminUserDeleteResponse:
+    """Reverse a soft-delete: clears the deletion stamp and reactivates
+    the account. Roles are NOT auto-restored — their memberships were
+    marked removed on delete; re-grant them from the detail page.
+    Audited ``admin.user.restored``.
+    """
+    target = db.get(User, user_id)
+    if target is None:
+        raise HTTPException(
+            status.HTTP_404_NOT_FOUND, detail="Usuario no encontrado."
+        )
+    if target.deleted_at is None:
+        raise HTTPException(
+            status.HTTP_409_CONFLICT, detail="La cuenta no está eliminada."
+        )
+    before = {
+        "status": target.status,
+        "deleted_at": target.deleted_at.isoformat(),
+    }
+    target.deleted_at = None
+    target.deleted_by_user_id = None
+    target.deletion_reason = None
+    target.status = "active"
+    db.flush()
+    _audit_admin(
+        db,
+        actor=current,
+        action="admin.user.restored",
+        entity_type="user",
+        entity_id=target.id,
+        before=before,
+        after={"status": target.status, "user_email": target.email},
+        request=request,
+    )
+    db.commit()
+    return AdminUserDeleteResponse(
+        user_id=target.id, status=target.status, deleted_at=None
     )
 
 
@@ -3802,6 +4032,10 @@ class AuditLogItem(BaseModel):
     before: dict | None
     after: dict | None
     metadata: dict | None = Field(default=None, alias="event_metadata")
+    ip_address: str | None = None
+    """Best-effort originating IP (migration 0043); null on system events
+    and rows written before the column existed."""
+    user_agent: str | None = None
     created_at: datetime
 
     model_config = {"populate_by_name": True}
@@ -3896,6 +4130,8 @@ def list_audit_log(
             before=row.before,
             after=row.after,
             event_metadata=row.event_metadata,
+            ip_address=row.ip_address,
+            user_agent=row.user_agent,
             created_at=row.created_at,
         )
         for row in rows

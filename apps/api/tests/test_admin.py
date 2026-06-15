@@ -2081,13 +2081,108 @@ def test_membership_404_on_foreign_membership(
     assert resp.status_code == 404
 
 
+# ---------------------------------------------------------------------------
+# Phase 5 (platform rework) — recoverable soft-delete
+# ---------------------------------------------------------------------------
+
+
+def test_delete_user_soft_deletes_and_frees_seats(
+    api_client: TestClient, db_factory
+) -> None:
+    token = _admin_token(api_client, db_factory)
+    uid = _provision_client(
+        api_client, token, email="del@cli.com", client_name="Del SA"
+    )
+
+    # Preview first — owner is the primary of one client org.
+    preview = api_client.get(
+        f"/api/v1/admin/users/{uid}/deletion-preview", headers=_h(token)
+    )
+    assert preview.status_code == 200, preview.text
+    assert preview.json()["active_memberships"] == 1
+    assert preview.json()["primary_of_orgs"]  # non-empty
+
+    deleted = api_client.request(
+        "DELETE",
+        f"/api/v1/admin/users/{uid}",
+        json={"reason": "duplicate account"},
+        headers=_h(token),
+    )
+    assert deleted.status_code == 200, deleted.text
+    assert deleted.json()["deleted_at"] is not None
+
+    detail = _detail(api_client, token, uid)
+    assert detail["deleted_at"] is not None
+    assert detail["status"] == "disabled"
+    assert detail["deletion_reason"] == "duplicate account"
+    # Membership was freed (removed), so no longer active.
+    assert all(m["status"] != "active" for m in detail["memberships"])
+
+    # Hidden from the default directory, visible with include_deleted.
+    default_list = api_client.get(
+        "/api/v1/admin/users?q=del@cli.com", headers=_h(token)
+    ).json()
+    assert default_list["total"] == 0
+    with_deleted = api_client.get(
+        "/api/v1/admin/users?q=del@cli.com&include_deleted=true",
+        headers=_h(token),
+    ).json()
+    assert with_deleted["total"] == 1
+    assert with_deleted["items"][0]["deleted_at"] is not None
+
+
+def test_delete_user_rejects_self_and_double_delete(
+    api_client: TestClient, db_factory
+) -> None:
+    pw, email = _seed_user(
+        db_factory, email="selfdel@checkwise.test", role="internal_admin"
+    )
+    token = _login(api_client, email, pw)
+    me_id = _user_id_by_email(db_factory, email)
+    # Can't delete yourself.
+    own = api_client.delete(f"/api/v1/admin/users/{me_id}", headers=_h(token))
+    assert own.status_code == 409
+
+    target = _seed_directory_user(db_factory, email="victim@seeded.test")
+    first = api_client.delete(
+        f"/api/v1/admin/users/{target}", headers=_h(token)
+    )
+    assert first.status_code == 200
+    again = api_client.delete(
+        f"/api/v1/admin/users/{target}", headers=_h(token)
+    )
+    assert again.status_code == 409  # already deleted
+
+
+def test_restore_user(api_client: TestClient, db_factory) -> None:
+    token = _admin_token(api_client, db_factory)
+    target = _seed_directory_user(db_factory, email="restoreme@seeded.test")
+    api_client.delete(f"/api/v1/admin/users/{target}", headers=_h(token))
+
+    restored = api_client.post(
+        f"/api/v1/admin/users/{target}/restore", headers=_h(token)
+    )
+    assert restored.status_code == 200, restored.text
+    assert restored.json()["status"] == "active"
+    assert _detail(api_client, token, target)["deleted_at"] is None
+
+    # Restoring a live account is a 409.
+    again = api_client.post(
+        f"/api/v1/admin/users/{target}/restore", headers=_h(token)
+    )
+    assert again.status_code == 409
+
+
 @pytest.mark.parametrize(
     ("method", "path", "body"),
     [
         ("GET", "/api/v1/admin/users", None),
         ("GET", "/api/v1/admin/users/whatever", None),
+        ("GET", "/api/v1/admin/users/whatever/deletion-preview", None),
         ("PATCH", "/api/v1/admin/users/whatever", {"status": "disabled"}),
         ("PATCH", "/api/v1/admin/users/whatever/identity", {"full_name": "X"}),
+        ("DELETE", "/api/v1/admin/users/whatever", None),
+        ("POST", "/api/v1/admin/users/whatever/restore", None),
         ("POST", "/api/v1/admin/users/whatever/reset-password", None),
         (
             "POST",
@@ -2110,8 +2205,11 @@ def test_user_management_rejects_unauthenticated(
     [
         ("GET", "/api/v1/admin/users", None),
         ("GET", "/api/v1/admin/users/whatever", None),
+        ("GET", "/api/v1/admin/users/whatever/deletion-preview", None),
         ("PATCH", "/api/v1/admin/users/whatever", {"status": "disabled"}),
         ("PATCH", "/api/v1/admin/users/whatever/identity", {"full_name": "X"}),
+        ("DELETE", "/api/v1/admin/users/whatever", None),
+        ("POST", "/api/v1/admin/users/whatever/restore", None),
         ("POST", "/api/v1/admin/users/whatever/reset-password", None),
         (
             "POST",

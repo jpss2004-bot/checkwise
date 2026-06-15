@@ -569,3 +569,28 @@ def test_lifecycle_actions_write_attributed_audit_rows(db_factory, api_client):
     # rows for the same entity — those are out of scope here.)
     assert all(r.actor_id == ctx["owner_id"] for r in lifecycle)
     assert all(r.actor_type == "client_admin" for r in lifecycle)
+
+
+def test_client_user_audit_captures_request_ip(db_factory, api_client):
+    """Phase 6 — client_users mutations now stamp the originating IP /
+    user-agent onto the audit row (previously NULL)."""
+    ctx = _seed_client_with_owner(db_factory)
+    token = _login(api_client, ctx["owner_email"])
+
+    resp = _create(api_client, token, email="audit-ip@checkwise.example")
+    assert resp.status_code == 201, resp.text
+
+    db = db_factory()
+    try:
+        row = db.scalars(
+            select(AuditLog)
+            .where(AuditLog.action == "client.user_created")
+            .order_by(AuditLog.created_at.desc())
+        ).first()
+        assert row is not None
+        # TestClient populates request.client.host, so the IP is non-null
+        # and the user-agent header is recorded.
+        assert row.ip_address
+        assert row.user_agent
+    finally:
+        db.close()

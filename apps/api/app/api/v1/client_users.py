@@ -40,7 +40,7 @@ from __future__ import annotations
 
 from typing import Literal
 
-from fastapi import APIRouter, HTTPException, Query, status
+from fastapi import APIRouter, HTTPException, Query, Request, status
 from pydantic import BaseModel, EmailStr, Field
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
@@ -50,6 +50,7 @@ from app.api.v1.client import ClientUser, DbSession, _resolve_client_id
 from app.constants.roles import MembershipRole
 from app.core.config import settings
 from app.models import Client, Membership, Organization, PasswordHistory, User
+from app.core.rate_limit import client_ip_from_request
 from app.services.audit_log import add_audit_event
 from app.services.auth import generate_temp_password, hash_password
 from app.services.email_delivery import (
@@ -67,6 +68,16 @@ DEFAULT_CLIENT_SEAT_LIMIT = 3
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
+
+
+def _request_ctx(request: Request) -> dict:
+    """IP + user-agent for the audit row (platform rework Phase 6).
+    ``user_agent`` is truncated to the AuditLog column width."""
+    ua = request.headers.get("user-agent")
+    return {
+        "ip_address": client_ip_from_request(request),
+        "user_agent": ua[:512] if ua else None,
+    }
 
 
 def _is_internal(current: CurrentUser) -> bool:
@@ -288,6 +299,7 @@ class ResetClientUserPasswordResponse(BaseModel):
 def list_client_users(
     db: DbSession,
     current: ClientUser,
+    request: Request,
     client_id: str | None = Query(default=None),
 ) -> ClientUsersList:
     """Seated users of the organization (active memberships only).
@@ -348,6 +360,7 @@ def create_client_user(
     payload: CreateClientUserPayload,
     db: DbSession,
     current: ClientUser,
+    request: Request,
     client_id: str | None = Query(default=None),
 ) -> CreateClientUserResponse:
     cid = _resolve_client_id(db, current, requested=client_id)
@@ -457,6 +470,7 @@ def create_client_user(
         entity_id=user.id,
         actor_type=_actor_type(current),
         actor_id=current.user.id,
+        **_request_ctx(request),
         after={
             "client_id": cid,
             "organization_id": org.id,
@@ -514,6 +528,7 @@ def update_client_user(
     payload: UpdateClientUserPayload,
     db: DbSession,
     current: ClientUser,
+    request: Request,
     client_id: str | None = Query(default=None),
 ) -> ClientUserActionResponse:
     cid = _resolve_client_id(db, current, requested=client_id)
@@ -549,6 +564,7 @@ def update_client_user(
         entity_id=user_id,
         actor_type=_actor_type(current),
         actor_id=current.user.id,
+        **_request_ctx(request),
         before={"status": before_status},
         after={
             "status": payload.status,
@@ -575,6 +591,7 @@ def remove_client_user(
     user_id: str,
     db: DbSession,
     current: ClientUser,
+    request: Request,
     client_id: str | None = Query(default=None),
 ) -> ClientUserActionResponse:
     cid = _resolve_client_id(db, current, requested=client_id)
@@ -598,6 +615,7 @@ def remove_client_user(
         entity_id=user_id,
         actor_type=_actor_type(current),
         actor_id=current.user.id,
+        **_request_ctx(request),
         after={
             "client_id": cid,
             "organization_id": org.id,
@@ -624,6 +642,7 @@ def reset_client_user_password(
     user_id: str,
     db: DbSession,
     current: ClientUser,
+    request: Request,
     client_id: str | None = Query(default=None),
 ) -> ResetClientUserPasswordResponse:
     cid = _resolve_client_id(db, current, requested=client_id)
@@ -662,6 +681,7 @@ def reset_client_user_password(
         entity_id=user_id,
         actor_type=_actor_type(current),
         actor_id=current.user.id,
+        **_request_ctx(request),
         after={
             "client_id": cid,
             "organization_id": org.id,
