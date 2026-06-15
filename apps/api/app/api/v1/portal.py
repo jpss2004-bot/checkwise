@@ -50,6 +50,7 @@ from pydantic import BaseModel, Field
 from sqlalchemy import and_, delete, func, select, update
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import Session, selectinload
+from starlette.concurrency import run_in_threadpool
 
 from app.api.v1.auth import CurrentUser, _claims_from_header, get_current_user
 from app.constants.statuses import DocumentStatus
@@ -2812,7 +2813,15 @@ async def create_workspace_submission(
             load_type=load_type,
         )
 
-        return finalize_intake_submission(
+        # PERF-5: finalize runs PDF inspection, OCR, forensics, QR decode,
+        # and the metadata XLSX export (which can PUT to R2) synchronously,
+        # then commits. Offload the whole back-half to a worker thread so a
+        # slow upload never blocks the event loop — and thus every other
+        # request — on a single-worker deploy. The session is used only in
+        # that one thread (the coroutine awaits), so there is no concurrent
+        # access. Behaviour-preserving: same result, status, and commit.
+        return await run_in_threadpool(
+            finalize_intake_submission,
             db,
             stored_file=stored_file,
             client=client,
@@ -3003,7 +3012,12 @@ async def create_workspace_submission_batch(
             load_type=load_type,
         )
 
-        return finalize_multi_document_submission(
+        # PERF-5: same offload as the single-file path — the batch runs
+        # inspection/OCR/forensics for every file plus the metadata export,
+        # synchronously, then commits. Run it in a worker thread so it
+        # doesn't block the event loop. Behaviour-preserving.
+        return await run_in_threadpool(
+            finalize_multi_document_submission,
             db,
             stored_files=stored_files,
             client=client,
