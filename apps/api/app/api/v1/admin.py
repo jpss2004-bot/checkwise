@@ -91,6 +91,7 @@ from app.services.auth import (
 )
 from app.services.email_delivery import (
     send_owner_reset_temp_password_email,
+    send_transactional_email,
     send_welcome_with_temp_password_email,
 )
 from app.services.metadata_store import ensure_local_export, mirror_enabled
@@ -946,11 +947,24 @@ def provision_user(
     email = payload.email.strip().lower()
 
     # ---- Reject duplicate email before any inserts. ----------------
+    # The 409 carries a structured summary of the existing account so the
+    # New User form can offer guided actions (open / reactivate / reset)
+    # instead of a dead-end error — the safe alternative to the
+    # delete-and-recreate reflex (Phase 3 resolver).
     existing_user = db.scalar(select(User).where(User.email == email))
     if existing_user is not None:
         raise HTTPException(
             status.HTTP_409_CONFLICT,
-            detail="Ya existe una cuenta con ese correo.",
+            detail={
+                "message": "Ya existe una cuenta con ese correo.",
+                "existing_user": {
+                    "user_id": existing_user.id,
+                    "full_name": existing_user.full_name,
+                    "email": existing_user.email,
+                    "status": existing_user.status,
+                    "roles": _active_roles(db, existing_user.id),
+                },
+            },
         )
 
     # ---- Mint the temp password + User row. ------------------------
@@ -1459,6 +1473,226 @@ def reset_user_password(
         temp_password=temp_password,
         email_status=delivery.status,
         email_error=delivery.error,
+    )
+
+
+def _active_roles(db: Session, user_id: str) -> list[str]:
+    """Distinct ACTIVE membership roles for a user, sorted. Shared by the
+    duplicate-email resolver and anywhere a role summary is needed."""
+    return sorted(
+        {
+            role
+            for (role,) in db.execute(
+                select(Membership.role).where(
+                    Membership.user_id == user_id,
+                    Membership.status == "active",
+                )
+            )
+        }
+    )
+
+
+def _primary_client_for_user(db: Session, user_id: str) -> Client | None:
+    """The Client a user is the Primary Account Owner of, if any.
+
+    Resolves the user's active *primary* ``client_admin`` membership →
+    its client-kind org → the linked Client. Returns None for
+    secondaries, providers, and internal staff. Used to keep the
+    canonical ``Client.email`` contact in sync when the owner's login
+    email changes.
+    """
+    org = db.scalar(
+        select(Organization)
+        .join(Membership, Membership.organization_id == Organization.id)
+        .where(
+            Membership.user_id == user_id,
+            Membership.status == "active",
+            Membership.is_primary.is_(True),
+            Organization.kind == "client",
+        )
+    )
+    if org is None or org.client_id is None:
+        return None
+    return db.get(Client, org.client_id)
+
+
+class AdminUserIdentityPayload(BaseModel):
+    """Partial identity edit. Every field is optional; at least one must
+    be present. ``email`` is normalised (trimmed + lowercased) and must
+    be unique across users. ``phone`` accepts an empty string to clear."""
+
+    full_name: str | None = None
+    email: EmailStr | None = None
+    phone: str | None = None
+
+
+class AdminUserIdentityResponse(BaseModel):
+    user_id: str
+    full_name: str
+    email: str
+    phone: str | None
+    email_changed: bool
+    # Combined delivery status of the old+new change notifications, or
+    # None when the email did not change. "sent" | "skipped" | "partial".
+    notification_status: str | None = None
+
+
+@router.patch(
+    "/users/{user_id}/identity", response_model=AdminUserIdentityResponse
+)
+def update_user_identity(
+    user_id: str,
+    payload: AdminUserIdentityPayload,
+    db: DbSession,
+    current: PlatformUser,
+    request: Request,
+) -> AdminUserIdentityResponse:
+    """Edit a user's name, email, and/or phone.
+
+    The fix for the delete-and-recreate anti-pattern: a typo'd email is
+    correctable in place. On an email change the new address must be free
+    (409 otherwise); the canonical ``Client.email`` is kept in sync when
+    the user is a client's Primary Account Owner; and BOTH the old and
+    new addresses are notified (no verification loop — this is an
+    operator-driven internal tool). Audited as ``admin.user.identity_updated``.
+    """
+    target = db.get(User, user_id)
+    if target is None:
+        raise HTTPException(
+            status.HTTP_404_NOT_FOUND, detail="Usuario no encontrado."
+        )
+    if target.deleted_at is not None:
+        raise HTTPException(
+            status.HTTP_409_CONFLICT,
+            detail="No puedes editar una cuenta eliminada. Restáurala primero.",
+        )
+
+    before = {
+        "full_name": target.full_name,
+        "email": target.email,
+        "phone": target.phone,
+    }
+
+    # Resolve the requested changes (only fields actually present in the
+    # body — model_fields_set distinguishes "omitted" from "sent as null").
+    sent = payload.model_fields_set
+    if not sent:
+        raise HTTPException(
+            status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail="Envía al menos un campo para actualizar.",
+        )
+
+    if "full_name" in sent:
+        new_name = (payload.full_name or "").strip()
+        if not new_name:
+            raise HTTPException(
+                status.HTTP_422_UNPROCESSABLE_ENTITY,
+                detail="El nombre no puede quedar vacío.",
+            )
+        target.full_name = new_name
+
+    if "phone" in sent:
+        target.phone = (payload.phone or "").strip() or None
+
+    email_changed = False
+    notification_status: str | None = None
+    if "email" in sent and payload.email is not None:
+        new_email = payload.email.strip().lower()
+        if new_email != target.email:
+            clash = db.scalar(
+                select(User).where(
+                    User.email == new_email, User.id != target.id
+                )
+            )
+            if clash is not None:
+                raise HTTPException(
+                    status.HTTP_409_CONFLICT,
+                    detail="Ya existe otra cuenta con ese correo.",
+                )
+            old_email = target.email
+            target.email = new_email
+            email_changed = True
+
+            # Keep the canonical client contact in sync for owners.
+            client = _primary_client_for_user(db, target.id)
+            if client is not None and (client.email or "").lower() == (
+                old_email or ""
+            ).lower():
+                client.email = new_email
+
+            # Notify BOTH addresses. send_transactional_email never raises
+            # (skips cleanly when SMTP is unconfigured), so delivery
+            # trouble can't fail the edit.
+            old_res = send_transactional_email(
+                to_email=old_email,
+                subject="Tu correo de acceso a CheckWise cambió",
+                body=(
+                    f"Hola {target.full_name},\n\n"
+                    f"El correo de acceso de tu cuenta de CheckWise cambió de "
+                    f"{old_email} a {new_email}.\n\n"
+                    "Si no reconoces este cambio, contacta a soporte de "
+                    "inmediato.\n\n— Equipo CheckWise"
+                ),
+            )
+            new_res = send_transactional_email(
+                to_email=new_email,
+                subject="Confirmación: nuevo correo de acceso a CheckWise",
+                body=(
+                    f"Hola {target.full_name},\n\n"
+                    f"A partir de ahora inicia sesión en CheckWise con este "
+                    f"correo: {new_email}.\n\n— Equipo CheckWise"
+                ),
+            )
+            statuses = {old_res.status, new_res.status}
+            if statuses == {"sent"}:
+                notification_status = "sent"
+            elif statuses == {"skipped"}:
+                notification_status = "skipped"
+            else:
+                notification_status = "partial"
+
+    after = {
+        "full_name": target.full_name,
+        "email": target.email,
+        "phone": target.phone,
+    }
+    if before == after:
+        # Nothing actually changed (e.g. same values re-sent) — skip the
+        # audit row and return the current state.
+        return AdminUserIdentityResponse(
+            user_id=target.id,
+            full_name=target.full_name,
+            email=target.email,
+            phone=target.phone,
+            email_changed=False,
+            notification_status=None,
+        )
+
+    db.flush()
+    _audit_admin(
+        db,
+        actor=current,
+        action="admin.user.identity_updated",
+        entity_type="user",
+        entity_id=target.id,
+        before=before,
+        after=after,
+        extra_metadata=(
+            {"email_notification_status": notification_status}
+            if email_changed
+            else None
+        ),
+        request=request,
+    )
+    db.commit()
+
+    return AdminUserIdentityResponse(
+        user_id=target.id,
+        full_name=target.full_name,
+        email=target.email,
+        phone=target.phone,
+        email_changed=email_changed,
+        notification_status=notification_status,
     )
 
 

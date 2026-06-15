@@ -1746,12 +1746,160 @@ def test_admin_user_detail_404_on_missing(
     assert resp.status_code == 404
 
 
+# ---------------------------------------------------------------------------
+# Phase 3 (platform rework) — edit identity + duplicate-email resolver
+# ---------------------------------------------------------------------------
+
+
+def _provision_client(
+    api_client: TestClient,
+    token: str,
+    *,
+    email: str,
+    full_name: str = "Edi Tante",
+    client_name: str = "Cliente Edit SA",
+) -> str:
+    resp = api_client.post(
+        "/api/v1/admin/users",
+        json={
+            "role": "client",
+            "full_name": full_name,
+            "email": email,
+            "client_name": client_name,
+        },
+        headers=_h(token),
+    )
+    assert resp.status_code == 201, resp.text
+    return resp.json()["user_id"]
+
+
+def test_admin_update_identity_name_and_phone(
+    api_client: TestClient, db_factory
+) -> None:
+    token = _admin_token(api_client, db_factory)
+    uid = _provision_client(api_client, token, email="nombre@edit-cliente.com")
+
+    resp = api_client.patch(
+        f"/api/v1/admin/users/{uid}/identity",
+        json={"full_name": "Nombre Nuevo", "phone": "+52 55 0000 1111"},
+        headers=_h(token),
+    )
+    assert resp.status_code == 200, resp.text
+    body = resp.json()
+    assert body["full_name"] == "Nombre Nuevo"
+    assert body["phone"] == "+52 55 0000 1111"
+    assert body["email_changed"] is False
+    assert body["notification_status"] is None
+
+    detail = api_client.get(
+        f"/api/v1/admin/users/{uid}", headers=_h(token)
+    ).json()
+    assert detail["full_name"] == "Nombre Nuevo"
+    assert detail["phone"] == "+52 55 0000 1111"
+
+
+def test_admin_update_identity_email_change_mirrors_client_and_audits(
+    api_client: TestClient, db_factory
+) -> None:
+    token = _admin_token(api_client, db_factory)
+    uid = _provision_client(api_client, token, email="viejo@edit-cliente.com")
+
+    resp = api_client.patch(
+        f"/api/v1/admin/users/{uid}/identity",
+        json={"email": "nuevo@edit-cliente.com"},
+        headers=_h(token),
+    )
+    assert resp.status_code == 200, resp.text
+    body = resp.json()
+    assert body["email"] == "nuevo@edit-cliente.com"
+    assert body["email_changed"] is True
+    # SMTP is unconfigured under test → both notifications skip cleanly.
+    assert body["notification_status"] == "skipped"
+
+    # User row + the canonical Client contact both moved to the new email.
+    db = db_factory()
+    try:
+        user = db.scalar(select(User).where(User.id == uid))
+        assert user is not None and user.email == "nuevo@edit-cliente.com"
+        mirrored = db.scalar(
+            select(Client).where(Client.email == "nuevo@edit-cliente.com")
+        )
+        assert mirrored is not None
+    finally:
+        db.close()
+
+    audit = api_client.get(
+        "/api/v1/admin/audit-log?action=admin.user.identity_updated",
+        headers=_h(token),
+    ).json()
+    assert audit["total"] >= 1
+
+
+def test_admin_update_identity_rejects_duplicate_email(
+    api_client: TestClient, db_factory
+) -> None:
+    token = _admin_token(api_client, db_factory)
+    uid_a = _provision_client(
+        api_client, token, email="a@edit-cliente.com", client_name="A SA"
+    )
+    _provision_client(
+        api_client, token, email="b@edit-cliente.com", client_name="B SA"
+    )
+    resp = api_client.patch(
+        f"/api/v1/admin/users/{uid_a}/identity",
+        json={"email": "b@edit-cliente.com"},
+        headers=_h(token),
+    )
+    assert resp.status_code == 409
+
+
+def test_admin_update_identity_404_on_missing(
+    api_client: TestClient, db_factory
+) -> None:
+    token = _admin_token(api_client, db_factory)
+    resp = api_client.patch(
+        "/api/v1/admin/users/no-such-user/identity",
+        json={"full_name": "X"},
+        headers=_h(token),
+    )
+    assert resp.status_code == 404
+
+
+def test_provision_duplicate_email_returns_existing_user_summary(
+    api_client: TestClient, db_factory
+) -> None:
+    """The duplicate-email 409 carries a structured summary of the
+    existing account so the New User form can offer guided actions."""
+    token = _admin_token(api_client, db_factory)
+    uid = _provision_client(
+        api_client, token, email="dup@edit-cliente.com", client_name="Dup SA"
+    )
+    again = api_client.post(
+        "/api/v1/admin/users",
+        json={
+            "role": "admin",
+            "full_name": "Otro Intento",
+            "email": "dup@edit-cliente.com",
+        },
+        headers=_h(token),
+    )
+    assert again.status_code == 409, again.text
+    detail = again.json()["detail"]
+    assert isinstance(detail, dict)
+    existing = detail["existing_user"]
+    assert existing["user_id"] == uid
+    assert existing["email"] == "dup@edit-cliente.com"
+    assert existing["status"] == "active"
+    assert "client_admin" in existing["roles"]
+
+
 @pytest.mark.parametrize(
     ("method", "path", "body"),
     [
         ("GET", "/api/v1/admin/users", None),
         ("GET", "/api/v1/admin/users/whatever", None),
         ("PATCH", "/api/v1/admin/users/whatever", {"status": "disabled"}),
+        ("PATCH", "/api/v1/admin/users/whatever/identity", {"full_name": "X"}),
         ("POST", "/api/v1/admin/users/whatever/reset-password", None),
     ],
 )
@@ -1768,6 +1916,7 @@ def test_user_management_rejects_unauthenticated(
         ("GET", "/api/v1/admin/users", None),
         ("GET", "/api/v1/admin/users/whatever", None),
         ("PATCH", "/api/v1/admin/users/whatever", {"status": "disabled"}),
+        ("PATCH", "/api/v1/admin/users/whatever/identity", {"full_name": "X"}),
         ("POST", "/api/v1/admin/users/whatever/reset-password", None),
     ],
 )
