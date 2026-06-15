@@ -1,6 +1,6 @@
 "use client";
 
-import { Lightbulb, Sparkle } from "@phosphor-icons/react";
+import { ArrowRight, Lightbulb, Sparkle } from "@phosphor-icons/react";
 
 import type { BlockDefinition, BlockProps } from "@/lib/reports/registry";
 
@@ -17,6 +17,16 @@ import type { BlockDefinition, BlockProps } from "@/lib/reports/registry";
 
 type AudienceTone = "internal" | "client" | "vendor";
 
+interface ActionLink {
+  id?: string;
+  type?: string | null;
+  priority?: string | null;
+  title?: string | null;
+  href?: string | null;
+  requirement_code?: string | null;
+  period_key?: string | null;
+}
+
 interface AiRecommendationConfig {
   based_on: string[];
   priority_count: number;
@@ -31,6 +41,7 @@ interface AiRecommendationData {
   }>;
   audience_tone: AudienceTone;
   priority_count: number;
+  action_links?: ActionLink[];
 }
 
 export const aiRecommendationDefinition: Omit<
@@ -55,6 +66,7 @@ export function AiRecommendationBlock({
 }: BlockProps<AiRecommendationConfig, AiRecommendationData>) {
   const ai = block.ai_summary;
   const upstream = block.data?.upstream_block_summaries ?? [];
+  const actionLinks = block.data?.action_links ?? [];
 
   return (
     <section
@@ -99,6 +111,24 @@ export function AiRecommendationBlock({
           >
             {ai.text}
           </div>
+          {actionLinks.length > 0 ? (
+            <div className="mt-3 flex flex-wrap gap-2 print:hidden">
+              {actionLinks.map((link, idx) =>
+                link.href ? (
+                  <a
+                    key={link.id ?? `${link.href}-${idx}`}
+                    href={link.href}
+                    target="_blank"
+                    rel="noreferrer"
+                    className="inline-flex items-center gap-1 rounded-sm border border-[color:var(--status-ai-border)] bg-[color:var(--surface-page)] px-2.5 py-1 text-[12px] font-medium text-[color:var(--text-primary)] hover:bg-[color:var(--surface-hover)]"
+                  >
+                    {link.title ?? "Abrir acción"}
+                    <ArrowRight className="h-3 w-3" aria-hidden="true" />
+                  </a>
+                ) : null,
+              )}
+            </div>
+          ) : null}
         </div>
       ) : (
         <div className="rounded-md border border-dashed border-[color:var(--border-subtle)] p-6 text-center">

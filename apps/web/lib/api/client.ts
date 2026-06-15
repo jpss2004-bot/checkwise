@@ -185,6 +185,7 @@ export type ClientVendorDetail = {
     total_tracked: number;
     on_track: number;
   };
+  document_action_items: Array<ClientVendorDocumentActionItem>;
   suggested_actions: Array<{
     id: string;
     type: string;
@@ -237,6 +238,26 @@ export type ClientVendorDetail = {
    * ``/api/v1/client/submissions/:submission_id/document``.
    */
   contracts: Array<ClientVendorContractDoc>;
+};
+
+export type ClientVendorDocumentActionItem = {
+  id: string;
+  kind:
+    | "missing"
+    | "rejected"
+    | "needs_correction"
+    | "possible_mismatch"
+    | "expired"
+    | "due_soon";
+  requirement_code: string | null;
+  requirement_name: string | null;
+  institution: string | null;
+  period_key: string | null;
+  deadline_iso: string | null;
+  state: string;
+  due_in_days: number | null;
+  href: string;
+  submission_id: string | null;
 };
 
 export type ClientVendorContractDoc = {

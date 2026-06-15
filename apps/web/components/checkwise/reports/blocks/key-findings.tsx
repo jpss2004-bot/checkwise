@@ -1,6 +1,7 @@
 "use client";
 
 import {
+  ArrowRight,
   CheckCircle,
   Info,
   Warning,
@@ -19,10 +20,21 @@ import type { BlockDefinition, BlockProps } from "@/lib/reports/registry";
 
 type Tone = "red" | "yellow" | "green" | "info";
 
+interface ActionLink {
+  id?: string;
+  type?: string | null;
+  priority?: string | null;
+  title?: string | null;
+  href?: string | null;
+  requirement_code?: string | null;
+  period_key?: string | null;
+}
+
 interface Finding {
   tone: Tone;
   title: string;
   detail: string;
+  links?: ActionLink[];
 }
 
 interface FindingsData {
@@ -80,6 +92,24 @@ export function KeyFindingsBlock({
                 <p className="text-[12px] leading-snug text-[color:var(--text-secondary)]">
                   {f.detail}
                 </p>
+                {f.links && f.links.length > 0 ? (
+                  <div className="mt-2 flex flex-wrap gap-2 print:hidden">
+                    {f.links.map((link, idx) =>
+                      link.href ? (
+                        <a
+                          key={link.id ?? `${link.href}-${idx}`}
+                          href={link.href}
+                          target="_blank"
+                          rel="noreferrer"
+                          className="inline-flex items-center gap-1 rounded-sm border border-[color:var(--border-subtle)] bg-[color:var(--surface-page)] px-2 py-1 text-[11px] font-medium text-[color:var(--text-primary)] hover:bg-[color:var(--surface-hover)]"
+                        >
+                          {link.title ?? "Abrir acción"}
+                          <ArrowRight className="h-3 w-3" aria-hidden="true" />
+                        </a>
+                      ) : null,
+                    )}
+                  </div>
+                ) : null}
               </div>
             </li>
           );

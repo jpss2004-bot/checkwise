@@ -40,10 +40,11 @@ import {
   getClientVendorDetail,
   type ClientVendorContractDoc,
   type ClientVendorDetail,
+  type ClientVendorDocumentActionItem,
 } from "@/lib/api/client";
 import { downloadAuthenticatedFile } from "@/lib/api/download";
 import { createReportFromPreset, ReportsApiError } from "@/lib/api/reports";
-import { slotStateLabel } from "@/lib/constants/statuses";
+import { slotStateLabel, slotStateVariant } from "@/lib/constants/statuses";
 
 type PageProps = {
   params: Promise<{ vendor_id: string }>;
@@ -207,6 +208,7 @@ export default function ClientVendorDetailPage({ params }: PageProps) {
           <div className="grid gap-5 lg:grid-cols-3">
             <div className="space-y-5 lg:col-span-2">
               <ContractDocumentsCard detail={detail} />
+              <DocumentActionItemsCard detail={detail} />
               <SuggestedActionsCard detail={detail} />
               <AttentionTodayCard detail={detail} />
             </div>
@@ -437,6 +439,94 @@ function ContractRow({ contract }: { contract: ClientVendorContractDoc }) {
         </Button>
       </div>
     </li>
+  );
+}
+
+// ─── Documents To Act On ────────────────────────────────────────
+
+const ACTION_KIND_LABEL: Record<ClientVendorDocumentActionItem["kind"], string> = {
+  missing: "Por entregar",
+  rejected: "Requiere corrección",
+  needs_correction: "Necesita aclaración",
+  possible_mismatch: "Posible inconsistencia",
+  expired: "Vencido",
+  due_soon: "Por vencer",
+};
+
+function formatDeadline(value: string | null) {
+  if (!value) return "—";
+  return new Date(value).toLocaleDateString("es-MX", {
+    day: "2-digit",
+    month: "short",
+    year: "numeric",
+    timeZone: "UTC",
+  });
+}
+
+function actionCtaLabel(item: ClientVendorDocumentActionItem) {
+  if (item.kind === "missing" || item.kind === "due_soon") return "Abrir carga";
+  return "Abrir corrección";
+}
+
+function DocumentActionItemsCard({ detail }: { detail: ClientVendorDetail }) {
+  const items = detail.document_action_items ?? [];
+  return (
+    <Surface
+      title="Documentos por atender"
+      icon={WarningOctagon}
+      description="Faltantes, correcciones y vencimientos del proveedor."
+    >
+      {items.length === 0 ? (
+        <EmptyState
+          icon={CheckCircle}
+          title="Sin documentos por atender"
+          description="No hay faltantes, correcciones ni vencimientos abiertos para este proveedor."
+        />
+      ) : (
+        <ul className="divide-y divide-[color:var(--border-subtle)]">
+          {items.map((item) => (
+            <li
+              key={item.id}
+              className="grid gap-3 py-3 first:pt-0 last:pb-0 md:grid-cols-[1fr,auto] md:items-center"
+            >
+              <div className="min-w-0 space-y-1">
+                <div className="flex flex-wrap items-center gap-2">
+                  <Badge variant={slotStateVariant(item.state)}>
+                    {slotStateLabel(item.state)}
+                  </Badge>
+                  <span className="font-mono text-[10px] uppercase tracking-wide text-[color:var(--text-tertiary)]">
+                    {item.institution ?? "—"}
+                    {item.period_key ? ` · ${item.period_key}` : ""}
+                  </span>
+                  <span className="font-mono text-[10px] uppercase tracking-wide text-[color:var(--text-tertiary)]">
+                    vence {formatDeadline(item.deadline_iso)}
+                  </span>
+                </div>
+                <p className="truncate text-[13px] font-medium text-[color:var(--text-primary)]">
+                  {item.requirement_name ?? item.requirement_code ?? "Documento requerido"}
+                </p>
+                <p className="text-[11px] text-[color:var(--text-secondary)]">
+                  {ACTION_KIND_LABEL[item.kind]}
+                  {item.due_in_days !== null && item.due_in_days >= 0
+                    ? ` · ${item.due_in_days} día(s)`
+                    : ""}
+                </p>
+              </div>
+              <Button asChild size="sm" variant="outline">
+                <Link href={item.href} target="_blank" rel="noreferrer">
+                  {actionCtaLabel(item)}
+                  <ArrowRight
+                    className="h-3.5 w-3.5"
+                    weight="bold"
+                    aria-hidden="true"
+                  />
+                </Link>
+              </Button>
+            </li>
+          ))}
+        </ul>
+      )}
+    </Surface>
   );
 }
 
