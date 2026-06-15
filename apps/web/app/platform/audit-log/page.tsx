@@ -367,6 +367,7 @@ export default function AdminAuditLogPage() {
                   <TableHead style={{ width: "120px" }}>Entidad</TableHead>
                   <TableHead style={{ width: "150px" }}>ID</TableHead>
                   <TableHead style={{ width: "110px" }}>Fuente</TableHead>
+                  <TableHead style={{ width: "120px" }}>IP</TableHead>
                 </TableRow>
               </TableHeader>
               <TableBody>
@@ -488,10 +489,18 @@ function AuditLogRow({
             {(row.event_metadata?.source as string | undefined) ?? "—"}
           </span>
         </TableCell>
+        <TableCell>
+          <span
+            className="font-mono text-[11px] tabular-nums text-[color:var(--text-tertiary)]"
+            title={row.user_agent ?? undefined}
+          >
+            {row.ip_address ?? "—"}
+          </span>
+        </TableCell>
       </TableRow>
       {expanded ? (
         <TableRow className="bg-[color:var(--surface-sunken)]/50 hover:bg-[color:var(--surface-sunken)]/50">
-          <TableCell colSpan={7} className="px-5 py-4" id={detailId}>
+          <TableCell colSpan={8} className="px-5 py-4" id={detailId}>
             <DiffPanel row={row} />
           </TableCell>
         </TableRow>

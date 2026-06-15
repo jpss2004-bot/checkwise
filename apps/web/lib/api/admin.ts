@@ -192,6 +192,8 @@ export type AdminUserRow = {
   must_change_password: boolean;
   last_login_at: string | null;
   created_at: string;
+  /** Set when the account is soft-deleted (migration 0042). */
+  deleted_at?: string | null;
   /** Distinct active membership roles, sorted. */
   roles: string[];
   organizations: { id: string; name: string; kind: string }[];
@@ -207,6 +209,7 @@ export async function listUsers(params?: {
   q?: string;
   status?: "active" | "disabled";
   role?: string;
+  include_deleted?: boolean;
   limit?: number;
   offset?: number;
 }): Promise<AdminUsersList> {
@@ -374,6 +377,52 @@ export async function promoteMembership(
     `/api/v1/admin/users/${userId}/memberships/${membershipId}`,
     { method: "PATCH", body: JSON.stringify({ is_primary: true }) },
   );
+}
+
+/** What a soft-delete would affect (Phase 5) — for the confirm modal. */
+export type AdminUserDeletionPreview = {
+  user_id: string;
+  email: string;
+  already_deleted: boolean;
+  active_memberships: number;
+  /** Client orgs the user is the active Primary Owner of (orphaned on delete). */
+  primary_of_orgs: string[];
+  /** Provider workspaces owned by this user (orphaned on delete). */
+  owned_workspaces: number;
+  /** Only remaining active internal_admin — a warning, not a block. */
+  is_last_internal_admin: boolean;
+};
+
+export type AdminUserDeleteResponse = {
+  user_id: string;
+  status: string;
+  deleted_at: string | null;
+};
+
+export async function getUserDeletionPreview(
+  userId: string,
+): Promise<AdminUserDeletionPreview> {
+  return fetchJson(`/api/v1/admin/users/${userId}/deletion-preview`);
+}
+
+/** Soft-delete a user (recoverable). Refuses self-delete / double-delete. */
+export async function deleteUser(
+  userId: string,
+  reason?: string,
+): Promise<AdminUserDeleteResponse> {
+  return fetchJson(`/api/v1/admin/users/${userId}`, {
+    method: "DELETE",
+    body: JSON.stringify({ reason: reason ?? null }),
+  });
+}
+
+/** Reverse a soft-delete. Roles are not auto-restored — re-grant them. */
+export async function restoreUser(
+  userId: string,
+): Promise<AdminUserDeleteResponse> {
+  return fetchJson(`/api/v1/admin/users/${userId}/restore`, {
+    method: "POST",
+  });
 }
 
 // ---------------------------------------------------------------------------
@@ -932,6 +981,9 @@ export type AdminAuditLogItem = {
   before: Record<string, unknown> | null;
   after: Record<string, unknown> | null;
   event_metadata: Record<string, unknown> | null;
+  /** Best-effort originating IP (migration 0043); null on system events. */
+  ip_address?: string | null;
+  user_agent?: string | null;
   created_at: string;
 };
 

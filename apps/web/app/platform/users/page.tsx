@@ -118,6 +118,7 @@ export default function PlatformUsersPage() {
   const [q, setQ] = useState("");
   const [statusFilter, setStatusFilter] = useState<StatusFilter>("");
   const [roleFilter, setRoleFilter] = useState("");
+  const [includeDeleted, setIncludeDeleted] = useState(false);
 
   // Action dialogs
   const [confirm, setConfirm] = useState<ConfirmState | null>(null);
@@ -131,16 +132,23 @@ export default function PlatformUsersPage() {
     q: string;
     status: StatusFilter;
     role: string;
+    includeDeleted: boolean;
   }): Parameters<typeof listUsers>[0] {
     const params: Parameters<typeof listUsers>[0] = { limit: PAGE_LIMIT };
     if (eff.q.trim()) params.q = eff.q.trim();
     if (eff.status) params.status = eff.status;
     if (eff.role) params.role = eff.role;
+    if (eff.includeDeleted) params.include_deleted = true;
     return params;
   }
 
   async function refresh(
-    overrides: { q?: string; status?: StatusFilter; role?: string } = {},
+    overrides: {
+      q?: string;
+      status?: StatusFilter;
+      role?: string;
+      includeDeleted?: boolean;
+    } = {},
   ) {
     setLoading(true);
     setError(null);
@@ -148,6 +156,10 @@ export default function PlatformUsersPage() {
       q: overrides.q !== undefined ? overrides.q : q,
       status: overrides.status !== undefined ? overrides.status : statusFilter,
       role: overrides.role !== undefined ? overrides.role : roleFilter,
+      includeDeleted:
+        overrides.includeDeleted !== undefined
+          ? overrides.includeDeleted
+          : includeDeleted,
     };
     try {
       const data = await listUsers(buildParams(eff));
@@ -170,7 +182,12 @@ export default function PlatformUsersPage() {
     setLoadingMore(true);
     try {
       const data = await listUsers({
-        ...buildParams({ q, status: statusFilter, role: roleFilter }),
+        ...buildParams({
+          q,
+          status: statusFilter,
+          role: roleFilter,
+          includeDeleted,
+        }),
         offset: rows.length,
       });
       setRows((current) => (current ? [...current, ...data.items] : data.items));
@@ -352,6 +369,20 @@ export default function PlatformUsersPage() {
             </Select>
           </label>
 
+          <label className="flex items-center gap-1.5 text-[11px] text-[color:var(--text-secondary)]">
+            <input
+              type="checkbox"
+              checked={includeDeleted}
+              onChange={(e) => {
+                const next = e.target.checked;
+                setIncludeDeleted(next);
+                refresh({ includeDeleted: next });
+              }}
+              className="h-3.5 w-3.5 rounded border-[color:var(--border-default)]"
+            />
+            Incluir eliminados
+          </label>
+
           <div className="ml-auto font-mono text-[10px] uppercase tracking-wide text-[color:var(--text-tertiary)]">
             {loading
               ? "Cargando…"
@@ -447,12 +478,14 @@ export default function PlatformUsersPage() {
               width: "180px",
               cell: (row) => (
                 <span className="flex flex-wrap items-center gap-1">
-                  {row.status === "active" ? (
+                  {row.deleted_at ? (
+                    <Badge variant="secondary">Eliminado</Badge>
+                  ) : row.status === "active" ? (
                     <Badge variant="success">Activo</Badge>
                   ) : (
                     <Badge variant="secondary">Desactivado</Badge>
                   )}
-                  {row.must_change_password ? (
+                  {!row.deleted_at && row.must_change_password ? (
                     <span
                       className="rounded-sm border border-[color:var(--border-subtle)] px-1 py-px font-mono text-[9px] uppercase tracking-wide text-[color:var(--text-tertiary)]"
                       title="Aún no ha cambiado su contraseña temporal."

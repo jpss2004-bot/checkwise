@@ -41,12 +41,16 @@ import { PlatformShell } from "../../_shell";
 import {
   AdminApiError,
   type AdminResetPasswordResponse,
+  type AdminUserDeletionPreview,
   type AdminUserDetail,
   type MembershipRoleCode,
+  deleteUser,
   getUser,
+  getUserDeletionPreview,
   grantMembership,
   promoteMembership,
   resetUserPassword,
+  restoreUser,
   revokeMembership,
   updateUserIdentity,
   updateUserStatus,
@@ -205,6 +209,67 @@ export default function PlatformUserDetailPage() {
       membershipApiError(err, fallback);
     } finally {
       setMemberBusy(null);
+    }
+  }
+
+  // Delete / restore (Phase 5)
+  const [deleteOpen, setDeleteOpen] = useState(false);
+  const [deletePreview, setDeletePreview] =
+    useState<AdminUserDeletionPreview | null>(null);
+  const [deleteReason, setDeleteReason] = useState("");
+  const [deleteConfirm, setDeleteConfirm] = useState("");
+  const [deleteBusy, setDeleteBusy] = useState(false);
+  const [deleteError, setDeleteError] = useState<string | null>(null);
+  const [restoreBusy, setRestoreBusy] = useState(false);
+
+  async function openDelete() {
+    if (!user) return;
+    setDeleteError(null);
+    setDeleteReason("");
+    setDeleteConfirm("");
+    setDeletePreview(null);
+    setDeleteOpen(true);
+    try {
+      setDeletePreview(await getUserDeletionPreview(user.user_id));
+    } catch {
+      // Preview is advisory — the modal still works without it.
+    }
+  }
+
+  async function onConfirmDelete() {
+    if (!user) return;
+    setDeleteBusy(true);
+    setDeleteError(null);
+    try {
+      await deleteUser(user.user_id, deleteReason.trim() || undefined);
+      setDeleteOpen(false);
+      await load();
+    } catch (err) {
+      if (err instanceof AdminApiError && err.status === 401) {
+        router.replace("/login");
+        return;
+      }
+      setDeleteError(apiErrorMessage(err, "No pudimos eliminar la cuenta."));
+    } finally {
+      setDeleteBusy(false);
+    }
+  }
+
+  async function onRestore() {
+    if (!user) return;
+    setRestoreBusy(true);
+    try {
+      await restoreUser(user.user_id);
+      await load();
+    } catch (err) {
+      if (err instanceof AdminApiError && err.status === 401) {
+        router.replace("/login");
+        return;
+      }
+      setEmailNotice(null);
+      setError(apiErrorMessage(err, "No pudimos restaurar la cuenta."));
+    } finally {
+      setRestoreBusy(false);
     }
   }
 
@@ -442,7 +507,26 @@ export default function PlatformUserDetailPage() {
                   Reactivar
                 </Button>
               )}
+              <Button
+                size="sm"
+                variant="outline"
+                className="text-[color:var(--status-error-text)]"
+                onClick={openDelete}
+              >
+                <Trash className="h-3.5 w-3.5" weight="bold" aria-hidden="true" />
+                Eliminar
+              </Button>
             </>
+          ) : null}
+          {user && isDeleted ? (
+            <Button size="sm" loading={restoreBusy} onClick={onRestore}>
+              <ArrowCounterClockwise
+                className="h-3.5 w-3.5"
+                weight="bold"
+                aria-hidden="true"
+              />
+              Restaurar cuenta
+            </Button>
           ) : null}
         </>
       }
@@ -817,6 +901,105 @@ export default function PlatformUserDetailPage() {
           </Surface>
         </div>
       ) : null}
+
+      {/* Delete (soft, recoverable) */}
+      <Dialog
+        open={deleteOpen}
+        onOpenChange={(next) => {
+          if (!next && !deleteBusy) setDeleteOpen(false);
+        }}
+      >
+        <DialogContent className="max-w-md">
+          <DialogHeader>
+            <DialogTitle>Eliminar cuenta</DialogTitle>
+            <DialogDescription>
+              {user ? (
+                <>
+                  Se eliminará la cuenta de <strong>{user.email}</strong>. Es
+                  reversible: podrás restaurarla después. Sus roles se quitan y
+                  deberán reasignarse al restaurar.
+                </>
+              ) : null}
+            </DialogDescription>
+          </DialogHeader>
+
+          {deletePreview &&
+          (deletePreview.primary_of_orgs.length > 0 ||
+            deletePreview.owned_workspaces > 0 ||
+            deletePreview.is_last_internal_admin) ? (
+            <div className="space-y-1 rounded-md border border-[color:var(--status-warning-border)] bg-[color:var(--status-warning-bg)] px-3 py-2.5 text-[12px] text-[color:var(--status-warning-text)]">
+              <p className="font-semibold">Esto también afecta:</p>
+              <ul className="list-inside list-disc space-y-0.5">
+                {deletePreview.primary_of_orgs.map((name) => (
+                  <li key={name}>
+                    Titular de <strong>{name}</strong> — quedará sin titular.
+                  </li>
+                ))}
+                {deletePreview.owned_workspaces > 0 ? (
+                  <li>
+                    {deletePreview.owned_workspaces} espacio(s) de proveedor
+                    quedarán sin dueño.
+                  </li>
+                ) : null}
+                {deletePreview.is_last_internal_admin ? (
+                  <li>Es el último administrador interno activo.</li>
+                ) : null}
+              </ul>
+            </div>
+          ) : null}
+
+          <div className="space-y-3">
+            <div className="space-y-1">
+              <Label htmlFor="del-reason">Motivo (opcional)</Label>
+              <Input
+                id="del-reason"
+                value={deleteReason}
+                onChange={(e) => setDeleteReason(e.target.value)}
+                placeholder="Cuenta duplicada, baja, etc."
+              />
+            </div>
+            <div className="space-y-1">
+              <Label htmlFor="del-confirm">
+                Escribe <strong>ELIMINAR</strong> para confirmar
+              </Label>
+              <Input
+                id="del-confirm"
+                value={deleteConfirm}
+                onChange={(e) => setDeleteConfirm(e.target.value)}
+                placeholder="ELIMINAR"
+                autoComplete="off"
+              />
+            </div>
+          </div>
+
+          {deleteError ? (
+            <div className="flex items-start gap-2 rounded-md border border-[color:var(--status-error-border)] bg-[color:var(--status-error-bg)] px-3 py-2 text-[12px] text-[color:var(--status-error-text)]">
+              <Warning className="mt-0.5 h-3.5 w-3.5 shrink-0" weight="fill" aria-hidden="true" />
+              <span>{deleteError}</span>
+            </div>
+          ) : null}
+
+          <DialogFooter>
+            <Button
+              type="button"
+              variant="ghost"
+              onClick={() => setDeleteOpen(false)}
+              disabled={deleteBusy}
+            >
+              Cancelar
+            </Button>
+            <Button
+              type="button"
+              variant="destructive"
+              loading={deleteBusy}
+              disabled={deleteConfirm.trim() !== "ELIMINAR"}
+              onClick={onConfirmDelete}
+            >
+              Eliminar cuenta
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
 
       {/* Edit identity */}
       <Dialog
