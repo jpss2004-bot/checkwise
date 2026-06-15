@@ -119,6 +119,35 @@ PlatformUser = Annotated[
     ),
 ]
 
+# Roles whose grant is itself an escalation: handing one out gives the
+# recipient (possibly the caller) access beyond the IT/platform surface.
+_PRIVILEGED_ROLES = frozenset(
+    {MembershipRole.INTERNAL_ADMIN.value, MembershipRole.PLATFORM_ADMIN.value}
+)
+
+
+def _assert_can_grant_role(actor: CurrentUser, role: str) -> None:
+    """ADMIN-1 — only a full ``internal_admin`` may create or grant the
+    privileged staff roles (``internal_admin`` / ``platform_admin``).
+
+    The user-management endpoints are gated by ``PlatformUser`` so a
+    future IT-only ``platform_admin`` can provision ordinary client /
+    provider accounts. But granting a *privileged* role is a self- or
+    lateral-escalation: without this check a pure ``platform_admin``
+    could mint itself ``internal_admin`` and reach the entire compliance
+    surface that ``AdminUser`` exists to fence off. Today every operator
+    also holds ``internal_admin`` (migration 0044 backfill), so this is
+    a no-op for current accounts and only bites the first IT-only one.
+    """
+    if role in _PRIVILEGED_ROLES and MembershipRole.INTERNAL_ADMIN.value not in actor.roles:
+        raise HTTPException(
+            status.HTTP_403_FORBIDDEN,
+            detail=(
+                "Solo un internal_admin puede otorgar los roles "
+                "internal_admin o platform_admin."
+            ),
+        )
+
 
 # ---------------------------------------------------------------------------
 # Shared helpers
@@ -943,6 +972,12 @@ def provision_user(
     Returns the plaintext temp password ONCE for the admin's
     confirmation surface; the User row stores only the bcrypt hash.
     """
+    # ADMIN-1 — provisioning role=="admin" mints an internal_admin; only
+    # a full internal_admin may do so. Checked first, before any inserts
+    # or the email-existence probe.
+    if payload.role == "admin":
+        _assert_can_grant_role(current, MembershipRole.INTERNAL_ADMIN.value)
+
     full_name = payload.full_name.strip()
     email = payload.email.strip().lower()
 
@@ -1803,6 +1838,10 @@ def grant_user_membership(
     constraint spans all statuses. New grants are never primary; transfer
     ownership via PATCH. Audited ``admin.user.membership_granted``.
     """
+    # ADMIN-1 — granting internal_admin / platform_admin is an
+    # escalation reserved to a full internal_admin.
+    _assert_can_grant_role(current, payload.role)
+
     user = db.get(User, user_id)
     if user is None:
         raise HTTPException(
