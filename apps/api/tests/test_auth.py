@@ -1067,3 +1067,66 @@ def test_set_password_writes_audit_event(
         assert after.get("source") == "set_password"
     finally:
         db.close()
+
+
+# ---------------------------------------------------------------------------
+# Account lockout (platform rework follow-up) — threshold = 5 by default
+# ---------------------------------------------------------------------------
+
+
+def _attempt_login(api_client: TestClient, email: str, password: str):
+    """Returns the raw login response — distinct from the module's earlier
+    ``_login`` helper, which returns just the token string."""
+    return api_client.post(
+        "/api/v1/auth/login", json={"email": email, "password": password}
+    )
+
+
+def test_account_locks_after_threshold_failed_logins(
+    api_client: TestClient, db_factory
+) -> None:
+    _seed_user(db_factory, password="Correct horse battery 4")
+    # Four bad attempts stay generic 401…
+    for _ in range(4):
+        r = _attempt_login(api_client, "ada@legalshelf.mx", "nope")
+        assert r.status_code == 401, r.text
+    # …the fifth trips the lock.
+    fifth = _attempt_login(api_client, "ada@legalshelf.mx", "nope")
+    assert fifth.status_code == 429
+    assert "bloqueada" in fifth.json()["detail"].lower()
+    # Even the CORRECT password is refused during the cooldown.
+    correct = _attempt_login(
+        api_client, "ada@legalshelf.mx", "Correct horse battery 4"
+    )
+    assert correct.status_code == 429
+
+
+def test_expired_lock_allows_login(api_client: TestClient, db_factory) -> None:
+    user_id, _org, pw = _seed_user(db_factory)
+    db = db_factory()
+    try:
+        u = db.get(User, user_id)
+        u.locked_until = utc_now() - timedelta(minutes=1)  # already elapsed
+        u.failed_login_count = 0
+        db.commit()
+    finally:
+        db.close()
+    r = _attempt_login(api_client, "ada@legalshelf.mx", pw)
+    assert r.status_code == 200, r.text
+
+
+def test_successful_login_resets_failed_count(
+    api_client: TestClient, db_factory
+) -> None:
+    user_id, _org, pw = _seed_user(db_factory)
+    for _ in range(2):
+        assert (
+            _attempt_login(api_client, "ada@legalshelf.mx", "nope").status_code
+            == 401
+        )
+    assert _attempt_login(api_client, "ada@legalshelf.mx", pw).status_code == 200
+    db = db_factory()
+    try:
+        assert db.get(User, user_id).failed_login_count == 0
+    finally:
+        db.close()

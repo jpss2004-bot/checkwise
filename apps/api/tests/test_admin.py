@@ -1647,6 +1647,39 @@ def test_admin_reset_password_409_on_disabled_target(
     )
 
 
+def test_admin_reset_password_clears_account_lock(
+    api_client: TestClient, db_factory
+) -> None:
+    """An admin reset is how an operator unsticks a locked-out user, so
+    it must clear the lock (else the new temp password wouldn't work
+    until the cooldown elapsed)."""
+    from datetime import UTC, datetime, timedelta
+
+    token = _admin_token(api_client, db_factory)
+    target = _seed_directory_user(db_factory, email="locked@seeded.test")
+    db = db_factory()
+    try:
+        u = db.get(User, target)
+        u.locked_until = datetime.now(UTC) + timedelta(minutes=30)
+        u.failed_login_count = 5
+        db.commit()
+    finally:
+        db.close()
+
+    resp = api_client.post(
+        f"/api/v1/admin/users/{target}/reset-password", headers=_h(token)
+    )
+    assert resp.status_code == 200, resp.text
+
+    db = db_factory()
+    try:
+        u = db.get(User, target)
+        assert u.locked_until is None
+        assert u.failed_login_count == 0
+    finally:
+        db.close()
+
+
 def test_admin_reset_password_404_on_missing(
     api_client: TestClient, db_factory
 ) -> None:

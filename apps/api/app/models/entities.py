@@ -567,6 +567,14 @@ class User(TimestampMixin, Base):
         Boolean, default=False, nullable=False
     )
     last_login_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    # Account lockout (migration 0045). ``failed_login_count`` counts
+    # CONSECUTIVE failed logins; once it hits the configured threshold the
+    # account is locked until ``locked_until`` and the counter resets. A
+    # successful login or any password change clears both.
+    failed_login_count: Mapped[int] = mapped_column(
+        Integer, default=0, server_default="0", nullable=False
+    )
+    locked_until: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     # Editable profile fields surfaced on /portal/entra-a-tu-espacio.
     # Phone and job_title are optional; contact_preference defaults to
     # email so existing rows stay valid after migration 0016 backfills

@@ -49,8 +49,8 @@ from app.api.v1.auth import CurrentUser
 from app.api.v1.client import ClientUser, DbSession, _resolve_client_id
 from app.constants.roles import MembershipRole
 from app.core.config import settings
-from app.models import Client, Membership, Organization, PasswordHistory, User
 from app.core.rate_limit import client_ip_from_request
+from app.models import Client, Membership, Organization, PasswordHistory, User
 from app.services.audit_log import add_audit_event
 from app.services.auth import generate_temp_password, hash_password
 from app.services.email_delivery import (

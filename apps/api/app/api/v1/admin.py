@@ -62,8 +62,8 @@ from app.core.compliance_catalog import (
     recurring_for_year_v2,
 )
 from app.core.config import settings
-from app.core.rate_limit import client_ip_from_request
 from app.core.period_validation import MAX_YEAR, MIN_YEAR
+from app.core.rate_limit import client_ip_from_request
 from app.db.session import get_db
 from app.models import (
     AuditLog,
@@ -1393,6 +1393,10 @@ def update_user_status(
 
     before_status = target.status
     target.status = payload.status
+    # Reactivating clears any lockout so the user can log in again.
+    if payload.status == "active":
+        target.failed_login_count = 0
+        target.locked_until = None
     db.flush()
 
     _audit_admin(
@@ -1455,6 +1459,11 @@ def reset_user_password(
         )
     target.password_hash = hash_password(temp_password)
     target.must_change_password = True
+    # Clear any account lockout — a reset is precisely how an operator
+    # un-sticks a locked-out user, so the new temp password must work
+    # immediately rather than wait out the cooldown.
+    target.failed_login_count = 0
+    target.locked_until = None
     db.flush()
 
     login_url = f"{settings.FRONTEND_BASE_URL.rstrip('/')}/login"

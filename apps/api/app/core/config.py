@@ -222,6 +222,15 @@ class Settings(BaseSettings):
     # (correct across any number of workers).
     AUTH_LOGIN_RATE_LIMIT_PER_MINUTE: int = 10
     AUTH_FORGOT_PASSWORD_RATE_LIMIT_PER_HOUR: int = 5
+    # Account lockout (platform rework follow-up). Distinct from the
+    # per-IP/email *rate* limiter above: this counts CONSECUTIVE failed
+    # logins per account and locks it for a cooldown once the threshold
+    # is hit — stopping a slow password-guess against one account even
+    # from rotating IPs. The counter resets on any successful login or
+    # password change, and an admin password-reset / reactivate clears
+    # an active lock. THRESHOLD=0 disables the feature.
+    AUTH_LOCKOUT_THRESHOLD: int = 5
+    AUTH_LOCKOUT_MINUTES: int = 15
     # M3 (2026-05-25) — brute-force protection on the public share-
     # link password unlock + consume endpoints. 5 attempts per minute
     # per (ip, token) lets a legitimate user retype a typo; 30 per

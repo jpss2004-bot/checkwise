@@ -154,6 +154,11 @@ def _apply_password_change(
     old_hash = user.password_hash
     user.password_hash = hash_password(new_plaintext)
     user.must_change_password = False
+    # A password change clears any account lockout — otherwise a user who
+    # self-service-resets while locked still couldn't log in until the
+    # cooldown elapsed (login checks the lock before the password).
+    user.failed_login_count = 0
+    user.locked_until = None
 
     if old_hash:
         db.add(PasswordHistory(user_id=user.id, password_hash=old_hash))
@@ -305,6 +310,43 @@ def _as_utc(value: datetime) -> datetime:
     if value.tzinfo is None:
         return value.replace(tzinfo=UTC)
     return value.astimezone(UTC)
+
+
+_LOCKOUT_DETAIL = "Cuenta bloqueada temporalmente por intentos fallidos."
+
+
+def _is_account_locked(user: User) -> bool:
+    return user.locked_until is not None and _as_utc(user.locked_until) > utc_now()
+
+
+def _lockout_retry_minutes(user: User) -> int:
+    if user.locked_until is None:
+        return 0
+    remaining = _as_utc(user.locked_until) - utc_now()
+    return max(1, int(remaining.total_seconds() // 60) + 1)
+
+
+def _lockout_detail_for(user: User) -> str:
+    return (
+        f"{_LOCKOUT_DETAIL} Intenta de nuevo en "
+        f"~{_lockout_retry_minutes(user)} min."
+    )
+
+
+def _register_failed_login(db: Session, user: User) -> None:
+    """Increment the consecutive-failure counter; lock the account once it
+    reaches the threshold (then reset the counter so the post-cooldown
+    window is fresh). No-op when lockout is disabled (THRESHOLD <= 0)."""
+    threshold = settings.AUTH_LOCKOUT_THRESHOLD
+    if threshold <= 0:
+        return
+    user.failed_login_count = (user.failed_login_count or 0) + 1
+    if user.failed_login_count >= threshold:
+        user.locked_until = utc_now() + timedelta(
+            minutes=settings.AUTH_LOCKOUT_MINUTES
+        )
+        user.failed_login_count = 0
+    db.commit()
 
 
 def _email_log_hash(email: str) -> str:
@@ -532,6 +574,16 @@ def login(payload: LoginRequest, request: Request, db: DbSession) -> LoginRespon
         select(User).where(User.email == payload.email)
     ).scalar_one_or_none()
 
+    # Account lockout — refuse a locked, active account before the
+    # password check (so even the correct password is rejected during the
+    # cooldown). Only signalled for existing active accounts; unknown /
+    # disabled stay on the generic path below.
+    if user is not None and user.status == "active" and _is_account_locked(user):
+        raise HTTPException(
+            status.HTTP_429_TOO_MANY_REQUESTS,
+            detail=_lockout_detail_for(user),
+        )
+
     # Generic 401 for both unknown-user and bad-password so the response
     # does not leak whether an email exists. Bcrypt's constant-time check
     # still runs to keep timing roughly comparable.
@@ -539,7 +591,19 @@ def login(payload: LoginRequest, request: Request, db: DbSession) -> LoginRespon
         verify_password(payload.password, _DUMMY_HASH)
         raise HTTPException(status.HTTP_401_UNAUTHORIZED, detail="Credenciales inválidas.")
     if not verify_password(payload.password, user.password_hash):
+        # Count the failure; if it trips the threshold, surface the lock.
+        _register_failed_login(db, user)
+        if _is_account_locked(user):
+            raise HTTPException(
+                status.HTTP_429_TOO_MANY_REQUESTS,
+                detail=_lockout_detail_for(user),
+            )
         raise HTTPException(status.HTTP_401_UNAUTHORIZED, detail="Credenciales inválidas.")
+
+    # Successful auth — clear any accumulated failure / lock state.
+    if user.failed_login_count or user.locked_until is not None:
+        user.failed_login_count = 0
+        user.locked_until = None
 
     memberships = (
         db.execute(
