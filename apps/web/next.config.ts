@@ -73,11 +73,39 @@ const nextConfig: NextConfig = {
   },
   // FE-SEC-5 — baseline security headers on every frontend response. The
   // API (Render) sets its own headers; these protect the user-facing app
-  // (Vercel). A full Content-Security-Policy is the recommended next step
-  // (roll out as Content-Security-Policy-Report-Only first to tune the
-  // script/style/connect origins against the live app), tracked in the
-  // audit report — these five are the zero-risk subset.
+  // (Vercel).
   async headers() {
+    // Content-Security-Policy shipped in REPORT-ONLY mode: the browser
+    // reports violations (console / report-to) but never blocks, so it is
+    // safe to deploy while the marketing v2 work is in flight. Tune the
+    // directives against real reports during QA, then flip the header key
+    // to "Content-Security-Policy" to enforce. connect-src is derived from
+    // the API origin; script/frame allow the Calendly booking embed.
+    let apiOrigin = "";
+    try {
+      const raw = process.env.NEXT_PUBLIC_API_BASE_URL;
+      if (raw) apiOrigin = new URL(raw).origin;
+    } catch {
+      apiOrigin = "";
+    }
+    const csp = [
+      "default-src 'self'",
+      "base-uri 'self'",
+      "object-src 'none'",
+      "frame-ancestors 'none'",
+      "form-action 'self'",
+      // Next injects an inline bootstrap script; without a nonce this
+      // needs 'unsafe-inline'. 'unsafe-eval' is only needed by the dev
+      // overlay and is harmless under report-only.
+      "script-src 'self' 'unsafe-inline' 'unsafe-eval' https://assets.calendly.com",
+      "style-src 'self' 'unsafe-inline' https://assets.calendly.com",
+      "img-src 'self' data: blob: https:",
+      "font-src 'self' data:",
+      `connect-src 'self' ${apiOrigin} https://calendly.com`.replace(/\s+/g, " ").trim(),
+      "frame-src 'self' https://calendly.com https://*.calendly.com https://calendar.app.google",
+      "worker-src 'self' blob:",
+    ].join("; ");
+
     const securityHeaders = [
       { key: "X-Content-Type-Options", value: "nosniff" },
       { key: "X-Frame-Options", value: "DENY" },
@@ -90,6 +118,7 @@ const nextConfig: NextConfig = {
         key: "Strict-Transport-Security",
         value: "max-age=63072000; includeSubDomains; preload",
       },
+      { key: "Content-Security-Policy-Report-Only", value: csp },
     ];
     return [{ source: "/:path*", headers: securityHeaders }];
   },
