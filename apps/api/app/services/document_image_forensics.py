@@ -59,6 +59,13 @@ from app.services.document_forensics import SEVERITY_MEDIUM, RiskReason
 
 logger = logging.getLogger(__name__)
 
+# FILE-2 — clamp PIL's decompression-bomb ceiling (default ~178M px) so a
+# crafted oversized raster can't balloon to 0.5 GB+ of RAM while these
+# forensics decode attacker-supplied embedded images. 64M px still covers
+# a 600-DPI A4 scan (~35M px). PIL raises DecompressionBombError past it,
+# which the analysis paths already treat as fail-open.
+Image.MAX_IMAGE_PIXELS = 64_000_000
+
 # Reason codes emitted here. The shadow runner strip-and-replaces on
 # these codes when merging (mirroring the Phase-C LLM merge), so they
 # must stay distinct from every other RiskReason code.

@@ -159,6 +159,26 @@ def assert_pdf_upload(file: UploadFile) -> None:
             detail=f"El MIME type recibido no parece PDF: {file.content_type}.",
         )
 
+    # FILE-1 — content-sniff the magic bytes. Extension + MIME are both
+    # client-controlled and trivially spoofable, so a genuine PDF must
+    # also carry the ``%PDF-`` signature near the start of the file. This
+    # blocks HTML / SVG / script / binary payloads renamed ``.pdf`` from
+    # ever being persisted as "evidence" (they otherwise ride into the
+    # expediente / audit ZIPs that clients and auditors download). The
+    # PDF spec tolerates a little leading junk before the header, so we
+    # scan the first 1 KiB rather than demanding the signature at offset
+    # 0. The stream is rewound to 0 so the downstream save reads it whole.
+    try:
+        head = file.file.read(1024)
+        file.file.seek(0)
+    except Exception:  # noqa: BLE001 — unreadable stream; inspect_pdf backstop still routes non-PDFs to review
+        head = b""
+    if head and b"%PDF-" not in head:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="El archivo no es un PDF válido (no contiene la firma %PDF-).",
+        )
+
 
 # Phase 1 — confidence-aware intake routing. Pre-Phase-1 the function
 # ignored ``requirement_match_confidence`` entirely: a 0.05-confidence

@@ -73,6 +73,7 @@ from app.core.compliance_catalog import (
     recurring_required_document,
 )
 from app.core.config import settings
+from app.core.http_utils import content_disposition_header
 from app.core.period_validation import MAX_YEAR, MIN_YEAR, validate_period_key
 from app.core.rate_limit import enforce_ai_heavy_rate_limit
 from app.db.session import get_db
@@ -2019,8 +2020,8 @@ def client_get_submission_document(
         )
 
     disposition_kind = "attachment" if download else "inline"
-    disposition_header = (
-        f'{disposition_kind}; filename="{document.original_filename}"'
+    disposition_header = content_disposition_header(
+        disposition_kind, document.original_filename
     )
 
     if download:
@@ -2127,6 +2128,12 @@ def client_calendar(
         workspaces = [w for w in workspaces if w.vendor_id in wanted]
     vendor_lookup = _vendors_by_id(db, [w.vendor_id for w in workspaces])
 
+    # PERF-4 — batch every workspace's submissions into a single query
+    # (the same proven helper the /overview + /vendors paths use) so the
+    # calendar is O(1) queries in the vendor count instead of O(N) full
+    # ``submissions`` scans. Behaviour-preserving.
+    subs_by_vendor, institutions_by_id = _portfolio_slot_inputs(db, target_id)
+
     # Per workspace, walk the canonical recurring catalog so we have
     # ``due_month`` + ``period_label`` (the slot view alone doesn't
     # carry them). For each catalog item, look up the matching slot
@@ -2137,7 +2144,13 @@ def client_calendar(
         vendor = vendor_lookup.get(ws.vendor_id)
         if vendor is None:
             continue
-        slot_views = build_workspace_calendar_slots(db, ws, year)
+        slot_views = build_workspace_calendar_slots(
+            db,
+            ws,
+            year,
+            prefetched_submissions=subs_by_vendor.get(ws.vendor_id, []),
+            institutions_by_id=institutions_by_id,
+        )
         view_by_key: dict[tuple[str | None, str | None], SlotView] = {
             (v.slot_key.requirement_code, v.slot_key.period_key): v for v in slot_views
         }

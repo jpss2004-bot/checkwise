@@ -204,6 +204,13 @@ def _scan_qr_codes(path: Path) -> tuple[list[dict[str, Any]], int, int]:
     from PIL import Image
     from pypdf import PdfReader
 
+    # FILE-2 — clamp the decompression-bomb surface. This runs on the
+    # synchronous intake path and decodes embedded images from an
+    # attacker-supplied PDF; PIL's default ~178M-px ceiling allows a
+    # single image to balloon to 0.5 GB+ of RAM. 64M px still covers a
+    # 600-DPI A4 scan (~35M px) while refusing bomb-sized rasters.
+    Image.MAX_IMAGE_PIXELS = 64_000_000
+
     qr_codes: list[dict[str, Any]] = []
     pages_scanned = 0
     images_scanned = 0

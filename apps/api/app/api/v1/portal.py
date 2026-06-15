@@ -74,6 +74,7 @@ from app.core.compliance_catalog import (
     recurring_where_to_obtain,
 )
 from app.core.config import settings
+from app.core.http_utils import content_disposition_header
 from app.core.period_validation import (
     MAX_YEAR,
     MIN_YEAR,
@@ -2221,8 +2222,8 @@ def get_workspace_submission_document(
         )
 
     disposition_kind = "attachment" if download else "inline"
-    disposition_header = (
-        f'{disposition_kind}; filename="{document.original_filename}"'
+    disposition_header = content_disposition_header(
+        disposition_kind, document.original_filename
     )
 
     # Phase 5 / Slice 5A — audit ONLY the attachment path. Inline

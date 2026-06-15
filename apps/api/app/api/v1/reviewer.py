@@ -19,7 +19,6 @@ import base64
 import binascii
 from datetime import UTC, datetime
 from typing import Annotated, Literal
-from urllib.parse import quote
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Response, status
 from pydantic import BaseModel, Field
@@ -30,6 +29,7 @@ from app.api.v1.auth import CurrentUser, require_any_role
 from app.constants.roles import MembershipRole
 from app.constants.statuses import DocumentStatus, ReviewerAction
 from app.core.config import settings
+from app.core.http_utils import content_disposition_header
 from app.db.session import get_db
 from app.models import (
     Client,
@@ -1052,7 +1052,7 @@ def get_submission_document(
         )
 
     disposition_kind = "attachment" if download else "inline"
-    disposition_header = _content_disposition_header(
+    disposition_header = content_disposition_header(
         disposition_kind,
         document.original_filename,
     )
@@ -1107,16 +1107,4 @@ def get_submission_document(
         media_type="application/pdf",
         filename=document.original_filename,
         content_disposition_type=disposition_kind,
-    )
-
-
-def _content_disposition_header(disposition_kind: str, filename: str) -> str:
-    """Build an ASCII-safe Content-Disposition value for signed storage URLs."""
-    safe_fallback = "".join(
-        char if 32 <= ord(char) < 127 and char not in {'"', "\\", ";"} else "_"
-        for char in filename
-    ).strip() or "documento.pdf"
-    return (
-        f'{disposition_kind}; filename="{safe_fallback}"; '
-        f"filename*=UTF-8''{quote(filename)}"
     )
