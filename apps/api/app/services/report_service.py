@@ -48,8 +48,10 @@ from app.constants.reports import (
 from app.constants.roles import MembershipRole
 from app.models.entities import (
     Membership,
+    Organization,
     Report,
     ReportVersion,
+    Vendor,
     new_id,
     utc_now,
 )
@@ -201,6 +203,66 @@ def _validate_scope(audience: str, client_id: str | None, vendor_id: str | None)
         )
 
 
+def _allowed_client_ids_for_actor(db: Session, actor: ReportActor) -> set[str]:
+    """The set of ``client_id`` values a non-internal actor may scope a
+    report to: the Client bound to any of the actor's organizations, plus
+    the Client of the actor's provider workspace (if any)."""
+    allowed: set[str] = set()
+    if actor.organization_ids:
+        rows = db.scalars(
+            select(Organization.client_id).where(
+                Organization.id.in_(actor.organization_ids),
+                Organization.client_id.is_not(None),
+            )
+        )
+        allowed.update(cid for cid in rows if cid)
+    if actor.workspace_client_id:
+        allowed.add(actor.workspace_client_id)
+    return allowed
+
+
+def _enforce_report_tenant_scope(
+    db: Session,
+    actor: ReportActor,
+    *,
+    client_id: str | None,
+    vendor_id: str | None,
+) -> None:
+    """Tenant-isolation guard for report create/patch (audit REPORT-1).
+
+    ``create_report``/``patch_report`` previously trusted the
+    body-supplied ``client_id``/``vendor_id`` verbatim — they only
+    validated that the *owning org* belonged to the actor. A
+    ``client_admin`` for tenant A could therefore author/patch a
+    ``client_facing`` report whose ``client_id`` (or ``vendor_id``)
+    pointed at tenant B and then generate it, pulling B's entire
+    compliance portfolio (vendor names, RFCs, risk scores) into a report
+    they own and can export/share.
+
+    This enforces that any supplied ``client_id``/``vendor_id`` resolves
+    to a Client the actor legitimately reaches. Internal staff keep
+    cross-tenant authorship (that is part of the role). Falsy values
+    (``None``/``""`` — meaning "unset"/"clear") are not checked.
+    """
+    if actor.is_internal:
+        return
+    if not client_id and not vendor_id:
+        return
+    allowed = _allowed_client_ids_for_actor(db, actor)
+    if client_id and client_id not in allowed:
+        raise ReportPermissionError(
+            "No puedes crear o asignar reportes para otro cliente."
+        )
+    if vendor_id:
+        vendor_client_id = db.scalar(
+            select(Vendor.client_id).where(Vendor.id == vendor_id)
+        )
+        if vendor_client_id is None or vendor_client_id not in allowed:
+            raise ReportPermissionError(
+                "No puedes asignar reportes a un proveedor de otro cliente."
+            )
+
+
 def _user_can_write_in_org(
     db: Session, user_id: str, organization_id: str
 ) -> bool:
@@ -297,6 +359,7 @@ def create_report(
         )
 
     _validate_scope(audience.value, client_id, vendor_id)
+    _enforce_report_tenant_scope(db, actor, client_id=client_id, vendor_id=vendor_id)
 
     now = utc_now()
     content = initial_content_json or {"schema_version": 1, "blocks": [], "global": {}}
@@ -508,6 +571,12 @@ def patch_report(
             raise ReportPermissionError(
                 "Workspace owners cannot change report audience."
             )
+
+    # REPORT-1: a client_admin is not a workspace owner, so the L1 lock
+    # above never fired for them — they could PATCH client_id/vendor_id
+    # to another tenant. Enforce the tenant-scope guard for every
+    # non-internal actor on the values actually being changed.
+    _enforce_report_tenant_scope(db, actor, client_id=client_id, vendor_id=vendor_id)
 
     if title is not None:
         report.title = title.strip()

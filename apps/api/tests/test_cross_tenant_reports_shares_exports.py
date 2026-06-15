@@ -489,3 +489,75 @@ def test_owner_can_read_versions_list_for_sanity(
         f"/api/v1/reports/{seed['report_id']}/versions", headers=_h(tok_a)
     )
     assert resp.status_code == 200, resp.text
+
+
+# ─── REPORT-1 — create/patch must not scope to a foreign client ──
+
+
+def test_create_report_rejects_foreign_client_id_returns_403(
+    api_client: TestClient, db_factory
+) -> None:
+    """REPORT-1 regression: a client_admin in org B must NOT be able to
+    author a client_facing report scoped at tenant A's client_id. Before
+    the fix this returned 201 and the report could then be generated to
+    pull A's entire portfolio (vendors, RFCs, risk scores). The guard
+    now rejects the foreign client_id with 403."""
+    seed = _seed_two_tenants(db_factory)
+    tok_b = _login(api_client, seed["user_b_email"])
+    resp = api_client.post(
+        f"/api/v1/reports?organization_id={seed['org_b_id']}",
+        headers=_h(tok_b),
+        json={
+            "title": "Fuga cross-tenant",
+            "audience": "client_facing",
+            "client_id": seed["client_a_id"],  # ← tenant A, not B
+        },
+    )
+    assert resp.status_code == 403, resp.text
+
+
+def test_patch_report_rejects_reassigning_to_foreign_client_returns_403(
+    api_client: TestClient, db_factory
+) -> None:
+    """REPORT-1 regression (patch path): a client_admin may patch their
+    OWN report, but not re-point its client_id at another tenant."""
+    seed = _seed_two_tenants(db_factory)
+    tok_b = _login(api_client, seed["user_b_email"])
+    # B legitimately creates a report scoped to their own client.
+    created = api_client.post(
+        f"/api/v1/reports?organization_id={seed['org_b_id']}",
+        headers=_h(tok_b),
+        json={
+            "title": "Reporte propio B",
+            "audience": "client_facing",
+            "client_id": seed["client_b_id"],
+        },
+    )
+    assert created.status_code == 201, created.text
+    report_id = created.json()["id"]
+    # Now try to re-point it at tenant A — must be rejected.
+    resp = api_client.patch(
+        f"/api/v1/reports/{report_id}",
+        headers=_h(tok_b),
+        json={"client_id": seed["client_a_id"]},
+    )
+    assert resp.status_code == 403, resp.text
+
+
+def test_create_report_allows_own_client_id_returns_201(
+    api_client: TestClient, db_factory
+) -> None:
+    """Positive control: scoping a report to the caller's OWN client_id
+    still works (the guard didn't break legitimate creation)."""
+    seed = _seed_two_tenants(db_factory)
+    tok_b = _login(api_client, seed["user_b_email"])
+    resp = api_client.post(
+        f"/api/v1/reports?organization_id={seed['org_b_id']}",
+        headers=_h(tok_b),
+        json={
+            "title": "Reporte propio B",
+            "audience": "client_facing",
+            "client_id": seed["client_b_id"],
+        },
+    )
+    assert resp.status_code == 201, resp.text
