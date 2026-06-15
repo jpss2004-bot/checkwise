@@ -419,6 +419,53 @@ def _portfolio_slot_inputs(
     return submissions_by_vendor, institutions_by_id
 
 
+def _submission_slot_key(sub: Submission) -> tuple[str, str, str, str] | None:
+    if sub.requirement_code and sub.period_key:
+        return ("canonical", sub.vendor_id, sub.requirement_code, sub.period_key)
+    if sub.requirement_id and sub.period_id:
+        return ("legacy", sub.vendor_id, sub.requirement_id, sub.period_id)
+    return None
+
+
+def _current_submissions_by_returned_row(
+    db: Session, *, client_id: str, rows: list[Submission]
+) -> dict[str, Submission]:
+    """Batch-resolve each returned row's current obligation-slot submission."""
+    vendor_ids = {row.vendor_id for row in rows}
+    if not vendor_ids:
+        return {}
+    candidates_by_slot: dict[tuple[str, str, str, str], list[Submission]] = {}
+    for sub in db.scalars(
+        select(Submission).where(
+            Submission.client_id == client_id,
+            Submission.vendor_id.in_(vendor_ids),
+        )
+    ):
+        key = _submission_slot_key(sub)
+        if key is not None:
+            candidates_by_slot.setdefault(key, []).append(sub)
+
+    current_by_slot: dict[tuple[str, str, str, str], Submission] = {}
+    for key, candidates in candidates_by_slot.items():
+        superseded_ids = {
+            c.supersedes_submission_id
+            for c in candidates
+            if c.supersedes_submission_id
+        }
+        leaves = [c for c in candidates if c.id not in superseded_ids]
+        if not leaves:
+            leaves = list(candidates)
+        leaves.sort(key=lambda sub: sub.created_at, reverse=True)
+        current_by_slot[key] = leaves[0]
+
+    current_by_row: dict[str, Submission] = {}
+    for row in rows:
+        key = _submission_slot_key(row)
+        if key is not None and key in current_by_slot:
+            current_by_row[row.id] = current_by_slot[key]
+    return current_by_row
+
+
 # ---------------------------------------------------------------------------
 # Schemas
 # ---------------------------------------------------------------------------
@@ -554,6 +601,8 @@ class ClientSubmissionItem(BaseModel):
     institution: str | None
     period_key: str | None
     status: str
+    current_slot_status: str | None
+    is_current_for_slot: bool
     filename: str | None
     submitted_at: datetime
     reviewed_at: datetime | None
@@ -564,6 +613,8 @@ class ClientSubmissionItem(BaseModel):
 
 class ClientSubmissionsResponse(BaseModel):
     client_id: str
+    scope: Literal["submitted_documents"]
+    scope_description: str
     items: list[ClientSubmissionItem]
     total: int
 
@@ -2029,8 +2080,6 @@ def client_calendar(
                 DocumentStatus.PENDIENTE_REVISION.value,
                 DocumentStatus.PREVALIDADO.value,
                 DocumentStatus.RECIBIDO.value,
-                DocumentStatus.PENDIENTE.value,
-                "pendiente",
             )
         )
         rejected_or_correction_total = sum(
@@ -2185,6 +2234,9 @@ def client_submissions(
         ):
             latest_review_by_sub.setdefault(ev.submission_id, ev)
 
+    current_by_row = _current_submissions_by_returned_row(
+        db, client_id=target_id, rows=rows
+    )
     items: list[ClientSubmissionItem] = []
     for sub in rows:
         vendor = vendor_lookup.get(sub.vendor_id)
@@ -2195,6 +2247,7 @@ def client_submissions(
             if latest_review
             else None
         )
+        current_for_slot = current_by_row.get(sub.id)
         items.append(
             ClientSubmissionItem(
                 submission_id=sub.id,
@@ -2209,6 +2262,12 @@ def client_submissions(
                 ),
                 period_key=sub.period_key,
                 status=sub.status,
+                current_slot_status=(
+                    current_for_slot.status if current_for_slot else None
+                ),
+                is_current_for_slot=(
+                    current_for_slot is not None and current_for_slot.id == sub.id
+                ),
                 filename=doc.original_filename if doc else None,
                 submitted_at=sub.created_at,
                 reviewed_at=(latest_review.created_at if latest_review else None),
@@ -2218,7 +2277,14 @@ def client_submissions(
             )
         )
     return ClientSubmissionsResponse(
-        client_id=target_id, items=items, total=len(items)
+        client_id=target_id,
+        scope="submitted_documents",
+        scope_description=(
+            "Historial de documentos enviados; el calendario muestra obligaciones "
+            "requeridas, incluidas las que todavía no tienen envío."
+        ),
+        items=items,
+        total=len(items),
     )
 
 

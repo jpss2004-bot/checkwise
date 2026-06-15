@@ -19,7 +19,7 @@ from sqlalchemy import create_engine, select
 from sqlalchemy.orm import Session, sessionmaker
 from sqlalchemy.pool import StaticPool
 
-from app.constants.statuses import DocumentStatus, ReviewerAction
+from app.constants.statuses import STATUS_LABELS_ES, DocumentStatus, ReviewerAction
 from app.core.config import settings
 from app.db.base import Base
 from app.db.session import get_db
@@ -498,6 +498,29 @@ def test_client_calendar_defaults_to_current_year(
     assert len(body["months"]) == 12
 
 
+def test_client_calendar_missing_slots_are_not_counted_in_review(
+    api_client: TestClient, db_factory
+) -> None:
+    client_id = _seed_client(db_factory)
+    _seed_vendor_with_workspace(db_factory, client_id=client_id)
+    _, email, pw = _seed_user_with_role(
+        db_factory, role="client_admin", client_id=client_id, email_prefix="ca"
+    )
+    token = _login(api_client, email, pw)
+
+    resp = api_client.get("/api/v1/client/calendar?year=2026", headers=_h(token))
+    assert resp.status_code == 200, resp.text
+    populated = [m for m in resp.json()["months"] if m["due_total"] > 0]
+    assert populated, "expected seeded workspace to produce recurring obligations"
+
+    month = populated[0]
+    assert month["pending_total"] == 0
+    assert month["missing_total"] == month["due_total"]
+    assert {item["status"] for item in month["items"]} == {
+        DocumentStatus.PENDIENTE.value
+    }
+
+
 # ---------------------------------------------------------------------------
 # /submissions — filters + replacement lineage
 # ---------------------------------------------------------------------------
@@ -523,6 +546,8 @@ def test_client_submissions_filters_by_vendor_status_period(
     item = items[0]
     assert item["vendor_id"] == vendor_id
     assert item["status"] == DocumentStatus.PENDIENTE_REVISION.value
+    assert item["current_slot_status"] == DocumentStatus.PENDIENTE_REVISION.value
+    assert item["is_current_for_slot"] is True
     assert item["period_key"] == "2026-B1"
 
     # Filter by mismatched status — no rows.
@@ -536,6 +561,44 @@ def test_client_submissions_filters_by_vendor_status_period(
         "/api/v1/client/submissions?period_key=2099-M01", headers=_h(token)
     ).json()
     assert mismatched["items"] == []
+
+
+def test_client_submissions_reconcile_current_slot_status_with_calendar(
+    api_client: TestClient, db_factory
+) -> None:
+    client_id = _seed_client(db_factory)
+    vendor_id, ws_id = _seed_vendor_with_workspace(db_factory, client_id=client_id)
+    _seed_submission_for_workspace(api_client, db_factory, ws_id)
+    _, email, pw = _seed_user_with_role(
+        db_factory, role="client_admin", client_id=client_id, email_prefix="ca"
+    )
+    token = _login(api_client, email, pw)
+
+    submissions = api_client.get(
+        f"/api/v1/client/submissions?vendor_id={vendor_id}", headers=_h(token)
+    )
+    assert submissions.status_code == 200, submissions.text
+    submissions_body = submissions.json()
+    assert submissions_body["scope"] == "submitted_documents"
+    submitted = submissions_body["items"][0]
+
+    calendar = api_client.get("/api/v1/client/calendar?year=2026", headers=_h(token))
+    assert calendar.status_code == 200, calendar.text
+    calendar_items = [
+        item
+        for month in calendar.json()["months"]
+        for item in month["items"]
+        if item["vendor_id"] == vendor_id
+        and item["requirement_code"] == submitted["requirement_code"]
+        and item["period_key"] == submitted["period_key"]
+    ]
+    assert len(calendar_items) == 1
+    calendar_status = calendar_items[0]["status"]
+
+    assert submitted["current_slot_status"] == calendar_status
+    assert STATUS_LABELS_ES[DocumentStatus(submitted["current_slot_status"])] == (
+        STATUS_LABELS_ES[DocumentStatus(calendar_status)]
+    )
 
 
 def test_client_submissions_filters_by_institution(
