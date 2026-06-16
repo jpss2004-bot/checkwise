@@ -341,6 +341,16 @@ class Settings(BaseSettings):
     # Exhaustion skips the escalation gracefully (triage result stands).
     DOCUMENT_ANALYSIS_ESCALATION_DAILY_CAP_PER_ORG: int = 50
 
+    # Phase 0 (comprehension) — the escalation/deep tier reasons about the
+    # document instead of single-pass extracting it: adaptive thinking +
+    # ``effort=high`` + structured outputs need more room and time than the
+    # cheap triage pass. These knobs apply ONLY to the deep tier; the Haiku
+    # triage tier keeps its tight 1024-token / 30 s budget. Raise the model
+    # to ``claude-opus-4-8`` via ``DOCUMENT_ANALYSIS_MODEL`` when the cost
+    # tradeoff is approved.
+    DOCUMENT_ANALYSIS_DEEP_MAX_TOKENS: int = 8192
+    DOCUMENT_ANALYSIS_DEEP_TIMEOUT_SECONDS: float = 90.0
+
     # Phase 3 — pilot-cohort allowlist. CSV of ``client.id`` values
     # that are allowed to receive shadow analysis. Empty string (the
     # default) disables the gate, so every org is in scope. When set,

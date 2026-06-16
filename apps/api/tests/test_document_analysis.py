@@ -15,6 +15,7 @@ forced-empty key as a precondition.
 
 from __future__ import annotations
 
+import json
 from io import BytesIO
 from pathlib import Path
 from typing import Any
@@ -322,6 +323,47 @@ def _mock_anthropic_response(
     return response
 
 
+def _mock_structured_response(
+    payload: dict | None = None,
+    *,
+    include_thinking: bool = True,
+) -> Any:
+    """Deep-tier response: schema-valid JSON in a text block (optionally
+    preceded by a thinking block, which the parser must skip)."""
+    blocks: list[Any] = []
+    if include_thinking:
+        thinking_block = MagicMock()
+        thinking_block.type = "thinking"
+        thinking_block.thinking = "Razonando sobre el documento..."
+        blocks.append(thinking_block)
+    text_block = MagicMock()
+    text_block.type = "text"
+    text_block.text = json.dumps(
+        payload
+        or {
+            "detected_institution": "sat",
+            "detected_document_type": "csf",
+            "detected_rfcs": ["ABCD010203XYZ"],
+            "detected_dates": ["2026-04-01"],
+            "period_mentions": [],
+            "requirement_match_confidence": 0.92,
+            "mismatch_reason": None,
+            "anomaly_codes": [],
+            "summary_for_reviewer": "CSF vigente del proveedor esperado.",
+        }
+    )
+    blocks.append(text_block)
+
+    response = MagicMock()
+    response.content = blocks
+    response.stop_reason = "end_turn"
+    response.model = "claude-sonnet-4-6"
+    usage = MagicMock()
+    usage.model_dump.return_value = {"input_tokens": 200, "output_tokens": 120}
+    response.usage = usage
+    return response
+
+
 class TestAnthropicProviderConstruction:
     def test_construction_requires_api_key(self, monkeypatch):
         monkeypatch.setattr(settings, "ANTHROPIC_API_KEY", "")
@@ -430,10 +472,12 @@ class TestAnthropicProviderResponseHandling:
             "confidence": 0.4,
         }
 
-    def test_escalation_provider_uses_deep_prompt(self, monkeypatch, tmp_path):
+    def test_escalation_tier_uses_deep_prompt_and_structured_reasoning(
+        self, monkeypatch, tmp_path
+    ):
         client = MagicMock()
         client.with_options.return_value.messages.create.return_value = (
-            _mock_anthropic_response()
+            _mock_structured_response()
         )
         monkeypatch.setattr(settings, "ANTHROPIC_API_KEY", "sk-test")
         provider = AnthropicDocumentAnalysisProvider(
@@ -450,12 +494,68 @@ class TestAnthropicProviderResponseHandling:
             period_code="2026-01",
         )
         assert result.error is None
+        assert result.signals is not None
+        assert result.signals.detected_document_type == "csf"
         assert result.prompt_version == "authenticity_deep.v1"
-        # The system prompt sent to the API is the deep prompt, not the
-        # requirement extraction prompt.
+
         create_kwargs = client.with_options.return_value.messages.create.call_args.kwargs
+        # The system prompt is the deep prompt, not the requirement prompt.
         assert "autenticidad" in create_kwargs["system"][0]["text"].lower()
         assert create_kwargs["model"] == "claude-sonnet-4-6"
+        # Reasoning + structured outputs replace the forced tool call
+        # (forced tool_choice is incompatible with thinking).
+        assert create_kwargs["thinking"] == {"type": "adaptive"}
+        assert create_kwargs["output_config"]["effort"] == "high"
+        assert create_kwargs["output_config"]["format"]["type"] == "json_schema"
+        assert "tool_choice" not in create_kwargs
+        assert "tools" not in create_kwargs
+
+    def test_deep_tier_non_json_text_is_malformed(self, monkeypatch, tmp_path):
+        client = MagicMock()
+        bad = _mock_structured_response()
+        bad.content[-1].text = "lo siento, no pude analizar el documento"
+        client.with_options.return_value.messages.create.return_value = bad
+        monkeypatch.setattr(settings, "ANTHROPIC_API_KEY", "sk-test")
+        provider = AnthropicDocumentAnalysisProvider(
+            api_key="sk-test", model="claude-sonnet-4-6", deep_authenticity=True
+        )
+        provider._client = client  # noqa: SLF001 — test injection seam
+        result = provider.analyze(
+            pdf_path=_blank_pdf_path(tmp_path),
+            requirement_code="REC-SAT-CSF-2026",
+            requirement_name="CSF",
+            institution_code="sat",
+            period_code="2026-01",
+        )
+        assert result.error == "malformed_response"
+        assert result.signals is None
+
+    def test_user_prompt_includes_provider_and_client_context(
+        self, monkeypatch, tmp_path
+    ):
+        client = MagicMock()
+        client.with_options.return_value.messages.create.return_value = (
+            _mock_anthropic_response()
+        )
+        provider = _build_provider_with_mock_client(monkeypatch, client)
+        provider.analyze(
+            pdf_path=_blank_pdf_path(tmp_path),
+            requirement_code="REC-SAT-CSF-2026",
+            requirement_name="CSF",
+            institution_code="sat",
+            period_code="2026-01",
+            expected_provider_rfc="ABCD010203XYZ",
+            expected_provider_name="ACME Servicios SA de CV",
+            expected_client_name="Cliente Demo SA",
+            expected_client_rfc="XAXX010101000",
+        )
+        create_kwargs = client.with_options.return_value.messages.create.call_args.kwargs
+        user_text = create_kwargs["messages"][0]["content"][1]["text"]
+        assert "ACME Servicios SA de CV" in user_text
+        assert "ABCD010203XYZ" in user_text
+        # Client is named as contratante, explicitly not the document titular.
+        assert "Cliente Demo SA" in user_text
+        assert "contratante" in user_text.lower()
 
     def test_no_tool_use_returns_malformed(self, monkeypatch, tmp_path):
         client = MagicMock()

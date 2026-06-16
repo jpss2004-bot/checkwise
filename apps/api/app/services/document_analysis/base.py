@@ -134,5 +134,16 @@ class DocumentAnalysisProvider(Protocol):
         institution_code: str,
         period_code: str,
         org_id: str | None = None,
+        # Situation context — the expected provider/client identity for
+        # this upload. Optional and defaulted so existing callers and the
+        # heuristic baseline keep working. The Anthropic provider folds
+        # these into the user prompt so the model can reason about whether
+        # the document actually belongs to the expected provider (emisor)
+        # vs merely mentioning the client — the regex path already had
+        # this context; the LLM path did not until Phase 0.
+        expected_provider_rfc: str | None = None,
+        expected_provider_name: str | None = None,
+        expected_client_name: str | None = None,
+        expected_client_rfc: str | None = None,
     ) -> AnalysisResult:
         ...

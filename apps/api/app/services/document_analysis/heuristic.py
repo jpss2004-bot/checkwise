@@ -37,6 +37,10 @@ class HeuristicDocumentAnalysisProvider:
         institution_code: str,
         period_code: str,
         org_id: str | None = None,
+        expected_provider_rfc: str | None = None,
+        expected_provider_name: str | None = None,
+        expected_client_name: str | None = None,
+        expected_client_rfc: str | None = None,
     ) -> AnalysisResult:
         _ = requirement_code  # unused by the heuristic; kept for parity
         _ = org_id
@@ -48,6 +52,14 @@ class HeuristicDocumentAnalysisProvider:
                 expected_requirement=requirement_name,
                 expected_institution=institution_code,
                 expected_period=period_code,
+                # Phase 0 — the shadow heuristic now receives the same
+                # identity context the live intake path already passes,
+                # so its ``identity_alignment`` / ``rfc_alignment`` are
+                # computed rather than left at ``no_expected``.
+                expected_rfc=expected_provider_rfc,
+                expected_vendor_name=expected_provider_name,
+                expected_client_name=expected_client_name,
+                expected_client_rfc=expected_client_rfc,
             )
         except Exception as exc:  # noqa: BLE001 — provider must never raise
             elapsed_ms = int((time.monotonic() - start) * 1000)

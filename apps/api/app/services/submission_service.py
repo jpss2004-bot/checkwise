@@ -983,6 +983,13 @@ def finalize_intake_submission(
             # Phase C — alto/crítico requirements always qualify for the
             # escalation tier (bounded by the escalation daily cap).
             requirement_risk_level=resolved_requirement.requirement.risk_level,
+            # Phase 0 — situation context so the LLM can reason about
+            # whether the document actually belongs to the expected
+            # provider (the regex path already had this).
+            expected_provider_rfc=vendor.rfc,
+            expected_provider_name=vendor.name,
+            expected_client_name=client.name,
+            expected_client_rfc=client.rfc,
         )
 
     return SubmissionResponse(
@@ -1471,6 +1478,11 @@ def finalize_multi_document_submission(
                 # Phase C — alto/crítico requirements always qualify for
                 # the escalation tier (bounded by the escalation cap).
                 requirement_risk_level=resolved_requirement.requirement.risk_level,
+                # Phase 0 — situation context (see single-submission path).
+                expected_provider_rfc=vendor.rfc,
+                expected_provider_name=vendor.name,
+                expected_client_name=client.name,
+                expected_client_rfc=client.rfc,
             )
 
     return MultiSubmissionResponse(

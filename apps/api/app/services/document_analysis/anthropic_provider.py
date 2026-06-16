@@ -40,6 +40,7 @@ Architecture notes (load-bearing — please read before editing):
 from __future__ import annotations
 
 import base64
+import copy
 import json
 import logging
 import time
@@ -228,6 +229,42 @@ _RECORD_TOOL: dict[str, Any] = {
 }
 
 
+def _strip_numeric_constraints(node: Any) -> Any:
+    """Recursively drop ``minimum``/``maximum`` from a JSON-Schema tree.
+
+    Structured outputs (``output_config.format``) reject numeric range
+    constraints. The tool ``input_schema`` keeps them (the tool path
+    validates server-side); the deep tier reuses the same shape minus
+    those keywords. We clamp the two confidence fields to [0, 1] when
+    parsing instead.
+    """
+    if isinstance(node, dict):
+        return {
+            key: _strip_numeric_constraints(value)
+            for key, value in node.items()
+            if key not in ("minimum", "maximum")
+        }
+    if isinstance(node, list):
+        return [_strip_numeric_constraints(item) for item in node]
+    return node
+
+
+# Deep-tier structured-output format. Same field shape as ``_RECORD_TOOL``
+# so the reviewer comparison card renders both tiers identically, but
+# delivered via ``output_config.format`` rather than a forced tool call —
+# forced ``tool_choice`` is incompatible with adaptive thinking, while
+# structured outputs compose with it.
+_RECORD_OUTPUT_FORMAT: dict[str, Any] = {
+    "type": "json_schema",
+    "schema": _strip_numeric_constraints(copy.deepcopy(_RECORD_TOOL["input_schema"])),
+}
+
+
+def _clamp01(value: float) -> float:
+    """Clamp a confidence to [0.0, 1.0] (structured outputs drop the range)."""
+    return min(1.0, max(0.0, value))
+
+
 class AnthropicDocumentAnalysisProvider:
     """Claude-backed implementation of ``DocumentAnalysisProvider``.
 
@@ -288,6 +325,10 @@ class AnthropicDocumentAnalysisProvider:
         institution_code: str,
         period_code: str,
         org_id: str | None = None,
+        expected_provider_rfc: str | None = None,
+        expected_provider_name: str | None = None,
+        expected_client_name: str | None = None,
+        expected_client_rfc: str | None = None,
     ) -> AnalysisResult:
         _ = org_id  # already enforced by the spend limiter upstream
         if self._deep_authenticity:
@@ -313,45 +354,79 @@ class AnthropicDocumentAnalysisProvider:
             requirement_name=requirement_name,
             institution_code=institution_code,
             period_code=period_code,
+            expected_provider_rfc=expected_provider_rfc,
+            expected_provider_name=expected_provider_name,
+            expected_client_name=expected_client_name,
+            expected_client_rfc=expected_client_rfc,
         )
 
-        try:
-            response = self._client.with_options(timeout=self._timeout).messages.create(
+        system = [
+            {
+                "type": "text",
+                "text": prompt.system_prompt,
+                # Save ~80% on input cost for repeat calls with the same
+                # prompt — the 5-min TTL is fine since uploads cluster.
+                # The volatile per-document context rides in the user turn
+                # below, so the cache stays valid.
+                "cache_control": {"type": "ephemeral"},
+            }
+        ]
+        messages = [
+            {
+                "role": "user",
+                "content": [
+                    {
+                        "type": "document",
+                        "source": {
+                            "type": "base64",
+                            "media_type": "application/pdf",
+                            "data": pdf_b64,
+                        },
+                    },
+                    {"type": "text", "text": user_prompt},
+                ],
+            }
+        ]
+
+        if self._deep_authenticity:
+            # Comprehension tier — let the model reason before answering
+            # (adaptive thinking + effort=high) and return schema-valid
+            # JSON via structured outputs. Forced ``tool_choice`` is
+            # incompatible with thinking, so the deep tier uses
+            # ``output_config.format`` instead of a forced tool call.
+            request_kwargs: dict[str, Any] = dict(
+                model=self._model,
+                max_tokens=int(settings.DOCUMENT_ANALYSIS_DEEP_MAX_TOKENS or 8192),
+                system=system,
+                messages=messages,
+                thinking={"type": "adaptive"},
+                output_config={"format": _RECORD_OUTPUT_FORMAT, "effort": "high"},
+            )
+            timeout = float(settings.DOCUMENT_ANALYSIS_DEEP_TIMEOUT_SECONDS or 90.0)
+        else:
+            # Triage tier (cheap, always-on) — single-pass forced tool
+            # call, unchanged from Phase C. No thinking on Haiku.
+            request_kwargs = dict(
                 model=self._model,
                 max_tokens=1024,
-                system=[
-                    {
-                        "type": "text",
-                        "text": prompt.system_prompt,
-                        # Save ~80% on input cost for repeat calls with
-                        # the same prompt — the 5-min TTL is fine since
-                        # uploads cluster.
-                        "cache_control": {"type": "ephemeral"},
-                    }
-                ],
+                system=system,
+                messages=messages,
                 tools=[_RECORD_TOOL],
                 tool_choice={"type": "tool", "name": _RECORD_TOOL["name"]},
-                messages=[
-                    {
-                        "role": "user",
-                        "content": [
-                            {
-                                "type": "document",
-                                "source": {
-                                    "type": "base64",
-                                    "media_type": "application/pdf",
-                                    "data": pdf_b64,
-                                },
-                            },
-                            {"type": "text", "text": user_prompt},
-                        ],
-                    }
-                ],
+            )
+            timeout = self._timeout
+
+        try:
+            response = self._client.with_options(timeout=timeout).messages.create(
+                **request_kwargs
             )
         except Exception as exc:  # noqa: BLE001 — categorise everything as a known failure
             return self._failure(prompt, start, self._categorise_exception(exc))
 
-        signals, raw_meta, authenticity = self._parse_response(response)
+        if self._deep_authenticity:
+            signals, raw_meta, authenticity = self._parse_structured_response(response)
+        else:
+            signals, raw_meta, authenticity = self._parse_response(response)
         elapsed_ms = int((time.monotonic() - start) * 1000)
 
         if signals is None:
@@ -408,21 +483,55 @@ class AnthropicDocumentAnalysisProvider:
         requirement_name: str,
         institution_code: str,
         period_code: str,
+        expected_provider_rfc: str | None = None,
+        expected_provider_name: str | None = None,
+        expected_client_name: str | None = None,
+        expected_client_rfc: str | None = None,
     ) -> str:
-        return (
+        lines = [
             "Analiza el documento adjunto y registra tu evaluación llamando "
-            "a la herramienta `record_document_analysis`.\n\n"
-            "Contexto del requisito esperado:\n"
-            f"- Nombre del requisito: {requirement_name}\n"
-            f"- Institución esperada: {institution_code}\n"
-            f"- Periodo esperado: {period_code}\n\n"
-            "Recuerda: extrae hechos, no inventes valores, y sé conservador "
-            "con la confianza. La decisión final la toma el equipo legal."
-        )
+            "a la herramienta `record_document_analysis`.",
+            "",
+            "Contexto del requisito esperado:",
+            f"- Nombre del requisito: {requirement_name}",
+            f"- Institución esperada: {institution_code}",
+            f"- Periodo esperado: {period_code}",
+        ]
 
-    def _parse_response(
-        self, response: Any
-    ) -> tuple[DocumentSignals | None, dict, dict | None]:
+        provider_bits = []
+        if expected_provider_name:
+            provider_bits.append(f"nombre/razón social: {expected_provider_name}")
+        if expected_provider_rfc:
+            provider_bits.append(f"RFC: {expected_provider_rfc}")
+        if provider_bits:
+            lines.append(
+                "- Proveedor esperado (este documento debe identificarlo como "
+                f"emisor/titular): {'; '.join(provider_bits)}"
+            )
+
+        client_bits = []
+        if expected_client_name:
+            client_bits.append(f"nombre: {expected_client_name}")
+        if expected_client_rfc:
+            client_bits.append(f"RFC: {expected_client_rfc}")
+        if client_bits:
+            lines.append(
+                "- Cliente contratante (puede aparecer mencionado pero NO es el "
+                f"titular del documento): {'; '.join(client_bits)}"
+            )
+
+        lines += [
+            "",
+            "Usa este contexto para evaluar si el documento realmente "
+            "corresponde al proveedor y periodo esperados, y para distinguir "
+            "si en realidad pertenece al cliente o a otra entidad. Recuerda: "
+            "extrae hechos, no inventes valores, y sé conservador con la "
+            "confianza. La decisión final la toma el equipo legal.",
+        ]
+        return "\n".join(lines)
+
+    @staticmethod
+    def _base_raw_meta(response: Any) -> dict[str, Any]:
         raw_meta: dict[str, Any] = {
             "stop_reason": str(getattr(response, "stop_reason", "")),
             "model": str(getattr(response, "model", "")),
@@ -433,7 +542,39 @@ class AnthropicDocumentAnalysisProvider:
                 raw_meta["usage"] = usage.model_dump()
             except Exception:  # noqa: BLE001 — usage is best-effort diagnostic
                 raw_meta["usage"] = str(usage)
+        return raw_meta
 
+    @staticmethod
+    def _signals_from_payload(payload: dict) -> DocumentSignals | None:
+        """Build ``DocumentSignals`` from a tool-input / structured payload.
+
+        Shared by the triage (tool_use) and deep (structured-output)
+        parse paths so both tiers produce identical signal shapes.
+        Returns ``None`` on a type error so the caller records
+        ``malformed_response`` and falls open to the other tier.
+        """
+        try:
+            confidence = payload.get("requirement_match_confidence")
+            return DocumentSignals(
+                detected_institution=payload.get("detected_institution"),
+                detected_document_type=payload.get("detected_document_type"),
+                detected_rfcs=list(payload.get("detected_rfcs") or []),
+                detected_dates=list(payload.get("detected_dates") or []),
+                period_mentions=list(payload.get("period_mentions") or []),
+                requirement_match_confidence=(
+                    _clamp01(float(confidence)) if confidence is not None else None
+                ),
+                mismatch_reason=payload.get("mismatch_reason"),
+                anomaly_codes=list(payload.get("anomaly_codes") or []),
+            )
+        except (TypeError, ValueError):
+            return None
+
+    def _parse_response(
+        self, response: Any
+    ) -> tuple[DocumentSignals | None, dict, dict | None]:
+        """Triage path — read the forced ``record_document_analysis`` tool call."""
+        raw_meta = self._base_raw_meta(response)
         for block in getattr(response, "content", []) or []:
             if getattr(block, "type", None) != "tool_use":
                 continue
@@ -445,27 +586,43 @@ class AnthropicDocumentAnalysisProvider:
                     payload = json.loads(payload)
                 except (TypeError, ValueError):
                     return None, raw_meta, None
-            try:
-                signals = DocumentSignals(
-                    detected_institution=payload.get("detected_institution"),
-                    detected_document_type=payload.get("detected_document_type"),
-                    detected_rfcs=list(payload.get("detected_rfcs") or []),
-                    detected_dates=list(payload.get("detected_dates") or []),
-                    period_mentions=list(payload.get("period_mentions") or []),
-                    requirement_match_confidence=(
-                        float(payload["requirement_match_confidence"])
-                        if payload.get("requirement_match_confidence") is not None
-                        else None
-                    ),
-                    mismatch_reason=payload.get("mismatch_reason"),
-                    anomaly_codes=list(payload.get("anomaly_codes") or []),
-                )
-            except (TypeError, ValueError):
+            signals = self._signals_from_payload(payload)
+            if signals is None:
                 return None, raw_meta, None
             raw_meta["summary_for_reviewer"] = payload.get("summary_for_reviewer")
             return signals, raw_meta, self._parse_authenticity(payload)
 
         return None, raw_meta, None
+
+    def _parse_structured_response(
+        self, response: Any
+    ) -> tuple[DocumentSignals | None, dict, dict | None]:
+        """Deep path — read schema-valid JSON from the first text block.
+
+        Structured outputs guarantee the response text is the JSON object;
+        any thinking blocks precede it and are skipped. A truncated or
+        non-JSON body returns ``None`` so the runner keeps the triage
+        result (fail-open).
+        """
+        raw_meta = self._base_raw_meta(response)
+        text: str | None = None
+        for block in getattr(response, "content", []) or []:
+            if getattr(block, "type", None) == "text":
+                text = getattr(block, "text", None)
+                break
+        if not text:
+            return None, raw_meta, None
+        try:
+            payload = json.loads(text)
+        except (TypeError, ValueError):
+            return None, raw_meta, None
+        if not isinstance(payload, dict):
+            return None, raw_meta, None
+        signals = self._signals_from_payload(payload)
+        if signals is None:
+            return None, raw_meta, None
+        raw_meta["summary_for_reviewer"] = payload.get("summary_for_reviewer")
+        return signals, raw_meta, self._parse_authenticity(payload)
 
     @staticmethod
     def _parse_authenticity(payload: dict) -> dict | None:

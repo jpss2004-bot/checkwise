@@ -111,6 +111,10 @@ def run_shadow_analysis(
     period_code: str,
     org_id: str | None,
     requirement_risk_level: str | None = None,
+    expected_provider_rfc: str | None = None,
+    expected_provider_name: str | None = None,
+    expected_client_name: str | None = None,
+    expected_client_rfc: str | None = None,
 ) -> None:
     """Run shadow analysis for one uploaded document (tiered, Phase C).
 
@@ -169,6 +173,10 @@ def run_shadow_analysis(
         institution_code=institution_code,
         period_code=period_code,
         org_id=org_id,
+        expected_provider_rfc=expected_provider_rfc,
+        expected_provider_name=expected_provider_name,
+        expected_client_name=expected_client_name,
+        expected_client_rfc=expected_client_rfc,
     )
 
     final_result = triage_result
@@ -192,6 +200,10 @@ def run_shadow_analysis(
             period_code=period_code,
             org_id=org_id,
             document_id=document_id,
+            expected_provider_rfc=expected_provider_rfc,
+            expected_provider_name=expected_provider_name,
+            expected_client_name=expected_client_name,
+            expected_client_rfc=expected_client_rfc,
         )
         if isinstance(escalation_result, AnalysisResult):
             tiers["escalation"] = {**_tier_meta(escalation_result), "triggers": triggers}
@@ -235,6 +247,10 @@ def _analyze_safely(
     institution_code: str,
     period_code: str,
     org_id: str | None,
+    expected_provider_rfc: str | None = None,
+    expected_provider_name: str | None = None,
+    expected_client_name: str | None = None,
+    expected_client_rfc: str | None = None,
 ) -> AnalysisResult:
     """Call ``provider.analyze`` with defence-in-depth exception capture."""
     try:
@@ -245,6 +261,10 @@ def _analyze_safely(
             institution_code=institution_code,
             period_code=period_code,
             org_id=org_id,
+            expected_provider_rfc=expected_provider_rfc,
+            expected_provider_name=expected_provider_name,
+            expected_client_name=expected_client_name,
+            expected_client_rfc=expected_client_rfc,
         )
     except Exception as exc:  # noqa: BLE001 — provider should not raise, but defence in depth
         logger.exception("Document-analysis provider raised; persisting as provider_error.")
@@ -310,6 +330,10 @@ def _run_escalation(
     period_code: str,
     org_id: str | None,
     document_id: str,
+    expected_provider_rfc: str | None = None,
+    expected_provider_name: str | None = None,
+    expected_client_name: str | None = None,
+    expected_client_rfc: str | None = None,
 ) -> AnalysisResult | dict:
     """Run the escalation tier, or return a skip-marker dict.
 
@@ -344,6 +368,10 @@ def _run_escalation(
         institution_code=institution_code,
         period_code=period_code,
         org_id=org_id,
+        expected_provider_rfc=expected_provider_rfc,
+        expected_provider_name=expected_provider_name,
+        expected_client_name=expected_client_name,
+        expected_client_rfc=expected_client_rfc,
     )
 
 
