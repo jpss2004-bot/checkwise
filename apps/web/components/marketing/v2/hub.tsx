@@ -1,65 +1,77 @@
 import Link from "next/link";
-import {
-  ArrowRight,
-  ArrowsClockwise,
-  BookOpen,
-  ClipboardText,
-  Scales,
-  Stack,
-} from "@phosphor-icons/react/dist/ssr";
+import { ArrowRight, BookOpen, Stack } from "@phosphor-icons/react/dist/ssr";
 
-import { Eyebrow, Section, SectionTitle } from "./_shared";
+import { Eyebrow, Lead, Section, SectionTitle } from "./_shared";
 
 /**
- * Section 08 — Hub REPSE · Recursos. Asymmetric bento of keyword-rich
- * internal links to the content cluster (SEO engine on the landing).
+ * Section 08 — Recursos REPSE. Two committed page destinations (per the
+ * landing notes: the ICSOE / SISUB / responsabilidad-solidaria / renovación
+ * cards all dead-ended at the same place, so they were removed; their topics
+ * are folded into the Guía card body to keep the on-page keywords). Both
+ * cards go to dedicated pages — "commit to one idea."
  */
 const CARDS = [
-  { icon: BookOpen, kw: "Guía", title: "¿Qué es el REPSE?", body: "Registro ante la STPS, obligaciones y sanciones, explicado claro.", href: "/repse", span: "lg:col-span-3", featured: true },
-  { icon: Stack, kw: "Software", title: "Software de cumplimiento REPSE", body: "Qué debe resolver y cómo lo hace CheckWise.", href: "/software-repse", span: "lg:col-span-3", featured: false },
-  { icon: ClipboardText, kw: "Obligación", title: "ICSOE", body: "Qué es y cómo presentarlo ante el IMSS.", href: "/repse", span: "lg:col-span-2", featured: false },
-  { icon: ClipboardText, kw: "Obligación", title: "SISUB", body: "Cómo cumplir con IMSS e Infonavit.", href: "/repse", span: "lg:col-span-2", featured: false },
-  { icon: Scales, kw: "Riesgo", title: "Responsabilidad solidaria", body: "Cómo protegerte como empresa contratante.", href: "/repse", span: "lg:col-span-2", featured: false },
-  { icon: ArrowsClockwise, kw: "Vigencia", title: "Renovación del REPSE", body: "Plazos, requisitos y consecuencias de no renovar a tiempo.", href: "/repse", span: "lg:col-span-6", featured: false },
+  {
+    icon: BookOpen,
+    kw: "Guía REPSE",
+    title: "¿Qué es el REPSE?",
+    body: "Registro ante la STPS, obligaciones, ICSOE y SISUB, responsabilidad solidaria y sanciones — explicado claro, sin tecnicismos.",
+    href: "/repse",
+    cta: "Leer la Guía REPSE",
+    featured: true,
+  },
+  {
+    icon: Stack,
+    kw: "El software",
+    title: "Software de cumplimiento REPSE",
+    body: "Qué debe resolver un software de cumplimiento y cómo CheckWise lo hace, de punta a punta.",
+    href: "/software-repse",
+    cta: "Conocer el software",
+    featured: false,
+  },
 ] as const;
 
 export function V2Hub() {
   return (
     <Section id="recursos" band="soft">
       <Eyebrow>Recursos REPSE</Eyebrow>
-      <SectionTitle accent="ICSOE y SISUB." className="mt-4">
-        Aprende REPSE: registro, obligaciones,
+      <SectionTitle accent="sin rodeos." className="mt-4">
+        Entiende el REPSE
       </SectionTitle>
+      <Lead className="mt-5">
+        Dos lecturas para resolverlo: qué te obliga la ley y cómo el software
+        lo mantiene en regla.
+      </Lead>
 
-      <div className="mt-12 grid gap-4 sm:grid-cols-2 lg:grid-cols-6">
+      <div className="mt-12 grid gap-5 lg:grid-cols-2">
         {CARDS.map((c) => {
           const Icon = c.icon;
           return (
             <Link
               key={c.title}
               href={c.href}
-              className={`group flex flex-col rounded-3xl border p-7 shadow-[var(--shadow-xs)] transition-[transform,box-shadow,border-color] duration-200 hover:-translate-y-1 hover:shadow-[var(--shadow-md)] ${c.span} ${
+              className={`group flex flex-col rounded-3xl border p-8 shadow-[var(--shadow-xs)] transition-[transform,box-shadow,border-color] duration-200 hover:-translate-y-1 hover:shadow-[var(--shadow-lg)] sm:p-10 ${
                 c.featured
                   ? "border-[color:var(--border-ai)] bg-[color:var(--surface-teal-muted)]"
                   : "border-[color:var(--border-default)] bg-[color:var(--surface-raised)] hover:border-[color:var(--border-strong)]"
               }`}
             >
-              <span className="inline-flex h-12 w-12 items-center justify-center rounded-2xl bg-[color:var(--surface-raised)] text-[color:var(--text-teal)] shadow-[var(--shadow-xs)]">
-                <Icon className="h-6 w-6" weight="duotone" aria-hidden="true" />
+              <span className="inline-flex h-14 w-14 items-center justify-center rounded-2xl bg-[color:var(--surface-raised)] text-[color:var(--text-teal)] shadow-[var(--shadow-xs)]">
+                <Icon className="h-7 w-7" weight="duotone" aria-hidden="true" />
               </span>
-              <p className="mt-5 font-mono text-[11px] uppercase tracking-[0.14em] text-[color:var(--text-teal)]">
+              <p className="mt-6 font-mono text-[12px] uppercase tracking-[0.14em] text-[color:var(--text-teal)]">
                 {c.kw}
               </p>
-              <h3 className="font-display mt-1.5 text-[19px] font-bold tracking-[-0.01em] text-[color:var(--text-primary)]">
+              <h3 className="font-display mt-2 text-[clamp(1.5rem,2.2vw,2rem)] font-bold tracking-[-0.01em] text-[color:var(--text-primary)]">
                 {c.title}
               </h3>
-              <p className="mt-1.5 max-w-[42ch] text-[13.5px] leading-[1.55] text-[color:var(--text-secondary)]">
+              <p className="mt-3 max-w-[46ch] text-[16px] leading-[1.6] text-[color:var(--text-secondary)]">
                 {c.body}
               </p>
-              <span className="mt-4 inline-flex items-center gap-1.5 text-[13px] font-semibold text-[color:var(--text-brand)]">
-                Leer
+              <span className="mt-7 inline-flex items-center gap-1.5 text-[15px] font-semibold text-[color:var(--text-brand)]">
+                {c.cta}
                 <ArrowRight
-                  className="h-3.5 w-3.5 transition-transform group-hover:translate-x-1"
+                  className="h-4 w-4 transition-transform group-hover:translate-x-1"
                   weight="bold"
                   aria-hidden="true"
                 />
