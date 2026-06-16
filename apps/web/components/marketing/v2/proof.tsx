@@ -20,7 +20,7 @@ export function V2Proof() {
     <section className="overflow-hidden bg-[color:var(--surface-page)]">
       <Container className="pt-[clamp(4.5rem,9vw,8.5rem)] pb-10">
         <Reveal>
-          <Eyebrow>Confían en Legal Shelf</Eyebrow>
+          <Eyebrow>Confían en CheckWise</Eyebrow>
           <div className="mt-4 flex flex-col gap-8 lg:flex-row lg:items-end lg:justify-between">
             <SectionTitle accent="ya operan con CheckWise.">
               Empresas líderes

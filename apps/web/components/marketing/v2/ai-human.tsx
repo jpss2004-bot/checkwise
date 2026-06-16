@@ -39,7 +39,7 @@ export function V2AiHuman() {
         <div className="grid items-center gap-12 lg:grid-cols-[1fr_1.15fr] lg:gap-16">
           {/* Left — copy + steps + guarantees */}
           <div>
-            <Eyebrow tone="onNavy">AI + revisión humana</Eyebrow>
+            <Eyebrow tone="onNavy">IA + revisión humana</Eyebrow>
             <h2 className="font-display mt-4 max-w-[18ch] text-[clamp(2.3rem,4vw,3.6rem)] font-bold leading-[1.04] tracking-[-0.02em] [text-wrap:balance]">
               CheckWise acelera el criterio.{" "}
               <span className="text-[hsl(var(--teal-300))]">No lo reemplaza.</span>

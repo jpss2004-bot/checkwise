@@ -1,4 +1,3 @@
-import Link from "next/link";
 import { ArrowRight, CalendarCheck, CheckCircle } from "@phosphor-icons/react/dist/ssr";
 
 import { Button } from "@/components/ui/button";
