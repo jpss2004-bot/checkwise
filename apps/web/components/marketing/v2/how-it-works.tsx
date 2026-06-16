@@ -89,13 +89,13 @@ export function V2HowItWorks() {
         onBlurCapture={() => setPaused(false)}
       >
         <div>
-          <Eyebrow>El sistema</Eyebrow>
+          <Eyebrow>El producto en vivo</Eyebrow>
           <SectionTitle accent="Un solo expediente." className="mt-4">
             Calendario, evidencia, revisión y reporte.
           </SectionTitle>
           <p className="mt-5 max-w-[44ch] text-[17px] leading-[1.6] text-[color:var(--text-secondary)]">
-            Una sola fuente de verdad por requisito, periodo e institución.
-            Toca cualquier paso para verlo.
+            Todo en una sola fuente de verdad por requisito, periodo e
+            institución — sin exportar a otro sistema, sin coordinar por correo.
           </p>
           <div className="mt-9">
             <HowBeats beats={BEATS} active={active} onSelect={setActive} />

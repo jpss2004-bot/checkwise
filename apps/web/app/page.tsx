@@ -95,10 +95,10 @@ export default function PublicHome() {
             <V2Stakes />
             <V2Shift />
             <V2HowItWorks />
-            <V2MidCta />
-            <V2Roles />
-            <V2AiHuman />
             <V2Proof />
+            <V2Roles />
+            <V2MidCta />
+            <V2AiHuman />
             <V2Faq />
             <V2CloseDemo />
           </main>

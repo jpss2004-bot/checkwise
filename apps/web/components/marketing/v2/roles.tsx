@@ -9,7 +9,7 @@ import { RolesSwitcher } from "./roles-switcher";
  */
 export function V2Roles() {
   return (
-    <Section id="roles" band="raised">
+    <Section id="roles" band="soft">
       <Eyebrow>Cinco vistas, un expediente</Eyebrow>
       <SectionTitle accent="Todos ven la misma verdad." className="mt-4">
         Cada persona ve su trabajo.
