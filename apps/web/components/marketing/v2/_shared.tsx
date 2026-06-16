@@ -92,7 +92,7 @@ export function Eyebrow({
   return (
     <p
       className={cn(
-        "font-mono text-[11px] font-medium uppercase tracking-[0.18em]",
+        "font-mono text-[12px] font-medium uppercase tracking-[0.18em]",
         EYEBROW_TONE[tone],
         className,
       )}
@@ -121,7 +121,7 @@ export function SectionTitle({
     <h2
       className={cn(
         "font-display max-w-[20ch] font-semibold tracking-[-0.02em] [text-wrap:balance]",
-        "text-[clamp(1.9rem,3.4vw,3rem)] leading-[1.05]",
+        "text-[clamp(2.3rem,4.2vw,3.85rem)] leading-[1.03]",
         onNavy ? "text-[color:var(--text-inverse)]" : "text-[color:var(--text-primary)]",
         className,
       )}
@@ -152,7 +152,7 @@ export function Lead({
   return (
     <p
       className={cn(
-        "max-w-[58ch] text-[16px] leading-[1.65] md:text-[17px]",
+        "max-w-[60ch] text-[18px] leading-[1.6] md:text-[20px]",
         onNavy
           ? "text-[color:var(--text-inverse-secondary)]"
           : "text-[color:var(--text-secondary)]",
