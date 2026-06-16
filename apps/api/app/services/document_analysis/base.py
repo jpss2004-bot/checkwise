@@ -98,6 +98,20 @@ class AnalysisResult:
     # ``llm_authenticity_concern`` RiskReasons (capped at medium) and
     # re-rolls ``DocumentInspection.authenticity_risk``.
     authenticity: dict | None = None
+    # Phase 1 — deep-tier comprehension. ``None`` for the triage tier and
+    # for providers that do not produce one (heuristic) or when the run
+    # failed. Shape (normalised by the provider):
+    #     {"purpose": str | None,
+    #      "key_facts": [{"label": str, "value": str}],
+    #      "status_assessment": {"validity": "valid"|"expired"|"indeterminate",
+    #                            "currency_ok": bool | None, "reasoning": str | None},
+    #      "obligation_satisfaction": {"verdict": "satisfied"|"partial"|
+    #                                  "not_satisfied"|"indeterminate",
+    #                                  "confidence": float | None,
+    #                                  "reasoning": str | None},
+    #      "discrepancies": [{"issue": str, "severity": str, "evidence": str}]}
+    # Persisted verbatim under ``shadow_signals['comprehension']``.
+    comprehension: dict | None = None
 
 
 class DocumentAnalysisProvider(Protocol):

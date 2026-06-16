@@ -43,18 +43,33 @@ _PROMPTS_DIR = Path(__file__).parent / "prompts"
 # tier (or the deterministic verdict / requirement risk level) flags
 # the document. It is requirement-agnostic — the requirement context
 # still arrives via the user prompt.
-_SLUG_TO_PROMPT: dict[str, str] = {
+# Per-tier slug → prompt-file stem.
+#
+# The TRIAGE tier (cheap Haiku per-upload pass) uses the v2 extraction
+# prompts. The DEEP/comprehension tier (stronger model + adaptive
+# thinking, Phase 1) uses the v3 prompts: they fold the v2 extraction +
+# authenticity guidance together with the comprehension contract
+# (``document_understanding``: purpose, key_facts, status_assessment,
+# obligation_satisfaction, discrepancies). Both stems stay on disk so a
+# persisted ``shadow_prompt_version`` is always replayable.
+_TRIAGE_SLUG_TO_PROMPT: dict[str, str] = {
     "csf_sat": "csf_sat.v2",
     "opinion_32d_sat": "opinion_32d.v2",
     "repse_stps": "repse_stps.v2",
     "imss_pago": "imss_pago.v2",
     "base": "base.v2",
-    "authenticity_deep": "authenticity_deep.v1",
+}
+_DEEP_SLUG_TO_PROMPT: dict[str, str] = {
+    "csf_sat": "csf_sat.v3",
+    "opinion_32d_sat": "opinion_32d.v3",
+    "repse_stps": "repse_stps.v3",
+    "imss_pago": "imss_pago.v3",
+    "base": "base.v3",
 }
 
-# Slugs that are not requirement extraction prompts (never returned by
-# requirement resolution; excluded from the supported-scope listing).
-_INTERNAL_SLUGS = {"base", "authenticity_deep"}
+# Requirement slugs we explicitly support (excludes the generic ``base``
+# fallback). Used by the Phase-2 scope listing.
+_SUPPORTED_SLUGS = ["csf_sat", "opinion_32d_sat", "repse_stps", "imss_pago"]
 
 
 @dataclass(frozen=True)
@@ -76,13 +91,22 @@ def _load_prompt(stem: str) -> str:
     return path.read_text(encoding="utf-8")
 
 
-# Eagerly load every prompt at import time so a missing/typo'd
-# prompt file is a boot-time failure (loud) rather than a per-upload
-# failure (silent until the affected requirement is uploaded).
-_PROMPTS: dict[str, PromptBundle] = {
-    slug: PromptBundle(slug=slug, version=stem, system_prompt=_load_prompt(stem))
-    for slug, stem in _SLUG_TO_PROMPT.items()
+def _load_bundle(slug: str, stem: str) -> PromptBundle:
+    return PromptBundle(slug=slug, version=stem, system_prompt=_load_prompt(stem))
+
+
+# Eagerly load every prompt at import time so a missing/typo'd prompt
+# file is a boot-time failure (loud) rather than a per-upload failure
+# (silent until the affected requirement is uploaded).
+_TRIAGE_PROMPTS: dict[str, PromptBundle] = {
+    slug: _load_bundle(slug, stem) for slug, stem in _TRIAGE_SLUG_TO_PROMPT.items()
 }
+_DEEP_PROMPTS: dict[str, PromptBundle] = {
+    slug: _load_bundle(slug, stem) for slug, stem in _DEEP_SLUG_TO_PROMPT.items()
+}
+_ESCALATION_PROMPT: PromptBundle = _load_bundle(
+    "authenticity_deep", "authenticity_deep.v1"
+)
 
 
 # Requirement-code substring rules. The portal sends a
@@ -132,25 +156,42 @@ def get_prompt_for_requirement(
     requirement_code: str | None,
     requirement_name: str,
 ) -> PromptBundle:
-    """Return the prompt bundle for the given requirement.
+    """Return the TRIAGE-tier (v2) extraction prompt for a requirement.
 
     Always succeeds — falls back to ``base`` when no specific match is
     found. The result includes ``version`` (the file stem) which the
     provider persists to ``shadow_prompt_version``.
     """
     slug = _slug_for_requirement(requirement_code, requirement_name)
-    return _PROMPTS[slug]
+    return _TRIAGE_PROMPTS[slug]
+
+
+def get_comprehension_prompt_for_requirement(
+    *,
+    requirement_code: str | None,
+    requirement_name: str,
+) -> PromptBundle:
+    """Return the DEEP-tier (v3) comprehension prompt for a requirement.
+
+    Phase 1 — the deep/escalation tier is requirement-aware: deep
+    *understanding* (what the document proves, whether it satisfies the
+    obligation) is inherently type-specific, so the deeper pass uses the
+    per-type v3 prompt rather than the requirement-agnostic
+    ``authenticity_deep`` prompt. Falls back to ``base`` (v3) outside the
+    supported scope.
+    """
+    slug = _slug_for_requirement(requirement_code, requirement_name)
+    return _DEEP_PROMPTS[slug]
 
 
 def get_escalation_prompt() -> PromptBundle:
-    """Return the deep authenticity prompt for the escalation tier.
+    """Return the legacy requirement-agnostic deep authenticity prompt.
 
-    Requirement-agnostic by design: the escalation pass re-examines a
-    document the triage tier (or a deterministic signal) flagged, so
-    one focused forensic prompt covers every requirement type. The
-    requirement context still rides in the per-call user prompt.
+    Retained for replay/back-compat. Phase 1 routes the deep tier
+    through ``get_comprehension_prompt_for_requirement`` instead, which
+    folds the same authenticity guidance into per-type v3 prompts.
     """
-    return _PROMPTS["authenticity_deep"]
+    return _ESCALATION_PROMPT
 
 
 def all_supported_slugs() -> list[str]:
@@ -159,4 +200,4 @@ def all_supported_slugs() -> list[str]:
     Used by the docs/Phase-2 report to enumerate the initial scope
     without re-hardcoding it.
     """
-    return [slug for slug in _SLUG_TO_PROMPT if slug not in _INTERNAL_SLUGS]
+    return list(_SUPPORTED_SLUGS)

@@ -30,6 +30,7 @@ from app.services.document_analysis import (
     build_document_analysis_provider,
 )
 from app.services.document_analysis.anthropic_provider import (
+    _COMPREHENSION_OUTPUT_FORMAT,
     _RECORD_TOOL,
     AnthropicDocumentAnalysisProvider,
 )
@@ -39,6 +40,7 @@ from app.services.document_analysis.heuristic import (
 )
 from app.services.document_analysis.prompt_registry import (
     all_supported_slugs,
+    get_comprehension_prompt_for_requirement,
     get_escalation_prompt,
     get_prompt_for_requirement,
 )
@@ -130,6 +132,51 @@ class TestPromptRegistry:
         # The escalation prompt is internal — never listed as a
         # requirement slug.
         assert "authenticity_deep" not in all_supported_slugs()
+
+    def test_deep_tier_resolves_requirement_specific_v3_prompts(self):
+        cases = [
+            ("REC-SAT-CSF-2026", "Constancia de Situación Fiscal", "csf_sat.v3"),
+            (
+                "REC-SAT-OPINION-32D-2026",
+                "Opinión de Cumplimiento de Obligaciones Fiscales",
+                "opinion_32d.v3",
+            ),
+            ("REC-STPS-REPSE-2026", "Constancia REPSE", "repse_stps.v3"),
+            ("REC-IMSS-PAGO-2026-M04", "IMSS — Comprobante de pago", "imss_pago.v3"),
+            ("REC-CFDI-NOMINA-2026", "Recibo CFDI de Nómina", "base.v3"),
+        ]
+        for code, name, expected_version in cases:
+            bundle = get_comprehension_prompt_for_requirement(
+                requirement_code=code, requirement_name=name
+            )
+            assert bundle.version == expected_version
+            # v3 prompts must carry the comprehension contract.
+            assert "document_understanding" in bundle.system_prompt
+
+    def test_comprehension_format_schema_shape(self):
+        schema = _COMPREHENSION_OUTPUT_FORMAT["schema"]
+        # Extraction fields + the comprehension object are all required.
+        assert "document_understanding" in schema["required"]
+        for field in (
+            "detected_institution",
+            "requirement_match_confidence",
+            "authenticity_concerns",
+        ):
+            assert field in schema["required"]
+        du = schema["properties"]["document_understanding"]
+        assert set(du["required"]) == {
+            "purpose",
+            "key_facts",
+            "status_assessment",
+            "obligation_satisfaction",
+            "discrepancies",
+        }
+        assert du["properties"]["obligation_satisfaction"]["properties"]["verdict"][
+            "enum"
+        ] == ["satisfied", "partial", "not_satisfied", "indeterminate"]
+        # Structured outputs reject numeric range constraints — the base
+        # confidence field must have been stripped by the deep schema.
+        assert "minimum" not in schema["properties"]["requirement_match_confidence"]
 
     def test_record_tool_schema_required_fields_match_signals(self):
         # Smoke test on the tool schema — every required field in
@@ -496,11 +543,18 @@ class TestAnthropicProviderResponseHandling:
         assert result.error is None
         assert result.signals is not None
         assert result.signals.detected_document_type == "csf"
-        assert result.prompt_version == "authenticity_deep.v1"
+        # Phase 1 — the deep tier is requirement-aware: a CSF upload uses
+        # the per-type v3 comprehension prompt, not the generic
+        # authenticity_deep prompt.
+        assert result.prompt_version == "csf_sat.v3"
 
         create_kwargs = client.with_options.return_value.messages.create.call_args.kwargs
-        # The system prompt is the deep prompt, not the requirement prompt.
-        assert "autenticidad" in create_kwargs["system"][0]["text"].lower()
+        system_text = create_kwargs["system"][0]["text"]
+        # The v3 prompt carries both the comprehension contract and the
+        # authenticity guidance.
+        assert "document_understanding" in system_text
+        assert "autenticidad" in system_text.lower()
+        assert "Constancia de Situación Fiscal" in system_text
         assert create_kwargs["model"] == "claude-sonnet-4-6"
         # Reasoning + structured outputs replace the forced tool call
         # (forced tool_choice is incompatible with thinking).
@@ -556,6 +610,145 @@ class TestAnthropicProviderResponseHandling:
         # Client is named as contratante, explicitly not the document titular.
         assert "Cliente Demo SA" in user_text
         assert "contratante" in user_text.lower()
+
+    def test_deep_tier_parses_comprehension_obligation(self, monkeypatch, tmp_path):
+        # The star case: an authentic, correctly-typed Opinión 32-D whose
+        # sentido is Negativo — the document is real and the right type,
+        # but it does NOT satisfy the obligation. Pure extraction would
+        # call this a match; comprehension catches the real situation.
+        payload = {
+            "detected_institution": "sat",
+            "detected_document_type": "opinion_cumplimiento_sat",
+            "detected_rfcs": ["ABCD010203XYZ"],
+            "detected_dates": ["2026-04-01"],
+            "period_mentions": [],
+            "requirement_match_confidence": 0.95,
+            "mismatch_reason": None,
+            "anomaly_codes": [],
+            "summary_for_reviewer": "Opinión negativa del proveedor esperado.",
+            "authenticity_concerns": [],
+            "looks_fabricated": False,
+            "authenticity_confidence": 0.95,
+            "document_understanding": {
+                "purpose": "Opinión 32-D del cumplimiento fiscal del proveedor.",
+                "key_facts": [
+                    {"label": "Sentido de la opinión", "value": "Negativo"},
+                    {"label": "RFC del contribuyente", "value": "ABCD010203XYZ"},
+                    {"label": "", "value": "dropped"},  # malformed → dropped
+                ],
+                "status_assessment": {
+                    "validity": "valid",
+                    "currency_ok": True,
+                    "reasoning": "Vigente para el periodo esperado.",
+                },
+                "obligation_satisfaction": {
+                    "verdict": "not_satisfied",
+                    "confidence": 0.9,
+                    "reasoning": "Una opinión negativa indica incumplimiento.",
+                },
+                "discrepancies": [
+                    {
+                        "issue": "Sentido negativo",
+                        "severity": "high",
+                        "evidence": "El documento indica 'Negativo'.",
+                    }
+                ],
+            },
+        }
+        client = MagicMock()
+        client.with_options.return_value.messages.create.return_value = (
+            _mock_structured_response(payload)
+        )
+        monkeypatch.setattr(settings, "ANTHROPIC_API_KEY", "sk-test")
+        provider = AnthropicDocumentAnalysisProvider(
+            api_key="sk-test", model="claude-sonnet-4-6", deep_authenticity=True
+        )
+        provider._client = client  # noqa: SLF001 — test injection seam
+        result = provider.analyze(
+            pdf_path=_blank_pdf_path(tmp_path),
+            requirement_code="REC-SAT-OPINION-32D-2026",
+            requirement_name="Opinión de Cumplimiento de Obligaciones Fiscales",
+            institution_code="sat",
+            period_code="2026-04",
+        )
+        assert result.error is None
+        comp = result.comprehension
+        assert comp is not None
+        assert comp["obligation_satisfaction"]["verdict"] == "not_satisfied"
+        assert comp["obligation_satisfaction"]["confidence"] == pytest.approx(0.9)
+        assert comp["status_assessment"]["validity"] == "valid"
+        assert comp["status_assessment"]["currency_ok"] is True
+        labels = [kf["label"] for kf in comp["key_facts"]]
+        assert "Sentido de la opinión" in labels
+        assert "" not in labels  # malformed key_fact dropped
+        assert comp["discrepancies"][0]["severity"] == "high"
+
+    def test_deep_tier_normalises_bad_comprehension_values(self, monkeypatch, tmp_path):
+        payload = {
+            "detected_institution": "sat",
+            "detected_document_type": "csf",
+            "detected_rfcs": [],
+            "detected_dates": [],
+            "period_mentions": [],
+            "requirement_match_confidence": 0.5,
+            "mismatch_reason": None,
+            "anomaly_codes": [],
+            "summary_for_reviewer": "x",
+            "document_understanding": {
+                "purpose": "x",
+                "key_facts": [],
+                "status_assessment": {
+                    "validity": "garbage",
+                    "currency_ok": "maybe",
+                    "reasoning": "",
+                },
+                "obligation_satisfaction": {
+                    "verdict": "nope",
+                    "confidence": "not-a-number",
+                    "reasoning": "",
+                },
+                "discrepancies": [
+                    {"issue": "y", "severity": "catastrophic", "evidence": ""}
+                ],
+            },
+        }
+        client = MagicMock()
+        client.with_options.return_value.messages.create.return_value = (
+            _mock_structured_response(payload)
+        )
+        monkeypatch.setattr(settings, "ANTHROPIC_API_KEY", "sk-test")
+        provider = AnthropicDocumentAnalysisProvider(
+            api_key="sk-test", model="claude-sonnet-4-6", deep_authenticity=True
+        )
+        provider._client = client  # noqa: SLF001 — test injection seam
+        result = provider.analyze(
+            pdf_path=_blank_pdf_path(tmp_path),
+            requirement_code="REC-SAT-CSF-2026",
+            requirement_name="CSF",
+            institution_code="sat",
+            period_code="2026-01",
+        )
+        comp = result.comprehension
+        assert comp["status_assessment"]["validity"] == "indeterminate"
+        assert comp["status_assessment"]["currency_ok"] is None
+        assert comp["obligation_satisfaction"]["verdict"] == "indeterminate"
+        assert comp["obligation_satisfaction"]["confidence"] is None
+        assert comp["discrepancies"][0]["severity"] == "medium"  # bad enum → medium
+
+    def test_triage_tier_has_no_comprehension(self, monkeypatch, tmp_path):
+        client = MagicMock()
+        client.with_options.return_value.messages.create.return_value = (
+            _mock_anthropic_response()
+        )
+        provider = _build_provider_with_mock_client(monkeypatch, client)
+        result = provider.analyze(
+            pdf_path=_blank_pdf_path(tmp_path),
+            requirement_code="REC-SAT-CSF-2026",
+            requirement_name="CSF",
+            institution_code="sat",
+            period_code="2026-01",
+        )
+        assert result.comprehension is None
 
     def test_no_tool_use_returns_malformed(self, monkeypatch, tmp_path):
         client = MagicMock()

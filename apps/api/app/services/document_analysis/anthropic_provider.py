@@ -54,7 +54,7 @@ from app.services.document_analysis.base import (
 )
 from app.services.document_analysis.prompt_registry import (
     PromptBundle,
-    get_escalation_prompt,
+    get_comprehension_prompt_for_requirement,
     get_prompt_for_requirement,
 )
 from app.services.document_intelligence import DocumentSignals
@@ -249,15 +249,125 @@ def _strip_numeric_constraints(node: Any) -> Any:
     return node
 
 
-# Deep-tier structured-output format. Same field shape as ``_RECORD_TOOL``
-# so the reviewer comparison card renders both tiers identically, but
-# delivered via ``output_config.format`` rather than a forced tool call —
-# forced ``tool_choice`` is incompatible with adaptive thinking, while
-# structured outputs compose with it.
-_RECORD_OUTPUT_FORMAT: dict[str, Any] = {
-    "type": "json_schema",
-    "schema": _strip_numeric_constraints(copy.deepcopy(_RECORD_TOOL["input_schema"])),
+# Phase 1 — the comprehension object the deep tier returns IN ADDITION to
+# the extraction + authenticity fields. This is where "understanding" goes:
+# what the document proves, whether it is current, and whether it actually
+# satisfies the obligation (not just whether it is the right type).
+_DOCUMENT_UNDERSTANDING_SCHEMA: dict[str, Any] = {
+    "type": "object",
+    "additionalProperties": False,
+    "properties": {
+        "purpose": {
+            "type": "string",
+            "description": "Una frase: qué es el documento y qué acredita.",
+        },
+        "key_facts": {
+            "type": "array",
+            "items": {
+                "type": "object",
+                "additionalProperties": False,
+                "properties": {
+                    "label": {"type": "string"},
+                    "value": {"type": "string"},
+                },
+                "required": ["label", "value"],
+            },
+            "description": (
+                "Hechos que dan sentido al documento (sentido/resultado, "
+                "montos, conteos, vigencias, folios), no sólo identificadores."
+            ),
+        },
+        "status_assessment": {
+            "type": "object",
+            "additionalProperties": False,
+            "properties": {
+                "validity": {
+                    "type": "string",
+                    "enum": ["valid", "expired", "indeterminate"],
+                },
+                "currency_ok": {
+                    "type": ["boolean", "null"],
+                    "description": (
+                        "¿Suficientemente reciente para el periodo/ventana del "
+                        "requisito? null si no aplica o no se puede determinar."
+                    ),
+                },
+                "reasoning": {"type": "string"},
+            },
+            "required": ["validity", "currency_ok", "reasoning"],
+        },
+        "obligation_satisfaction": {
+            "type": "object",
+            "additionalProperties": False,
+            "properties": {
+                "verdict": {
+                    "type": "string",
+                    "enum": [
+                        "satisfied",
+                        "partial",
+                        "not_satisfied",
+                        "indeterminate",
+                    ],
+                },
+                "confidence": {"type": "number"},
+                "reasoning": {
+                    "type": "string",
+                    "description": (
+                        "Por qué cumple o no la obligación esperada, no sólo si "
+                        "es del tipo correcto."
+                    ),
+                },
+            },
+            "required": ["verdict", "confidence", "reasoning"],
+        },
+        "discrepancies": {
+            "type": "array",
+            "items": {
+                "type": "object",
+                "additionalProperties": False,
+                "properties": {
+                    "issue": {"type": "string"},
+                    "severity": {
+                        "type": "string",
+                        "enum": ["info", "low", "medium", "high"],
+                    },
+                    "evidence": {"type": "string"},
+                },
+                "required": ["issue", "severity", "evidence"],
+            },
+            "description": "Problemas contextuales observados. Vacío si no hay.",
+        },
+    },
+    "required": [
+        "purpose",
+        "key_facts",
+        "status_assessment",
+        "obligation_satisfaction",
+        "discrepancies",
+    ],
 }
+
+
+def _build_comprehension_schema() -> dict[str, Any]:
+    schema = _strip_numeric_constraints(copy.deepcopy(_RECORD_TOOL["input_schema"]))
+    schema["properties"]["document_understanding"] = copy.deepcopy(
+        _DOCUMENT_UNDERSTANDING_SCHEMA
+    )
+    schema["required"] = [*schema["required"], "document_understanding"]
+    return schema
+
+
+# Deep/comprehension-tier format: extraction + authenticity + the
+# document_understanding object, all required and schema-enforced.
+_COMPREHENSION_OUTPUT_FORMAT: dict[str, Any] = {
+    "type": "json_schema",
+    "schema": _build_comprehension_schema(),
+}
+
+# Valid enum values for tolerant comprehension parsing.
+_VALIDITY_VALUES = ("valid", "expired", "indeterminate")
+_VERDICT_VALUES = ("satisfied", "partial", "not_satisfied", "indeterminate")
+_DISCREPANCY_SEVERITIES = ("info", "low", "medium", "high")
 
 
 def _clamp01(value: float) -> float:
@@ -332,7 +442,13 @@ class AnthropicDocumentAnalysisProvider:
     ) -> AnalysisResult:
         _ = org_id  # already enforced by the spend limiter upstream
         if self._deep_authenticity:
-            prompt = get_escalation_prompt()
+            # Phase 1 — the deep tier is requirement-aware: the per-type
+            # v3 prompt folds extraction + authenticity + the
+            # comprehension contract together.
+            prompt = get_comprehension_prompt_for_requirement(
+                requirement_code=requirement_code,
+                requirement_name=requirement_name,
+            )
         else:
             prompt = get_prompt_for_requirement(
                 requirement_code=requirement_code,
@@ -400,7 +516,10 @@ class AnthropicDocumentAnalysisProvider:
                 system=system,
                 messages=messages,
                 thinking={"type": "adaptive"},
-                output_config={"format": _RECORD_OUTPUT_FORMAT, "effort": "high"},
+                output_config={
+                    "format": _COMPREHENSION_OUTPUT_FORMAT,
+                    "effort": "high",
+                },
             )
             timeout = float(settings.DOCUMENT_ANALYSIS_DEEP_TIMEOUT_SECONDS or 90.0)
         else:
@@ -423,8 +542,14 @@ class AnthropicDocumentAnalysisProvider:
         except Exception as exc:  # noqa: BLE001 — categorise everything as a known failure
             return self._failure(prompt, start, self._categorise_exception(exc))
 
+        comprehension: dict | None = None
         if self._deep_authenticity:
-            signals, raw_meta, authenticity = self._parse_structured_response(response)
+            (
+                signals,
+                raw_meta,
+                authenticity,
+                comprehension,
+            ) = self._parse_structured_response(response)
         else:
             signals, raw_meta, authenticity = self._parse_response(response)
         elapsed_ms = int((time.monotonic() - start) * 1000)
@@ -447,6 +572,7 @@ class AnthropicDocumentAnalysisProvider:
             error=None,
             raw_meta=raw_meta,
             authenticity=authenticity,
+            comprehension=comprehension,
         )
 
     # ------------------------------------------------------------------
@@ -596,13 +722,14 @@ class AnthropicDocumentAnalysisProvider:
 
     def _parse_structured_response(
         self, response: Any
-    ) -> tuple[DocumentSignals | None, dict, dict | None]:
+    ) -> tuple[DocumentSignals | None, dict, dict | None, dict | None]:
         """Deep path — read schema-valid JSON from the first text block.
 
+        Returns ``(signals, raw_meta, authenticity, comprehension)``.
         Structured outputs guarantee the response text is the JSON object;
         any thinking blocks precede it and are skipped. A truncated or
-        non-JSON body returns ``None`` so the runner keeps the triage
-        result (fail-open).
+        non-JSON body returns ``None`` signals so the runner keeps the
+        triage result (fail-open).
         """
         raw_meta = self._base_raw_meta(response)
         text: str | None = None
@@ -611,18 +738,102 @@ class AnthropicDocumentAnalysisProvider:
                 text = getattr(block, "text", None)
                 break
         if not text:
-            return None, raw_meta, None
+            return None, raw_meta, None, None
         try:
             payload = json.loads(text)
         except (TypeError, ValueError):
-            return None, raw_meta, None
+            return None, raw_meta, None, None
         if not isinstance(payload, dict):
-            return None, raw_meta, None
+            return None, raw_meta, None, None
         signals = self._signals_from_payload(payload)
         if signals is None:
-            return None, raw_meta, None
+            return None, raw_meta, None, None
         raw_meta["summary_for_reviewer"] = payload.get("summary_for_reviewer")
-        return signals, raw_meta, self._parse_authenticity(payload)
+        return (
+            signals,
+            raw_meta,
+            self._parse_authenticity(payload),
+            self._parse_comprehension(payload),
+        )
+
+    @staticmethod
+    def _parse_comprehension(payload: dict) -> dict | None:
+        """Normalise the Phase-1 ``document_understanding`` object.
+
+        Returns ``None`` when absent (e.g. a triage payload or a replayed
+        v2 run). Malformed sub-entries are dropped rather than failing the
+        whole extraction — comprehension is additive and must never cost
+        us the base signals.
+        """
+        raw = payload.get("document_understanding")
+        if not isinstance(raw, dict):
+            return None
+
+        key_facts: list[dict[str, str]] = []
+        for item in raw.get("key_facts") or []:
+            if not isinstance(item, dict):
+                continue
+            label = str(item.get("label") or "").strip()
+            value = str(item.get("value") or "").strip()
+            if label and value:
+                key_facts.append({"label": label, "value": value})
+
+        discrepancies: list[dict[str, str]] = []
+        for item in raw.get("discrepancies") or []:
+            if not isinstance(item, dict):
+                continue
+            issue = str(item.get("issue") or "").strip()
+            if not issue:
+                continue
+            severity = item.get("severity")
+            if severity not in _DISCREPANCY_SEVERITIES:
+                severity = "medium"
+            discrepancies.append(
+                {
+                    "issue": issue,
+                    "severity": severity,
+                    "evidence": str(item.get("evidence") or "").strip(),
+                }
+            )
+
+        status = raw.get("status_assessment")
+        status = status if isinstance(status, dict) else {}
+        validity = status.get("validity")
+        if validity not in _VALIDITY_VALUES:
+            validity = "indeterminate"
+        currency_ok = status.get("currency_ok")
+        if currency_ok not in (True, False, None):
+            currency_ok = None
+
+        oblig = raw.get("obligation_satisfaction")
+        oblig = oblig if isinstance(oblig, dict) else {}
+        verdict = oblig.get("verdict")
+        if verdict not in _VERDICT_VALUES:
+            verdict = "indeterminate"
+        try:
+            obligation_confidence = (
+                _clamp01(float(oblig["confidence"]))
+                if oblig.get("confidence") is not None
+                else None
+            )
+        except (TypeError, ValueError):
+            obligation_confidence = None
+
+        return {
+            "purpose": (str(raw.get("purpose") or "").strip() or None),
+            "key_facts": key_facts,
+            "status_assessment": {
+                "validity": validity,
+                "currency_ok": currency_ok,
+                "reasoning": (str(status.get("reasoning") or "").strip() or None),
+            },
+            "obligation_satisfaction": {
+                "verdict": verdict,
+                "confidence": obligation_confidence,
+                "reasoning": (str(oblig.get("reasoning") or "").strip() or None),
+            },
+            "discrepancies": discrepancies,
+        }
 
     @staticmethod
     def _parse_authenticity(payload: dict) -> dict | None:

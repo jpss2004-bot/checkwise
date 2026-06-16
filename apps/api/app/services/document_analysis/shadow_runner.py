@@ -731,6 +731,11 @@ def _persist_shadow_result(
                 shadow_signals_blob["_meta"] = result.raw_meta
             if result.authenticity is not None:
                 shadow_signals_blob["authenticity"] = result.authenticity
+            # Phase 1 — deep-tier comprehension (purpose, key_facts,
+            # status, obligation_satisfaction, discrepancies). Persisted
+            # verbatim for the reviewer card; None for the triage tier.
+            if result.comprehension is not None:
+                shadow_signals_blob["comprehension"] = result.comprehension
         if tiers is not None:
             # Keep the tier bookkeeping even when the final result has
             # no signals (e.g., both tiers errored) — the skip/error
