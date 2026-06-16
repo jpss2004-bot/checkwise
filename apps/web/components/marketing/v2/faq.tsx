@@ -1,34 +1,22 @@
 "use client";
 
 import { useState } from "react";
-import { motion, useReducedMotion } from "motion/react";
-import {
-  ArrowRight,
-  Plus,
-} from "@phosphor-icons/react";
+import { AnimatePresence, motion, useReducedMotion } from "motion/react";
+import { ArrowRight, ArrowUpRight, Plus } from "@phosphor-icons/react";
 
 import { FAQ_ITEMS } from "@/lib/marketing/faq";
 
 import { Eyebrow, Section, SectionTitle } from "./_shared";
 
 const CATEGORIES = [
-  {
-    key: "repse" as const,
-    label: "REPSE",
-    caption: "La norma",
-    items: FAQ_ITEMS.slice(0, 5),
-  },
-  {
-    key: "checkwise" as const,
-    label: "CheckWise",
-    caption: "El producto",
-    items: FAQ_ITEMS.slice(5),
-  },
+  { key: "repse" as const, label: "Sobre REPSE", items: FAQ_ITEMS.slice(0, 5) },
+  { key: "checkwise" as const, label: "Sobre CheckWise", items: FAQ_ITEMS.slice(5) },
 ];
 
 type CatKey = "repse" | "checkwise";
 
-const EASE = [0.16, 1, 0.3, 1] as const;
+const ENTER = { duration: 0.52, ease: [0.22, 1, 0.36, 1] } as const;
+const EXIT  = { duration: 0.18, ease: [0.4, 0, 1, 1]    } as const;
 
 export function V2Faq() {
   const reduced = useReducedMotion();
@@ -47,6 +35,7 @@ export function V2Faq() {
 
   return (
     <Section id="faq" band="page">
+      {/* Header */}
       <div className="text-center">
         <Eyebrow>Preguntas frecuentes</Eyebrow>
         <SectionTitle accent="explicados sin rodeos." className="mx-auto mt-4 text-center">
@@ -54,36 +43,33 @@ export function V2Faq() {
         </SectionTitle>
       </div>
 
+      {/* Category selector — floats above the card */}
+      <div className="mt-10 flex justify-center gap-1.5">
+        {CATEGORIES.map((c) => {
+          const on = c.key === cat;
+          return (
+            <button
+              key={c.key}
+              type="button"
+              onClick={() => switchCat(c.key)}
+              className={`rounded-full px-5 py-2 text-[13.5px] font-semibold transition-all duration-200 ${
+                on
+                  ? "bg-[hsl(var(--teal-500)/0.1)] text-[color:var(--text-teal)]"
+                  : "text-[color:var(--text-tertiary)] hover:text-[color:var(--text-secondary)]"
+              }`}
+            >
+              {c.label}
+            </button>
+          );
+        })}
+      </div>
+
       {/* ── Desktop: two-panel reader ── */}
-      <div className="mx-auto mt-14 hidden max-w-[1060px] overflow-hidden rounded-2xl border border-[color:var(--border-default)] shadow-[var(--shadow-md)] lg:grid lg:grid-cols-[272px_1fr]">
+      <div className="mx-auto mt-5 hidden max-w-[1060px] overflow-hidden rounded-3xl shadow-[0_4px_32px_-8px_rgba(3,20,31,0.13),0_1px_8px_-2px_rgba(3,20,31,0.07)] lg:grid lg:grid-cols-[258px_1fr]">
+
         {/* Left — question list */}
         <div className="flex flex-col border-r border-[color:var(--border-default)] bg-[color:var(--surface-raised)]">
-          {/* Category tabs */}
-          <div className="grid grid-cols-2 border-b border-[color:var(--border-default)]">
-            {CATEGORIES.map((c) => {
-              const on = c.key === cat;
-              return (
-                <button
-                  key={c.key}
-                  type="button"
-                  onClick={() => switchCat(c.key)}
-                  className={`py-4 text-[13px] font-semibold transition-colors ${
-                    on
-                      ? "bg-[color:var(--surface-page)] text-[color:var(--text-primary)] shadow-[inset_0_-2px_0_hsl(var(--teal-400))]"
-                      : "text-[color:var(--text-secondary)] hover:text-[color:var(--text-primary)]"
-                  }`}
-                >
-                  {c.label}
-                  <span className={`ml-1.5 font-mono text-[10px] font-normal ${on ? "text-[color:var(--text-teal)]" : "text-[color:var(--text-tertiary)]"}`}>
-                    {c.caption}
-                  </span>
-                </button>
-              );
-            })}
-          </div>
-
-          {/* Question items */}
-          <ol className="flex-1 py-1">
+          <ol className="flex-1 space-y-0.5 p-3">
             {items.map((item, i) => {
               const on = i === idx;
               return (
@@ -91,13 +77,15 @@ export function V2Faq() {
                   <button
                     type="button"
                     onClick={() => setIdx(i)}
-                    className={`relative flex w-full items-start gap-3 border-l-2 px-5 py-3.5 text-left transition-colors ${
+                    className={`flex w-full items-start gap-3 rounded-xl px-3.5 py-3 text-left transition-all duration-200 ${
                       on
-                        ? "border-l-[hsl(var(--teal-400))] bg-[hsl(var(--teal-500)/0.07)] text-[color:var(--text-primary)]"
-                        : "border-l-transparent text-[color:var(--text-secondary)] hover:bg-[color:var(--surface-page)] hover:text-[color:var(--text-primary)]"
+                        ? "bg-[color:var(--surface-page)] text-[color:var(--text-primary)] shadow-[0_1px_6px_-1px_rgba(0,0,0,0.08),0_0_0_1px_rgba(0,0,0,0.04)]"
+                        : "text-[color:var(--text-secondary)] hover:bg-[color:var(--surface-page)] hover:text-[color:var(--text-primary)] hover:opacity-80"
                     }`}
                   >
-                    <span className={`mt-px shrink-0 font-mono text-[10px] ${on ? "text-[color:var(--text-teal)]" : "text-[color:var(--text-tertiary)]"}`}>
+                    <span
+                      className={`mt-px shrink-0 font-mono text-[10px] ${on ? "text-[color:var(--text-teal)]" : "text-[color:var(--text-tertiary)]"}`}
+                    >
                       {String(i + 1).padStart(2, "0")}
                     </span>
                     <span className={`text-[13px] leading-[1.45] ${on ? "font-semibold" : "font-medium"}`}>
@@ -109,68 +97,94 @@ export function V2Faq() {
             })}
           </ol>
 
-          {/* Footer counter */}
-          <div className="border-t border-[color:var(--border-default)] px-5 py-3">
-            <p className="font-mono text-[10.5px] text-[color:var(--text-tertiary)]">
-              {idx + 1} de {items.length} — {category.label}
+          <div className="border-t border-[color:var(--border-default)] px-6 py-3">
+            <p className="font-mono text-[10px] text-[color:var(--text-tertiary)]">
+              {idx + 1} / {items.length} — {category.label}
             </p>
           </div>
         </div>
 
-        {/* Right — answer display */}
-        <div className="flex flex-col bg-[color:var(--surface-page)] p-10">
-          <motion.div
-            key={`${cat}-${idx}`}
-            initial={{ opacity: 0, y: 10 }}
-            animate={{ opacity: 1, y: 0 }}
-            transition={{ duration: reduced ? 0 : 0.32, ease: EASE }}
-            className="flex-1"
-          >
-            <span className="font-mono text-[10.5px] uppercase tracking-[0.18em] text-[color:var(--text-teal)]">
-              {category.caption}
-            </span>
-            <h3 className="font-display mt-3 text-[22px] font-bold leading-[1.2] tracking-[-0.01em] text-[color:var(--text-primary)]">
-              {active.question}
-            </h3>
-            <p className="mt-5 text-[15.5px] leading-[1.75] text-[color:var(--text-secondary)]">
-              {active.answer}
-            </p>
-          </motion.div>
+        {/* Right — answer pane */}
+        <div className="flex min-h-[420px] flex-col bg-[color:var(--surface-page)] p-12">
+          <AnimatePresence mode="wait">
+            <motion.div
+              key={`${cat}-${idx}`}
+              initial={{ opacity: 0, y: 16 }}
+              animate={{ opacity: 1, y: 0 }}
+              exit={{ opacity: 0, y: -8, transition: reduced ? { duration: 0 } : EXIT }}
+              transition={reduced ? { duration: 0 } : ENTER}
+              className="flex flex-1 flex-col"
+            >
+              {/* Question */}
+              <h3 className="font-display text-[25px] font-bold leading-[1.18] tracking-[-0.02em] text-[color:var(--text-primary)]">
+                {active.question}
+              </h3>
 
-          {next ? (
-            <button
-              type="button"
-              onClick={() => setIdx(idx + 1)}
-              className="group mt-10 flex items-center gap-2 self-start"
-            >
-              <span className="text-[12px] font-medium uppercase tracking-[0.12em] text-[color:var(--text-tertiary)] transition-colors group-hover:text-[color:var(--text-secondary)]">
-                Siguiente
-              </span>
-              <ArrowRight
-                className="h-3 w-3 text-[color:var(--text-tertiary)] transition-all group-hover:translate-x-0.5 group-hover:text-[color:var(--text-teal)]"
-                weight="bold"
-                aria-hidden="true"
-              />
-              <span className="max-w-[40ch] truncate text-[13.5px] font-medium text-[color:var(--text-secondary)] transition-colors group-hover:text-[color:var(--text-primary)]">
-                {next.question}
-              </span>
-            </button>
-          ) : (
-            <a
-              href="#contacto"
-              className="group mt-10 inline-flex items-center gap-2 self-start rounded-full border border-[hsl(var(--teal-500)/0.4)] bg-[hsl(var(--teal-500)/0.06)] px-5 py-2.5 text-[13.5px] font-semibold text-[color:var(--text-teal)] transition-colors hover:bg-[hsl(var(--teal-500)/0.12)]"
-            >
-              Solicitar demo
-              <ArrowRight className="h-3.5 w-3.5 transition-transform group-hover:translate-x-0.5" weight="bold" aria-hidden="true" />
-            </a>
-          )}
+              {/* Answer */}
+              <p className="mt-6 text-[16.5px] leading-[1.8] text-[color:var(--text-secondary)]">
+                {active.answer}
+              </p>
+
+              {/* Contextual deep-link into sub-page */}
+              {active.learnMore && (
+                <a
+                  href={active.learnMore.href}
+                  className="group mt-7 flex w-fit items-center gap-2 rounded-xl border border-[hsl(var(--teal-500)/0.22)] bg-[hsl(var(--teal-500)/0.05)] px-4 py-2.5 transition-all duration-200 hover:border-[hsl(var(--teal-500)/0.4)] hover:bg-[hsl(var(--teal-500)/0.09)]"
+                >
+                  <span className="text-[13px] font-semibold text-[color:var(--text-teal)]">
+                    {active.learnMore.label}
+                  </span>
+                  <ArrowUpRight
+                    className="h-3.5 w-3.5 text-[color:var(--text-teal)] transition-transform duration-200 group-hover:-translate-y-0.5 group-hover:translate-x-0.5"
+                    weight="bold"
+                    aria-hidden="true"
+                  />
+                </a>
+              )}
+
+              {/* Footer nav */}
+              <div className="mt-auto pt-10">
+                {next ? (
+                  <button
+                    type="button"
+                    onClick={() => setIdx(idx + 1)}
+                    className="group flex items-center gap-2.5"
+                  >
+                    <span className="text-[11px] font-medium uppercase tracking-[0.15em] text-[color:var(--text-tertiary)] transition-colors group-hover:text-[color:var(--text-secondary)]">
+                      Siguiente
+                    </span>
+                    <ArrowRight
+                      className="h-3 w-3 text-[color:var(--text-tertiary)] transition-all duration-200 group-hover:translate-x-0.5 group-hover:text-[color:var(--text-teal)]"
+                      weight="bold"
+                      aria-hidden="true"
+                    />
+                    <span className="max-w-[38ch] truncate text-[13.5px] font-medium text-[color:var(--text-secondary)] transition-colors group-hover:text-[color:var(--text-primary)]">
+                      {next.question}
+                    </span>
+                  </button>
+                ) : (
+                  <a
+                    href="#contacto"
+                    className="group inline-flex items-center gap-2 rounded-full border border-[hsl(var(--teal-500)/0.4)] bg-[hsl(var(--teal-500)/0.06)] px-5 py-2.5 text-[13.5px] font-semibold text-[color:var(--text-teal)] transition-colors hover:bg-[hsl(var(--teal-500)/0.12)]"
+                  >
+                    Solicitar demo
+                    <ArrowRight
+                      className="h-3.5 w-3.5 transition-transform duration-200 group-hover:translate-x-0.5"
+                      weight="bold"
+                      aria-hidden="true"
+                    />
+                  </a>
+                )}
+              </div>
+            </motion.div>
+          </AnimatePresence>
         </div>
       </div>
 
-      {/* ── Mobile: categorized accordion ── */}
+      {/* ── Mobile: accordion ── */}
       <div className="mx-auto mt-10 max-w-[680px] lg:hidden">
         {/* Category pills */}
-        <div className="mb-6 grid grid-cols-2 gap-2">
+        <div className="mb-6 flex gap-2">
           {CATEGORIES.map((c) => {
             const on = c.key === cat;
             return (
@@ -178,22 +192,18 @@ export function V2Faq() {
                 key={c.key}
                 type="button"
                 onClick={() => switchCat(c.key)}
-                className={`rounded-xl border py-3 text-[14px] font-semibold transition-colors ${
+                className={`flex-1 rounded-2xl border py-3 text-[14px] font-semibold transition-all duration-200 ${
                   on
-                    ? "border-[hsl(var(--teal-500)/0.5)] bg-[hsl(var(--teal-500)/0.07)] text-[color:var(--text-teal)]"
+                    ? "border-[hsl(var(--teal-500)/0.4)] bg-[hsl(var(--teal-500)/0.07)] text-[color:var(--text-teal)]"
                     : "border-[color:var(--border-default)] text-[color:var(--text-secondary)]"
                 }`}
               >
                 {c.label}
-                <span className="ml-1.5 font-mono text-[10px] font-normal opacity-70">
-                  {c.caption}
-                </span>
               </button>
             );
           })}
         </div>
 
-        {/* Accordions */}
         <div className="flex flex-col gap-3">
           {items.map((f) => (
             <details
@@ -210,9 +220,20 @@ export function V2Faq() {
                   aria-hidden="true"
                 />
               </summary>
-              <p className="mt-3 text-[14px] leading-[1.65] text-[color:var(--text-secondary)]">
-                {f.answer}
-              </p>
+              <div className="mt-3">
+                <p className="text-[14px] leading-[1.65] text-[color:var(--text-secondary)]">
+                  {f.answer}
+                </p>
+                {f.learnMore && (
+                  <a
+                    href={f.learnMore.href}
+                    className="mt-3 inline-flex items-center gap-1.5 text-[13px] font-semibold text-[color:var(--text-teal)] hover:underline"
+                  >
+                    {f.learnMore.label}
+                    <ArrowUpRight className="h-3 w-3" weight="bold" aria-hidden="true" />
+                  </a>
+                )}
+              </div>
             </details>
           ))}
         </div>
