@@ -513,6 +513,11 @@ pre {
   }
 }
 
+@keyframes cw-marquee {
+  from { transform: translateX(0); }
+  to   { transform: translateX(-50%); }
+}
+
 @media (prefers-reduced-motion: no-preference) {
   .cw-fade-up {
     animation: cw-fade-up 320ms var(--ease-enter) both;
@@ -540,6 +545,13 @@ pre {
 
   .cw-pulse-soft {
     animation: cw-pulse-soft 3.6s ease-in-out infinite;
+  }
+
+  .cw-marquee {
+    animation: cw-marquee 32s linear infinite;
+  }
+  .cw-marquee:hover {
+    animation-play-state: paused;
   }
 
   /* Indeterminate progress sweep — used by the report-export overlay.
