@@ -32,14 +32,14 @@ export function V2CloseDemo() {
         <div className="grid items-center gap-12 lg:grid-cols-[1fr_0.85fr] lg:gap-16">
           <div>
             <Eyebrow tone="onNavy">Solicitar demo</Eyebrow>
-            <h2 className="font-display mt-4 max-w-[16ch] text-[clamp(2rem,3.6vw,3.4rem)] font-bold leading-[1.05] tracking-[-0.02em] [text-wrap:balance]">
+            <h2 className="font-display mt-4 max-w-[16ch] text-[clamp(2.3rem,4vw,3.7rem)] font-bold leading-[1.04] tracking-[-0.02em] [text-wrap:balance]">
               Ve tu propia operación{" "}
               <span className="text-[hsl(var(--teal-300))]">
                 en una demo guiada
               </span>
               .
             </h2>
-            <p className="mt-5 max-w-[44ch] text-[16px] leading-[1.6] text-[hsl(var(--navy-200))]">
+            <p className="mt-6 max-w-[46ch] text-[18px] leading-[1.6] text-[hsl(var(--navy-200))] md:text-[19px]">
               Recorremos calendario, expediente, revisión CheckWise y reportes
               con IA usando datos de ejemplo. Sin video pregrabado.
             </p>

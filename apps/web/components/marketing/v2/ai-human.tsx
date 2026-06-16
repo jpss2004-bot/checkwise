@@ -20,11 +20,11 @@ export function V2AiHuman() {
       />
       <Container className="relative py-[clamp(4.5rem,9vw,8rem)]">
         <Eyebrow tone="onNavy">AI + revisión humana</Eyebrow>
-        <h2 className="font-display mt-4 max-w-[18ch] text-[clamp(2rem,3.6vw,3.2rem)] font-bold leading-[1.05] tracking-[-0.02em] [text-wrap:balance]">
+        <h2 className="font-display mt-4 max-w-[18ch] text-[clamp(2.3rem,4vw,3.6rem)] font-bold leading-[1.04] tracking-[-0.02em] [text-wrap:balance]">
           CheckWise acelera el criterio.{" "}
           <span className="text-[hsl(var(--teal-300))]">No lo reemplaza.</span>
         </h2>
-        <p className="mt-5 max-w-[52ch] text-[16px] leading-[1.6] text-[hsl(var(--navy-200))]">
+        <p className="mt-6 max-w-[54ch] text-[18px] leading-[1.6] text-[hsl(var(--navy-200))] md:text-[19px]">
           La IA explica, redacta y convierte estados en reportes. Las decisiones
           críticas siguen siendo del equipo, con actor, acción y cambio firmado.
         </p>
