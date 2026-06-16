@@ -20,6 +20,7 @@ export interface ContactRequestPayload {
   email: string;
   interest: LeadInterest;
   message: string;
+  source?: string;
 }
 
 export interface ContactRequestSuccess {
@@ -100,7 +101,7 @@ export async function submitContactRequest(
         company,
         role: roleFromInterest(payload.interest),
         message,
-        source: "landing",
+        source: payload.source ?? "landing",
       }),
     });
   } catch {
