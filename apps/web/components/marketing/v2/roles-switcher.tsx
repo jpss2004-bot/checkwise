@@ -81,28 +81,34 @@ export function RolesSwitcher() {
 
   return (
     <div>
-      <div className="inline-flex max-w-full flex-wrap gap-1 rounded-2xl border border-[color:var(--border-default)] bg-[color:var(--surface-page)] p-1">
+      <div className="inline-flex max-w-full flex-wrap gap-1 rounded-2xl border border-[color:var(--border-default)] bg-[color:var(--surface-page)] p-1.5">
         {ROLES.map((r, i) => {
           const on = i === active;
+          const Icon = r.icon;
           return (
             <button
               key={r.key}
               type="button"
               onClick={() => setActive(i)}
               aria-pressed={on}
-              className={`relative rounded-xl px-4 py-2 text-[14px] font-medium transition-colors ${
+              className={`relative flex items-center gap-1.5 rounded-xl px-4 py-2 text-[14px] transition-colors ${
                 on
-                  ? "text-white"
-                  : "text-[color:var(--text-secondary)] hover:text-[color:var(--text-primary)]"
+                  ? "font-semibold text-[#04302c]"
+                  : "font-medium text-[color:var(--text-tertiary)] hover:text-[color:var(--text-primary)]"
               }`}
             >
               {on ? (
                 <motion.span
                   layoutId="role-pill"
-                  className="absolute inset-0 -z-10 rounded-xl bg-[color:var(--interactive-primary)]"
+                  className="absolute inset-0 -z-10 rounded-xl bg-[hsl(var(--teal-400))]"
                   transition={{ type: "spring", stiffness: 380, damping: 32 }}
                 />
               ) : null}
+              <Icon
+                className={`h-3.5 w-3.5 shrink-0 transition-opacity ${on ? "opacity-100" : "opacity-40"}`}
+                weight={on ? "fill" : "regular"}
+                aria-hidden="true"
+              />
               {r.name}
             </button>
           );
