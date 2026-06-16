@@ -9,7 +9,9 @@ Follow-up to `_handoff/audit-security-perf-2026-06-15.md`. Implements the four d
 | 3 | **PERF-7** — submission indexes | ✅ Done + validated on local DB |
 | 4 | **PERF-5** — background heavy intake work off the event loop | ✅ Done + tested |
 | 1 | **Frontend CSP** | ✅ Done (report-only; ready to enforce after QA) |
-| 2 | **FE-SEC-1/2** — JWT → httpOnly cookie + route guard | 🟡 Backend foundation done + tested; frontend cutover staged (plan below) |
+| 2 | **FE-SEC-1/2** — JWT → httpOnly cookie + route guard | ✅ Backend foundation + **frontend cutover implemented** (commit 5b0098a, committed not pushed); awaiting deliberate deploy (see DEPLOY below) |
+
+> **Item 2 update (cutover implemented 2026-06-15, commit 5b0098a):** the frontend cutover described in the plan below is now DONE — all ~14 API clients use `credentials:"include"` with no bearer header, the JWT is off localStorage (`"cookie-managed"` placeholder), `clearAdminSession()` clears the cookie via `POST /auth/logout` (keepalive), and `apps/web/middleware.ts` edge-guards `/admin`,`/client`,`/platform`. Verified: tsc + eslint clean (only Codex v2 WIP errors remain), grep shows zero residual bearer headers, every auth fetch has credentials. **NOT pushed** — pushing logs out all live sessions. **DEPLOY:** snapshot Neon (the held PERF-7 migration 394ba9f also ships on push), pick a low-traffic window, then `git push`; immediately smoke-test login → a mutation (e.g. save a report) → logout in prod, with rollback ready. The prod frontend origin is already in `CORS_ORIGINS`/`allowed_csrf_origins`, so cookie mutations pass CSRF.
 
 ---
 
