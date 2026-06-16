@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useState } from "react";
-import { DownloadSimple, Eye, FilePdf } from "@phosphor-icons/react";
+import { DownloadSimple, Eye, FilePdf, type Icon as PhosphorIcon } from "@phosphor-icons/react";
 
 import { Button } from "@/components/ui/button";
 import { OVERFLOW_MENU_ROW_CLASS } from "@/components/ui/overflow-menu";
@@ -41,7 +41,7 @@ import {
 
 const FORMAT_META: Record<
   ReportExportFormat,
-  { label: string; busyLabel: string; title: string; icon: React.ElementType }
+  { label: string; busyLabel: string; title: string; icon: PhosphorIcon }
 > = {
   html: {
     label: "Descargar HTML",
