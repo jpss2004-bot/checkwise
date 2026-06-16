@@ -651,6 +651,27 @@ pre {
   }
 }
 
+/* ── Prevención flow (Shift section) ───────────────────────────────
+   The four steps sit on a curved wave joined by directional arrows; a
+   single teal comet runs the whole path 01→04 — "a compliance signal
+   travels detect → prove." Pure CSS on an SVG path (pathLength
+   normalised to 100), so it's GPU-cheap and collapses to a static wave
+   under reduced motion. */
+@keyframes cw-flow-travel {
+  from { stroke-dashoffset: 100; }
+  to   { stroke-dashoffset: 0; }
+}
+@media (prefers-reduced-motion: no-preference) {
+  .cw-flow-signal {
+    animation: cw-flow-travel 4.5s linear infinite;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .cw-flow-signal {
+    opacity: 0 !important;
+  }
+}
+
 /* ── FAQ disclosure ───────────────────────────────────────────────
    Progressive enhancement: where the browser supports it, the native
    <details> answer animates open/closed instead of snapping. Browsers
