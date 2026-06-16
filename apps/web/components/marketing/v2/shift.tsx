@@ -7,15 +7,6 @@ import {
 
 import { Eyebrow, Lead, Section, SectionTitle } from "./_shared";
 
-/**
- * Section 03 — Shift · Reactivo → Preventivo.
- *
- * Meaning: "a compliance signal travels detect → prove." A centered header
- * sits over a bold curved wave through the four steps, joined by directional
- * flow arrows (node arrowheads + mid-segment chevrons), with a teal comet
- * running the whole path 01→04 (CSS .cw-flow-signal, reduced-motion safe).
- * Light band = relief after the two dark risk scenes.
- */
 const STEPS = [
   { n: "01", icon: MagnifyingGlass, title: "Detecta", body: "Ve qué falta y qué vence, por proveedor, requisito y periodo." },
   { n: "02", icon: ShieldCheck, title: "Valida", body: "La IA clasifica el documento. El equipo CheckWise firma la decisión." },
@@ -23,31 +14,41 @@ const STEPS = [
   { n: "04", icon: SealCheck, title: "Demuestra", body: "Exporta el expediente firmado en PDF, Excel o HTML, listo para la inspección." },
 ] as const;
 
-// Node centres in the SVG viewBox — a pronounced wave (high, low, high, low)
-// so the flow fills the band vertically instead of sitting in dead space.
+// Circuit frame — rounded rectangle, nodes at corners, clockwise 01→02→03→04
 const VB_W = 1060;
-const VB_H = 330;
-const NODES = [
-  { cx: 110, cy: 78, high: true },
-  { cx: 390, cy: 252, high: false },
-  { cx: 670, cy: 78, high: true },
-  { cx: 950, cy: 252, high: false },
+const VB_H = 580;
+const FL = 130, FT = 50, FR = 930, FB = 530;
+const R = 28;
+
+const FRAME_PATH = [
+  `M${FL + R},${FT}`,
+  `H${FR - R} Q${FR},${FT} ${FR},${FT + R}`,
+  `V${FB - R} Q${FR},${FB} ${FR - R},${FB}`,
+  `H${FL + R} Q${FL},${FB} ${FL},${FB - R}`,
+  `V${FT + R} Q${FL},${FT} ${FL + R},${FT}`,
+].join(" ");
+
+// Clockwise direction arrows at mid-segment of each side
+const FLOW_ARROWS = [
+  { x: (FL + FR) / 2, y: FT, rot: 0 },
+  { x: FR, y: (FT + FB) / 2, rot: 90 },
+  { x: (FL + FR) / 2, y: FB, rot: 180 },
+  { x: FL, y: (FT + FB) / 2, rot: -90 },
 ] as const;
 
-const FLOW_PATH =
-  "M110,78 C250,78 250,252 390,252 C530,252 530,78 670,78 C810,78 810,252 950,252";
-
-// Mid-segment flow arrows, rotated to the curve's mid-tangent (≈ ±51°).
-const MID_ARROWS = [
-  { x: 250, y: 165, rot: 51 },
-  { x: 530, y: 165, rot: -51 },
-  { x: 810, y: 165, rot: 51 },
+// Nodes at the 4 corners (TL=01, TR=02, BR=03, BL=04)
+const FRAME_NODES = [
+  { step: STEPS[0], x: FL, y: FT, below: true },
+  { step: STEPS[1], x: FR, y: FT, below: true },
+  { step: STEPS[2], x: FR, y: FB, below: false },
+  { step: STEPS[3], x: FL, y: FB, below: false },
 ] as const;
 
 export function V2Shift() {
   return (
     <Section id="prevencion" band="soft">
-      <div className="mx-auto max-w-[44ch] text-center">
+      {/* Mobile header */}
+      <div className="mx-auto max-w-[44ch] text-center lg:hidden">
         <Eyebrow className="justify-center">Prevención REPSE</Eyebrow>
         <SectionTitle accent="a la prevención del riesgo." className="mx-auto mt-4">
           Del seguimiento reactivo
@@ -58,8 +59,8 @@ export function V2Shift() {
         </Lead>
       </div>
 
-      {/* Desktop: the curved wave with directional flow arrows + comet. */}
-      <div className="relative mx-auto mt-8 hidden w-full max-w-[1060px] lg:block">
+      {/* Desktop: circuit frame — headline centered inside, steps at corners */}
+      <div className="relative mx-auto hidden w-full max-w-[1060px] lg:block">
         <div className="relative" style={{ aspectRatio: `${VB_W} / ${VB_H}` }}>
           <svg
             viewBox={`0 0 ${VB_W} ${VB_H}`}
@@ -68,84 +69,88 @@ export function V2Shift() {
             preserveAspectRatio="xMidYMid meet"
             className="absolute inset-0 h-full w-full overflow-visible"
           >
+            {/* Dashed guide frame */}
             <path
-              d={FLOW_PATH}
-              stroke="hsl(var(--teal-500) / 0.30)"
+              d={FRAME_PATH}
+              stroke="hsl(var(--teal-500) / 0.28)"
               strokeWidth={2.5}
               strokeLinecap="round"
-              strokeDasharray="1.5 10"
+              strokeDasharray="2 11"
             />
+            {/* Animated comet */}
             <path
-              d={FLOW_PATH}
+              d={FRAME_PATH}
               pathLength={100}
               stroke="hsl(var(--teal-400))"
               strokeWidth={4}
               strokeLinecap="round"
-              strokeDasharray="13 87"
+              strokeDasharray="10 90"
               className="cw-flow-signal"
               style={{ filter: "drop-shadow(0 0 6px hsl(var(--teal-400) / 0.9))" }}
             />
-            {/* bigger arrowheads approaching nodes 02, 03, 04 */}
-            {NODES.slice(1).map((nd) => (
-              <path
-                key={`n${nd.cx}`}
-                d="M0,-9 L14,0 L0,9 Z"
-                transform={`translate(${nd.cx - 52} ${nd.cy})`}
-                fill="hsl(var(--teal-500))"
-              />
-            ))}
-            {/* mid-segment flow arrows (aumentar flechas) */}
-            {MID_ARROWS.map((a) => (
-              <path
-                key={`m${a.x}`}
-                d="M0,-7 L11,0 L0,7 Z"
-                transform={`translate(${a.x} ${a.y}) rotate(${a.rot})`}
-                fill="hsl(var(--teal-500) / 0.7)"
-              />
+            {/* Mid-segment direction arrows */}
+            {FLOW_ARROWS.map((a, i) => (
+              <g key={i} transform={`translate(${a.x} ${a.y}) rotate(${a.rot})`}>
+                <path d="M-6,-8 L7,0 L-6,8 Z" fill="hsl(var(--teal-500) / 0.7)" />
+              </g>
             ))}
           </svg>
 
-          {NODES.map((nd, i) => {
-            const s = STEPS[i];
-            const Icon = s.icon;
+          {/* Step nodes at the 4 corners */}
+          {FRAME_NODES.map(({ step, x, y, below }) => {
+            const Icon = step.icon;
             return (
               <div
-                key={s.n}
+                key={step.n}
                 className="absolute -translate-x-1/2 -translate-y-1/2"
-                style={{
-                  left: `${(nd.cx / VB_W) * 100}%`,
-                  top: `${(nd.cy / VB_H) * 100}%`,
-                }}
+                style={{ left: `${(x / VB_W) * 100}%`, top: `${(y / VB_H) * 100}%` }}
               >
                 <div className="flex h-16 w-16 items-center justify-center rounded-2xl border border-[color:var(--border-default)] bg-[color:var(--surface-raised)] text-[color:var(--text-teal)] shadow-[var(--shadow-md)]">
                   <Icon className="h-7 w-7" weight="duotone" aria-hidden="true" />
                 </div>
                 <div
                   className={`absolute left-1/2 w-[210px] -translate-x-1/2 text-center ${
-                    nd.high
-                      ? "top-[calc(100%+0.8rem)]"
-                      : "bottom-[calc(100%+0.8rem)]"
+                    below ? "top-[calc(100%+0.8rem)]" : "bottom-[calc(100%+0.8rem)]"
                   }`}
                 >
                   <div className="flex items-center justify-center gap-2">
                     <h3 className="font-display text-[21px] font-bold tracking-[-0.01em] text-[color:var(--text-primary)]">
-                      {s.title}
+                      {step.title}
                     </h3>
                     <span className="font-mono text-[12px] text-[color:var(--text-tertiary)]">
-                      {s.n}
+                      {step.n}
                     </span>
                   </div>
                   <p className="mt-1 text-[14px] leading-[1.5] text-[color:var(--text-secondary)]">
-                    {s.body}
+                    {step.body}
                   </p>
                 </div>
               </div>
             );
           })}
+
+          {/* Center headline — inside the circuit */}
+          <div
+            className="absolute -translate-x-1/2 -translate-y-1/2 w-[310px] text-center"
+            style={{
+              left: `${(((FL + FR) / 2) / VB_W) * 100}%`,
+              top: `${(((FT + FB) / 2) / VB_H) * 100}%`,
+            }}
+          >
+            <Eyebrow className="justify-center">Prevención REPSE</Eyebrow>
+            <h2
+              className="font-display mt-3 font-bold leading-[1.07] tracking-[-0.02em] [text-wrap:balance] text-[color:var(--text-primary)]"
+              style={{ fontSize: "clamp(1.8rem, 2.4vw, 2.6rem)" }}
+            >
+              Del seguimiento{" "}
+              <span className="text-[color:var(--text-teal)]">reactivo</span>
+              {" "}a la prevención.
+            </h2>
+          </div>
         </div>
       </div>
 
-      {/* Mobile / tablet: a vertical flow with down-arrows between steps. */}
+      {/* Mobile / tablet: vertical flow with down-arrows */}
       <ol className="mx-auto mt-12 flex max-w-[30rem] flex-col lg:hidden">
         {STEPS.map((s, i) => {
           const Icon = s.icon;
