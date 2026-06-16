@@ -11,7 +11,6 @@ import { V2HowItWorks } from "@/components/marketing/v2/how-it-works";
 import { V2MidCta } from "@/components/marketing/v2/mid-cta";
 import { SmoothScroll } from "@/components/marketing/v2/motion";
 import { V2Nav } from "@/components/marketing/v2/nav";
-import { V2Proof } from "@/components/marketing/v2/proof";
 import { V2Roles } from "@/components/marketing/v2/roles";
 import { V2Shift } from "@/components/marketing/v2/shift";
 import { V2Stakes } from "@/components/marketing/v2/stakes";
@@ -95,7 +94,6 @@ export default function PublicHome() {
             <V2Stakes />
             <V2Shift />
             <V2HowItWorks />
-            <V2Proof />
             <V2Roles />
             <V2MidCta />
             <V2AiHuman />
