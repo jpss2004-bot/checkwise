@@ -1107,4 +1107,6 @@ def get_submission_document(
         media_type="application/pdf",
         filename=document.original_filename,
         content_disposition_type=disposition_kind,
+        # FILE GAP-6 — sensitive evidence bytes: never cache.
+        headers={"Cache-Control": "no-store, private"},
     )

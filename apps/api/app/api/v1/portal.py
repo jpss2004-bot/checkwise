@@ -2151,10 +2151,12 @@ def cancel_workspace_submission(
         ) from exc
 
     if storage_keys:
+        # FILE-DEL-1 — the submission's Document rows are already deleted and
+        # committed above, so a remaining reference means another submission
+        # (possibly another tenant) shares this content-addressed object.
+        # Only delete the bytes when this was the last reference.
         try:
-            storage = get_storage_service()
-            for storage_key in storage_keys:
-                storage.delete(storage_key)
+            _delete_orphaned_objects(db, storage_keys)
         except Exception:  # noqa: BLE001 — DB cancellation already succeeded
             pass
 
@@ -2286,7 +2288,11 @@ def get_workspace_submission_document(
         path,
         media_type="application/pdf",
         filename=document.original_filename,
-        headers={"Content-Disposition": disposition_header},
+        # FILE GAP-6 — sensitive evidence bytes: never cache.
+        headers={
+            "Content-Disposition": disposition_header,
+            "Cache-Control": "no-store, private",
+        },
     )
 
 
@@ -3040,37 +3046,67 @@ async def create_workspace_submission_batch(
         # might have started before the failure, and clean up storage
         # writes so we don't leave orphaned PDFs.
         db.rollback()
-        _cleanup_partial_storage(stored_files)
+        _cleanup_partial_storage(db, stored_files)
         raise
     except SQLAlchemyError as exc:
         db.rollback()
-        _cleanup_partial_storage(stored_files)
+        _cleanup_partial_storage(db, stored_files)
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="No fue posible registrar la carga documental.",
         ) from exc
 
 
-def _cleanup_partial_storage(stored_files: list) -> None:
+def _delete_orphaned_objects(db: Session, storage_keys: list[str]) -> None:
+    """Delete storage objects only when no ``Document`` still references them.
+
+    FILE-DEL-1 — storage keys are content-addressed (``documents/<sha256>/…``),
+    so two different tenants uploading byte-identical PDFs share ONE object.
+    Deleting that object on a cancel/rollback without a reference check would
+    erase the *other* tenant's evidence (a cross-tenant data-destruction bug).
+    We therefore delete the underlying object only when this is the last
+    reference to it. Caller must have already removed/rolled-back its own
+    ``Document`` rows so they don't count toward the reference total.
+
+    Best-effort and never raises: this runs on cleanup paths and must not
+    mask the original outcome. Critically, if the reference count cannot be
+    verified we **skip** the delete — failing safe leaves a recoverable
+    orphan, never a cross-tenant deletion.
+    """
+    keys = {key for key in storage_keys if key}
+    if not keys:
+        return
+    try:
+        storage = get_storage_service()
+    except Exception:  # noqa: BLE001 — keep the original outcome in view
+        return
+    for key in keys:
+        try:
+            remaining = db.scalar(
+                select(func.count())
+                .select_from(Document)
+                .where(Document.storage_key == key)
+            )
+        except SQLAlchemyError:
+            # Can't confirm it's an orphan → do not delete (fail safe).
+            continue
+        if not remaining:
+            storage.delete(key)
+
+
+def _cleanup_partial_storage(db: Session, stored_files: list) -> None:
     """Delete storage entries written before a rollback.
 
     Called from the multi-file batch endpoint's exception handlers
     (HTTPException + SQLAlchemyError) so a partial batch never leaves
-    orphan bytes in storage. ``StorageService.delete`` is itself
-    idempotent and best-effort — it never raises — so this loop is a
-    thin orchestration layer over it. The outer try/except guards
-    against the unlikely case where the backend factory itself fails
-    (e.g. S3 credentials revoked mid-request); we still want the
-    original rollback exception to surface in that case.
+    orphan bytes in storage. The batch's own ``Document`` rows were just
+    rolled back, so they don't count as references; the refcount guard in
+    ``_delete_orphaned_objects`` ensures we only remove bytes no committed
+    ``Document`` (this tenant's or another's) still points at.
     """
     if not stored_files:
         return
-    try:
-        storage = get_storage_service()
-    except Exception:  # noqa: BLE001 — keep the original rollback error in view
-        return
-    for stored in stored_files:
-        storage.delete(stored.storage_key)
+    _delete_orphaned_objects(db, [stored.storage_key for stored in stored_files])
 
 
 # ---------------------------------------------------------------------------

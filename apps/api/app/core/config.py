@@ -58,6 +58,12 @@ class Settings(BaseSettings):
     AWS_S3_ENDPOINT: str = ""
     AWS_REGION: str = "auto"
     S3_PRESIGNED_URL_TTL_SECONDS: int = 60 * 15
+    # ENC-2 — server-side-encryption algorithm sent on every object write
+    # (S3 ``ServerSideEncryption``). "AES256" = SSE-S3 on AWS; Cloudflare R2
+    # accepts it and also encrypts at rest unconditionally. Set to "" to
+    # disable the header if a backend ever rejects it. Use "aws:kms" only
+    # with a configured KMS key on AWS.
+    STORAGE_SSE_ALGORITHM: str = "AES256"
 
     MAX_UPLOAD_SIZE_BYTES: int = 15 * 1024 * 1024
     ALLOWED_FILE_EXTENSIONS: str = ".pdf"
@@ -492,7 +498,7 @@ class Settings(BaseSettings):
         explicit ``postgresql+psycopg://`` driver token, so paste-as-is
         Just Works without you remembering to rewrite the URL.
         """
-        return _normalize_pg_url(self.DATABASE_URL)
+        return _normalize_pg_url(self.DATABASE_URL, require_ssl=not self.is_local_env)
 
     @property
     def alembic_url(self) -> str:
@@ -502,16 +508,37 @@ class Settings(BaseSettings):
         locks). Falls back to ``DATABASE_URL`` when no direct URL is set,
         which matches single-endpoint dev setups.
         """
-        return _normalize_pg_url(self.DIRECT_DATABASE_URL or self.DATABASE_URL)
+        return _normalize_pg_url(
+            self.DIRECT_DATABASE_URL or self.DATABASE_URL,
+            require_ssl=not self.is_local_env,
+        )
 
 
-def _normalize_pg_url(url: str) -> str:
+def _ensure_sslmode_require(url: str) -> str:
+    """Pin ``sslmode=require`` on a Postgres URL that omits an explicit mode.
+
+    ENC-1 — psycopg/libpq defaults to ``sslmode=prefer``, which silently
+    downgrades to an *unencrypted* connection when the server permits it.
+    For any non-local deploy we want encryption-in-transit to fail closed,
+    so we require TLS unless the operator has already chosen an explicit
+    (and presumably stricter, e.g. ``verify-full``) mode. We only append —
+    never override — so a deliberate choice is respected.
+    """
+    if "sslmode=" in url:
+        return url
+    sep = "&" if "?" in url else "?"
+    return f"{url}{sep}sslmode=require"
+
+
+def _normalize_pg_url(url: str, *, require_ssl: bool = False) -> str:
     if not url:
         return url
     if url.startswith("postgres://"):
         url = "postgresql://" + url[len("postgres://"):]
     if url.startswith("postgresql://"):
-        return "postgresql+psycopg://" + url[len("postgresql://"):]
+        url = "postgresql+psycopg://" + url[len("postgresql://"):]
+    if require_ssl and url.startswith("postgresql+psycopg://"):
+        url = _ensure_sslmode_require(url)
     return url
 
 
@@ -585,6 +612,21 @@ def _validate_boot_security(settings: Settings) -> None:
             "The rate limiter is in-memory and only enforces correctly on "
             "a SINGLE worker/instance. Provision Redis and set REDIS_URL "
             "before raising the worker or instance count.",
+            settings.CHECKWISE_ENV,
+        )
+
+    # ENC-1 — encryption-in-transit to Postgres. ``sqlalchemy_url`` /
+    # ``alembic_url`` auto-append ``sslmode=require`` when the URL omits a
+    # mode, so the default is fail-closed. Warn loudly if an operator has
+    # explicitly selected an insecure mode, which would re-open a plaintext
+    # downgrade despite the auto-append.
+    _db_url = (settings.DATABASE_URL or "").lower()
+    if any(f"sslmode={mode}" in _db_url for mode in ("disable", "allow", "prefer")):
+        logging.getLogger("checkwise.config").warning(
+            "DATABASE_URL sets an insecure sslmode on a non-local deploy "
+            "(CHECKWISE_ENV=%s). Data to the database may transit without "
+            "TLS. Use sslmode=require (or verify-full) for encryption in "
+            "transit.",
             settings.CHECKWISE_ENV,
         )
 

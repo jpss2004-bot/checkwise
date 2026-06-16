@@ -282,6 +282,15 @@ class S3StorageService:
         extra_args: dict[str, str] = {}
         if upload.content_type:
             extra_args["ContentType"] = upload.content_type
+        # ENC-2 — assert encryption-at-rest in code rather than relying on
+        # the bucket's default-encryption config. AWS S3 honors SSE-S3
+        # (AES256); Cloudflare R2 encrypts at rest unconditionally and
+        # accepts the header, so this is safe for both backends and makes
+        # the at-rest guarantee auditable from the source. Configurable
+        # (STORAGE_SSE_ALGORITHM="" disables) so a backend that ever
+        # rejects the header can't break uploads.
+        if settings.STORAGE_SSE_ALGORITHM:
+            extra_args.setdefault("ServerSideEncryption", settings.STORAGE_SSE_ALGORITHM)
 
         def _do_upload() -> None:
             with temp_path.open("rb") as fh:
@@ -322,6 +331,9 @@ class S3StorageService:
         }
         if content_type:
             kwargs["ContentType"] = content_type
+        # ENC-2 — encryption-at-rest, asserted in code (see save_upload).
+        if settings.STORAGE_SSE_ALGORITHM:
+            kwargs["ServerSideEncryption"] = settings.STORAGE_SSE_ALGORITHM
         self._client.put_object(**kwargs)
 
     def open_for_read(self, storage_key: str) -> Path:
@@ -367,6 +379,11 @@ class S3StorageService:
         # a plain object link.
         if content_disposition:
             params["ResponseContentDisposition"] = content_disposition
+            # FILE GAP-6 — document downloads always set a disposition, so
+            # this is the sensitive-bytes path. Instruct the browser/any
+            # intermediary not to cache the object served via this signed
+            # URL (it carries REPSE/tax/payroll evidence).
+            params["ResponseCacheControl"] = "no-store, private"
         return self._client.generate_presigned_url(
             ClientMethod="get_object",
             Params=params,

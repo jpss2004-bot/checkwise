@@ -2066,7 +2066,11 @@ def client_get_submission_document(
         path,
         media_type="application/pdf",
         filename=document.original_filename,
-        headers={"Content-Disposition": disposition_header},
+        # FILE GAP-6 — sensitive evidence bytes: never cache.
+        headers={
+            "Content-Disposition": disposition_header,
+            "Cache-Control": "no-store, private",
+        },
     )
 
 
