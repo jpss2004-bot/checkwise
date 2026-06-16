@@ -16,9 +16,9 @@ import { HeroSemaforo } from "./hero-semaforo";
  */
 
 const PROOF = [
-  { value: "151", detail: "obligaciones REPSE" },
-  { value: "5 pasos", detail: "carga guiada" },
-  { value: "PDF · Excel", detail: "listo para auditar" },
+  { value: "151", detail: "obligaciones por proveedor" },
+  { value: "Revisión humana", detail: "firmada por abogados" },
+  { value: "PDF · Excel", detail: "listo para la STPS" },
 ] as const;
 
 export function V2Hero() {

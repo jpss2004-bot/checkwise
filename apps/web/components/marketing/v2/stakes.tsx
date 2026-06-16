@@ -44,14 +44,15 @@ export function V2Stakes() {
       />
       <Container className="relative py-[clamp(4.5rem,9vw,8rem)]">
         <div className="mx-auto max-w-[46ch] text-center">
-          <Eyebrow tone="onNavy">Por qué importa</Eyebrow>
+          <Eyebrow tone="onNavy">Responsabilidad solidaria</Eyebrow>
           <h2 className="font-display mx-auto mt-4 max-w-[18ch] text-[clamp(2.4rem,4.4vw,3.9rem)] font-bold leading-[1.03] tracking-[-0.02em] [text-wrap:balance]">
             El incumplimiento de un proveedor es{" "}
             <span className="text-[#ff7a7a]">tu riesgo</span>.
           </h2>
           <p className="mx-auto mt-6 max-w-[54ch] text-[18px] leading-[1.6] text-[hsl(var(--navy-200))] md:text-[20px]">
-            Si un proveedor incumple sus obligaciones REPSE, la autoridad puede
-            voltear a verte a ti. Eso es la responsabilidad solidaria.
+            Controlar tu propio cumplimiento no alcanza. Si un proveedor tuyo
+            incumple sus obligaciones REPSE, la autoridad puede voltear a verte
+            a ti — eso es la responsabilidad solidaria.
           </p>
         </div>
 
