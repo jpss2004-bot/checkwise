@@ -14,7 +14,7 @@ const NAV_ITEMS = [
   { href: "/#sistema", label: "Sistema" },
   { href: "/#prevencion", label: "Prevención" },
   { href: "/#ia", label: "IA + revisión" },
-  { href: "/#recursos", label: "Recursos" },
+  { href: "/seguridad", label: "Seguridad" },
 ] as const;
 
 export function V2Nav() {

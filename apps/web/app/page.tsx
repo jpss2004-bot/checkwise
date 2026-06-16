@@ -8,7 +8,7 @@ import { V2Faq } from "@/components/marketing/v2/faq";
 import { V2Footer } from "@/components/marketing/v2/footer";
 import { V2Hero } from "@/components/marketing/v2/hero";
 import { V2HowItWorks } from "@/components/marketing/v2/how-it-works";
-import { V2Hub } from "@/components/marketing/v2/hub";
+import { V2MidCta } from "@/components/marketing/v2/mid-cta";
 import { SmoothScroll } from "@/components/marketing/v2/motion";
 import { V2Nav } from "@/components/marketing/v2/nav";
 import { V2Proof } from "@/components/marketing/v2/proof";
@@ -95,10 +95,10 @@ export default function PublicHome() {
             <V2Stakes />
             <V2Shift />
             <V2HowItWorks />
+            <V2MidCta />
             <V2Roles />
             <V2AiHuman />
             <V2Proof />
-            <V2Hub />
             <V2Faq />
             <V2CloseDemo />
           </main>

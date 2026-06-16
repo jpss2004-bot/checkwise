@@ -29,6 +29,8 @@ const COLS = [
   {
     title: "Empresa",
     links: [
+      { label: "Sobre CheckWise", href: "/sobre-checkwise" },
+      { label: "Seguridad", href: "/seguridad" },
       { label: "Legal Shelf", href: "https://legalshelf.mx" },
       { label: "Aviso de privacidad", href: "/legal/privacidad" },
       { label: "Términos", href: "/legal/terminos" },
