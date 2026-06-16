@@ -1,0 +1,37 @@
+# CODEOWNERS — change-management control (CICD-3 / ISO 27002:2022 8.32, 8.31, 5.4).
+#
+# Auto-requests review from the listed owner on PRs touching security-critical
+# surfaces. This is the FIRST half of the control; it only ENFORCES review once
+# GitHub branch protection on `main` is enabled with "Require review from Code
+# Owners" + "Require status checks (CI, Security, CodeQL)". See
+# docs/compliance/CHANGE_MANAGEMENT.md.
+#
+# NOTE: replace @jpss2004-bot with the real GitHub handle/team for the security
+# approver(s). An unresolved handle produces only a non-blocking editor warning.
+
+# Default owner for everything not matched below.
+*                                   @jpss2004-bot
+
+# --- Authentication, authorization, tenant isolation ---
+/apps/api/app/api/v1/auth.py        @jpss2004-bot
+/apps/api/app/services/auth.py      @jpss2004-bot
+/apps/api/app/core/                 @jpss2004-bot
+/apps/api/app/api/v1/admin.py       @jpss2004-bot
+
+# --- Data model & migrations (schema changes need a second look) ---
+/apps/api/app/models/               @jpss2004-bot
+/apps/api/alembic/versions/         @jpss2004-bot
+
+# --- Storage, document handling, audit trail ---
+/apps/api/app/services/storage.py           @jpss2004-bot
+/apps/api/app/services/submission_service.py @jpss2004-bot
+/apps/api/app/services/audit_log.py         @jpss2004-bot
+
+# --- Deployment, secrets, CI/CD ---
+/render.yaml                        @jpss2004-bot
+/.github/                           @jpss2004-bot
+/apps/web/next.config.ts            @jpss2004-bot
+/apps/web/middleware.ts             @jpss2004-bot
+
+# --- Compliance evidence (changes are governance-relevant) ---
+/docs/compliance/                   @jpss2004-bot

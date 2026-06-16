@@ -1,0 +1,47 @@
+# Dependabot — automated dependency-update PRs (CICD-2 / ISO 27002:2022 8.8).
+#
+# The Security workflow (security.yml) *detects* vulnerable deps (pip-audit +
+# npm audit, weekly cron). Dependabot closes the loop by opening the upgrade
+# PRs, so CVE remediation isn't a manual lockfile regeneration. Minor/patch
+# bumps are grouped to keep PR volume low for a small team; majors come as
+# individual PRs so a breaking change is reviewed on its own.
+version: 2
+updates:
+  # Backend (FastAPI) — pyproject.toml + requirements.lock under apps/api.
+  - package-ecosystem: "pip"
+    directory: "/apps/api"
+    schedule:
+      interval: "weekly"
+      day: "monday"
+      time: "07:00"
+      timezone: "America/Mexico_City"
+    open-pull-requests-limit: 5
+    labels: ["dependencies", "backend", "security"]
+    groups:
+      backend-minor-patch:
+        update-types: ["minor", "patch"]
+
+  # Frontend (Next.js) — package.json + package-lock.json under apps/web.
+  - package-ecosystem: "npm"
+    directory: "/apps/web"
+    schedule:
+      interval: "weekly"
+      day: "monday"
+      time: "07:00"
+      timezone: "America/Mexico_City"
+    open-pull-requests-limit: 5
+    labels: ["dependencies", "frontend", "security"]
+    groups:
+      frontend-minor-patch:
+        update-types: ["minor", "patch"]
+
+  # GitHub Actions used by the CI/security workflows themselves.
+  - package-ecosystem: "github-actions"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+      day: "monday"
+      time: "07:00"
+      timezone: "America/Mexico_City"
+    open-pull-requests-limit: 5
+    labels: ["dependencies", "ci", "security"]
