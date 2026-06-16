@@ -1,12 +1,24 @@
 import type { Metadata } from "next";
 import { GeistMono } from "geist/font/mono";
 import { GeistSans } from "geist/font/sans";
+import { Schibsted_Grotesk } from "next/font/google";
 
 import { Toaster } from "@/components/ui/toast";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { SITE_NAME, SITE_URL } from "@/lib/site";
 
 import "./globals.css";
+
+// Landing redesign display typeface, exposed app-wide as --font-display and
+// applied only via the .font-display utility (marketing headings). Not
+// preloaded so it never weighs on product-app pages that don't use it.
+const display = Schibsted_Grotesk({
+  subsets: ["latin"],
+  weight: ["400", "500", "600", "700", "800"],
+  variable: "--font-display",
+  display: "swap",
+  preload: false,
+});
 
 export const metadata: Metadata = {
   metadataBase: new URL(SITE_URL),
@@ -83,7 +95,10 @@ export default function RootLayout({
   children: React.ReactNode;
 }>) {
   return (
-    <html lang="es" className={`${GeistSans.variable} ${GeistMono.variable}`}>
+    <html
+      lang="es"
+      className={`${GeistSans.variable} ${GeistMono.variable} ${display.variable}`}
+    >
       <body className="antialiased">
         <TooltipProvider delayDuration={300} skipDelayDuration={150}>
           {children}
