@@ -6,8 +6,8 @@ import { Button } from "@/components/ui/button";
 import { DEMO_BOOKING_URL } from "@/lib/marketing/booking";
 import { SITE_URL } from "@/lib/site";
 
-import { MarketingFooter } from "./marketing-footer";
-import { MarketingNav } from "./marketing-nav";
+import { V2Footer } from "./v2/footer";
+import { V2Nav } from "./v2/nav";
 
 /**
  * Shell for the public REPSE content pages (/repse, /software-repse).
@@ -55,7 +55,7 @@ export function MarketingArticleShell({
         type="application/ld+json"
         dangerouslySetInnerHTML={{ __html: JSON.stringify(breadcrumbLd) }}
       />
-      <MarketingNav />
+      <V2Nav />
 
       <article className="mx-auto max-w-[820px] px-5 pb-24 pt-14 lg:pt-20">
         <header>
@@ -83,7 +83,7 @@ export function MarketingArticleShell({
         </footer>
       </article>
 
-      <MarketingFooter />
+      <V2Footer />
     </main>
   );
 }

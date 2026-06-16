@@ -7,11 +7,14 @@ import { ArrowRight, List, X } from "@phosphor-icons/react";
 import { BrandLogo } from "@/components/checkwise/brand-logo";
 import { Button } from "@/components/ui/button";
 
+// Absolute hrefs ("/#sistema") so the nav also works from the sub-pages
+// (/repse, /software-repse, /legal/*); on the landing the browser treats
+// them as same-document fragment jumps.
 const NAV_ITEMS = [
-  { href: "#sistema", label: "Sistema" },
-  { href: "#prevencion", label: "Prevención" },
-  { href: "#ia", label: "IA + revisión" },
-  { href: "#recursos", label: "Recursos" },
+  { href: "/#sistema", label: "Sistema" },
+  { href: "/#prevencion", label: "Prevención" },
+  { href: "/#ia", label: "IA + revisión" },
+  { href: "/#recursos", label: "Recursos" },
 ] as const;
 
 export function V2Nav() {
@@ -92,7 +95,7 @@ export function V2Nav() {
             <Link href="/login">Iniciar sesión</Link>
           </Button>
           <Button asChild size="sm" className="h-11 rounded-full md:h-8">
-            <Link href="#contacto" onClick={() => setOpen(false)}>
+            <Link href="/#contacto" onClick={() => setOpen(false)}>
               <span className="sm:hidden">Demo</span>
               <span className="hidden sm:inline">Solicitar demo</span>
               <ArrowRight className="h-3.5 w-3.5" weight="bold" aria-hidden="true" />
