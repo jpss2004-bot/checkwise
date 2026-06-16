@@ -22,20 +22,15 @@ export class AdminApiError extends Error {
 
 async function fetchJson<T>(path: string, init: RequestInit = {}): Promise<T> {
   const session = readAdminSession();
-  if (!session) {
+  if (!session?.access_token) {
     throw new AdminApiError(401, "No active admin session.");
   }
   const headers = new Headers(init.headers ?? {});
   if (!headers.has("Content-Type") && init.body) {
     headers.set("Content-Type", "application/json");
   }
-  // FE-SEC-1: auth via the httpOnly session cookie, not a localStorage
-  // JWT. credentials:"include" sends the cookie; no Authorization header.
-  const response = await fetch(`${API_BASE_URL}${path}`, {
-    ...init,
-    headers,
-    credentials: "include",
-  });
+  headers.set("Authorization", `Bearer ${session.access_token}`);
+  const response = await fetch(`${API_BASE_URL}${path}`, { ...init, headers });
   if (!response.ok) {
     const detail = await response.text().catch(() => "");
     throw new AdminApiError(response.status, detail || response.statusText);
@@ -674,12 +669,12 @@ export async function getMetadataExportPreview(
 
 export async function downloadMetadataExport(id: string): Promise<Blob> {
   const session = readAdminSession();
-  if (!session) {
+  if (!session?.access_token) {
     throw new AdminApiError(401, "No active admin session.");
   }
   const response = await fetch(
     `${API_BASE_URL}/api/v1/admin/metadata-exports/${id}/download`,
-    { credentials: "include" },
+    { headers: { Authorization: `Bearer ${session.access_token}` } },
   );
   if (!response.ok) {
     const detail = await response.text().catch(() => "");
@@ -698,12 +693,12 @@ export async function downloadClientMasterMetadata(
   clientId: string,
 ): Promise<Blob> {
   const session = readAdminSession();
-  if (!session) {
+  if (!session?.access_token) {
     throw new AdminApiError(401, "No active admin session.");
   }
   const response = await fetch(
     `${API_BASE_URL}/api/v1/admin/metadata-exports/clients/${clientId}/master/download`,
-    { credentials: "include" },
+    { headers: { Authorization: `Bearer ${session.access_token}` } },
   );
   if (!response.ok) {
     const detail = await response.text().catch(() => "");

@@ -24,15 +24,7 @@ async function fetchJson<T>(path: string, init: RequestInit = {}): Promise<T> {
   if (!headers.has("Content-Type") && init.body) {
     headers.set("Content-Type", "application/json");
   }
-  // FE-SEC-1: every auth call sends the httpOnly session cookie. login's
-  // Set-Cookie is only stored by the browser when the request opts into
-  // credentials:"include"; /me, /set-password, /enter then authenticate
-  // via that cookie instead of a localStorage bearer token.
-  const response = await fetch(`${API_BASE_URL}${path}`, {
-    ...init,
-    headers,
-    credentials: "include",
-  });
+  const response = await fetch(`${API_BASE_URL}${path}`, { ...init, headers });
   if (!response.ok) {
     const detail = await response.text().catch(() => "");
     throw new AuthApiError(response.status, detail || response.statusText);
@@ -61,11 +53,7 @@ export async function login(
     body: JSON.stringify({ email, password }),
   });
   return {
-    // FE-SEC-1: the real JWT is NOT persisted client-side anymore — it
-    // lives only in the httpOnly cookie the backend just set. We carry a
-    // placeholder so existing TypeScript consumers keep compiling (mirrors
-    // the provider portal's "cookie-managed" sentinel).
-    access_token: "cookie-managed",
+    access_token: payload.access_token,
     expires_at: payload.expires_at,
     user: payload.user,
     roles: payload.roles,
@@ -84,11 +72,11 @@ type MeResponse = {
   token_expires_at: string;
 };
 
-export async function getCurrentAdmin(): Promise<MeResponse> {
-  // FE-SEC-1: re-hydrate via the httpOnly session cookie (credentials:
-  // include in fetchJson). The token param is vestigial — kept so callers
-  // that still pass the placeholder keep compiling.
-  return await fetchJson<MeResponse>("/api/v1/auth/me", { method: "GET" });
+export async function getCurrentAdmin(token: string): Promise<MeResponse> {
+  return await fetchJson<MeResponse>("/api/v1/auth/me", {
+    method: "GET",
+    headers: { Authorization: `Bearer ${token}` },
+  });
 }
 
 type SetPasswordResponse = {
@@ -97,12 +85,12 @@ type SetPasswordResponse = {
 };
 
 export async function setPassword(
+  token: string,
   newPassword: string,
 ): Promise<SetPasswordResponse> {
-  // FE-SEC-1: authenticate via the session cookie set at login (the
-  // /activate flow logs in first). Token param vestigial.
   return await fetchJson<SetPasswordResponse>("/api/v1/auth/set-password", {
     method: "POST",
+    headers: { Authorization: `Bearer ${token}` },
     body: JSON.stringify({ new_password: newPassword }),
   });
 }
@@ -169,15 +157,13 @@ type EnterResponse = {
  * browser. After this call, /portal/* endpoints work via cookie.
  */
 export async function enterPortal(
-  _token?: string,
+  token: string,
   workspaceId?: string,
 ): Promise<EnterResponse> {
-  // FE-SEC-1: mint the portal cookie off the admin session cookie
-  // (credentials:include in fetchJson). The backend /portal/enter
-  // resolves the user via that cookie and verifies workspace ownership.
-  // Token param vestigial.
   return await fetchJson<EnterResponse>("/api/v1/portal/enter", {
     method: "POST",
+    credentials: "include",
+    headers: { Authorization: `Bearer ${token}` },
     body: JSON.stringify(workspaceId ? { workspace_id: workspaceId } : {}),
   });
 }

@@ -50,13 +50,15 @@ export async function downloadAuthenticatedFile(
   fallbackFilename: string,
 ): Promise<void> {
   const session = readAdminSession();
-  if (!session) {
+  if (!session?.access_token) {
     throw new DownloadError(401, "No active staff session.");
   }
   let response: Response;
   try {
-    // FE-SEC-1: auth via the httpOnly session cookie.
-    response = await fetch(url, { credentials: "include" });
+    response = await fetch(url, {
+      headers: { Authorization: `Bearer ${session.access_token}` },
+      credentials: "include",
+    });
   } catch {
     throw new DownloadError(0, "No pudimos contactar al servidor.");
   }

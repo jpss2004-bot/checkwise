@@ -48,13 +48,14 @@ export class SearchApiError extends Error {
 async function searchFetch(
   path: string,
   query: string,
-  _token: string | null,
+  token: string | null,
   init: RequestInit = {},
 ): Promise<SearchResponse> {
   const url = `${API_BASE_URL}${path}?q=${encodeURIComponent(query)}&limit=50`;
-  // FE-SEC-1: auth via the httpOnly session cookie (credentials:include);
-  // the token param is vestigial.
   const headers = new Headers(init.headers ?? {});
+  if (token) {
+    headers.set("Authorization", `Bearer ${token}`);
+  }
   const response = await fetch(url, {
     ...init,
     headers,

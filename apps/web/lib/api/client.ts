@@ -28,15 +28,14 @@ export class ClientApiError extends Error {
 
 async function fetchJson<T>(path: string, init: RequestInit = {}): Promise<T> {
   const session = readAdminSession();
-  if (!session) {
+  if (!session?.access_token) {
     throw new ClientApiError(401, "No active staff session.");
   }
   const headers = new Headers(init.headers ?? {});
   if (!headers.has("Content-Type") && init.body) {
     headers.set("Content-Type", "application/json");
   }
-  // FE-SEC-1: auth via the httpOnly session cookie (credentials:include),
-  // not a localStorage JWT.
+  headers.set("Authorization", `Bearer ${session.access_token}`);
   const controller = init.signal ? null : new AbortController();
   const timeoutId = controller
     ? setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS)
@@ -46,7 +45,6 @@ async function fetchJson<T>(path: string, init: RequestInit = {}): Promise<T> {
     response = await fetch(`${API_BASE_URL}${path}`, {
       ...init,
       headers,
-      credentials: "include",
       signal: init.signal ?? controller?.signal,
     });
   } catch (err) {
@@ -603,12 +601,16 @@ export async function downloadClientMetadata(params?: {
   client_id?: string;
 }): Promise<Blob> {
   const session = readAdminSession();
-  if (!session) {
+  if (!session?.access_token) {
     throw new ClientApiError(401, "No active staff session.");
   }
   const response = await fetch(
     `${API_BASE_URL}/api/v1/client/metadata/download${qs(params)}`,
-    { credentials: "include" },
+    {
+      headers: {
+        Authorization: `Bearer ${session.access_token}`,
+      },
+    },
   );
   if (!response.ok) {
     const detail = await response.text().catch(() => "");
@@ -673,12 +675,17 @@ export async function fetchClientSubmissionDocumentBlob(
   opts: { download?: boolean } = {},
 ): Promise<string> {
   const session = readAdminSession();
-  if (!session) {
+  if (!session?.access_token) {
     throw new ClientApiError(401, "No active staff session.");
   }
+  const headers = new Headers();
+  headers.set("Authorization", `Bearer ${session.access_token}`);
   const response = await fetch(
     clientSubmissionDocumentUrl(submissionId, { ...opts, proxy: true }),
-    { credentials: "include" },
+    {
+      headers,
+      credentials: "include",
+    },
   );
   if (!response.ok) {
     const detail = await response.text().catch(() => "");
@@ -893,10 +900,11 @@ export async function downloadClientAuditPackageZipPost(
   body: AuditPackageFilters & { submission_ids: string[] },
 ): Promise<{ blob: Blob; filename: string }> {
   const session = readAdminSession();
-  if (!session) {
+  if (!session?.access_token) {
     throw new ClientApiError(401, "No active staff session.");
   }
   const headers = new Headers();
+  headers.set("Authorization", `Bearer ${session.access_token}`);
   headers.set("Content-Type", "application/json");
   const response = await fetch(
     `${API_BASE_URL}/api/v1/client/audit-package.zip`,

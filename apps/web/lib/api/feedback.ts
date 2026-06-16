@@ -46,7 +46,7 @@ export interface FeedbackFailure {
 export type FeedbackResult = FeedbackSuccess | FeedbackFailure;
 
 export async function submitFeedback(
-  _token: string,
+  token: string,
   payload: FeedbackPayload,
 ): Promise<FeedbackResult> {
   const body = new FormData();
@@ -65,8 +65,7 @@ export async function submitFeedback(
   try {
     res = await fetch(`${API_BASE_URL}/api/v1/feedback`, {
       method: "POST",
-      // FE-SEC-1: reporter attribution via the httpOnly session cookie.
-      credentials: "include",
+      headers: { Authorization: `Bearer ${token}` },
       body,
     });
   } catch {

@@ -13,6 +13,8 @@
  * a thrown exception.
  */
 
+import { readAdminSession } from "@/lib/session/admin";
+
 const API_BASE_URL =
   (typeof process !== "undefined" && process.env.NEXT_PUBLIC_API_BASE_URL) ||
   "http://127.0.0.1:8000";
@@ -58,9 +60,10 @@ export interface PhoneConfirmResponse {
 }
 
 function bearerHeader(): Record<string, string> {
-  // FE-SEC-1: auth now rides the httpOnly session cookie (every fetch in
-  // this module uses credentials:include); no localStorage bearer header.
-  return {};
+  const session = readAdminSession();
+  return session?.access_token
+    ? { Authorization: `Bearer ${session.access_token}` }
+    : {};
 }
 
 export async function fetchNotificationPreferences(): Promise<

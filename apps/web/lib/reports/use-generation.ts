@@ -134,12 +134,11 @@ export function useReportGeneration(reportId: string): UseReportGeneration {
           `${API_BASE_URL}/api/v1/reports/${reportId}/generate`,
           {
             method: "POST",
-            // FE-SEC-1: auth via the httpOnly session cookie.
             headers: {
               "Content-Type": "application/json",
+              Authorization: `Bearer ${session.access_token}`,
               Accept: "text/event-stream",
             },
-            credentials: "include",
             body: JSON.stringify({
               prompt,
               period: period ?? null,

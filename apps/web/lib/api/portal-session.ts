@@ -17,6 +17,8 @@
  * UX (the alternative is a noisy redirect loop).
  */
 
+import { readAdminSession } from "@/lib/session/admin";
+
 const API_BASE_URL =
   (typeof process !== "undefined" && process.env.NEXT_PUBLIC_API_BASE_URL) ||
   "http://127.0.0.1:8000";
@@ -65,9 +67,10 @@ export interface WorkspaceProfileUpdate {
 }
 
 function bearerHeader(): Record<string, string> {
-  // FE-SEC-1: auth now rides the httpOnly session cookie (every fetch in
-  // this module uses credentials:include); no localStorage bearer header.
-  return {};
+  const session = readAdminSession();
+  return session?.access_token
+    ? { Authorization: `Bearer ${session.access_token}` }
+    : {};
 }
 
 /** Fetch the current session summary. JWT-first, cookie-fallback. */
