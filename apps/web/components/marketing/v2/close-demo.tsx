@@ -5,10 +5,12 @@ import { Button } from "@/components/ui/button";
 import { DEMO_BOOKING_URL } from "@/lib/marketing/booking";
 
 import { Container, Eyebrow } from "./_shared";
+import { PullIn } from "./pull-in";
 
 /**
  * Section 10 — Cierre · Demo guiada. Bold dark conversion moment (primary
- * goal = demo bookings). Glowing gradient CTA, branded booking card.
+ * goal = demo bookings). Glowing gradient CTA, branded booking card that
+ * pulls back into view (camera steps back to take in the whole picture).
  */
 const POINTS = [
   "Demo en vivo sobre el producto real, no diapositivas.",
@@ -55,7 +57,7 @@ export function V2CloseDemo() {
             </ul>
           </div>
 
-          <div className="rounded-3xl border border-white/12 bg-white/[0.04] p-8 shadow-[0_30px_80px_-30px_rgba(0,0,0,0.6)] backdrop-blur">
+          <PullIn className="rounded-3xl border border-white/12 bg-white/[0.04] p-8 shadow-[0_30px_80px_-30px_rgba(0,0,0,0.6)] backdrop-blur">
             <div className="flex items-center gap-3">
               <span className="inline-flex h-11 w-11 items-center justify-center rounded-xl bg-[hsl(var(--teal-500))]/15 text-[hsl(var(--teal-300))]">
                 <CalendarCheck className="h-5 w-5" weight="duotone" aria-hidden="true" />
@@ -97,7 +99,7 @@ export function V2CloseDemo() {
                 <Link href="/login">Ya tengo acceso</Link>
               </Button>
             </div>
-          </div>
+          </PullIn>
         </div>
       </Container>
     </section>
