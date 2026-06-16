@@ -10,9 +10,7 @@ const LOGOS = [
   "Benotto",
   "Giormar",
   "Samano Abogados",
-  "Grupo Castores",
-  "Vitrocrisa",
-  "Pisa Farmacéutica",
+  "+ más",
 ] as const;
 
 export function V2Proof() {
