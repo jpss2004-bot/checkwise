@@ -1486,3 +1486,58 @@ class PhoneVerification(Base):
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), default=utc_now, nullable=False
     )
+
+
+class ExpedienteAssessment(TimestampMixin, Base):
+    """Phase 2 — expediente-level situational assessment.
+
+    Where ``DocumentInspection.shadow_signals['comprehension']`` (Phase 1)
+    reasons about ONE document, this row reasons about the WHOLE situation
+    for a provider in a period: cross-document coherence (does the IMSS
+    headcount match the contract's ``estimated_workers``, is the REPSE
+    authorized activity consistent with the contracted service, do the
+    periods/entities cohere across documents) plus obligation coverage
+    gaps.
+
+    Reviewer-facing and additive — like the shadow columns it never alters
+    user-visible status. One row per assessment run; re-runs append
+    (history), newest by ``created_at``.
+    """
+
+    __tablename__ = "expediente_assessments"
+    __table_args__ = (
+        Index(
+            "ix_expediente_assessments_scope",
+            "client_id",
+            "vendor_id",
+            "period_id",
+            "created_at",
+        ),
+    )
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=new_id)
+    client_id: Mapped[str] = mapped_column(ForeignKey("clients.id"), nullable=False)
+    vendor_id: Mapped[str] = mapped_column(ForeignKey("vendors.id"), nullable=False)
+    period_id: Mapped[str | None] = mapped_column(ForeignKey("periods.id"))
+    contract_id: Mapped[str | None] = mapped_column(ForeignKey("contracts.id"))
+
+    # LLM provenance, mirroring the ``DocumentInspection.shadow_*`` columns.
+    provider_id: Mapped[str | None] = mapped_column(String(120))
+    prompt_version: Mapped[str | None] = mapped_column(String(60))
+
+    # Overall situational read: "coherent" | "minor_issues" |
+    # "incoherent" | "indeterminate". NULL when the run errored.
+    coherence: Mapped[str | None] = mapped_column(String(20))
+    # list of {code, severity, detail_es, evidence} — cross-document
+    # situational findings (headcount mismatch, activity inconsistency,
+    # period incoherence, entity mismatch, contract-window mismatch, ...).
+    findings: Mapped[list | None] = mapped_column(JSON)
+    # list of {requirement_code, detail_es} — obligations the situation
+    # implies but that are missing or unsatisfied in the assessed set.
+    coverage_gaps: Mapped[list | None] = mapped_column(JSON)
+    # The documents that were part of this assessment (audit trail).
+    document_ids: Mapped[list | None] = mapped_column(JSON)
+    summary_for_reviewer: Mapped[str | None] = mapped_column(Text)
+
+    latency_ms: Mapped[int | None] = mapped_column(Integer)
+    error: Mapped[str | None] = mapped_column(Text)

@@ -351,6 +351,13 @@ class Settings(BaseSettings):
     DOCUMENT_ANALYSIS_DEEP_MAX_TOKENS: int = 8192
     DOCUMENT_ANALYSIS_DEEP_TIMEOUT_SECONDS: float = 90.0
 
+    # Phase 2 (expediente) — the situational pass reasons across a whole
+    # provider+period document set. Opt-in (off by default) and counted
+    # against the per-org escalation cap, since each run is a deep call on
+    # the stronger model. Uses ``DOCUMENT_ANALYSIS_MODEL`` (the deep tier
+    # model) + the deep max-tokens/timeout knobs above.
+    DOCUMENT_ANALYSIS_EXPEDIENTE_ENABLED: bool = False
+
     # Phase 3 — pilot-cohort allowlist. CSV of ``client.id`` values
     # that are allowed to receive shadow analysis. Empty string (the
     # default) disables the gate, so every org is in scope. When set,
