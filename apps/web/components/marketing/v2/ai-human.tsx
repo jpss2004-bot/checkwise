@@ -1,0 +1,47 @@
+import { AiHandoff } from "./ai-handoff";
+import { Container, Eyebrow } from "./_shared";
+
+/**
+ * Section 06 — IA + Humano · Confianza.
+ * Bold dark band (gravity/trust). The hand-off cycles IA → human → signed.
+ */
+const GUARDS = [
+  "La IA no aprueba documentos legales",
+  "No reemplaza la revisión humana",
+  "No cambia estados sin registro",
+] as const;
+
+export function V2AiHuman() {
+  return (
+    <section id="ia" className="relative overflow-hidden bg-[#03141f] text-white">
+      <div
+        aria-hidden="true"
+        className="pointer-events-none absolute -top-[10%] left-[18%] -z-0 h-[520px] w-[520px] rounded-full opacity-25 blur-[150px] [background:radial-gradient(circle,#09c1b0,transparent_62%)]"
+      />
+      <Container className="relative py-[clamp(4.5rem,9vw,8rem)]">
+        <Eyebrow tone="onNavy">AI + revisión humana</Eyebrow>
+        <h2 className="font-display mt-4 max-w-[18ch] text-[clamp(2rem,3.6vw,3.2rem)] font-bold leading-[1.05] tracking-[-0.02em] [text-wrap:balance]">
+          CheckWise acelera el criterio.{" "}
+          <span className="text-[hsl(var(--teal-300))]">No lo reemplaza.</span>
+        </h2>
+        <p className="mt-5 max-w-[52ch] text-[16px] leading-[1.6] text-[hsl(var(--navy-200))]">
+          La IA explica, redacta y convierte estados en reportes. Las decisiones
+          críticas siguen siendo del equipo, con actor, acción y cambio firmado.
+        </p>
+        <div className="mt-12">
+          <AiHandoff />
+        </div>
+        <div className="mt-8 flex flex-wrap gap-2.5">
+          {GUARDS.map((g) => (
+            <span
+              key={g}
+              className="rounded-full border border-white/14 px-3.5 py-1.5 text-[12.5px] text-[hsl(var(--navy-200))]"
+            >
+              {g}
+            </span>
+          ))}
+        </div>
+      </Container>
+    </section>
+  );
+}

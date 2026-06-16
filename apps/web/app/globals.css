@@ -411,6 +411,14 @@ pre {
   max-width: var(--prose-max-width);
 }
 
+/* v2 redesign — display typeface (Schibsted Grotesk), loaded in
+   app/v2/layout.tsx and scoped via --font-display. Used on headings only;
+   falls back to Open Sans / Geist so it never blocks render. */
+.font-display {
+  font-family: var(--font-display), "Open Sans", var(--font-geist-sans),
+    system-ui, sans-serif;
+}
+
 /* Metadata strip — the canonical horizontal label/value composition
    used in page headers, hero, and detail surfaces.
    Use:
