@@ -58,8 +58,13 @@ export function V2Hero() {
           </h1>
 
           <p className="mt-6 max-w-[44ch] text-[17px] leading-[1.6] text-[hsl(var(--navy-200))] md:text-[18px]">
-            El expediente auditable que ve qué falta, qué vence y qué está en
-            riesgo. Antes de la inspección.
+            La plataforma de cumplimiento REPSE que monitorea a tus
+            proveedores, detecta faltantes y vencimientos antes de la
+            inspección, y genera el expediente auditable listo para la
+            autoridad.
+          </p>
+          <p className="mt-3 text-[12.5px] tracking-[0.01em] text-[hsl(var(--navy-200)_/_0.55)]">
+            Para empresas que contratan servicios especializados.
           </p>
 
           <div className="mt-9 flex flex-wrap items-center gap-3.5">

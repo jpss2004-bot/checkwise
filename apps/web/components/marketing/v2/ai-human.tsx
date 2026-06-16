@@ -6,9 +6,9 @@ import { Container, Eyebrow } from "./_shared";
  * Bold dark band (gravity/trust). The hand-off cycles IA → human → signed.
  */
 const GUARDS = [
-  "La IA no aprueba documentos legales",
-  "No reemplaza la revisión humana",
-  "No cambia estados sin registro",
+  "Cada revisión firmada: actor, acción y fecha",
+  "La aprobación es siempre de una persona",
+  "Historial completo e inalterable",
 ] as const;
 
 export function V2AiHuman() {
@@ -25,8 +25,9 @@ export function V2AiHuman() {
           <span className="text-[hsl(var(--teal-300))]">No lo reemplaza.</span>
         </h2>
         <p className="mt-6 max-w-[54ch] text-[18px] leading-[1.6] text-[hsl(var(--navy-200))] md:text-[19px]">
-          La IA explica, redacta y convierte estados en reportes. Las decisiones
-          críticas siguen siendo del equipo, con actor, acción y cambio firmado.
+          La IA lee documentos, detecta anomalías y redacta observaciones.
+          La aprobación de cada documento queda firmada por una persona, con
+          actor, acción y fecha registrada.
         </p>
         <div className="mt-12">
           <AiHandoff />

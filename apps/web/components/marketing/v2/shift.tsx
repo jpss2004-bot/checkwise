@@ -17,10 +17,10 @@ import { Eyebrow, Lead, Section, SectionTitle } from "./_shared";
  * Light band = relief after the two dark risk scenes.
  */
 const STEPS = [
-  { n: "01", icon: MagnifyingGlass, title: "Detecta", body: "Faltantes y vencimientos por requisito." },
-  { n: "02", icon: ShieldCheck, title: "Valida", body: "Verificación con IA y revisión humana." },
-  { n: "03", icon: BellRinging, title: "Anticipa", body: "Recordatorios antes de cada vencimiento." },
-  { n: "04", icon: SealCheck, title: "Demuestra", body: "Expediente auditable y reportes, siempre listos." },
+  { n: "01", icon: MagnifyingGlass, title: "Detecta", body: "Ve qué falta y qué vence, por proveedor, requisito y periodo." },
+  { n: "02", icon: ShieldCheck, title: "Valida", body: "La IA clasifica el documento. El equipo CheckWise firma la decisión." },
+  { n: "03", icon: BellRinging, title: "Anticipa", body: "Alertas 30 días antes del vencimiento, por correo y en el semáforo." },
+  { n: "04", icon: SealCheck, title: "Demuestra", body: "Exporta el expediente firmado en PDF, Excel o HTML, listo para la inspección." },
 ] as const;
 
 // Node centres in the SVG viewBox — a pronounced wave (high, low, high, low)

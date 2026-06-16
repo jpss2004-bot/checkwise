@@ -23,12 +23,12 @@ export function V2Proof() {
       <div className="grid items-center gap-12 lg:grid-cols-[1fr_1fr] lg:gap-16">
         <div>
           <Eyebrow>Confían en Legal Shelf</Eyebrow>
-          <SectionTitle accent="ya confían en CheckWise." className="mt-4">
-            Empresas con cientos de proveedores
+          <SectionTitle accent="ya operan con CheckWise." className="mt-4">
+            Empresas líderes
           </SectionTitle>
           <p className="mt-5 max-w-[44ch] text-[16px] leading-[1.6] text-[color:var(--text-secondary)]">
-            Construido por Legal Shelf, la firma de cumplimiento detrás de
-            CheckWise.
+            Construido por Legal Shelf, la firma de abogados especializada en
+            cumplimiento REPSE con sede en Ciudad de México.
           </p>
 
           <div className="mt-9 flex flex-wrap gap-x-10 gap-y-6">
@@ -46,7 +46,7 @@ export function V2Proof() {
                 <br />a horas
               </div>
               <div className="mt-2 max-w-[22ch] text-[13.5px] text-[color:var(--text-secondary)]">
-                para preparar una auditoría
+                para preparar una auditoría REPSE desde cero
               </div>
             </div>
           </div>
