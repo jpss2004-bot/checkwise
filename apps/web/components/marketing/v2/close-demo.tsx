@@ -4,6 +4,8 @@ import { ArrowRight, CalendarCheck, CheckCircle } from "@phosphor-icons/react/di
 import { Button } from "@/components/ui/button";
 import { DEMO_BOOKING_URL } from "@/lib/marketing/booking";
 
+import { ContactForm } from "./contact-form";
+
 import { Container, Eyebrow } from "./_shared";
 import { PullIn } from "./pull-in";
 
@@ -90,15 +92,17 @@ export function V2CloseDemo() {
                   />
                 </a>
               </Button>
-              <Button
-                asChild
-                variant="ghost"
-                size="lg"
-                className="w-full justify-center rounded-full border border-white/20 text-white hover:bg-white/10 hover:text-white"
-              >
-                <Link href="/login">Ya tengo acceso</Link>
-              </Button>
             </div>
+
+            <div className="my-5 flex items-center gap-3">
+              <div className="h-px flex-1 bg-white/10" aria-hidden="true" />
+              <span className="text-[11px] text-[hsl(var(--navy-200)_/_0.6)]">
+                o escríbenos directamente
+              </span>
+              <div className="h-px flex-1 bg-white/10" aria-hidden="true" />
+            </div>
+
+            <ContactForm source="demo-cta" />
           </PullIn>
         </div>
       </Container>

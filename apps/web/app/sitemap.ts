@@ -12,7 +12,7 @@ import { SITE_URL } from "@/lib/site";
  * `lastModified` is a content-stable date, not the build time, so the
  * sitemap does not churn its timestamps on every deploy.
  */
-const LAST_MODIFIED = "2026-06-12";
+const LAST_MODIFIED = "2026-06-16";
 
 export default function sitemap(): MetadataRoute.Sitemap {
   return [
@@ -33,6 +33,18 @@ export default function sitemap(): MetadataRoute.Sitemap {
       lastModified: LAST_MODIFIED,
       changeFrequency: "monthly",
       priority: 0.8,
+    },
+    {
+      url: `${SITE_URL}/sobre-checkwise`,
+      lastModified: LAST_MODIFIED,
+      changeFrequency: "monthly",
+      priority: 0.7,
+    },
+    {
+      url: `${SITE_URL}/seguridad`,
+      lastModified: LAST_MODIFIED,
+      changeFrequency: "monthly",
+      priority: 0.6,
     },
     {
       url: `${SITE_URL}/login`,
