@@ -36,10 +36,10 @@ export function V2Nav() {
 
   return (
     <header
-      className={`sticky top-0 z-40 border-b backdrop-blur transition-[background,border-color,box-shadow] duration-300 ${
+      className={`sticky top-0 z-40 border-b backdrop-blur-xl backdrop-saturate-150 transition-[background-color,border-color,box-shadow] duration-300 ${
         elevated || open
-          ? "border-[color:var(--border-default)] bg-[color:var(--surface-raised)]/92 shadow-[0_8px_24px_-18px_hsl(var(--brand-navy)/0.35)]"
-          : "border-[color:var(--border-subtle)] bg-[color:var(--surface-raised)]"
+          ? "border-[hsl(var(--navy-200)/0.55)] bg-[hsl(var(--navy-50)/0.85)] shadow-[0_10px_30px_-18px_hsl(var(--brand-navy)/0.4)]"
+          : "border-[hsl(var(--navy-100)/0.5)] bg-[hsl(var(--navy-50)/0.6)]"
       }`}
     >
       <div
@@ -48,7 +48,7 @@ export function V2Nav() {
         }`}
       >
         <Link
-          href="/v2"
+          href="/"
           aria-label="CheckWise inicio"
           className="flex items-center gap-2.5"
           onClick={() => setOpen(false)}
