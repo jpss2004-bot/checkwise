@@ -27,6 +27,7 @@ from fastapi import (
     Depends,
     HTTPException,
     Query,
+    Request,
     Response,
     status,
 )
@@ -43,7 +44,7 @@ from app.constants.reports import (
     ReportVersionOrigin,
 )
 from app.core.config import settings
-from app.core.rate_limit import enforce_ai_heavy_rate_limit
+from app.core.rate_limit import client_ip_from_request, enforce_ai_heavy_rate_limit
 from app.db.session import SessionLocal, get_db
 from app.models.entities import Report, ReportExport, ReportShare, ReportVersion
 from app.schemas.reports import (
@@ -63,6 +64,7 @@ from app.schemas.reports import (
     ReportVersionRead,
     ReportVersionSummary,
 )
+from app.services.audit_log import add_audit_event
 from app.services.report_service import (
     ReportActor,
     ReportNotFoundError,
@@ -1897,6 +1899,7 @@ def _share_consume_url(token: str) -> str:
 def post_report_share(
     report_id: str,
     payload: CreateReportSharePayload,
+    request: Request,
     db: DbSession,
     current: Annotated[CurrentUser, Depends(get_current_user)],
 ) -> MintReportShareResponse:
@@ -1951,6 +1954,28 @@ def post_report_share(
         expires_at=expires,
         password=payload.password,
     )
+    db.flush()  # populate row.id for the audit reference
+    # AUDIT-SHARE — disclosure of compliance evidence to an external party
+    # is the "evidence left the building" event an ISO 37001 / 27002 8.15
+    # auditor will demand. Record WHO minted WHAT, to which audience, with
+    # what expiry — never the raw token.
+    add_audit_event(
+        db,
+        action="report.share_minted",
+        entity_type="report",
+        entity_id=report.id,
+        actor_type="user",
+        actor_id=current.user.id,
+        metadata={
+            "share_id": row.id,
+            "version_id": version.id,
+            "audience": report.audience,
+            "expires_at": expires.isoformat() if expires else None,
+            "password_protected": payload.password is not None,
+        },
+        ip_address=client_ip_from_request(request),
+        user_agent=(request.headers.get("user-agent") or "")[:512] or None,
+    )
     db.commit()
     db.refresh(row)
     return MintReportShareResponse(
@@ -2000,6 +2025,7 @@ def get_report_shares(
 )
 def delete_report_share(
     share_id: str,
+    request: Request,
     db: DbSession,
     current: Annotated[CurrentUser, Depends(get_current_user)],
 ) -> Response:
@@ -2019,5 +2045,18 @@ def delete_report_share(
             status.HTTP_404_NOT_FOUND, detail="Enlace compartido no encontrado."
         ) from exc
     revoke_share(db, share=share)
+    # AUDIT-SHARE — record the revocation (the "access cut off" half of the
+    # disclosure trail).
+    add_audit_event(
+        db,
+        action="report.share_revoked",
+        entity_type="report",
+        entity_id=share.report_id,
+        actor_type="user",
+        actor_id=current.user.id,
+        metadata={"share_id": share.id, "audience": share.audience},
+        ip_address=client_ip_from_request(request),
+        user_agent=(request.headers.get("user-agent") or "")[:512] or None,
+    )
     db.commit()
     return Response(status_code=status.HTTP_204_NO_CONTENT)

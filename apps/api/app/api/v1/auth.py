@@ -37,6 +37,7 @@ from pydantic import BaseModel, Field, field_validator
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
+from app.core.common_passwords import is_common_password
 from app.core.config import settings
 from app.core.rate_limit import (
     forgot_password_limiter,
@@ -198,6 +199,14 @@ def _enforce_password_rules(value: str) -> str:
         raise ValueError("La contraseña debe incluir al menos una letra minúscula.")
     if not any(c.isdigit() for c in value):
         raise ValueError("La contraseña debe incluir al menos un número.")
+    # AUTH G-4 — reject high-frequency / breached passwords that pass the
+    # composition rules (e.g. "Password1234", "Bienvenido2026"). Offline
+    # denylist, no network call.
+    if is_common_password(value):
+        raise ValueError(
+            "Esta contraseña es demasiado común o aparece en listas de "
+            "contraseñas filtradas. Elige una contraseña única."
+        )
     return value
 
 
@@ -1005,14 +1014,56 @@ def me(current: Annotated[CurrentUser, Depends(get_current_user)]) -> CurrentUse
 
 
 @router.post("/logout", status_code=status.HTTP_204_NO_CONTENT)
-def logout() -> Response:
-    """Clear the httpOnly session cookie (FE-SEC-1).
+def logout(
+    request: Request,
+    db: DbSession,
+    authorization: Annotated[str | None, Header()] = None,
+) -> Response:
+    """Clear the httpOnly session cookie (FE-SEC-1) and audit the logout.
 
     Stateless JWTs can't be server-revoked, so logout is a cookie clear:
-    the frontend also drops any in-memory/localStorage token. Safe to
-    call unauthenticated (idempotent). The cookie attributes must match
-    the ones ``login`` set or the browser won't remove it.
+    the frontend also drops any in-memory token. Safe to call
+    unauthenticated (idempotent). The cookie attributes must match the
+    ones ``login`` set or the browser won't remove it.
+
+    G-7 — best-effort resolve the principal from the bearer header or the
+    session cookie and write an ``auth.logout`` row so session-end has a
+    forensic trail (mirrors the login-success/failure audit). Resolution
+    and auditing are wrapped so logout can never fail or leak — an
+    anonymous/expired-token logout still returns 204.
     """
+    token = ""
+    if authorization:
+        try:
+            token = _bearer_token(authorization)
+        except HTTPException:
+            token = ""
+    if not token:
+        token = request.cookies.get(settings.AUTH_SESSION_COOKIE_NAME) or ""
+
+    if token:
+        try:
+            claims = decode_access_token(token)
+        except TokenError:
+            claims = None
+        if claims is not None:
+            try:
+                ip, ua = _audit_provenance(request)
+                add_audit_event(
+                    db,
+                    action="auth.logout",
+                    entity_type="user",
+                    entity_id=claims.user_id,
+                    actor_type="user",
+                    actor_id=claims.user_id,
+                    after={"email": claims.email},
+                    ip_address=ip,
+                    user_agent=ua,
+                )
+                db.commit()
+            except Exception:  # noqa: BLE001 — logout must never fail
+                db.rollback()
+
     resp = Response(status_code=status.HTTP_204_NO_CONTENT)
     resp.delete_cookie(
         key=settings.AUTH_SESSION_COOKIE_NAME,

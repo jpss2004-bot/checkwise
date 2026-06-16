@@ -48,6 +48,17 @@ class SecurityHeadersMiddleware(BaseHTTPMiddleware):
                 "Content-Security-Policy",
                 "default-src 'none'; frame-ancestors 'none'; base-uri 'none'",
             )
+        else:
+            # INFRA-1 (extension) — non-JSON responses (inline PDFs, ZIP
+            # streams, redirects, the default 422/500 bodies) still get the
+            # non-render-blocking CSP subset, so clickjacking (frame-ancestors)
+            # and <base> hijack (base-uri) are denied on every response, not
+            # just JSON. ``default-src 'none'`` stays JSON-only so it never
+            # blocks a legitimately served file.
+            response.headers.setdefault(
+                "Content-Security-Policy",
+                "frame-ancestors 'none'; base-uri 'none'",
+            )
         if not settings.is_local_env:
             response.headers.setdefault(
                 "Strict-Transport-Security",
@@ -157,7 +168,12 @@ def create_app() -> FastAPI:
         )
         origin = request.headers.get("origin")
         headers: dict[str, str] = {}
-        if origin and ("*" in allowed_origins or origin in allowed_origins):
+        # Only reflect an exact-match allowlisted Origin. The CORSMiddleware
+        # forbids ``*`` with credentials; this handler must not be more
+        # permissive, so the ``"*" in allowed_origins`` shortcut is gone —
+        # it would echo any origin with ``Allow-Credentials: true`` if
+        # CORS_ORIGINS were ever misconfigured to a wildcard.
+        if origin and origin in allowed_origins:
             headers["access-control-allow-origin"] = origin
             headers["access-control-allow-credentials"] = "true"
             headers["vary"] = "Origin"
