@@ -1,191 +1,202 @@
+"use client";
+
 import {
   BellRinging,
   MagnifyingGlass,
   SealCheck,
   ShieldCheck,
 } from "@phosphor-icons/react/dist/ssr";
+import { motion } from "motion/react";
 
+import { EASE_ENTER } from "../motion-helpers";
+import { useMotionPreference } from "../motion-preference";
 import { Eyebrow, Lead, Section, SectionTitle } from "./_shared";
 
+/**
+ * Prevención REPSE — the "del seguimiento reactivo a la prevención" beat.
+ *
+ * Earlier this was a closed clockwise circuit: four identical icon tiles at
+ * the corners of a dashed rectangle, the headline boxed in the dead center,
+ * and a comet looping the perimeter forever. A loop is the wrong shape for a
+ * story that goes *from* one state *to* another, and the perpetual motion
+ * read as decoration.
+ *
+ * Now it is a directional semáforo timeline. One rail flows through the four
+ * compliance states the product actually tracks:
+ *   navy  → you can see what is missing (Detecta)
+ *   teal  → the system reasons, a person signs (Valida)
+ *   amber → a deadline is near but still correctable (Anticipa)
+ *   green → proven, ready for the inspection (Demuestra)
+ * A single signal draws down the rail on scroll, lighting each stage as it
+ * passes and sealing on the green node. Color carries state (graphic
+ * elements at >=3:1); the copy stays high-contrast. Reduced motion renders
+ * the whole rail drawn and every word still ships server-side for SEO.
+ */
 const STEPS = [
-  { n: "01", icon: MagnifyingGlass, title: "Detecta", body: "Ve qué falta y qué vence, por proveedor, requisito y periodo." },
-  { n: "02", icon: ShieldCheck, title: "Valida", body: "La IA clasifica el documento. El equipo CheckWise firma la decisión." },
-  { n: "03", icon: BellRinging, title: "Anticipa", body: "Alertas 30 días antes del vencimiento, por correo y en el semáforo." },
-  { n: "04", icon: SealCheck, title: "Demuestra", body: "Exporta el expediente firmado en PDF, Excel o HTML, listo para la inspección." },
+  {
+    n: "01",
+    icon: MagnifyingGlass,
+    title: "Detecta",
+    body: "Ve qué falta y qué vence por proveedor, requisito y periodo, en un expediente auditable con reportes automáticos.",
+    tone: "--brand-navy",
+  },
+  {
+    n: "02",
+    icon: ShieldCheck,
+    title: "Valida",
+    body: "La IA clasifica el documento. El equipo CheckWise firma la decisión.",
+    tone: "--teal-500",
+  },
+  {
+    n: "03",
+    icon: BellRinging,
+    title: "Anticipa",
+    body: "Alertas 30 días antes del vencimiento, por correo y en el semáforo.",
+    tone: "--amber-500",
+  },
+  {
+    n: "04",
+    icon: SealCheck,
+    title: "Demuestra",
+    body: "Exporta el expediente firmado en PDF, Excel o HTML, listo para la inspección.",
+    tone: "--green-500",
+  },
 ] as const;
 
-// Circuit frame — rounded rectangle, nodes at corners, clockwise 01→02→03→04
-const VB_W = 1060;
-const VB_H = 580;
-const FL = 130, FT = 50, FR = 930, FB = 530;
-const R = 28;
-
-const FRAME_PATH = [
-  `M${FL + R},${FT}`,
-  `H${FR - R} Q${FR},${FT} ${FR},${FT + R}`,
-  `V${FB - R} Q${FR},${FB} ${FR - R},${FB}`,
-  `H${FL + R} Q${FL},${FB} ${FL},${FB - R}`,
-  `V${FT + R} Q${FL},${FT} ${FL + R},${FT}`,
-].join(" ");
-
-// Clockwise direction arrows at mid-segment of each side
-const FLOW_ARROWS = [
-  { x: (FL + FR) / 2, y: FT, rot: 0 },
-  { x: FR, y: (FT + FB) / 2, rot: 90 },
-  { x: (FL + FR) / 2, y: FB, rot: 180 },
-  { x: FL, y: (FT + FB) / 2, rot: -90 },
-] as const;
-
-// Nodes at the 4 corners (TL=01, TR=02, BR=03, BL=04)
-const FRAME_NODES = [
-  { step: STEPS[0], x: FL, y: FT, below: true },
-  { step: STEPS[1], x: FR, y: FT, below: true },
-  { step: STEPS[2], x: FR, y: FB, below: false },
-  { step: STEPS[3], x: FL, y: FB, below: false },
-] as const;
+const VIEWPORT = { once: true, amount: 0.25 } as const;
 
 export function V2Shift() {
+  const { reduced } = useMotionPreference();
+
   return (
     <Section id="prevencion" band="soft">
-      {/* Mobile header */}
-      <div className="mx-auto max-w-[44ch] text-center lg:hidden">
-        <Eyebrow className="justify-center">Prevención REPSE</Eyebrow>
-        <SectionTitle accent="a la prevención del riesgo." className="mx-auto mt-4">
-          Del seguimiento reactivo
-        </SectionTitle>
-        <Lead className="mx-auto mt-6">
-          Un solo flujo: detecta, valida, anticipa y demuestra, antes de que
-          llegue la inspección.
-        </Lead>
-      </div>
+      <div className="grid gap-x-[clamp(2rem,5vw,5rem)] gap-y-14 lg:grid-cols-[minmax(0,0.82fr)_minmax(0,1.18fr)]">
+        {/* Anchored header — calm left column, not a centered stack. */}
+        <header className="lg:sticky lg:top-[6.5rem] lg:self-start">
+          <Eyebrow>Prevención REPSE</Eyebrow>
+          <SectionTitle accent="a la prevención del riesgo." className="mt-4">
+            Del seguimiento reactivo
+          </SectionTitle>
+          <Lead className="mt-6 max-w-[42ch]">
+            Un solo flujo: detecta, valida, anticipa y demuestra, antes de que
+            llegue la inspección.
+          </Lead>
+        </header>
 
-      {/* Desktop: circuit frame — headline centered inside, steps at corners */}
-      <div className="relative mx-auto hidden w-full max-w-[1060px] lg:block">
-        <div className="relative" style={{ aspectRatio: `${VB_W} / ${VB_H}` }}>
-          <svg
-            viewBox={`0 0 ${VB_W} ${VB_H}`}
-            fill="none"
-            aria-hidden="true"
-            preserveAspectRatio="xMidYMid meet"
-            className="absolute inset-0 h-full w-full overflow-visible"
-          >
-            {/* Dashed guide frame */}
-            <path
-              d={FRAME_PATH}
-              stroke="hsl(var(--teal-500) / 0.28)"
-              strokeWidth={2.5}
-              strokeLinecap="round"
-              strokeDasharray="2 11"
-            />
-            {/* Animated comet */}
-            <path
-              d={FRAME_PATH}
-              pathLength={100}
-              stroke="hsl(var(--teal-400))"
-              strokeWidth={4}
-              strokeLinecap="round"
-              strokeDasharray="10 90"
-              className="cw-flow-signal"
-              style={{ filter: "drop-shadow(0 0 6px hsl(var(--teal-400) / 0.9))" }}
-            />
-            {/* Mid-segment direction arrows */}
-            {FLOW_ARROWS.map((a, i) => (
-              <g key={i} transform={`translate(${a.x} ${a.y}) rotate(${a.rot})`}>
-                <path d="M-6,-8 L7,0 L-6,8 Z" fill="hsl(var(--teal-500) / 0.7)" />
-              </g>
-            ))}
-          </svg>
-
-          {/* Step nodes at the 4 corners */}
-          {FRAME_NODES.map(({ step, x, y, below }) => {
+        {/* Semáforo timeline — one rail, four states, navy to green. */}
+        <ol className="relative">
+          {STEPS.map((step, i) => {
             const Icon = step.icon;
+            const isLast = i === STEPS.length - 1;
+            const tone = `hsl(var(${step.tone}))`;
+            const nodeDelay = 0.2 + i * 0.22;
+
             return (
-              <div
+              <li
                 key={step.n}
-                className="absolute -translate-x-1/2 -translate-y-1/2"
-                style={{ left: `${(x / VB_W) * 100}%`, top: `${(y / VB_H) * 100}%` }}
+                className="grid grid-cols-[2.75rem_minmax(0,1fr)]"
               >
-                <div className="flex h-16 w-16 items-center justify-center rounded-2xl border border-[color:var(--border-default)] bg-[color:var(--surface-raised)] text-[color:var(--text-teal)] shadow-[var(--shadow-md)]">
-                  <Icon className="h-7 w-7" weight="duotone" aria-hidden="true" />
+                {/* Rail gutter: the node, then the segment down to the next. */}
+                <div className="relative flex flex-col items-center">
+                  <motion.span
+                    className="relative z-10 mt-[0.35rem] block h-3.5 w-3.5 shrink-0 rounded-full"
+                    style={{
+                      backgroundColor: tone,
+                      boxShadow: `0 0 0 3px var(--surface-raised), 0 0 0 6px hsl(var(${step.tone}) / 0.16)`,
+                    }}
+                    initial={reduced ? false : { scale: 0.3, opacity: 0 }}
+                    whileInView={{ scale: 1, opacity: 1 }}
+                    viewport={VIEWPORT}
+                    transition={
+                      reduced
+                        ? undefined
+                        : { duration: 0.45, ease: EASE_ENTER, delay: nodeDelay }
+                    }
+                  >
+                    {/* One-time "sealed" ring on the proven (green) node. */}
+                    {isLast && !reduced ? (
+                      <motion.span
+                        aria-hidden="true"
+                        className="absolute inset-0 rounded-full"
+                        style={{ border: `2px solid ${tone}` }}
+                        initial={{ scale: 1, opacity: 0.7 }}
+                        whileInView={{ scale: 2.6, opacity: 0 }}
+                        viewport={VIEWPORT}
+                        transition={{
+                          duration: 0.9,
+                          ease: EASE_ENTER,
+                          delay: nodeDelay + 0.35,
+                        }}
+                      />
+                    ) : null}
+                  </motion.span>
+
+                  {!isLast ? (
+                    <span
+                      aria-hidden="true"
+                      className="relative -mt-1 mb-[-0.5rem] w-[2px] flex-1 overflow-hidden rounded-full"
+                    >
+                      <span
+                        className="absolute inset-0 rounded-full"
+                        style={{ backgroundColor: "hsl(var(--brand-navy) / 0.1)" }}
+                      />
+                      <motion.span
+                        className="absolute inset-0 origin-top rounded-full"
+                        style={{
+                          backgroundImage: `linear-gradient(to bottom, hsl(var(${step.tone})), hsl(var(${STEPS[i + 1].tone})))`,
+                        }}
+                        initial={reduced ? false : { scaleY: 0 }}
+                        whileInView={{ scaleY: 1 }}
+                        viewport={VIEWPORT}
+                        transition={
+                          reduced
+                            ? undefined
+                            : {
+                                duration: 0.7,
+                                ease: EASE_ENTER,
+                                delay: 0.32 + i * 0.22,
+                              }
+                        }
+                      />
+                    </span>
+                  ) : null}
                 </div>
-                <div
-                  className={`absolute left-1/2 w-[210px] -translate-x-1/2 text-center ${
-                    below ? "top-[calc(100%+0.8rem)]" : "bottom-[calc(100%+0.8rem)]"
-                  }`}
+
+                {/* Stage copy. */}
+                <motion.div
+                  className={isLast ? "" : "pb-[clamp(2.25rem,4vw,3.25rem)]"}
+                  initial={reduced ? false : { opacity: 0, y: 12 }}
+                  whileInView={{ opacity: 1, y: 0 }}
+                  viewport={VIEWPORT}
+                  transition={
+                    reduced
+                      ? undefined
+                      : { duration: 0.5, ease: EASE_ENTER, delay: nodeDelay + 0.06 }
+                  }
                 >
-                  <div className="flex items-center justify-center gap-2">
-                    <h3 className="font-display text-[21px] font-bold tracking-[-0.01em] text-[color:var(--text-primary)]">
-                      {step.title}
-                    </h3>
-                    <span className="font-mono text-[12px] text-[color:var(--text-tertiary)]">
+                  <div className="flex items-center gap-2.5">
+                    <span className="font-mono text-[12px] font-medium tabular-nums text-[color:var(--text-tertiary)]">
                       {step.n}
                     </span>
+                    <Icon
+                      className="h-[18px] w-[18px] shrink-0"
+                      weight="duotone"
+                      style={{ color: tone }}
+                      aria-hidden="true"
+                    />
+                    <h3 className="font-display text-[19px] font-bold leading-none tracking-[-0.01em] text-[color:var(--text-primary)]">
+                      {step.title}
+                    </h3>
                   </div>
-                  <p className="mt-1 text-[14px] leading-[1.5] text-[color:var(--text-secondary)]">
+                  <p className="mt-2.5 max-w-[44ch] text-[14.5px] leading-[1.55] text-[color:var(--text-secondary)]">
                     {step.body}
                   </p>
-                </div>
-              </div>
+                </motion.div>
+              </li>
             );
           })}
-
-          {/* Center headline — inside the circuit */}
-          <div
-            className="absolute -translate-x-1/2 -translate-y-1/2 w-[310px] text-center"
-            style={{
-              left: `${(((FL + FR) / 2) / VB_W) * 100}%`,
-              top: `${(((FT + FB) / 2) / VB_H) * 100}%`,
-            }}
-          >
-            <Eyebrow className="justify-center">Prevención REPSE</Eyebrow>
-            <h2
-              className="font-display mt-3 font-bold leading-[1.07] tracking-[-0.02em] [text-wrap:balance] text-[color:var(--text-primary)]"
-              style={{ fontSize: "clamp(1.8rem, 2.4vw, 2.6rem)" }}
-            >
-              Del seguimiento{" "}
-              <span className="text-[color:var(--text-teal)]">reactivo</span>
-              {" "}a la prevención.
-            </h2>
-          </div>
-        </div>
+        </ol>
       </div>
-
-      {/* Mobile / tablet: vertical flow with down-arrows */}
-      <ol className="mx-auto mt-12 flex max-w-[30rem] flex-col lg:hidden">
-        {STEPS.map((s, i) => {
-          const Icon = s.icon;
-          return (
-            <li key={s.n}>
-              <div className="flex items-start gap-4">
-                <div className="flex h-16 w-16 shrink-0 items-center justify-center rounded-2xl border border-[color:var(--border-default)] bg-[color:var(--surface-raised)] text-[color:var(--text-teal)] shadow-[var(--shadow-sm)]">
-                  <Icon className="h-7 w-7" weight="duotone" aria-hidden="true" />
-                </div>
-                <div className="pt-2">
-                  <div className="flex items-center gap-2">
-                    <h3 className="font-display text-[20px] font-bold tracking-[-0.01em] text-[color:var(--text-primary)]">
-                      {s.title}
-                    </h3>
-                    <span className="font-mono text-[12px] text-[color:var(--text-tertiary)]">
-                      {s.n}
-                    </span>
-                  </div>
-                  <p className="mt-1 max-w-[34ch] text-[15px] leading-[1.5] text-[color:var(--text-secondary)]">
-                    {s.body}
-                  </p>
-                </div>
-              </div>
-              {i < STEPS.length - 1 ? (
-                <div aria-hidden="true" className="my-2 ml-8 flex">
-                  <svg viewBox="0 0 12 30" className="h-8 w-3 text-[hsl(var(--teal-500))]" fill="none">
-                    <path d="M6,0 V23" stroke="currentColor" strokeWidth="1.5" strokeDasharray="2 3" />
-                    <path d="M1.5,18 L6,25 L10.5,18" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" />
-                  </svg>
-                </div>
-              ) : null}
-            </li>
-          );
-        })}
-      </ol>
     </Section>
   );
 }
