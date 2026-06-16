@@ -161,7 +161,7 @@ export default function SeguridadPage() {
           <Link href="/#contacto" className="text-[color:var(--text-teal)] underline-offset-2 hover:underline">
             página principal
           </Link>
-          {" "}con el asunto "Seguridad".
+          {' con el asunto "Seguridad".'}
         </p>
       </ArticleSection>
 
