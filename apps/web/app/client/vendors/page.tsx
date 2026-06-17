@@ -21,6 +21,7 @@ import { DataTable, type DataTableColumn } from "@/components/ui/data-table";
 import { Input } from "@/components/ui/input";
 import { MetadataStrip } from "@/components/ui/metadata-strip";
 import { Progress } from "@/components/ui/progress";
+import { Tooltip } from "@/components/ui/tooltip";
 
 import { ClientShell } from "../_shell";
 import { VendorRef } from "@/components/checkwise/vendor-ref";
@@ -525,16 +526,28 @@ const SEMAPHORE_META: Record<
   },
 };
 
+// CW-16 — plain-language reason behind each semáforo color, so the pill
+// explains *why* a provider is red/yellow/green instead of just showing it.
+// Mirrors the backend rule in _compute_semaphore (portal.py).
+const SEMAPHORE_EXPLANATION: Record<SemaphoreLevel, string> = {
+  green: "Al día: todos los documentos obligatorios están aprobados.",
+  yellow:
+    "En proceso: hay documentos faltantes, en revisión o por vencer — ninguno rechazado.",
+  red: "En riesgo: hay documentos rechazados o por corregir, o el proveedor aún no tiene ningún documento aprobado.",
+};
+
 function SemaphorePill({ level }: { level: SemaphoreLevel }) {
   const meta = SEMAPHORE_META[level];
   const IconComponent = meta.icon;
   return (
-    <span
-      className={`inline-flex items-center gap-1.5 rounded-full px-2 py-0.5 text-[12px] font-medium ${meta.tone}`}
-    >
-      <IconComponent className="h-3 w-3" weight="bold" aria-hidden="true" />
-      {meta.label}
-    </span>
+    <Tooltip content={SEMAPHORE_EXPLANATION[level]}>
+      <span
+        className={`inline-flex cursor-help items-center gap-1.5 rounded-full px-2 py-0.5 text-[12px] font-medium ${meta.tone}`}
+      >
+        <IconComponent className="h-3 w-3" weight="bold" aria-hidden="true" />
+        {meta.label}
+      </span>
+    </Tooltip>
   );
 }
 
