@@ -11,7 +11,9 @@ from app.core.config import settings
 from app.core.metadata_rules import all_metadata_rules, metadata_rule_by_code
 from app.models import Client, Contract, Document, Vendor
 from app.models import Institution as InstitutionModel
+from app.services.document_intelligence import DocumentSignals
 from app.services.metadata_store import persist_export, sync_client_latest_exports
+from app.services.pdf_validation import PdfInspectionResult
 from app.services.requirement_service import ResolvedPeriod, ResolvedRequirement
 from app.services.storage import StoredFile
 from tools.export_pdf_metadata_table import (
@@ -34,7 +36,51 @@ class MetadataExportResult:
 _CLASSIFIER_TO_METADATA_CODE = {
     "contrato": "contrato_prestacion_servicios",
     "repse_constancia": "registro_repse",
+    # Pre-validation classifier code -> metadata rulebook code. Only the
+    # unambiguous 1:1 mappings live here; the upload's requirement_code is
+    # resolved first (see resolve_metadata_document_type_code) and stays
+    # authoritative. Ambiguous classifier codes (imss_pago / infonavit_pago
+    # → several SUA/CFDI/bank rules, factura_cfdi / opinion_cumplimiento_sat
+    # → no rulebook entry) are intentionally left out so the requirement
+    # slot decides instead of a coin-flip.
+    "imss_liquidacion": "resumen_liquidacion_imss",
+    "infonavit_liquidacion": "resumen_liquidacion_infonavit",
 }
+
+
+def _text_extraction_from_prevalidation(
+    pdf_inspection: PdfInspectionResult,
+    document_signals: DocumentSignals,
+) -> dict[str, Any]:
+    """Repackage the intake inspection into the metadata "intelligence" shape.
+
+    Mirrors ``tools.test_pdf_metadata_dry_run._build_pdf_text_extraction`` so
+    the metadata pipeline can reuse the text + signals the live path already
+    produced (with full tenant context and OCR fallback) instead of re-opening
+    the PDF and re-running the regex classifier. ``ocr_used`` reports False
+    because the metadata pipeline itself did not run OCR — any OCR text came
+    from intake — which keeps the dry-run safety check (``ocr_used`` requires
+    ``enable_ocr``) satisfied.
+    """
+    return {
+        "pdf_text_extraction_used": True,
+        "method": "reused_prevalidation_inspection",
+        "ocr_used": False,
+        "text_char_count": pdf_inspection.text_char_count,
+        "has_text": pdf_inspection.has_text,
+        "is_probably_scanned": pdf_inspection.is_probably_scanned,
+        "text_sample": pdf_inspection.text_sample,
+        "signals": {
+            "detected_institution": document_signals.detected_institution,
+            "detected_document_type": document_signals.detected_document_type,
+            "detected_rfcs": document_signals.detected_rfcs,
+            "detected_dates": document_signals.detected_dates,
+            "period_mentions": document_signals.period_mentions,
+            "requirement_match_confidence": document_signals.requirement_match_confidence,
+            "mismatch_reason": document_signals.mismatch_reason,
+            "anomaly_codes": document_signals.anomaly_codes,
+        },
+    }
 
 
 def export_metadata_table_after_upload(
@@ -48,12 +94,20 @@ def export_metadata_table_after_upload(
     resolved_period: ResolvedPeriod,
     document: Document,
     detected_document_type: str | None,
+    pdf_inspection: PdfInspectionResult | None = None,
+    document_signals: DocumentSignals | None = None,
 ) -> MetadataExportResult:
     """Create the automatic XLSX metadata table for a submitted PDF.
 
     This function is deliberately best-effort: metadata export should be
     visible to LegalShelf but must never block the provider's upload.
     Callers record the returned status as a ValidationEvent.
+
+    When ``pdf_inspection`` and ``document_signals`` are supplied (the live
+    intake path always has them in hand), the PDF text + classifier signals
+    are reused instead of re-opening the file and re-running
+    ``analyze_document_text`` — the single biggest piece of duplicated work
+    between pre-validation and metadata export.
     """
     if not settings.AUTO_METADATA_EXPORT_ENABLED:
         return MetadataExportResult(status="skipped", reason="automatic export disabled")
@@ -93,6 +147,12 @@ def export_metadata_table_after_upload(
         document_type_code=document_type_code,
     )
 
+    precomputed_text_extraction = None
+    if pdf_inspection is not None and document_signals is not None:
+        precomputed_text_extraction = _text_extraction_from_prevalidation(
+            pdf_inspection, document_signals
+        )
+
     try:
         export_pdf_metadata_table(
             pdf_path=stored_file.path,
@@ -102,6 +162,7 @@ def export_metadata_table_after_upload(
             output_format="xlsx",
             include_intelligence=True,
             enable_ocr=False,
+            precomputed_text_extraction=precomputed_text_extraction,
         )
         shutil.copyfile(output_path, latest_path)
         # Mirror both workbooks to durable storage BEFORE the master

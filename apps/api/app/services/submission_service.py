@@ -857,6 +857,10 @@ def finalize_intake_submission(
         resolved_period=resolved_period,
         document=document,
         detected_document_type=document_signals.detected_document_type,
+        # Reuse the intake inspection + classifier signals so the metadata
+        # export doesn't re-open the PDF and re-run analyze_document_text.
+        pdf_inspection=pdf_inspection,
+        document_signals=document_signals,
     )
     metadata_export_event = add_validation_event(
         db,

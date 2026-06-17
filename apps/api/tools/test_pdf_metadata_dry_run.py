@@ -561,8 +561,17 @@ def build_pdf_metadata_dry_run_payload(
     context: dict[str, Any] | None = None,
     include_intelligence: bool = False,
     enable_ocr: bool = False,
+    precomputed_text_extraction: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
-    """Create a review payload for one PDF using the real metadata rulebook."""
+    """Create a review payload for one PDF using the real metadata rulebook.
+
+    ``precomputed_text_extraction`` lets a caller that already extracted the
+    PDF text and ran the pre-validation classifier (i.e. the live intake path)
+    hand those results in, so this function does not re-open the PDF and
+    re-run ``analyze_document_text`` a second time. It must match the shape
+    returned by ``_build_pdf_text_extraction``. When ``None`` (CLI / dry-run /
+    tests) the text is extracted here exactly as before.
+    """
     context = _compact_context(dict(context or {}))
     pdf_inspection = inspect_local_pdf(pdf_path)
     template = n8n_template_for_document_type(document_type_code)
@@ -601,7 +610,10 @@ def build_pdf_metadata_dry_run_payload(
     text_extraction: dict[str, Any] | None = None
     ocr_status: dict[str, Any] | None = None
     if include_intelligence:
-        text_extraction = _build_pdf_text_extraction(pdf_path, template)
+        if precomputed_text_extraction is not None:
+            text_extraction = precomputed_text_extraction
+        else:
+            text_extraction = _build_pdf_text_extraction(pdf_path, template)
         ocr_status = _build_ocr_status(
             text_extraction,
             pdf_path=pdf_path,

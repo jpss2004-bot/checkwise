@@ -204,6 +204,54 @@ def test_payload_can_run_opt_in_local_ocr(
     ]["text_sample"]
 
 
+def test_precomputed_intelligence_is_reused_without_reparsing(monkeypatch, tmp_path: Path) -> None:
+    pdf_path = tmp_path / "csf.pdf"
+    _write_blank_pdf(pdf_path)
+
+    def _must_not_run(*_args, **_kwargs):
+        raise AssertionError(
+            "_build_pdf_text_extraction must not run when intelligence is precomputed"
+        )
+
+    monkeypatch.setattr(dry_run_tool, "_build_pdf_text_extraction", _must_not_run)
+
+    precomputed = {
+        "pdf_text_extraction_used": True,
+        "method": "reused_prevalidation_inspection",
+        "ocr_used": False,
+        "text_char_count": 30,
+        "has_text": True,
+        "is_probably_scanned": False,
+        "text_sample": "constancia de situacion fiscal",
+        "signals": {
+            "detected_institution": "sat",
+            "detected_document_type": "constancia_situacion_fiscal",
+            "detected_rfcs": ["XAXX010101000"],
+            "detected_dates": [],
+            "period_mentions": [],
+            "requirement_match_confidence": 0.9,
+            "mismatch_reason": None,
+            "anomaly_codes": [],
+        },
+    }
+
+    payload = build_pdf_metadata_dry_run_payload(
+        pdf_path=pdf_path,
+        document_type_code="constancia_situacion_fiscal",
+        include_intelligence=True,
+        precomputed_text_extraction=precomputed,
+    )
+
+    assert payload["intelligence"]["pdf_text_extraction"] is precomputed
+    assert payload["safety"]["ocr_used"] is False
+    assert payload["validation_result"]["status"] == "passed"
+    # The reused intake text still reaches the AI hand-off envelope.
+    assert (
+        "constancia de situacion fiscal"
+        in payload["intelligence"]["ai_extraction_request"]["user_payload"]["text_sample"]
+    )
+
+
 def test_cli_writes_output_file(tmp_path: Path) -> None:
     pdf_path = tmp_path / "sample.pdf"
     context_path = tmp_path / "context.json"
