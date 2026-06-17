@@ -2859,6 +2859,117 @@ def list_periods(
     return {"items": [_period_to_dict(r) for r in rows], "total": len(rows)}
 
 
+class RadarDeadlineItem(BaseModel):
+    vendor_id: str
+    vendor_name: str
+    client_id: str | None
+    title: str
+    institution: str
+    period_key: str | None
+    due_in_days: int
+    state: str
+    href: str | None = None
+
+
+class CalendarRadarResponse(BaseModel):
+    as_of: str
+    upcoming: list[RadarDeadlineItem]
+    urgency_buckets: dict[str, int]
+    urgency_bands: list[dict]
+    awaiting_review_total: int
+    vendors_scanned: int
+    truncated: bool
+    """True when the vendor scan hit its bound and some providers were skipped."""
+
+
+_RADAR_VENDOR_SCAN_CAP = 300
+
+
+@router.get("/calendar/radar", response_model=CalendarRadarResponse)
+def get_admin_calendar_radar(
+    db: DbSession,
+    current: AdminUser,
+    client_id: str | None = None,
+    institution: str | None = None,
+    top: Annotated[int, Query(ge=1, le=100)] = 30,
+) -> CalendarRadarResponse:
+    """Forward operational radar across the portfolio (P2-07).
+
+    The admin month-grid showed a static catalog distribution the operator
+    already knew. This is the "what needs attention next" view: the soonest
+    upcoming required obligations across every active provider (vendor-tagged,
+    urgency-bucketed), filterable by client and institution, plus the count of
+    documents currently awaiting review. Reuses the same per-vendor deadline
+    engine (dashboard_compute) the provider/client surfaces use, so the numbers
+    match. The month grid stays available as a secondary catalog view.
+    """
+    _ = current
+    from app.services.dashboard_compute import (
+        URGENCY_BANDS,
+        bucket_upcoming_by_urgency,
+        build_upcoming_deadlines_for_vendor,
+    )
+
+    today = date.today()
+    vstmt = select(Vendor.id, Vendor.client_id, Vendor.name).where(
+        Vendor.status == "active"
+    )
+    if client_id:
+        vstmt = vstmt.where(Vendor.client_id == client_id)
+    vendor_rows = db.execute(vstmt.order_by(Vendor.name.asc())).all()
+    # Bound the per-vendor fan-out (each call resolves a workspace + computes
+    # slots). At current portfolio scale this is comfortably under the cap; the
+    # ``truncated`` flag tells the UI when some providers were skipped.
+    truncated = len(vendor_rows) > _RADAR_VENDOR_SCAN_CAP
+    scan_rows = vendor_rows[:_RADAR_VENDOR_SCAN_CAP]
+
+    merged: list[RadarDeadlineItem] = []
+    for vid, vclient, vname in scan_rows:
+        payload = build_upcoming_deadlines_for_vendor(
+            db, vendor_id=vid, today=today, top=8
+        )
+        for it in payload.get("items", []):
+            inst = it.get("institution") or "—"
+            if institution and inst != institution:
+                continue
+            merged.append(
+                RadarDeadlineItem(
+                    vendor_id=vid,
+                    vendor_name=vname,
+                    client_id=vclient,
+                    title=it.get("title") or "Obligación",
+                    institution=inst,
+                    period_key=it.get("period_key"),
+                    due_in_days=int(it.get("due_in_days") or 0),
+                    state=it.get("state") or "",
+                    href=it.get("href"),
+                )
+            )
+
+    merged.sort(key=lambda r: r.due_in_days)
+    # Buckets count the full in-scope set; the list itself is capped at ``top``.
+    buckets = bucket_upcoming_by_urgency(
+        [{"due_in_days": r.due_in_days} for r in merged]
+    )
+
+    aw_stmt = select(func.count(Submission.id)).where(
+        Submission.status.in_(_QUEUE_STATUSES)
+    )
+    if client_id:
+        aw_stmt = aw_stmt.where(Submission.client_id == client_id)
+    awaiting = int(db.scalar(aw_stmt) or 0)
+
+    return CalendarRadarResponse(
+        as_of=today.isoformat(),
+        upcoming=merged[:top],
+        urgency_buckets=buckets,
+        urgency_bands=[dict(b) for b in URGENCY_BANDS],
+        awaiting_review_total=awaiting,
+        vendors_scanned=len(scan_rows),
+        truncated=truncated,
+    )
+
+
 @router.get("/calendar")
 def get_admin_calendar(
     db: DbSession,

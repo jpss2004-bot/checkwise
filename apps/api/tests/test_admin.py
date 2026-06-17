@@ -2534,3 +2534,23 @@ def test_metadata_catalog_documents_the_rulebook(
         "optional",
         "blank",
     )
+
+
+def test_calendar_radar_returns_forward_shape(
+    api_client: TestClient, db_factory
+) -> None:
+    """P2-07: the admin calendar radar returns the forward operational shape —
+    urgency buckets/bands, an awaiting-review count, and a (possibly empty)
+    upcoming list — without erroring on an empty portfolio."""
+    token = _admin_token(api_client, db_factory)
+    resp = api_client.get("/api/v1/admin/calendar/radar", headers=_h(token))
+    assert resp.status_code == 200, resp.text
+    body = resp.json()
+    assert "as_of" in body
+    assert isinstance(body["upcoming"], list)
+    assert {"week", "fortnight", "month", "later"}.issubset(
+        body["urgency_buckets"].keys()
+    )
+    assert body["urgency_bands"], "urgency band labels for the FE"
+    assert isinstance(body["awaiting_review_total"], int)
+    assert body["truncated"] is False
