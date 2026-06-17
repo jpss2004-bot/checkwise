@@ -24,6 +24,7 @@ import {
   CheckCircle,
   FileText,
   FileXls,
+  Gear,
   Storefront,
   type Icon,
 } from "@phosphor-icons/react";
@@ -209,16 +210,23 @@ export default function ClientNotificationsPage() {
       title="Notificaciones"
       description="Avisos críticos primero. La pestaña Pendientes solo muestra lo que aún requiere tu atención."
       actions={
-        counts.pending > 0 ? (
-          <Button type="button" size="sm" variant="outline" onClick={markAll}>
-            <CheckCircle
-              className="h-3.5 w-3.5"
-              weight="bold"
-              aria-hidden
-            />
-            Marcar todas como leídas
+        <div className="flex items-center gap-2">
+          {counts.pending > 0 ? (
+            <Button type="button" size="sm" variant="outline" onClick={markAll}>
+              <CheckCircle className="h-3.5 w-3.5" weight="bold" aria-hidden />
+              Marcar todas como leídas
+            </Button>
+          ) : null}
+          {/* CW-13 — the notification preferences page existed but was
+              unreachable from the inbox. Surface it right where the alerts
+              arrive so "where do I change these?" has an obvious answer. */}
+          <Button asChild size="sm" variant="outline">
+            <Link href="/client/configuracion/notificaciones">
+              <Gear className="h-3.5 w-3.5" weight="bold" aria-hidden />
+              Preferencias
+            </Link>
           </Button>
-        ) : null
+        </div>
       }
     >
       {error ? (
