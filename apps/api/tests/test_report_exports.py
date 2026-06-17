@@ -773,6 +773,12 @@ def test_get_export_401_when_unauthenticated(api_client, db_factory) -> None:
     )
     export_id = create.json()["id"]
 
+    # The login above set the session cookie on the TestClient — the backend
+    # also deposits an httpOnly session cookie at login, and TestClient
+    # persists cookies across requests. Clear it so this exercises the truly
+    # unauthenticated path (no bearer header AND no cookie); otherwise the
+    # cookie fallback in get_current_user authenticates the request and it 200s.
+    api_client.cookies.clear()
     resp = api_client.get(f"/api/v1/reports/exports/{export_id}")
     assert resp.status_code == 401
     resp_dl = api_client.get(f"/api/v1/reports/exports/{export_id}/download")
