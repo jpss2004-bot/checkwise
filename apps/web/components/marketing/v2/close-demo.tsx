@@ -5,7 +5,7 @@ import { DEMO_BOOKING_URL } from "@/lib/marketing/booking";
 
 import { ContactForm } from "./contact-form";
 
-import { Container, Eyebrow } from "./_shared";
+import { Container, DarkAtmo, Eyebrow } from "./_shared";
 import { PullIn } from "./pull-in";
 
 /**
@@ -27,8 +27,9 @@ export function V2CloseDemo() {
     >
       <div
         aria-hidden="true"
-        className="pointer-events-none absolute left-1/2 top-[-10%] -z-0 h-[560px] w-[560px] -translate-x-1/2 rounded-full opacity-25 blur-[150px] [background:radial-gradient(circle,#09c1b0,transparent_62%)]"
+        className="pointer-events-none absolute left-1/2 top-[-10%] -z-0 h-[560px] w-[560px] -translate-x-1/2 rounded-full opacity-30 blur-[150px] [background:radial-gradient(circle,#16a34a,transparent_62%)]"
       />
+      <DarkAtmo />
       <Container className="relative py-[clamp(4.5rem,9vw,8rem)]">
         <div className="grid items-center gap-12 lg:grid-cols-[1fr_0.85fr] lg:gap-16">
           <div>

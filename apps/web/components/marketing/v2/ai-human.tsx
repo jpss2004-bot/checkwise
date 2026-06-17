@@ -2,7 +2,7 @@ import { CheckCircle } from "@phosphor-icons/react/dist/ssr";
 
 import { ProductFrame } from "@/components/marketing/product-frame";
 
-import { Container, Eyebrow } from "./_shared";
+import { Container, DarkAtmo, Eyebrow } from "./_shared";
 
 const STEPS = [
   {
@@ -35,6 +35,7 @@ export function V2AiHuman() {
         aria-hidden="true"
         className="pointer-events-none absolute -top-[10%] left-[18%] -z-0 h-[520px] w-[520px] rounded-full opacity-25 blur-[150px] [background:radial-gradient(circle,#09c1b0,transparent_62%)]"
       />
+      <DarkAtmo />
       <Container className="relative py-[clamp(4.5rem,9vw,8rem)]">
         <div className="grid items-center gap-12 lg:grid-cols-[1fr_1.15fr] lg:gap-16">
           {/* Left — copy + steps + guarantees */}

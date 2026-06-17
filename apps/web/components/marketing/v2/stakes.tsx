@@ -7,7 +7,7 @@ import {
   Warning,
 } from "@phosphor-icons/react/dist/ssr";
 
-import { Container, Eyebrow } from "./_shared";
+import { Container, DarkAtmo, Eyebrow } from "./_shared";
 
 /**
  * Section 02 — Stakes · Por qué importa. The "cadena de responsabilidad":
@@ -42,6 +42,7 @@ export function V2Stakes() {
         aria-hidden="true"
         className="pointer-events-none absolute -top-[12%] right-[6%] -z-0 h-[560px] w-[560px] rounded-full opacity-25 blur-[150px] [background:radial-gradient(circle,#e5484d,transparent_62%)]"
       />
+      <DarkAtmo />
       <Container className="relative py-[clamp(4.5rem,9vw,8rem)]">
         <div className="mx-auto max-w-[46ch] text-center">
           <Eyebrow tone="onNavy">Responsabilidad solidaria</Eyebrow>

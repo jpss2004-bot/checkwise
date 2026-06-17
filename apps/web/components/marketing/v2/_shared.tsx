@@ -167,3 +167,37 @@ export function Lead({
     </p>
   );
 }
+
+/**
+ * Living texture for the dark beats — a faint light grid + grain so the opaque
+ * dark sections share the atmosphere's depth. The translucent light bands pick
+ * this up from the fixed MarketingAtmosphere; the dark sections are opaque, so
+ * they carry their own. Pair with each section's semáforo beat glow. Static,
+ * aria-hidden, pointer-events-none; sits behind the section's Container.
+ */
+export function DarkAtmo({ className }: { className?: string }) {
+  return (
+    <div
+      aria-hidden="true"
+      className={cn("pointer-events-none absolute inset-0 -z-0 overflow-hidden", className)}
+    >
+      <div
+        className="absolute inset-0"
+        style={{
+          backgroundImage:
+            "linear-gradient(to right, hsl(0 0% 100% / 0.04) 1px, transparent 1px), linear-gradient(to bottom, hsl(0 0% 100% / 0.04) 1px, transparent 1px)",
+          backgroundSize: "56px 56px",
+          maskImage: "radial-gradient(125% 90% at 50% 0%, #000 32%, transparent 80%)",
+          WebkitMaskImage: "radial-gradient(125% 90% at 50% 0%, #000 32%, transparent 80%)",
+        }}
+      />
+      <div
+        className="absolute inset-0 opacity-[0.05] mix-blend-overlay"
+        style={{
+          backgroundImage:
+            "url(\"data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='160' height='160'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='2' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E\")",
+        }}
+      />
+    </div>
+  );
+}
