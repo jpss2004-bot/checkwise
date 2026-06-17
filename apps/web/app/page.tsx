@@ -3,6 +3,7 @@ import type { Metadata } from "next";
 import { FeedbackLauncher } from "@/components/feedback/feedback-launcher";
 import { MotionPreferenceProvider } from "@/components/marketing/motion-preference";
 import { V2AiHuman } from "@/components/marketing/v2/ai-human";
+import { MarketingAtmosphere } from "@/components/marketing/v2/atmosphere";
 import { V2CloseDemo } from "@/components/marketing/v2/close-demo";
 import { V2Faq } from "@/components/marketing/v2/faq";
 import { V2Footer } from "@/components/marketing/v2/footer";
@@ -88,20 +89,23 @@ export default function PublicHome() {
       />
       <MotionPreferenceProvider>
         <SmoothScroll>
-          <V2Nav />
-          <main>
-            <V2Hero />
-            <V2Stakes />
-            <V2Shift />
-            <V2HowItWorks />
-            <V2Roles />
-            <V2MidCta />
-            <V2AiHuman />
-            <V2Faq />
-            <V2CloseDemo />
-          </main>
-          <V2Footer />
-          <FeedbackLauncher allowPublic />
+          <MarketingAtmosphere />
+          <div className="relative z-10">
+            <V2Nav />
+            <main>
+              <V2Hero />
+              <V2Stakes />
+              <V2Shift />
+              <V2HowItWorks />
+              <V2Roles />
+              <V2MidCta />
+              <V2AiHuman />
+              <V2Faq />
+              <V2CloseDemo />
+            </main>
+            <V2Footer />
+            <FeedbackLauncher allowPublic />
+          </div>
         </SmoothScroll>
       </MotionPreferenceProvider>
     </>

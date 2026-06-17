@@ -32,11 +32,15 @@ export function Container({
 
 type Band = "page" | "raised" | "soft" | "navy";
 
+// Light bands are translucent so the fixed MarketingAtmosphere (scroll-reactive
+// semáforo glows + living grid + grain) bleeds through and gives them life.
+// Alpha is high enough to keep dark text at full contrast. Navy stays opaque —
+// the dark beats carry their own treatment and occlude the atmosphere on purpose.
 const BAND_CLASS: Record<Band, string> = {
-  page: "bg-[color:var(--surface-page)] text-[color:var(--text-primary)]",
-  raised: "bg-[color:var(--surface-raised)] text-[color:var(--text-primary)]",
+  page: "bg-[hsl(var(--gray-50)_/_0.58)] text-[color:var(--text-primary)]",
+  raised: "bg-[hsl(0_0%_100%_/_0.54)] text-[color:var(--text-primary)]",
   // Soft = a barely-there navy wash that lifts off white without a hard edge.
-  soft: "bg-[linear-gradient(180deg,var(--surface-brand-muted),var(--surface-raised))] text-[color:var(--text-primary)]",
+  soft: "bg-[linear-gradient(180deg,hsl(var(--navy-50)_/_0.55),hsl(0_0%_100%_/_0.46))] text-[color:var(--text-primary)]",
   // Navy = gravity. Carries risk + trust beats. Inverse text tokens guarantee contrast.
   navy: "bg-[color:var(--surface-brand)] text-[color:var(--text-inverse)]",
 };
