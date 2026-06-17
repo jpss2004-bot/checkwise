@@ -485,12 +485,21 @@ function AuditLogRow({
         </TableCell>
         <TableCell>
           <span className="flex items-center gap-1">
-            <span
-              className="font-mono text-[11px] tabular-nums text-[color:var(--text-tertiary)]"
-              title={row.entity_id}
-            >
-              {row.entity_id.slice(0, 8)}…
-            </span>
+            {row.entity_label ? (
+              <span
+                className="max-w-[220px] truncate text-[12px] text-[color:var(--text-primary)]"
+                title={`${row.entity_label} · ${row.entity_id}`}
+              >
+                {row.entity_label}
+              </span>
+            ) : (
+              <span
+                className="font-mono text-[11px] tabular-nums text-[color:var(--text-tertiary)]"
+                title={row.entity_id}
+              >
+                {row.entity_id.slice(0, 8)}…
+              </span>
+            )}
             <CopyIdButton value={row.entity_id} />
           </span>
         </TableCell>

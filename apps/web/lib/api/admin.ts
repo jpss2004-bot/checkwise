@@ -986,6 +986,9 @@ export type AdminAuditLogItem = {
   action: string;
   entity_type: string;
   entity_id: string;
+  /** Resolved human name for the target entity (P1-06b) — client/vendor/report
+   *  name or user email; null for types without a name (falls back to the id). */
+  entity_label?: string | null;
   before: Record<string, unknown> | null;
   after: Record<string, unknown> | null;
   event_metadata: Record<string, unknown> | null;

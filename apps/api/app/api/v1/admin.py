@@ -4198,6 +4198,10 @@ class AuditLogItem(BaseModel):
     action: str
     entity_type: str
     entity_id: str
+    entity_label: str | None = None
+    """Resolved human name for the target entity (P1-06b) — e.g. the client/
+    vendor/report name or user email. Null for types without a meaningful
+    name (submission, system, …); the UI falls back to the short id."""
     before: dict | None
     after: dict | None
     metadata: dict | None = Field(default=None, alias="event_metadata")
@@ -4216,6 +4220,46 @@ class AuditLogResponse(BaseModel):
     """Real count of rows matching the filters (not len(items))."""
     limit: int
     offset: int
+
+
+def _resolve_audit_entity_labels(
+    db: Session, rows: list[AuditLog]
+) -> dict[tuple[str, str], str]:
+    """Best-effort entity_id → human label per entity_type for the audit
+    explorer (P1-06b). Issues one IN query per entity_type present on the page
+    (mirrors the actor_email bulk-load); types without a meaningful name
+    (submission, system, document, …) are skipped and fall back to the short
+    id in the UI."""
+    from app.models import Report  # local: not in the module-wide import set
+
+    # entity_type → (id column, label column)
+    resolvers = {
+        "user": (User.id, User.email),
+        "client": (Client.id, Client.name),
+        "vendor": (Vendor.id, Vendor.name),
+        "requirement": (Requirement.id, Requirement.name),
+        "report": (Report.id, Report.title),
+        "workspace": (ProviderWorkspace.id, ProviderWorkspace.display_name),
+        "provider_workspace": (
+            ProviderWorkspace.id,
+            ProviderWorkspace.display_name,
+        ),
+        "contact_request": (ContactRequest.id, ContactRequest.name),
+    }
+    ids_by_type: dict[str, set[str]] = {}
+    for row in rows:
+        if row.entity_id and row.entity_type in resolvers:
+            ids_by_type.setdefault(row.entity_type, set()).add(row.entity_id)
+
+    labels: dict[tuple[str, str], str] = {}
+    for etype, ids in ids_by_type.items():
+        id_col, label_col = resolvers[etype]
+        for eid, label in db.execute(
+            select(id_col, label_col).where(id_col.in_(ids))
+        ):
+            if label:
+                labels[(etype, eid)] = label
+    return labels
 
 
 @router.get("/audit-log", response_model=AuditLogResponse)
@@ -4307,6 +4351,7 @@ def list_audit_log(
                 select(User.id, User.email).where(User.id.in_(actor_ids))
             )
         }
+    entity_labels = _resolve_audit_entity_labels(db, rows)
 
     items = [
         AuditLogItem(
@@ -4319,6 +4364,7 @@ def list_audit_log(
             action=row.action,
             entity_type=row.entity_type,
             entity_id=row.entity_id,
+            entity_label=entity_labels.get((row.entity_type, row.entity_id)),
             before=row.before,
             after=row.after,
             event_metadata=row.event_metadata,

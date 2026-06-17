@@ -2350,6 +2350,9 @@ def test_audit_log_resolves_actor_email(
     ).json()
     assert body["items"]
     assert body["items"][0]["actor_email"] == "adm@checkwise.test"
+    # P1-06b: the target entity (a client) resolves to its human name, not a
+    # raw UUID. The patch renamed it, so the label reflects the current name.
+    assert body["items"][0]["entity_label"] == "ActorCli Renombrado"
 
     # A row whose actor_id is not a user id resolves to null.
     db = db_factory()
