@@ -304,7 +304,11 @@ function defaultDestination(session: { roles: string[] }): string {
   // above, so this only catches the pure-platform_admin case.
   if (session.roles.includes("platform_admin")) return "/platform/dashboard";
   if (session.roles.includes("client_admin")) return "/client/dashboard";
-  return "/portal/entra-a-tu-espacio";
+  // §4.7 — providers pass through ``entra-a-tu-espacio`` (the legal-consent
+  // gate) but ``?continue=1`` lets that page forward straight to the
+  // dashboard/onboarding when consent is already accepted, so a returning
+  // provider lands on their compliance state in one hop instead of two.
+  return "/portal/entra-a-tu-espacio?continue=1";
 }
 
 /**

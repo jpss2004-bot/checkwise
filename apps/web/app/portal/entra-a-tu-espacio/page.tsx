@@ -94,6 +94,23 @@ function EntraATuEspacioInner({ session }: { session: PortalSession }) {
       ? "/portal/dashboard"
       : "/portal/onboarding";
 
+  // §4.7 — when the provider arrives here straight from login
+  // (``?continue=1``) and legal consent is already accepted, skip this
+  // gate entirely and forward to their real landing surface — no extra
+  // "Entrar a mi espacio" click. Navigating here intentionally via the
+  // "Mi espacio" nav (no param) keeps the identity view, and a pending
+  // consent still renders the form below (the gate has a job to do).
+  // Effect-only (never during render) to avoid a hydration mismatch.
+  const [autoForwarding, setAutoForwarding] = useState(false);
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    const params = new URLSearchParams(window.location.search);
+    if (params.get("continue") === "1" && !needsLegalConsent) {
+      setAutoForwarding(true);
+      router.replace(nextRouteAfterEntry);
+    }
+  }, [router, needsLegalConsent, nextRouteAfterEntry]);
+
   const canEnter = !needsLegalConsent;
 
   async function handleEnter() {
@@ -131,6 +148,10 @@ function EntraATuEspacioInner({ session }: { session: PortalSession }) {
     }
     router.push(nextRouteAfterEntry);
   }
+
+  // Forwarding straight through to the dashboard/onboarding (§4.7) —
+  // render nothing while the replace navigation lands.
+  if (autoForwarding) return null;
 
   return (
     <PortalAppShell session={liveSession}>

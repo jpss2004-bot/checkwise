@@ -3842,7 +3842,12 @@ def _compute_attention_today(
             i.due_in_days if i.due_in_days is not None else 0,
         )
     )
-    return items[:10]
+    # §4.5 — the dashboard must surface ALL faltantes that need attention,
+    # not a truncated 10. The list is bounded by a provider's obligation
+    # count (a few dozen at most), so a generous cap keeps the "Por
+    # atender" count + "Ver todo" honest for the rare provider with a long
+    # backlog while still guarding against a pathological payload.
+    return items[:50]
 
 
 def _compute_upcoming_deadlines(
