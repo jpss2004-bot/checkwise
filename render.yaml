@@ -372,6 +372,71 @@ services:
         sync: false
 
   # ──────────────────────────────────────────────────────────────────
+  # Async-upload durability — stranded intake-receipt reconcile cron
+  # ──────────────────────────────────────────────────────────────────
+  #
+  # The provider upload endpoint persists a ``recibido`` receipt and runs
+  # the heavy validation pipeline in a FastAPI BackgroundTask. Those
+  # tasks die on a worker restart — and Render redeploys the API on every
+  # push to ``main`` — so a finalize task that was in flight during a
+  # deploy would leave its receipt stuck at ``recibido`` forever.
+  #
+  # This cron runs ``scripts.run_intake_reconcile`` every 15 minutes and
+  # re-finalizes any receipt still at ``recibido`` older than 5 minutes,
+  # via the SAME idempotent background function (a receipt already moved
+  # past ``recibido`` is skipped). The age cutoff keeps the sweep from
+  # pre-empting a finalize task that is merely milliseconds into its
+  # happy path.
+  #
+  # Env vars: needs DATABASE_URL AND the R2 storage creds, because it
+  # re-reads the uploaded PDF bytes from durable storage (the request's
+  # local temp file is long gone by the time this runs). STORAGE_BACKEND
+  # is pinned to ``s3`` explicitly here — ``.env.production`` omits it and
+  # the code default is ``local``, which would make the cron read from a
+  # nonexistent local disk. All sourced from / matched to the
+  # ``checkwise-api`` web service so the secrets stay paired with the API.
+  - type: cron
+    name: checkwise-intake-reconcile
+    runtime: python
+    plan: starter
+    rootDir: apps/api
+    branch: main
+    schedule: "*/15 * * * *"
+    buildCommand: pip install -e .
+    command: python -m scripts.run_intake_reconcile
+    envVars:
+      - key: CHECKWISE_ENV
+        value: production
+      - key: PYTHON_VERSION
+        value: "3.11"
+      - key: DATABASE_URL
+        fromService:
+          type: web
+          name: checkwise-api
+          envVarKey: DATABASE_URL
+      - key: STORAGE_BACKEND
+        value: s3
+      - key: STORAGE_BUCKET
+        value: checkwise-prod
+      - key: AWS_REGION
+        value: auto
+      - key: AWS_S3_ENDPOINT
+        fromService:
+          type: web
+          name: checkwise-api
+          envVarKey: AWS_S3_ENDPOINT
+      - key: AWS_ACCESS_KEY_ID
+        fromService:
+          type: web
+          name: checkwise-api
+          envVarKey: AWS_ACCESS_KEY_ID
+      - key: AWS_SECRET_ACCESS_KEY
+        fromService:
+          type: web
+          name: checkwise-api
+          envVarKey: AWS_SECRET_ACCESS_KEY
+
+  # ──────────────────────────────────────────────────────────────────
   # Phase 7 cutover Slice D — Periodic reporting reminder cron
   # ──────────────────────────────────────────────────────────────────
   #

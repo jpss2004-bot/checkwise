@@ -29,7 +29,7 @@ from typing import Literal
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from app.constants.statuses import ReviewerAction
+from app.constants.statuses import DocumentStatus, ReviewerAction
 from app.models import ProviderNotification, ProviderWorkspace, Submission
 
 NotificationSeverity = Literal["green", "yellow", "red", "info"]
@@ -207,6 +207,77 @@ def notify_provider_of_renewal_overdue(
             "threshold_days": threshold_days,
             "due_date": due.isoformat(),
             "cycle_anchor_date": cycle_anchor_date.isoformat(),
+        },
+    )
+
+
+def notify_provider_of_validation_complete(
+    db: Session,
+    *,
+    submission: Submission,
+    workspace_id: str | None,
+    match_warning: str | None = None,
+) -> ProviderNotification | None:
+    """Emit the provider's own-upload validation result (async intake).
+
+    Fired at the end of ``finalize_intake_submission_background`` once the
+    receipt has transitioned ``recibido → derived``. The async upload no
+    longer shows the prevalidation verdict inline on the confirmation
+    screen, so this notification is how the provider learns the outcome.
+
+    Lifecycle status + the soft requirement-*match* warning only —
+    authenticity / forensic / QR-verification signals are reviewer-facing
+    and must NEVER surface here (the same anti-tipping contract the upload
+    response honors). ``match_warning`` is the already-provider-safe
+    ``MatchFeedback.warning_es`` (or None); when present it drives a soft
+    yellow heads-up regardless of the derived status, mirroring the inline
+    match feedback the synchronous response used to show.
+
+    ``workspace_id`` None (no workspace for this tenant) → silent skip,
+    exactly like the reviewer-decision emitter.
+    """
+    if not workspace_id:
+        return None
+
+    requirement_label = _requirement_label(submission)
+    period_label = _period_label(submission)
+    status_value = submission.status
+
+    if match_warning:
+        severity: NotificationSeverity = "yellow"
+        title = "Revisa tu carga"
+        body = match_warning
+    elif status_value == DocumentStatus.POSIBLE_MISMATCH.value:
+        severity = "yellow"
+        title = "Revisa tu carga"
+        body = (
+            f"Recibimos tu documento para {requirement_label}{period_label}, "
+            "pero podría no corresponder al requisito. Ábrelo para revisarlo; "
+            "si subiste el archivo equivocado, vuelve a cargarlo."
+        )
+    else:
+        severity = "green"
+        title = "Documento validado"
+        body = (
+            f"Tu documento para {requirement_label}{period_label} pasó la "
+            "validación automática y quedó en revisión. No necesitas hacer "
+            "nada más."
+        )
+
+    return add_provider_notification(
+        db,
+        workspace_id=workspace_id,
+        submission_id=submission.id,
+        # ``document_`` prefix → "verification" category (categorize.py).
+        notification_type="document_validation_complete",
+        severity=severity,
+        title=title,
+        body=body,
+        action_url=f"/portal/submissions/{submission.id}",
+        payload={
+            "status": status_value,
+            "requirement_code": submission.requirement_code,
+            "period_key": submission.period_key,
         },
     )
 

@@ -91,6 +91,14 @@ class SubmissionResponse(BaseModel):
     # Phase C — soft match-only feedback (see MatchFeedback docstring).
     # Additive + default None so pre-Phase-C clients are unaffected.
     match_feedback: MatchFeedback | None = None
+    # Async intake (§1.5) — True when the row is a freshly-persisted
+    # ``recibido`` receipt whose validation pipeline is still running in
+    # the background. The verdict-bearing fields (``validations``,
+    # ``inspection``, ``document_signals``, ``match_feedback``) are empty
+    # in that case; the frontend branches on this flag to show
+    # "validando…" instead of an inline verdict. False on the synchronous
+    # path, where the response already carries the full verdict.
+    validation_pending: bool = False
 
 
 # Stage 2.7-b — Multi-document submission response.

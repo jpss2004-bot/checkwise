@@ -10,6 +10,7 @@ re-validation flows).
 from __future__ import annotations
 
 import logging
+from dataclasses import dataclass
 from pathlib import Path
 
 from fastapi import BackgroundTasks, HTTPException, UploadFile, status
@@ -19,6 +20,7 @@ from sqlalchemy.orm import Session
 from app.constants.institutions import INSTITUTION_LABELS, Institution
 from app.constants.statuses import DocumentStatus
 from app.core.config import settings
+from app.db.session import SessionLocal
 from app.models import (
     Client,
     Contract,
@@ -64,8 +66,9 @@ from app.services.pdf_validation import (
     inspect_pdf_with_ocr_fallback,
 )
 from app.services.prevalidation import build_initial_validations
+from app.services.provider_notifications import notify_provider_of_validation_complete
 from app.services.requirement_service import ResolvedPeriod, ResolvedRequirement
-from app.services.storage import StoredFile
+from app.services.storage import StoredFile, get_storage_service
 from app.services.validation_events import add_validation_event
 
 logger = logging.getLogger(__name__)
@@ -628,8 +631,18 @@ def finalize_intake_submission(
     extra_audit_metadata: dict | None = None,
     supersedes_submission: Submission | None = None,
     background_tasks: BackgroundTasks | None = None,
+    existing_submission: Submission | None = None,
+    existing_document: Document | None = None,
 ) -> SubmissionResponse:
     """Run the shared back-half of a documentary intake.
+
+    When ``existing_submission`` / ``existing_document`` are supplied
+    (the async portal path), this transitions an already-persisted
+    ``RECIBIDO`` receipt to its derived status and attaches every
+    analysis side-effect to it — instead of creating new rows. The
+    legacy synchronous path passes neither and creates the rows in one
+    shot at the derived status. Everything after status derivation is
+    identical for both paths.
 
     Both ``POST /api/v1/submissions`` (legacy native intake, kept for the
     importer + dev paths) and ``POST /api/v1/portal/workspaces/{id}/submissions``
@@ -654,9 +667,14 @@ def finalize_intake_submission(
     ``INTAKE_SOURCE_WORKSPACE_PORTAL``. It is written to the audit-log
     metadata so an auditor can tell which path produced the row.
     """
-    duplicate = db.scalar(
-        select(Document).where(Document.sha256 == stored_file.sha256).limit(1)
-    )
+    # Duplicate detection ignores the row this very upload just created:
+    # the async portal path persists the Document (at ``recibido``) before
+    # this finalize pass runs, so a document must never be flagged as a
+    # duplicate of itself.
+    duplicate_query = select(Document).where(Document.sha256 == stored_file.sha256)
+    if existing_document is not None:
+        duplicate_query = duplicate_query.where(Document.id != existing_document.id)
+    duplicate = db.scalar(duplicate_query.limit(1))
 
     pdf_inspection = inspect_pdf_with_ocr_fallback(stored_file.path)
     document_signals = analyze_document_text(
@@ -671,44 +689,56 @@ def finalize_intake_submission(
     )
     final_status = status_from_inspection(pdf_inspection, document_signals)
 
-    submission = Submission(
-        client_id=client.id,
-        vendor_id=vendor.id,
-        contract_id=contract.id if contract else None,
-        period_id=resolved_period.period.id,
-        institution_id=institution.id,
-        requirement_id=resolved_requirement.requirement.id,
-        requirement_version_id=resolved_requirement.requirement_version.id,
-        requirement_code=resolved_requirement.canonical_code,
-        period_key=resolved_period.canonical_period_key,
-        load_type=load_type,
-        source="portal",
-        status=final_status.value,
-        comments=comments,
-        submitted_by=submitted_by,
-        # Replacement lineage (Phase 3). Caller must have already
-        # validated that the prior submission belongs to the same
-        # tenant + slot and is in an eligible state before passing it
-        # in; this layer trusts that decision and just persists the
-        # FK + emits the lineage audit trail.
-        supersedes_submission_id=(
-            supersedes_submission.id if supersedes_submission is not None else None
-        ),
-    )
-    db.add(submission)
-    db.flush()
+    if existing_submission is not None and existing_document is not None:
+        # Async portal path — transition the pre-persisted RECIBIDO
+        # receipt to the derived status. ``prior_status`` (recibido)
+        # becomes the ``from_status`` of the status-history row below.
+        prior_status: str | None = existing_submission.status
+        submission = existing_submission
+        document = existing_document
+        submission.status = final_status.value
+        document.status = final_status.value
+    else:
+        # Legacy synchronous path — create the rows at the derived status.
+        prior_status = None
+        submission = Submission(
+            client_id=client.id,
+            vendor_id=vendor.id,
+            contract_id=contract.id if contract else None,
+            period_id=resolved_period.period.id,
+            institution_id=institution.id,
+            requirement_id=resolved_requirement.requirement.id,
+            requirement_version_id=resolved_requirement.requirement_version.id,
+            requirement_code=resolved_requirement.canonical_code,
+            period_key=resolved_period.canonical_period_key,
+            load_type=load_type,
+            source="portal",
+            status=final_status.value,
+            comments=comments,
+            submitted_by=submitted_by,
+            # Replacement lineage (Phase 3). Caller must have already
+            # validated that the prior submission belongs to the same
+            # tenant + slot and is in an eligible state before passing it
+            # in; this layer trusts that decision and just persists the
+            # FK + emits the lineage audit trail.
+            supersedes_submission_id=(
+                supersedes_submission.id if supersedes_submission is not None else None
+            ),
+        )
+        db.add(submission)
+        db.flush()
 
-    document = Document(
-        submission_id=submission.id,
-        storage_key=stored_file.storage_key,
-        original_filename=stored_file.original_filename,
-        mime_type=stored_file.mime_type,
-        size_bytes=stored_file.size_bytes,
-        sha256=stored_file.sha256,
-        status=final_status.value,
-    )
-    db.add(document)
-    db.flush()
+        document = Document(
+            submission_id=submission.id,
+            storage_key=stored_file.storage_key,
+            original_filename=stored_file.original_filename,
+            mime_type=stored_file.mime_type,
+            size_bytes=stored_file.size_bytes,
+            sha256=stored_file.sha256,
+            status=final_status.value,
+        )
+        db.add(document)
+        db.flush()
 
     # Phase A forensics + Phase B QR/folio verification. Reviewer-facing
     # verdict only: never alters statuses, validations or prevalidation
@@ -781,7 +811,7 @@ def finalize_intake_submission(
         DocumentStatusHistory(
             document_id=document.id,
             submission_id=submission.id,
-            from_status=None,
+            from_status=prior_status,
             to_status=final_status.value,
             reason=history_reason,
             actor="system",
@@ -1047,6 +1077,311 @@ def finalize_intake_submission(
             requirement_name=resolved_requirement.canonical_name,
         ),
     )
+
+
+@dataclass(frozen=True)
+class IntakeReceipt:
+    """Lean acknowledgement returned the instant an upload is persisted.
+
+    The heavy validation pipeline (OCR, forensics, status derivation,
+    metadata export) runs afterward in
+    ``finalize_intake_submission_background``; this receipt is what the
+    provider's request returns so the wizard can confirm "recibido"
+    without waiting on any of it.
+    """
+
+    submission_id: str
+    document_id: str
+    status: str
+    sha256: str
+    storage_key: str
+
+
+def persist_intake_receipt(
+    db: Session,
+    *,
+    stored_file: StoredFile,
+    client: Client,
+    vendor: Vendor,
+    contract: Contract | None,
+    institution: InstitutionModel,
+    resolved_requirement: ResolvedRequirement,
+    resolved_period: ResolvedPeriod,
+    load_type: str,
+    comments: str | None,
+    submitted_by: str,
+    intake_source: str,
+    supersedes_submission: Submission | None = None,
+    extra_audit_metadata: dict | None = None,
+) -> IntakeReceipt:
+    """Persist a pre-validation intake receipt and commit immediately.
+
+    The provider's upload request returns the moment this commits. The
+    row starts at ``RECIBIDO`` ("En revisión") so it shows on the
+    dashboard / calendar / submissions right away while
+    ``finalize_intake_submission_background`` runs the heavy pipeline and
+    transitions it to its derived status.
+    """
+    submission = Submission(
+        client_id=client.id,
+        vendor_id=vendor.id,
+        contract_id=contract.id if contract else None,
+        period_id=resolved_period.period.id,
+        institution_id=institution.id,
+        requirement_id=resolved_requirement.requirement.id,
+        requirement_version_id=resolved_requirement.requirement_version.id,
+        requirement_code=resolved_requirement.canonical_code,
+        period_key=resolved_period.canonical_period_key,
+        load_type=load_type,
+        source="portal",
+        status=DocumentStatus.RECIBIDO.value,
+        comments=comments,
+        submitted_by=submitted_by,
+        supersedes_submission_id=(
+            supersedes_submission.id if supersedes_submission is not None else None
+        ),
+    )
+    db.add(submission)
+    db.flush()
+
+    document = Document(
+        submission_id=submission.id,
+        storage_key=stored_file.storage_key,
+        original_filename=stored_file.original_filename,
+        mime_type=stored_file.mime_type,
+        size_bytes=stored_file.size_bytes,
+        sha256=stored_file.sha256,
+        status=DocumentStatus.RECIBIDO.value,
+    )
+    db.add(document)
+    db.flush()
+
+    db.add(
+        DocumentStatusHistory(
+            document_id=document.id,
+            submission_id=submission.id,
+            from_status=None,
+            to_status=DocumentStatus.RECIBIDO.value,
+            reason="Carga recibida; validación en proceso.",
+            actor="system",
+        )
+    )
+
+    audit_metadata: dict = {
+        "source": "native_intake",
+        "intake_source": intake_source,
+        "storage_key": stored_file.storage_key,
+        "sha256": stored_file.sha256,
+        "phase": "receipt",
+    }
+    if supersedes_submission is not None:
+        audit_metadata["supersedes_submission_id"] = supersedes_submission.id
+    if extra_audit_metadata:
+        audit_metadata.update(extra_audit_metadata)
+
+    add_audit_event(
+        db,
+        action="submission.received",
+        entity_type="submission",
+        entity_id=submission.id,
+        after={
+            "client_id": client.id,
+            "vendor_id": vendor.id,
+            "requirement_code": resolved_requirement.canonical_code,
+            "period_key": resolved_period.canonical_period_key,
+            "status": DocumentStatus.RECIBIDO.value,
+        },
+        metadata=audit_metadata,
+    )
+
+    db.commit()
+
+    return IntakeReceipt(
+        submission_id=submission.id,
+        document_id=document.id,
+        status=DocumentStatus.RECIBIDO.value,
+        sha256=stored_file.sha256,
+        storage_key=stored_file.storage_key,
+    )
+
+
+def finalize_intake_submission_background(
+    *,
+    submission_id: str,
+    storage_key: str,
+    intake_source: str,
+) -> None:
+    """Run the heavy intake pipeline for a ``RECIBIDO`` receipt, off-request.
+
+    Mirrors ``run_shadow_analysis``: queued as a FastAPI BackgroundTask
+    (and re-run by the reconcile cron), opens its own DB session, takes
+    only primitive ids, and NEVER raises into the worker. It loads the
+    receipt rows, re-materializes the PDF from durable storage (so it
+    works even after the request's temp file is gone — e.g. from the
+    cron), re-resolves requirement/period (idempotent get-or-create),
+    runs ``finalize_intake_submission`` against the existing rows to
+    transition ``recibido → derived`` and attach every analysis
+    side-effect, emits the provider verdict notification, then runs
+    shadow analysis inline.
+
+    Idempotent: a receipt already past ``RECIBIDO`` (finalized by a prior
+    run, or by the inline task racing the reconcile cron) is skipped.
+    """
+    from app.models import ProviderWorkspace
+    from app.services.requirement_service import resolve_period, resolve_requirement
+
+    db = SessionLocal()
+    materialized_path: Path | None = None
+    shadow_args: dict | None = None
+    try:
+        submission = db.get(Submission, submission_id)
+        if submission is None:
+            logger.warning(
+                "Intake finalize: submission %s not found; skipping.", submission_id
+            )
+            return
+        if submission.status != DocumentStatus.RECIBIDO.value:
+            # Already finalized (inline task + reconcile cron raced, or a
+            # reviewer already acted). Nothing to do.
+            return
+        document = submission.documents[0] if submission.documents else None
+        if document is None:
+            logger.warning(
+                "Intake finalize: submission %s has no document; skipping.",
+                submission_id,
+            )
+            return
+
+        client = submission.client
+        vendor = submission.vendor
+        contract = submission.contract
+        institution = submission.institution
+
+        resolved_requirement = resolve_requirement(
+            db,
+            requirement_code=submission.requirement_code,
+            requirement_name=(
+                submission.requirement.name if submission.requirement else ""
+            ),
+            institution_id=institution.id,
+            institution_code=institution.code,
+            load_type=submission.load_type,
+        )
+        period_code = (
+            submission.period.code if submission.period else submission.period_key
+        )
+        resolved_period = resolve_period(
+            db,
+            period_key=submission.period_key,
+            period_code=period_code,
+            load_type=submission.load_type,
+        )
+
+        storage = get_storage_service()
+        materialized_path = storage.open_for_read(storage_key)
+        stored_file = StoredFile(
+            storage_key=storage_key,
+            path=materialized_path,
+            original_filename=document.original_filename,
+            mime_type=document.mime_type,
+            size_bytes=document.size_bytes or 0,
+            sha256=document.sha256,
+            extension=Path(document.original_filename or "").suffix.lower(),
+        )
+
+        supersedes = (
+            db.get(Submission, submission.supersedes_submission_id)
+            if submission.supersedes_submission_id
+            else None
+        )
+        workspace = db.scalar(
+            select(ProviderWorkspace).where(
+                ProviderWorkspace.client_id == submission.client_id,
+                ProviderWorkspace.vendor_id == submission.vendor_id,
+            )
+        )
+
+        response = finalize_intake_submission(
+            db,
+            stored_file=stored_file,
+            client=client,
+            vendor=vendor,
+            contract=contract,
+            institution=institution,
+            resolved_requirement=resolved_requirement,
+            resolved_period=resolved_period,
+            load_type=submission.load_type,
+            period_code=period_code,
+            comments=submission.comments,
+            submitted_by=submission.submitted_by,
+            intake_source=intake_source,
+            extra_audit_metadata=(
+                {"workspace_id": workspace.id} if workspace is not None else None
+            ),
+            supersedes_submission=supersedes,
+            background_tasks=None,
+            existing_submission=submission,
+            existing_document=document,
+        )
+
+        # Provider verdict notification — the provider's own-upload result.
+        # Lifecycle status + the soft requirement-match warning only (the
+        # same anti-tipping contract the response honors; ``match_feedback``
+        # carries no authenticity/forensic signal). Skipped silently when no
+        # workspace matches (legacy / partial seed data).
+        notify_provider_of_validation_complete(
+            db,
+            submission=submission,
+            workspace_id=workspace.id if workspace is not None else None,
+            match_warning=(
+                response.match_feedback.warning_es
+                if response.match_feedback is not None
+                else None
+            ),
+        )
+        db.commit()
+
+        # Capture the shadow-analysis args while the session + file are
+        # live; the call runs after this block so a shadow failure can
+        # never roll back the finalize commit above.
+        shadow_args = {
+            "document_id": document.id,
+            "submission_id": submission.id,
+            "pdf_path": str(materialized_path),
+            "requirement_code": resolved_requirement.canonical_code,
+            "requirement_name": resolved_requirement.canonical_name,
+            "institution_code": institution.code,
+            "period_code": period_code,
+            "org_id": client.id,
+            "requirement_risk_level": resolved_requirement.requirement.risk_level,
+            "expected_provider_rfc": vendor.rfc,
+            "expected_provider_name": vendor.name,
+            "expected_client_name": client.name,
+            "expected_client_rfc": client.rfc,
+        }
+    except Exception:  # noqa: BLE001 — a background failure must never crash the worker
+        logger.exception("Intake finalize failed for submission %s", submission_id)
+        db.rollback()
+        shadow_args = None
+    finally:
+        db.close()
+
+    # Shadow analysis (own session, never raises) runs AFTER the finalize
+    # commit and before temp cleanup so the materialized PDF is still
+    # present. Mirrors the synchronous path's scheduled shadow run.
+    if shadow_args is not None:
+        run_shadow_analysis(**shadow_args)
+
+    # Clean up the S3 temp download; the local backend hands back the
+    # durable path, which must never be unlinked.
+    if (
+        materialized_path is not None
+        and (settings.STORAGE_BACKEND or "local").strip().lower() == "s3"
+    ):
+        try:
+            materialized_path.unlink(missing_ok=True)
+        except OSError:
+            pass
 
 
 # ---------------------------------------------------------------------------

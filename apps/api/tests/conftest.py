@@ -19,6 +19,15 @@ import pytest
 os.environ.pop("ANTHROPIC_API_KEY", None)
 os.environ["CHECKWISE_LLM_BACKEND"] = "mock"
 
+# Async intake (§1.5) runs the validation pipeline in a FastAPI
+# BackgroundTask that opens its own ``SessionLocal`` — which binds to the
+# configured engine, NOT the per-test in-memory SQLite each ``api_client``
+# fixture builds. Force the synchronous in-request path for the suite so
+# finalize writes land in the test session; the dedicated async-path tests
+# flip ``settings.INTAKE_ASYNC_FINALIZE`` back on (and patch SessionLocal)
+# to exercise the background function directly.
+os.environ["INTAKE_ASYNC_FINALIZE"] = "false"
+
 
 @pytest.fixture(autouse=True)
 def _reset_auth_rate_limiters() -> None:

@@ -44,6 +44,7 @@ from app.models import (  # noqa: F401 — ensure mappers register
     Document,
     DocumentInspection,
     DocumentStatusHistory,
+    ProviderNotification,
     ProviderWorkspace,
     Submission,
     User,
@@ -51,7 +52,9 @@ from app.models import (  # noqa: F401 — ensure mappers register
     Vendor,
     entities,
 )
+from app.services import submission_service
 from app.services.auth import hash_password, issue_access_token
+from app.services.submission_service import INTAKE_SOURCE_WORKSPACE_PORTAL
 
 
 @pytest.fixture
@@ -1264,3 +1267,178 @@ def test_build_match_feedback_thresholds() -> None:
     assert mismatch is not None
     assert mismatch.warning_es.startswith("El documento parece")
     assert "«Comprobante de pago bancario»" in mismatch.warning_es
+
+
+# ---------------------------------------------------------------------------
+# Async intake (§1.5) — receipt contract + background finalize + reconcile
+# ---------------------------------------------------------------------------
+#
+# The suite runs with INTAKE_ASYNC_FINALIZE=false (conftest) so the
+# pipeline writes land in the per-test session. These tests flip it back on
+# and drive ``finalize_intake_submission_background`` directly against the
+# test DB by pointing the service's ``SessionLocal`` at the test factory —
+# the scheduled in-request task no-ops because its real ``SessionLocal``
+# can't see this in-memory engine.
+
+
+def _async_upload(api_client: TestClient, ws: dict) -> dict:
+    data, _ = _canonical_intake_payload()
+    response = api_client.post(
+        f"/api/v1/portal/workspaces/{ws['workspace_id']}/submissions",
+        data=data,
+        files={"file": ("inf.pdf", _pdf_bytes(), "application/pdf")},
+    )
+    assert response.status_code == 202, response.text
+    return response.json()
+
+
+def test_workspace_upload_async_returns_recibido_receipt(
+    api_client: TestClient, monkeypatch
+) -> None:
+    """With async on, the upload returns a ``recibido`` receipt with no
+    inline verdict — validation is still pending in the background."""
+    monkeypatch.setattr(settings, "INTAKE_ASYNC_FINALIZE", True)
+    ws = _setup_workspace(api_client)
+    body = _async_upload(api_client, ws)
+
+    assert body["status"] == "recibido"
+    assert body["validation_pending"] is True
+    assert body["validations"] == []
+    assert body["inspection"] is None
+    assert body["match_feedback"] is None
+    assert body["sha256"]
+    assert body["storage_key"].endswith("inf.pdf")
+
+    # The scheduled background task could not reach this in-memory DB, so
+    # the row is still the untouched receipt.
+    factory = api_client.app.state.testing_session  # type: ignore[attr-defined]
+    db: Session = factory()
+    try:
+        sub = db.get(Submission, body["submission_id"])
+        assert sub is not None
+        assert sub.status == "recibido"
+        insp = db.scalar(
+            select(DocumentInspection)
+            .join(Document, DocumentInspection.document_id == Document.id)
+            .where(Document.submission_id == sub.id)
+        )
+        assert insp is None, "receipt must not carry an inspection yet"
+    finally:
+        db.close()
+
+
+def test_background_finalize_transitions_and_notifies(
+    api_client: TestClient, monkeypatch
+) -> None:
+    """Driving the background finalize against the test DB transitions the
+    receipt off ``recibido``, attaches inspection, and emits the provider
+    verdict notification — and a second run is an idempotent no-op."""
+    monkeypatch.setattr(settings, "INTAKE_ASYNC_FINALIZE", True)
+    ws = _setup_workspace(api_client)
+    body = _async_upload(api_client, ws)
+    submission_id = body["submission_id"]
+    storage_key = body["storage_key"]
+
+    factory = api_client.app.state.testing_session  # type: ignore[attr-defined]
+    monkeypatch.setattr(submission_service, "SessionLocal", factory)
+
+    submission_service.finalize_intake_submission_background(
+        submission_id=submission_id,
+        storage_key=storage_key,
+        intake_source=INTAKE_SOURCE_WORKSPACE_PORTAL,
+    )
+
+    db: Session = factory()
+    try:
+        sub = db.get(Submission, submission_id)
+        assert sub.status != "recibido", "receipt should be finalized"
+        insp = db.scalar(
+            select(DocumentInspection)
+            .join(Document, DocumentInspection.document_id == Document.id)
+            .where(Document.submission_id == submission_id)
+        )
+        assert insp is not None
+        notifs = db.scalars(
+            select(ProviderNotification).where(
+                ProviderNotification.submission_id == submission_id,
+                ProviderNotification.notification_type == "document_validation_complete",
+            )
+        ).all()
+        assert len(notifs) == 1
+        # A two-step history (recibido → derived) was recorded.
+        history = db.scalars(
+            select(DocumentStatusHistory)
+            .where(DocumentStatusHistory.submission_id == submission_id)
+            .order_by(DocumentStatusHistory.created_at)
+        ).all()
+        assert history[0].to_status == "recibido"
+        assert history[-1].from_status == "recibido"
+    finally:
+        db.close()
+
+    # Idempotent: a second run (e.g. the reconcile cron racing the inline
+    # task) is skipped because the row is no longer ``recibido``.
+    submission_service.finalize_intake_submission_background(
+        submission_id=submission_id,
+        storage_key=storage_key,
+        intake_source=INTAKE_SOURCE_WORKSPACE_PORTAL,
+    )
+    db = factory()
+    try:
+        notifs = db.scalars(
+            select(ProviderNotification).where(
+                ProviderNotification.submission_id == submission_id,
+                ProviderNotification.notification_type == "document_validation_complete",
+            )
+        ).all()
+        assert len(notifs) == 1, "must not emit a duplicate verdict notification"
+    finally:
+        db.close()
+
+
+def test_intake_reconcile_refinalizes_stranded_receipt(
+    api_client: TestClient, monkeypatch
+) -> None:
+    """A receipt stuck at ``recibido`` past the age cutoff is picked up by
+    the reconcile sweep and re-finalized."""
+    from datetime import timedelta
+
+    from app.models.entities import utc_now
+    from scripts.run_intake_reconcile import _stranded_receipts
+
+    monkeypatch.setattr(settings, "INTAKE_ASYNC_FINALIZE", True)
+    ws = _setup_workspace(api_client)
+    body = _async_upload(api_client, ws)
+    submission_id = body["submission_id"]
+    storage_key = body["storage_key"]
+
+    factory = api_client.app.state.testing_session  # type: ignore[attr-defined]
+    # Backdate the receipt so it falls inside the reconcile age window.
+    db: Session = factory()
+    try:
+        sub = db.get(Submission, submission_id)
+        sub.created_at = utc_now() - timedelta(minutes=30)
+        db.commit()
+    finally:
+        db.close()
+
+    db = factory()
+    try:
+        pairs = _stranded_receipts(db, older_than_minutes=5)
+    finally:
+        db.close()
+    assert (submission_id, storage_key) in pairs
+
+    monkeypatch.setattr(submission_service, "SessionLocal", factory)
+    for sid, skey in pairs:
+        submission_service.finalize_intake_submission_background(
+            submission_id=sid,
+            storage_key=skey,
+            intake_source=INTAKE_SOURCE_WORKSPACE_PORTAL,
+        )
+
+    db = factory()
+    try:
+        assert db.get(Submission, submission_id).status != "recibido"
+    finally:
+        db.close()

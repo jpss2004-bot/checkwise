@@ -98,7 +98,10 @@ from app.models import (
     WiseEvent,
 )
 from app.models.entities import utc_now
-from app.schemas.submissions import MultiSubmissionResponse, SubmissionResponse
+from app.schemas.submissions import (
+    MultiSubmissionResponse,
+    SubmissionResponse,
+)
 from app.services.audit_log import add_audit_event
 from app.services.contact_service import hash_ip
 from app.services.correction_request_service import (
@@ -136,8 +139,10 @@ from app.services.submission_service import (
     INTAKE_SOURCE_WORKSPACE_PORTAL,
     assert_pdf_upload,
     finalize_intake_submission,
+    finalize_intake_submission_background,
     finalize_multi_document_submission,
     get_or_create_institution,
+    persist_intake_receipt,
 )
 
 _MUTATING_METHODS: Final[frozenset[str]] = frozenset(
@@ -2709,7 +2714,13 @@ def get_workspace_slot_state(
         "Identity (client, vendor, contract) is derived from the authenticated "
         "`ProviderWorkspace`. Browser-posted client / vendor / RFC / contract "
         "fields are NOT accepted and have no effect — a spoofed form cannot "
-        "redirect the submission to another tenant."
+        "redirect the submission to another tenant.\n\n"
+        "Async (§1.5): when `INTAKE_ASYNC_FINALIZE` is on (default), persists "
+        "a `recibido` receipt and returns it immediately with "
+        "`validation_pending=true`; OCR, forensics, status derivation and the "
+        "metadata export run in a background task and the verdict is delivered "
+        "via a provider notification, not in this response. With the flag off "
+        "the response carries the full synchronous verdict."
     ),
 )
 async def create_workspace_submission(
@@ -2758,11 +2769,10 @@ async def create_workspace_submission(
     # downstream logic still drives the canonical resolution.
     validate_period_key(period_key)
 
-    if initial_status != DocumentStatus.PENDIENTE_REVISION:
-        raise HTTPException(
-            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
-            detail="La carga inicial debe comenzar en pendiente_revision.",
-        )
+    # ``initial_status`` is now advisory: the async receipt always starts
+    # at ``recibido`` ("En revisión") and the background pipeline derives
+    # the real status. We still reject a structurally invalid value so a
+    # malformed client can't slip garbage past the contract.
     if initial_status not in _VALID_DOCUMENT_STATUSES:
         raise HTTPException(
             status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
@@ -2830,15 +2840,43 @@ async def create_workspace_submission(
             load_type=load_type,
         )
 
-        # PERF-5: finalize runs PDF inspection, OCR, forensics, QR decode,
-        # and the metadata XLSX export (which can PUT to R2) synchronously,
-        # then commits. Offload the whole back-half to a worker thread so a
-        # slow upload never blocks the event loop — and thus every other
-        # request — on a single-worker deploy. The session is used only in
-        # that one thread (the coroutine awaits), so there is no concurrent
-        # access. Behaviour-preserving: same result, status, and commit.
-        return await run_in_threadpool(
-            finalize_intake_submission,
+        if not settings.INTAKE_ASYNC_FINALIZE:
+            # Synchronous fallback — kill-switch for the async path, and
+            # the mode the test suite runs in so finalize writes land in
+            # the request session (the background task's detached
+            # ``SessionLocal`` can't see a per-test in-memory DB). Returns
+            # the full verdict inline (``validation_pending`` defaults
+            # False), exactly like the pre-async contract.
+            return await run_in_threadpool(
+                finalize_intake_submission,
+                db,
+                stored_file=stored_file,
+                client=client,
+                vendor=vendor,
+                contract=contract,
+                institution=institution,
+                resolved_requirement=resolved_requirement,
+                resolved_period=resolved_period,
+                load_type=load_type,
+                period_code=period_code.strip(),
+                comments=comments,
+                submitted_by=f"workspace:{workspace.id}",
+                intake_source=INTAKE_SOURCE_WORKSPACE_PORTAL,
+                extra_audit_metadata={"workspace_id": workspace.id},
+                supersedes_submission=supersedes_submission,
+                background_tasks=background_tasks,
+            )
+
+        # Async (§1.5/§1.6) — persist a lightweight ``recibido`` receipt
+        # and return it immediately. The heavy back-half (PDF inspection,
+        # OCR, forensics, QR decode, status derivation, and the metadata
+        # XLSX export → R2) runs after the response in
+        # ``finalize_intake_submission_background``; the reconcile cron is
+        # the durability backstop. The commit is quick DB work but still
+        # offloaded to a worker thread so the session is touched from
+        # exactly one thread while the coroutine awaits.
+        receipt = await run_in_threadpool(
+            persist_intake_receipt,
             db,
             stored_file=stored_file,
             client=client,
@@ -2848,13 +2886,11 @@ async def create_workspace_submission(
             resolved_requirement=resolved_requirement,
             resolved_period=resolved_period,
             load_type=load_type,
-            period_code=period_code.strip(),
             comments=comments,
             submitted_by=f"workspace:{workspace.id}",
             intake_source=INTAKE_SOURCE_WORKSPACE_PORTAL,
-            extra_audit_metadata={"workspace_id": workspace.id},
             supersedes_submission=supersedes_submission,
-            background_tasks=background_tasks,
+            extra_audit_metadata={"workspace_id": workspace.id},
         )
     except SQLAlchemyError as exc:
         db.rollback()
@@ -2862,6 +2898,30 @@ async def create_workspace_submission(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="No fue posible registrar la carga documental.",
         ) from exc
+
+    # Schedule the validation pipeline OUTSIDE the try/except: it runs
+    # once the response is flushed (and is re-run by the reconcile cron if
+    # this worker dies mid-flight), so a scheduling concern is never
+    # masked as a storage failure.
+    background_tasks.add_task(
+        finalize_intake_submission_background,
+        submission_id=receipt.submission_id,
+        storage_key=receipt.storage_key,
+        intake_source=INTAKE_SOURCE_WORKSPACE_PORTAL,
+    )
+    return SubmissionResponse(
+        submission_id=receipt.submission_id,
+        document_id=receipt.document_id,
+        status=receipt.status,
+        sha256=receipt.sha256,
+        storage_key=receipt.storage_key,
+        validations=[],
+        message=(
+            "Recibimos tu documento. Lo estamos validando y te avisaremos "
+            "cuando termine."
+        ),
+        validation_pending=True,
+    )
 
 
 # ---------------------------------------------------------------------------

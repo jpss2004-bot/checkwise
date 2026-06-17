@@ -208,6 +208,17 @@ class Settings(BaseSettings):
     # roll back without redeploying.
     MULTI_FILE_UPLOAD_ENABLED: bool = True
 
+    # Async intake (§1.5, 2026-06-17) — when True (default), the provider
+    # upload endpoint persists a lightweight ``recibido`` receipt and runs
+    # the heavy validation pipeline (OCR, forensics, status derivation,
+    # metadata export) in a background task; the provider's request
+    # returns immediately. When False, the endpoint runs the pipeline
+    # synchronously in-request (the legacy behavior) — a kill-switch if
+    # the async path ever misbehaves, and the mode the test suite uses so
+    # finalize writes land in the per-test session rather than a detached
+    # ``SessionLocal``.
+    INTAKE_ASYNC_FINALIZE: bool = True
+
     # Catalog v2 (2026-05-20) — collapsed recurring catalog feature flag.
     # When True, ``recurring_for_year_v2`` is the authoritative
     # generator: each (institution, period) pair becomes ONE
