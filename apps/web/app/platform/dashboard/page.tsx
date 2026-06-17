@@ -9,8 +9,6 @@ import {
   UsersThree,
 } from "@phosphor-icons/react";
 
-import { Surface } from "@/components/checkwise/dashboard/stat-card";
-import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
 
 import { PlatformShell } from "../_shell";
@@ -21,58 +19,45 @@ import {
 } from "@/lib/api/admin";
 
 /**
- * /platform/dashboard — system view (V2).
+ * /platform/dashboard — system overview (V3).
  *
- * Lightweight landing for the Platform shell. Each card now carries a
- * live count (V1 showed the raw route path) fetched in parallel with
- * ``limit: 1`` — the backend returns the real filtered ``total``
- * regardless of page size, so these are cheap. Individual failures
- * degrade to "—" without blocking the other cards. Future iterations
- * layer SMTP/WhatsApp health, recent deploy info, and aggregate error
- * counters.
+ * V2 rendered three full launcher cards (icon + description + a CTA button)
+ * that simply re-linked to the sidebar destinations — a home that duplicated
+ * the nav (P3-11), the same anti-pattern /admin/dashboard already removed.
+ * V3 keeps the genuinely useful part (live counts) as a compact stat strip:
+ * each tile leads with the number and links through to its surface, but the
+ * redundant descriptions and "Ver …" buttons are gone. Counts fetch in
+ * parallel with ``limit: 1`` (only ``total`` matters) and degrade to "—"
+ * independently. Future iterations layer real IT telemetry here — SMTP /
+ * WhatsApp / R2 health, cron + job status, error counters, storage — which is
+ * what this section should eventually own.
  */
 
 type CardKey = "users" | "audit" | "feedback";
 
-const ACTIONS: {
+const STATS: {
   key: CardKey;
   href: string;
-  title: string;
-  description: string;
+  label: string;
   icon: typeof UsersThree;
-  cta: string;
-  /** Spanish count line, e.g. "12 usuarios" / "3 nuevos". */
-  countLabel: (n: number) => string;
 }[] = [
   {
     key: "users",
     href: "/platform/users",
-    title: "Usuarios",
-    description:
-      "Todas las cuentas del sistema: restablece contraseñas, desactiva o reactiva accesos y da de alta usuarios nuevos.",
+    label: "Usuarios del sistema",
     icon: UsersThree,
-    cta: "Ver usuarios",
-    countLabel: (n) => `${n.toLocaleString("es-MX")} ${n === 1 ? "usuario" : "usuarios"}`,
   },
   {
     key: "audit",
     href: "/platform/audit-log",
-    title: "Audit log",
-    description:
-      "Trazabilidad completa del sistema: descargas, decisiones del revisor, cambios de perfil, accesos, provisionamiento.",
+    label: "Eventos en bitácora",
     icon: ListMagnifyingGlass,
-    cta: "Abrir explorador",
-    countLabel: (n) => `${n.toLocaleString("es-MX")} ${n === 1 ? "evento" : "eventos"}`,
   },
   {
     key: "feedback",
     href: "/platform/feedback-reports",
-    title: "Reportes de feedback",
-    description:
-      "Bugs e ideas que los usuarios reportan desde el launcher en la app. Triaje + ack al usuario.",
+    label: "Feedback sin triage",
     icon: Bug,
-    cta: "Ver bandeja",
-    countLabel: (n) => `${n.toLocaleString("es-MX")} ${n === 1 ? "nuevo" : "nuevos"}`,
   },
 ];
 
@@ -110,47 +95,48 @@ export default function PlatformDashboardPage() {
   return (
     <PlatformShell
       title="Resumen de plataforma"
-      description="Surfaces internas para el equipo de TI: gestión de usuarios, trazabilidad y feedback de la app."
+      description="Vista de sistema para el equipo de TI. La navegación vive en la barra lateral; aquí solo el estado de un vistazo."
     >
-      <div className="grid gap-4 sm:grid-cols-2">
-        {ACTIONS.map((action) => {
-          const Icon = action.icon;
-          const count = counts[action.key];
+      <div className="grid gap-3 sm:grid-cols-3">
+        {STATS.map((stat) => {
+          const Icon = stat.icon;
+          const count = counts[stat.key];
           return (
-            <Surface
-              key={action.href}
-              title={action.title}
-              icon={Icon}
-              description={action.description}
-              actions={
-                <Button asChild size="sm">
-                  <Link href={action.href}>
-                    {action.cta}
-                    <ArrowRight
-                      className="h-3.5 w-3.5"
-                      weight="bold"
-                      aria-hidden="true"
-                    />
-                  </Link>
-                </Button>
-              }
+            <Link
+              key={stat.href}
+              href={stat.href}
+              className="group flex items-center gap-3 rounded-md border border-[color:var(--border-default)] bg-[color:var(--surface-raised)] px-4 py-3 shadow-[var(--shadow-sm)] transition-colors hover:bg-[color:var(--surface-hover)]"
             >
-              {count === undefined ? (
-                <Skeleton className="h-5 w-24" />
-              ) : count === null ? (
-                <p className="text-sm text-[color:var(--text-tertiary)]">—</p>
-              ) : (
-                <p
-                  className={
-                    count === 0
-                      ? "text-sm text-[color:var(--text-tertiary)]"
-                      : "text-sm font-semibold tabular-nums text-[color:var(--text-primary)]"
-                  }
-                >
-                  {action.countLabel(count)}
+              <span
+                className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-[color:var(--surface-brand-muted)] text-[color:var(--text-brand)]"
+                aria-hidden="true"
+              >
+                <Icon className="h-4 w-4" weight="bold" />
+              </span>
+              <div className="min-w-0">
+                {count === undefined ? (
+                  <Skeleton className="h-6 w-16" />
+                ) : (
+                  <p
+                    className={
+                      count
+                        ? "text-[20px] font-semibold tabular-nums leading-none text-[color:var(--text-primary)]"
+                        : "text-[20px] font-semibold tabular-nums leading-none text-[color:var(--text-tertiary)]"
+                    }
+                  >
+                    {count === null ? "—" : count.toLocaleString("es-MX")}
+                  </p>
+                )}
+                <p className="mt-1 truncate text-[11px] text-[color:var(--text-secondary)]">
+                  {stat.label}
                 </p>
-              )}
-            </Surface>
+              </div>
+              <ArrowRight
+                className="ml-auto h-4 w-4 shrink-0 text-[color:var(--text-tertiary)] opacity-0 transition-opacity group-hover:opacity-100"
+                weight="bold"
+                aria-hidden="true"
+              />
+            </Link>
           );
         })}
       </div>
