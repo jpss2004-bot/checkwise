@@ -364,6 +364,46 @@ _COMPREHENSION_OUTPUT_FORMAT: dict[str, Any] = {
     "schema": _build_comprehension_schema(),
 }
 
+# Phase 3 — generic field-suggestion item. The schema stays generic (a
+# free ``field_key`` string) so it is static across document types; the
+# concrete field list the model should fill rides in the user prompt
+# (volatile per-document context). Numeric ranges are dropped by
+# structured outputs, so confidence is validated/clamped in parsing.
+_FIELD_SUGGESTION_ITEM_SCHEMA: dict[str, Any] = {
+    "type": "object",
+    "additionalProperties": False,
+    "properties": {
+        "field_key": {"type": "string"},
+        "value": {"type": "string"},
+        "confidence": {"type": "number"},
+        "evidence": {"type": "string"},
+    },
+    "required": ["field_key", "value", "confidence", "evidence"],
+}
+
+
+def _build_comprehension_with_fields_schema() -> dict[str, Any]:
+    schema = _build_comprehension_schema()
+    schema["properties"]["field_suggestions"] = {
+        "type": "array",
+        "items": copy.deepcopy(_FIELD_SUGGESTION_ITEM_SCHEMA),
+        "description": (
+            "Valores propuestos para los campos de metadata indicados en el "
+            "prompt. Vacío si el documento no los contiene."
+        ),
+    }
+    schema["required"] = [*schema["required"], "field_suggestions"]
+    return schema
+
+
+# Deep tier + metadata field suggestions (Phase 3). Selected per-request
+# only when the caller supplies ``metadata_field_schema``; otherwise the
+# plain comprehension format above is used and behaviour is unchanged.
+_COMPREHENSION_WITH_FIELDS_OUTPUT_FORMAT: dict[str, Any] = {
+    "type": "json_schema",
+    "schema": _build_comprehension_with_fields_schema(),
+}
+
 # Valid enum values for tolerant comprehension parsing.
 _VALIDITY_VALUES = ("valid", "expired", "indeterminate")
 _VERDICT_VALUES = ("satisfied", "partial", "not_satisfied", "indeterminate")
@@ -439,8 +479,12 @@ class AnthropicDocumentAnalysisProvider:
         expected_provider_name: str | None = None,
         expected_client_name: str | None = None,
         expected_client_rfc: str | None = None,
+        metadata_field_schema: list[dict] | None = None,
     ) -> AnalysisResult:
         _ = org_id  # already enforced by the spend limiter upstream
+        # Field suggestions only make sense on the deep tier (structured
+        # output + reasoning). The triage tier ignores the schema.
+        want_field_suggestions = bool(self._deep_authenticity and metadata_field_schema)
         if self._deep_authenticity:
             # Phase 1 — the deep tier is requirement-aware: the per-type
             # v3 prompt folds extraction + authenticity + the
@@ -474,6 +518,7 @@ class AnthropicDocumentAnalysisProvider:
             expected_provider_name=expected_provider_name,
             expected_client_name=expected_client_name,
             expected_client_rfc=expected_client_rfc,
+            metadata_field_schema=metadata_field_schema if want_field_suggestions else None,
         )
 
         system = [
@@ -517,7 +562,11 @@ class AnthropicDocumentAnalysisProvider:
                 messages=messages,
                 thinking={"type": "adaptive"},
                 output_config={
-                    "format": _COMPREHENSION_OUTPUT_FORMAT,
+                    "format": (
+                        _COMPREHENSION_WITH_FIELDS_OUTPUT_FORMAT
+                        if want_field_suggestions
+                        else _COMPREHENSION_OUTPUT_FORMAT
+                    ),
                     "effort": "high",
                 },
             )
@@ -543,12 +592,14 @@ class AnthropicDocumentAnalysisProvider:
             return self._failure(prompt, start, self._categorise_exception(exc))
 
         comprehension: dict | None = None
+        field_suggestions: list[dict] | None = None
         if self._deep_authenticity:
             (
                 signals,
                 raw_meta,
                 authenticity,
                 comprehension,
+                field_suggestions,
             ) = self._parse_structured_response(response)
         else:
             signals, raw_meta, authenticity = self._parse_response(response)
@@ -573,6 +624,7 @@ class AnthropicDocumentAnalysisProvider:
             raw_meta=raw_meta,
             authenticity=authenticity,
             comprehension=comprehension,
+            field_suggestions=field_suggestions,
         )
 
     # ------------------------------------------------------------------
@@ -613,6 +665,7 @@ class AnthropicDocumentAnalysisProvider:
         expected_provider_name: str | None = None,
         expected_client_name: str | None = None,
         expected_client_rfc: str | None = None,
+        metadata_field_schema: list[dict] | None = None,
     ) -> str:
         lines = [
             "Analiza el documento adjunto y registra tu evaluación llamando "
@@ -654,6 +707,27 @@ class AnthropicDocumentAnalysisProvider:
             "extrae hechos, no inventes valores, y sé conservador con la "
             "confianza. La decisión final la toma el equipo legal.",
         ]
+
+        if metadata_field_schema:
+            lines += [
+                "",
+                "Además, propón valores para los siguientes campos de metadata "
+                "en `field_suggestions`, usando el `field_key` EXACTO. Toma el "
+                "valor del propio documento; si un campo no aparece, omítelo "
+                "(no lo inventes). Usa confianza baja cuando no estés seguro. "
+                "Estas sugerencias son borradores que revisa el equipo legal, "
+                "nunca aprobaciones legales.",
+                "Campos:",
+            ]
+            for field in metadata_field_schema:
+                key = str(field.get("field_key") or "").strip()
+                if not key:
+                    continue
+                label = str(field.get("label") or "").strip()
+                description = str(field.get("description") or "").strip()
+                detail = " — ".join(part for part in [label, description] if part)
+                lines.append(f"- {key}: {detail}" if detail else f"- {key}")
+
         return "\n".join(lines)
 
     @staticmethod
@@ -722,10 +796,13 @@ class AnthropicDocumentAnalysisProvider:
 
     def _parse_structured_response(
         self, response: Any
-    ) -> tuple[DocumentSignals | None, dict, dict | None, dict | None]:
+    ) -> tuple[
+        DocumentSignals | None, dict, dict | None, dict | None, list[dict] | None
+    ]:
         """Deep path — read schema-valid JSON from the first text block.
 
-        Returns ``(signals, raw_meta, authenticity, comprehension)``.
+        Returns ``(signals, raw_meta, authenticity, comprehension,
+        field_suggestions)``.
         Structured outputs guarantee the response text is the JSON object;
         any thinking blocks precede it and are skipped. A truncated or
         non-JSON body returns ``None`` signals so the runner keeps the
@@ -738,23 +815,62 @@ class AnthropicDocumentAnalysisProvider:
                 text = getattr(block, "text", None)
                 break
         if not text:
-            return None, raw_meta, None, None
+            return None, raw_meta, None, None, None
         try:
             payload = json.loads(text)
         except (TypeError, ValueError):
-            return None, raw_meta, None, None
+            return None, raw_meta, None, None, None
         if not isinstance(payload, dict):
-            return None, raw_meta, None, None
+            return None, raw_meta, None, None, None
         signals = self._signals_from_payload(payload)
         if signals is None:
-            return None, raw_meta, None, None
+            return None, raw_meta, None, None, None
         raw_meta["summary_for_reviewer"] = payload.get("summary_for_reviewer")
         return (
             signals,
             raw_meta,
             self._parse_authenticity(payload),
             self._parse_comprehension(payload),
+            self._parse_field_suggestions(payload),
         )
+
+    @staticmethod
+    def _parse_field_suggestions(payload: dict) -> list[dict] | None:
+        """Normalise the Phase-3 ``field_suggestions`` array.
+
+        Returns ``None`` when absent (plain comprehension format, or the
+        model proposed nothing). Malformed entries are dropped — suggestions
+        are additive and must never cost the base signals. Confidence is
+        coerced to [0,1]; entries without a field_key or value are skipped.
+        """
+        raw = payload.get("field_suggestions")
+        if not isinstance(raw, list):
+            return None
+        suggestions: list[dict] = []
+        for item in raw:
+            if not isinstance(item, dict):
+                continue
+            field_key = str(item.get("field_key") or "").strip()
+            value = str(item.get("value") or "").strip()
+            if not field_key or not value:
+                continue
+            try:
+                confidence = (
+                    _clamp01(float(item["confidence"]))
+                    if item.get("confidence") is not None
+                    else None
+                )
+            except (TypeError, ValueError):
+                confidence = None
+            suggestions.append(
+                {
+                    "field_key": field_key,
+                    "value": value,
+                    "confidence": confidence,
+                    "evidence": str(item.get("evidence") or "").strip(),
+                }
+            )
+        return suggestions or None
 
     @staticmethod
     def _parse_comprehension(payload: dict) -> dict | None:

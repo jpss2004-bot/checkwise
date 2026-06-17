@@ -1023,6 +1023,43 @@ def n8n_template_for_document_type(code: str) -> dict:
     }
 
 
+def ai_assisted_field_schema_for_document_type(code: str) -> list[dict]:
+    """Fields a document type expects the AI tier to propose values for.
+
+    Returns the subset of a rule's required/optional/conditional fields
+    whose ``extraction_methods`` include ``"ai_assisted"`` — i.e. the
+    content-dependent fields the deterministic pipeline leaves blank
+    (``main_date``, ``participants``, ``start_date``, …). Each entry is the
+    minimal contract handed to the deep tier and matched back when filling
+    the workbook: ``{field_key, label, requirement_level, description}``.
+    Raises ``UnknownDocumentTypeError`` for an unknown code.
+    """
+    rule = metadata_rule_by_code(code)
+    keys = (
+        rule.required_field_keys
+        + rule.optional_field_keys
+        + rule.conditional_field_keys
+    )
+    schema: list[dict] = []
+    seen: set[str] = set()
+    for key in keys:
+        if key in seen:
+            continue
+        seen.add(key)
+        definition = FIELD_DEFINITIONS.get(key)
+        if definition is None or "ai_assisted" not in definition.extraction_methods:
+            continue
+        schema.append(
+            {
+                "field_key": definition.key,
+                "label": definition.label,
+                "requirement_level": definition.requirement_level,
+                "description": definition.description,
+            }
+        )
+    return schema
+
+
 def validate_metadata_rulebook() -> list[str]:
     """Return catalog problems. Empty list means structurally valid."""
     problems: list[str] = []
@@ -1058,6 +1095,7 @@ __all__ = [
     "DocumentMetadataRule",
     "MetadataFieldDefinition",
     "UnknownDocumentTypeError",
+    "ai_assisted_field_schema_for_document_type",
     "all_metadata_rules",
     "field_definition",
     "metadata_rule_by_code",

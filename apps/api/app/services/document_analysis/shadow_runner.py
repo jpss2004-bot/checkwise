@@ -192,6 +192,15 @@ def run_shadow_analysis(
     )
     if triggers:
         tiers = {"triage": _tier_meta(triage_result), "escalation": None}
+        # Phase 3 — when the comprehension→metadata feature is unlocked for
+        # this requirement, hand the deep tier the metadata field schema so
+        # it also proposes values for the ``ai_assisted`` cells. None
+        # otherwise → the deep call is byte-for-byte unchanged.
+        metadata_field_schema = _metadata_field_schema_for(
+            requirement_code=requirement_code,
+            requirement_name=requirement_name,
+            institution_code=institution_code,
+        )
         escalation_result = _run_escalation(
             triggers=triggers,
             pdf_path=pdf_path,
@@ -205,6 +214,7 @@ def run_shadow_analysis(
             expected_provider_name=expected_provider_name,
             expected_client_name=expected_client_name,
             expected_client_rfc=expected_client_rfc,
+            metadata_field_schema=metadata_field_schema,
         )
         if isinstance(escalation_result, AnalysisResult):
             tiers["escalation"] = {**_tier_meta(escalation_result), "triggers": triggers}
@@ -245,6 +255,15 @@ def run_shadow_analysis(
         submission_id=submission_id,
         org_id=org_id,
         escalated=bool(triggers),
+    )
+
+    # Phase 3 — when the deep tier proposed metadata field values, re-export
+    # the metadata workbook with them prefilled (off the request path, gated,
+    # never an approval). No-op when the feature is off or no suggestions.
+    _maybe_enrich_metadata(
+        document_id=document_id,
+        pdf_path=pdf_path,
+        field_suggestions=final_result.field_suggestions,
     )
 
 
@@ -292,6 +311,100 @@ def _maybe_trigger_expediente(
     )
 
 
+def _comprehension_unlocked_codes() -> set[str]:
+    """Requirement codes (lowercased) unlocked for metadata field suggestions.
+
+    ``*`` unlocks every code. Empty = none, even with the master flag on.
+    """
+    raw = settings.COMPREHENSION_UNLOCKED_REQUIREMENT_CODES or ""
+    return {code.strip().lower() for code in raw.split(",") if code.strip()}
+
+
+def _metadata_field_schema_for(
+    *,
+    requirement_code: str | None,
+    requirement_name: str,
+    institution_code: str,
+) -> list[dict] | None:
+    """The ``ai_assisted`` metadata fields to ask the deep tier to fill.
+
+    Returns ``None`` (no suggestions requested) unless the feature is enabled
+    AND this requirement code is unlocked (Phase-4 gating) AND the upload
+    resolves to a metadata rule with ``ai_assisted`` fields. Any failure is
+    swallowed — suggestions are additive and must never break the deep run.
+    """
+    if not settings.COMPREHENSION_FIELD_SUGGESTIONS_ENABLED:
+        return None
+    unlocked = _comprehension_unlocked_codes()
+    code = (requirement_code or "").strip().lower()
+    if "*" not in unlocked and code not in unlocked:
+        return None
+    try:
+        from app.core.metadata_rules import ai_assisted_field_schema_for_document_type
+        from app.services.metadata_export import resolve_metadata_document_type_code
+
+        document_type_code = resolve_metadata_document_type_code(
+            requirement_code=requirement_code,
+            requirement_name=requirement_name,
+            institution_code=institution_code,
+            filename="",
+        )
+        if not document_type_code:
+            return None
+        return ai_assisted_field_schema_for_document_type(document_type_code) or None
+    except Exception:  # noqa: BLE001 — suggestions are best-effort
+        logger.exception("Failed building metadata field schema for suggestions.")
+        return None
+
+
+def _maybe_enrich_metadata(
+    *,
+    document_id: str,
+    pdf_path: str,
+    field_suggestions: list[dict] | None,
+) -> None:
+    """Re-export the metadata workbook with deep-tier field suggestions.
+
+    No-op unless the feature is enabled and the deep tier returned at least
+    one suggestion above the confidence floor. Runs inline (already a
+    background task), owns its own DB session inside the export, and never
+    raises into the caller.
+    """
+    if not settings.COMPREHENSION_FIELD_SUGGESTIONS_ENABLED:
+        return
+    if not field_suggestions:
+        return
+    min_confidence = float(settings.COMPREHENSION_FIELD_SUGGESTION_MIN_CONFIDENCE or 0.0)
+    filtered = [
+        suggestion
+        for suggestion in field_suggestions
+        if isinstance(suggestion, dict)
+        and suggestion.get("confidence") is not None
+        and suggestion["confidence"] >= min_confidence
+    ]
+    if not filtered:
+        return
+    try:
+        from app.services.metadata_export import reexport_metadata_with_field_suggestions
+
+        result = reexport_metadata_with_field_suggestions(
+            document_id=document_id,
+            pdf_path=pdf_path,
+            field_suggestions=filtered,
+        )
+        if result.status not in {"completed", "skipped"}:
+            logger.warning(
+                "Metadata enrich returned status=%s (%s) for document_id=%s",
+                result.status,
+                result.reason,
+                document_id,
+            )
+    except Exception:  # noqa: BLE001 — enrich is best-effort, never crash the worker
+        logger.exception(
+            "Metadata enrich from field suggestions failed; document_id=%s", document_id
+        )
+
+
 def _analyze_safely(
     provider,  # noqa: ANN001 — DocumentAnalysisProvider protocol
     *,
@@ -305,6 +418,7 @@ def _analyze_safely(
     expected_provider_name: str | None = None,
     expected_client_name: str | None = None,
     expected_client_rfc: str | None = None,
+    metadata_field_schema: list[dict] | None = None,
 ) -> AnalysisResult:
     """Call ``provider.analyze`` with defence-in-depth exception capture."""
     try:
@@ -319,6 +433,7 @@ def _analyze_safely(
             expected_provider_name=expected_provider_name,
             expected_client_name=expected_client_name,
             expected_client_rfc=expected_client_rfc,
+            metadata_field_schema=metadata_field_schema,
         )
     except Exception as exc:  # noqa: BLE001 — provider should not raise, but defence in depth
         logger.exception("Document-analysis provider raised; persisting as provider_error.")
@@ -388,6 +503,7 @@ def _run_escalation(
     expected_provider_name: str | None = None,
     expected_client_name: str | None = None,
     expected_client_rfc: str | None = None,
+    metadata_field_schema: list[dict] | None = None,
 ) -> AnalysisResult | dict:
     """Run the escalation tier, or return a skip-marker dict.
 
@@ -426,6 +542,7 @@ def _run_escalation(
         expected_provider_name=expected_provider_name,
         expected_client_name=expected_client_name,
         expected_client_rfc=expected_client_rfc,
+        metadata_field_schema=metadata_field_schema,
     )
 
 
@@ -790,6 +907,10 @@ def _persist_shadow_result(
             # verbatim for the reviewer card; None for the triage tier.
             if result.comprehension is not None:
                 shadow_signals_blob["comprehension"] = result.comprehension
+            # Phase 3 — metadata field suggestions from the deep tier, kept
+            # alongside the comprehension for the reviewer card + audit.
+            if result.field_suggestions:
+                shadow_signals_blob["field_suggestions"] = result.field_suggestions
         if tiers is not None:
             # Keep the tier bookkeeping even when the final result has
             # no signals (e.g., both tiers errored) — the skip/error

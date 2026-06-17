@@ -564,6 +564,93 @@ class TestAnthropicProviderResponseHandling:
         assert "tool_choice" not in create_kwargs
         assert "tools" not in create_kwargs
 
+    def test_deep_tier_emits_field_suggestions_when_schema_supplied(
+        self, monkeypatch, tmp_path
+    ):
+        payload = {
+            "detected_institution": "sat",
+            "detected_document_type": "csf",
+            "detected_rfcs": [],
+            "detected_dates": [],
+            "period_mentions": [],
+            "requirement_match_confidence": 0.9,
+            "mismatch_reason": None,
+            "anomaly_codes": [],
+            "summary_for_reviewer": "ok",
+            "field_suggestions": [
+                {
+                    "field_key": "main_date",
+                    "value": "2024-03-07",
+                    "confidence": 1.4,  # clamped to 1.0
+                    "evidence": "fecha de emisión",
+                },
+                {"field_key": "", "value": "x", "confidence": 0.9, "evidence": ""},  # dropped
+            ],
+        }
+        client = MagicMock()
+        client.with_options.return_value.messages.create.return_value = (
+            _mock_structured_response(payload)
+        )
+        monkeypatch.setattr(settings, "ANTHROPIC_API_KEY", "sk-test")
+        provider = AnthropicDocumentAnalysisProvider(
+            api_key="sk-test", model="claude-sonnet-4-6", deep_authenticity=True
+        )
+        provider._client = client  # noqa: SLF001 — test injection seam
+        result = provider.analyze(
+            pdf_path=_blank_pdf_path(tmp_path),
+            requirement_code="REC-SAT-CSF-2026",
+            requirement_name="CSF",
+            institution_code="sat",
+            period_code="2026-01",
+            metadata_field_schema=[
+                {
+                    "field_key": "main_date",
+                    "label": "Fecha principal",
+                    "requirement_level": "required",
+                    "description": "Fecha del documento",
+                }
+            ],
+        )
+        assert result.error is None
+        assert result.field_suggestions == [
+            {
+                "field_key": "main_date",
+                "value": "2024-03-07",
+                "confidence": 1.0,
+                "evidence": "fecha de emisión",
+            }
+        ]
+        create_kwargs = client.with_options.return_value.messages.create.call_args.kwargs
+        schema_props = create_kwargs["output_config"]["format"]["schema"]["properties"]
+        assert "field_suggestions" in schema_props
+        user_text = create_kwargs["messages"][0]["content"][-1]["text"]
+        assert "main_date" in user_text
+        assert "field_suggestions" in user_text
+
+    def test_deep_tier_without_schema_omits_field_suggestions(
+        self, monkeypatch, tmp_path
+    ):
+        client = MagicMock()
+        client.with_options.return_value.messages.create.return_value = (
+            _mock_structured_response()
+        )
+        monkeypatch.setattr(settings, "ANTHROPIC_API_KEY", "sk-test")
+        provider = AnthropicDocumentAnalysisProvider(
+            api_key="sk-test", model="claude-sonnet-4-6", deep_authenticity=True
+        )
+        provider._client = client  # noqa: SLF001 — test injection seam
+        result = provider.analyze(
+            pdf_path=_blank_pdf_path(tmp_path),
+            requirement_code="REC-SAT-CSF-2026",
+            requirement_name="CSF",
+            institution_code="sat",
+            period_code="2026-01",
+        )
+        assert result.field_suggestions is None
+        create_kwargs = client.with_options.return_value.messages.create.call_args.kwargs
+        schema_props = create_kwargs["output_config"]["format"]["schema"]["properties"]
+        assert "field_suggestions" not in schema_props
+
     def test_deep_tier_non_json_text_is_malformed(self, monkeypatch, tmp_path):
         client = MagicMock()
         bad = _mock_structured_response()
@@ -1910,3 +1997,121 @@ class TestMergeLlmAuthenticity:
         # The clean re-run removes the stale reason and re-rolls down.
         assert insp.risk_reasons == []
         assert insp.authenticity_risk == "clean"
+
+
+class TestComprehensionFieldSuggestionGating:
+    """Phase 3/4 — the metadata field-suggestion feature is gated dark."""
+
+    def test_schema_is_none_when_feature_disabled(self, monkeypatch):
+        from app.services.document_analysis import shadow_runner as sr
+
+        monkeypatch.setattr(settings, "COMPREHENSION_FIELD_SUGGESTIONS_ENABLED", False)
+        monkeypatch.setattr(settings, "COMPREHENSION_UNLOCKED_REQUIREMENT_CODES", "*")
+        assert (
+            sr._metadata_field_schema_for(
+                requirement_code="constancia_situacion_fiscal",
+                requirement_name="Constancia de Situación Fiscal",
+                institution_code="sat",
+            )
+            is None
+        )
+
+    def test_schema_is_none_when_code_not_unlocked(self, monkeypatch):
+        from app.services.document_analysis import shadow_runner as sr
+
+        monkeypatch.setattr(settings, "COMPREHENSION_FIELD_SUGGESTIONS_ENABLED", True)
+        monkeypatch.setattr(
+            settings, "COMPREHENSION_UNLOCKED_REQUIREMENT_CODES", "registro_repse"
+        )
+        assert (
+            sr._metadata_field_schema_for(
+                requirement_code="constancia_situacion_fiscal",
+                requirement_name="Constancia de Situación Fiscal",
+                institution_code="sat",
+            )
+            is None
+        )
+
+    def test_schema_returns_ai_assisted_fields_when_unlocked(self, monkeypatch):
+        from app.services.document_analysis import shadow_runner as sr
+
+        monkeypatch.setattr(settings, "COMPREHENSION_FIELD_SUGGESTIONS_ENABLED", True)
+        monkeypatch.setattr(
+            settings,
+            "COMPREHENSION_UNLOCKED_REQUIREMENT_CODES",
+            "constancia_situacion_fiscal",
+        )
+        schema = sr._metadata_field_schema_for(
+            requirement_code="constancia_situacion_fiscal",
+            requirement_name="Constancia de Situación Fiscal",
+            institution_code="sat",
+        )
+        assert schema is not None
+        keys = {field["field_key"] for field in schema}
+        assert "main_date" in keys
+        assert all({"field_key", "label", "description"} <= set(f) for f in schema)
+
+    def test_wildcard_unlocks_all_codes(self, monkeypatch):
+        from app.services.document_analysis import shadow_runner as sr
+
+        monkeypatch.setattr(settings, "COMPREHENSION_FIELD_SUGGESTIONS_ENABLED", True)
+        monkeypatch.setattr(settings, "COMPREHENSION_UNLOCKED_REQUIREMENT_CODES", "*")
+        schema = sr._metadata_field_schema_for(
+            requirement_code="registro_repse",
+            requirement_name="Registro REPSE",
+            institution_code="stps_repse",
+        )
+        assert schema is not None and schema
+
+    def test_enrich_is_noop_when_disabled(self, monkeypatch):
+        from app.services.document_analysis import shadow_runner as sr
+
+        monkeypatch.setattr(settings, "COMPREHENSION_FIELD_SUGGESTIONS_ENABLED", False)
+        called = {"n": 0}
+
+        def _boom(**_kwargs):
+            called["n"] += 1
+            raise AssertionError("reexport must not run when disabled")
+
+        monkeypatch.setattr(
+            "app.services.metadata_export.reexport_metadata_with_field_suggestions",
+            _boom,
+        )
+        sr._maybe_enrich_metadata(
+            document_id="doc_1",
+            pdf_path="/tmp/x.pdf",
+            field_suggestions=[{"field_key": "main_date", "value": "x", "confidence": 1.0}],
+        )
+        assert called["n"] == 0
+
+    def test_enrich_drops_low_confidence_suggestions(self, monkeypatch):
+        from app.services.document_analysis import shadow_runner as sr
+
+        monkeypatch.setattr(settings, "COMPREHENSION_FIELD_SUGGESTIONS_ENABLED", True)
+        monkeypatch.setattr(
+            settings, "COMPREHENSION_FIELD_SUGGESTION_MIN_CONFIDENCE", 0.8
+        )
+        captured = {"suggestions": None}
+
+        def _capture(*, document_id, pdf_path, field_suggestions):
+            captured["suggestions"] = field_suggestions
+            from app.services.metadata_export import MetadataExportResult
+
+            return MetadataExportResult(status="completed")
+
+        monkeypatch.setattr(
+            "app.services.metadata_export.reexport_metadata_with_field_suggestions",
+            _capture,
+        )
+        sr._maybe_enrich_metadata(
+            document_id="doc_1",
+            pdf_path="/tmp/x.pdf",
+            field_suggestions=[
+                {"field_key": "main_date", "value": "ok", "confidence": 0.9},
+                {"field_key": "participants", "value": "low", "confidence": 0.3},
+                {"field_key": "issue_date", "value": "none", "confidence": None},
+            ],
+        )
+        assert captured["suggestions"] == [
+            {"field_key": "main_date", "value": "ok", "confidence": 0.9}
+        ]

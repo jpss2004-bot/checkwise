@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import logging
 import re
 import shutil
 import unicodedata
@@ -7,9 +8,20 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
+from sqlalchemy import select
+
 from app.core.config import settings
 from app.core.metadata_rules import all_metadata_rules, metadata_rule_by_code
-from app.models import Client, Contract, Document, Vendor
+from app.db.session import SessionLocal
+from app.models import (
+    Client,
+    Contract,
+    Document,
+    DocumentInspection,
+    Requirement,
+    Submission,
+    Vendor,
+)
 from app.models import Institution as InstitutionModel
 from app.services.document_intelligence import DocumentSignals
 from app.services.metadata_store import persist_export, sync_client_latest_exports
@@ -21,6 +33,8 @@ from tools.export_pdf_metadata_table import (
     read_metadata_field_rows_from_xlsx,
     write_client_master_xlsx,
 )
+
+logger = logging.getLogger(__name__)
 
 
 @dataclass(frozen=True)
@@ -96,6 +110,7 @@ def export_metadata_table_after_upload(
     detected_document_type: str | None,
     pdf_inspection: PdfInspectionResult | None = None,
     document_signals: DocumentSignals | None = None,
+    field_suggestions: dict[str, dict[str, Any]] | None = None,
 ) -> MetadataExportResult:
     """Create the automatic XLSX metadata table for a submitted PDF.
 
@@ -125,23 +140,16 @@ def export_metadata_table_after_upload(
             reason="metadata document type could not be resolved",
         )
 
-    output_dir = _export_directory(
-        client_name=client.name,
-        vendor_name=vendor.name,
-        period_key=resolved_period.canonical_period_key,
-        document_type_code=document_type_code,
-    )
-    output_dir.mkdir(parents=True, exist_ok=True)
-
-    output_path = output_dir / f"{document.submission_id}_{document.id}_metadata.xlsx"
-    latest_path = output_dir / "latest_metadata.xlsx"
     context = _metadata_context(
         client=client,
         vendor=vendor,
         contract=contract,
         institution=institution,
-        resolved_requirement=resolved_requirement,
-        resolved_period=resolved_period,
+        requirement_id=resolved_requirement.requirement.id,
+        requirement_code=resolved_requirement.canonical_code,
+        requirement_name=resolved_requirement.canonical_name,
+        period_id=resolved_period.period.id,
+        period_key=resolved_period.canonical_period_key,
         document=document,
         stored_file=stored_file,
         document_type_code=document_type_code,
@@ -153,6 +161,48 @@ def export_metadata_table_after_upload(
             pdf_inspection, document_signals
         )
 
+    return _write_metadata_workbooks(
+        stored_file=stored_file,
+        client_name=client.name,
+        vendor_name=vendor.name,
+        period_key=resolved_period.canonical_period_key,
+        document_type_code=document_type_code,
+        context=context,
+        precomputed_text_extraction=precomputed_text_extraction,
+        field_suggestions=field_suggestions,
+    )
+
+
+def _write_metadata_workbooks(
+    *,
+    stored_file: StoredFile,
+    client_name: str,
+    vendor_name: str,
+    period_key: str | None,
+    document_type_code: str,
+    context: dict[str, Any],
+    precomputed_text_extraction: dict[str, Any] | None = None,
+    field_suggestions: dict[str, dict[str, Any]] | None = None,
+) -> MetadataExportResult:
+    """Write the per-document + latest workbooks, mirror, rebuild the master.
+
+    The shared core behind both the synchronous intake export and the async
+    comprehension re-export. ``field_suggestions`` (field_key -> {value,
+    confidence, evidence}) prefills the ``ai_assisted`` cells.
+    """
+    output_dir = _export_directory(
+        client_name=client_name,
+        vendor_name=vendor_name,
+        period_key=period_key,
+        document_type_code=document_type_code,
+    )
+    output_dir.mkdir(parents=True, exist_ok=True)
+
+    output_path = (
+        output_dir / f"{context['submission_id']}_{context['document_id']}_metadata.xlsx"
+    )
+    latest_path = output_dir / "latest_metadata.xlsx"
+
     try:
         export_pdf_metadata_table(
             pdf_path=stored_file.path,
@@ -163,6 +213,7 @@ def export_metadata_table_after_upload(
             include_intelligence=True,
             enable_ocr=False,
             precomputed_text_extraction=precomputed_text_extraction,
+            field_suggestions=field_suggestions,
         )
         shutil.copyfile(output_path, latest_path)
         # Mirror both workbooks to durable storage BEFORE the master
@@ -170,7 +221,7 @@ def export_metadata_table_after_upload(
         # able to recover the full slot set after a deploy.
         persist_export(output_path)
         persist_export(latest_path)
-        master_path = rebuild_client_master_metadata_export(client_name=client.name)
+        master_path = rebuild_client_master_metadata_export(client_name=client_name)
     except Exception as exc:  # noqa: BLE001 - surfaced as telemetry, not a provider error
         return MetadataExportResult(
             status="failed",
@@ -185,6 +236,145 @@ def export_metadata_table_after_upload(
         latest_path=str(latest_path),
         master_path=str(master_path) if master_path else None,
     )
+
+
+def reexport_metadata_with_field_suggestions(
+    *,
+    document_id: str,
+    pdf_path: str,
+    field_suggestions: list[dict[str, Any]],
+) -> MetadataExportResult:
+    """Re-export one document's metadata workbook with AI field suggestions.
+
+    Called from the shadow runner AFTER the deep comprehension tier produced
+    ``field_suggestions`` (Phase 3). Reconstructs the export context from the
+    persisted submission so it does not depend on request-scoped objects,
+    reuses the intake classifier signals from ``DocumentInspection`` (no
+    re-parse), and overwrites the intake skeleton workbook with the
+    prefilled one. Best-effort: never raises into the caller.
+    """
+    if not settings.AUTO_METADATA_EXPORT_ENABLED:
+        return MetadataExportResult(status="skipped", reason="automatic export disabled")
+    if not field_suggestions:
+        return MetadataExportResult(status="skipped", reason="no field suggestions")
+
+    db = SessionLocal()
+    try:
+        document = db.get(Document, document_id)
+        if document is None:
+            return MetadataExportResult(status="failed", reason="document not found")
+        submission = db.get(Submission, document.submission_id)
+        if submission is None:
+            return MetadataExportResult(status="failed", reason="submission not found")
+        client = db.get(Client, submission.client_id)
+        vendor = db.get(Vendor, submission.vendor_id)
+        institution = db.get(InstitutionModel, submission.institution_id)
+        requirement = db.get(Requirement, submission.requirement_id)
+        contract = db.get(Contract, submission.contract_id) if submission.contract_id else None
+        if client is None or vendor is None or institution is None or requirement is None:
+            return MetadataExportResult(status="failed", reason="submission relations missing")
+        inspection = db.scalar(
+            select(DocumentInspection).where(DocumentInspection.document_id == document_id)
+        )
+
+        document_type_code = resolve_metadata_document_type_code(
+            requirement_code=submission.requirement_code,
+            requirement_name=requirement.name,
+            institution_code=institution.code,
+            filename=document.original_filename,
+            detected_document_type=(
+                inspection.detected_document_type if inspection is not None else None
+            ),
+        )
+        if document_type_code is None:
+            return MetadataExportResult(
+                status="skipped",
+                reason="metadata document type could not be resolved",
+            )
+
+        stored_file = StoredFile(
+            storage_key=document.storage_key,
+            path=Path(pdf_path),
+            original_filename=document.original_filename,
+            mime_type=document.mime_type,
+            size_bytes=document.size_bytes or 0,
+            sha256=document.sha256,
+            extension=Path(document.original_filename or "").suffix.lstrip("."),
+        )
+        context = _metadata_context(
+            client=client,
+            vendor=vendor,
+            contract=contract,
+            institution=institution,
+            requirement_id=submission.requirement_id,
+            requirement_code=submission.requirement_code,
+            requirement_name=requirement.name,
+            period_id=submission.period_id,
+            period_key=submission.period_key,
+            document=document,
+            stored_file=stored_file,
+            document_type_code=document_type_code,
+        )
+        precomputed = (
+            _text_extraction_from_inspection(inspection) if inspection is not None else None
+        )
+        return _write_metadata_workbooks(
+            stored_file=stored_file,
+            client_name=client.name,
+            vendor_name=vendor.name,
+            period_key=submission.period_key,
+            document_type_code=document_type_code,
+            context=context,
+            precomputed_text_extraction=precomputed,
+            field_suggestions=_suggestions_by_key(field_suggestions),
+        )
+    finally:
+        db.close()
+
+
+def _suggestions_by_key(
+    field_suggestions: list[dict[str, Any]],
+) -> dict[str, dict[str, Any]]:
+    """Index a field_suggestions list by field_key (last write wins)."""
+    indexed: dict[str, dict[str, Any]] = {}
+    for suggestion in field_suggestions or []:
+        key = str(suggestion.get("field_key") or "").strip()
+        if key:
+            indexed[key] = suggestion
+    return indexed
+
+
+def _text_extraction_from_inspection(
+    inspection: DocumentInspection,
+) -> dict[str, Any]:
+    """Build the metadata "intelligence" shape from a persisted inspection.
+
+    The async re-export runs after intake, where the in-memory
+    ``PdfInspectionResult`` is long gone and the extracted text was never
+    persisted. The classifier *detections* were, so rebuild the signals from
+    the ``DocumentInspection`` columns and avoid re-opening the PDF. The
+    text sample is unavailable (not stored) — fine, since the n8n text
+    hand-off is superseded by the in-house suggestions.
+    """
+    return {
+        "pdf_text_extraction_used": True,
+        "method": "reused_inspection_row",
+        "ocr_used": False,
+        "text_char_count": inspection.text_char_count or 0,
+        "has_text": bool(inspection.has_text),
+        "is_probably_scanned": bool(inspection.is_probably_scanned),
+        "text_sample": "",
+        "signals": {
+            "detected_institution": inspection.detected_institution,
+            "detected_document_type": inspection.detected_document_type,
+            "detected_rfcs": list(inspection.detected_rfcs or []),
+            "detected_dates": list(inspection.detected_dates or []),
+            "period_mentions": list(inspection.period_mentions or []),
+            "requirement_match_confidence": inspection.requirement_match_confidence,
+            "mismatch_reason": inspection.mismatch_reason,
+            "anomaly_codes": [],
+        },
+    }
 
 
 def rebuild_client_master_metadata_export(*, client_name: str) -> Path | None:
@@ -274,13 +464,17 @@ def _metadata_context(
     vendor: Vendor,
     contract: Contract | None,
     institution: InstitutionModel,
-    resolved_requirement: ResolvedRequirement,
-    resolved_period: ResolvedPeriod,
+    requirement_id: str,
+    requirement_code: str | None,
+    requirement_name: str,
+    period_id: str,
+    period_key: str | None,
     document: Document,
     stored_file: StoredFile,
     document_type_code: str,
 ) -> dict[str, Any]:
-    period_key = resolved_period.canonical_period_key
+    # Takes primitives (not the resolver objects) so the async re-export
+    # path can rebuild the same context straight from a persisted Submission.
     return {
         "submission_id": document.submission_id,
         "document_id": document.id,
@@ -292,10 +486,10 @@ def _metadata_context(
         "provider_nomenclature": vendor.name,
         "contract_id": contract.id if contract else None,
         "contract_reference": contract.external_reference if contract else None,
-        "requirement_id": resolved_requirement.requirement.id,
-        "requirement_code": resolved_requirement.canonical_code,
-        "requirement_name": resolved_requirement.canonical_name,
-        "period_id": resolved_period.period.id,
+        "requirement_id": requirement_id,
+        "requirement_code": requirement_code,
+        "requirement_name": requirement_name,
+        "period_id": period_id,
         "period_key": period_key,
         "document_type_code": document_type_code,
         "expected_document_type_code": document_type_code,

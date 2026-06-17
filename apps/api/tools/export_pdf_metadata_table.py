@@ -880,6 +880,7 @@ def export_pdf_metadata_table(
     include_intelligence: bool = True,
     enable_ocr: bool = False,
     precomputed_text_extraction: dict[str, Any] | None = None,
+    field_suggestions: dict[str, dict[str, Any]] | None = None,
 ) -> list[dict[str, str]]:
     payload = build_pdf_metadata_dry_run_payload(
         pdf_path=pdf_path,
@@ -888,6 +889,7 @@ def export_pdf_metadata_table(
         include_intelligence=include_intelligence,
         enable_ocr=enable_ocr,
         precomputed_text_extraction=precomputed_text_extraction,
+        field_suggestions=field_suggestions,
     )
     rows = build_metadata_field_rows(payload)
     path = Path(output_path).expanduser()

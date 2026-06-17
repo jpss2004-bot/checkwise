@@ -73,3 +73,62 @@ def test_classifier_bridge_targets_are_real_rule_codes() -> None:
     for classifier_code, metadata_code in _CLASSIFIER_TO_METADATA_CODE.items():
         rule = metadata_rule_by_code(metadata_code)
         assert rule.code == metadata_code, classifier_code
+
+
+def test_ai_assisted_field_schema_selects_ai_fields_only() -> None:
+    from app.core.metadata_rules import ai_assisted_field_schema_for_document_type
+
+    schema = ai_assisted_field_schema_for_document_type("constancia_situacion_fiscal")
+    keys = {field["field_key"] for field in schema}
+    assert "main_date" in keys
+    assert "taxpayer_name" in keys
+    # Deterministic-only fields (no ``ai_assisted`` method) are excluded.
+    assert "area_interna" not in keys
+    for field in schema:
+        assert set(field) == {"field_key", "label", "requirement_level", "description"}
+
+
+def test_suggestions_by_key_indexes_and_last_write_wins() -> None:
+    from app.services.metadata_export import _suggestions_by_key
+
+    out = _suggestions_by_key(
+        [
+            {"field_key": "main_date", "value": "a"},
+            {"field_key": "main_date", "value": "b"},
+            {"field_key": "", "value": "dropped"},
+        ]
+    )
+    assert out == {"main_date": {"field_key": "main_date", "value": "b"}}
+
+
+def test_text_extraction_from_inspection_shape() -> None:
+    from app.models import DocumentInspection
+    from app.services.metadata_export import _text_extraction_from_inspection
+
+    inspection = DocumentInspection(
+        document_id="d1",
+        is_pdf=True,
+        detected_institution="sat",
+        detected_document_type="constancia_situacion_fiscal",
+        detected_rfcs=["XAXX010101000"],
+        requirement_match_confidence=0.8,
+        text_char_count=10,
+        has_text=True,
+        is_probably_scanned=False,
+    )
+    extraction = _text_extraction_from_inspection(inspection)
+    assert extraction["ocr_used"] is False
+    assert extraction["method"] == "reused_inspection_row"
+    assert extraction["text_sample"] == ""
+    assert extraction["signals"]["detected_institution"] == "sat"
+    assert extraction["signals"]["detected_rfcs"] == ["XAXX010101000"]
+    assert set(extraction) == {
+        "pdf_text_extraction_used",
+        "method",
+        "ocr_used",
+        "text_char_count",
+        "has_text",
+        "is_probably_scanned",
+        "text_sample",
+        "signals",
+    }

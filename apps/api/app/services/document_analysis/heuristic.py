@@ -41,9 +41,11 @@ class HeuristicDocumentAnalysisProvider:
         expected_provider_name: str | None = None,
         expected_client_name: str | None = None,
         expected_client_rfc: str | None = None,
+        metadata_field_schema: list[dict] | None = None,
     ) -> AnalysisResult:
         _ = requirement_code  # unused by the heuristic; kept for parity
         _ = org_id
+        _ = metadata_field_schema  # the heuristic has no deep tier / suggestions
         start = time.monotonic()
         try:
             inspection = inspect_pdf(pdf_path)

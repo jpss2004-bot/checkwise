@@ -374,6 +374,30 @@ class Settings(BaseSettings):
     DOCUMENT_ANALYSIS_PILOT_ORG_IDS: str = ""
 
     # ─────────────────────────────────────────────────────────────────
+    # Phase 3/4 — comprehension → metadata field suggestions.
+    #
+    # When the deep tier runs, it can also propose values for the
+    # ``ai_assisted`` metadata fields the rulebook otherwise leaves blank
+    # (main_date, participants, start_date, …) and those proposals fill the
+    # metadata XLSX as ``prefilled_needs_review`` — never auto-approved
+    # (the rulebook keeps ``legal_approval_allowed=False``). Zero extra
+    # model calls: it rides the comprehension pass that already runs.
+    #
+    # Off by default — when disabled, the deep tier behaves exactly as
+    # before (no field schema sent, no suggestions parsed) and the metadata
+    # export keeps its deterministic skeleton. Safe to ship dark.
+    COMPREHENSION_FIELD_SUGGESTIONS_ENABLED: bool = False
+    # CSV allowlist of requirement codes whose uploads get field
+    # suggestions. Empty (default) = none, even when the flag above is on —
+    # graduate codes one at a time as calibration confirms precision
+    # (mirrors the auto-approve unlock ladder). ``*`` unlocks all codes.
+    COMPREHENSION_UNLOCKED_REQUIREMENT_CODES: str = ""
+    # Drop any individual field suggestion below this confidence before it
+    # reaches the workbook. The reviewer still confirms every prefilled
+    # value; this just suppresses low-signal noise.
+    COMPREHENSION_FIELD_SUGGESTION_MIN_CONFIDENCE: float = 0.55
+
+    # ─────────────────────────────────────────────────────────────────
     # Phase E — document-revalidation approval suggestion + auto-approve.
     #
     # ``AUTO_APPROVE_SUGGEST_CONFIDENCE`` gates the reviewer-facing

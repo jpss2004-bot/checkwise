@@ -112,6 +112,15 @@ class AnalysisResult:
     #      "discrepancies": [{"issue": str, "severity": str, "evidence": str}]}
     # Persisted verbatim under ``shadow_signals['comprehension']``.
     comprehension: dict | None = None
+    # Phase 3 — metadata field suggestions. ``None`` unless the caller asked
+    # for them (deep tier + ``metadata_field_schema`` supplied + Phase-4
+    # gating open). Shape (normalised by the provider):
+    #     [{"field_key": str, "value": str, "confidence": float | None,
+    #       "evidence": str}]
+    # These feed the metadata XLSX's ``ai_assisted`` cells as
+    # ``prefilled_needs_review`` — never an approval. Persisted under
+    # ``shadow_signals['field_suggestions']``.
+    field_suggestions: list[dict] | None = None
 
 
 class DocumentAnalysisProvider(Protocol):
@@ -159,5 +168,11 @@ class DocumentAnalysisProvider(Protocol):
         expected_provider_name: str | None = None,
         expected_client_name: str | None = None,
         expected_client_rfc: str | None = None,
+        # Phase 3 — when supplied (deep tier only), the model also proposes
+        # values for these metadata fields. Each entry:
+        # ``{field_key, label, requirement_level, description}``. Optional and
+        # defaulted so the triage tier, the heuristic baseline, and every
+        # existing caller keep working unchanged.
+        metadata_field_schema: list[dict] | None = None,
     ) -> AnalysisResult:
         ...

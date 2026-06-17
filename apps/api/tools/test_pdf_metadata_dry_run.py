@@ -232,6 +232,7 @@ def _build_review_item(
     context: dict[str, Any],
     template: dict[str, Any],
     pdf_inspection: dict[str, Any],
+    field_suggestions: dict[str, dict[str, Any]] | None = None,
 ) -> dict[str, Any]:
     field_key = field["key"]
     raw_value, source, extraction_method, confidence = _context_value_for_field(
@@ -243,6 +244,21 @@ def _build_review_item(
     status = "prefilled_needs_review" if raw_value is not None else "pending"
     if field_key == "pdf_quality_ocr":
         status = "deterministic_inspection_needs_review"
+
+    reviewer_notes: str | None = None
+    # Phase 3 — fill an otherwise-pending field from an AI comprehension
+    # suggestion. Never overrides a deterministic value, and never an
+    # approval: the status stays ``*_needs_review`` so the reviewer confirms.
+    if raw_value is None and field_suggestions and field_key in field_suggestions:
+        suggestion = field_suggestions[field_key]
+        suggested_value = suggestion.get("value")
+        if suggested_value not in (None, ""):
+            raw_value = suggested_value
+            source = "ai_comprehension"
+            extraction_method = "ai_assisted"
+            confidence = suggestion.get("confidence") or 0.0
+            status = "prefilled_needs_review"
+            reviewer_notes = suggestion.get("evidence") or None
 
     return {
         "field_key": field_key,
@@ -257,7 +273,7 @@ def _build_review_item(
         "extraction_method": extraction_method,
         "source": source,
         "human_review_required": field["human_review_required"],
-        "reviewer_notes": None,
+        "reviewer_notes": reviewer_notes,
     }
 
 
@@ -458,6 +474,7 @@ def _build_ai_extraction_request(
     review_items: list[dict[str, Any]],
     text_extraction: dict[str, Any],
     ocr_status: dict[str, Any] | None = None,
+    suggestions_applied: bool = False,
 ) -> dict[str, Any]:
     field_schema = [
         {
@@ -478,7 +495,14 @@ def _build_ai_extraction_request(
 
     return {
         "ai_used": False,
-        "status": "ready_for_n8n_ai_node",
+        # Phase 3 — when the deep comprehension tier already supplied
+        # suggestions (the live path), the standalone n8n AI node is
+        # superseded: the in-house pass is the AI source. The envelope is
+        # still emitted (CLI/dry-run with no suggestions keep the original
+        # hand-off) but flagged so consumers don't double-call a model.
+        "status": (
+            "fulfilled_by_comprehension" if suggestions_applied else "ready_for_n8n_ai_node"
+        ),
         "recommended_model_policy": (
             "Use a model configured in n8n credentials; keep output JSON-only."
         ),
@@ -562,6 +586,7 @@ def build_pdf_metadata_dry_run_payload(
     include_intelligence: bool = False,
     enable_ocr: bool = False,
     precomputed_text_extraction: dict[str, Any] | None = None,
+    field_suggestions: dict[str, dict[str, Any]] | None = None,
 ) -> dict[str, Any]:
     """Create a review payload for one PDF using the real metadata rulebook.
 
@@ -571,6 +596,11 @@ def build_pdf_metadata_dry_run_payload(
     re-run ``analyze_document_text`` a second time. It must match the shape
     returned by ``_build_pdf_text_extraction``. When ``None`` (CLI / dry-run /
     tests) the text is extracted here exactly as before.
+
+    ``field_suggestions`` (Phase 3) maps ``field_key -> {value, confidence,
+    evidence}`` produced by the deep comprehension tier. Pending
+    ``ai_assisted`` fields are prefilled from it as ``prefilled_needs_review``
+    — never an approval. When ``None`` the fields stay blank exactly as before.
     """
     context = _compact_context(dict(context or {}))
     pdf_inspection = inspect_local_pdf(pdf_path)
@@ -592,6 +622,7 @@ def build_pdf_metadata_dry_run_payload(
             context=context,
             template=template,
             pdf_inspection=pdf_inspection,
+            field_suggestions=field_suggestions,
         )
         for field in required_fields
     ]
@@ -681,6 +712,7 @@ def build_pdf_metadata_dry_run_payload(
                 review_items=review_items,
                 text_extraction=text_extraction,
                 ocr_status=ocr_status,
+                suggestions_applied=bool(field_suggestions),
             ),
             "google_sheets": {
                 "google_sheets_used": False,

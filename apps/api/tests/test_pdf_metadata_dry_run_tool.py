@@ -252,6 +252,46 @@ def test_precomputed_intelligence_is_reused_without_reparsing(monkeypatch, tmp_p
     )
 
 
+def test_field_suggestions_fill_pending_but_not_deterministic(tmp_path: Path) -> None:
+    pdf_path = tmp_path / "csf.pdf"
+    _write_blank_pdf(pdf_path)
+    payload = build_pdf_metadata_dry_run_payload(
+        pdf_path=pdf_path,
+        document_type_code="constancia_situacion_fiscal",
+        context={"client_legal_name": "X", "provider_nomenclature": "Y"},
+        include_intelligence=True,
+        field_suggestions={
+            "main_date": {
+                "value": "2024-03-07",
+                "confidence": 0.9,
+                "evidence": "fecha de emisión",
+            },
+            # A deterministic field — the suggestion must be ignored.
+            "document_name": {"value": "WRONG", "confidence": 0.99, "evidence": "x"},
+        },
+    )
+    by_key = {item["field_key"]: item for item in payload["review_items"]}
+
+    main_date = by_key["main_date"]
+    assert main_date["raw_value"] == "2024-03-07"
+    assert main_date["status"] == "prefilled_needs_review"
+    assert main_date["source"] == "ai_comprehension"
+    assert main_date["extraction_method"] == "ai_assisted"
+    assert main_date["confidence"] == 0.9
+    assert main_date["reviewer_notes"] == "fecha de emisión"
+
+    # The deterministic rulebook value wins; the suggestion never overrides it.
+    assert by_key["document_name"]["raw_value"] != "WRONG"
+    assert by_key["document_name"]["source"] != "ai_comprehension"
+
+    # The standalone n8n AI node is superseded, and the dry-run ran no AI.
+    assert (
+        payload["intelligence"]["ai_extraction_request"]["status"]
+        == "fulfilled_by_comprehension"
+    )
+    assert payload["safety"]["ai_used"] is False
+
+
 def test_cli_writes_output_file(tmp_path: Path) -> None:
     pdf_path = tmp_path / "sample.pdf"
     context_path = tmp_path / "context.json"
