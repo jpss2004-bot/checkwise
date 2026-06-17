@@ -13,9 +13,9 @@ import {
 
 import { ClientShell } from "../_shell";
 import { Surface } from "@/components/checkwise/dashboard/stat-card";
+import { PeriodPicker } from "@/components/checkwise/period-picker";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import {
   CaretDown,
@@ -362,34 +362,26 @@ export default function ClientAuditoriaPage() {
         <Surface title="Periodo" icon={Sparkle}>
           <div className="grid gap-3 sm:grid-cols-2">
             <div className="space-y-1">
-              <Label htmlFor="audit-from">Desde (AAAA-Mxx)</Label>
-              <Input
-                id="audit-from"
+              <Label>Desde</Label>
+              <PeriodPicker
                 value={periodFrom}
-                onChange={(e) => setPeriodFrom(e.target.value)}
-                placeholder="2026-M01"
-                aria-describedby="audit-period-helper"
+                onChange={setPeriodFrom}
+                allowEmpty={false}
               />
             </div>
             <div className="space-y-1">
-              <Label htmlFor="audit-to">Hasta (AAAA-Mxx)</Label>
-              <Input
-                id="audit-to"
+              <Label>Hasta</Label>
+              <PeriodPicker
                 value={periodTo}
-                onChange={(e) => setPeriodTo(e.target.value)}
-                placeholder="2026-M12"
-                aria-describedby="audit-period-helper"
+                onChange={setPeriodTo}
+                allowEmpty={false}
               />
             </div>
           </div>
-          <p
-            id="audit-period-helper"
-            className="mt-2 text-xs text-[color:var(--text-tertiary)]"
-          >
-            El formato canónico es <code>AAAA-Mxx</code> para meses,{" "}
-            <code>AAAA-Bx</code> para bimestres y <code>AAAA-A</code>{" "}
-            para el año fiscal completo. Usa los atajos para los rangos
-            más comunes.
+          <p className="mt-2 text-xs text-[color:var(--text-tertiary)]">
+            Elige la granularidad (mes, bimestre, cuatrimestre o año
+            fiscal) y el rango. Usa los atajos para los periodos más
+            comunes.
           </p>
           <div className="mt-3 flex flex-wrap gap-2">
             {(Object.keys(PRESET_LABELS) as PresetKey[]).map((key) => (

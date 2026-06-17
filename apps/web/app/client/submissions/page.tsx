@@ -7,11 +7,11 @@ import { Surface } from "@/components/checkwise/dashboard/stat-card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { DataTable, type DataTableColumn } from "@/components/ui/data-table";
-import { Input } from "@/components/ui/input";
 import { Select } from "@/components/ui/select";
 
 import { ClientShell } from "../_shell";
 import { VendorRef } from "@/components/checkwise/vendor-ref";
+import { PeriodPicker } from "@/components/checkwise/period-picker";
 import {
   listClientSubmissions,
   listClientVendors,
@@ -177,12 +177,11 @@ export default function ClientSubmissionsPage() {
               </Select>
             </FilterField>
             <FilterField label="Periodo">
-              <Input
+              <PeriodPicker
                 value={filters.period_key}
-                onChange={(e) =>
-                  setFilters({ ...filters, period_key: e.target.value })
+                onChange={(periodKey) =>
+                  setFilters({ ...filters, period_key: periodKey })
                 }
-                placeholder="2026-M05"
               />
             </FilterField>
             <div className="sm:col-span-2 lg:col-span-4">
