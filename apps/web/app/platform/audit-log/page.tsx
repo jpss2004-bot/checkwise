@@ -31,6 +31,11 @@ import {
   Skeleton,
 } from "@/components/checkwise/portal/state-surfaces";
 import { cn } from "@/lib/utils";
+import {
+  auditActionLabel,
+  auditActorTypeLabel,
+  auditEntityTypeLabel,
+} from "@/lib/constants/labels";
 
 import { PlatformShell } from "../_shell";
 import {
@@ -217,7 +222,7 @@ export default function AdminAuditLogPage() {
                 <option value="">Todos</option>
                 {actorTypeOptions.map((t) => (
                   <option key={t} value={t}>
-                    {t}
+                    {auditActorTypeLabel(t)}
                   </option>
                 ))}
               </Select>
@@ -258,7 +263,7 @@ export default function AdminAuditLogPage() {
                 <option value="">Todos</option>
                 {entityTypeOptions.map((t) => (
                   <option key={t} value={t}>
-                    {t}
+                    {auditEntityTypeLabel(t)}
                   </option>
                 ))}
               </Select>
@@ -466,12 +471,17 @@ function AuditLogRow({
           />
         </TableCell>
         <TableCell>
-          <code className="rounded-sm bg-[color:var(--surface-sunken)] px-1.5 py-0.5 font-mono text-[11px] text-[color:var(--text-primary)]">
-            {row.action}
-          </code>
+          <span
+            className="text-[12px] text-[color:var(--text-primary)]"
+            title={row.action}
+          >
+            {auditActionLabel(row.action)}
+          </span>
         </TableCell>
         <TableCell>
-          <Badge variant="outline">{row.entity_type}</Badge>
+          <Badge variant="outline" title={row.entity_type}>
+            {auditEntityTypeLabel(row.entity_type)}
+          </Badge>
         </TableCell>
         <TableCell>
           <span className="flex items-center gap-1">
@@ -552,8 +562,11 @@ function ActorChip({
             <CopyIdButton value={actorId} />
           </p>
         ) : null}
-        <p className="text-[10px] text-[color:var(--text-tertiary)]">
-          {actorType}
+        <p
+          className="text-[10px] text-[color:var(--text-tertiary)]"
+          title={actorType}
+        >
+          {auditActorTypeLabel(actorType)}
         </p>
       </div>
     </div>

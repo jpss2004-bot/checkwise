@@ -20,6 +20,10 @@ class Settings(BaseSettings):
     API_VERSION: str = "2.5.1"
     API_V1_PREFIX: str = "/api/v1"
     CHECKWISE_ENV: str = "local"
+    # IANA tz used to interpret date-only filters (e.g. the audit-log
+    # explorer's Desde/Hasta) as full LOCAL calendar days. Stored timestamps
+    # are UTC; this anchors a bare "2026-06-17" to the local day boundary.
+    AUDIT_LOG_TIMEZONE: str = "America/Mexico_City"
 
     DATABASE_URL: str = "postgresql+psycopg://checkwise:checkwise@localhost:5432/checkwise"
     # Optional second URL used only by Alembic. Pooled connection providers

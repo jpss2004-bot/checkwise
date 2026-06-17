@@ -2370,3 +2370,65 @@ def test_audit_log_resolves_actor_email(
         "/api/v1/admin/audit-log?action=system.cron.fired", headers=_h(token)
     ).json()
     assert system_rows["items"][0]["actor_email"] is None
+
+
+def test_audit_log_date_to_is_inclusive_of_the_whole_local_day(
+    api_client: TestClient, db_factory
+) -> None:
+    """P1-06c: 'Hasta' must include the entire selected LOCAL day. A bare date
+    is read as a full America/Mexico_City calendar day, so an event at 23:30
+    local on the 'Hasta' day is returned and one just after midnight the next
+    day is not — fixing the old ``created_at <= midnight`` 'hasta m-1' bug."""
+    from datetime import UTC, datetime
+    from zoneinfo import ZoneInfo
+
+    token = _admin_token(api_client, db_factory)
+    tz = ZoneInfo("America/Mexico_City")
+    late_same_day = datetime(2026, 3, 15, 23, 30, tzinfo=tz).astimezone(UTC)
+    early_next_day = datetime(2026, 3, 16, 0, 30, tzinfo=tz).astimezone(UTC)
+
+    db = db_factory()
+    try:
+        db.add_all(
+            [
+                AuditLog(
+                    action="system.boundarytest.fired",
+                    entity_type="system",
+                    entity_id="late-2026-03-15",
+                    actor_type="system",
+                    actor_id="boundary",
+                    created_at=late_same_day,
+                ),
+                AuditLog(
+                    action="system.boundarytest.fired",
+                    entity_type="system",
+                    entity_id="early-2026-03-16",
+                    actor_type="system",
+                    actor_id="boundary",
+                    created_at=early_next_day,
+                ),
+            ]
+        )
+        db.commit()
+    finally:
+        db.close()
+
+    # date_to = the "Hasta" day → includes the 23:30 row, excludes next-day.
+    hasta = api_client.get(
+        "/api/v1/admin/audit-log",
+        params={"action": "system.boundarytest.fired", "date_to": "2026-03-15"},
+        headers=_h(token),
+    ).json()
+    hasta_ids = {item["entity_id"] for item in hasta["items"]}
+    assert "late-2026-03-15" in hasta_ids
+    assert "early-2026-03-16" not in hasta_ids
+
+    # date_from = the next day → includes only the next-day row.
+    desde = api_client.get(
+        "/api/v1/admin/audit-log",
+        params={"action": "system.boundarytest.fired", "date_from": "2026-03-16"},
+        headers=_h(token),
+    ).json()
+    desde_ids = {item["entity_id"] for item in desde["items"]}
+    assert "early-2026-03-16" in desde_ids
+    assert "late-2026-03-15" not in desde_ids

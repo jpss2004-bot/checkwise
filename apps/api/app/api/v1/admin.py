@@ -39,6 +39,7 @@ from datetime import UTC, date, datetime, timedelta
 from pathlib import Path
 from typing import Annotated, Final, Literal
 from xml.etree import ElementTree as ET
+from zoneinfo import ZoneInfo
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response, status
 from fastapi.responses import FileResponse
@@ -4199,10 +4200,33 @@ def list_audit_log(
         filters.append(AuditLog.entity_type == entity_type)
     if entity_id:
         filters.append(AuditLog.entity_id == entity_id)
+    # Date filters interpret the bare picker date (sent as midnight) as a full
+    # LOCAL calendar day, then compare against the UTC ``created_at`` column.
+    # Both ends are INCLUSIVE: "Hasta" bounds by the start of the NEXT local
+    # day (exclusive), so the entire selected day is returned. The previous
+    # ``created_at <= date_to`` compared against local-midnight and silently
+    # dropped the whole "Hasta" day ("hasta m-1"), and ignored the tz offset.
+    _audit_tz = UTC
+    if date_from or date_to:
+        try:
+            _audit_tz = ZoneInfo(settings.AUDIT_LOG_TIMEZONE)
+        except Exception:  # bad/unknown tz name → fall back to UTC days
+            _audit_tz = UTC
     if date_from:
-        filters.append(AuditLog.created_at >= date_from)
+        # Start of the local "Desde" day, normalized to UTC to match the
+        # stored column (mirrors the tz-aware UTC comparison used elsewhere).
+        start_utc = datetime(
+            date_from.year, date_from.month, date_from.day, tzinfo=_audit_tz
+        ).astimezone(UTC)
+        filters.append(AuditLog.created_at >= start_utc)
     if date_to:
-        filters.append(AuditLog.created_at <= date_to)
+        # Start of the local day AFTER "Hasta" (exclusive) → the whole "Hasta"
+        # day is included. Normalized to UTC for the comparison.
+        end_utc = (
+            datetime(date_to.year, date_to.month, date_to.day, tzinfo=_audit_tz)
+            + timedelta(days=1)
+        ).astimezone(UTC)
+        filters.append(AuditLog.created_at < end_utc)
     count_stmt = select(func.count()).select_from(AuditLog)
     stmt = select(AuditLog)
     if filters:

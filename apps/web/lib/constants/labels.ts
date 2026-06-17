@@ -182,3 +182,129 @@ export function entityStatusVariant(
   if (!code) return "outline";
   return ENTITY_STATUS_VARIANTS[code.toLowerCase()] ?? "outline";
 }
+
+// ---------------------------------------------------------------------------
+// Audit log — actor type, entity type, and action codes.
+//
+// The backend writes raw ``domain.entity.verb`` action strings (English,
+// snake_case) plus actor/entity-type codes. The platform audit-log explorer
+// used to render these verbatim against Spanish chrome (P1-06a). These maps
+// give each a plain-Spanish label; the raw code is kept as a tooltip for
+// power users. The action humaniser splits on ``.`` and ``_`` so an
+// unmapped/future code reads "Domain · entity verb" instead of raw.
+// ---------------------------------------------------------------------------
+
+export const AUDIT_ACTOR_TYPE_LABELS_ES: Record<string, string> = {
+  internal_admin: "Administrador interno",
+  platform_admin: "Administrador de plataforma",
+  client_admin: "Administrador de cliente",
+  reviewer: "Revisor",
+  provider: "Proveedor",
+  system: "Sistema",
+};
+
+export function auditActorTypeLabel(code: string | null | undefined): string {
+  if (!code) return "—";
+  return AUDIT_ACTOR_TYPE_LABELS_ES[code] ?? humanizeCode(code);
+}
+
+export const AUDIT_ENTITY_TYPE_LABELS_ES: Record<string, string> = {
+  user: "Usuario",
+  client: "Cliente",
+  vendor: "Proveedor",
+  submission: "Entrega",
+  workspace: "Espacio de proveedor",
+  provider_workspace: "Espacio de proveedor",
+  requirement: "Requisito",
+  report: "Reporte",
+  system: "Sistema",
+  notification_template: "Plantilla de notificación",
+  contact_request: "Solicitud de contacto",
+  feedback_report: "Reporte de feedback",
+};
+
+export function auditEntityTypeLabel(code: string | null | undefined): string {
+  if (!code) return "—";
+  return AUDIT_ENTITY_TYPE_LABELS_ES[code] ?? humanizeCode(code);
+}
+
+export const AUDIT_ACTION_LABELS_ES: Record<string, string> = {
+  "admin.client.updated": "Cliente actualizado",
+  "admin.contact_request.status_changed":
+    "Estado de solicitud de contacto cambiado",
+  "admin.feedback_report.status_changed":
+    "Estado de reporte de feedback cambiado",
+  "admin.notification_template.activated": "Plantilla de notificación activada",
+  "admin.notification_template.created": "Plantilla de notificación creada",
+  "admin.requirement.created": "Requisito creado",
+  "admin.requirement.updated": "Requisito actualizado",
+  "admin.user.deleted": "Usuario eliminado",
+  "admin.user.identity_updated": "Identidad de usuario actualizada",
+  "admin.user.membership_granted": "Membresía otorgada",
+  "admin.user.membership_promoted": "Membresía promovida",
+  "admin.user.membership_revoked": "Membresía revocada",
+  "admin.user.provisioned": "Usuario creado",
+  "admin.user.restored": "Usuario restaurado",
+  "admin.user_password_reset": "Contraseña de usuario restablecida",
+  "admin.vendor.created": "Proveedor creado",
+  "admin.vendor.updated": "Proveedor actualizado",
+  "admin.vendor_expediente_downloaded": "Expediente de proveedor descargado",
+  "admin.workspace.updated": "Espacio de proveedor actualizado",
+  "auth.login.failed": "Inicio de sesión fallido",
+  "auth.login.succeeded": "Inicio de sesión exitoso",
+  "auth.logout": "Cierre de sesión",
+  "auth.password_changed": "Contraseña cambiada",
+  "auth.password_reset_completed": "Restablecimiento de contraseña completado",
+  "auth.password_reset_requested": "Restablecimiento de contraseña solicitado",
+  "client.audit_package_downloaded": "Paquete de auditoría descargado",
+  "client.document_downloaded": "Documento descargado",
+  "client.legal_consent_accepted": "Consentimiento legal aceptado",
+  "client.notification_marked_read": "Notificación marcada como leída",
+  "client.notifications_marked_all_read":
+    "Todas las notificaciones marcadas como leídas",
+  "client.profile_updated": "Perfil actualizado",
+  "client.provider_invited": "Proveedor invitado",
+  "client.user_created": "Usuario de cliente creado",
+  "client.user_password_reset": "Contraseña de usuario de cliente restablecida",
+  "client.user_removed": "Usuario de cliente eliminado",
+  "client.vendor_expediente_downloaded": "Expediente de proveedor descargado",
+  "client.vendor_metadata_downloaded": "Metadata de proveedor descargada",
+  "correction_request.submitted": "Solicitud de corrección enviada",
+  "email.transactional_sent": "Correo transaccional enviado",
+  "notification.dispatch_attempted": "Intento de envío de notificación",
+  "notification.whatsapp_dispatched": "Notificación de WhatsApp enviada",
+  "provider.document_downloaded": "Documento descargado",
+  "provider.expediente_downloaded": "Expediente descargado",
+  "provider.legal_consent_accepted": "Consentimiento legal aceptado",
+  "provider.notification_marked_read": "Notificación marcada como leída",
+  "provider.notifications_marked_all_read":
+    "Todas las notificaciones marcadas como leídas",
+  "provider.submission_cancelled": "Entrega cancelada",
+  "report.share_minted": "Enlace de reporte generado",
+  "report.share_revoked": "Enlace de reporte revocado",
+  "reviewer.document_downloaded": "Documento descargado",
+  "submission.created": "Entrega creada",
+  "submission.replacement_linked": "Reemplazo de entrega vinculado",
+  "submission.reviewer_decision": "Decisión de revisor",
+  "submission.uploaded": "Entrega cargada",
+  "system.auto_approved": "Aprobado automáticamente",
+  "user.notification_preferences_updated":
+    "Preferencias de notificación actualizadas",
+  "user.phone_verification_confirmed": "Verificación de teléfono confirmada",
+  "user.phone_verification_requested": "Verificación de teléfono solicitada",
+  "whatsapp.transactional_sent": "WhatsApp transaccional enviado",
+};
+
+/** Humanise an unmapped audit action: ``domain.entity_verb`` →
+ *  "Domain · entity verb" so a new server-side code never renders raw. */
+function humanizeAuditAction(code: string): string {
+  const [domain, ...rest] = code.split(".");
+  const tail = rest.join(" ").replace(/[_.]+/g, " ").trim();
+  const head = humanizeCode(domain);
+  return tail ? `${head} · ${tail}` : head;
+}
+
+export function auditActionLabel(code: string | null | undefined): string {
+  if (!code) return "—";
+  return AUDIT_ACTION_LABELS_ES[code] ?? humanizeAuditAction(code);
+}
