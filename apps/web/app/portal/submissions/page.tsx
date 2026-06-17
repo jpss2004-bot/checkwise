@@ -14,7 +14,7 @@
  * already have a first-class flow through the upload wizard.
  */
 
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState, type ReactNode } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { ArrowRight, FileText, FolderOpen, Trash } from "@phosphor-icons/react";
@@ -24,6 +24,7 @@ import { RequirementStatusBadge } from "@/components/checkwise/portal/requiremen
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { PageHeader } from "@/components/ui/page-header";
+import { Select } from "@/components/ui/select";
 import { toast } from "@/components/ui/toast";
 import {
   INSTITUTION_LABELS,
@@ -35,6 +36,7 @@ import {
   type WorkspaceSubmissionListItem,
 } from "@/lib/api/portal";
 import { fetchCurrentSession, type PortalSession } from "@/lib/session/portal";
+import { statusLabel } from "@/lib/constants/statuses";
 
 type Grouped = {
   institutionCode: string;
@@ -57,6 +59,11 @@ export default function SubmissionsIndexPage() {
   );
   const [errorKind, setErrorKind] = useState<"network" | null>(null);
   const [cancelingId, setCancelingId] = useState<string | null>(null);
+  // CW-11 — client-side filters over the provider's own upload history
+  // (the page previously offered no way to slice a long list).
+  const [filterInstitution, setFilterInstitution] = useState("");
+  const [filterStatus, setFilterStatus] = useState("");
+  const [filterYear, setFilterYear] = useState("");
 
   useEffect(() => {
     let cancelled = false;
@@ -92,6 +99,74 @@ export default function SubmissionsIndexPage() {
       cancelled = true;
     };
   }, [session]);
+
+  const institutionOptions = useMemo(() => {
+    const set = new Set<string>();
+    for (const it of items ?? []) set.add(it.institution || "otros");
+    return Array.from(set).sort((a, b) =>
+      (INSTITUTION_LABELS[a] ?? a).localeCompare(
+        INSTITUTION_LABELS[b] ?? b,
+        "es",
+      ),
+    );
+  }, [items]);
+
+  const statusOptions = useMemo(() => {
+    const set = new Set<string>();
+    for (const it of items ?? []) set.add(it.status);
+    return Array.from(set).sort((a, b) =>
+      statusLabel(a).localeCompare(statusLabel(b), "es"),
+    );
+  }, [items]);
+
+  const yearOptions = useMemo(() => {
+    const set = new Set<number>();
+    for (const it of items ?? []) set.add(extractYearMonth(it).year);
+    return Array.from(set).sort((a, b) => b - a);
+  }, [items]);
+
+  const filteredItems = useMemo(() => {
+    if (!items) return items;
+    return items.filter((it) => {
+      if (
+        filterInstitution &&
+        (it.institution || "otros") !== filterInstitution
+      )
+        return false;
+      if (filterStatus && it.status !== filterStatus) return false;
+      if (filterYear && String(extractYearMonth(it).year) !== filterYear)
+        return false;
+      return true;
+    });
+  }, [items, filterInstitution, filterStatus, filterYear]);
+
+  async function handleCancel(item: WorkspaceSubmissionListItem) {
+    if (!session || cancelingId) return;
+    const confirmed = window.confirm(
+      "Cancelar este envío eliminará el PDF y lo quitará de tu historial. Si solo necesitas cambiar el archivo, abre el detalle y usa Reemplazar archivo.",
+    );
+    if (!confirmed) return;
+    setCancelingId(item.submission_id);
+    try {
+      await cancelWorkspaceSubmission(session, item.submission_id);
+      setItems(
+        (current) =>
+          current?.filter((row) => row.submission_id !== item.submission_id) ??
+          [],
+      );
+      toast.success("Envío cancelado", {
+        description: "La obligación vuelve a quedar pendiente.",
+      });
+    } catch (err) {
+      const description =
+        err instanceof PortalApiError && err.status === 409
+          ? "Este envío ya entró a revisión. Ábrelo para reemplazarlo si necesitas corregirlo."
+          : "No pudimos cancelar el envío. Inténtalo de nuevo en unos segundos.";
+      toast.error("No se pudo cancelar", { description });
+    } finally {
+      setCancelingId(null);
+    }
+  }
 
   if (!session) return null;
 
@@ -131,41 +206,127 @@ export default function SubmissionsIndexPage() {
             </CardContent>
           </Card>
         ) : (
-          <GroupedList
-            groups={groupSubmissions(items)}
-            cancelingId={cancelingId}
-            onCancel={async (item) => {
-              if (!session || cancelingId) return;
-              const confirmed = window.confirm(
-                "Cancelar este envío eliminará el PDF y lo quitará de tu historial. Si solo necesitas cambiar el archivo, abre el detalle y usa Reemplazar archivo.",
-              );
-              if (!confirmed) return;
-              setCancelingId(item.submission_id);
-              try {
-                await cancelWorkspaceSubmission(session, item.submission_id);
-                setItems(
-                  (current) =>
-                    current?.filter(
-                      (row) => row.submission_id !== item.submission_id,
-                    ) ?? [],
-                );
-                toast.success("Envío cancelado", {
-                  description: "La obligación vuelve a quedar pendiente.",
-                });
-              } catch (err) {
-                const description =
-                  err instanceof PortalApiError && err.status === 409
-                    ? "Este envío ya entró a revisión. Ábrelo para reemplazarlo si necesitas corregirlo."
-                    : "No pudimos cancelar el envío. Inténtalo de nuevo en unos segundos.";
-                toast.error("No se pudo cancelar", { description });
-              } finally {
-                setCancelingId(null);
-              }
-            }}
-          />
+          <div className="space-y-5">
+            <ProviderSubmissionsFilters
+              institutionOptions={institutionOptions}
+              statusOptions={statusOptions}
+              yearOptions={yearOptions}
+              institution={filterInstitution}
+              status={filterStatus}
+              year={filterYear}
+              onInstitution={setFilterInstitution}
+              onStatus={setFilterStatus}
+              onYear={setFilterYear}
+              onClear={() => {
+                setFilterInstitution("");
+                setFilterStatus("");
+                setFilterYear("");
+              }}
+            />
+            {(filteredItems?.length ?? 0) === 0 ? (
+              <p className="text-sm text-muted-foreground">
+                Ningún documento coincide con los filtros.
+              </p>
+            ) : (
+              <GroupedList
+                groups={groupSubmissions(filteredItems ?? [])}
+                cancelingId={cancelingId}
+                onCancel={handleCancel}
+              />
+            )}
+          </div>
         )}
       </main>
     </PortalAppShell>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Filters (CW-11)
+// ---------------------------------------------------------------------------
+
+function ProviderSubmissionsFilters({
+  institutionOptions,
+  statusOptions,
+  yearOptions,
+  institution,
+  status,
+  year,
+  onInstitution,
+  onStatus,
+  onYear,
+  onClear,
+}: {
+  institutionOptions: string[];
+  statusOptions: string[];
+  yearOptions: number[];
+  institution: string;
+  status: string;
+  year: string;
+  onInstitution: (value: string) => void;
+  onStatus: (value: string) => void;
+  onYear: (value: string) => void;
+  onClear: () => void;
+}) {
+  const hasFilters = Boolean(institution || status || year);
+  return (
+    <div className="flex flex-wrap items-end gap-3 rounded-lg border border-[color:var(--border-subtle)] bg-[color:var(--surface-raised)] px-4 py-3">
+      <FilterControl label="Institución">
+        <Select
+          value={institution}
+          onChange={(e) => onInstitution(e.target.value)}
+        >
+          <option value="">Todas</option>
+          {institutionOptions.map((code) => (
+            <option key={code} value={code}>
+              {INSTITUTION_LABELS[code] ?? code}
+            </option>
+          ))}
+        </Select>
+      </FilterControl>
+      <FilterControl label="Estado">
+        <Select value={status} onChange={(e) => onStatus(e.target.value)}>
+          <option value="">Todos</option>
+          {statusOptions.map((value) => (
+            <option key={value} value={value}>
+              {statusLabel(value)}
+            </option>
+          ))}
+        </Select>
+      </FilterControl>
+      <FilterControl label="Año">
+        <Select value={year} onChange={(e) => onYear(e.target.value)}>
+          <option value="">Todos</option>
+          {yearOptions.map((y) => (
+            <option key={y} value={String(y)}>
+              {y}
+            </option>
+          ))}
+        </Select>
+      </FilterControl>
+      {hasFilters ? (
+        <Button type="button" size="sm" variant="ghost" onClick={onClear}>
+          Limpiar
+        </Button>
+      ) : null}
+    </div>
+  );
+}
+
+function FilterControl({
+  label,
+  children,
+}: {
+  label: string;
+  children: ReactNode;
+}) {
+  return (
+    <div className="space-y-1">
+      <label className="block text-[11px] font-medium uppercase tracking-wide text-muted-foreground">
+        {label}
+      </label>
+      {children}
+    </div>
   );
 }
 
