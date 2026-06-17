@@ -13,6 +13,7 @@ import {
   FileText,
   CircleNotch,
   Lock,
+  Paperclip,
   PencilSimple,
   ShieldCheck,
   CloudArrowUp,
@@ -1224,6 +1225,12 @@ function ContextStep({
               placeholder="2026-05 / Ene-Abr 2026"
               required
             />
+            <p className="mt-1 text-xs text-muted-foreground">
+              Escribe el periodo que <span className="font-medium">cubre</span>{" "}
+              el documento, no la fecha en que lo subes. Mensual: un solo mes
+              (ej. 2026-05). Bimestral, cuatrimestral o anual: el rango completo
+              (ej. Ene-Abr 2026).
+            </p>
           </Field>
         ) : null}
         {!lockedSet.has("load_type") ? (
@@ -1511,8 +1518,8 @@ function UploadSlotSummary({
           </p>
         </div>
         <div className="grid gap-2 text-sm sm:grid-cols-2 lg:grid-cols-4">
-          <SummaryChip label="Periodo" value={periodDisplay} />
-          <SummaryChip label="Vence" value={deadlineDisplay ?? "—"} />
+          <SummaryChip label="Periodo que cubre" value={periodDisplay} />
+          <SummaryChip label="Fecha límite de entrega" value={deadlineDisplay ?? "—"} />
           <SummaryChip label="Frecuencia" value={loadTypeLabel} />
           <SummaryChip label="Institución" value={institutionLabel} />
         </div>
@@ -1656,6 +1663,18 @@ function ExpectedDocumentsChecklist({
                 </li>
               ))}
             </ul>
+          </div>
+        ) : null}
+        {onboardingGuide.annexes_required ? (
+          <div className="mt-3 rounded-md border border-[color:var(--status-warning-border)] bg-[color:var(--status-warning-bg)] p-3">
+            <p className="flex items-center gap-1.5 text-xs font-semibold text-[color:var(--status-warning-text)]">
+              <Paperclip className="h-3.5 w-3.5" aria-hidden="true" />
+              Anexos obligatorios
+            </p>
+            <p className="mt-1 text-xs text-[color:var(--text-primary)]">
+              {onboardingGuide.annexes_note ||
+                "Este documento requiere sus anexos. Adjúntalos junto con el archivo principal en la sección de archivos adicionales más abajo."}
+            </p>
           </div>
         ) : null}
         {showActaNote ? (

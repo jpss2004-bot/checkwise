@@ -59,6 +59,12 @@ export type OnboardingItem = {
   anatomy: string;
   where_to_obtain: string;
   common_errors: string[];
+  /** §1.2 (2026-06-17) — annex clarity. ``annexes_required`` marks a
+   *  requirement that is incomplete without supporting annexes;
+   *  ``annexes_note`` is the per-requirement explanation of which annexes
+   *  and when they're mandatory (empty falls back to generic copy). */
+  annexes_required: boolean;
+  annexes_note: string;
   next_action: string;
   reviewer_note: string | null;
 };

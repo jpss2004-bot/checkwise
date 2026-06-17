@@ -153,6 +153,14 @@ class OnboardingRequirement:
     # "updates" / "renewals" rows for REPSE and patronal (those are
     # provider-driven uploads, not schedule-driven).
     renewal_frequency_days: int | None = None
+    # §1.2 (2026-06-17) — annex clarity. ``annexes_required`` marks a
+    # requirement that is incomplete without supporting annexes (e.g. a
+    # contrato that references anexos técnicos / convenios). ``annexes_note``
+    # is the per-requirement Spanish explanation of WHICH annexes and WHEN
+    # they're mandatory; blank falls back to a generic line in the UI. Both
+    # default off so existing rows are unaffected.
+    annexes_required: bool = False
+    annexes_note: str = ""
 
 
 @dataclass(frozen=True)
@@ -203,6 +211,9 @@ class RecurringRequirement:
     # behavior change while the flag stays off.
     accepts_documents: tuple[str, ...] = ()
     minimum_documents: MinimumDocuments = "one"
+    # §1.2 (2026-06-17) — annex clarity (see OnboardingRequirement).
+    annexes_required: bool = False
+    annexes_note: str = ""
 
 
 # ---------------------------------------------------------------------------
@@ -241,6 +252,12 @@ _ONBOARDING_MORAL: tuple[OnboardingRequirement, ...] = (
                 "Subir un archivo en cualquier formato distinto a PDF "
                 "(Word, imagen, foto del documento)."
             ),
+        ),
+        annexes_required=True,
+        annexes_note=(
+            "Si el contrato menciona anexos (técnico, comercial, tabulador, "
+            "convenios modificatorios o alcances), son obligatorios: adjúntalos "
+            "junto con el contrato. Sin ellos el expediente queda incompleto."
         ),
     ),
     OnboardingRequirement(

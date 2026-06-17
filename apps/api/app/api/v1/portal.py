@@ -1526,6 +1526,11 @@ def get_workspace_onboarding(
             "anatomy": onboarding_anatomy(req),
             "where_to_obtain": onboarding_where_to_obtain(req),
             "common_errors": list(onboarding_common_errors(req)),
+            # §1.2 — annex clarity. Drives the upload wizard's "Anexos
+            # obligatorios" callout from the catalog instead of a frontend
+            # name-match heuristic.
+            "annexes_required": req.annexes_required,
+            "annexes_note": req.annexes_note,
             "next_action": _onboarding_next_action(item_status, req.required),
             "reviewer_note": _latest_reviewer_note(db, current_submission_id),
         }
