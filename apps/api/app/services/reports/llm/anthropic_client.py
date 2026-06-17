@@ -15,6 +15,7 @@ second call.
 
 from __future__ import annotations
 
+import os
 from collections.abc import AsyncIterator, Iterable
 from typing import Any
 
@@ -36,6 +37,15 @@ class AnthropicLLMClient:
     planner_model = "claude-sonnet-4-6"
     content_model = "claude-haiku-4-5-20251001"
 
+    # Per-request wall-clock cap. The SDK default is 600s, and combined
+    # with the default retries a single unreachable/slow call can hold a
+    # generation worker for many minutes — indistinguishable from "frozen"
+    # to the user. Bound it so a stuck call fails fast and frees the
+    # thread. Env-tunable for the rare legitimately-long batch.
+    _REQUEST_TIMEOUT_SECONDS = float(
+        os.environ.get("ANTHROPIC_REQUEST_TIMEOUT_SECONDS", "120")
+    )
+
     def __init__(self, api_key: str | None = None) -> None:
         key = api_key or getattr(settings, "ANTHROPIC_API_KEY", None)
         if not key:
@@ -44,7 +54,9 @@ class AnthropicLLMClient:
                 "or fall back to DeterministicMockLLMClient via "
                 "CHECKWISE_LLM_BACKEND=mock."
             )
-        self._client = Anthropic(api_key=key)
+        self._client = Anthropic(
+            api_key=key, timeout=self._REQUEST_TIMEOUT_SECONDS
+        )
 
     # ──────────────────────────────────────────────────────────────
     # Planning
