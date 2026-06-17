@@ -2432,3 +2432,69 @@ def test_audit_log_date_to_is_inclusive_of_the_whole_local_day(
     desde_ids = {item["entity_id"] for item in desde["items"]}
     assert "early-2026-03-16" in desde_ids
     assert "late-2026-03-15" not in desde_ids
+
+
+def test_users_filter_provider_surfaces_workspace_owner(
+    api_client: TestClient, db_factory
+) -> None:
+    """P1-05: role=provider returns ProviderWorkspace-owner accounts (which hold
+    no membership), tagged with the synthetic 'provider' role and carrying their
+    vendor/client association — and excludes them from membership-role filters."""
+    token = _admin_token(api_client, db_factory)
+    db = db_factory()
+    try:
+        client = Client(name="Cliente Prov Test", rfc="CPT260101AB1")
+        db.add(client)
+        db.flush()
+        vendor = Vendor(
+            client_id=client.id,
+            name="Proveedor Uno",
+            rfc="PRV260101XY2",
+            persona_type="moral",
+        )
+        db.add(vendor)
+        db.flush()
+        prov_user = User(
+            email="prov.login@cw.test",
+            password_hash="x",
+            full_name="Proveedor Uno Login",
+            status="active",
+        )
+        db.add(prov_user)
+        db.flush()
+        ws = ProviderWorkspace(
+            client_id=client.id,
+            vendor_id=vendor.id,
+            persona_type="moral",
+            display_name="Proveedor Uno",
+            access_token="tok-prov-1",
+            owner_user_id=prov_user.id,
+            status="active",
+        )
+        db.add(ws)
+        db.commit()
+        prov_user_id = prov_user.id
+        vendor_id = vendor.id
+        client_name = client.name
+    finally:
+        db.close()
+
+    # role=provider returns the workspace owner with its vendor/client.
+    body = api_client.get(
+        "/api/v1/admin/users", params={"role": "provider"}, headers=_h(token)
+    ).json()
+    by_id = {u["user_id"]: u for u in body["items"]}
+    assert prov_user_id in by_id, "provider login should appear under role=provider"
+    row = by_id[prov_user_id]
+    assert "provider" in row["roles"]
+    assert row["provider_workspaces"], "vendor/client association should be present"
+    assert row["provider_workspaces"][0]["vendor_id"] == vendor_id
+    assert row["provider_workspaces"][0]["client_name"] == client_name
+
+    # The provider login must NOT appear under a membership-role filter.
+    cadmin = api_client.get(
+        "/api/v1/admin/users",
+        params={"role": "client_admin"},
+        headers=_h(token),
+    ).json()
+    assert prov_user_id not in {u["user_id"] for u in cadmin["items"]}

@@ -449,28 +449,65 @@ export default function PlatformUsersPage() {
             },
             {
               id: "organizations",
-              header: "Organización",
-              cell: (row) =>
-                row.organizations.length ? (
-                  <span className="inline-flex items-center gap-1.5 text-[12px] text-[color:var(--text-secondary)]">
-                    <span className="max-w-[200px] truncate">
-                      {row.organizations[0].name}
+              header: "Organización / Proveedor",
+              cell: (row) => {
+                if (row.organizations.length) {
+                  return (
+                    <span className="inline-flex items-center gap-1.5 text-[12px] text-[color:var(--text-secondary)]">
+                      <span className="max-w-[200px] truncate">
+                        {row.organizations[0].name}
+                      </span>
+                      {row.organizations.length > 1 ? (
+                        <Badge
+                          variant="secondary"
+                          title={row.organizations
+                            .slice(1)
+                            .map((org) => org.name)
+                            .join(", ")}
+                        >
+                          +{row.organizations.length - 1}
+                        </Badge>
+                      ) : null}
                     </span>
-                    {row.organizations.length > 1 ? (
-                      <Badge
-                        variant="secondary"
-                        title={row.organizations
-                          .slice(1)
-                          .map((org) => org.name)
-                          .join(", ")}
+                  );
+                }
+                // Provider accounts hold no membership/org — show the vendor
+                // they own (P1-05) with a deep link to the vendor entity, plus
+                // the client the vendor belongs to.
+                const ws = row.provider_workspaces ?? [];
+                if (ws.length) {
+                  const first = ws[0];
+                  return (
+                    <span className="inline-flex items-center gap-1.5 text-[12px] text-[color:var(--text-secondary)]">
+                      <Link
+                        href={`/admin/vendors/${first.vendor_id}`}
+                        className="max-w-[180px] truncate text-[color:var(--text-link)] hover:underline"
                       >
-                        +{row.organizations.length - 1}
-                      </Badge>
-                    ) : null}
-                  </span>
-                ) : (
+                        {first.vendor_name}
+                      </Link>
+                      {first.client_name ? (
+                        <span className="text-[color:var(--text-tertiary)]">
+                          · {first.client_name}
+                        </span>
+                      ) : null}
+                      {ws.length > 1 ? (
+                        <Badge
+                          variant="secondary"
+                          title={ws
+                            .slice(1)
+                            .map((w) => w.vendor_name)
+                            .join(", ")}
+                        >
+                          +{ws.length - 1}
+                        </Badge>
+                      ) : null}
+                    </span>
+                  );
+                }
+                return (
                   <span className="text-[color:var(--text-tertiary)]">—</span>
-                ),
+                );
+              },
             },
             {
               id: "status",

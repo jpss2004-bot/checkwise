@@ -194,9 +194,17 @@ export type AdminUserRow = {
   created_at: string;
   /** Set when the account is soft-deleted (migration 0042). */
   deleted_at?: string | null;
-  /** Distinct active membership roles, sorted. */
+  /** Distinct active membership roles, sorted. Includes the synthetic
+   *  "provider" role for ProviderWorkspace owners (who hold no membership). */
   roles: string[];
   organizations: { id: string; name: string; kind: string }[];
+  /** Provider logins this account owns (P1-05); empty for non-providers. */
+  provider_workspaces?: {
+    vendor_id: string;
+    vendor_name: string;
+    client_id: string | null;
+    client_name: string | null;
+  }[];
 };
 
 export type AdminUsersList = {

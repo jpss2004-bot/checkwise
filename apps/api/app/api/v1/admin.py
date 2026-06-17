@@ -1245,6 +1245,18 @@ class AdminUserOrgItem(BaseModel):
     kind: str
 
 
+class AdminUserProviderItem(BaseModel):
+    """A provider login this account owns (ProviderWorkspace.owner_user_id).
+    Providers aren't membership users, so this is how a provider account's
+    vendor/client (and a deep link to the vendor) surface in the directory
+    (P1-05)."""
+
+    vendor_id: str
+    vendor_name: str
+    client_id: str | None
+    client_name: str | None
+
+
 class AdminUserItem(BaseModel):
     user_id: str
     email: str
@@ -1256,9 +1268,12 @@ class AdminUserItem(BaseModel):
     deleted_at: str | None = None
     """Set when the account is soft-deleted (migration 0042)."""
     roles: list[str]
-    """Distinct ACTIVE membership roles, sorted."""
+    """Distinct ACTIVE membership roles, sorted. Includes the synthetic
+    "provider" role for ProviderWorkspace owners (who hold no membership)."""
     organizations: list[AdminUserOrgItem]
     """Organizations of the user's active memberships."""
+    provider_workspaces: list[AdminUserProviderItem] = []
+    """Provider logins this account owns — empty for non-provider users."""
 
 
 class AdminUsersListResponse(BaseModel):
@@ -1307,14 +1322,30 @@ def _admin_user_filters(
     if status_value:
         filters.append(User.status == status_value)
     if role:
-        filters.append(
-            User.id.in_(
-                select(Membership.user_id).where(
-                    Membership.role == role,
-                    Membership.status == "active",
+        if role == "provider":
+            # Providers authenticate via ProviderWorkspace tokens, not
+            # memberships (see entities.py), so the membership subquery can
+            # never match role="provider" — the filter used to return nothing
+            # (P1-05). A provider's User row (minted at provisioning) is linked
+            # through ProviderWorkspace.owner_user_id; surface those accounts so
+            # IT can see provider logins here. Token-only providers without a
+            # User account have no login to list.
+            filters.append(
+                User.id.in_(
+                    select(ProviderWorkspace.owner_user_id).where(
+                        ProviderWorkspace.owner_user_id.isnot(None)
+                    )
                 )
             )
-        )
+        else:
+            filters.append(
+                User.id.in_(
+                    select(Membership.user_id).where(
+                        Membership.role == role,
+                        Membership.status == "active",
+                    )
+                )
+            )
     return filters
 
 
@@ -1379,6 +1410,34 @@ def list_users(
             roles_by_user[membership.user_id].add(membership.role)
             orgs_by_user[membership.user_id].setdefault(org.id, org)
 
+    # Provider logins (P1-05): providers hold no membership, so their account's
+    # vendor/client comes from the ProviderWorkspace they own. Bulk-load for the
+    # page (one IN query, mirrors the membership load) and tag owners with the
+    # synthetic "provider" role so the directory labels and links them.
+    workspaces_by_user: dict[str, list[AdminUserProviderItem]] = {
+        uid: [] for uid in user_ids
+    }
+    if user_ids:
+        ws_rows = db.execute(
+            select(ProviderWorkspace, Vendor, Client)
+            .join(Vendor, Vendor.id == ProviderWorkspace.vendor_id)
+            .join(Client, Client.id == ProviderWorkspace.client_id, isouter=True)
+            .where(
+                ProviderWorkspace.owner_user_id.in_(user_ids),
+                ProviderWorkspace.status == "active",
+            )
+        ).all()
+        for ws, vendor, client in ws_rows:
+            workspaces_by_user[ws.owner_user_id].append(
+                AdminUserProviderItem(
+                    vendor_id=vendor.id,
+                    vendor_name=vendor.name,
+                    client_id=client.id if client else None,
+                    client_name=client.name if client else None,
+                )
+            )
+            roles_by_user[ws.owner_user_id].add("provider")
+
     items = [
         AdminUserItem(
             user_id=u.id,
@@ -1396,6 +1455,7 @@ def list_users(
                 AdminUserOrgItem(id=org.id, name=org.name, kind=org.kind)
                 for org in orgs_by_user.get(u.id, {}).values()
             ],
+            provider_workspaces=workspaces_by_user.get(u.id, []),
         )
         for u in rows
     ]
