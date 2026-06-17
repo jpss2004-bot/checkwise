@@ -3,9 +3,6 @@
 import { useEffect } from "react";
 import type { ReactNode } from "react";
 import { motion, useReducedMotion } from "motion/react";
-import Lenis from "lenis";
-import gsap from "gsap";
-import { ScrollTrigger } from "gsap/ScrollTrigger";
 
 import { useMotionPreference } from "@/components/marketing/motion-preference";
 
@@ -34,26 +31,50 @@ export function SmoothScroll({ children }: { children: ReactNode }) {
   useEffect(() => {
     if (reduced) return;
 
-    gsap.registerPlugin(ScrollTrigger);
+    let cancelled = false;
+    let cleanup: (() => void) | undefined;
 
-    const lenis = new Lenis({ lerp: 0.1, smoothWheel: true });
+    // Load Lenis + GSAP/ScrollTrigger only at runtime, and only when motion
+    // is enabled. Statically importing them put ~350 KB of scroll machinery
+    // in the landing's First Load JS for every visitor — including
+    // reduced-motion users, who never run any of it. The dynamic import
+    // code-splits them into an async chunk (the 3D hero already loads this
+    // way), so the initial bundle no longer carries them.
+    void (async () => {
+      const [{ default: Lenis }, { default: gsap }, { ScrollTrigger }] =
+        await Promise.all([
+          import("lenis"),
+          import("gsap"),
+          import("gsap/ScrollTrigger"),
+        ]);
+      if (cancelled) return;
 
-    // Lenis drives ScrollTrigger; the GSAP ticker drives Lenis. One clock
-    // for smooth scroll and every scrubbed / pinned timeline on the page.
-    lenis.on("scroll", ScrollTrigger.update);
-    const onTick = (time: number) => lenis.raf(time * 1000);
-    gsap.ticker.add(onTick);
-    gsap.ticker.lagSmoothing(0);
+      gsap.registerPlugin(ScrollTrigger);
 
-    // Sections register their own triggers in child effects (which run
-    // before this parent effect), so refresh once everything is mounted.
-    ScrollTrigger.refresh();
+      const lenis = new Lenis({ lerp: 0.1, smoothWheel: true });
+
+      // Lenis drives ScrollTrigger; the GSAP ticker drives Lenis. One clock
+      // for smooth scroll and every scrubbed / pinned timeline on the page.
+      lenis.on("scroll", ScrollTrigger.update);
+      const onTick = (time: number) => lenis.raf(time * 1000);
+      gsap.ticker.add(onTick);
+      gsap.ticker.lagSmoothing(0);
+
+      // Sections register their own triggers in child effects; refresh once
+      // the controller is live so they all recalculate against Lenis.
+      ScrollTrigger.refresh();
+
+      cleanup = () => {
+        gsap.ticker.remove(onTick);
+        lenis.off("scroll", ScrollTrigger.update);
+        lenis.destroy();
+        ScrollTrigger.getAll().forEach((t) => t.kill());
+      };
+    })();
 
     return () => {
-      gsap.ticker.remove(onTick);
-      lenis.off("scroll", ScrollTrigger.update);
-      lenis.destroy();
-      ScrollTrigger.getAll().forEach((t) => t.kill());
+      cancelled = true;
+      cleanup?.();
     };
   }, [reduced]);
 

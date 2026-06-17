@@ -10,8 +10,6 @@ import {
   useSpring,
   useTransform,
 } from "motion/react";
-import gsap from "gsap";
-import { ScrollTrigger } from "gsap/ScrollTrigger";
 
 import { useMotionPreference } from "@/components/marketing/motion-preference";
 import { cn } from "@/lib/utils";
@@ -82,33 +80,53 @@ export function HeroSemaforo() {
   // Scroll-travel proof: the layers drift apart as the hero scrolls out.
   useEffect(() => {
     if (reduced) return;
-    gsap.registerPlugin(ScrollTrigger);
-    const ctx = gsap.context(() => {
-      const trig = {
-        trigger: "#inicio",
-        start: "top top",
-        end: "bottom top",
-        scrub: true,
-      } as const;
-      if (cardScrollRef.current) {
-        gsap.to(cardScrollRef.current, {
-          yPercent: -9,
-          scale: 0.95,
-          opacity: 0.65,
-          ease: "none",
-          scrollTrigger: trig,
-        });
-      }
-      if (canvasWrapRef.current) {
-        gsap.to(canvasWrapRef.current, {
-          yPercent: 16,
-          scale: 1.12,
-          ease: "none",
-          scrollTrigger: trig,
-        });
-      }
-    });
-    return () => ctx.revert();
+
+    let cancelled = false;
+    let ctx: { revert: () => void } | undefined;
+
+    // Load GSAP + ScrollTrigger lazily — only at runtime, only when motion is
+    // enabled. They are ~300 KB and were shipping in the landing's First Load
+    // JS via this static import; the dynamic import code-splits them out,
+    // matching how SmoothScroll and the 3D layer already load.
+    void (async () => {
+      const [{ default: gsap }, { ScrollTrigger }] = await Promise.all([
+        import("gsap"),
+        import("gsap/ScrollTrigger"),
+      ]);
+      if (cancelled) return;
+
+      gsap.registerPlugin(ScrollTrigger);
+      ctx = gsap.context(() => {
+        const trig = {
+          trigger: "#inicio",
+          start: "top top",
+          end: "bottom top",
+          scrub: true,
+        } as const;
+        if (cardScrollRef.current) {
+          gsap.to(cardScrollRef.current, {
+            yPercent: -9,
+            scale: 0.95,
+            opacity: 0.65,
+            ease: "none",
+            scrollTrigger: trig,
+          });
+        }
+        if (canvasWrapRef.current) {
+          gsap.to(canvasWrapRef.current, {
+            yPercent: 16,
+            scale: 1.12,
+            ease: "none",
+            scrollTrigger: trig,
+          });
+        }
+      });
+    })();
+
+    return () => {
+      cancelled = true;
+      ctx?.revert();
+    };
   }, [reduced]);
 
   const onMove = (e: ReactPointerEvent<HTMLDivElement>) => {
