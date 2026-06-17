@@ -451,6 +451,55 @@ def test_queue_facets_are_scoped_to_actionable_rows(
     assert terminal_vendor_id not in {vendor["id"] for vendor in payload["vendors"]}
 
 
+def test_queue_facets_client_scoped_includes_idle_providers(
+    api_client: TestClient, db_factory
+) -> None:
+    """P0-02: selecting a client must surface ALL of its active providers —
+    including one with no queue item — sourced from the Vendor↔Client link,
+    not just providers that happen to have an actionable submission. Without a
+    client selected the list stays actionable-scoped (bounded)."""
+    _seed_user(db_factory, email="rev@x.mx", role="reviewer")
+    token = _login(api_client, "rev@x.mx", "Hunter2 Correct horse")
+    actionable_id = _seed_submission(db_factory, period_key="2026-M01")
+
+    db = db_factory()
+    try:
+        actionable = db.get(Submission, actionable_id)
+        assert actionable is not None
+        client_id = actionable.client_id
+        busy_vendor_id = actionable.vendor_id
+        # An idle provider under the SAME client — no submission at all.
+        idle_vendor = Vendor(
+            client_id=client_id,
+            name="Proveedor sin movimientos",
+            rfc="IDLE010101AAA",
+        )
+        db.add(idle_vendor)
+        db.commit()
+        idle_vendor_id = idle_vendor.id
+    finally:
+        db.close()
+
+    # Unscoped: only the provider with an actionable row appears.
+    unscoped = api_client.get(
+        "/api/v1/reviewer/queue/facets",
+        headers={"Authorization": f"Bearer {token}"},
+    ).json()
+    unscoped_vendor_ids = {v["id"] for v in unscoped["vendors"]}
+    assert busy_vendor_id in unscoped_vendor_ids
+    assert idle_vendor_id not in unscoped_vendor_ids
+
+    # Client-scoped: BOTH providers appear — the link table, not queue activity.
+    scoped = api_client.get(
+        "/api/v1/reviewer/queue/facets",
+        params={"client_id": client_id},
+        headers={"Authorization": f"Bearer {token}"},
+    ).json()
+    scoped_vendor_ids = {v["id"] for v in scoped["vendors"]}
+    assert busy_vendor_id in scoped_vendor_ids
+    assert idle_vendor_id in scoped_vendor_ids
+
+
 # ---------------------------------------------------------------------------
 # Authenticity verdict (document-revalidation Phase A)
 # ---------------------------------------------------------------------------

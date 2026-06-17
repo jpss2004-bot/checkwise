@@ -139,10 +139,18 @@ export async function getReviewerQueue(
   );
 }
 
+// ``clientId`` makes the provider list honour the 1-client→N-providers
+// relationship: the server returns every active vendor of that client, not
+// only those with a row in the queue (P0-02). Omit it for the unscoped list.
 export async function getReviewerQueueFacets(
   token: string,
+  clientId?: string,
 ): Promise<QueueFacets> {
-  return await fetchJson<QueueFacets>("/api/v1/reviewer/queue/facets", token);
+  const qs = clientId ? `?client_id=${encodeURIComponent(clientId)}` : "";
+  return await fetchJson<QueueFacets>(
+    `/api/v1/reviewer/queue/facets${qs}`,
+    token,
+  );
 }
 
 // ---------------------------------------------------------------------------

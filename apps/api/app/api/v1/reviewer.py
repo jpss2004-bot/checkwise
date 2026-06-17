@@ -469,8 +469,20 @@ def get_queue(
 def get_queue_facets(
     db: DbSession,
     current: ReviewerDep,  # noqa: ARG001 - enforces RBAC
+    client_id: str | None = None,
 ) -> QueueFacetsResponse:
-    """Return client/provider filter options scoped to actionable queue rows."""
+    """Return client/provider filter options for the operational inbox.
+
+    Clients are scoped to actionable queue rows — the inbox only offers
+    clients that currently have work. Providers, however, must honour the
+    1-client→N-providers relationship: when a ``client_id`` is selected the
+    provider dropdown lists EVERY active vendor of that client (from the
+    Vendor↔Client link), not only those with a row currently in the queue.
+    Sourcing the options from the actionable ``Submission`` join made a
+    client's up-to-date, brand-new, or fully-resolved providers silently
+    vanish from the filter (P0-02). With no client selected we keep the
+    actionable-scoped vendor list so the unscoped option set stays bounded.
+    """
 
     client_rows = db.execute(
         select(Client.id, Client.name)
@@ -479,13 +491,22 @@ def get_queue_facets(
         .distinct()
         .order_by(Client.name.asc())
     ).all()
-    vendor_rows = db.execute(
-        select(Vendor.id, Vendor.client_id, Vendor.name, Vendor.rfc)
-        .join(Submission, Submission.vendor_id == Vendor.id)
-        .where(Submission.status.in_(QUEUE_STATUSES))
-        .distinct()
-        .order_by(Vendor.name.asc())
-    ).all()
+    if client_id:
+        # Honour the link table: all of this client's active providers,
+        # regardless of whether they currently have a queue item.
+        vendor_rows = db.execute(
+            select(Vendor.id, Vendor.client_id, Vendor.name, Vendor.rfc)
+            .where(Vendor.client_id == client_id, Vendor.status == "active")
+            .order_by(Vendor.name.asc())
+        ).all()
+    else:
+        vendor_rows = db.execute(
+            select(Vendor.id, Vendor.client_id, Vendor.name, Vendor.rfc)
+            .join(Submission, Submission.vendor_id == Vendor.id)
+            .where(Submission.status.in_(QUEUE_STATUSES))
+            .distinct()
+            .order_by(Vendor.name.asc())
+        ).all()
     return QueueFacetsResponse(
         clients=[QueueFacetClient(id=row.id, name=row.name) for row in client_rows],
         vendors=[

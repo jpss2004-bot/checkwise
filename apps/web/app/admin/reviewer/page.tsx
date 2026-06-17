@@ -112,6 +112,19 @@ const RISK_LABEL: Record<RiskKey, string> = {
   high_risk: "Alto riesgo",
 };
 
+// Per-value definitions for the authenticity-risk badge (P3-12). Rules mirror
+// document_forensics.rollup_authenticity_risk: the verdict reflects the PDF
+// CONTAINER forensics (producer/editor tool, incremental-update markers,
+// embedded JavaScript), independent of whether the document matches its
+// requirement. "riesgo" here ≠ the SLA "edad" warning below.
+const RISK_TOOLTIP: Record<RiskKey, string> = {
+  clean: "Sin hallazgos forenses de manipulación en el PDF.",
+  suspicious:
+    "Al menos un hallazgo forense de severidad media (p. ej. generado con un editor de diseño).",
+  high_risk:
+    "Al menos un hallazgo forense de severidad alta — posible manipulación del PDF.",
+};
+
 function parseRiskParam(raw: string | null): RiskKey | "" {
   return (RISK_VALUES as readonly string[]).includes(raw ?? "")
     ? (raw as RiskKey)
@@ -284,10 +297,15 @@ function ReviewerQueueBody() {
     setSession(current);
   }, [router]);
 
+  // Refetch facets when the selected client changes: with a client chosen the
+  // server returns ALL of that client's active providers (not just those with
+  // a queue item), so the provider dropdown reflects the full 1→N relationship
+  // (P0-02). The clients list stays actionable-scoped and unchanged across
+  // refetches, so the client dropdown doesn't flicker.
   useEffect(() => {
     if (!session) return;
     let cancelled = false;
-    getReviewerQueueFacets(session.access_token)
+    getReviewerQueueFacets(session.access_token, clientId || undefined)
       .then((payload) => {
         if (!cancelled) setFacets(payload);
       })
@@ -300,7 +318,7 @@ function ReviewerQueueBody() {
     return () => {
       cancelled = true;
     };
-  }, [session, router]);
+  }, [session, router, clientId]);
 
   useEffect(() => {
     if (!clientId || !vendorId || visibleVendors.some((v) => v.id === vendorId)) {
@@ -702,6 +720,21 @@ function ReviewerQueueBody() {
                   </span>{" "}
                   más de 7 días en cola
                 </p>
+                <p className="text-[11px] text-[color:var(--text-tertiary)]">
+                  Riesgo (análisis forense del PDF):{" "}
+                  <span className="text-[color:var(--status-success-text)]">
+                    Limpio
+                  </span>{" "}
+                  sin hallazgos ·{" "}
+                  <span className="text-[color:var(--status-warning-text)]">
+                    Sospechoso
+                  </span>{" "}
+                  severidad media ·{" "}
+                  <span className="text-[color:var(--status-error-text)]">
+                    Alto riesgo
+                  </span>{" "}
+                  severidad alta
+                </p>
               </div>
               {queue.next_cursor ? (
                 <div className="flex items-center gap-3">
@@ -878,7 +911,11 @@ function RiskBadge({ risk }: { risk: QueueItem["authenticity_risk"] }) {
   }
   if (risk === "clean") {
     return (
-      <Badge variant="outline" className="whitespace-nowrap">
+      <Badge
+        variant="outline"
+        className="whitespace-nowrap"
+        title={RISK_TOOLTIP.clean}
+      >
         <span
           aria-hidden
           className="h-1.5 w-1.5 shrink-0 rounded-full bg-[color:var(--status-success-text)]"
@@ -891,6 +928,9 @@ function RiskBadge({ risk }: { risk: QueueItem["authenticity_risk"] }) {
     <Badge
       variant={risk === "high_risk" ? "destructive" : "warning"}
       className="whitespace-nowrap"
+      title={
+        risk === "high_risk" ? RISK_TOOLTIP.high_risk : RISK_TOOLTIP.suspicious
+      }
     >
       <span
         aria-hidden
