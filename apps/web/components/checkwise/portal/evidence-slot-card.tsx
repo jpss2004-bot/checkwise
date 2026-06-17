@@ -45,7 +45,9 @@ export interface EvidenceSlotCardProps {
   className?: string;
 }
 
-const STATE_LABEL_FALLBACK: Record<DocumentStateCode, string> = {
+// Exported so the CW-03 taxonomy guard (doc-state-labels.test.ts) can assert
+// it never drifts from DOC_STATE_LABELS / the canonical slot dictionary.
+export const STATE_LABEL_FALLBACK: Record<DocumentStateCode, string> = {
   // Canonical wording unification (2026-06-10) — mirrors slotStateLabel()
   // in @/lib/constants/statuses so provider slot cards read the same words
   // as client surfaces. `uploaded` collapses into "En revisión".
