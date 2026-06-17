@@ -108,6 +108,11 @@ type SubmissionResponse = {
    *  accepted and queued for normal review. Never blocks. */
   match_feedback?: MatchFeedback | null;
   message: string;
+  /** Async intake (§1.5, 2026-06-17). True when the row is a freshly
+   *  persisted ``recibido`` receipt whose validation pipeline is still
+   *  running in the background — the verdict fields above are empty and
+   *  the confirmation shows "validando…" instead of an inline result. */
+  validation_pending?: boolean;
 };
 
 /** Per-file match feedback collected from the batch response so the
@@ -2168,6 +2173,117 @@ function ConfirmationStep({
       <div className="rounded-md border border-border bg-muted/40 p-4 text-sm text-muted-foreground">
         Envía la carga para ver el resultado de prevalidación.
       </div>
+    );
+  }
+
+  // Async intake (§1.5/§1.6) — the receipt is persisted but its validation
+  // pipeline is still running in the background, so there is no inline
+  // verdict to show yet. Confirm receipt, point at the (polling) detail +
+  // calendar, and tell the provider we'll notify them when it finishes.
+  if (result.validation_pending) {
+    return (
+      <section className="space-y-5">
+        <div className="cw-fade-up rounded-md border border-[color:var(--status-success-border)] bg-[color:var(--status-success-bg)] p-5">
+          <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+            <div className="flex gap-3">
+              <div
+                className="cw-success-ring mt-0.5 flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-[color:var(--status-success-text)] text-[color:var(--text-inverse)]"
+                aria-hidden="true"
+              >
+                <AnimatedCheck />
+              </div>
+              <div className="min-w-0">
+                <p className="text-base font-semibold">Recibimos tu documento</p>
+                <p className="mt-1 text-sm text-muted-foreground">
+                  Lo estamos validando en segundo plano. No necesitas esperar
+                  aquí: ya quedó registrado en tu calendario y tu dashboard, y te
+                  avisaremos en cuanto termine.
+                </p>
+              </div>
+            </div>
+            <RequirementStatusBadge status={result.status as RequirementStatus} />
+          </div>
+        </div>
+
+        <div className="cw-fade-up rounded-md border border-primary/25 bg-primary/5 p-5">
+          <p className="text-xs font-medium uppercase tracking-wide text-primary">
+            Lo que sigue
+          </p>
+          <ol className="cw-stagger mt-3 space-y-3 text-sm">
+            <li className="flex items-start gap-3">
+              <span className="mt-0.5 flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-primary text-primary-foreground">
+                <CircleNotch
+                  className="h-3.5 w-3.5 animate-spin"
+                  aria-hidden="true"
+                />
+              </span>
+              <div>
+                <p className="font-medium">Validación automática (en curso)</p>
+                <p className="text-xs text-muted-foreground">
+                  Revisamos que el archivo sea un PDF legible, no esté duplicado
+                  y corresponda al requisito. Tarda unos segundos.
+                </p>
+              </div>
+            </li>
+            <li className="flex items-start gap-3">
+              <span className="mt-0.5 flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-primary text-xs font-semibold text-primary-foreground">
+                2
+              </span>
+              <div>
+                <p className="font-medium">
+                  Revisión humana del equipo de cumplimiento
+                </p>
+                <p className="text-xs text-muted-foreground">
+                  Una persona autorizada decide aprobar, rechazar o pedir
+                  aclaración. La automatización no aprueba.
+                </p>
+              </div>
+            </li>
+            <li className="flex items-start gap-3">
+              <span className="mt-0.5 flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-primary text-xs font-semibold text-primary-foreground">
+                3
+              </span>
+              <div>
+                <p className="font-medium">Te avisaremos con el resultado</p>
+                <p className="text-xs text-muted-foreground">
+                  Recibirás una notificación cuando termine la validación. Si te
+                  piden corregir algo, te llevaremos al detalle con la razón
+                  exacta.
+                </p>
+              </div>
+            </li>
+          </ol>
+          <div className="mt-5 flex flex-wrap gap-2">
+            {successContinue ? (
+              <Button asChild className="active:scale-[0.98]">
+                <Link href={successContinue.href}>
+                  <ArrowRight className="h-4 w-4" aria-hidden="true" />
+                  {successContinue.label}
+                </Link>
+              </Button>
+            ) : (
+              <Button asChild className="active:scale-[0.98]">
+                <Link href="/portal/calendar">
+                  <Calendar className="h-4 w-4" aria-hidden="true" />
+                  Ver mi calendario
+                  <ArrowRight className="h-4 w-4" aria-hidden="true" />
+                </Link>
+              </Button>
+            )}
+            <Button asChild variant="outline" className="active:scale-[0.98]">
+              <Link href={`/portal/submissions/${result.submission_id}`}>
+                <FileText className="h-4 w-4" aria-hidden="true" />
+                Ver estado del documento
+              </Link>
+            </Button>
+          </div>
+          {successContinue?.helper && (
+            <p className="mt-3 text-xs text-muted-foreground">
+              {successContinue.helper}
+            </p>
+          )}
+        </div>
+      </section>
     );
   }
 

@@ -8,6 +8,7 @@ import {
   ArrowLeft,
   ArrowRight,
   CheckCircle,
+  CircleNotch,
   Clock,
   DownloadSimple,
   FileText,
@@ -98,6 +99,26 @@ export default function SubmissionDetailPage({ params }: PageProps) {
       cancelled = true;
     };
   }, [session, submission_id, reloadKey]);
+
+  // Async intake (§1.5) — a freshly-uploaded document lands here as
+  // ``recibido`` while its validation pipeline finishes in the background.
+  // Poll (bounded) so the verdict appears on its own without a manual
+  // reload. The effect re-runs only when ``status`` changes, so the
+  // interval keeps ticking while still ``recibido`` and clears the moment
+  // the status moves off it (or after ~2 min as a backstop).
+  useEffect(() => {
+    if (detail?.status !== DocumentStatus.RECIBIDO) return;
+    let attempts = 0;
+    const id = window.setInterval(() => {
+      attempts += 1;
+      if (attempts > 30) {
+        window.clearInterval(id);
+        return;
+      }
+      setReloadKey((k) => k + 1);
+    }, 4000);
+    return () => window.clearInterval(id);
+  }, [detail?.status]);
 
   const retry = useCallback(() => setReloadKey((k) => k + 1), []);
 
@@ -274,6 +295,15 @@ function StatusHero({
           </div>
           <div className="min-w-0">
             <RequirementStatusBadge status={detail.status} />
+            {detail.status === DocumentStatus.RECIBIDO ? (
+              <p className="mt-2 inline-flex items-center gap-1.5 text-xs font-medium text-[color:var(--text-secondary)]">
+                <CircleNotch
+                  className="h-3.5 w-3.5 animate-spin"
+                  aria-hidden="true"
+                />
+                Validando automáticamente… se actualizará solo.
+              </p>
+            ) : null}
             <p className="mt-2 text-base font-semibold text-[color:var(--text-primary)]">
               {headline}
             </p>
