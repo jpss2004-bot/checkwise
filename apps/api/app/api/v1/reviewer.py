@@ -740,6 +740,11 @@ def get_submission(
         # is a denormalized copy of the inspection columns so the
         # comparison card can render before the shadow call finishes.
         "shadow_analysis": _build_shadow_analysis_payload(inspection),
+        # Phase 2/3 — expediente-level situational assessment for this
+        # submission's (client, vendor, period). Reviewer-facing; ``None``
+        # until the situational pass runs for the scope. Cross-document
+        # findings the per-document shadow card cannot show.
+        "expediente_assessment": _build_expediente_payload(db, submission),
         # Phase E — advisory approval suggestion. Computed from data
         # already loaded above (no extra queries). ``None`` only when
         # there is no inspection row at all; otherwise the block always
@@ -877,6 +882,43 @@ def _build_prevalidation_evidence_payload(inspection) -> dict | None:  # noqa: A
     return evidence if isinstance(evidence, dict) else None
 
 
+def _build_expediente_payload(db, submission) -> dict | None:  # noqa: ANN001
+    """Latest expediente situational assessment for this submission's scope.
+
+    Phase 2/3 — reviewer-facing. Returns the most recent non-errored
+    ``ExpedienteAssessment`` for the submission's (client, vendor, period),
+    or ``None`` when the situational pass has not produced one. Cross-
+    document findings (headcount vs contract, REPSE activity, period/entity
+    coherence, coverage gaps) that no single document carries.
+    """
+    from app.models import ExpedienteAssessment
+
+    row = db.scalar(
+        select(ExpedienteAssessment)
+        .where(
+            ExpedienteAssessment.client_id == submission.client_id,
+            ExpedienteAssessment.vendor_id == submission.vendor_id,
+            ExpedienteAssessment.period_id == submission.period_id,
+            ExpedienteAssessment.error.is_(None),
+        )
+        .order_by(ExpedienteAssessment.created_at.desc())
+        .limit(1)
+    )
+    if row is None:
+        return None
+    return {
+        "coherence": row.coherence,
+        "summary_for_reviewer": row.summary_for_reviewer,
+        "findings": list(row.findings or []),
+        "coverage_gaps": list(row.coverage_gaps or []),
+        "document_count": len(row.document_ids or []),
+        "provider_id": row.provider_id,
+        "completed_at": row.created_at.isoformat()
+        if getattr(row, "created_at", None)
+        else None,
+    }
+
+
 def _build_shadow_analysis_payload(inspection) -> dict | None:  # noqa: ANN001
     """Shape the shadow-mode comparison payload for the admin UI.
 
@@ -917,6 +959,14 @@ def _build_shadow_analysis_payload(inspection) -> dict | None:  # noqa: ANN001
             "error": inspection.shadow_error,
             "confidence": inspection.shadow_confidence,
             "signals": inspection.shadow_signals,
+            # Phase 1 — deep-tier comprehension, surfaced explicitly so the
+            # reviewer card need not dig into ``signals``. ``None`` for the
+            # triage tier / legacy rows.
+            "comprehension": (
+                inspection.shadow_signals.get("comprehension")
+                if isinstance(inspection.shadow_signals, dict)
+                else None
+            ),
         },
     }
 
