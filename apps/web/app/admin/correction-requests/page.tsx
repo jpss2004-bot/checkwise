@@ -313,11 +313,21 @@ export default function AdminCorrectionRequestsPage() {
               {STATUS_LABEL[row.status]}
             </Badge>
             {isResolved ? (
-              row.resolution_note ? (
-                <p className="line-clamp-2 max-w-[180px] text-[10px] text-[color:var(--text-tertiary)]">
-                  {row.resolution_note}
-                </p>
-              ) : null
+              <div className="flex flex-col gap-0.5">
+                {row.resolved_at ? (
+                  <span className="text-[10px] text-[color:var(--text-tertiary)]">
+                    Resuelta el{" "}
+                    {new Date(row.resolved_at).toLocaleDateString("es-MX", {
+                      dateStyle: "medium",
+                    })}
+                  </span>
+                ) : null}
+                {row.resolution_note ? (
+                  <p className="line-clamp-2 max-w-[180px] text-[10px] text-[color:var(--text-tertiary)]">
+                    {row.resolution_note}
+                  </p>
+                ) : null}
+              </div>
             ) : (
               <div className="flex gap-1.5">
                 <Button

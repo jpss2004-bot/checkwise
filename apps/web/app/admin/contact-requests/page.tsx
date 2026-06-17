@@ -214,6 +214,23 @@ export default function AdminContactRequestsPage() {
       ),
     },
     {
+      id: "source",
+      header: "Origen",
+      width: "140px",
+      cell: (row) => (
+        <span
+          className="text-[11px] text-[color:var(--text-secondary)]"
+          title={`source: ${row.source}`}
+        >
+          {row.source === "landing"
+            ? "Página de inicio"
+            : row.source === "demo-cta"
+              ? "CTA · Agenda demo"
+              : row.source || "—"}
+        </span>
+      ),
+    },
+    {
       id: "role",
       header: "Interés",
       cell: (row) => (
