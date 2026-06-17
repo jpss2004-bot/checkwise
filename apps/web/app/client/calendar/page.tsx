@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { CalendarBlank, Funnel } from "@phosphor-icons/react";
 
@@ -12,14 +12,12 @@ import {
 } from "@/components/checkwise/portal/state-surfaces";
 
 import { ClientShell } from "../_shell";
-import { MonthCalendar } from "@/components/checkwise/calendar/month-calendar";
 import { ObligationBlock } from "@/components/checkwise/calendar/obligation-block";
 import { PortfolioMatrix } from "@/components/checkwise/calendar/portfolio-matrix";
-import { ProviderReviewCard } from "@/components/checkwise/calendar/provider-review-card";
 import {
   CLIENT_RISK_ORDER,
+  SEMAPHORE_DOT,
   daysUntil,
-  formatLongDate,
   formatShortDate,
   monthOf,
   relativeDeadline,
@@ -32,6 +30,7 @@ import {
   type ClientCalendarProvider,
   type ClientVendorListResponse,
 } from "@/lib/api/client";
+import { MONTH_LABELS_ES } from "@/lib/api/portal";
 import {
   CALENDAR_MAX_YEAR,
   CALENDAR_MIN_YEAR,
@@ -53,7 +52,7 @@ const INSTITUTION_FILTERS: { code: string; label: string }[] = [
   { code: "stps_repse", label: "STPS / REPSE" },
 ];
 
-type ViewMode = "calendar" | "providers";
+type Selected = { month: number; vendorId: string | null } | null;
 
 export default function ClientCalendarPage() {
   const router = useRouter();
@@ -73,19 +72,9 @@ export default function ClientCalendarPage() {
     const v = searchParams?.get("inst") ?? "all";
     return INSTITUTION_FILTERS.some((o) => o.code === v) ? v : "all";
   });
-  const [viewMode, setViewMode] = useState<ViewMode>(() =>
-    searchParams?.get("view") === "providers" ? "providers" : "calendar",
-  );
-  const [viewMonth, setViewMonth] = useState<number>(() =>
-    today.getFullYear() === parseCalendarYear(searchParams?.get("year") ?? null)
-      ? today.getMonth() + 1
-      : 1,
-  );
-  const [selectedDay, setSelectedDay] = useState<number | null>(null);
+  const [selected, setSelected] = useState<Selected>(null);
   const [vendorsList, setVendorsList] =
     useState<ClientVendorListResponse | null>(null);
-  const [openProviders, setOpenProviders] = useState<Set<string>>(new Set());
-  const autoOpenedRef = useRef(false);
 
   const calendarHref = useMemo(() => {
     const params = new URLSearchParams();
@@ -93,10 +82,9 @@ export default function ClientCalendarPage() {
     if (year !== new Date().getFullYear()) params.set("year", String(year));
     for (const vendorId of vendorFilter) params.append("vendor_id", vendorId);
     if (institutionFilter !== "all") params.set("inst", institutionFilter);
-    if (viewMode === "providers") params.set("view", "providers");
     const qs = params.toString();
     return `/client/calendar${qs ? `?${qs}` : ""}`;
-  }, [urlClientId, vendorFilter, year, institutionFilter, viewMode]);
+  }, [urlClientId, vendorFilter, year, institutionFilter]);
 
   useEffect(() => {
     router.replace(calendarHref, { scroll: false });
@@ -138,56 +126,19 @@ export default function ClientCalendarPage() {
     };
   }, [year, vendorFilter, urlClientId]);
 
-  useEffect(() => {
-    if (autoOpenedRef.current) return;
-    if (data && data.providers.length > 0) {
-      setOpenProviders(new Set([data.providers[0].vendor_id]));
-      autoOpenedRef.current = true;
-    }
-  }, [data]);
-
   function toggleVendor(id: string) {
     setVendorFilter((prev) =>
       prev.includes(id) ? prev.filter((v) => v !== id) : [...prev, id],
     );
   }
 
-  function toggleProvider(id: string) {
-    setOpenProviders((prev) => {
-      const next = new Set(prev);
-      if (next.has(id)) next.delete(id);
-      else next.add(id);
-      return next;
-    });
-  }
-
-  function selectProvider(id: string) {
-    setViewMode("providers");
-    setOpenProviders((prev) => new Set(prev).add(id));
+  function selectAndScroll(next: NonNullable<Selected>) {
+    setSelected(next);
     requestAnimationFrame(() => {
       document
-        .getElementById(`provider-card-${id}`)
+        .getElementById("selection-detail")
         ?.scrollIntoView({ behavior: "smooth", block: "start" });
     });
-  }
-
-  function prevMonth() {
-    if (viewMonth > 1) setViewMonth(viewMonth - 1);
-    else {
-      setYear(year - 1);
-      setViewMonth(12);
-    }
-  }
-  function nextMonth() {
-    if (viewMonth < 12) setViewMonth(viewMonth + 1);
-    else {
-      setYear(year + 1);
-      setViewMonth(1);
-    }
-  }
-  function goToday() {
-    setYear(today.getFullYear());
-    setViewMonth(today.getMonth() + 1);
   }
 
   // Vendor narrowing is server-side; institution narrowing is client-side.
@@ -221,53 +172,35 @@ export default function ClientCalendarPage() {
     return map;
   }, [filteredItems]);
 
-  const itemsByProvider = useMemo(() => {
-    const map = new Map<string, ClientCalendarItem[]>();
-    for (const item of filteredItems) {
-      const list = map.get(item.vendor_id) ?? [];
-      list.push(item);
-      map.set(item.vendor_id, list);
-    }
-    return map;
-  }, [filteredItems]);
-
-  // Obligations of the displayed month, grouped by day-of-month.
-  const itemsByDay = useMemo(() => {
-    const map = new Map<number, ClientCalendarItem[]>();
-    const prefix = `${year}-${String(viewMonth).padStart(2, "0")}-`;
-    for (const item of filteredItems) {
-      if (!item.deadline_iso.startsWith(prefix)) continue;
-      const day = Number(item.deadline_iso.slice(8, 10));
-      const list = map.get(day) ?? [];
-      list.push(item);
-      map.set(day, list);
-    }
-    return map;
-  }, [filteredItems, year, viewMonth]);
-
-  const isCurrentMonth =
-    today.getFullYear() === year && today.getMonth() + 1 === viewMonth;
-
-  // Pick a sensible default selected day when the month / filters change:
-  // today if it has deadlines this month, else the first populated day.
-  useEffect(() => {
-    const days = [...itemsByDay.keys()].sort((a, b) => a - b);
-    if (days.length === 0) {
-      setSelectedDay(null);
-      return;
-    }
-    if (isCurrentMonth && itemsByDay.has(today.getDate())) {
-      setSelectedDay(today.getDate());
-    } else {
-      setSelectedDay(days[0]);
-    }
-  }, [itemsByDay, isCurrentMonth, today]);
-
   const visibleProviders = useMemo(() => {
     if (!data) return [] as ClientCalendarProvider[];
     if (institutionFilter === "all") return data.providers;
-    return data.providers.filter((p) => itemsByProvider.has(p.vendor_id));
-  }, [data, itemsByProvider, institutionFilter]);
+    const withItems = new Set(filteredItems.map((i) => i.vendor_id));
+    return data.providers.filter((p) => withItems.has(p.vendor_id));
+  }, [data, filteredItems, institutionFilter]);
+
+  // Default selection when the data / filter context changes: the current
+  // month across all providers, else the first month that has anything.
+  useEffect(() => {
+    const monthsWithItems = new Set(filteredItems.map(monthOf));
+    if (monthsWithItems.size === 0) {
+      setSelected(null);
+      return;
+    }
+    const cm = today.getFullYear() === year ? today.getMonth() + 1 : null;
+    const month =
+      cm && monthsWithItems.has(cm) ? cm : Math.min(...monthsWithItems);
+    setSelected({ month, vendorId: null });
+  }, [filteredItems, year, today]);
+
+  const selectionItems = useMemo(() => {
+    if (!selected) return [] as ClientCalendarItem[];
+    return filteredItems.filter(
+      (i) =>
+        monthOf(i) === selected.month &&
+        (selected.vendorId === null || i.vendor_id === selected.vendorId),
+    );
+  }, [filteredItems, selected]);
 
   const strip = useMemo(() => {
     const atRisk = visibleProviders.filter(
@@ -295,7 +228,7 @@ export default function ClientCalendarPage() {
   return (
     <ClientShell
       title="Calendario del cliente"
-      description="Revisa los vencimientos de cumplimiento de tu portafolio mes a mes, con el detalle exacto de cada documento."
+      description="El año de cumplimiento de tu portafolio. Cada proveedor por mes; toca un mes o una celda para ver el detalle de los documentos."
       actions={
         <label className="flex items-center gap-2 rounded-md border border-[color:var(--border-default)] bg-[color:var(--surface-raised)] px-3 py-1 text-xs">
           <CalendarBlank
@@ -341,76 +274,39 @@ export default function ClientCalendarPage() {
 
           {data.providers.length === 0 ? (
             <NoProvidersState />
+          ) : visibleProviders.length === 0 ? (
+            <FilteredEmptyState onClear={() => setInstitutionFilter("all")} />
           ) : (
             <>
-              <ViewToggle value={viewMode} onChange={setViewMode} />
+              <Surface
+                title={`Calendario ${year}`}
+                description="Proveedores en las filas, meses en las columnas. El color marca el estado más crítico de cada mes."
+                bodyClassName="p-4"
+              >
+                <PortfolioMatrix
+                  providers={visibleProviders}
+                  itemsByCell={itemsByCell}
+                  currentMonth={currentMonthForMatrix}
+                  selected={selected}
+                  onSelectCell={(vendorId, month) =>
+                    selectAndScroll({ month, vendorId })
+                  }
+                  onSelectMonth={(month) =>
+                    selectAndScroll({ month, vendorId: null })
+                  }
+                />
+              </Surface>
 
-              {viewMode === "calendar" ? (
-                <div className="grid gap-6 lg:grid-cols-[minmax(0,1fr)_minmax(320px,420px)]">
-                  <Surface bodyClassName="p-4 sm:p-5">
-                    <MonthCalendar
-                      year={year}
-                      month={viewMonth}
-                      itemsByDay={itemsByDay}
-                      today={today}
-                      selectedDay={selectedDay}
-                      onSelectDay={setSelectedDay}
-                      onPrevMonth={prevMonth}
-                      onNextMonth={nextMonth}
-                      onToday={goToday}
-                    />
-                  </Surface>
-                  <DayDetail
-                    year={year}
-                    month={viewMonth}
-                    day={selectedDay}
-                    items={selectedDay ? (itemsByDay.get(selectedDay) ?? []) : []}
-                    today={today}
-                    returnToHref={calendarHref}
-                  />
-                </div>
-              ) : visibleProviders.length === 0 ? (
-                <FilteredEmptyState onClear={() => setInstitutionFilter("all")} />
-              ) : (
-                <div className="space-y-6">
-                  <div className="hidden lg:block">
-                    <Surface
-                      title={`Mapa de riesgo · ${year}`}
-                      description="Vistazo anual de todo el portafolio. Toca un proveedor o una celda para abrir su revisión a detalle abajo."
-                      bodyClassName="p-4"
-                    >
-                      <PortfolioMatrix
-                        providers={visibleProviders}
-                        itemsByCell={itemsByCell}
-                        currentMonth={currentMonthForMatrix}
-                        onSelectProvider={selectProvider}
-                      />
-                    </Surface>
-                  </div>
-                  <section className="space-y-3">
-                    <div>
-                      <h2 className="text-sm font-semibold text-[color:var(--text-primary)]">
-                        Revisión por proveedor
-                      </h2>
-                      <p className="text-xs text-[color:var(--text-tertiary)]">
-                        Ordenados por riesgo. Abre un proveedor para revisar sus
-                        obligaciones a detalle.
-                      </p>
-                    </div>
-                    {visibleProviders.map((p) => (
-                      <ProviderReviewCard
-                        key={p.vendor_id}
-                        provider={p}
-                        items={itemsByProvider.get(p.vendor_id) ?? []}
-                        today={today}
-                        returnToHref={calendarHref}
-                        open={openProviders.has(p.vendor_id)}
-                        onToggle={() => toggleProvider(p.vendor_id)}
-                      />
-                    ))}
-                  </section>
-                </div>
-              )}
+              <div id="selection-detail" className="scroll-mt-4">
+                <SelectionDetail
+                  selected={selected}
+                  items={selectionItems}
+                  providers={visibleProviders}
+                  year={year}
+                  today={today}
+                  returnToHref={calendarHref}
+                />
+              </div>
             </>
           )}
         </div>
@@ -419,80 +315,37 @@ export default function ClientCalendarPage() {
   );
 }
 
-// ─── View toggle ────────────────────────────────────────────────
+// ─── Selection detail (grouped by provider) ─────────────────────
 
-function ViewToggle({
-  value,
-  onChange,
-}: {
-  value: ViewMode;
-  onChange: (v: ViewMode) => void;
-}) {
-  return (
-    <div
-      role="tablist"
-      aria-label="Modo de vista"
-      className="inline-flex rounded-lg border border-[color:var(--border-default)] bg-[color:var(--surface-raised)] p-0.5"
-    >
-      {(
-        [
-          { id: "calendar", label: "Calendario" },
-          { id: "providers", label: "Por proveedor" },
-        ] as const
-      ).map((opt) => {
-        const active = value === opt.id;
-        return (
-          <button
-            key={opt.id}
-            type="button"
-            role="tab"
-            aria-selected={active}
-            onClick={() => onChange(opt.id)}
-            className={
-              "rounded-md px-4 py-1.5 text-sm font-medium transition-colors " +
-              (active
-                ? "bg-[color:var(--surface-brand)] text-[color:var(--text-inverse)]"
-                : "text-[color:var(--text-secondary)] hover:bg-[color:var(--surface-hover)]")
-            }
-          >
-            {opt.label}
-          </button>
-        );
-      })}
-    </div>
-  );
-}
-
-// ─── Selected-day detail ────────────────────────────────────────
-
-function DayDetail({
-  year,
-  month,
-  day,
+function SelectionDetail({
+  selected,
   items,
+  providers,
+  year,
   today,
   returnToHref,
 }: {
-  year: number;
-  month: number;
-  day: number | null;
+  selected: Selected;
   items: ClientCalendarItem[];
+  providers: ClientCalendarProvider[];
+  year: number;
   today: Date;
   returnToHref: string;
 }) {
-  if (day === null || items.length === 0) {
+  if (!selected) {
     return (
-      <Surface bodyClassName="flex min-h-[200px] items-center justify-center p-6 text-center">
+      <Surface bodyClassName="p-6 text-center">
         <p className="text-sm text-[color:var(--text-secondary)]">
-          Este mes no tiene vencimientos. Usa ‹ › para cambiar de mes.
+          Selecciona un mes o una celda en el calendario para ver el detalle.
         </p>
       </Surface>
     );
   }
 
-  const iso = `${year}-${String(month).padStart(2, "0")}-${String(day).padStart(2, "0")}`;
+  const semaphoreByVendor = new Map(
+    providers.map((p) => [p.vendor_id, p.semaphore_level]),
+  );
 
-  // Group the day's obligations by provider, worst-first.
   const byVendor = new Map<
     string,
     { name: string; items: ClientCalendarItem[] }
@@ -507,49 +360,72 @@ function DayDetail({
   }
   const worstOf = (list: ClientCalendarItem[]) =>
     Math.min(...list.map((i) => CLIENT_RISK_ORDER[i.risk_level ?? "on_track"]));
-  const groups = [...byVendor.values()].sort(
-    (a, b) => worstOf(a.items) - worstOf(b.items),
-  );
+  const groups = [...byVendor.entries()]
+    .map(([vendorId, g]) => ({ vendorId, ...g }))
+    .sort((a, b) => worstOf(a.items) - worstOf(b.items));
+
+  const monthName = MONTH_LABELS_ES[selected.month];
+  const title =
+    selected.vendorId === null
+      ? `${monthName} ${year} · todo el portafolio`
+      : `${byVendor.get(selected.vendorId)?.name ?? "Proveedor"} · ${monthName} ${year}`;
 
   return (
     <Surface bodyClassName="p-4 sm:p-5">
-      <div className="mb-3 border-b border-[color:var(--border-subtle)] pb-3">
+      <div className="mb-4 border-b border-[color:var(--border-subtle)] pb-3">
         <p className="text-sm font-semibold text-[color:var(--text-primary)]">
-          {formatLongDate(iso)}
+          {title}
         </p>
         <p className="text-xs text-[color:var(--text-tertiary)]">
-          {relativeDeadline(iso, today).split(" · ")[0]} ·{" "}
-          {items.length}{" "}
-          {items.length === 1 ? "obligación" : "obligaciones"} ·{" "}
-          {groups.length} {groups.length === 1 ? "proveedor" : "proveedores"}
+          {items.length} {items.length === 1 ? "obligación" : "obligaciones"}
+          {selected.vendorId === null
+            ? ` · ${groups.length} ${groups.length === 1 ? "proveedor" : "proveedores"}`
+            : ""}
         </p>
       </div>
-      <div className="space-y-4">
-        {groups.map((g) => (
-          <section key={g.name}>
-            <h3 className="mb-2 text-xs font-semibold uppercase tracking-wide text-[color:var(--text-secondary)]">
-              {g.name}
-            </h3>
-            <ul className="space-y-2.5">
-              {g.items
-                .slice()
-                .sort(
-                  (a, b) =>
-                    CLIENT_RISK_ORDER[a.risk_level ?? "on_track"] -
-                    CLIENT_RISK_ORDER[b.risk_level ?? "on_track"],
-                )
-                .map((item) => (
-                  <ObligationBlock
-                    key={`${item.vendor_id}-${item.requirement_code ?? item.requirement_name}-${item.period_key ?? ""}`}
-                    item={item}
-                    today={today}
-                    returnToHref={returnToHref}
-                  />
-                ))}
-            </ul>
-          </section>
-        ))}
-      </div>
+
+      {groups.length === 0 ? (
+        <p className="text-sm text-[color:var(--text-secondary)]">
+          Sin obligaciones en esta selección.
+        </p>
+      ) : (
+        <div className="space-y-5">
+          {groups.map((g) => (
+            <section key={g.vendorId}>
+              <h3 className="mb-2 flex items-center gap-2 text-sm font-semibold text-[color:var(--text-primary)]">
+                <span
+                  aria-hidden="true"
+                  className={
+                    "h-2.5 w-2.5 shrink-0 rounded-full " +
+                    SEMAPHORE_DOT[semaphoreByVendor.get(g.vendorId) ?? "yellow"]
+                  }
+                />
+                {g.name}
+                <span className="font-mono text-[11px] font-normal tabular-nums text-[color:var(--text-tertiary)]">
+                  {g.items.length}
+                </span>
+              </h3>
+              <ul className="space-y-2.5">
+                {g.items
+                  .slice()
+                  .sort(
+                    (a, b) =>
+                      CLIENT_RISK_ORDER[a.risk_level ?? "on_track"] -
+                      CLIENT_RISK_ORDER[b.risk_level ?? "on_track"],
+                  )
+                  .map((item) => (
+                    <ObligationBlock
+                      key={`${item.vendor_id}-${item.requirement_code ?? item.requirement_name}-${item.period_key ?? ""}`}
+                      item={item}
+                      today={today}
+                      returnToHref={returnToHref}
+                    />
+                  ))}
+              </ul>
+            </section>
+          ))}
+        </div>
+      )}
     </Surface>
   );
 }
