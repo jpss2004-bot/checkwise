@@ -416,11 +416,13 @@ def build_entries(
     # without breaking the download flow.
     institution_id_for: dict[str, str] = {}
     institution_name_for: dict[str, str] = {}
+    institution_code_for_id: dict[str, str] = {}
     institution_filter_ids: list[str] = []
     institution_rows = list(db.scalars(select(Institution)))
     for inst in institution_rows:
         institution_id_for[inst.code] = inst.id
         institution_name_for[inst.code] = inst.name
+        institution_code_for_id[inst.id] = inst.code
     if filters.institutions:
         institution_filter_ids = [
             institution_id_for[code]
@@ -475,6 +477,19 @@ def build_entries(
             filters.period_from, filters.period_to
         )
         submissions = list(db.scalars(sub_stmt))
+        # Batch-load the first document per submission in ONE query (was an
+        # N+1: a SELECT per submission). A submission normally carries
+        # exactly one document; when several exist we keep the lowest id,
+        # matching the previous ``LIMIT 1`` (which had no explicit order)
+        # deterministically.
+        docs_by_submission: dict[str, Document] = {}
+        if submissions:
+            for d in db.scalars(
+                select(Document)
+                .where(Document.submission_id.in_([s.id for s in submissions]))
+                .order_by(Document.submission_id, Document.id)
+            ):
+                docs_by_submission.setdefault(d.submission_id, d)
         # Materialise the whitelist once per workspace pass; a missing
         # filter is a no-op (every submission passes the membership
         # check below). Using ``frozenset`` keeps the lookup O(1) even
@@ -492,15 +507,17 @@ def build_entries(
                 sub.period_key, range_start, range_end
             ):
                 continue
-            doc = db.scalar(
-                select(Document).where(Document.submission_id == sub.id).limit(1)
-            )
+            doc = docs_by_submission.get(sub.id)
             if doc is None:
                 continue
-            institution_code = sub.institution.code if sub.institution else "otros"
+            # Resolve institution from the id→code/name maps built once
+            # above, instead of the lazy ``sub.institution`` relationship
+            # (which fired a query per submission).
+            institution_code = (
+                institution_code_for_id.get(sub.institution_id) or "otros"
+            )
             institution_name = (
-                institution_name_for.get(institution_code)
-                or (sub.institution.name if sub.institution else institution_code)
+                institution_name_for.get(institution_code) or institution_code
             )
             period = sub.period_key or "sin-periodo"
             safe_name = _safe_filename(
