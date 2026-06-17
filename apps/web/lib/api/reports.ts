@@ -19,6 +19,12 @@ import type {
 const API_BASE_URL =
   process.env.NEXT_PUBLIC_API_BASE_URL ?? "http://127.0.0.1:8000";
 
+// Client-side ceiling for read calls (list / presets / single report).
+// Converts a request that hangs server-side into a visible error instead
+// of an infinite spinner — the reports-section "enter" outage. AI-heavy
+// POSTs (generate / plan / regenerate) intentionally omit this.
+const READ_TIMEOUT_MS = 25_000;
+
 export class ReportsApiError extends Error {
   status: number;
   constructor(status: number, message: string) {
@@ -28,7 +34,11 @@ export class ReportsApiError extends Error {
   }
 }
 
-async function fetchJson<T>(path: string, init: RequestInit = {}): Promise<T> {
+async function fetchJson<T>(
+  path: string,
+  init: RequestInit = {},
+  timeoutMs?: number,
+): Promise<T> {
   const session = readAdminSession();
   if (!session?.access_token) {
     throw new ReportsApiError(401, "No active session.");
@@ -38,13 +48,40 @@ async function fetchJson<T>(path: string, init: RequestInit = {}): Promise<T> {
     headers.set("Content-Type", "application/json");
   }
   headers.set("Authorization", `Bearer ${session.access_token}`);
-  const response = await fetch(`${API_BASE_URL}${path}`, { ...init, headers });
-  if (!response.ok) {
-    const detail = await response.text().catch(() => "");
-    throw new ReportsApiError(response.status, detail || response.statusText);
+  // When `timeoutMs` is set, abort the request after the deadline and
+  // raise a 408 so the caller's existing `.catch` renders an error state.
+  // Without this a server-side hang leaves the promise unsettled forever
+  // and the UI spins indefinitely.
+  const controller = timeoutMs ? new AbortController() : undefined;
+  const timer = timeoutMs
+    ? setTimeout(() => controller!.abort(), timeoutMs)
+    : undefined;
+  try {
+    const response = await fetch(`${API_BASE_URL}${path}`, {
+      ...init,
+      headers,
+      signal: controller?.signal ?? init.signal,
+    });
+    if (!response.ok) {
+      const detail = await response.text().catch(() => "");
+      throw new ReportsApiError(
+        response.status,
+        detail || response.statusText,
+      );
+    }
+    if (response.status === 204) return undefined as unknown as T;
+    return (await response.json()) as T;
+  } catch (err) {
+    if (err instanceof DOMException && err.name === "AbortError") {
+      throw new ReportsApiError(
+        408,
+        "La solicitud al servidor tardó demasiado. Vuelve a intentarlo.",
+      );
+    }
+    throw err;
+  } finally {
+    if (timer) clearTimeout(timer);
   }
-  if (response.status === 204) return undefined as unknown as T;
-  return (await response.json()) as T;
 }
 
 // ─── Wire shapes ─────────────────────────────────────────────────
@@ -177,11 +214,19 @@ export function listReports(
   if (options.limit !== undefined) params.set("limit", String(options.limit));
   if (options.offset !== undefined) params.set("offset", String(options.offset));
   const qs = params.toString();
-  return fetchJson<ReportList>(`/api/v1/reports${qs ? `?${qs}` : ""}`);
+  return fetchJson<ReportList>(
+    `/api/v1/reports${qs ? `?${qs}` : ""}`,
+    {},
+    READ_TIMEOUT_MS,
+  );
 }
 
 export function getReport(reportId: string): Promise<ReportRead> {
-  return fetchJson<ReportRead>(`/api/v1/reports/${reportId}`);
+  return fetchJson<ReportRead>(
+    `/api/v1/reports/${reportId}`,
+    {},
+    READ_TIMEOUT_MS,
+  );
 }
 
 export interface PatchReportInput {
@@ -384,7 +429,11 @@ export interface ReportPresetList {
 }
 
 export function listPresets(): Promise<ReportPresetList> {
-  return fetchJson<ReportPresetList>(`/api/v1/reports/_presets`);
+  return fetchJson<ReportPresetList>(
+    `/api/v1/reports/_presets`,
+    {},
+    READ_TIMEOUT_MS,
+  );
 }
 
 export function createReportFromPreset(
