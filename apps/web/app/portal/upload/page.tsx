@@ -22,9 +22,11 @@ import { Button } from "@/components/ui/button";
 import { PageHeader } from "@/components/ui/page-header";
 import {
   getCalendar,
+  getOnboarding,
   getSlotState,
   statusToDocumentStateCode,
   type CalendarAcceptedDocument,
+  type OnboardingItem,
 } from "@/lib/api/portal";
 import type { DocumentStateCode } from "@/lib/types";
 import { fetchCurrentSession, type PortalSession } from "@/lib/session/portal";
@@ -108,6 +110,11 @@ function PortalUploadInner() {
   const [minimumDocuments, setMinimumDocuments] = useState<
     "one" | "all" | null
   >(null);
+  // CW-08 — catalog guidance for the requirement being uploaded from the
+  // expediente (onboarding). Null until fetched / when not an onboarding flow.
+  const [onboardingGuide, setOnboardingGuide] = useState<OnboardingItem | null>(
+    null,
+  );
 
   useEffect(() => {
     if (!session || !isV2Mode || !requirementCode || !periodKey) {
@@ -192,6 +199,31 @@ function PortalUploadInner() {
       cancelled = true;
     };
   }, [session, requirementCode, periodKey]);
+
+  // CW-08 — when opened from the expediente (onboarding), fetch the catalog
+  // guidance for this requirement so the upload checklist shows what the
+  // document must contain + common errors. Skipped for calendar/recurring.
+  useEffect(() => {
+    if (!session || !cameFromOnboarding || !requirementCode) {
+      setOnboardingGuide(null);
+      return;
+    }
+    let cancelled = false;
+    getOnboarding(session)
+      .then((payload) => {
+        if (cancelled) return;
+        const match = payload.sections
+          .flatMap((section) => section.items)
+          .find((item) => item.code === requirementCode);
+        setOnboardingGuide(match ?? null);
+      })
+      .catch(() => {
+        if (!cancelled) setOnboardingGuide(null);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [session, cameFromOnboarding, requirementCode]);
 
   const prefill = useMemo<IntakeWizardPrefill | undefined>(() => {
     if (!session) return undefined;
@@ -367,6 +399,12 @@ function PortalUploadInner() {
           replaceWarning={replaceWarning}
           periodLabel={periodHuman ?? periodLabel}
           deadlineIso={deadlineIso}
+          onboardingGuide={onboardingGuide}
+          showActaNote={
+            session.persona_type === "moral" &&
+            !!onboardingGuide &&
+            /contrato/i.test(onboardingGuide.name)
+          }
         />
       </main>
     </PortalAppShell>

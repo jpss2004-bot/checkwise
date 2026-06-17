@@ -58,6 +58,7 @@ import {
   type CalendarAcceptedDocument,
   type DuplicateCheck,
   type MatchFeedback,
+  type OnboardingItem,
   type RequirementStatus,
 } from "@/lib/api/portal";
 import { DocumentStatus } from "@/lib/constants/statuses";
@@ -221,6 +222,8 @@ export function IntakeWizard({
   replaceWarning,
   periodLabel,
   deadlineIso,
+  onboardingGuide,
+  showActaNote,
 }: {
   prefill?: IntakeWizardPrefill;
   lockedFields?: IntakeLockedField[];
@@ -254,6 +257,13 @@ export function IntakeWizard({
    *  resolving and when it is due. Not part of the submitted form. */
   periodLabel?: string;
   deadlineIso?: string;
+  /** CW-08 — catalog-driven onboarding guidance for this requirement
+   *  (anatomy / where-to-obtain / common errors), fetched when the wizard is
+   *  opened from the expediente. Drives the checklist instead of the static
+   *  fallback. ``showActaNote`` adds the moral-only reminder that the acta
+   *  constitutiva is uploaded as a separate expediente item. */
+  onboardingGuide?: OnboardingItem | null;
+  showActaNote?: boolean;
 } = {}) {
   const apiBaseUrl = useMemo(
     () => process.env.NEXT_PUBLIC_API_BASE_URL ?? "http://127.0.0.1:8000",
@@ -895,6 +905,8 @@ export function IntakeWizard({
               multiFileTotalBytesCap={MULTI_FILE_TOTAL_BYTES_CAP}
               periodLabel={periodLabel}
               deadlineIso={deadlineIso}
+              onboardingGuide={onboardingGuide}
+              showActaNote={showActaNote}
             />
           ) : null}
           {step === 3 ? (
@@ -1522,11 +1534,15 @@ function ExpectedDocumentsChecklist({
   minimumDocuments,
   selectedName,
   requirement,
+  onboardingGuide,
+  showActaNote,
 }: {
   acceptedDocuments?: CalendarAcceptedDocument[] | null;
   minimumDocuments?: "one" | "all" | null;
   selectedName: string;
   requirement: (typeof requirementGuides)[number];
+  onboardingGuide?: OnboardingItem | null;
+  showActaNote?: boolean;
 }) {
   if (acceptedDocuments === null) {
     return (
@@ -1595,6 +1611,65 @@ function ExpectedDocumentsChecklist({
     );
   }
 
+  // CW-08 — onboarding (expediente) uploads: drive the checklist from the
+  // catalog's per-requirement guidance instead of a static block, and (for
+  // morales, on the contract) cross-reference the separately-required acta
+  // constitutiva.
+  if (onboardingGuide) {
+    const errors = onboardingGuide.common_errors ?? [];
+    return (
+      <section className="rounded-md border border-border bg-white p-4">
+        <p className="text-sm font-semibold text-[color:var(--text-primary)]">
+          Qué debe contener este documento
+        </p>
+        {onboardingGuide.anatomy ? (
+          <p className="mt-1 text-xs text-muted-foreground">
+            {onboardingGuide.anatomy}
+          </p>
+        ) : null}
+        {onboardingGuide.where_to_obtain ? (
+          <p className="mt-2 text-xs text-muted-foreground">
+            Dónde obtenerlo: {onboardingGuide.where_to_obtain}
+          </p>
+        ) : null}
+        {errors.length > 0 ? (
+          <div className="mt-3">
+            <p className="text-xs font-medium text-[color:var(--text-primary)]">
+              Evita estos errores comunes
+            </p>
+            <ul className="mt-1 space-y-1">
+              {errors.map((err) => (
+                <li
+                  key={err}
+                  className="flex items-start gap-2 text-xs text-muted-foreground"
+                >
+                  <Warning
+                    className="mt-0.5 h-3.5 w-3.5 shrink-0 text-[color:var(--state-yellow,#d97706)]"
+                    aria-hidden="true"
+                  />
+                  <span>{err}</span>
+                </li>
+              ))}
+            </ul>
+          </div>
+        ) : null}
+        {showActaNote ? (
+          <div className="mt-3 rounded-md border border-[color:var(--border-brand)] bg-[color:var(--surface-teal-muted)]/30 p-3">
+            <p className="text-xs text-[color:var(--text-primary)]">
+              <span className="font-semibold">Acta constitutiva:</span> se carga
+              como un documento aparte de tu expediente inicial (aplica a
+              personas morales). Súbela desde{" "}
+              <Link href="/portal/onboarding" className="font-medium underline">
+                tu expediente
+              </Link>
+              .
+            </p>
+          </div>
+        ) : null}
+      </section>
+    );
+  }
+
   if (!/contrato|anexo/i.test(requirement.name)) return null;
 
   const contractChecklist = [
@@ -1652,6 +1727,8 @@ function UploadStep({
   multiFileTotalBytesCap,
   periodLabel,
   deadlineIso,
+  onboardingGuide,
+  showActaNote,
 }: {
   file: File | null;
   fileError: string | null;
@@ -1675,6 +1752,8 @@ function UploadStep({
   multiFileTotalBytesCap: number;
   periodLabel?: string;
   deadlineIso?: string;
+  onboardingGuide?: OnboardingItem | null;
+  showActaNote?: boolean;
 }) {
   return (
     <section className="space-y-4">
@@ -1692,6 +1771,8 @@ function UploadStep({
             minimumDocuments={minimumDocuments}
             selectedName={form.requirement_name}
             requirement={requirement}
+            onboardingGuide={onboardingGuide}
+            showActaNote={showActaNote}
           />
           <label
             htmlFor="native-file"
