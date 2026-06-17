@@ -137,6 +137,45 @@ export async function getMetadataCatalog(): Promise<MetadataCatalog> {
   return fetchJson("/api/v1/admin/metadata/catalog");
 }
 
+// ---------------------------------------------------------------------------
+// Calendar radar (P2-07) — forward operational view across the portfolio
+// ---------------------------------------------------------------------------
+
+export type CalendarRadarDeadline = {
+  vendor_id: string;
+  vendor_name: string;
+  client_id: string | null;
+  title: string;
+  institution: string;
+  period_key: string | null;
+  due_in_days: number;
+  state: string;
+  href: string | null;
+};
+
+export type CalendarRadar = {
+  as_of: string;
+  upcoming: CalendarRadarDeadline[];
+  urgency_buckets: Record<string, number>;
+  urgency_bands: { key: string; label: string; max_days: number | null }[];
+  awaiting_review_total: number;
+  vendors_scanned: number;
+  truncated: boolean;
+};
+
+export async function getAdminCalendarRadar(params?: {
+  client_id?: string;
+  institution?: string;
+  top?: number;
+}): Promise<CalendarRadar> {
+  const qs = new URLSearchParams();
+  if (params?.client_id) qs.set("client_id", params.client_id);
+  if (params?.institution) qs.set("institution", params.institution);
+  if (params?.top !== undefined) qs.set("top", String(params.top));
+  const suffix = qs.toString() ? `?${qs.toString()}` : "";
+  return fetchJson(`/api/v1/admin/calendar/radar${suffix}`);
+}
+
 /**
  * Item 8 v2 — unified user provisioning. Replaces the older
  * createClient + provisionClient pair. One endpoint mints a temp
