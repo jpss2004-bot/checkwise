@@ -464,6 +464,10 @@ class ProviderWorkspace(TimestampMixin, Base):
         CheckConstraint(
             _PERSONA_TYPE_CHECK, name="ck_provider_workspaces_persona_type"
         ),
+        # PERF (2026-06-17, migration 0048) — vendor-only lookups
+        # (resolve_workspace_for_vendor, on nearly every compliance path)
+        # cannot use the (client_id, vendor_id) composite below.
+        Index("ix_provider_workspaces_vendor_id", "vendor_id"),
     )
 
     id: Mapped[str] = mapped_column(String(36), primary_key=True, default=new_id)
@@ -745,6 +749,10 @@ class AuditLog(Base):
     __table_args__ = (
         Index("ix_audit_log_entity", "entity_type", "entity_id"),
         Index("ix_audit_log_actor", "actor_id"),
+        # PERF (2026-06-17, migration 0048) — explorer filters by action and
+        # orders by created_at DESC; the ops dashboard scans an action-scoped
+        # slice every load. audit_log is append-only and grows without bound.
+        Index("ix_audit_log_action_created", "action", "created_at"),
     )
 
     id: Mapped[str] = mapped_column(String(36), primary_key=True, default=new_id)
