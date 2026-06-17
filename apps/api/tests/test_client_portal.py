@@ -560,6 +560,10 @@ def test_client_calendar_items_carry_risk_level(
     assert items, "expected the seeded vendor to populate calendar items"
     for item in items:
         assert item["risk_level"] in valid, item
+        # Document guidance is surfaced inline on the client review card, so
+        # both fields must always be present as strings (possibly empty).
+        assert isinstance(item["where_to_obtain"], str)
+        assert isinstance(item["anatomy"], str)
 
 
 def test_client_calendar_providers_rollup_is_worst_first_and_consistent(

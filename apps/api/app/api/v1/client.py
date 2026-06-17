@@ -68,8 +68,10 @@ from app.core.compliance_catalog import (
     catalog_metadata,
     expediente_for_persona,
     normalize_persona_type,
+    recurring_anatomy,
     recurring_for_year,
     recurring_required_document,
+    recurring_where_to_obtain,
 )
 from app.core.config import settings
 from app.core.http_utils import content_disposition_header
@@ -754,6 +756,12 @@ class ClientCalendarItem(BaseModel):
     submission_id: str | None
     deadline_iso: str
     risk_level: str | None
+    # Document guidance, mirrored from the provider calendar so the client
+    # review surface can show "what the document is, and where to get it"
+    # inline instead of forcing a click-through. ``requirement_name`` already
+    # carries the document name; these add the supporting detail.
+    anatomy: str
+    where_to_obtain: str
     href: str
 
 
@@ -2293,6 +2301,8 @@ def client_calendar(
                     submission_id=view.current_submission_id if view else None,
                     deadline_iso=deadline_iso,
                     risk_level=risk_level,
+                    anatomy=recurring_anatomy(req),
+                    where_to_obtain=recurring_where_to_obtain(req),
                     href=href,
                 )
             )
