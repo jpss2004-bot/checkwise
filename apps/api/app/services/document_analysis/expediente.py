@@ -30,6 +30,7 @@ from __future__ import annotations
 import json
 import logging
 import time
+from datetime import UTC, datetime, timedelta
 from typing import Any
 
 from sqlalchemy import select
@@ -254,6 +255,39 @@ def _document_entry(submission: Submission, document: Document) -> dict:
         "comprension": comprehension,
         "extraccion": extraction,
     }
+
+
+def _recently_assessed(
+    db: Any,
+    *,
+    client_id: str,
+    vendor_id: str,
+    period_id: str,
+    within_hours: int,
+) -> bool:
+    """True if a non-errored assessment for this scope exists within the window.
+
+    Backs the debounce on the after-deep-run trigger: re-assessing the
+    whole expediente on every deep document would be wasteful, so a recent
+    assessment short-circuits the next one. Errored rows do not count
+    (a failed run should not suppress a retry).
+    """
+    cutoff = datetime.now(UTC) - timedelta(hours=within_hours)
+    row = (
+        db.execute(
+            select(ExpedienteAssessment.id)
+            .where(
+                ExpedienteAssessment.client_id == client_id,
+                ExpedienteAssessment.vendor_id == vendor_id,
+                ExpedienteAssessment.period_id == period_id,
+                ExpedienteAssessment.error.is_(None),
+                ExpedienteAssessment.created_at >= cutoff,
+            )
+            .limit(1)
+        )
+        .first()
+    )
+    return row is not None
 
 
 def _load_context(
@@ -510,12 +544,15 @@ def run_expediente_assessment(
     vendor_id: str,
     period_id: str,
     org_id: str | None = None,
+    debounce_hours: int = 0,
 ) -> None:
     """Run the expediente situational pass for one (client, vendor, period).
 
     Safe to queue as a FastAPI ``BackgroundTask``. No-op when disabled, no
-    provider is configured, the escalation cap is reached, or there are no
-    current documents to assess. Never raises.
+    provider is configured, the escalation cap is reached, a non-errored
+    assessment already ran within ``debounce_hours``, or there are no
+    current documents to assess. ``debounce_hours=0`` disables the
+    debounce (e.g. a forced on-demand run). Never raises.
     """
     if not settings.DOCUMENT_ANALYSIS_EXPEDIENTE_ENABLED:
         return
@@ -535,6 +572,14 @@ def run_expediente_assessment(
 
     db = SessionLocal()
     try:
+        if debounce_hours > 0 and _recently_assessed(
+            db,
+            client_id=client_id,
+            vendor_id=vendor_id,
+            period_id=period_id,
+            within_hours=debounce_hours,
+        ):
+            return
         context, document_ids, contract_id = _load_context(
             db, client_id=client_id, vendor_id=vendor_id, period_id=period_id
         )

@@ -47,6 +47,7 @@ from app.db.session import SessionLocal
 from app.models import Document, DocumentInspection, Submission, Vendor
 from app.models.entities import utc_now
 from app.services.document_analysis.base import AnalysisResult
+from app.services.document_analysis.expediente import run_expediente_assessment
 from app.services.document_analysis.factory import build_document_analysis_provider
 from app.services.document_analysis.spend_limiter import (
     check_org_daily_quota,
@@ -235,6 +236,59 @@ def run_shadow_analysis(
         result=final_result,
         tiers=tiers,
         image_result=image_result,
+    )
+
+    # Phase 2 — after a deep run, queue a debounced expediente reassessment
+    # for this provider+period. ``triggers`` non-empty means the deep tier
+    # was engaged for this upload.
+    _maybe_trigger_expediente(
+        submission_id=submission_id,
+        org_id=org_id,
+        escalated=bool(triggers),
+    )
+
+
+def _maybe_trigger_expediente(
+    *,
+    submission_id: str,
+    org_id: str | None,
+    escalated: bool,
+) -> None:
+    """After a deep run, run a debounced expediente reassessment.
+
+    Fires only when the deep tier was engaged for this upload
+    (``escalated``) and the expediente feature is enabled. Runs inline —
+    this is already a background task, so the extra latency is off the
+    request path. The expediente pass owns its own DB sessions, escalation
+    cap check, and debounce, and never raises.
+    """
+    if not settings.DOCUMENT_ANALYSIS_EXPEDIENTE_ENABLED:
+        return
+    if not escalated:
+        return
+
+    db = SessionLocal()
+    try:
+        submission = db.get(Submission, submission_id)
+        if submission is None:
+            return
+        client_id = submission.client_id
+        vendor_id = submission.vendor_id
+        period_id = submission.period_id
+    except Exception:  # noqa: BLE001 — a lookup failure must not crash the worker
+        logger.exception(
+            "Failed resolving expediente scope for submission_id=%s", submission_id
+        )
+        return
+    finally:
+        db.close()
+
+    run_expediente_assessment(
+        client_id=client_id,
+        vendor_id=vendor_id,
+        period_id=period_id,
+        org_id=org_id,
+        debounce_hours=int(settings.DOCUMENT_ANALYSIS_EXPEDIENTE_DEBOUNCE_HOURS or 0),
     )
 
 

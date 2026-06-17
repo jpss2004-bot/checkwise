@@ -238,3 +238,134 @@ class TestEntryPointGating:
             client_id="c", vendor_id="v", period_id="p", org_id="o"
         )
         sentinel.assert_not_called()
+
+
+class TestDebounce:
+    def test_run_skips_within_debounce_window(self, monkeypatch):
+        monkeypatch.setattr(settings, "DOCUMENT_ANALYSIS_EXPEDIENTE_ENABLED", True)
+        monkeypatch.setattr(settings, "DOCUMENT_ANALYSIS_PROVIDER", "anthropic")
+        monkeypatch.setattr(
+            "app.services.document_analysis.expediente.check_org_escalation_daily_quota",
+            lambda org_id: True,
+        )
+        monkeypatch.setattr(
+            "app.services.document_analysis.expediente.SessionLocal",
+            lambda: MagicMock(),
+        )
+        monkeypatch.setattr(
+            "app.services.document_analysis.expediente._recently_assessed",
+            lambda *a, **k: True,
+        )
+        # Within the window → the LLM client is never built.
+        sentinel = MagicMock(side_effect=AssertionError("must not run within debounce"))
+        monkeypatch.setattr(
+            "app.services.document_analysis.expediente._build_client", sentinel
+        )
+        run_expediente_assessment(
+            client_id="c",
+            vendor_id="v",
+            period_id="p",
+            org_id="o",
+            debounce_hours=6,
+        )
+        sentinel.assert_not_called()
+
+    def test_recently_assessed_ignores_errored_rows(self):
+        # Standalone in-memory engine (no FK enforcement) — exercises the
+        # real query (scope filter + error.is_(None) + time window) without
+        # seeding the clients/vendors/periods the FKs would require.
+        from sqlalchemy import create_engine
+        from sqlalchemy.orm import Session
+
+        from app.db.base import Base
+        from app.models import ExpedienteAssessment
+        from app.services.document_analysis.expediente import _recently_assessed
+
+        eng = create_engine("sqlite://")
+        Base.metadata.create_all(eng, tables=[ExpedienteAssessment.__table__])
+        with Session(eng) as db:
+            db.add(
+                ExpedienteAssessment(
+                    client_id="ok",
+                    vendor_id="v",
+                    period_id="p",
+                    coherence="coherent",
+                    document_ids=["d"],
+                )
+            )
+            db.add(
+                ExpedienteAssessment(
+                    client_id="err",
+                    vendor_id="v",
+                    period_id="p",
+                    error="timeout",
+                    document_ids=[],
+                )
+            )
+            db.commit()
+            assert _recently_assessed(
+                db, client_id="ok", vendor_id="v", period_id="p", within_hours=6
+            )
+            # An errored run does not suppress a retry.
+            assert not _recently_assessed(
+                db, client_id="err", vendor_id="v", period_id="p", within_hours=6
+            )
+            # A zero/negative window excludes everything via the cutoff.
+            assert not _recently_assessed(
+                db, client_id="ok", vendor_id="v", period_id="p", within_hours=0
+            )
+
+
+class TestShadowTrigger:
+    def test_noop_when_disabled(self, monkeypatch):
+        from app.services.document_analysis import shadow_runner
+
+        monkeypatch.setattr(settings, "DOCUMENT_ANALYSIS_EXPEDIENTE_ENABLED", False)
+        sentinel = MagicMock(side_effect=AssertionError("DB must not be touched"))
+        monkeypatch.setattr(shadow_runner, "SessionLocal", sentinel)
+        shadow_runner._maybe_trigger_expediente(
+            submission_id="s", org_id="o", escalated=True
+        )
+        sentinel.assert_not_called()
+
+    def test_noop_when_not_escalated(self, monkeypatch):
+        from app.services.document_analysis import shadow_runner
+
+        monkeypatch.setattr(settings, "DOCUMENT_ANALYSIS_EXPEDIENTE_ENABLED", True)
+        sentinel = MagicMock(side_effect=AssertionError("DB must not be touched"))
+        monkeypatch.setattr(shadow_runner, "SessionLocal", sentinel)
+        shadow_runner._maybe_trigger_expediente(
+            submission_id="s", org_id="o", escalated=False
+        )
+        sentinel.assert_not_called()
+
+    def test_resolves_scope_and_calls_runner(self, monkeypatch):
+        from app.services.document_analysis import shadow_runner
+
+        monkeypatch.setattr(settings, "DOCUMENT_ANALYSIS_EXPEDIENTE_ENABLED", True)
+        monkeypatch.setattr(
+            settings, "DOCUMENT_ANALYSIS_EXPEDIENTE_DEBOUNCE_HOURS", 6
+        )
+        fake_db = MagicMock()
+        fake_db.get.return_value = SimpleNamespace(
+            client_id="c1", vendor_id="v1", period_id="p1"
+        )
+        monkeypatch.setattr(shadow_runner, "SessionLocal", lambda: fake_db)
+
+        captured: dict = {}
+        monkeypatch.setattr(
+            shadow_runner,
+            "run_expediente_assessment",
+            lambda **kwargs: captured.update(kwargs),
+        )
+        shadow_runner._maybe_trigger_expediente(
+            submission_id="s1", org_id="o1", escalated=True
+        )
+        assert captured == {
+            "client_id": "c1",
+            "vendor_id": "v1",
+            "period_id": "p1",
+            "org_id": "o1",
+            "debounce_hours": 6,
+        }
+        fake_db.close.assert_called_once()

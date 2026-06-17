@@ -357,6 +357,12 @@ class Settings(BaseSettings):
     # the stronger model. Uses ``DOCUMENT_ANALYSIS_MODEL`` (the deep tier
     # model) + the deep max-tokens/timeout knobs above.
     DOCUMENT_ANALYSIS_EXPEDIENTE_ENABLED: bool = False
+    # Debounce for the after-deep-run trigger: skip the expediente pass if
+    # a non-errored assessment for the same (client, vendor, period) ran
+    # within this many hours. 0 disables the debounce (every deep run
+    # triggers one). Keeps active expedientes from re-assessing on every
+    # uploaded document.
+    DOCUMENT_ANALYSIS_EXPEDIENTE_DEBOUNCE_HOURS: int = 6
 
     # Phase 3 — pilot-cohort allowlist. CSV of ``client.id`` values
     # that are allowed to receive shadow analysis. Empty string (the
