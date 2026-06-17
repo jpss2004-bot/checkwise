@@ -52,7 +52,6 @@ from app.api.v1.portal import (
     DashboardUpcomingDeadline,
     _bucket_document_state,
     _calendar_deadline_iso,
-    _calendar_reupload_href,
     _calendar_upload_href,
     _compute_attention_today,
     _compute_onboarding_summary,
@@ -61,7 +60,6 @@ from app.api.v1.portal import (
     _compute_upcoming_deadlines,
     _due_in_days_for_period,
     _empty_document_counts,
-    _onboarding_reupload_href,
 )
 from app.constants.roles import MembershipRole
 from app.constants.statuses import DocumentStatus
@@ -590,7 +588,10 @@ class ClientVendorDocumentActionItem(BaseModel):
     deadline_iso: str | None
     state: str
     due_in_days: int | None
-    href: str
+    # The client monitors compliance; it does not upload the provider's
+    # documents. So a client-facing action item carries no upload href — the
+    # detail card links to the document itself (submission_id) when one exists.
+    href: str | None = None
     submission_id: str | None
 
 
@@ -1457,7 +1458,6 @@ def _document_action_items_for_workspace(
                 deadline_iso=None,
                 state=view.state.value,
                 due_in_days=None,
-                href=_onboarding_reupload_href(view),
                 submission_id=view.current_submission_id,
             )
         )
@@ -1489,7 +1489,6 @@ def _document_action_items_for_workspace(
                 deadline_iso=_calendar_deadline_iso(year, req.due_month, req.due_day),
                 state=view.state.value,
                 due_in_days=due_in,
-                href=_calendar_reupload_href(view),
                 submission_id=view.current_submission_id,
             )
         )

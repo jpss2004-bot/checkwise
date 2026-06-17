@@ -426,7 +426,10 @@ def test_vendor_detail_returns_dashboard_shape_for_owned_vendor(
         assert key in body, f"missing {key}"
     action_items = body["document_action_items"]
     assert action_items
-    assert all(item["href"].startswith("/portal/upload") for item in action_items)
+    # The client monitors compliance; action items no longer carry a
+    # provider-portal upload href (the client cannot upload). href is None —
+    # the detail card links to the document itself via submission_id.
+    assert all(item["href"] is None for item in action_items)
     assert any(
         item["kind"] == "missing"
         and item["institution"]

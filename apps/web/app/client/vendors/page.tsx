@@ -321,6 +321,30 @@ function MetricCell({ value, warn }: { value: number; warn?: boolean }) {
   );
 }
 
+// A non-zero bucket count is a drill-down: clicking it deep-links into the
+// provider detail focused on that bucket (?focus=…#documentos), so the client
+// goes from the aggregate straight to the specific documents (CW-06).
+function DrillMetricCell({
+  vendorId,
+  focus,
+  value,
+}: {
+  vendorId: string;
+  focus: "missing" | "rejected" | "due_soon";
+  value: number;
+}) {
+  if (value <= 0) return <MetricCell value={value} />;
+  return (
+    <Link
+      href={`/client/vendors/${vendorId}?focus=${focus}#documentos`}
+      title="Ver estos documentos del proveedor"
+      className="rounded-sm underline decoration-dotted decoration-1 underline-offset-2 hover:opacity-80 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-[color:var(--ring)]"
+    >
+      <MetricCell value={value} warn />
+    </Link>
+  );
+}
+
 function buildVendorColumns(
   unreadByVendor: Record<string, number>,
   onGenerateReport: (vendorId: string) => void,
@@ -382,9 +406,10 @@ function buildVendorColumns(
     width: "100px",
     align: "right",
     cell: (row) => (
-      <MetricCell
+      <DrillMetricCell
+        vendorId={row.vendor_id}
+        focus="missing"
         value={row.missing_required_count}
-        warn={row.missing_required_count > 0}
       />
     ),
   },
@@ -394,9 +419,10 @@ function buildVendorColumns(
     width: "100px",
     align: "right",
     cell: (row) => (
-      <MetricCell
+      <DrillMetricCell
+        vendorId={row.vendor_id}
+        focus="rejected"
         value={row.rejected_or_correction_count}
-        warn={row.rejected_or_correction_count > 0}
       />
     ),
   },
@@ -406,7 +432,11 @@ function buildVendorColumns(
     width: "90px",
     align: "right",
     cell: (row) => (
-      <MetricCell value={row.due_soon_count} warn={row.due_soon_count > 0} />
+      <DrillMetricCell
+        vendorId={row.vendor_id}
+        focus="due_soon"
+        value={row.due_soon_count}
+      />
     ),
   },
   {

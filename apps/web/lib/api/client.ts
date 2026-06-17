@@ -256,7 +256,9 @@ export type ClientVendorDocumentActionItem = {
   deadline_iso: string | null;
   state: string;
   due_in_days: number | null;
-  href: string;
+  // The client monitors; it does not upload. Action items carry no upload
+  // href — the detail card opens the document itself via submission_id.
+  href: string | null;
   submission_id: string | null;
 };
 

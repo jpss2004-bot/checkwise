@@ -72,6 +72,7 @@ export default function ClientVendorDetailPage({ params }: PageProps) {
   const [generating, setGenerating] = useState(false);
   const [downloadingZip, setDownloadingZip] = useState(false);
   const [vendorsReturnHref, setVendorsReturnHref] = useState("/client/vendors");
+  const [focusKey, setFocusKey] = useState<string | null>(null);
 
   const onDownloadExpediente = useCallback(async () => {
     if (downloadingZip) return;
@@ -127,6 +128,24 @@ export default function ClientVendorDetailPage({ params }: PageProps) {
       cancelled = true;
     };
   }, [vendor_id]);
+
+  // Deep-link focus: report findings, alerts, and the vendors-list count
+  // cells link here with ?focus=<requirement_code|bucket>#documentos. Once the
+  // detail loads, scroll the "Documentos por atender" card into view and
+  // briefly highlight the matching rows, then let the highlight fade.
+  useEffect(() => {
+    if (!detail) return;
+    const focus = new URLSearchParams(window.location.search).get("focus");
+    const wantsDocs = focus || window.location.hash === "#documentos";
+    if (!wantsDocs) return;
+    if (focus) setFocusKey(focus);
+    document
+      .getElementById("documentos")
+      ?.scrollIntoView({ behavior: "smooth", block: "start" });
+    if (!focus) return;
+    const t = window.setTimeout(() => setFocusKey(null), 4000);
+    return () => window.clearTimeout(t);
+  }, [detail]);
 
   return (
     <ClientShell
@@ -208,7 +227,9 @@ export default function ClientVendorDetailPage({ params }: PageProps) {
           <div className="grid gap-5 lg:grid-cols-3">
             <div className="space-y-5 lg:col-span-2">
               <ContractDocumentsCard detail={detail} />
-              <DocumentActionItemsCard detail={detail} />
+              <div id="documentos" className="scroll-mt-24">
+                <DocumentActionItemsCard detail={detail} focusKey={focusKey} />
+              </div>
               <SuggestedActionsCard detail={detail} />
               <AttentionTodayCard detail={detail} />
             </div>
@@ -463,12 +484,33 @@ function formatDeadline(value: string | null) {
   });
 }
 
-function actionCtaLabel(item: ClientVendorDocumentActionItem) {
-  if (item.kind === "missing" || item.kind === "due_soon") return "Abrir carga";
-  return "Abrir corrección";
+const FOCUS_KINDS: Record<
+  string,
+  ReadonlyArray<ClientVendorDocumentActionItem["kind"]>
+> = {
+  missing: ["missing"],
+  // The vendors-list "rechazos/correcciones" column aggregates every
+  // actionable state, so focus=rejected highlights all of them at once.
+  rejected: ["rejected", "needs_correction", "possible_mismatch", "expired"],
+  due_soon: ["due_soon"],
+};
+
+function isActionItemFocused(
+  item: ClientVendorDocumentActionItem,
+  focusKey: string | null,
+): boolean {
+  if (!focusKey) return false;
+  if (item.requirement_code === focusKey) return true;
+  return FOCUS_KINDS[focusKey]?.includes(item.kind) ?? false;
 }
 
-function DocumentActionItemsCard({ detail }: { detail: ClientVendorDetail }) {
+function DocumentActionItemsCard({
+  detail,
+  focusKey = null,
+}: {
+  detail: ClientVendorDetail;
+  focusKey?: string | null;
+}) {
   const items = detail.document_action_items ?? [];
   return (
     <Surface
@@ -485,48 +527,100 @@ function DocumentActionItemsCard({ detail }: { detail: ClientVendorDetail }) {
       ) : (
         <ul className="divide-y divide-[color:var(--border-subtle)]">
           {items.map((item) => (
-            <li
+            <ActionItemRow
               key={item.id}
-              className="grid gap-3 py-3 first:pt-0 last:pb-0 md:grid-cols-[1fr,auto] md:items-center"
-            >
-              <div className="min-w-0 space-y-1">
-                <div className="flex flex-wrap items-center gap-2">
-                  <Badge variant={slotStateVariant(item.state)}>
-                    {slotStateLabel(item.state)}
-                  </Badge>
-                  <span className="font-mono text-[10px] uppercase tracking-wide text-[color:var(--text-tertiary)]">
-                    {item.institution ?? "—"}
-                    {item.period_key ? ` · ${item.period_key}` : ""}
-                  </span>
-                  <span className="font-mono text-[10px] uppercase tracking-wide text-[color:var(--text-tertiary)]">
-                    vence {formatDeadline(item.deadline_iso)}
-                  </span>
-                </div>
-                <p className="truncate text-[13px] font-medium text-[color:var(--text-primary)]">
-                  {item.requirement_name ?? item.requirement_code ?? "Documento requerido"}
-                </p>
-                <p className="text-[11px] text-[color:var(--text-secondary)]">
-                  {ACTION_KIND_LABEL[item.kind]}
-                  {item.due_in_days !== null && item.due_in_days >= 0
-                    ? ` · ${item.due_in_days} día(s)`
-                    : ""}
-                </p>
-              </div>
-              <Button asChild size="sm" variant="outline">
-                <Link href={item.href} target="_blank" rel="noreferrer">
-                  {actionCtaLabel(item)}
-                  <ArrowRight
-                    className="h-3.5 w-3.5"
-                    weight="bold"
-                    aria-hidden="true"
-                  />
-                </Link>
-              </Button>
-            </li>
+              item={item}
+              focused={isActionItemFocused(item, focusKey)}
+            />
           ))}
         </ul>
       )}
     </Surface>
+  );
+}
+
+function ActionItemRow({
+  item,
+  focused,
+}: {
+  item: ClientVendorDocumentActionItem;
+  focused: boolean;
+}) {
+  const [viewing, setViewing] = useState(false);
+  const [viewError, setViewError] = useState<string | null>(null);
+
+  async function onView() {
+    if (!item.submission_id || viewing) return;
+    setViewing(true);
+    setViewError(null);
+    try {
+      const url = await fetchClientSubmissionDocumentBlob(item.submission_id);
+      const win = window.open(url, "_blank", "noopener,noreferrer");
+      setTimeout(() => URL.revokeObjectURL(url), 60_000);
+      if (!win) {
+        setViewError("Permite ventanas emergentes para ver el documento.");
+      }
+    } catch {
+      setViewError("No pudimos abrir el documento. Intenta de nuevo.");
+    } finally {
+      setViewing(false);
+    }
+  }
+
+  return (
+    <li
+      className={
+        "grid gap-3 py-3 first:pt-0 last:pb-0 md:grid-cols-[1fr,auto] md:items-center" +
+        (focused
+          ? " -mx-2 rounded-md px-2 ring-2 ring-[color:var(--text-ai)] bg-[color:var(--surface-hover)]"
+          : "")
+      }
+    >
+      <div className="min-w-0 space-y-1">
+        <div className="flex flex-wrap items-center gap-2">
+          <Badge variant={slotStateVariant(item.state)}>
+            {slotStateLabel(item.state)}
+          </Badge>
+          <span className="font-mono text-[10px] uppercase tracking-wide text-[color:var(--text-tertiary)]">
+            {item.institution ?? "—"}
+            {item.period_key ? ` · ${item.period_key}` : ""}
+          </span>
+          <span className="font-mono text-[10px] uppercase tracking-wide text-[color:var(--text-tertiary)]">
+            vence {formatDeadline(item.deadline_iso)}
+          </span>
+        </div>
+        <p className="truncate text-[13px] font-medium text-[color:var(--text-primary)]">
+          {item.requirement_name ?? item.requirement_code ?? "Documento requerido"}
+        </p>
+        <p className="text-[11px] text-[color:var(--text-secondary)]">
+          {ACTION_KIND_LABEL[item.kind]}
+          {item.due_in_days !== null && item.due_in_days >= 0
+            ? ` · ${item.due_in_days} día(s)`
+            : ""}
+        </p>
+        {viewError ? (
+          <p className="text-[11px] text-[color:var(--status-error-text)]">
+            {viewError}
+          </p>
+        ) : null}
+      </div>
+      {/* The client monitors; it cannot upload the provider's documents. When
+          the provider HAS submitted (rejected / needs correction / expired),
+          let the client open that document to see what's wrong. Purely missing
+          items have nothing to open yet, so they read as a finding. */}
+      {item.submission_id ? (
+        <Button
+          type="button"
+          size="sm"
+          variant="outline"
+          onClick={onView}
+          disabled={viewing}
+        >
+          <Eye className="h-3.5 w-3.5" weight="bold" aria-hidden="true" />
+          {viewing ? "Abriendo…" : "Ver documento"}
+        </Button>
+      ) : null}
+    </li>
   );
 }
 
