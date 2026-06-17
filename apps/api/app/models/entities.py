@@ -797,6 +797,12 @@ class Report(TimestampMixin, Base):
     """
 
     __tablename__ = "reports"
+    # PERF (2026-06-17, migration 0049) — list_reports filters by
+    # organization_id (= or IN) and orders by updated_at DESC; the composite
+    # serves the org-scoped list + sort.
+    __table_args__ = (
+        Index("ix_reports_org_updated", "organization_id", "updated_at"),
+    )
 
     id: Mapped[str] = mapped_column(String(36), primary_key=True, default=new_id)
     organization_id: Mapped[str] = mapped_column(
@@ -1176,6 +1182,16 @@ class ProviderNotification(Base):
     """
 
     __tablename__ = "provider_notifications"
+    # PERF (2026-06-17, migration 0049) — the inbox lists
+    # ``WHERE workspace_id = ? [AND read_at IS NULL] ORDER BY created_at DESC``;
+    # the composite serves the filter + the sort from one index.
+    __table_args__ = (
+        Index(
+            "ix_provider_notifications_workspace_created",
+            "workspace_id",
+            "created_at",
+        ),
+    )
 
     id: Mapped[str] = mapped_column(String(36), primary_key=True, default=new_id)
     workspace_id: Mapped[str] = mapped_column(
@@ -1214,6 +1230,12 @@ class ClientNotification(Base):
     """Client-facing notification generated from provider/document events."""
 
     __tablename__ = "client_notifications"
+    # PERF (2026-06-17, migration 0049) — the inbox lists
+    # ``WHERE client_id = ? [AND read_at IS NULL] ORDER BY created_at DESC``;
+    # the composite serves the filter + the sort from one index.
+    __table_args__ = (
+        Index("ix_client_notifications_client_created", "client_id", "created_at"),
+    )
 
     id: Mapped[str] = mapped_column(String(36), primary_key=True, default=new_id)
     client_id: Mapped[str] = mapped_column(
