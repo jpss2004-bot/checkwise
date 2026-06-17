@@ -35,20 +35,40 @@ def _action_links_from_items(
     types: set[str] | None = None,
     priorities: set[str] | None = None,
     limit: int = 3,
+    client_vendor_id: str | None = None,
 ) -> list[dict]:
+    """Project action items into report link dicts.
+
+    When ``client_vendor_id`` is set the report is read by the CLIENT (who
+    monitors, not uploads), so each link is rewritten to a client-routable
+    deep link into the provider detail (CW-04) instead of the provider's
+    ``/portal/upload`` href, and the label becomes a neutral "ver" CTA.
+    """
+    from app.services.dashboard_compute import client_vendor_focus_href
+
     links: list[dict] = []
     for item in items:
         if types is not None and item.get("type") not in types:
             continue
         if priorities is not None and item.get("priority") not in priorities:
             continue
+        if client_vendor_id is not None:
+            href = client_vendor_focus_href(
+                client_vendor_id,
+                requirement_code=item.get("requirement_code"),
+                period_key=item.get("period_key"),
+            )
+            title = "Ver documento del proveedor"
+        else:
+            href = item.get("href")
+            title = item.get("title")
         links.append(
             {
                 "id": item.get("id"),
                 "type": item.get("type"),
                 "priority": item.get("priority"),
-                "title": item.get("title"),
-                "href": item.get("href"),
+                "title": title,
+                "href": href,
                 "requirement_code": item.get("requirement_code"),
                 "period_key": item.get("period_key"),
             }
@@ -309,7 +329,9 @@ def compute_client_insight(
             "tone": "red" if (has_active or worst.semaphore_level == "red") else "yellow",
             "title": f"{worst.vendor_name} es quien más atención necesita",
             "detail": _vendor_issue(db, worst.vendor_id, worst.missing_required_count),
-            "links": _action_links_from_items(action_items, limit=3),
+            "links": _action_links_from_items(
+                action_items, limit=3, client_vendor_id=worst.vendor_id
+            ),
         })
     # 2) Soonest renewal coming due.
     rf = _renewal_finding(db, scope.client_id, today)
@@ -361,6 +383,9 @@ def compute_vendor_insight(
     # findings document they hand to the provider). Mirrors the block-level
     # ``interactive`` gate.
     vendor_reads = scope.audience == ReportAudience.VENDOR_FACING
+    # A client/internal reader can't upload — point their report links into
+    # the client app (CW-04), not the provider's /portal/upload wizard.
+    client_vendor_id = None if vendor_reads else scope.vendor_id
     state = build_compliance_state_for_vendor(db, vendor_id=scope.vendor_id)
     sem = state.get("semaphore", {})
     counts = state.get("document_state_counts", {})
@@ -427,6 +452,7 @@ def compute_vendor_insight(
                 types={"reupload", "clarify", "verify_mismatch", "regularize"},
                 priorities={"high"},
                 limit=5,
+                client_vendor_id=client_vendor_id,
             ),
         })
     elif pending:
@@ -442,6 +468,7 @@ def compute_vendor_insight(
                 suggested_actions,
                 types={"complete_onboarding", "upcoming"},
                 limit=5,
+                client_vendor_id=client_vendor_id,
             ),
         })
     deadlines = build_upcoming_deadlines_for_vendor(db, vendor_id=scope.vendor_id, top=1)
@@ -460,7 +487,9 @@ def compute_vendor_insight(
                 f"{str(it.get('institution', '')).upper()} · "
                 f"{it.get('title', '')} {when}."
             ).strip(),
-            "links": _action_links_from_items([it], limit=1),
+            "links": _action_links_from_items(
+                [it], limit=1, client_vendor_id=client_vendor_id
+            ),
         })
     if in_review and len(findings) < 3:
         findings.append({

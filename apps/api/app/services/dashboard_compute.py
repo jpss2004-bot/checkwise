@@ -316,6 +316,29 @@ def calendar_reupload_href(view: SlotView) -> str:
     return f"/portal/upload?{qs}" if qs else "/portal/upload"
 
 
+def client_vendor_focus_href(
+    vendor_id: str,
+    *,
+    requirement_code: str | None = None,
+    period_key: str | None = None,
+) -> str:
+    """Client-routable deep link into a provider's detail page (CW-04).
+
+    The client monitors compliance and cannot upload — so report/list CTAs
+    shown to a CLIENT audience point here instead of the provider-only
+    ``/portal/upload`` wizard. Lands on the "Documentos por atender" card
+    (``#documentos``) and highlights the matching requirement row.
+    """
+    parts: list[str] = []
+    if requirement_code:
+        parts.append(f"focus={quote(requirement_code)}")
+    if period_key:
+        parts.append(f"period={quote(period_key)}")
+    qs = "&".join(parts)
+    base = f"/client/vendors/{vendor_id}"
+    return f"{base}?{qs}#documentos" if qs else f"{base}#documentos"
+
+
 # ─── Due-in-days estimate ──────────────────────────────────────
 
 
