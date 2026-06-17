@@ -41,8 +41,30 @@ import {
   type ReportSummary,
 } from "@/lib/api/reports";
 import { listClientVendors, type ClientVendorRow } from "@/lib/api/client";
+import { listClients, type AdminClient } from "@/lib/api/admin";
 
 const PER_PROVIDER_PRESET_ID = "client-vendor-detail";
+
+/**
+ * Admins author client-portfolio reports *on behalf of* a client, so the
+ * client_facing portfolio presets (Resumen ejecutivo, Matriz de riesgo,
+ * Documentos faltantes) need an explicit client picker: internal staff have
+ * no client org for the backend to auto-resolve, which is exactly what
+ * produced the raw 422 "Audience client-facing requires at least client_id
+ * or vendor_id" leak (P0-03). The per-provider preset keeps its own vendor
+ * picker (the vendor anchors the client). Client/portal roles auto-resolve
+ * their own client and need no picker.
+ */
+function needsClientPicker(
+  role: ReportsListViewProps["role"],
+  preset: ReportPresetSummary,
+): boolean {
+  return (
+    role === "admin" &&
+    preset.audience === "client_facing" &&
+    preset.id !== PER_PROVIDER_PRESET_ID
+  );
+}
 
 /**
  * Shared reports list view — R2.
@@ -288,6 +310,47 @@ export function ReportsListView({
     [creating, router, presetCreateRedirectBase],
   );
 
+  // Admin-only: fetch the client roster so the client_facing portfolio
+  // presets can offer a client picker. The backend can't auto-resolve a
+  // client for internal staff (they have no client org), so without this the
+  // "Generar reporte" button 422s. Only fetch when a preset actually needs it
+  // (never on the client/portal shells, which auto-resolve their own client).
+  const [clients, setClients] = useState<AdminClient[] | null>(null);
+  const needsAnyClientPicker = (presets ?? []).some((p) =>
+    needsClientPicker(role, p),
+  );
+  useEffect(() => {
+    if (!needsAnyClientPicker) return;
+    let cancelled = false;
+    listClients()
+      .then((res) => {
+        if (!cancelled) setClients(res.items ?? []);
+      })
+      .catch(() => {
+        if (!cancelled) setClients([]);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [needsAnyClientPicker]);
+
+  const onGenerateForClient = useCallback(
+    async (presetId: string, clientId: string) => {
+      if (creating) return;
+      setCreating(presetId);
+      try {
+        const r = await createReportFromPreset(presetId, true, { clientId });
+        router.push(`${presetCreateRedirectBase}/${r.id}`);
+      } catch (e) {
+        setCreating(null);
+        setError(
+          e instanceof ReportsApiError ? e.message : "Error generando el reporte.",
+        );
+      }
+    },
+    [creating, router, presetCreateRedirectBase],
+  );
+
   const clearFilters = useCallback(() => {
     setStatusFilter("all");
     setAudienceFilter("all");
@@ -443,6 +506,15 @@ export function ReportsListView({
                   creating={creating === p.id}
                   disabled={creating !== null && creating !== p.id}
                   onGenerate={(vendorId) => onGenerateForVendor(p.id, vendorId)}
+                />
+              ) : needsClientPicker(role, p) ? (
+                <ClientPickerPresetCard
+                  key={p.id}
+                  preset={p}
+                  clients={clients}
+                  creating={creating === p.id}
+                  disabled={creating !== null && creating !== p.id}
+                  onGenerate={(clientId) => onGenerateForClient(p.id, clientId)}
                 />
               ) : (
                 <PresetCard
@@ -786,6 +858,73 @@ function PerProviderPresetCard({
         className="mt-auto"
         onClick={() => vendorId && onGenerate(vendorId)}
         disabled={disabled || creating || !vendorId}
+      >
+        {creating ? (
+          <CircleNotch className="h-3.5 w-3.5 animate-spin" weight="bold" aria-hidden="true" />
+        ) : (
+          <Sparkle className="h-3.5 w-3.5" weight="bold" aria-hidden="true" />
+        )}
+        {creating ? "Generando…" : "Generar reporte"}
+      </Button>
+    </article>
+  );
+}
+
+function ClientPickerPresetCard({
+  preset,
+  clients,
+  creating,
+  disabled,
+  onGenerate,
+}: {
+  preset: ReportPresetSummary;
+  clients: AdminClient[] | null;
+  creating: boolean;
+  disabled: boolean;
+  onGenerate: (clientId: string) => void;
+}) {
+  const [clientId, setClientId] = useState<string>("");
+  return (
+    <article className="flex h-full flex-col gap-2 rounded-md border border-[color:var(--border-default)] bg-[color:var(--surface-raised)] p-4 shadow-[var(--shadow-sm)]">
+      <div className="flex items-center gap-2 text-[color:var(--text-ai)]">
+        <Sparkle className="h-3.5 w-3.5" weight="fill" aria-hidden="true" />
+        <span className="cw-eyebrow text-[color:var(--text-ai)]">
+          {REPORT_AUDIENCE_LABEL[preset.audience]}
+        </span>
+      </div>
+      <h3 className="text-[14px] font-semibold leading-tight text-[color:var(--text-primary)]">
+        {preset.title}
+      </h3>
+      <p className="text-[12px] leading-relaxed text-[color:var(--text-secondary)]">
+        {preset.description}
+      </p>
+      <select
+        value={clientId}
+        onChange={(e) => setClientId(e.target.value)}
+        disabled={disabled || creating || clients === null}
+        aria-label="Elige un cliente"
+        className="mt-1 w-full rounded-md border border-[color:var(--border-default)] bg-[color:var(--surface-base)] px-2 py-1.5 text-[12px] text-[color:var(--text-primary)] focus:outline-none focus:ring-1 focus:ring-[color:var(--text-ai)] disabled:opacity-60"
+      >
+        <option value="">
+          {clients === null
+            ? "Cargando clientes…"
+            : clients.length === 0
+              ? "No hay clientes"
+              : "Elige un cliente…"}
+        </option>
+        {(clients ?? []).map((c) => (
+          <option key={c.id} value={c.id}>
+            {c.name}
+          </option>
+        ))}
+      </select>
+      <Button
+        type="button"
+        size="sm"
+        variant="default"
+        className="mt-auto"
+        onClick={() => clientId && onGenerate(clientId)}
+        disabled={disabled || creating || !clientId}
       >
         {creating ? (
           <CircleNotch className="h-3.5 w-3.5 animate-spin" weight="bold" aria-hidden="true" />

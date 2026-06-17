@@ -63,11 +63,21 @@ async function fetchJson<T>(
       signal: controller?.signal ?? init.signal,
     });
     if (!response.ok) {
-      const detail = await response.text().catch(() => "");
-      throw new ReportsApiError(
-        response.status,
-        detail || response.statusText,
-      );
+      const raw = await response.text().catch(() => "");
+      // FastAPI serialises errors as ``{"detail": "..."}``. Unwrap that
+      // envelope so callers (and the UI alert) surface the human sentence
+      // instead of echoing raw JSON at the user — the reports-page "Audience
+      // client-facing requires…" leak. Non-JSON bodies pass through verbatim.
+      let message = raw || response.statusText;
+      if (raw) {
+        try {
+          const parsed = JSON.parse(raw) as { detail?: unknown };
+          if (typeof parsed.detail === "string") message = parsed.detail;
+        } catch {
+          // body wasn't JSON — keep the raw text
+        }
+      }
+      throw new ReportsApiError(response.status, message);
     }
     if (response.status === 204) return undefined as unknown as T;
     return (await response.json()) as T;

@@ -805,18 +805,32 @@ def fetch_for_block(
 
 
 def _vendors_in_scope(db: Session, scope: ReportScope) -> list[Vendor]:
+    from app.constants.reports import ReportAudience  # local: mirrors file pattern
+
     stmt = select(Vendor)
     if scope.vendor_id:
         stmt = stmt.where(Vendor.id == scope.vendor_id)
     elif scope.client_id:
         stmt = stmt.where(Vendor.client_id == scope.client_id)
+    elif scope.audience == ReportAudience.INTERNAL_ONLY:
+        # Cross-portfolio rollup (P1-04). An internal_only report with no
+        # client/vendor anchor — the "Cola diaria de revisión" and
+        # "Proveedores de alto riesgo" admin presets — aggregates over EVERY
+        # active vendor across all clients. This is not a leak: internal staff
+        # bypass tenant scoping by role (see assemble_context) and already see
+        # all tenants on the admin dashboard/rollup, and internal_only carries
+        # no PII redaction. Output stays bounded — the vendor_risk_matrix sorts
+        # by risk and caps at ``max_rows`` (default 25) downstream. (The
+        # per-vendor slot computation is O(vendors); acceptable at current
+        # portfolio scale since reports generate on demand under a statement
+        # timeout, and the alternative — leaving these reports empty — was the
+        # P1-04 defect.)
+        stmt = stmt.where(Vendor.status == "active")
     else:
-        # Organization-scoped: pull every vendor whose client belongs
-        # to the org's bound client_id. We don't yet have org→client
-        # linkage in 3.3a's schema, so for now: when scope is
-        # internal_only with no client/vendor, return [] rather than
-        # leaking everything. Internal staff who want everything can
-        # specify client/vendor explicitly via report metadata.
+        # client_facing / vendor_facing with no anchor: never leak everything.
+        # The caller must pass a client_id/vendor_id (enforced upstream by
+        # _validate_scope); reaching here means an unscoped external report,
+        # which renders empty rather than cross-tenant.
         return []
     return list(db.scalars(stmt))
 
@@ -991,7 +1005,48 @@ def _resolve_metric(db: Session, scope: ReportScope, metric_key: str) -> int | f
     if metric_key == "approved_pct":
         return _completion_and_risk(db, scope)[0]
     if metric_key == "avg_review_hours":
-        return None
+        return _avg_review_hours(db, scope)
     if metric_key == "days_to_next_deadline":
+        # Honest gap (P1-04): a single "next deadline" is ill-defined for a
+        # cross-portfolio rollup and the per-vendor deadline engine
+        # (dashboard_compute.compute_upcoming_deadlines) is too heavy to fan
+        # out here. Left unavailable — the KPI strip renders "—" rather than a
+        # fabricated number. Surface upcoming deadlines via the P2-07 radar.
         return None
     return None
+
+
+def _avg_review_hours(db: Session, scope: ReportScope) -> float | None:
+    """Average hours from submission receipt to reviewer decision.
+
+    Real metric (P1-04): mean of ``reviewed_at - created_at`` over the most
+    recent reviewed submissions in scope. Bounded to the latest 500 and
+    averaged in Python so it works identically on Postgres and SQLite (which
+    share no interval→hours function). Returns ``None`` when nothing in scope
+    has been reviewed yet, so the KPI strip shows "—" rather than a fake 0.
+    """
+    from datetime import UTC
+
+    stmt = select(Submission.created_at, Submission.reviewed_at).where(
+        Submission.reviewed_at.isnot(None)
+    )
+    if scope.client_id:
+        stmt = stmt.where(Submission.client_id == scope.client_id)
+    if scope.vendor_id:
+        stmt = stmt.where(Submission.vendor_id == scope.vendor_id)
+    stmt = stmt.order_by(Submission.reviewed_at.desc()).limit(500)
+
+    hours: list[float] = []
+    for created, reviewed in db.execute(stmt):
+        if not created or not reviewed:
+            continue
+        if created.tzinfo is None:
+            created = created.replace(tzinfo=UTC)
+        if reviewed.tzinfo is None:
+            reviewed = reviewed.replace(tzinfo=UTC)
+        delta_hours = (reviewed - created).total_seconds() / 3600.0
+        if delta_hours >= 0:
+            hours.append(delta_hours)
+    if not hours:
+        return None
+    return round(sum(hours) / len(hours), 1)
