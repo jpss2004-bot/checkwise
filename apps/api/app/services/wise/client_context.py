@@ -23,6 +23,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from datetime import date
+from weakref import WeakKeyDictionary
 
 from sqlalchemy import select
 from sqlalchemy.orm import Session
@@ -260,6 +261,55 @@ def build_client_context(
         missing_required_total=missing_total,
         vendors=rows,
     )
+
+
+# ─── Per-render client-context memo (PERF-1) ──────────────────────
+#
+# build_client_context is the heaviest call in the report pipeline (a full
+# portfolio slot pass over every workspace + requirement). A single client
+# report needs the same client's context in several blocks — the executive
+# cover, compliance_radar, compliance_overview, and the verdict / key
+# findings via insights — and each used to rebuild it independently, so one
+# report ran the heaviest pass several times.
+#
+# The result is deterministic for a (client, read snapshot), and one report
+# render runs on a single Session, so we memoize on the Session identity:
+# the first caller builds it, the rest reuse it. The report executor calls
+# reset_client_context_memo() before each render so a Session reused across
+# renders (notably in tests) never serves a previous render's portfolio.
+# The WeakKeyDictionary drops entries once the Session is collected;
+# concurrent renders use distinct Sessions and never share state.
+_CLIENT_CONTEXT_MEMO: WeakKeyDictionary[Session, dict[str, WiseClientContext | None]] = (
+    WeakKeyDictionary()
+)
+
+
+def reset_client_context_memo(db: Session) -> None:
+    """Begin a fresh per-render client-context cache for this Session."""
+    _CLIENT_CONTEXT_MEMO[db] = {}
+
+
+def build_client_context_cached(
+    db: Session, client_id: str | None
+) -> WiseClientContext | None:
+    """Memoized build_client_context keyed by client id for this render.
+
+    Reuses a context already built earlier in the same report render (same
+    Session); otherwise loads the client and builds it once. Returns None
+    when the client id is missing or unknown. See _CLIENT_CONTEXT_MEMO.
+    """
+    if client_id is None:
+        return None
+    per_session = _CLIENT_CONTEXT_MEMO.get(db)
+    if per_session is None:
+        per_session = {}
+        _CLIENT_CONTEXT_MEMO[db] = per_session
+    if client_id in per_session:
+        return per_session[client_id]
+    client = db.get(Client, client_id)
+    ctx = build_client_context(db, client) if client is not None else None
+    per_session[client_id] = ctx
+    return ctx
 
 
 def build_vendor_focus(

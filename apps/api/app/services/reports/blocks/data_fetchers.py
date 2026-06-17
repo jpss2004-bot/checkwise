@@ -125,12 +125,10 @@ def _exec_compliance(db: Session, scope: ReportScope) -> tuple[int, int]:
         payload = build_compliance_state_for_vendor(db, vendor_id=scope.vendor_id)
         return int(payload["semaphore"]["compliance_pct"]), 0
     if scope.client_id:
-        from app.models.entities import Client
-        from app.services.wise.client_context import build_client_context
+        from app.services.wise.client_context import build_client_context_cached
 
-        client = db.get(Client, scope.client_id)
-        if client is not None:
-            ctx = build_client_context(db, client)
+        ctx = build_client_context_cached(db, scope.client_id)
+        if ctx is not None:
             return int(ctx.overall_compliance_pct), int(ctx.red_count)
     return _completion_and_risk(db, scope)
 
@@ -370,14 +368,12 @@ def fetch_compliance_radar(
         return None
     if scope.client_id is None:
         return None
-    from app.models.entities import Client
-    from app.services.wise.client_context import build_client_context
+    from app.services.wise.client_context import build_client_context_cached
 
-    client_row = db.get(Client, scope.client_id)
-    if client_row is None:  # pragma: no cover — defensive
+    portfolio = build_client_context_cached(db, scope.client_id)
+    if portfolio is None:  # pragma: no cover — defensive
         return None
 
-    portfolio = build_client_context(db, client_row)
     top_n = int(config.get("top_n_vendors", 8))
 
     ordered = sorted(
@@ -554,14 +550,12 @@ def fetch_compliance_overview(
         return None
     if scope.client_id is None:
         return None
-    from app.models.entities import Client
-    from app.services.wise.client_context import build_client_context
+    from app.services.wise.client_context import build_client_context_cached
 
-    client_row = db.get(Client, scope.client_id)
-    if client_row is None:  # pragma: no cover — defensive
+    portfolio = build_client_context_cached(db, scope.client_id)
+    if portfolio is None:  # pragma: no cover — defensive
         return None
 
-    portfolio = build_client_context(db, client_row)
     top_n = int(config.get("top_n_vendors", 12))
 
     # Worst-first: red → yellow → green, then lowest compliance first so

@@ -164,6 +164,16 @@ def execute_plan(
     """
     audience = context.scope.audience
 
+    # PERF-1: build_client_context is the heaviest call in the pipeline and
+    # several blocks need the same client's portfolio. Start a fresh
+    # per-render memo so the first block that needs it computes it once and
+    # the rest reuse it (and a Session reused across renders never serves a
+    # stale portfolio). Imported lazily to keep client_context's heavy
+    # import chain off executor module load.
+    from app.services.wise.client_context import reset_client_context_memo
+
+    reset_client_context_memo(db)
+
     # Pre-emit the plan as the first event so the client can render
     # block skeletons immediately.
     yield (

@@ -21,7 +21,6 @@ from sqlalchemy.orm import Session
 from app.constants.reports import ReportAudience
 from app.constants.statuses import DocumentStatus
 from app.models import (
-    Client,
     ProviderWorkspace,
     RenewalReminder,
     Submission,
@@ -234,12 +233,11 @@ def compute_client_insight(
         return None
     today = today or date.today()
 
-    from app.services.wise.client_context import build_client_context
+    from app.services.wise.client_context import build_client_context_cached
 
-    client = db.get(Client, scope.client_id)
-    if client is None:
+    pf = build_client_context_cached(db, scope.client_id)
+    if pf is None:
         return None
-    pf = build_client_context(db, client)
 
     overall = int(pf.overall_compliance_pct)
     red, yellow, green, total = (
