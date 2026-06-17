@@ -4,11 +4,13 @@ import logging
 import re
 import shutil
 import unicodedata
+from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
 from sqlalchemy import select
+from sqlalchemy.orm import Session
 
 from app.core.config import settings
 from app.core.metadata_rules import all_metadata_rules, metadata_rule_by_code
@@ -27,7 +29,7 @@ from app.services.document_intelligence import DocumentSignals
 from app.services.metadata_store import persist_export, sync_client_latest_exports
 from app.services.pdf_validation import PdfInspectionResult
 from app.services.requirement_service import ResolvedPeriod, ResolvedRequirement
-from app.services.storage import StoredFile
+from app.services.storage import StoredFile, get_storage_service
 from tools.export_pdf_metadata_table import (
     export_pdf_metadata_table,
     read_metadata_field_rows_from_xlsx,
@@ -183,6 +185,7 @@ def _write_metadata_workbooks(
     context: dict[str, Any],
     precomputed_text_extraction: dict[str, Any] | None = None,
     field_suggestions: dict[str, dict[str, Any]] | None = None,
+    rebuild_master: bool = True,
 ) -> MetadataExportResult:
     """Write the per-document + latest workbooks, mirror, rebuild the master.
 
@@ -221,7 +224,13 @@ def _write_metadata_workbooks(
         # able to recover the full slot set after a deploy.
         persist_export(output_path)
         persist_export(latest_path)
-        master_path = rebuild_client_master_metadata_export(client_name=client_name)
+        # Bulk backfill rebuilds the master once per client at the end rather
+        # than once per document (avoids O(n²) reads of the slot set).
+        master_path = (
+            rebuild_client_master_metadata_export(client_name=client_name)
+            if rebuild_master
+            else None
+        )
     except Exception as exc:  # noqa: BLE001 - surfaced as telemetry, not a provider error
         return MetadataExportResult(
             status="failed",
@@ -403,6 +412,199 @@ def rebuild_client_master_metadata_export(*, client_name: str) -> Path | None:
     write_client_master_xlsx(rows, master_path, client_name=client_name)
     persist_export(master_path)
     return master_path
+
+
+@dataclass
+class MetadataBackfillResult:
+    """Counters for one backfill run (CW-14)."""
+
+    scanned: int = 0
+    generated: int = 0
+    skipped_existing: int = 0
+    skipped_unresolved: int = 0
+    failed: int = 0
+    clients_rebuilt: int = 0
+
+
+def backfill_metadata_exports(
+    db: Session,
+    *,
+    client_id: str | None = None,
+    vendor_id: str | None = None,
+    period_key: str | None = None,
+    statuses: tuple[str, ...] | None = None,
+    force: bool = False,
+    dry_run: bool = True,
+    limit: int | None = None,
+    log: Callable[[str], None] | None = None,
+) -> MetadataBackfillResult:
+    """Generate metadata workbooks for already-stored documents missing one (CW-14).
+
+    Metadata XLSX tables are produced at intake. Documents uploaded before
+    automatic export existed — or whose export failed — have no
+    ``latest_metadata.xlsx`` and never reach the client master. This rebuilds
+    them from the persisted ``DocumentInspection`` signals (no OCR / LLM /
+    re-parse), pulling each PDF from storage on demand.
+
+    Idempotent: a slot that already has a ``latest_metadata.xlsx`` is skipped
+    unless ``force``. Within a run the newest submission owns each slot (rows
+    are processed newest-first), so a backfilled master reflects current state.
+    The per-client master is rebuilt once at the end, not per document.
+    ``dry_run`` (default) reports what would be written without touching
+    storage. Scope with ``client_id`` / ``vendor_id`` / ``period_key`` /
+    ``statuses``; cap with ``limit``.
+    """
+    result = MetadataBackfillResult()
+    emit = log or (lambda _message: None)
+
+    if not settings.AUTO_METADATA_EXPORT_ENABLED and not force:
+        emit(
+            "AUTO_METADATA_EXPORT_ENABLED is off — pass force=True to backfill anyway."
+        )
+        return result
+
+    stmt = (
+        select(Submission, Document)
+        .join(Document, Document.submission_id == Submission.id)
+        .order_by(Submission.created_at.desc())
+    )
+    if client_id:
+        stmt = stmt.where(Submission.client_id == client_id)
+    if vendor_id:
+        stmt = stmt.where(Submission.vendor_id == vendor_id)
+    if period_key:
+        stmt = stmt.where(Submission.period_key == period_key)
+    if statuses:
+        stmt = stmt.where(Submission.status.in_(statuses))
+    if limit:
+        stmt = stmt.limit(limit)
+
+    storage = get_storage_service()
+    processed_slots: set[Path] = set()
+    clients_touched: dict[str, str] = {}
+
+    for submission, document in db.execute(stmt).all():
+        result.scanned += 1
+        client = db.get(Client, submission.client_id)
+        vendor = db.get(Vendor, submission.vendor_id)
+        institution = db.get(InstitutionModel, submission.institution_id)
+        requirement = db.get(Requirement, submission.requirement_id)
+        if (
+            client is None
+            or vendor is None
+            or institution is None
+            or requirement is None
+        ):
+            result.failed += 1
+            continue
+        contract = (
+            db.get(Contract, submission.contract_id)
+            if submission.contract_id
+            else None
+        )
+        inspection = db.scalar(
+            select(DocumentInspection).where(
+                DocumentInspection.document_id == document.id
+            )
+        )
+
+        document_type_code = resolve_metadata_document_type_code(
+            requirement_code=submission.requirement_code,
+            requirement_name=requirement.name,
+            institution_code=institution.code,
+            filename=document.original_filename,
+            detected_document_type=(
+                inspection.detected_document_type if inspection is not None else None
+            ),
+        )
+        if document_type_code is None:
+            result.skipped_unresolved += 1
+            continue
+
+        slot_dir = _export_directory(
+            client_name=client.name,
+            vendor_name=vendor.name,
+            period_key=submission.period_key,
+            document_type_code=document_type_code,
+        )
+        if slot_dir in processed_slots:
+            # A newer submission already owns this slot's current workbook.
+            result.skipped_existing += 1
+            continue
+        processed_slots.add(slot_dir)
+        if (slot_dir / "latest_metadata.xlsx").exists() and not force:
+            result.skipped_existing += 1
+            continue
+
+        label = (
+            f"{client.name} / {vendor.name} / "
+            f"{submission.period_key or 'alta-inicial'} / {document_type_code}"
+        )
+        if dry_run:
+            emit(f"would generate: {label}")
+            result.generated += 1
+            clients_touched[client.id] = client.name
+            continue
+
+        try:
+            pdf_path = storage.open_for_read(document.storage_key)
+        except Exception as exc:  # noqa: BLE001 - best-effort per document
+            emit(f"FAILED fetch {document.id}: {exc.__class__.__name__}: {exc}")
+            result.failed += 1
+            continue
+
+        stored_file = StoredFile(
+            storage_key=document.storage_key,
+            path=Path(pdf_path),
+            original_filename=document.original_filename,
+            mime_type=document.mime_type,
+            size_bytes=document.size_bytes or 0,
+            sha256=document.sha256,
+            extension=Path(document.original_filename or "").suffix.lstrip("."),
+        )
+        context = _metadata_context(
+            client=client,
+            vendor=vendor,
+            contract=contract,
+            institution=institution,
+            requirement_id=submission.requirement_id,
+            requirement_code=submission.requirement_code,
+            requirement_name=requirement.name,
+            period_id=submission.period_id,
+            period_key=submission.period_key,
+            document=document,
+            stored_file=stored_file,
+            document_type_code=document_type_code,
+        )
+        precomputed = (
+            _text_extraction_from_inspection(inspection)
+            if inspection is not None
+            else None
+        )
+        write_result = _write_metadata_workbooks(
+            stored_file=stored_file,
+            client_name=client.name,
+            vendor_name=vendor.name,
+            period_key=submission.period_key,
+            document_type_code=document_type_code,
+            context=context,
+            precomputed_text_extraction=precomputed,
+            rebuild_master=False,
+        )
+        if write_result.status == "completed":
+            result.generated += 1
+            clients_touched[client.id] = client.name
+            emit(f"generated: {label}")
+        else:
+            result.failed += 1
+            emit(f"FAILED write {document.id}: {write_result.reason}")
+
+    if not dry_run:
+        for client_name in sorted(set(clients_touched.values())):
+            rebuild_client_master_metadata_export(client_name=client_name)
+            result.clients_rebuilt += 1
+
+    return result
 
 
 def resolve_metadata_document_type_code(
