@@ -116,7 +116,10 @@ export default function ClientCalendarPage() {
   const [vendorFilter, setVendorFilter] = useState<string[]>(() =>
     searchParams?.getAll("vendor_id") ?? [],
   );
-  const [institutionFilter, setInstitutionFilter] = useState<string>("all");
+  const [institutionFilter, setInstitutionFilter] = useState<string>(() => {
+    const v = searchParams?.get("inst") ?? "all";
+    return INSTITUTION_FILTERS.some((o) => o.code === v) ? v : "all";
+  });
   const [vendorsList, setVendorsList] =
     useState<ClientVendorListResponse | null>(null);
   const [showLater, setShowLater] = useState(false);
@@ -132,9 +135,10 @@ export default function ClientCalendarPage() {
     if (urlClientId) params.set("client_id", urlClientId);
     if (year !== new Date().getFullYear()) params.set("year", String(year));
     for (const vendorId of vendorFilter) params.append("vendor_id", vendorId);
+    if (institutionFilter !== "all") params.set("inst", institutionFilter);
     const qs = params.toString();
     return `/client/calendar${qs ? `?${qs}` : ""}`;
-  }, [urlClientId, vendorFilter, year]);
+  }, [urlClientId, vendorFilter, year, institutionFilter]);
 
   useEffect(() => {
     router.replace(calendarHref, { scroll: false });
@@ -625,8 +629,32 @@ function AgendaBand({
           {meta.hint}
         </span>
       </header>
+      <AgendaRows items={items} today={today} onOpen={onOpen} />
+    </section>
+  );
+}
+
+const AGENDA_BAND_CAP = 8;
+
+/** Row list for one band, capped so a heavily non-compliant portfolio
+ *  (hundreds of overdue obligations) doesn't render as an endless wall.
+ *  "Ver N más" reveals the rest in place. */
+function AgendaRows({
+  items,
+  today,
+  onOpen,
+}: {
+  items: ClientCalendarItem[];
+  today: Date;
+  onOpen: (items: ClientCalendarItem[]) => void;
+}) {
+  const [showAll, setShowAll] = useState(false);
+  const visible = showAll ? items : items.slice(0, AGENDA_BAND_CAP);
+  const hidden = items.length - visible.length;
+  return (
+    <>
       <ul className="divide-y divide-[color:var(--border-subtle)]">
-        {items.map((item) => (
+        {visible.map((item) => (
           <AgendaRow
             key={`${item.vendor_id}-${item.requirement_code ?? item.requirement_name}-${item.period_key ?? ""}`}
             item={item}
@@ -635,7 +663,18 @@ function AgendaBand({
           />
         ))}
       </ul>
-    </section>
+      {items.length > AGENDA_BAND_CAP ? (
+        <div className="border-t border-[color:var(--border-subtle)] px-4 py-2">
+          <button
+            type="button"
+            onClick={() => setShowAll((v) => !v)}
+            className="text-xs font-medium text-[color:var(--text-brand)] hover:underline"
+          >
+            {showAll ? "Ver menos" : `Ver ${hidden} más`}
+          </button>
+        </div>
+      ) : null}
+    </>
   );
 }
 
@@ -684,16 +723,7 @@ function LaterBand({
         </span>
       </button>
       {open ? (
-        <ul className="divide-y divide-[color:var(--border-subtle)]">
-          {items.map((item) => (
-            <AgendaRow
-              key={`${item.vendor_id}-${item.requirement_code ?? item.requirement_name}-${item.period_key ?? ""}`}
-              item={item}
-              today={today}
-              onOpen={onOpen}
-            />
-          ))}
-        </ul>
+        <AgendaRows items={items} today={today} onOpen={onOpen} />
       ) : null}
     </section>
   );

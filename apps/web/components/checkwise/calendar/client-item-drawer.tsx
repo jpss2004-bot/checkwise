@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
 import {
   ArrowRight,
@@ -63,12 +63,15 @@ export function ClientItemDrawer({
   );
   const [selectedIdx, setSelectedIdx] = useState(0);
   const item = ordered[Math.min(selectedIdx, ordered.length - 1)];
+  const panelRef = useRef<HTMLElement>(null);
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       if (e.key === "Escape") onClose();
     };
     window.addEventListener("keydown", onKey);
+    // Move focus into the dialog on open so keyboard users land inside it.
+    panelRef.current?.focus();
     return () => window.removeEventListener("keydown", onKey);
   }, [onClose]);
 
@@ -106,7 +109,9 @@ export function ClientItemDrawer({
         aria-label="Cerrar"
       />
       <aside
-        className="absolute right-0 top-0 h-full w-full max-w-md overflow-y-auto border-l border-[color:var(--border-default)] bg-[color:var(--surface-overlay)] shadow-xl cw-fade-up"
+        ref={panelRef}
+        tabIndex={-1}
+        className="absolute right-0 top-0 h-full w-full max-w-md overflow-y-auto border-l border-[color:var(--border-default)] bg-[color:var(--surface-overlay)] shadow-xl cw-fade-up focus:outline-none"
         style={{ animationDuration: "300ms" }}
       >
         <header className="sticky top-0 flex items-start justify-between gap-3 border-b border-[color:var(--border-subtle)] bg-[color:var(--surface-overlay)] px-6 py-4">
