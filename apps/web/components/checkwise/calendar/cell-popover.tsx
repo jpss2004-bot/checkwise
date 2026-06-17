@@ -171,6 +171,11 @@ export function CellPopover({
                   <span className="block truncate text-[12px] text-[color:var(--text-primary)]">
                     {event.obligation}
                   </span>
+                  {event.period_label ? (
+                    <span className="block truncate text-[10px] text-[color:var(--text-secondary)]">
+                      Periodo: {event.period_label}
+                    </span>
+                  ) : null}
                   {event.filename ? (
                     <span className="block truncate text-[10px] text-[color:var(--text-tertiary)]">
                       {event.filename}

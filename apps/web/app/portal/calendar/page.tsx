@@ -9,6 +9,7 @@ import {
   ArrowsClockwise,
   Buildings,
   CalendarBlank,
+  Clock,
   CloudArrowUp,
   DownloadSimple,
   Eye,
@@ -82,6 +83,8 @@ function flattenCalendarPayload(payload: CalendarPayload): CalendarEntry[] {
           state: statusToDocumentStateCode(item.status),
           suggested_action: item.suggested_action,
           frequency: item.frequency,
+          period_label: item.period_label,
+          period_key: item.period_key,
           href: item.href,
           submission_id: item.submission_id,
           filename: item.filename ?? null,
@@ -720,9 +723,16 @@ function EventDrawer({
             label="Documento requerido"
             value={event.required_document}
           />
+          {event.period_label ? (
+            <DetailRow
+              icon={Clock}
+              label="Periodo que cubre"
+              value={event.period_label}
+            />
+          ) : null}
           <DetailRow
             icon={CalendarBlank}
-            label="Vence"
+            label="Fecha límite de entrega"
             value={formatLongDate(event.deadline_iso)}
           />
           <DetailRow

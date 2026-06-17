@@ -165,6 +165,7 @@ export function MobileMonthList({
                         ] ??
                           INSTITUTION_LABELS[event.institution] ??
                           event.institution}
+                        {event.period_label ? ` · ${event.period_label}` : ""}
                         {event.filename ? ` · ${event.filename}` : ""}
                       </span>
                     </span>

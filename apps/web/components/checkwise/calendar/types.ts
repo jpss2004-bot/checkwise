@@ -21,6 +21,12 @@ export type CalendarEntry = {
   state: DocumentStateCode;
   suggested_action: string;
   frequency: CalendarItem["frequency"];
+  /** Human label of the period this obligation *covers* (e.g. "IMSS
+   *  Mayo"), distinct from the deadline month. Surfaced on the cell
+   *  popover, mobile list, and drawer so the provider can tell which
+   *  period each entry is for (§2.2). */
+  period_label: string;
+  period_key: string;
   href: string;
   submission_id: string | null;
   /** Filename of the current submission's PDF, if any. Surfaced in the
