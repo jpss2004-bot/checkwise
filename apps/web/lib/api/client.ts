@@ -742,6 +742,20 @@ export function clientVendorExpedienteZipUrl(
   return qs ? `${base}?${qs}` : base;
 }
 
+/**
+ * Absolute URL of the per-provider metadata Excel download (CW-15) — the
+ * client master filtered to one provider. Same Bearer-only auth as the
+ * expediente ZIP; pass to ``downloadAuthenticatedFile``. Optional
+ * ``periodKey`` narrows it to a single period.
+ */
+export function clientVendorMetadataDownloadUrl(
+  vendorId: string,
+  periodKey?: string,
+): string {
+  const base = `${API_BASE_URL}/api/v1/client/vendors/${encodeURIComponent(vendorId)}/metadata/download`;
+  return periodKey ? `${base}?period_key=${encodeURIComponent(periodKey)}` : base;
+}
+
 // ---------------------------------------------------------------------------
 // Junta 2026-05-23 — client onboarding profile
 // ---------------------------------------------------------------------------

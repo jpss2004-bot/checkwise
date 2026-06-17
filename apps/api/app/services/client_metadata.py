@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
+import os
 import re
+import tempfile
 import unicodedata
 import zipfile
 from dataclasses import dataclass
@@ -124,3 +126,55 @@ def _xlsx_cell_text(cell: ET.Element, namespace: dict[str, str]) -> str:
         return "".join(node.text or "" for node in inline.findall(".//x:t", namespace))
     value = cell.find("x:v", namespace)
     return value.text if value is not None and value.text is not None else ""
+
+
+def filter_master_by_vendor(
+    master_path: Path, *, vendor_name: str, period_key: str | None = None
+) -> Path | None:
+    """Write a temp copy of the client master keeping only one provider's rows.
+
+    CW-15 — the all-providers master already exists; this is the per-provider
+    (optionally per-period) view. Reuses the single master workbook (one R2
+    fetch) and drops every "01 Metadata" row whose ``Proveedor`` (and, when
+    given, ``Periodo``) doesn't match, preserving the workbook structure and
+    the "00 Guia" sheet. Returns the temp path, or ``None`` when the provider
+    has no rows in the master.
+    """
+    from openpyxl import load_workbook
+
+    workbook = load_workbook(master_path)
+    if "01 Metadata" not in workbook.sheetnames:
+        return None
+    sheet = workbook["01 Metadata"]
+    header = [str(cell.value or "").strip() for cell in sheet[1]]
+    if "Proveedor" not in header:
+        return None
+    vendor_col = header.index("Proveedor") + 1
+    period_col = (
+        header.index("Periodo") + 1 if (period_key and "Periodo" in header) else None
+    )
+    wanted_vendor = (vendor_name or "").strip()
+    wanted_period = (period_key or "").strip()
+
+    kept = 0
+    # Bottom-up so deletions don't reindex rows we haven't checked yet.
+    for row in range(sheet.max_row, 1, -1):
+        vendor_cell = str(sheet.cell(row=row, column=vendor_col).value or "").strip()
+        keep = vendor_cell == wanted_vendor
+        if keep and period_col is not None:
+            period_cell = str(
+                sheet.cell(row=row, column=period_col).value or ""
+            ).strip()
+            keep = period_cell == wanted_period
+        if keep:
+            kept += 1
+        else:
+            sheet.delete_rows(row, 1)
+    if kept == 0:
+        return None
+
+    handle, temp_name = tempfile.mkstemp(prefix="cw-vendor-metadata-", suffix=".xlsx")
+    os.close(handle)
+    output = Path(temp_name)
+    workbook.save(output)
+    return output

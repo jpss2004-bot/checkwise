@@ -13,6 +13,7 @@ import {
   DownloadSimple,
   Eye,
   FileText,
+  FileXls,
   Lightning,
   Warning,
   WarningOctagon,
@@ -36,6 +37,7 @@ import { safeReturnTo } from "@/lib/navigation/return-to";
 import { ClientShell } from "../../_shell";
 import {
   clientVendorExpedienteZipUrl,
+  clientVendorMetadataDownloadUrl,
   fetchClientSubmissionDocumentBlob,
   getClientVendorDetail,
   type ClientVendorContractDoc,
@@ -71,6 +73,7 @@ export default function ClientVendorDetailPage({ params }: PageProps) {
   const router = useRouter();
   const [generating, setGenerating] = useState(false);
   const [downloadingZip, setDownloadingZip] = useState(false);
+  const [downloadingMetadata, setDownloadingMetadata] = useState(false);
   const [vendorsReturnHref, setVendorsReturnHref] = useState("/client/vendors");
   const [focusKey, setFocusKey] = useState<string | null>(null);
 
@@ -90,6 +93,25 @@ export default function ClientVendorDetailPage({ params }: PageProps) {
       setDownloadingZip(false);
     }
   }, [downloadingZip, vendor_id]);
+
+  const onDownloadMetadata = useCallback(async () => {
+    if (downloadingMetadata) return;
+    setDownloadingMetadata(true);
+    try {
+      await downloadAuthenticatedFile(
+        clientVendorMetadataDownloadUrl(vendor_id),
+        "metadata.xlsx",
+      );
+    } catch (e) {
+      setError(
+        e instanceof Error
+          ? e.message
+          : "No pudimos preparar la descarga de metadata.",
+      );
+    } finally {
+      setDownloadingMetadata(false);
+    }
+  }, [downloadingMetadata, vendor_id]);
 
   const onGenerateReport = useCallback(async () => {
     if (generating) return;
@@ -205,6 +227,24 @@ export default function ClientVendorDetailPage({ params }: PageProps) {
               />
             )}
             Descargar expediente
+          </Button>
+          <Button
+            size="sm"
+            variant="outline"
+            onClick={onDownloadMetadata}
+            disabled={downloadingMetadata}
+            title="Descargar la metadata de este proveedor en Excel"
+          >
+            {downloadingMetadata ? (
+              <CircleNotch
+                className="h-4 w-4 animate-spin"
+                weight="bold"
+                aria-hidden="true"
+              />
+            ) : (
+              <FileXls className="h-4 w-4" weight="bold" aria-hidden="true" />
+            )}
+            Descargar metadata
           </Button>
           <Button asChild size="sm" variant="outline">
             <Link href={vendorsReturnHref}>

@@ -38,6 +38,7 @@ from pydantic import BaseModel, EmailStr, Field
 from sqlalchemy import and_, func, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session, selectinload
+from starlette.background import BackgroundTask
 
 from app.api.v1.auth import CurrentUser, require_any_role
 from app.api.v1.portal import (
@@ -92,6 +93,7 @@ from app.services.audit_log import add_audit_event
 from app.services.client_metadata import (
     client_master_file_path,
     display_export_path,
+    filter_master_by_vendor,
     read_xlsx_preview,
 )
 from app.services.dashboard_compute import compute_renewal_actions
@@ -2975,6 +2977,63 @@ def download_client_metadata(
         path,
         media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
         filename=f"{client.name}_metadata_master.xlsx",
+    )
+
+
+@router.get("/vendors/{vendor_id}/metadata/download")
+def download_client_vendor_metadata(
+    vendor_id: str,
+    db: DbSession,
+    current: ClientUser,
+    client_id: str | None = None,
+    period_key: str | None = None,
+) -> FileResponse:
+    """Download the client metadata master filtered to ONE provider (CW-15).
+
+    The all-providers master lives at ``/client/metadata/download``; this
+    returns the same workbook with only the requested vendor's rows (optionally
+    a single ``period_key``). Tenant-gated: the vendor must belong to the
+    client. The filtered copy is a temp file cleaned up after the response.
+    """
+    target_id, vendor = _resolve_client_id_for_vendor(
+        db, current, vendor_id=vendor_id, requested=client_id
+    )
+    client = db.get(Client, target_id)
+    if client is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, detail="Cliente no encontrado.")
+    master = ensure_local_export(client_master_file_path(client))
+    if not master.exists():
+        raise HTTPException(
+            status.HTTP_404_NOT_FOUND,
+            detail="Master de metadata no encontrado para este cliente.",
+        )
+    filtered = filter_master_by_vendor(
+        master, vendor_name=vendor.name, period_key=period_key
+    )
+    if filtered is None:
+        raise HTTPException(
+            status.HTTP_404_NOT_FOUND,
+            detail="Aún no hay metadata para este proveedor.",
+        )
+    add_audit_event(
+        db,
+        action="client.vendor_metadata_downloaded",
+        entity_type="vendor",
+        entity_id=vendor_id,
+        actor_type="client_admin",
+        actor_id=current.user.id,
+        after={
+            "client_id": target_id,
+            "vendor_id": vendor_id,
+            "period_key": period_key,
+        },
+    )
+    db.commit()
+    return FileResponse(
+        filtered,
+        media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        filename=f"{client.name}_{vendor.name}_metadata.xlsx",
+        background=BackgroundTask(filtered.unlink),
     )
 
 
