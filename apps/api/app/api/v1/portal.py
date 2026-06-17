@@ -526,6 +526,8 @@ def _calendar_upload_href(
     name: str | None = None,
     institution: str | None = None,
     load_type: str | None = None,
+    period_human: str | None = None,
+    deadline_iso: str | None = None,
     v2_mode: bool = False,
 ) -> str:
     """Build the canonical upload URL for a calendar item.
@@ -563,6 +565,13 @@ def _calendar_upload_href(
         parts.append(f"institution={quote(institution)}")
     if load_type:
         parts.append(f"load_type={quote(load_type)}")
+    # CW-07 — thread the human period label (e.g. "Bimestre 1 2026") and the
+    # deadline so the upload wizard can tell the provider exactly which period
+    # they are resolving and when it is due, instead of a raw period key.
+    if period_human:
+        parts.append(f"period_human={quote(period_human)}")
+    if deadline_iso:
+        parts.append(f"deadline={quote(deadline_iso)}")
     if v2_mode:
         parts.append("v2=1")
     return "/portal/upload?" + "&".join(parts)
@@ -1631,6 +1640,8 @@ def get_workspace_calendar(
             name=req.name,
             institution=req.institution,
             load_type=req.frequency,
+            period_human=req.period_label,
+            deadline_iso=deadline_iso,
             v2_mode=bool(req.accepts_documents),
         )
         # Session 2 — when this is a v2 row, surface the rich

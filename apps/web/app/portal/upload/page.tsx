@@ -66,6 +66,11 @@ function PortalUploadInner() {
   const loadType = params.get("load_type") ?? undefined;
   const periodLabel = params.get("period_label") ?? undefined;
   const periodKey = params.get("period_key") ?? undefined;
+  // CW-07 — the human period label + deadline the calendar threads into the
+  // upload URL, so the wizard shows which period the provider is resolving and
+  // when it is due. Display-only — not part of the submitted form.
+  const periodHuman = params.get("period_human") ?? undefined;
+  const deadlineIso = params.get("deadline") ?? undefined;
   // Session 3 (2026-05-21) — catalog v2 signal. The calendar's
   // _calendar_upload_href appends ``&v2=1`` when the row carries
   // alternatives. Reading the URL avoids the cost of an extra catalog
@@ -331,7 +336,7 @@ function PortalUploadInner() {
           title="Carga documental"
           description={
             periodLabel
-              ? `Estás resolviendo la obligación del periodo ${periodLabel}. Confirmamos contexto, validamos el archivo y te avisamos qué pasa después.`
+              ? `Estás resolviendo la obligación del periodo ${periodHuman ?? periodLabel}. Confirmamos contexto, validamos el archivo y te avisamos qué pasa después.`
               : "Resuelve una obligación específica: confirmamos contexto, validamos el archivo y te decimos qué pasa después de subir."
           }
           actions={
@@ -360,6 +365,8 @@ function PortalUploadInner() {
           acceptedDocuments={isV2Mode ? acceptedDocuments : undefined}
           minimumDocuments={isV2Mode ? minimumDocuments : undefined}
           replaceWarning={replaceWarning}
+          periodLabel={periodHuman ?? periodLabel}
+          deadlineIso={deadlineIso}
         />
       </main>
     </PortalAppShell>

@@ -219,6 +219,8 @@ export function IntakeWizard({
   acceptedDocuments,
   minimumDocuments,
   replaceWarning,
+  periodLabel,
+  deadlineIso,
 }: {
   prefill?: IntakeWizardPrefill;
   lockedFields?: IntakeLockedField[];
@@ -246,6 +248,12 @@ export function IntakeWizard({
    *  acknowledgement before the re-upload supersedes it. ``null``
    *  (default) = empty or actionable slot, no warning. */
   replaceWarning?: DocumentStateCode | null;
+  /** CW-07 — display-only context threaded from the calendar upload URL:
+   *  the human period label (e.g. "Bimestre 1 2026") and the ISO deadline,
+   *  so the upload summary tells the provider which period they are
+   *  resolving and when it is due. Not part of the submitted form. */
+  periodLabel?: string;
+  deadlineIso?: string;
 } = {}) {
   const apiBaseUrl = useMemo(
     () => process.env.NEXT_PUBLIC_API_BASE_URL ?? "http://127.0.0.1:8000",
@@ -885,6 +893,8 @@ export function IntakeWizard({
               onAdditionalFileRemoved={removeAdditionalFile}
               multiFileMaxAdditional={MULTI_FILE_MAX_ADDITIONAL}
               multiFileTotalBytesCap={MULTI_FILE_TOTAL_BYTES_CAP}
+              periodLabel={periodLabel}
+              deadlineIso={deadlineIso}
             />
           ) : null}
           {step === 3 ? (
@@ -1434,12 +1444,29 @@ function RequirementStep({
   );
 }
 
+function formatUploadDeadline(iso: string): string {
+  // deadline_iso is a plain YYYY-MM-DD; format in UTC to avoid a timezone
+  // off-by-one and render it in long Spanish form ("17 de marzo de 2026").
+  const parsed = new Date(iso);
+  if (Number.isNaN(parsed.getTime())) return iso;
+  return parsed.toLocaleDateString("es-MX", {
+    day: "2-digit",
+    month: "long",
+    year: "numeric",
+    timeZone: "UTC",
+  });
+}
+
 function UploadSlotSummary({
   form,
   requirement,
+  periodLabel,
+  deadlineIso,
 }: {
   form: IntakeForm;
   requirement: (typeof requirementGuides)[number];
+  periodLabel?: string;
+  deadlineIso?: string;
 }) {
   const institutionLabel =
     institutions.find((item) => item.value === form.institution_code)?.label ??
@@ -1449,7 +1476,12 @@ function UploadSlotSummary({
     loadTypes.find((item) => item.value === form.load_type)?.label ??
     form.load_type ??
     requirement.frequency;
-  const periodLabel = form.period_code || form.period_key || "—";
+  // CW-07 — prefer the human period label threaded from the calendar
+  // (e.g. "Bimestre 1 2026") over the raw period code, and surface the
+  // deadline so the provider knows the covered period and when it is due.
+  const periodDisplay =
+    periodLabel || form.period_code || form.period_key || "—";
+  const deadlineDisplay = deadlineIso ? formatUploadDeadline(deadlineIso) : null;
   return (
     <section className="rounded-md border border-[color:var(--border-brand)] bg-[color:var(--surface-teal-muted)]/35 p-4">
       <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
@@ -1461,8 +1493,9 @@ function UploadSlotSummary({
             {form.requirement_name || requirement.name}
           </p>
         </div>
-        <div className="grid gap-2 text-sm sm:grid-cols-3">
-          <SummaryChip label="Periodo" value={periodLabel} />
+        <div className="grid gap-2 text-sm sm:grid-cols-2 lg:grid-cols-4">
+          <SummaryChip label="Periodo" value={periodDisplay} />
+          <SummaryChip label="Vence" value={deadlineDisplay ?? "—"} />
           <SummaryChip label="Frecuencia" value={loadTypeLabel} />
           <SummaryChip label="Institución" value={institutionLabel} />
         </div>
@@ -1617,6 +1650,8 @@ function UploadStep({
   onAdditionalFileRemoved,
   multiFileMaxAdditional,
   multiFileTotalBytesCap,
+  periodLabel,
+  deadlineIso,
 }: {
   file: File | null;
   fileError: string | null;
@@ -1638,13 +1673,20 @@ function UploadStep({
   onAdditionalFileRemoved: (index: number) => void;
   multiFileMaxAdditional: number;
   multiFileTotalBytesCap: number;
+  periodLabel?: string;
+  deadlineIso?: string;
 }) {
   return (
     <section className="space-y-4">
       <StepHeading title="Sube el documento" />
       <div className="grid gap-4 lg:grid-cols-[minmax(0,1fr)_320px]">
         <div className="space-y-4">
-          <UploadSlotSummary form={form} requirement={requirement} />
+          <UploadSlotSummary
+            form={form}
+            requirement={requirement}
+            periodLabel={periodLabel}
+            deadlineIso={deadlineIso}
+          />
           <ExpectedDocumentsChecklist
             acceptedDocuments={acceptedDocuments}
             minimumDocuments={minimumDocuments}
