@@ -768,11 +768,35 @@ class ClientCalendarMonth(BaseModel):
     items: list[ClientCalendarItem]
 
 
+class ClientCalendarProvider(BaseModel):
+    """Per-provider rollup for the client calendar.
+
+    Lets the calendar lead with risk (which providers are about to make
+    the client non-compliant) instead of month aggregates. ``semaphore_level``
+    and ``compliance_pct`` come from the same ``_compute_semaphore`` /
+    ``_vendor_compliance`` path the ``/vendors`` list uses, so the calendar's
+    provider colors are identical to that screen by construction.
+    """
+
+    vendor_id: str
+    vendor_name: str
+    semaphore_level: str
+    compliance_pct: int
+    overdue_count: int
+    due_soon_count: int
+    action_required_count: int
+    next_deadline_iso: str | None
+
+
 class ClientCalendarResponse(BaseModel):
     metadata: dict
     client_id: str
     year: int
     months: list[ClientCalendarMonth]
+    # Sorted worst-first (red before yellow before green) so the agenda and
+    # risk matrix can render the danger provider at the top without a second
+    # sort on the client.
+    providers: list[ClientCalendarProvider] = []
 
 
 # ---------------------------------------------------------------------------
@@ -1088,6 +1112,55 @@ _REJECTED_OR_CORRECTION_STATUSES = (
     DocumentStatus.REQUIERE_ACLARACION.value,
     DocumentStatus.POSIBLE_MISMATCH.value,
 )
+
+# Worst-first ordering for the per-provider rollup. Red providers (something
+# is overdue or rejected) sort above yellow (in motion) above green (al día).
+_SEMAPHORE_SORT_ORDER = {"red": 0, "yellow": 1, "green": 2}
+
+
+def _calendar_item_risk(status: str, deadline_iso: str, today: date) -> str:
+    """Classify one calendar obligation's current severity.
+
+    Returns a single ordered severity the client agenda bands by and the
+    risk matrix colors by, so the frontend never re-derives urgency from raw
+    dates. Most-severe wins:
+
+    * ``on_track``        - resolved (aprobado / excepcion legal / no aplica)
+    * ``overdue``         - past its deadline (or VENCIDO) and not resolved
+    * ``action_required`` - rejected / needs clarification / possible mismatch
+    * ``due_soon``        - due within 14 days and not resolved
+    * ``in_review``       - submitted, with reviewer (recibido / prevalidado / en revision)
+    * ``upcoming``        - not yet submitted, due in 15+ days
+
+    The ``due_soon`` window (<=14 days, >=0) matches the existing
+    ``due_soon_total`` convention so the calendar's two surfaces never
+    disagree by a few days.
+    """
+    if status in (
+        DocumentStatus.APROBADO.value,
+        DocumentStatus.EXCEPCION_LEGAL.value,
+        DocumentStatus.NO_APLICA.value,
+    ):
+        return "on_track"
+    try:
+        days_until: int | None = (date.fromisoformat(deadline_iso) - today).days
+    except ValueError:
+        days_until = None
+    if status == DocumentStatus.VENCIDO.value or (
+        days_until is not None and days_until < 0
+    ):
+        return "overdue"
+    if status in _REJECTED_OR_CORRECTION_STATUSES:
+        return "action_required"
+    if days_until is not None and 0 <= days_until <= 14:
+        return "due_soon"
+    if status in (
+        DocumentStatus.RECIBIDO.value,
+        DocumentStatus.PENDIENTE_REVISION.value,
+        DocumentStatus.PREVALIDADO.value,
+    ):
+        return "in_review"
+    return "upcoming"
 
 
 @router.get("/overview", response_model=ClientOverview)
@@ -2143,20 +2216,42 @@ def client_calendar(
     # view to read the current state.
     months: dict[int, list[ClientCalendarItem]] = defaultdict(list)
     aggregate_vendors_per_month: dict[int, set[str]] = defaultdict(set)
+    # Per-provider risk rollup, keyed by vendor id, so the response can lead
+    # with "which providers put me at risk" instead of month totals.
+    provider_acc: dict[str, dict] = {}
     for ws in workspaces:
         vendor = vendor_lookup.get(ws.vendor_id)
         if vendor is None:
             continue
-        slot_views = build_workspace_calendar_slots(
+        # One canonical compliance pass per workspace. ``_vendor_compliance``
+        # is the same helper ``/vendors`` uses, so the calendar's semaphore
+        # matches that screen by construction; we read its ``calendar_slots``
+        # back instead of calling ``build_workspace_calendar_slots`` a second
+        # time (the prefetched submissions keep it query-cheap — PERF-4).
+        compliance = _vendor_compliance(
             db,
             ws,
-            year,
+            today=today,
+            year=year,
             prefetched_submissions=subs_by_vendor.get(ws.vendor_id, []),
             institutions_by_id=institutions_by_id,
         )
         view_by_key: dict[tuple[str | None, str | None], SlotView] = {
-            (v.slot_key.requirement_code, v.slot_key.period_key): v for v in slot_views
+            (v.slot_key.requirement_code, v.slot_key.period_key): v
+            for v in compliance["calendar_slots"]
         }
+        acc = provider_acc.setdefault(
+            vendor.id,
+            {
+                "vendor_name": vendor.name,
+                "semaphore_level": compliance["semaphore_level"],
+                "compliance_pct": compliance["compliance_pct"],
+                "overdue": 0,
+                "due_soon": 0,
+                "action_required": 0,
+                "next_deadline": None,
+            },
+        )
         # Bugfix (2026-05-21) — defensive normalize so legacy
         # workspaces with non-canonical ``persona_type`` values still
         # produce a non-empty client calendar.
@@ -2167,6 +2262,7 @@ def client_calendar(
                 view.current_status if view and view.current_status else "pendiente"
             )
             deadline_iso = _calendar_deadline_iso(year, req.due_month, req.due_day)
+            risk_level = _calendar_item_risk(item_status, deadline_iso, today)
             # Session 3 audit fix (2026-05-21) — surface v2 mode on
             # client-side calendar hrefs too, so a client/admin who
             # clicks through to /portal/upload gets the alternatives
@@ -2194,11 +2290,28 @@ def client_calendar(
                     status=item_status,
                     submission_id=view.current_submission_id if view else None,
                     deadline_iso=deadline_iso,
-                    risk_level=None,
+                    risk_level=risk_level,
                     href=href,
                 )
             )
             aggregate_vendors_per_month[req.due_month].add(vendor.id)
+            if risk_level == "overdue":
+                acc["overdue"] += 1
+            elif risk_level == "action_required":
+                acc["action_required"] += 1
+            elif risk_level == "due_soon":
+                acc["due_soon"] += 1
+            if risk_level != "on_track":
+                try:
+                    due_date: date | None = date.fromisoformat(deadline_iso)
+                except ValueError:
+                    due_date = None
+                if (
+                    due_date is not None
+                    and due_date >= today
+                    and (acc["next_deadline"] is None or due_date < acc["next_deadline"])
+                ):
+                    acc["next_deadline"] = due_date
 
     response_months: list[ClientCalendarMonth] = []
     for month in range(1, 13):
@@ -2260,11 +2373,36 @@ def client_calendar(
                 items=items,
             )
         )
+    providers = [
+        ClientCalendarProvider(
+            vendor_id=vid,
+            vendor_name=acc["vendor_name"],
+            semaphore_level=acc["semaphore_level"],
+            compliance_pct=acc["compliance_pct"],
+            overdue_count=acc["overdue"],
+            due_soon_count=acc["due_soon"],
+            action_required_count=acc["action_required"],
+            next_deadline_iso=(
+                acc["next_deadline"].isoformat() if acc["next_deadline"] else None
+            ),
+        )
+        for vid, acc in provider_acc.items()
+    ]
+    providers.sort(
+        key=lambda p: (
+            _SEMAPHORE_SORT_ORDER.get(p.semaphore_level, 3),
+            -p.overdue_count,
+            -p.action_required_count,
+            -p.due_soon_count,
+            p.vendor_name.lower(),
+        )
+    )
     return ClientCalendarResponse(
         metadata=catalog_metadata(),
         client_id=target_id,
         year=year,
         months=response_months,
+        providers=providers,
     )
 
 

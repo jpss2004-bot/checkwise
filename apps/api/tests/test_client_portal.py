@@ -534,6 +534,138 @@ def test_client_calendar_missing_slots_are_not_counted_in_review(
     }
 
 
+def test_client_calendar_items_carry_risk_level(
+    api_client: TestClient, db_factory
+) -> None:
+    """Every calendar item must carry a non-null risk_level from the known
+    severity vocabulary. The field used to be hardcoded None, which forced
+    the client UI to bucket by month and discard the deadline entirely."""
+    client_id = _seed_client(db_factory)
+    _seed_vendor_with_workspace(db_factory, client_id=client_id)
+    _, email, pw = _seed_user_with_role(
+        db_factory, role="client_admin", client_id=client_id, email_prefix="ca"
+    )
+    token = _login(api_client, email, pw)
+    resp = api_client.get("/api/v1/client/calendar?year=2026", headers=_h(token))
+    assert resp.status_code == 200, resp.text
+    valid = {
+        "overdue",
+        "action_required",
+        "due_soon",
+        "in_review",
+        "upcoming",
+        "on_track",
+    }
+    items = [i for m in resp.json()["months"] for i in m["items"]]
+    assert items, "expected the seeded vendor to populate calendar items"
+    for item in items:
+        assert item["risk_level"] in valid, item
+
+
+def test_client_calendar_providers_rollup_is_worst_first_and_consistent(
+    api_client: TestClient, db_factory
+) -> None:
+    """The providers rollup leads with risk: red before yellow before green,
+    the counts reconcile with the per-item risk_level, and an all-missing
+    vendor reads red ('sin avance') exactly like the /vendors semaphore."""
+    client_id = _seed_client(db_factory)
+    vendor_id, _ = _seed_vendor_with_workspace(db_factory, client_id=client_id)
+    _, email, pw = _seed_user_with_role(
+        db_factory, role="client_admin", client_id=client_id, email_prefix="ca"
+    )
+    token = _login(api_client, email, pw)
+    body = api_client.get(
+        "/api/v1/client/calendar?year=2026", headers=_h(token)
+    ).json()
+
+    providers = body["providers"]
+    assert len(providers) == 1
+    prov = providers[0]
+    assert prov["vendor_id"] == vendor_id
+    # No submissions → nothing on track → red "sin avance", matching the
+    # _compute_semaphore rule the /vendors list uses.
+    assert prov["semaphore_level"] == "red"
+    assert prov["compliance_pct"] == 0
+
+    # Worst-first ordering invariant: semaphore rank is non-decreasing.
+    order = {"red": 0, "yellow": 1, "green": 2}
+    ranks = [order.get(p["semaphore_level"], 3) for p in providers]
+    assert ranks == sorted(ranks)
+
+    # Rollup counts reconcile with the per-item risk_level for this vendor.
+    items = [
+        i for m in body["months"] for i in m["items"] if i["vendor_id"] == vendor_id
+    ]
+    assert prov["overdue_count"] == sum(
+        1 for i in items if i["risk_level"] == "overdue"
+    )
+    assert prov["due_soon_count"] == sum(
+        1 for i in items if i["risk_level"] == "due_soon"
+    )
+    assert prov["action_required_count"] == sum(
+        1 for i in items if i["risk_level"] == "action_required"
+    )
+
+
+def test_client_calendar_approved_slot_reads_on_track(
+    api_client: TestClient, db_factory
+) -> None:
+    """An approved submission flips its slot's item to on_track (so the
+    agenda drops it) and lifts the provider's compliance above zero."""
+    client_id = _seed_client(db_factory)
+    vendor_id, ws_id = _seed_vendor_with_workspace(db_factory, client_id=client_id)
+    _seed_approved_submission_for_workspace(api_client, db_factory, ws_id)
+    _, email, pw = _seed_user_with_role(
+        db_factory, role="client_admin", client_id=client_id, email_prefix="ca"
+    )
+    token = _login(api_client, email, pw)
+    body = api_client.get(
+        "/api/v1/client/calendar?year=2026", headers=_h(token)
+    ).json()
+
+    approved_items = [
+        i
+        for m in body["months"]
+        for i in m["items"]
+        if i["status"] == DocumentStatus.APROBADO.value
+    ]
+    assert approved_items, "expected the approved submission to surface a slot"
+    assert all(i["risk_level"] == "on_track" for i in approved_items)
+
+    prov = next(p for p in body["providers"] if p["vendor_id"] == vendor_id)
+    assert prov["compliance_pct"] > 0
+
+
+def test_client_calendar_vendor_filter_scopes_providers_rollup(
+    api_client: TestClient, db_factory
+) -> None:
+    """The ?vendor_id filter narrows the providers rollup too, and a vendor
+    id outside the portfolio is dropped silently (no cross-tenant
+    enumeration)."""
+    client_id = _seed_client(db_factory)
+    vendor_a, _ = _seed_vendor_with_workspace(
+        db_factory, client_id=client_id, vendor_name="Proveedor A", rfc="AAA260101AB1"
+    )
+    vendor_b, _ = _seed_vendor_with_workspace(
+        db_factory, client_id=client_id, vendor_name="Proveedor B", rfc="BBB260101AB2"
+    )
+    _, email, pw = _seed_user_with_role(
+        db_factory, role="client_admin", client_id=client_id, email_prefix="ca"
+    )
+    token = _login(api_client, email, pw)
+
+    all_body = api_client.get(
+        "/api/v1/client/calendar?year=2026", headers=_h(token)
+    ).json()
+    assert {p["vendor_id"] for p in all_body["providers"]} == {vendor_a, vendor_b}
+
+    scoped = api_client.get(
+        f"/api/v1/client/calendar?year=2026&vendor_ids={vendor_a}&vendor_ids=not-a-real-id",
+        headers=_h(token),
+    ).json()
+    assert {p["vendor_id"] for p in scoped["providers"]} == {vendor_a}
+
+
 # ---------------------------------------------------------------------------
 # /submissions — filters + replacement lineage
 # ---------------------------------------------------------------------------
