@@ -165,7 +165,7 @@ def _audit_admin(
     after: dict | None,
     extra_metadata: dict | None = None,
     request: Request | None = None,
-) -> None:
+) -> AuditLog:
     """Write the standard admin-operations audit row.
 
     Every admin mutation goes through here so the audit-log explorer
@@ -189,7 +189,7 @@ def _audit_admin(
         # pathological header never overflows the column on Postgres.
         ua = request.headers.get("user-agent")
         user_agent = ua[:512] if ua else None
-    add_audit_event(
+    return add_audit_event(
         db,
         action=action,
         entity_type=entity_type,
@@ -3042,14 +3042,32 @@ def _correction_row_to_item(
     vendor: Vendor | None,
     client: Client | None,
     user: User | None,
+    resolution: AuditLog | None = None,
 ) -> CorrectionRequestAdminItem:
     meta = row.event_metadata or {}
     before = row.before or {}
     after = row.after or {}
-    raw_status = meta.get("status", "pending")
-    status_val: Literal["pending", "approved", "rejected"] = (
-        raw_status if raw_status in ("pending", "approved", "rejected") else "pending"
-    )
+    # Resolution status is derived from the sibling ``correction_request.
+    # approved`` / ``.rejected`` audit row — never from mutating this
+    # submission row. ``audit_log`` is append-only at the DB level
+    # (migration 0031 blocks UPDATE), so writing the status back onto the
+    # original row raises InsufficientPrivilege. A missing sibling means
+    # the request is still pending.
+    status_val: Literal["pending", "approved", "rejected"] = "pending"
+    resolved_at_val: datetime | None = None
+    resolved_by_val: str | None = None
+    resolution_note_val: str | None = None
+    if resolution is not None:
+        status_val = (
+            "approved"
+            if resolution.action == "correction_request.approved"
+            else "rejected"
+        )
+        resolved_at_val = resolution.created_at
+        resolved_by_val = resolution.actor_id
+        res_after = resolution.after or {}
+        if isinstance(res_after, dict):
+            resolution_note_val = res_after.get("note")
     return CorrectionRequestAdminItem(
         id=row.id,
         status=status_val,
@@ -3069,14 +3087,42 @@ def _correction_row_to_item(
         reason=str(meta.get("reason") or ""),
         message=meta.get("message"),
         submitted_at=row.created_at,
-        resolved_at=(
-            datetime.fromisoformat(meta["resolved_at"])
-            if isinstance(meta.get("resolved_at"), str)
-            else None
-        ),
-        resolved_by_user_id=meta.get("resolved_by_user_id"),
-        resolution_note=meta.get("resolution_note"),
+        resolved_at=resolved_at_val,
+        resolved_by_user_id=resolved_by_val,
+        resolution_note=resolution_note_val,
     )
+
+
+_RESOLUTION_ACTIONS = (
+    "correction_request.approved",
+    "correction_request.rejected",
+)
+
+
+def _resolution_index(db: Session) -> dict[str, AuditLog]:
+    """Map ``correction_request_id`` -> its latest resolution audit row.
+
+    Resolutions live in sibling ``correction_request.approved`` /
+    ``.rejected`` rows (written by ``_audit_admin``) that carry the
+    original request id in ``event_metadata.correction_request_id``. We
+    read them back here instead of mutating the append-only submission
+    row. JSON-column filtering is not portable across SQLite (tests) and
+    Postgres (prod), so we pull resolution rows oldest-first and let the
+    newest win in the map. The correction dataset is small enough that the
+    in-memory pass is fine (mirrors ``list_correction_requests``).
+    """
+    rows = db.scalars(
+        select(AuditLog)
+        .where(AuditLog.action.in_(_RESOLUTION_ACTIONS))
+        .order_by(AuditLog.created_at.asc())
+    )
+    index: dict[str, AuditLog] = {}
+    for r in rows:
+        r_meta = r.event_metadata or {}
+        cid = r_meta.get("correction_request_id") if isinstance(r_meta, dict) else None
+        if cid:
+            index[cid] = r
+    return index
 
 
 def _load_correction_context(
@@ -3133,10 +3179,17 @@ def list_correction_requests(
         .order_by(AuditLog.created_at.desc())
     )
     rows = list(db.scalars(stmt))
+    resolutions = _resolution_index(db)
 
     def _row_status(r: AuditLog) -> str:
-        meta = r.event_metadata or {}
-        return meta.get("status", "pending") if isinstance(meta, dict) else "pending"
+        res = resolutions.get(r.id)
+        if res is None:
+            return "pending"
+        return (
+            "approved"
+            if res.action == "correction_request.approved"
+            else "rejected"
+        )
 
     if status_filter:
         rows = [r for r in rows if _row_status(r) == status_filter]
@@ -3147,7 +3200,13 @@ def list_correction_requests(
     for row in page:
         vendor, client, user = _load_correction_context(db, row)
         items.append(
-            _correction_row_to_item(row, vendor=vendor, client=client, user=user)
+            _correction_row_to_item(
+                row,
+                vendor=vendor,
+                client=client,
+                user=user,
+                resolution=resolutions.get(row.id),
+            )
         )
 
     return CorrectionRequestList(
@@ -3163,20 +3222,24 @@ def _resolve_correction(
     decision: Literal["approved", "rejected"],
     note: str | None,
 ) -> CorrectionRequestAdminItem:
-    """Shared resolver for approve / reject. Mutates the original
-    audit row's event_metadata to record the decision and writes a
-    sibling audit row so the audit explorer can surface the decision
-    independently of the submission row."""
+    """Shared resolver for approve / reject.
 
-    meta = dict(row.event_metadata or {})
-    if meta.get("status") in ("approved", "rejected"):
-        # Idempotent — return current state without re-applying.
+    Records the decision ONLY as a sibling ``correction_request.approved``
+    / ``.rejected`` audit row; the original submission row is never
+    mutated because ``audit_log`` is append-only at the DB level
+    (migration 0031 blocks UPDATE). ``list_correction_requests`` and the
+    response below recover the status from that sibling via
+    ``_resolution_index``."""
+
+    existing = _resolution_index(db).get(row.id)
+    if existing is not None:
+        # Idempotent — already resolved; return current state without
+        # re-applying.
         vendor, client, user = _load_correction_context(db, row)
-        return _correction_row_to_item(row, vendor=vendor, client=client, user=user)
+        return _correction_row_to_item(
+            row, vendor=vendor, client=client, user=user, resolution=existing
+        )
 
-    from app.models.entities import utc_now
-
-    resolved_at = utc_now()
     note_clean = (note or "").strip() or None
 
     vendor, client, user = _load_correction_context(db, row)
@@ -3212,19 +3275,12 @@ def _resolve_correction(
             "new_value": new_value,
         }
 
-    meta.update(
-        {
-            "status": decision,
-            "resolved_at": resolved_at.isoformat(),
-            "resolved_by_user_id": current.user.id,
-            "resolution_note": note_clean,
-        }
-    )
-    if applied_change is not None:
-        meta["applied_change"] = applied_change
-    row.event_metadata = meta
-
-    _audit_admin(
+    # The decision is recorded ONLY as a sibling audit row; we never write
+    # back to ``row`` (append-only audit_log — migration 0031 blocks
+    # UPDATE, which is what 500'd every approve/reject). The sibling's
+    # created_at / actor_id / note become the resolution metadata on
+    # read-back via ``_resolution_index``.
+    resolution_row = _audit_admin(
         db,
         actor=current,
         action=(
@@ -3244,13 +3300,17 @@ def _resolve_correction(
         extra_metadata={"correction_request_id": row.id},
     )
 
-    db.flush()
     db.commit()
-    db.refresh(row)
     if vendor is not None:
         db.refresh(vendor)
     vendor, client, user = _load_correction_context(db, row)
-    return _correction_row_to_item(row, vendor=vendor, client=client, user=user)
+    return _correction_row_to_item(
+        row,
+        vendor=vendor,
+        client=client,
+        user=user,
+        resolution=resolution_row,
+    )
 
 
 @router.post(
