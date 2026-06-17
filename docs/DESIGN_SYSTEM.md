@@ -215,12 +215,12 @@ This is what components consume. Map primitives to meaning:
   /* ── Text ─────────────────────────────────────────── */
   --text-primary:    hsl(var(--gray-950));  /* main content */
   --text-secondary:  hsl(var(--gray-500));  /* supporting info */
-  --text-tertiary:   hsl(var(--gray-400));  /* placeholders, hints */
+  --text-tertiary:   hsl(var(--gray-450));  /* eyebrows, captions, hints — AA 4.5:1+ on light (gray-400 was 2.96:1) */
   --text-disabled:   hsl(var(--gray-300));  /* disabled elements */
   --text-inverse:    hsl(0 0% 100%);        /* text on dark bg */
   --text-link:       hsl(var(--navy-700));  /* anchors, interactive text */
   --text-brand:      hsl(var(--navy-800));  /* brand emphasis */
-  --text-teal:       hsl(var(--teal-600));  /* teal-colored labels */
+  --text-teal:       hsl(var(--teal-800));  /* teal labels — AA 4.5:1+ on light (teal-600 was 2.9:1) */
 
   /* ── Borders ──────────────────────────────────────── */
   --border-subtle:   hsl(var(--gray-100));  /* very subtle dividers */
@@ -1269,7 +1269,7 @@ The final `globals.css` after Phase 1 implementation:
   --foreground:           var(--gray-950);
   --text-primary:         hsl(var(--gray-950));
   --text-secondary:       hsl(var(--gray-500));
-  --text-tertiary:        hsl(var(--gray-400));
+  --text-tertiary:        hsl(var(--gray-450));  /* AA-safe; gray-400 failed 4.5:1 */
   --text-disabled:        hsl(var(--gray-300));
   --text-inverse:         hsl(0 0% 100%);
   --text-link:            hsl(var(--navy-700));

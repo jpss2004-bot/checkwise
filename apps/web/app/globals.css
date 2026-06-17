@@ -47,6 +47,7 @@
   --gray-200:  214  18% 88%;
   --gray-300:  214  16% 76%;
   --gray-400:  215  14% 60%;
+  --gray-450:  215  14% 44%;   /* AA-safe muted text step (#606e80) — see --text-tertiary */
   --gray-500:  215  14% 42%;
   --gray-600:  215  16% 34%;
   --gray-700:  215  18% 26%;
@@ -65,6 +66,7 @@
   --amber-100:  38  85% 85%;
   --amber-500:  38  92% 50%;
   --amber-700:  38  90% 36%;
+  --amber-800:  38  92% 30%;   /* AA-safe warning/needs-review text on amber-50 (5.0:1) */
 
   /* Status — error / destructive */
   --red-50:    0  90% 96%;
@@ -84,6 +86,7 @@
   --orange-100: 30  70% 85%;
   --orange-500: 30  90% 50%;
   --orange-700: 30  80% 38%;
+  --orange-800: 30  82% 32%;   /* AA-safe expired/low text on orange-50 (5.6:1) */
 }
 
 /* ── 2. Semantic tokens ───────────────────────────────────────── */
@@ -103,7 +106,15 @@
   /* Text */
   --text-primary:         hsl(var(--gray-950));
   --text-secondary:       hsl(var(--gray-500));
-  --text-tertiary:        hsl(var(--gray-400));
+  /* Tertiary = quietest text tier (eyebrows, captions, placeholders,
+     hints). Anchored to gray-450 — the lightest neutral that still clears
+     WCAG AA 4.5:1 on every light surface it lands on: white, page
+     (gray-50), sunken (gray-100), and the navy/teal tinted cards. The old
+     gray-400 (#8b97a7) was only ~2.96:1 and failed AA app-wide (the mono
+     uppercase eyebrow convention is on nearly every screen); do not revert
+     it. The eyebrow's mono/uppercase/tracked treatment keeps it visibly
+     distinct from --text-secondary despite the small lightness gap. */
+  --text-tertiary:        hsl(var(--gray-450));
   --text-disabled:        hsl(var(--gray-300));
   --text-inverse:         hsl(0 0% 100%);
   /* Inverse text scale for navy/dark bands. Solid values (not white at
@@ -116,7 +127,10 @@
   --text-inverse-muted:     hsl(201 22% 73%);
   --text-link:            hsl(var(--navy-700));
   --text-brand:           hsl(var(--navy-800));
-  --text-teal:            hsl(var(--teal-600));
+  /* teal-600 (#08a698) was only ~2.9:1 on light surfaces — fails AA. teal-800
+     is the readable teal for small accent text; the brand-bright teal-500/600
+     stays for fills, borders and interactive hovers (non-text). */
+  --text-teal:            hsl(var(--teal-800));
   --text-ai:              hsl(var(--teal-700));
 
   /* Borders */
@@ -145,7 +159,7 @@
   --status-success-bg:     hsl(var(--green-50));
   --status-success-border: hsl(var(--green-100));
 
-  --status-warning-text:   hsl(var(--amber-700));
+  --status-warning-text:   hsl(var(--amber-800));
   --status-warning-bg:     hsl(var(--amber-50));
   --status-warning-border: hsl(var(--amber-100));
 
@@ -157,12 +171,14 @@
   --status-info-bg:        hsl(var(--blue-50));
   --status-info-border:    hsl(var(--blue-100));
 
-  --status-ai-text:        hsl(var(--teal-700));
+  --status-ai-text:        hsl(var(--teal-800));
   --status-ai-bg:          hsl(var(--teal-50));
   --status-ai-border:      hsl(var(--teal-100));
 
   /* REPSE document states */
-  --doc-empty-text:        hsl(var(--gray-400));
+  /* gray-450, not gray-400: the empty-slot badge label is essential text
+     and must clear AA 4.5:1 on --doc-empty-bg (gray-50). */
+  --doc-empty-text:        hsl(var(--gray-450));
   --doc-empty-bg:          hsl(var(--gray-50));
   --doc-empty-border:      hsl(var(--gray-200));
 
@@ -197,11 +213,11 @@
   --doc-rejected-bg:       hsl(var(--red-50));
   --doc-rejected-border:   hsl(var(--red-100));
 
-  --doc-expired-text:      hsl(var(--orange-700));
+  --doc-expired-text:      hsl(var(--orange-800));
   --doc-expired-bg:        hsl(var(--orange-50));
   --doc-expired-border:    hsl(var(--orange-100));
 
-  --doc-needs-review-text: hsl(var(--amber-700));
+  --doc-needs-review-text: hsl(var(--amber-800));
   --doc-needs-review-bg:   hsl(var(--amber-50));
   --doc-needs-review-border:hsl(var(--amber-100));
 
@@ -210,11 +226,11 @@
   --confidence-high-bg:      hsl(var(--green-50));
   --confidence-high-border:  hsl(var(--green-100));
 
-  --confidence-medium-text:  hsl(var(--amber-700));
+  --confidence-medium-text:  hsl(var(--amber-800));
   --confidence-medium-bg:    hsl(var(--amber-50));
   --confidence-medium-border:hsl(var(--amber-100));
 
-  --confidence-low-text:     hsl(var(--orange-700));
+  --confidence-low-text:     hsl(var(--orange-800));
   --confidence-low-bg:       hsl(var(--orange-50));
   --confidence-low-border:   hsl(var(--orange-100));
 
