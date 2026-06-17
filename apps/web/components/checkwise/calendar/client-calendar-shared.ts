@@ -181,3 +181,22 @@ export function focusForItem(
 export function monthOf(item: ClientCalendarItem): number {
   return Number(item.deadline_iso.slice(5, 7));
 }
+
+/** The concrete next step for the CLIENT on one obligation. The client does
+ *  not upload, so every action is framed as chasing the provider or waiting
+ *  on the reviewer — never a fabricated capability. */
+export function nextActionFor(item: ClientCalendarItem): string {
+  switch (item.risk_level) {
+    case "action_required":
+      return "Pídele al proveedor que corrija y reemplace el documento.";
+    case "in_review":
+      return "En revisión por el equipo. No requiere acción de tu parte.";
+    case "on_track":
+      return "Al día. Sin acción pendiente.";
+    default:
+      // overdue / due_soon / upcoming
+      return item.submission_id
+        ? "Da seguimiento con el proveedor."
+        : "Pídele al proveedor que suba el documento.";
+  }
+}

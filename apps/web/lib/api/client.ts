@@ -297,6 +297,10 @@ export type ClientCalendarItem = {
   submission_id: string | null;
   deadline_iso: string;
   risk_level: ClientCalendarRisk | null;
+  /** Supporting document guidance shown inline on the review card
+   *  (requirement_name is the document; these describe + locate it). */
+  anatomy: string;
+  where_to_obtain: string;
   href: string;
 };
 

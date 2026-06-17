@@ -1,20 +1,10 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
-import {
-  ArrowsClockwise,
-  CalendarBlank,
-  CaretRight,
-  CheckCircle,
-  Clock,
-  Funnel,
-  WarningOctagon,
-  type Icon,
-} from "@phosphor-icons/react";
+import { CalendarBlank, Funnel } from "@phosphor-icons/react";
 
 import { Surface } from "@/components/checkwise/dashboard/stat-card";
-import { Badge } from "@/components/ui/badge";
 import { Input } from "@/components/ui/input";
 import {
   ErrorState,
@@ -22,13 +12,15 @@ import {
 } from "@/components/checkwise/portal/state-surfaces";
 
 import { ClientShell } from "../_shell";
-import { ClientItemDrawer } from "@/components/checkwise/calendar/client-item-drawer";
+import { MonthCalendar } from "@/components/checkwise/calendar/month-calendar";
+import { ObligationBlock } from "@/components/checkwise/calendar/obligation-block";
 import { PortfolioMatrix } from "@/components/checkwise/calendar/portfolio-matrix";
+import { ProviderReviewCard } from "@/components/checkwise/calendar/provider-review-card";
 import {
-  INSTITUTION_ICON,
+  CLIENT_RISK_ORDER,
   daysUntil,
+  formatLongDate,
   formatShortDate,
-  itemStatusDisplay,
   monthOf,
   relativeDeadline,
 } from "@/components/checkwise/calendar/client-calendar-shared";
@@ -38,10 +30,8 @@ import {
   type ClientCalendar,
   type ClientCalendarItem,
   type ClientCalendarProvider,
-  type ClientCalendarRisk,
   type ClientVendorListResponse,
 } from "@/lib/api/client";
-import { INSTITUTION_LABELS } from "@/lib/api/portal";
 import {
   CALENDAR_MAX_YEAR,
   CALENDAR_MIN_YEAR,
@@ -49,51 +39,10 @@ import {
 } from "@/lib/calendar-year";
 import { useUrlClientId } from "@/lib/workspace/use-url-client-id";
 
-// ─── Agenda bands ───────────────────────────────────────────────
-// Ordered by what a portfolio overseer must act on first. Resolved
-// obligations (on_track) never appear; in_review + upcoming collapse
-// into a single informational "later" section.
-
-type BandKey = "overdue" | "action_required" | "due_soon";
-
-const BAND_META: Record<
-  BandKey,
-  { label: string; hint: string; icon: Icon; tone: "error" | "warning" }
-> = {
-  overdue: {
-    label: "Vencidas",
-    hint: "Fuera de plazo. El proveedor ya está en incumplimiento.",
-    icon: WarningOctagon,
-    tone: "error",
-  },
-  action_required: {
-    label: "Requieren corrección",
-    hint: "Rechazadas o con observaciones. El proveedor debe reemplazar el documento.",
-    icon: ArrowsClockwise,
-    tone: "warning",
-  },
-  due_soon: {
-    label: "Vencen pronto · ≤14 días",
-    hint: "Aún a tiempo. Da seguimiento antes de que caigan en incumplimiento.",
-    icon: Clock,
-    tone: "warning",
-  },
-};
-
 const TONE_TEXT: Record<"error" | "warning" | "info", string> = {
   error: "text-[color:var(--status-error-text)]",
   warning: "text-[color:var(--status-warning-text)]",
   info: "text-[color:var(--status-info-text)]",
-};
-
-const TONE_CHIP: Record<"error" | "warning" | "info" | "neutral", string> = {
-  error:
-    "border-[color:var(--status-error-border)] bg-[color:var(--status-error-bg)] text-[color:var(--status-error-text)]",
-  warning:
-    "border-[color:var(--status-warning-border)] bg-[color:var(--status-warning-bg)] text-[color:var(--status-warning-text)]",
-  info: "border-[color:var(--status-info-border)] bg-[color:var(--status-info-bg)] text-[color:var(--status-info-text)]",
-  neutral:
-    "border-[color:var(--border-subtle)] bg-[color:var(--surface-page)] text-[color:var(--text-tertiary)]",
 };
 
 const INSTITUTION_FILTERS: { code: string; label: string }[] = [
@@ -104,10 +53,14 @@ const INSTITUTION_FILTERS: { code: string; label: string }[] = [
   { code: "stps_repse", label: "STPS / REPSE" },
 ];
 
+type ViewMode = "calendar" | "providers";
+
 export default function ClientCalendarPage() {
   const router = useRouter();
   const searchParams = useSearchParams();
   const urlClientId = useUrlClientId();
+  const [today] = useState(() => new Date());
+
   const [year, setYear] = useState(() =>
     parseCalendarYear(searchParams?.get("year") ?? null),
   );
@@ -120,15 +73,19 @@ export default function ClientCalendarPage() {
     const v = searchParams?.get("inst") ?? "all";
     return INSTITUTION_FILTERS.some((o) => o.code === v) ? v : "all";
   });
+  const [viewMode, setViewMode] = useState<ViewMode>(() =>
+    searchParams?.get("view") === "providers" ? "providers" : "calendar",
+  );
+  const [viewMonth, setViewMonth] = useState<number>(() =>
+    today.getFullYear() === parseCalendarYear(searchParams?.get("year") ?? null)
+      ? today.getMonth() + 1
+      : 1,
+  );
+  const [selectedDay, setSelectedDay] = useState<number | null>(null);
   const [vendorsList, setVendorsList] =
     useState<ClientVendorListResponse | null>(null);
-  const [showLater, setShowLater] = useState(false);
-  const [drawerItems, setDrawerItems] = useState<ClientCalendarItem[] | null>(
-    null,
-  );
-
-  // ``today`` is read once per mount; the calendar is not a live ticker.
-  const [today] = useState(() => new Date());
+  const [openProviders, setOpenProviders] = useState<Set<string>>(new Set());
+  const autoOpenedRef = useRef(false);
 
   const calendarHref = useMemo(() => {
     const params = new URLSearchParams();
@@ -136,9 +93,10 @@ export default function ClientCalendarPage() {
     if (year !== new Date().getFullYear()) params.set("year", String(year));
     for (const vendorId of vendorFilter) params.append("vendor_id", vendorId);
     if (institutionFilter !== "all") params.set("inst", institutionFilter);
+    if (viewMode === "providers") params.set("view", "providers");
     const qs = params.toString();
     return `/client/calendar${qs ? `?${qs}` : ""}`;
-  }, [urlClientId, vendorFilter, year, institutionFilter]);
+  }, [urlClientId, vendorFilter, year, institutionFilter, viewMode]);
 
   useEffect(() => {
     router.replace(calendarHref, { scroll: false });
@@ -180,14 +138,59 @@ export default function ClientCalendarPage() {
     };
   }, [year, vendorFilter, urlClientId]);
 
+  useEffect(() => {
+    if (autoOpenedRef.current) return;
+    if (data && data.providers.length > 0) {
+      setOpenProviders(new Set([data.providers[0].vendor_id]));
+      autoOpenedRef.current = true;
+    }
+  }, [data]);
+
   function toggleVendor(id: string) {
     setVendorFilter((prev) =>
       prev.includes(id) ? prev.filter((v) => v !== id) : [...prev, id],
     );
   }
 
-  // Vendor narrowing is server-side; institution narrowing is client-side
-  // (the payload already carries every institution).
+  function toggleProvider(id: string) {
+    setOpenProviders((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  }
+
+  function selectProvider(id: string) {
+    setViewMode("providers");
+    setOpenProviders((prev) => new Set(prev).add(id));
+    requestAnimationFrame(() => {
+      document
+        .getElementById(`provider-card-${id}`)
+        ?.scrollIntoView({ behavior: "smooth", block: "start" });
+    });
+  }
+
+  function prevMonth() {
+    if (viewMonth > 1) setViewMonth(viewMonth - 1);
+    else {
+      setYear(year - 1);
+      setViewMonth(12);
+    }
+  }
+  function nextMonth() {
+    if (viewMonth < 12) setViewMonth(viewMonth + 1);
+    else {
+      setYear(year + 1);
+      setViewMonth(1);
+    }
+  }
+  function goToday() {
+    setYear(today.getFullYear());
+    setViewMonth(today.getMonth() + 1);
+  }
+
+  // Vendor narrowing is server-side; institution narrowing is client-side.
   const filteredItems = useMemo(() => {
     if (!data) return [] as ClientCalendarItem[];
     const all = data.months.flatMap((m) => m.items);
@@ -195,7 +198,6 @@ export default function ClientCalendarPage() {
     return all.filter((i) => i.institution === institutionFilter);
   }, [data, institutionFilter]);
 
-  // Item counts per institution (before the institution filter) for chip badges.
   const institutionCounts = useMemo(() => {
     const counts: Record<string, number> = { all: 0 };
     if (!data) return counts;
@@ -208,27 +210,6 @@ export default function ClientCalendarPage() {
     return counts;
   }, [data]);
 
-  const agenda = useMemo(() => {
-    const bands: Record<BandKey, ClientCalendarItem[]> & {
-      later: ClientCalendarItem[];
-    } = { overdue: [], action_required: [], due_soon: [], later: [] };
-    for (const item of filteredItems) {
-      const r: ClientCalendarRisk | null = item.risk_level;
-      if (r === "overdue") bands.overdue.push(item);
-      else if (r === "action_required") bands.action_required.push(item);
-      else if (r === "due_soon") bands.due_soon.push(item);
-      else if (r === "in_review" || r === "upcoming") bands.later.push(item);
-      // "on_track" (resolved) is intentionally dropped from the agenda.
-    }
-    const byDeadline = (a: ClientCalendarItem, b: ClientCalendarItem) =>
-      a.deadline_iso.localeCompare(b.deadline_iso);
-    for (const key of Object.keys(bands) as (keyof typeof bands)[]) {
-      bands[key].sort(byDeadline);
-    }
-    return bands;
-  }, [filteredItems]);
-
-  // Matrix inputs, derived from the filtered items.
   const itemsByCell = useMemo(() => {
     const map = new Map<string, ClientCalendarItem[]>();
     for (const item of filteredItems) {
@@ -240,45 +221,81 @@ export default function ClientCalendarPage() {
     return map;
   }, [filteredItems]);
 
+  const itemsByProvider = useMemo(() => {
+    const map = new Map<string, ClientCalendarItem[]>();
+    for (const item of filteredItems) {
+      const list = map.get(item.vendor_id) ?? [];
+      list.push(item);
+      map.set(item.vendor_id, list);
+    }
+    return map;
+  }, [filteredItems]);
+
+  // Obligations of the displayed month, grouped by day-of-month.
+  const itemsByDay = useMemo(() => {
+    const map = new Map<number, ClientCalendarItem[]>();
+    const prefix = `${year}-${String(viewMonth).padStart(2, "0")}-`;
+    for (const item of filteredItems) {
+      if (!item.deadline_iso.startsWith(prefix)) continue;
+      const day = Number(item.deadline_iso.slice(8, 10));
+      const list = map.get(day) ?? [];
+      list.push(item);
+      map.set(day, list);
+    }
+    return map;
+  }, [filteredItems, year, viewMonth]);
+
+  const isCurrentMonth =
+    today.getFullYear() === year && today.getMonth() + 1 === viewMonth;
+
+  // Pick a sensible default selected day when the month / filters change:
+  // today if it has deadlines this month, else the first populated day.
+  useEffect(() => {
+    const days = [...itemsByDay.keys()].sort((a, b) => a - b);
+    if (days.length === 0) {
+      setSelectedDay(null);
+      return;
+    }
+    if (isCurrentMonth && itemsByDay.has(today.getDate())) {
+      setSelectedDay(today.getDate());
+    } else {
+      setSelectedDay(days[0]);
+    }
+  }, [itemsByDay, isCurrentMonth, today]);
+
   const visibleProviders = useMemo(() => {
     if (!data) return [] as ClientCalendarProvider[];
     if (institutionFilter === "all") return data.providers;
-    const withItems = new Set(filteredItems.map((i) => i.vendor_id));
-    return data.providers.filter((p) => withItems.has(p.vendor_id));
-  }, [data, filteredItems, institutionFilter]);
+    return data.providers.filter((p) => itemsByProvider.has(p.vendor_id));
+  }, [data, itemsByProvider, institutionFilter]);
 
   const strip = useMemo(() => {
     const atRisk = visibleProviders.filter(
       (p) => p.semaphore_level === "red",
     ).length;
+    let overdue = 0;
+    let dueSoon = 0;
     let next: { iso: string; vendor: string } | null = null;
     for (const item of filteredItems) {
+      if (item.risk_level === "overdue") overdue += 1;
+      else if (item.risk_level === "due_soon") dueSoon += 1;
       if (item.risk_level === "on_track") continue;
       const n = daysUntil(item.deadline_iso, today);
-      if (n === null || n < 0) continue; // only upcoming, not overdue
+      if (n === null || n < 0) continue;
       if (!next || item.deadline_iso < next.iso) {
         next = { iso: item.deadline_iso, vendor: item.vendor_name };
       }
     }
-    return {
-      overdue: agenda.overdue.length,
-      dueSoon: agenda.due_soon.length,
-      atRisk,
-      next,
-    };
-  }, [agenda, visibleProviders, filteredItems, today]);
+    return { overdue, dueSoon, atRisk, next };
+  }, [filteredItems, visibleProviders, today]);
 
-  const currentMonth =
+  const currentMonthForMatrix =
     today.getFullYear() === year ? today.getMonth() + 1 : null;
-  const actionableTotal =
-    agenda.overdue.length +
-    agenda.action_required.length +
-    agenda.due_soon.length;
 
   return (
     <ClientShell
       title="Calendario del cliente"
-      description="Lo que debes atender en tu portafolio, ordenado por urgencia: qué está vencido, qué vence pronto y qué proveedor te pone en riesgo."
+      description="Revisa los vencimientos de cumplimiento de tu portafolio mes a mes, con el detalle exacto de cada documento."
       actions={
         <label className="flex items-center gap-2 rounded-md border border-[color:var(--border-default)] bg-[color:var(--surface-raised)] px-3 py-1 text-xs">
           <CalendarBlank
@@ -326,71 +343,214 @@ export default function ClientCalendarPage() {
             <NoProvidersState />
           ) : (
             <>
-              {actionableTotal === 0 ? (
-                <AllClearState filtered={institutionFilter !== "all"} />
-              ) : (
-                <Surface
-                  title="Por atender"
-                  description="Toca una obligación para ver el detalle, abrir el expediente del proveedor o empaquetar el periodo."
-                  bodyClassName="p-0"
-                >
-                  <div className="divide-y divide-[color:var(--border-subtle)]">
-                    {(Object.keys(BAND_META) as BandKey[]).map((key) =>
-                      agenda[key].length > 0 ? (
-                        <AgendaBand
-                          key={key}
-                          bandKey={key}
-                          items={agenda[key]}
-                          today={today}
-                          onOpen={setDrawerItems}
-                        />
-                      ) : null,
-                    )}
-                    {agenda.later.length > 0 ? (
-                      <LaterBand
-                        items={agenda.later}
-                        today={today}
-                        open={showLater}
-                        onToggle={() => setShowLater((v) => !v)}
-                        onOpen={setDrawerItems}
-                      />
-                    ) : null}
-                  </div>
-                </Surface>
-              )}
+              <ViewToggle value={viewMode} onChange={setViewMode} />
 
-              {visibleProviders.length > 0 ? (
-                <Surface
-                  title={`Mapa de riesgo · ${year}`}
-                  description="Cada celda muestra el estado más crítico de ese proveedor en el mes. Toca una celda para ver sus obligaciones."
-                  bodyClassName="p-3 lg:p-4"
-                >
-                  <PortfolioMatrix
-                    providers={visibleProviders}
-                    itemsByCell={itemsByCell}
-                    currentMonth={currentMonth}
-                    onOpenCell={(items) =>
-                      items.length > 0 ? setDrawerItems(items) : undefined
-                    }
+              {viewMode === "calendar" ? (
+                <div className="grid gap-6 lg:grid-cols-[minmax(0,1fr)_minmax(320px,420px)]">
+                  <Surface bodyClassName="p-4 sm:p-5">
+                    <MonthCalendar
+                      year={year}
+                      month={viewMonth}
+                      itemsByDay={itemsByDay}
+                      today={today}
+                      selectedDay={selectedDay}
+                      onSelectDay={setSelectedDay}
+                      onPrevMonth={prevMonth}
+                      onNextMonth={nextMonth}
+                      onToday={goToday}
+                    />
+                  </Surface>
+                  <DayDetail
+                    year={year}
+                    month={viewMonth}
+                    day={selectedDay}
+                    items={selectedDay ? (itemsByDay.get(selectedDay) ?? []) : []}
+                    today={today}
                     returnToHref={calendarHref}
                   />
-                </Surface>
-              ) : null}
+                </div>
+              ) : visibleProviders.length === 0 ? (
+                <FilteredEmptyState onClear={() => setInstitutionFilter("all")} />
+              ) : (
+                <div className="space-y-6">
+                  <div className="hidden lg:block">
+                    <Surface
+                      title={`Mapa de riesgo · ${year}`}
+                      description="Vistazo anual de todo el portafolio. Toca un proveedor o una celda para abrir su revisión a detalle abajo."
+                      bodyClassName="p-4"
+                    >
+                      <PortfolioMatrix
+                        providers={visibleProviders}
+                        itemsByCell={itemsByCell}
+                        currentMonth={currentMonthForMatrix}
+                        onSelectProvider={selectProvider}
+                      />
+                    </Surface>
+                  </div>
+                  <section className="space-y-3">
+                    <div>
+                      <h2 className="text-sm font-semibold text-[color:var(--text-primary)]">
+                        Revisión por proveedor
+                      </h2>
+                      <p className="text-xs text-[color:var(--text-tertiary)]">
+                        Ordenados por riesgo. Abre un proveedor para revisar sus
+                        obligaciones a detalle.
+                      </p>
+                    </div>
+                    {visibleProviders.map((p) => (
+                      <ProviderReviewCard
+                        key={p.vendor_id}
+                        provider={p}
+                        items={itemsByProvider.get(p.vendor_id) ?? []}
+                        today={today}
+                        returnToHref={calendarHref}
+                        open={openProviders.has(p.vendor_id)}
+                        onToggle={() => toggleProvider(p.vendor_id)}
+                      />
+                    ))}
+                  </section>
+                </div>
+              )}
             </>
           )}
         </div>
       )}
-
-      {drawerItems && drawerItems.length > 0 ? (
-        <ClientItemDrawer
-          items={drawerItems}
-          year={year}
-          today={today}
-          returnToHref={calendarHref}
-          onClose={() => setDrawerItems(null)}
-        />
-      ) : null}
     </ClientShell>
+  );
+}
+
+// ─── View toggle ────────────────────────────────────────────────
+
+function ViewToggle({
+  value,
+  onChange,
+}: {
+  value: ViewMode;
+  onChange: (v: ViewMode) => void;
+}) {
+  return (
+    <div
+      role="tablist"
+      aria-label="Modo de vista"
+      className="inline-flex rounded-lg border border-[color:var(--border-default)] bg-[color:var(--surface-raised)] p-0.5"
+    >
+      {(
+        [
+          { id: "calendar", label: "Calendario" },
+          { id: "providers", label: "Por proveedor" },
+        ] as const
+      ).map((opt) => {
+        const active = value === opt.id;
+        return (
+          <button
+            key={opt.id}
+            type="button"
+            role="tab"
+            aria-selected={active}
+            onClick={() => onChange(opt.id)}
+            className={
+              "rounded-md px-4 py-1.5 text-sm font-medium transition-colors " +
+              (active
+                ? "bg-[color:var(--surface-brand)] text-[color:var(--text-inverse)]"
+                : "text-[color:var(--text-secondary)] hover:bg-[color:var(--surface-hover)]")
+            }
+          >
+            {opt.label}
+          </button>
+        );
+      })}
+    </div>
+  );
+}
+
+// ─── Selected-day detail ────────────────────────────────────────
+
+function DayDetail({
+  year,
+  month,
+  day,
+  items,
+  today,
+  returnToHref,
+}: {
+  year: number;
+  month: number;
+  day: number | null;
+  items: ClientCalendarItem[];
+  today: Date;
+  returnToHref: string;
+}) {
+  if (day === null || items.length === 0) {
+    return (
+      <Surface bodyClassName="flex min-h-[200px] items-center justify-center p-6 text-center">
+        <p className="text-sm text-[color:var(--text-secondary)]">
+          Este mes no tiene vencimientos. Usa ‹ › para cambiar de mes.
+        </p>
+      </Surface>
+    );
+  }
+
+  const iso = `${year}-${String(month).padStart(2, "0")}-${String(day).padStart(2, "0")}`;
+
+  // Group the day's obligations by provider, worst-first.
+  const byVendor = new Map<
+    string,
+    { name: string; items: ClientCalendarItem[] }
+  >();
+  for (const item of items) {
+    const g = byVendor.get(item.vendor_id) ?? {
+      name: item.vendor_name,
+      items: [],
+    };
+    g.items.push(item);
+    byVendor.set(item.vendor_id, g);
+  }
+  const worstOf = (list: ClientCalendarItem[]) =>
+    Math.min(...list.map((i) => CLIENT_RISK_ORDER[i.risk_level ?? "on_track"]));
+  const groups = [...byVendor.values()].sort(
+    (a, b) => worstOf(a.items) - worstOf(b.items),
+  );
+
+  return (
+    <Surface bodyClassName="p-4 sm:p-5">
+      <div className="mb-3 border-b border-[color:var(--border-subtle)] pb-3">
+        <p className="text-sm font-semibold text-[color:var(--text-primary)]">
+          {formatLongDate(iso)}
+        </p>
+        <p className="text-xs text-[color:var(--text-tertiary)]">
+          {relativeDeadline(iso, today).split(" · ")[0]} ·{" "}
+          {items.length}{" "}
+          {items.length === 1 ? "obligación" : "obligaciones"} ·{" "}
+          {groups.length} {groups.length === 1 ? "proveedor" : "proveedores"}
+        </p>
+      </div>
+      <div className="space-y-4">
+        {groups.map((g) => (
+          <section key={g.name}>
+            <h3 className="mb-2 text-xs font-semibold uppercase tracking-wide text-[color:var(--text-secondary)]">
+              {g.name}
+            </h3>
+            <ul className="space-y-2.5">
+              {g.items
+                .slice()
+                .sort(
+                  (a, b) =>
+                    CLIENT_RISK_ORDER[a.risk_level ?? "on_track"] -
+                    CLIENT_RISK_ORDER[b.risk_level ?? "on_track"],
+                )
+                .map((item) => (
+                  <ObligationBlock
+                    key={`${item.vendor_id}-${item.requirement_code ?? item.requirement_name}-${item.period_key ?? ""}`}
+                    item={item}
+                    today={today}
+                    returnToHref={returnToHref}
+                  />
+                ))}
+            </ul>
+          </section>
+        ))}
+      </div>
+    </Surface>
   );
 }
 
@@ -457,20 +617,20 @@ function StatTile({
   muted?: boolean;
 }) {
   return (
-    <div className="rounded-lg border border-[color:var(--border-default)] bg-[color:var(--surface-raised)] px-4 py-3">
-      <p className="font-mono text-[10px] uppercase tracking-wide text-[color:var(--text-tertiary)]">
+    <div className="rounded-lg border border-[color:var(--border-default)] bg-[color:var(--surface-raised)] px-4 py-3.5">
+      <p className="text-[11px] font-medium uppercase tracking-wide text-[color:var(--text-secondary)]">
         {label}
       </p>
       <p
         className={
-          "mt-1 font-mono text-2xl font-semibold tabular-nums " +
+          "mt-1.5 font-mono text-3xl font-semibold tabular-nums " +
           (muted ? "text-[color:var(--text-secondary)]" : TONE_TEXT[tone])
         }
       >
         {value}
       </p>
       {sub ? (
-        <p className="mt-0.5 truncate text-[11px] text-[color:var(--text-tertiary)]">
+        <p className="mt-1 truncate text-xs text-[color:var(--text-tertiary)]">
           {sub}
         </p>
       ) : null}
@@ -522,7 +682,6 @@ function Filters({
       }
     >
       <div className="space-y-3">
-        {/* Institution axis */}
         <div className="flex flex-wrap items-center gap-2">
           <Funnel
             className="h-3.5 w-3.5 text-[color:var(--text-tertiary)]"
@@ -562,7 +721,6 @@ function Filters({
           })}
         </div>
 
-        {/* Vendor axis */}
         {hasVendors ? (
           <div className="flex flex-wrap gap-2 border-t border-[color:var(--border-subtle)] pt-3">
             {(vendorsList?.items ?? []).map((v) => {
@@ -591,232 +749,21 @@ function Filters({
   );
 }
 
-// ─── Agenda bands ───────────────────────────────────────────────
-
-function AgendaBand({
-  bandKey,
-  items,
-  today,
-  onOpen,
-}: {
-  bandKey: BandKey;
-  items: ClientCalendarItem[];
-  today: Date;
-  onOpen: (items: ClientCalendarItem[]) => void;
-}) {
-  const meta = BAND_META[bandKey];
-  const BandIcon = meta.icon;
-  return (
-    <section>
-      <header className="flex items-center gap-2 bg-[color:var(--surface-page)] px-4 py-2.5">
-        <BandIcon
-          className={"h-4 w-4 " + TONE_TEXT[meta.tone]}
-          weight="fill"
-          aria-hidden="true"
-        />
-        <h3 className="text-[13px] font-semibold text-[color:var(--text-primary)]">
-          {meta.label}
-        </h3>
-        <span
-          className={
-            "rounded-full border px-2 py-0.5 font-mono text-[10px] tabular-nums " +
-            TONE_CHIP[meta.tone]
-          }
-        >
-          {items.length}
-        </span>
-        <span className="hidden truncate text-[11px] text-[color:var(--text-tertiary)] sm:inline">
-          {meta.hint}
-        </span>
-      </header>
-      <AgendaRows items={items} today={today} onOpen={onOpen} />
-    </section>
-  );
-}
-
-const AGENDA_BAND_CAP = 8;
-
-/** Row list for one band, capped so a heavily non-compliant portfolio
- *  (hundreds of overdue obligations) doesn't render as an endless wall.
- *  "Ver N más" reveals the rest in place. */
-function AgendaRows({
-  items,
-  today,
-  onOpen,
-}: {
-  items: ClientCalendarItem[];
-  today: Date;
-  onOpen: (items: ClientCalendarItem[]) => void;
-}) {
-  const [showAll, setShowAll] = useState(false);
-  const visible = showAll ? items : items.slice(0, AGENDA_BAND_CAP);
-  const hidden = items.length - visible.length;
-  return (
-    <>
-      <ul className="divide-y divide-[color:var(--border-subtle)]">
-        {visible.map((item) => (
-          <AgendaRow
-            key={`${item.vendor_id}-${item.requirement_code ?? item.requirement_name}-${item.period_key ?? ""}`}
-            item={item}
-            today={today}
-            onOpen={onOpen}
-          />
-        ))}
-      </ul>
-      {items.length > AGENDA_BAND_CAP ? (
-        <div className="border-t border-[color:var(--border-subtle)] px-4 py-2">
-          <button
-            type="button"
-            onClick={() => setShowAll((v) => !v)}
-            className="text-xs font-medium text-[color:var(--text-brand)] hover:underline"
-          >
-            {showAll ? "Ver menos" : `Ver ${hidden} más`}
-          </button>
-        </div>
-      ) : null}
-    </>
-  );
-}
-
-function LaterBand({
-  items,
-  today,
-  open,
-  onToggle,
-  onOpen,
-}: {
-  items: ClientCalendarItem[];
-  today: Date;
-  open: boolean;
-  onToggle: () => void;
-  onOpen: (items: ClientCalendarItem[]) => void;
-}) {
-  return (
-    <section>
-      <button
-        type="button"
-        onClick={onToggle}
-        aria-expanded={open}
-        className="flex w-full items-center gap-2 bg-[color:var(--surface-page)] px-4 py-2.5 text-left hover:bg-[color:var(--surface-hover)]"
-      >
-        <CaretRight
-          className={
-            "h-3.5 w-3.5 text-[color:var(--text-tertiary)] transition-transform " +
-            (open ? "rotate-90" : "")
-          }
-          weight="bold"
-          aria-hidden="true"
-        />
-        <h3 className="text-[13px] font-semibold text-[color:var(--text-primary)]">
-          Próximas y en revisión
-        </h3>
-        <span
-          className={
-            "rounded-full border px-2 py-0.5 font-mono text-[10px] tabular-nums " +
-            TONE_CHIP.neutral
-          }
-        >
-          {items.length}
-        </span>
-        <span className="hidden text-[11px] text-[color:var(--text-tertiary)] sm:inline">
-          A tiempo o ya con el revisor. No requieren acción inmediata.
-        </span>
-      </button>
-      {open ? (
-        <AgendaRows items={items} today={today} onOpen={onOpen} />
-      ) : null}
-    </section>
-  );
-}
-
-function AgendaRow({
-  item,
-  today,
-  onOpen,
-}: {
-  item: ClientCalendarItem;
-  today: Date;
-  onOpen: (items: ClientCalendarItem[]) => void;
-}) {
-  const InstitutionIcon = INSTITUTION_ICON[item.institution];
-  const institutionLabel =
-    INSTITUTION_LABELS[item.institution] ?? item.institution;
-  const statusDisplay = itemStatusDisplay(item);
-  const overdue = item.risk_level === "overdue";
-
-  return (
-    <li>
-      <button
-        type="button"
-        onClick={() => onOpen([item])}
-        className="flex w-full flex-wrap items-center gap-x-4 gap-y-2 px-4 py-3 text-left transition-colors hover:bg-[color:var(--surface-hover)] focus:outline-none focus-visible:bg-[color:var(--surface-hover)]"
-      >
-        <div className="min-w-[180px] flex-1">
-          <div className="flex items-center gap-2">
-            <span className="truncate text-[13px] font-semibold text-[color:var(--text-primary)]">
-              {item.vendor_name}
-            </span>
-            <Badge variant={statusDisplay.variant}>{statusDisplay.label}</Badge>
-          </div>
-          <div className="mt-1 flex flex-wrap items-center gap-x-2 gap-y-1 text-xs text-[color:var(--text-secondary)]">
-            {InstitutionIcon ? (
-              <InstitutionIcon
-                className="h-3.5 w-3.5 shrink-0 text-[color:var(--text-brand)]"
-                weight="bold"
-                aria-hidden="true"
-              />
-            ) : null}
-            <span className="font-medium text-[color:var(--text-primary)]">
-              {item.requirement_name}
-            </span>
-            <span className="text-[color:var(--text-tertiary)]">·</span>
-            <span>{institutionLabel}</span>
-            <span className="text-[color:var(--text-tertiary)]">·</span>
-            <span className="font-mono text-[10px] text-[color:var(--text-tertiary)]">
-              {item.period_label}
-            </span>
-          </div>
-        </div>
-
-        <p
-          className={
-            "min-w-[150px] text-xs font-medium tabular-nums " +
-            (overdue
-              ? "text-[color:var(--status-error-text)]"
-              : "text-[color:var(--text-secondary)]")
-          }
-        >
-          {relativeDeadline(item.deadline_iso, today)}
-        </p>
-
-        <CaretRight
-          className="h-4 w-4 shrink-0 text-[color:var(--text-tertiary)]"
-          weight="bold"
-          aria-hidden="true"
-        />
-      </button>
-    </li>
-  );
-}
-
 // ─── Empty + loading states ─────────────────────────────────────
 
-function AllClearState({ filtered }: { filtered: boolean }) {
+function FilteredEmptyState({ onClear }: { onClear: () => void }) {
   return (
-    <section className="rounded-lg border border-dashed border-[color:var(--status-success-border)] bg-[color:var(--status-success-bg)] px-6 py-10 text-center">
-      <CheckCircle
-        className="mx-auto h-8 w-8 text-[color:var(--status-success-text)]"
-        weight="fill"
-        aria-hidden="true"
-      />
-      <p className="mt-3 font-mono text-[10px] uppercase tracking-wide text-[color:var(--status-success-text)]">
-        Todo al día
+    <section className="rounded-lg border border-dashed border-[color:var(--border-default)] bg-[color:var(--surface-raised)] px-6 py-10 text-center">
+      <p className="text-sm text-[color:var(--text-primary)]">
+        Ningún proveedor tiene obligaciones de esta institución en el año.
       </p>
-      <p className="mt-1 text-sm text-[color:var(--text-primary)]">
-        {filtered
-          ? "Ningún proveedor tiene obligaciones vencidas, por corregir o por vencer con los filtros actuales."
-          : "Ningún proveedor de tu portafolio tiene obligaciones vencidas, por corregir o por vencer. Te avisaremos cuando aparezca la próxima."}
-      </p>
+      <button
+        type="button"
+        onClick={onClear}
+        className="mt-3 text-xs font-medium text-[color:var(--text-brand)] hover:underline"
+      >
+        Quitar filtro de institución
+      </button>
     </section>
   );
 }
@@ -836,15 +783,15 @@ function NoProvidersState() {
 
 function CalendarSkeleton() {
   return (
-    <div className="space-y-5" aria-busy="true" aria-live="polite">
+    <div className="space-y-6" aria-busy="true" aria-live="polite">
       <span className="sr-only">Cargando calendario…</span>
       <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
         {Array.from({ length: 4 }, (_, i) => (
-          <Skeleton key={i} className="h-20 w-full rounded-lg" />
+          <Skeleton key={i} className="h-24 w-full rounded-lg" />
         ))}
       </div>
-      <Skeleton className="h-24 w-full rounded-lg" />
-      <Skeleton className="h-80 w-full rounded-lg" />
+      <Skeleton className="h-28 w-full rounded-lg" />
+      <Skeleton className="h-96 w-full rounded-lg" />
     </div>
   );
 }
