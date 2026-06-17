@@ -1,43 +1,44 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
-import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
 import {
-  Buildings,
+  ArrowsClockwise,
   CalendarBlank,
-  CaretDown,
   CaretRight,
-  House,
-  Package,
-  Scales,
-  ShieldCheck,
+  CheckCircle,
+  Clock,
+  Funnel,
+  WarningOctagon,
   type Icon,
 } from "@phosphor-icons/react";
 
-import {
-  MiniBars,
-  StackedBars,
-  type ChartSegment,
-} from "@/components/checkwise/charts";
 import { Surface } from "@/components/checkwise/dashboard/stat-card";
 import { Badge } from "@/components/ui/badge";
-import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { MetadataStrip } from "@/components/ui/metadata-strip";
 import {
   ErrorState,
   Skeleton,
 } from "@/components/checkwise/portal/state-surfaces";
 
 import { ClientShell } from "../_shell";
-import { VendorRef } from "@/components/checkwise/vendor-ref";
+import { ClientItemDrawer } from "@/components/checkwise/calendar/client-item-drawer";
+import { PortfolioMatrix } from "@/components/checkwise/calendar/portfolio-matrix";
+import {
+  INSTITUTION_ICON,
+  daysUntil,
+  formatShortDate,
+  itemStatusDisplay,
+  monthOf,
+  relativeDeadline,
+} from "@/components/checkwise/calendar/client-calendar-shared";
 import {
   getClientCalendar,
   listClientVendors,
   type ClientCalendar,
   type ClientCalendarItem,
-  type ClientCalendarMonth,
+  type ClientCalendarProvider,
+  type ClientCalendarRisk,
   type ClientVendorListResponse,
 } from "@/lib/api/client";
 import { INSTITUTION_LABELS } from "@/lib/api/portal";
@@ -46,60 +47,62 @@ import {
   CALENDAR_MIN_YEAR,
   parseCalendarYear,
 } from "@/lib/calendar-year";
-import {
-  DocumentStatus,
-  SlotState,
-  slotStateLabel,
-  slotStateVariant,
-  statusLabel,
-  statusVariant,
-} from "@/lib/constants/statuses";
 import { useUrlClientId } from "@/lib/workspace/use-url-client-id";
-import { withReturnTo } from "@/lib/navigation/return-to";
 
-const MONTH_SHORT = [
-  "Ene",
-  "Feb",
-  "Mar",
-  "Abr",
-  "May",
-  "Jun",
-  "Jul",
-  "Ago",
-  "Sep",
-  "Oct",
-  "Nov",
-  "Dic",
-];
+// ─── Agenda bands ───────────────────────────────────────────────
+// Ordered by what a portfolio overseer must act on first. Resolved
+// obligations (on_track) never appear; in_review + upcoming collapse
+// into a single informational "later" section.
 
-// Junta 2026-05-23 — institution icons mirror the portal calendar
-// so the client view reads with the same visual vocabulary the
-// provider already uses. House (vivienda) for INFONAVIT is the
-// disambiguator from IMSS (Buildings) per the audit follow-up.
-const INSTITUTION_ICON: Record<string, Icon> = {
-  sat: Scales,
-  imss: Buildings,
-  infonavit: House,
-  stps_repse: ShieldCheck,
+type BandKey = "overdue" | "action_required" | "due_soon";
+
+const BAND_META: Record<
+  BandKey,
+  { label: string; hint: string; icon: Icon; tone: "error" | "warning" }
+> = {
+  overdue: {
+    label: "Vencidas",
+    hint: "Fuera de plazo. El proveedor ya está en incumplimiento.",
+    icon: WarningOctagon,
+    tone: "error",
+  },
+  action_required: {
+    label: "Requieren corrección",
+    hint: "Rechazadas o con observaciones. El proveedor debe reemplazar el documento.",
+    icon: ArrowsClockwise,
+    tone: "warning",
+  },
+  due_soon: {
+    label: "Vencen pronto · ≤14 días",
+    hint: "Aún a tiempo. Da seguimiento antes de que caigan en incumplimiento.",
+    icon: Clock,
+    tone: "warning",
+  },
 };
 
-const INSTITUTION_ORDER = ["sat", "imss", "infonavit", "stps_repse"] as const;
+const TONE_TEXT: Record<"error" | "warning" | "info", string> = {
+  error: "text-[color:var(--status-error-text)]",
+  warning: "text-[color:var(--status-warning-text)]",
+  info: "text-[color:var(--status-info-text)]",
+};
 
-// Status labels and color tones now live in the central dictionary so a
-// vocabulary or color change in one place propagates across every
-// surface. See apps/web/lib/constants/statuses.ts.
-function calendarItemStatusDisplay(row: ClientCalendarItem) {
-  if (row.status === DocumentStatus.PENDIENTE && !row.submission_id) {
-    return {
-      label: slotStateLabel(SlotState.MISSING),
-      variant: slotStateVariant(SlotState.MISSING),
-    };
-  }
-  return {
-    label: statusLabel(row.status),
-    variant: statusVariant(row.status),
-  };
-}
+const TONE_CHIP: Record<"error" | "warning" | "info" | "neutral", string> = {
+  error:
+    "border-[color:var(--status-error-border)] bg-[color:var(--status-error-bg)] text-[color:var(--status-error-text)]",
+  warning:
+    "border-[color:var(--status-warning-border)] bg-[color:var(--status-warning-bg)] text-[color:var(--status-warning-text)]",
+  info: "border-[color:var(--status-info-border)] bg-[color:var(--status-info-bg)] text-[color:var(--status-info-text)]",
+  neutral:
+    "border-[color:var(--border-subtle)] bg-[color:var(--surface-page)] text-[color:var(--text-tertiary)]",
+};
+
+const INSTITUTION_FILTERS: { code: string; label: string }[] = [
+  { code: "all", label: "Todas" },
+  { code: "sat", label: "SAT" },
+  { code: "imss", label: "IMSS" },
+  { code: "infonavit", label: "INFONAVIT" },
+  { code: "stps_repse", label: "STPS / REPSE" },
+];
 
 export default function ClientCalendarPage() {
   const router = useRouter();
@@ -110,13 +113,20 @@ export default function ClientCalendarPage() {
   );
   const [data, setData] = useState<ClientCalendar | null>(null);
   const [error, setError] = useState<string | null>(null);
-  const [expandedMonth, setExpandedMonth] = useState<number | null>(null);
-  // Item 3 — vendor multi-select. Empty list = portfolio-wide view.
   const [vendorFilter, setVendorFilter] = useState<string[]>(() =>
     searchParams?.getAll("vendor_id") ?? [],
   );
+  const [institutionFilter, setInstitutionFilter] = useState<string>("all");
   const [vendorsList, setVendorsList] =
     useState<ClientVendorListResponse | null>(null);
+  const [showLater, setShowLater] = useState(false);
+  const [drawerItems, setDrawerItems] = useState<ClientCalendarItem[] | null>(
+    null,
+  );
+
+  // ``today`` is read once per mount; the calendar is not a live ticker.
+  const [today] = useState(() => new Date());
+
   const calendarHref = useMemo(() => {
     const params = new URLSearchParams();
     if (urlClientId) params.set("client_id", urlClientId);
@@ -157,7 +167,9 @@ export default function ClientCalendarPage() {
       })
       .catch((err: unknown) => {
         if (cancelled) return;
-        setError(err instanceof Error ? err.message : "Error al cargar calendario.");
+        setError(
+          err instanceof Error ? err.message : "Error al cargar calendario.",
+        );
       });
     return () => {
       cancelled = true;
@@ -170,44 +182,99 @@ export default function ClientCalendarPage() {
     );
   }
 
-  const totals = useMemo(() => {
-    if (!data) return { due: 0, approved: 0, pending: 0, missing: 0, rejected: 0, dueSoon: 0 };
-    return data.months.reduce(
-      (acc, m) => {
-        acc.due += m.due_total;
-        acc.approved += m.approved_total;
-        acc.pending += m.pending_total;
-        acc.missing += m.missing_total;
-        acc.rejected += m.rejected_or_correction_total;
-        acc.dueSoon += m.due_soon_total;
-        return acc;
-      },
-      { due: 0, approved: 0, pending: 0, missing: 0, rejected: 0, dueSoon: 0 },
-    );
+  // Vendor narrowing is server-side; institution narrowing is client-side
+  // (the payload already carries every institution).
+  const filteredItems = useMemo(() => {
+    if (!data) return [] as ClientCalendarItem[];
+    const all = data.months.flatMap((m) => m.items);
+    if (institutionFilter === "all") return all;
+    return all.filter((i) => i.institution === institutionFilter);
+  }, [data, institutionFilter]);
+
+  // Item counts per institution (before the institution filter) for chip badges.
+  const institutionCounts = useMemo(() => {
+    const counts: Record<string, number> = { all: 0 };
+    if (!data) return counts;
+    for (const m of data.months) {
+      for (const i of m.items) {
+        counts.all += 1;
+        counts[i.institution] = (counts[i.institution] ?? 0) + 1;
+      }
+    }
+    return counts;
   }, [data]);
 
-  const barsApproved = useMemo(() => {
-    if (!data) return [];
-    return data.months.map((m) => ({
-      label: MONTH_SHORT[m.month - 1] ?? `${m.month}`,
-      value: m.approved_total,
-      tone: "success" as const,
-    }));
-  }, [data]);
+  const agenda = useMemo(() => {
+    const bands: Record<BandKey, ClientCalendarItem[]> & {
+      later: ClientCalendarItem[];
+    } = { overdue: [], action_required: [], due_soon: [], later: [] };
+    for (const item of filteredItems) {
+      const r: ClientCalendarRisk | null = item.risk_level;
+      if (r === "overdue") bands.overdue.push(item);
+      else if (r === "action_required") bands.action_required.push(item);
+      else if (r === "due_soon") bands.due_soon.push(item);
+      else if (r === "in_review" || r === "upcoming") bands.later.push(item);
+      // "on_track" (resolved) is intentionally dropped from the agenda.
+    }
+    const byDeadline = (a: ClientCalendarItem, b: ClientCalendarItem) =>
+      a.deadline_iso.localeCompare(b.deadline_iso);
+    for (const key of Object.keys(bands) as (keyof typeof bands)[]) {
+      bands[key].sort(byDeadline);
+    }
+    return bands;
+  }, [filteredItems]);
 
-  const barsMissing = useMemo(() => {
-    if (!data) return [];
-    return data.months.map((m) => ({
-      label: MONTH_SHORT[m.month - 1] ?? `${m.month}`,
-      value: m.missing_total + m.rejected_or_correction_total,
-      tone: "warning" as const,
-    }));
-  }, [data]);
+  // Matrix inputs, derived from the filtered items.
+  const itemsByCell = useMemo(() => {
+    const map = new Map<string, ClientCalendarItem[]>();
+    for (const item of filteredItems) {
+      const key = `${item.vendor_id}-${monthOf(item)}`;
+      const list = map.get(key) ?? [];
+      list.push(item);
+      map.set(key, list);
+    }
+    return map;
+  }, [filteredItems]);
+
+  const visibleProviders = useMemo(() => {
+    if (!data) return [] as ClientCalendarProvider[];
+    if (institutionFilter === "all") return data.providers;
+    const withItems = new Set(filteredItems.map((i) => i.vendor_id));
+    return data.providers.filter((p) => withItems.has(p.vendor_id));
+  }, [data, filteredItems, institutionFilter]);
+
+  const strip = useMemo(() => {
+    const atRisk = visibleProviders.filter(
+      (p) => p.semaphore_level === "red",
+    ).length;
+    let next: { iso: string; vendor: string } | null = null;
+    for (const item of filteredItems) {
+      if (item.risk_level === "on_track") continue;
+      const n = daysUntil(item.deadline_iso, today);
+      if (n === null || n < 0) continue; // only upcoming, not overdue
+      if (!next || item.deadline_iso < next.iso) {
+        next = { iso: item.deadline_iso, vendor: item.vendor_name };
+      }
+    }
+    return {
+      overdue: agenda.overdue.length,
+      dueSoon: agenda.due_soon.length,
+      atRisk,
+      next,
+    };
+  }, [agenda, visibleProviders, filteredItems, today]);
+
+  const currentMonth =
+    today.getFullYear() === year ? today.getMonth() + 1 : null;
+  const actionableTotal =
+    agenda.overdue.length +
+    agenda.action_required.length +
+    agenda.due_soon.length;
 
   return (
     <ClientShell
       title="Calendario del cliente"
-      description="Cumplimiento mensual agregado de todos los proveedores bajo este cliente."
+      description="Lo que debes atender en tu portafolio, ordenado por urgencia: qué está vencido, qué vence pronto y qué proveedor te pone en riesgo."
       actions={
         <label className="flex items-center gap-2 rounded-md border border-[color:var(--border-default)] bg-[color:var(--surface-raised)] px-3 py-1 text-xs">
           <CalendarBlank
@@ -220,10 +287,6 @@ export default function ClientCalendarPage() {
           </span>
           <Input
             type="number"
-            // REPSE compliance starts in 2021. Match backend MIN_YEAR=2021
-            // (apps/api/app/core/period_validation.py) instead of the prior
-            // 2024 floor which silently blocked 2021-2023 historical
-            // periods that the API otherwise serves.
             min={CALENDAR_MIN_YEAR}
             max={CALENDAR_MAX_YEAR}
             value={year}
@@ -243,339 +306,501 @@ export default function ClientCalendarPage() {
         <CalendarSkeleton />
       ) : (
         <div className="space-y-6">
-          <MetadataStrip
-            items={[
-              { label: "Año", value: data.year.toString(), mono: true },
-              { label: "Obligaciones", value: totals.due.toString(), mono: true },
-              { label: "Aprobadas", value: totals.approved.toString(), mono: true, tone: "teal" },
-              { label: "En revisión", value: totals.pending.toString(), mono: true },
-              {
-                label: "Faltantes + Por corregir",
-                value: (totals.missing + totals.rejected).toString(),
-                mono: true,
-                tone: totals.missing + totals.rejected > 0 ? "warning" : "default",
-              },
-              { label: "Por vencer ≤14 d", value: totals.dueSoon.toString(), mono: true, tone: totals.dueSoon > 0 ? "warning" : "default" },
-            ]}
+          <RiskStrip strip={strip} today={today} />
+
+          <Filters
+            vendorsList={vendorsList}
+            vendorFilter={vendorFilter}
+            onToggleVendor={toggleVendor}
+            onClearVendors={() => setVendorFilter([])}
+            institutionFilter={institutionFilter}
+            onInstitution={setInstitutionFilter}
+            institutionCounts={institutionCounts}
           />
 
-          <Surface
-            title="Filtrar por proveedor"
-            description={
-              vendorFilter.length === 0
-                ? "Mostrando todos los proveedores del portafolio. Toca un proveedor para acotar el calendario a sus obligaciones."
-                : `Filtrando por ${vendorFilter.length} proveedor${vendorFilter.length === 1 ? "" : "es"}.`
-            }
-            actions={
-              vendorFilter.length > 0 ? (
-                <button
-                  type="button"
-                  className="text-xs font-medium text-[color:var(--text-brand)] hover:underline"
-                  onClick={() => setVendorFilter([])}
+          {data.providers.length === 0 ? (
+            <NoProvidersState />
+          ) : (
+            <>
+              {actionableTotal === 0 ? (
+                <AllClearState filtered={institutionFilter !== "all"} />
+              ) : (
+                <Surface
+                  title="Por atender"
+                  description="Toca una obligación para ver el detalle, abrir el expediente del proveedor o empaquetar el periodo."
+                  bodyClassName="p-0"
                 >
-                  Limpiar filtro
-                </button>
-              ) : null
-            }
-          >
-            <div className="flex flex-wrap gap-2">
-              {(vendorsList?.items ?? []).map((v) => {
-                const active = vendorFilter.includes(v.vendor_id);
-                return (
-                  <button
-                    type="button"
-                    key={v.vendor_id}
-                    onClick={() => toggleVendor(v.vendor_id)}
-                    aria-pressed={active}
-                    className={
-                      "rounded-full border px-3 py-1.5 text-xs font-medium transition " +
-                      (active
-                        ? "border-[color:var(--interactive-primary)] bg-[color:var(--surface-brand-muted)] text-[color:var(--text-brand)]"
-                        : "border-[color:var(--border-default)] bg-[color:var(--surface-raised)] text-[color:var(--text-secondary)] hover:border-[color:var(--border-strong)]")
-                    }
-                  >
-                    {v.vendor_name}
-                  </button>
-                );
-              })}
-              {vendorsList && vendorsList.items.length === 0 ? (
-                <p className="text-xs text-[color:var(--text-tertiary)]">
-                  Aún no tienes proveedores registrados.
-                </p>
-              ) : null}
-            </div>
-          </Surface>
+                  <div className="divide-y divide-[color:var(--border-subtle)]">
+                    {(Object.keys(BAND_META) as BandKey[]).map((key) =>
+                      agenda[key].length > 0 ? (
+                        <AgendaBand
+                          key={key}
+                          bandKey={key}
+                          items={agenda[key]}
+                          today={today}
+                          onOpen={setDrawerItems}
+                        />
+                      ) : null,
+                    )}
+                    {agenda.later.length > 0 ? (
+                      <LaterBand
+                        items={agenda.later}
+                        today={today}
+                        open={showLater}
+                        onToggle={() => setShowLater((v) => !v)}
+                        onOpen={setDrawerItems}
+                      />
+                    ) : null}
+                  </div>
+                </Surface>
+              )}
 
-          <Surface
-            title="Ritmo anual"
-            description="Distribución mensual de obligaciones aprobadas vs. faltantes."
-          >
-            <div className="grid gap-6 md:grid-cols-2">
-              <div>
-                <p className="cw-eyebrow mb-2">Aprobadas por mes</p>
-                <MiniBars data={barsApproved} height={100} showValues />
-              </div>
-              <div>
-                <p className="cw-eyebrow mb-2">Faltantes + por corregir por mes</p>
-                <MiniBars data={barsMissing} height={100} showValues />
-              </div>
-            </div>
-          </Surface>
-
-          <Surface
-            title="Detalle por mes"
-            description="Toca una fila para ver el detalle por proveedor y empaquetarlo para auditoría."
-            bodyClassName="p-0 overflow-x-auto"
-          >
-            <table className="w-full text-sm">
-              <thead className="border-b border-[color:var(--border-subtle)] bg-[color:var(--surface-page)] text-left font-mono text-[10px] uppercase tracking-wide text-[color:var(--text-tertiary)]">
-                <tr>
-                  <th className="px-4 py-2.5">Mes</th>
-                  <th className="px-3 py-2.5">Instituciones</th>
-                  <th className="px-3 py-2.5 text-right">Proveedores</th>
-                  <th className="px-3 py-2.5 text-right">Total</th>
-                  <th className="px-3 py-2.5">Distribución</th>
-                  <th className="px-3 py-2.5 text-right">Vencen ≤14d</th>
-                  <th className="px-3 py-2.5 text-right" aria-label="Acciones" />
-                </tr>
-              </thead>
-              <tbody>
-                {data.months.map((m) => (
-                  <MonthRow
-                    key={m.month}
-                    month={m}
-                    year={data.year}
-                    expanded={expandedMonth === m.month}
-                    onToggle={() =>
-                      setExpandedMonth((prev) =>
-                        prev === m.month ? null : m.month,
-                      )
+              {visibleProviders.length > 0 ? (
+                <Surface
+                  title={`Mapa de riesgo · ${year}`}
+                  description="Cada celda muestra el estado más crítico de ese proveedor en el mes. Toca una celda para ver sus obligaciones."
+                  bodyClassName="p-3 lg:p-4"
+                >
+                  <PortfolioMatrix
+                    providers={visibleProviders}
+                    itemsByCell={itemsByCell}
+                    currentMonth={currentMonth}
+                    onOpenCell={(items) =>
+                      items.length > 0 ? setDrawerItems(items) : undefined
                     }
                     returnToHref={calendarHref}
                   />
-                ))}
-              </tbody>
-            </table>
-          </Surface>
+                </Surface>
+              ) : null}
+            </>
+          )}
         </div>
       )}
+
+      {drawerItems && drawerItems.length > 0 ? (
+        <ClientItemDrawer
+          items={drawerItems}
+          year={year}
+          today={today}
+          returnToHref={calendarHref}
+          onClose={() => setDrawerItems(null)}
+        />
+      ) : null}
     </ClientShell>
   );
 }
 
-function MonthRow({
-  month,
-  year,
-  expanded,
-  onToggle,
-  returnToHref,
+// ─── Risk strip ─────────────────────────────────────────────────
+
+function RiskStrip({
+  strip,
+  today,
 }: {
-  month: ClientCalendarMonth;
-  year: number;
-  expanded: boolean;
-  onToggle: () => void;
-  returnToHref: string;
+  strip: {
+    overdue: number;
+    dueSoon: number;
+    atRisk: number;
+    next: { iso: string; vendor: string } | null;
+  };
+  today: Date;
 }) {
-  const segments: ChartSegment[] = [
-    { label: "Aprobados", value: month.approved_total, tone: "success" },
-    { label: "En revisión", value: month.pending_total, tone: "info" },
-    { label: "Por corregir", value: month.rejected_or_correction_total, tone: "error" },
-    { label: "Faltantes", value: month.missing_total, tone: "warning" },
-  ];
-
-  // Per-institution count for the month. Built off ``items[]`` so it
-  // stays in sync with the same data driving the expanded panel.
-  const institutionCounts = useMemo(() => {
-    const counts: Record<string, number> = {};
-    for (const item of month.items) {
-      counts[item.institution] = (counts[item.institution] ?? 0) + 1;
-    }
-    return counts;
-  }, [month.items]);
-
-  const periodKey = `${year}-M${String(month.month).padStart(2, "0")}`;
-  const auditUrl = `/client/auditoria?period_from=${periodKey}&period_to=${periodKey}`;
-  const Caret = expanded ? CaretDown : CaretRight;
-
   return (
-    <>
-      <tr
-        className="cursor-pointer border-b border-[color:var(--border-subtle)] last:border-0 hover:bg-[color:var(--surface-hover)]"
-        onClick={onToggle}
-        aria-expanded={expanded}
-        role="button"
-      >
-        <td className="px-4 py-3 font-medium text-[color:var(--text-primary)]">
-          <span className="inline-flex items-center gap-2">
-            <Caret
-              className="h-3.5 w-3.5 text-[color:var(--text-tertiary)]"
-              weight="bold"
-              aria-hidden="true"
-            />
-            {month.month_label}
-          </span>
-        </td>
-        <td className="px-3 py-3">
-          <div className="flex flex-wrap items-center gap-1.5">
-            {INSTITUTION_ORDER.map((code) => {
-              const count = institutionCounts[code] ?? 0;
-              if (count === 0) return null;
-              const IconComponent = INSTITUTION_ICON[code];
-              return (
-                <span
-                  key={code}
-                  className="inline-flex items-center gap-1 rounded-full border border-[color:var(--border-subtle)] bg-[color:var(--surface-page)] px-2 py-0.5 text-[11px] font-medium text-[color:var(--text-secondary)]"
-                  title={`${INSTITUTION_LABELS[code] ?? code} · ${count}`}
-                >
-                  {IconComponent ? (
-                    <IconComponent
-                      className="h-3 w-3 text-[color:var(--text-brand)]"
-                      weight="bold"
-                      aria-hidden="true"
-                    />
-                  ) : null}
-                  <span>{INSTITUTION_LABELS[code] ?? code}</span>
-                  <span className="font-mono tabular-nums text-[10px] text-[color:var(--text-tertiary)]">
-                    {count}
-                  </span>
-                </span>
-              );
-            })}
-            {Object.keys(institutionCounts).length === 0 ? (
-              <span className="text-[11px] text-[color:var(--text-tertiary)]">
-                Sin obligaciones este mes
-              </span>
-            ) : null}
-          </div>
-        </td>
-        <td className="px-3 py-3 text-right font-mono tabular-nums text-[color:var(--text-primary)]">
-          {month.vendors_total}
-        </td>
-        <td className="px-3 py-3 text-right font-mono tabular-nums text-[color:var(--text-primary)]">
-          {month.due_total}
-        </td>
-        <td className="min-w-[260px] px-3 py-3">
-          <StackedBars segments={segments} height={10} />
-        </td>
-        <td className="px-3 py-3 text-right font-mono tabular-nums text-[color:var(--text-primary)]">
-          {month.due_soon_total}
-        </td>
-        <td className="px-3 py-3 text-right">
-          <Button
-            asChild
-            size="sm"
-            variant="outline"
-            onClick={(e) => e.stopPropagation()}
-            disabled={month.due_total === 0}
-          >
-            <Link
-              href={auditUrl}
-              title="Pre-llena la página de paquete para auditoría con este mes"
-            >
-              <Package className="h-3 w-3" weight="bold" aria-hidden="true" />
-              Paquete
-            </Link>
-          </Button>
-        </td>
-      </tr>
-      {expanded ? (
-        <tr className="border-b border-[color:var(--border-subtle)] last:border-0 bg-[color:var(--surface-sunken)]">
-          <td colSpan={7} className="px-4 py-3">
-            <ExpandedDetail items={month.items} returnToHref={returnToHref} />
-          </td>
-        </tr>
-      ) : null}
-    </>
+    <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
+      <StatTile
+        label="Vencidas"
+        value={String(strip.overdue)}
+        tone={strip.overdue > 0 ? "error" : "info"}
+        muted={strip.overdue === 0}
+      />
+      <StatTile
+        label="Vencen ≤14 d"
+        value={String(strip.dueSoon)}
+        tone={strip.dueSoon > 0 ? "warning" : "info"}
+        muted={strip.dueSoon === 0}
+      />
+      <StatTile
+        label="Proveedores en riesgo"
+        value={String(strip.atRisk)}
+        tone={strip.atRisk > 0 ? "error" : "info"}
+        muted={strip.atRisk === 0}
+      />
+      <StatTile
+        label="Próximo vencimiento"
+        value={strip.next ? formatShortDate(strip.next.iso) : "—"}
+        sub={
+          strip.next
+            ? `${relativeDeadline(strip.next.iso, today).split(" · ")[0]} · ${strip.next.vendor}`
+            : "Nada por vencer"
+        }
+        tone="info"
+        muted={!strip.next}
+      />
+    </div>
   );
 }
 
-function ExpandedDetail({
-  items,
-  returnToHref,
+function StatTile({
+  label,
+  value,
+  sub,
+  tone,
+  muted,
 }: {
-  items: ClientCalendarItem[];
-  returnToHref: string;
+  label: string;
+  value: string;
+  sub?: string;
+  tone: "error" | "warning" | "info";
+  muted?: boolean;
 }) {
-  if (items.length === 0) {
-    return (
-      <p className="text-xs text-[color:var(--text-tertiary)]">
-        Este mes no tiene obligaciones registradas en el calendario.
-      </p>
-    );
-  }
-  // Group by vendor so the expanded section reads "proveedor X tiene
-  // estos requisitos" — the mental model an auditor walks through.
-  const byVendor = new Map<string, { vendor_name: string; rows: ClientCalendarItem[] }>();
-  for (const item of items) {
-    const key = item.vendor_id;
-    if (!byVendor.has(key)) {
-      byVendor.set(key, { vendor_name: item.vendor_name, rows: [] });
-    }
-    byVendor.get(key)!.rows.push(item);
-  }
-  const groups = Array.from(byVendor.values()).sort((a, b) =>
-    a.vendor_name.localeCompare(b.vendor_name, "es"),
-  );
   return (
-    <div className="space-y-4">
-      {groups.map((g) => (
-        <div key={g.vendor_name}>
-          <div className="mb-2 flex items-center justify-between">
-            <p className="text-xs font-semibold uppercase tracking-wide text-[color:var(--text-secondary)]">
-              <VendorRef
-                vendorId={g.rows[0].vendor_id}
-                vendorName={g.vendor_name}
-              />
-            </p>
-            <Link
-              href={withReturnTo(
-                `/client/vendors/${g.rows[0].vendor_id}`,
-                returnToHref,
-              )}
-              className="text-[11px] font-medium text-[color:var(--text-brand)] hover:underline"
-              title="Abrir el expediente del proveedor"
-            >
-              Ver expediente →
-            </Link>
-          </div>
-          <ul className="divide-y divide-[color:var(--border-subtle)] rounded-md border border-[color:var(--border-subtle)] bg-[color:var(--surface-raised)]">
-            {g.rows.map((row) => {
-              const inst = INSTITUTION_LABELS[row.institution] ?? row.institution;
-              const IconComponent = INSTITUTION_ICON[row.institution];
-              const statusDisplay = calendarItemStatusDisplay(row);
-              return (
-                <li
-                  key={`${row.vendor_id}-${row.requirement_code ?? row.requirement_name}-${row.period_key ?? ""}`}
-                  className="flex flex-wrap items-center justify-between gap-3 px-3 py-2 text-xs"
+    <div className="rounded-lg border border-[color:var(--border-default)] bg-[color:var(--surface-raised)] px-4 py-3">
+      <p className="font-mono text-[10px] uppercase tracking-wide text-[color:var(--text-tertiary)]">
+        {label}
+      </p>
+      <p
+        className={
+          "mt-1 font-mono text-2xl font-semibold tabular-nums " +
+          (muted ? "text-[color:var(--text-secondary)]" : TONE_TEXT[tone])
+        }
+      >
+        {value}
+      </p>
+      {sub ? (
+        <p className="mt-0.5 truncate text-[11px] text-[color:var(--text-tertiary)]">
+          {sub}
+        </p>
+      ) : null}
+    </div>
+  );
+}
+
+// ─── Filters ────────────────────────────────────────────────────
+
+function Filters({
+  vendorsList,
+  vendorFilter,
+  onToggleVendor,
+  onClearVendors,
+  institutionFilter,
+  onInstitution,
+  institutionCounts,
+}: {
+  vendorsList: ClientVendorListResponse | null;
+  vendorFilter: string[];
+  onToggleVendor: (id: string) => void;
+  onClearVendors: () => void;
+  institutionFilter: string;
+  onInstitution: (code: string) => void;
+  institutionCounts: Record<string, number>;
+}) {
+  const hasVendors = !vendorsList || vendorsList.items.length > 0;
+  return (
+    <Surface
+      title="Filtrar"
+      description={
+        vendorFilter.length === 0
+          ? "Mostrando todo el portafolio. Acota por proveedor o por institución."
+          : `Filtrando por ${vendorFilter.length} proveedor${vendorFilter.length === 1 ? "" : "es"}.`
+      }
+      actions={
+        vendorFilter.length > 0 || institutionFilter !== "all" ? (
+          <button
+            type="button"
+            className="text-xs font-medium text-[color:var(--text-brand)] hover:underline"
+            onClick={() => {
+              onClearVendors();
+              onInstitution("all");
+            }}
+          >
+            Limpiar filtros
+          </button>
+        ) : null
+      }
+    >
+      <div className="space-y-3">
+        {/* Institution axis */}
+        <div className="flex flex-wrap items-center gap-2">
+          <Funnel
+            className="h-3.5 w-3.5 text-[color:var(--text-tertiary)]"
+            weight="bold"
+            aria-hidden="true"
+          />
+          {INSTITUTION_FILTERS.map((opt) => {
+            const active = institutionFilter === opt.code;
+            const count =
+              opt.code === "all"
+                ? institutionCounts.all
+                : (institutionCounts[opt.code] ?? 0);
+            return (
+              <button
+                key={opt.code}
+                type="button"
+                aria-pressed={active}
+                onClick={() => onInstitution(opt.code)}
+                className={
+                  "inline-flex items-center gap-1.5 rounded-full border px-3 py-1.5 text-xs font-medium transition-colors " +
+                  (active
+                    ? "border-[color:var(--border-brand)] bg-[color:var(--surface-brand)] text-[color:var(--text-inverse)]"
+                    : "border-[color:var(--border-default)] bg-[color:var(--surface-raised)] text-[color:var(--text-secondary)] hover:bg-[color:var(--surface-hover)]")
+                }
+              >
+                <span>{opt.label}</span>
+                <span
+                  className={
+                    "font-mono text-[10px] tabular-nums " +
+                    (active ? "opacity-80" : "text-[color:var(--text-tertiary)]")
+                  }
                 >
-                  <div className="flex min-w-0 items-center gap-2">
-                    {IconComponent ? (
-                      <IconComponent
-                        className="h-3.5 w-3.5 shrink-0 text-[color:var(--text-brand)]"
-                        weight="bold"
-                        aria-hidden="true"
-                      />
-                    ) : null}
-                    <span className="font-medium text-[color:var(--text-primary)]">
-                      {row.requirement_name}
-                    </span>
-                    <span className="text-[color:var(--text-tertiary)]">·</span>
-                    <span className="text-[color:var(--text-secondary)]">{inst}</span>
-                    <span className="text-[color:var(--text-tertiary)]">·</span>
-                    <span className="font-mono text-[10px] text-[color:var(--text-tertiary)]">
-                      {row.period_label}
-                    </span>
-                  </div>
-                  <Badge variant={statusDisplay.variant}>
-                    {statusDisplay.label}
-                  </Badge>
-                </li>
+                  {count}
+                </span>
+              </button>
+            );
+          })}
+        </div>
+
+        {/* Vendor axis */}
+        {hasVendors ? (
+          <div className="flex flex-wrap gap-2 border-t border-[color:var(--border-subtle)] pt-3">
+            {(vendorsList?.items ?? []).map((v) => {
+              const active = vendorFilter.includes(v.vendor_id);
+              return (
+                <button
+                  type="button"
+                  key={v.vendor_id}
+                  onClick={() => onToggleVendor(v.vendor_id)}
+                  aria-pressed={active}
+                  className={
+                    "rounded-full border px-3 py-1.5 text-xs font-medium transition " +
+                    (active
+                      ? "border-[color:var(--interactive-primary)] bg-[color:var(--surface-brand-muted)] text-[color:var(--text-brand)]"
+                      : "border-[color:var(--border-default)] bg-[color:var(--surface-raised)] text-[color:var(--text-secondary)] hover:border-[color:var(--border-strong)]")
+                  }
+                >
+                  {v.vendor_name}
+                </button>
               );
             })}
-          </ul>
+          </div>
+        ) : null}
+      </div>
+    </Surface>
+  );
+}
+
+// ─── Agenda bands ───────────────────────────────────────────────
+
+function AgendaBand({
+  bandKey,
+  items,
+  today,
+  onOpen,
+}: {
+  bandKey: BandKey;
+  items: ClientCalendarItem[];
+  today: Date;
+  onOpen: (items: ClientCalendarItem[]) => void;
+}) {
+  const meta = BAND_META[bandKey];
+  const BandIcon = meta.icon;
+  return (
+    <section>
+      <header className="flex items-center gap-2 bg-[color:var(--surface-page)] px-4 py-2.5">
+        <BandIcon
+          className={"h-4 w-4 " + TONE_TEXT[meta.tone]}
+          weight="fill"
+          aria-hidden="true"
+        />
+        <h3 className="text-[13px] font-semibold text-[color:var(--text-primary)]">
+          {meta.label}
+        </h3>
+        <span
+          className={
+            "rounded-full border px-2 py-0.5 font-mono text-[10px] tabular-nums " +
+            TONE_CHIP[meta.tone]
+          }
+        >
+          {items.length}
+        </span>
+        <span className="hidden truncate text-[11px] text-[color:var(--text-tertiary)] sm:inline">
+          {meta.hint}
+        </span>
+      </header>
+      <ul className="divide-y divide-[color:var(--border-subtle)]">
+        {items.map((item) => (
+          <AgendaRow
+            key={`${item.vendor_id}-${item.requirement_code ?? item.requirement_name}-${item.period_key ?? ""}`}
+            item={item}
+            today={today}
+            onOpen={onOpen}
+          />
+        ))}
+      </ul>
+    </section>
+  );
+}
+
+function LaterBand({
+  items,
+  today,
+  open,
+  onToggle,
+  onOpen,
+}: {
+  items: ClientCalendarItem[];
+  today: Date;
+  open: boolean;
+  onToggle: () => void;
+  onOpen: (items: ClientCalendarItem[]) => void;
+}) {
+  return (
+    <section>
+      <button
+        type="button"
+        onClick={onToggle}
+        aria-expanded={open}
+        className="flex w-full items-center gap-2 bg-[color:var(--surface-page)] px-4 py-2.5 text-left hover:bg-[color:var(--surface-hover)]"
+      >
+        <CaretRight
+          className={
+            "h-3.5 w-3.5 text-[color:var(--text-tertiary)] transition-transform " +
+            (open ? "rotate-90" : "")
+          }
+          weight="bold"
+          aria-hidden="true"
+        />
+        <h3 className="text-[13px] font-semibold text-[color:var(--text-primary)]">
+          Próximas y en revisión
+        </h3>
+        <span
+          className={
+            "rounded-full border px-2 py-0.5 font-mono text-[10px] tabular-nums " +
+            TONE_CHIP.neutral
+          }
+        >
+          {items.length}
+        </span>
+        <span className="hidden text-[11px] text-[color:var(--text-tertiary)] sm:inline">
+          A tiempo o ya con el revisor. No requieren acción inmediata.
+        </span>
+      </button>
+      {open ? (
+        <ul className="divide-y divide-[color:var(--border-subtle)]">
+          {items.map((item) => (
+            <AgendaRow
+              key={`${item.vendor_id}-${item.requirement_code ?? item.requirement_name}-${item.period_key ?? ""}`}
+              item={item}
+              today={today}
+              onOpen={onOpen}
+            />
+          ))}
+        </ul>
+      ) : null}
+    </section>
+  );
+}
+
+function AgendaRow({
+  item,
+  today,
+  onOpen,
+}: {
+  item: ClientCalendarItem;
+  today: Date;
+  onOpen: (items: ClientCalendarItem[]) => void;
+}) {
+  const InstitutionIcon = INSTITUTION_ICON[item.institution];
+  const institutionLabel =
+    INSTITUTION_LABELS[item.institution] ?? item.institution;
+  const statusDisplay = itemStatusDisplay(item);
+  const overdue = item.risk_level === "overdue";
+
+  return (
+    <li>
+      <button
+        type="button"
+        onClick={() => onOpen([item])}
+        className="flex w-full flex-wrap items-center gap-x-4 gap-y-2 px-4 py-3 text-left transition-colors hover:bg-[color:var(--surface-hover)] focus:outline-none focus-visible:bg-[color:var(--surface-hover)]"
+      >
+        <div className="min-w-[180px] flex-1">
+          <div className="flex items-center gap-2">
+            <span className="truncate text-[13px] font-semibold text-[color:var(--text-primary)]">
+              {item.vendor_name}
+            </span>
+            <Badge variant={statusDisplay.variant}>{statusDisplay.label}</Badge>
+          </div>
+          <div className="mt-1 flex flex-wrap items-center gap-x-2 gap-y-1 text-xs text-[color:var(--text-secondary)]">
+            {InstitutionIcon ? (
+              <InstitutionIcon
+                className="h-3.5 w-3.5 shrink-0 text-[color:var(--text-brand)]"
+                weight="bold"
+                aria-hidden="true"
+              />
+            ) : null}
+            <span className="font-medium text-[color:var(--text-primary)]">
+              {item.requirement_name}
+            </span>
+            <span className="text-[color:var(--text-tertiary)]">·</span>
+            <span>{institutionLabel}</span>
+            <span className="text-[color:var(--text-tertiary)]">·</span>
+            <span className="font-mono text-[10px] text-[color:var(--text-tertiary)]">
+              {item.period_label}
+            </span>
+          </div>
         </div>
-      ))}
-    </div>
+
+        <p
+          className={
+            "min-w-[150px] text-xs font-medium tabular-nums " +
+            (overdue
+              ? "text-[color:var(--status-error-text)]"
+              : "text-[color:var(--text-secondary)]")
+          }
+        >
+          {relativeDeadline(item.deadline_iso, today)}
+        </p>
+
+        <CaretRight
+          className="h-4 w-4 shrink-0 text-[color:var(--text-tertiary)]"
+          weight="bold"
+          aria-hidden="true"
+        />
+      </button>
+    </li>
+  );
+}
+
+// ─── Empty + loading states ─────────────────────────────────────
+
+function AllClearState({ filtered }: { filtered: boolean }) {
+  return (
+    <section className="rounded-lg border border-dashed border-[color:var(--status-success-border)] bg-[color:var(--status-success-bg)] px-6 py-10 text-center">
+      <CheckCircle
+        className="mx-auto h-8 w-8 text-[color:var(--status-success-text)]"
+        weight="fill"
+        aria-hidden="true"
+      />
+      <p className="mt-3 font-mono text-[10px] uppercase tracking-wide text-[color:var(--status-success-text)]">
+        Todo al día
+      </p>
+      <p className="mt-1 text-sm text-[color:var(--text-primary)]">
+        {filtered
+          ? "Ningún proveedor tiene obligaciones vencidas, por corregir o por vencer con los filtros actuales."
+          : "Ningún proveedor de tu portafolio tiene obligaciones vencidas, por corregir o por vencer. Te avisaremos cuando aparezca la próxima."}
+      </p>
+    </section>
+  );
+}
+
+function NoProvidersState() {
+  return (
+    <section className="rounded-lg border border-dashed border-[color:var(--border-default)] bg-[color:var(--surface-raised)] px-6 py-10 text-center">
+      <p className="font-mono text-[10px] uppercase tracking-wide text-[color:var(--text-tertiary)]">
+        Sin proveedores
+      </p>
+      <p className="mt-2 text-sm text-[color:var(--text-primary)]">
+        Aún no tienes proveedores registrados en este cliente.
+      </p>
+    </section>
   );
 }
 
@@ -583,8 +808,12 @@ function CalendarSkeleton() {
   return (
     <div className="space-y-5" aria-busy="true" aria-live="polite">
       <span className="sr-only">Cargando calendario…</span>
-      <Skeleton className="h-12 w-full rounded-md" />
-      <Skeleton className="h-56 w-full rounded-lg" />
+      <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
+        {Array.from({ length: 4 }, (_, i) => (
+          <Skeleton key={i} className="h-20 w-full rounded-lg" />
+        ))}
+      </div>
+      <Skeleton className="h-24 w-full rounded-lg" />
       <Skeleton className="h-80 w-full rounded-lg" />
     </div>
   );

@@ -272,6 +272,17 @@ export type ClientVendorContractDoc = {
   size_bytes: number | null;
 };
 
+/** Per-obligation severity computed by the backend (no longer null).
+ *  Ordered most-severe-first; the agenda bands by it and the matrix
+ *  colors by it. See ``_calendar_item_risk`` in apps/api. */
+export type ClientCalendarRisk =
+  | "overdue"
+  | "action_required"
+  | "due_soon"
+  | "in_review"
+  | "upcoming"
+  | "on_track";
+
 export type ClientCalendarItem = {
   vendor_id: string;
   workspace_id: string;
@@ -285,8 +296,22 @@ export type ClientCalendarItem = {
   status: string;
   submission_id: string | null;
   deadline_iso: string;
-  risk_level: string | null;
+  risk_level: ClientCalendarRisk | null;
   href: string;
+};
+
+/** Per-provider rollup the calendar leads with: which providers put the
+ *  client at risk. ``semaphore_level`` / ``compliance_pct`` match the
+ *  /vendors list exactly (same backend semáforo). Sorted worst-first. */
+export type ClientCalendarProvider = {
+  vendor_id: string;
+  vendor_name: string;
+  semaphore_level: "red" | "yellow" | "green";
+  compliance_pct: number;
+  overdue_count: number;
+  due_soon_count: number;
+  action_required_count: number;
+  next_deadline_iso: string | null;
 };
 
 export type ClientCalendarMonth = {
@@ -307,6 +332,7 @@ export type ClientCalendar = {
   client_id: string;
   year: number;
   months: ClientCalendarMonth[];
+  providers: ClientCalendarProvider[];
 };
 
 export type ClientSubmissionItem = {
