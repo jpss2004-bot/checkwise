@@ -2501,3 +2501,36 @@ def test_users_filter_provider_surfaces_workspace_owner(
         headers=_h(token),
     ).json()
     assert prov_user_id not in {u["user_id"] for u in cadmin["items"]}
+
+
+def test_metadata_catalog_documents_the_rulebook(
+    api_client: TestClient, db_factory
+) -> None:
+    """P2-09: the catalog endpoint exposes the rulebook — document types with
+    their metadata fields, sources, and review flags — for the explainer."""
+    token = _admin_token(api_client, db_factory)
+    resp = api_client.get("/api/v1/admin/metadata/catalog", headers=_h(token))
+    assert resp.status_code == 200, resp.text
+    body = resp.json()
+    assert body["rulebook_title"]
+    assert body["document_types"], "should list document types"
+    # Extraction-method glossary is present and covers the human-review source.
+    assert "human_review" in body["extraction_methods"]
+    # Each doc type carries fields with the expected shape + a bucketed level.
+    first = body["document_types"][0]
+    assert first["code"] and first["name"]
+    assert first["fields"], "a doc type should expose its metadata fields"
+    field = first["fields"][0]
+    assert {
+        "key",
+        "label",
+        "requirement_level",
+        "extraction_methods",
+        "human_review_required",
+    }.issubset(field.keys())
+    assert field["requirement_level"] in (
+        "required",
+        "conditional",
+        "optional",
+        "blank",
+    )

@@ -3722,6 +3722,121 @@ class ClientMetadataResponse(BaseModel):
     documents: list[ClientMetadataDocument]
 
 
+class MetadataCatalogField(BaseModel):
+    key: str
+    label: str
+    requirement_level: str
+    """How THIS document type uses the field: required / conditional / optional."""
+    description: str
+    extraction_methods: list[str]
+    human_review_required: bool
+
+
+class MetadataCatalogDocType(BaseModel):
+    code: str
+    name: str
+    institution: str
+    frequency: str
+    hierarchy: str
+    category: str
+    human_review_required: bool
+    legal_approval_allowed: bool
+    fields: list[MetadataCatalogField]
+
+
+class MetadataCatalogResponse(BaseModel):
+    rulebook_title: str
+    rulebook_version: str
+    rulebook_source: str
+    extraction_methods: dict[str, str]
+    """method code → plain-Spanish description of how that source works."""
+    document_types: list[MetadataCatalogDocType]
+
+
+_EXTRACTION_METHOD_LABELS_ES: dict[str, str] = {
+    "context": "Contexto — derivado del cliente/proveedor/período del expediente.",
+    "deterministic": "Determinista — calculado por reglas fijas (nomenclatura, catálogo).",
+    "pdf_text": "Texto del PDF — leído de la capa de texto del documento.",
+    "ocr": "OCR — extraído por reconocimiento óptico de un PDF escaneado.",
+    "ai_assisted": "Asistido por IA — propuesto por el modelo de comprensión; requiere revisión.",
+    "human_review": "Revisión humana — capturado o confirmado por un revisor.",
+}
+
+
+@router.get("/metadata/catalog", response_model=MetadataCatalogResponse)
+def get_metadata_catalog(
+    db: DbSession,  # noqa: ARG001 - parity with sibling endpoints
+    current: PlatformUser,
+) -> MetadataCatalogResponse:
+    """Operational documentation of the metadata rulebook (P2-09).
+
+    Reads the single source of truth (core/metadata_rules.py) and explains
+    which document types CheckWise tracks, the metadata fields extracted per
+    type, how each field is sourced (extraction method), and whether it needs
+    human review before it's trustworthy. The client portal (/client/metadata)
+    renders the *validated* projection of this data; this surface documents the
+    model behind it so an admin can answer "what metadata exists and where is
+    it used." Live per-field confidence/review-status is a per-document signal
+    shown on the per-client metadata view — not in this static catalog.
+    """
+    _ = current
+    from app.core.metadata_rules import (
+        RULEBOOK_SOURCE,
+        RULEBOOK_TITLE,
+        RULEBOOK_VERSION,
+        all_metadata_rules,
+        field_definition,
+    )
+
+    doc_types: list[MetadataCatalogDocType] = []
+    for rule in all_metadata_rules(include_annexes=False):
+        fields: list[MetadataCatalogField] = []
+        # Order + level reflect how THIS doc type uses each field, not the
+        # field's intrinsic default — a field can be required for one type and
+        # optional for another.
+        for level, keys in (
+            ("required", rule.required_field_keys),
+            ("conditional", rule.conditional_field_keys),
+            ("optional", rule.optional_field_keys),
+        ):
+            for key in keys:
+                try:
+                    fd = field_definition(key)
+                except KeyError:
+                    continue
+                fields.append(
+                    MetadataCatalogField(
+                        key=fd.key,
+                        label=fd.label,
+                        requirement_level=level,
+                        description=fd.description,
+                        extraction_methods=list(fd.extraction_methods),
+                        human_review_required=fd.human_review_required,
+                    )
+                )
+        doc_types.append(
+            MetadataCatalogDocType(
+                code=rule.code,
+                name=rule.name,
+                institution=str(rule.institution),
+                frequency=str(rule.frequency),
+                hierarchy=str(rule.hierarchy),
+                category=str(rule.category),
+                human_review_required=rule.human_review_required,
+                legal_approval_allowed=rule.legal_approval_allowed,
+                fields=fields,
+            )
+        )
+
+    return MetadataCatalogResponse(
+        rulebook_title=RULEBOOK_TITLE,
+        rulebook_version=RULEBOOK_VERSION,
+        rulebook_source=RULEBOOK_SOURCE,
+        extraction_methods=_EXTRACTION_METHOD_LABELS_ES,
+        document_types=doc_types,
+    )
+
+
 @router.get("/metadata-exports", response_model=MetadataExportListResponse)
 def list_metadata_exports(
     db: DbSession,

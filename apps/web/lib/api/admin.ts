@@ -98,6 +98,45 @@ export async function updateClient(
   });
 }
 
+// ---------------------------------------------------------------------------
+// Metadata rulebook catalog (P2-09) — operational documentation surface
+// ---------------------------------------------------------------------------
+
+export type MetadataCatalogField = {
+  key: string;
+  label: string;
+  /** How THIS doc type uses the field: required / conditional / optional. */
+  requirement_level: string;
+  description: string;
+  extraction_methods: string[];
+  human_review_required: boolean;
+};
+
+export type MetadataCatalogDocType = {
+  code: string;
+  name: string;
+  institution: string;
+  frequency: string;
+  hierarchy: string;
+  category: string;
+  human_review_required: boolean;
+  legal_approval_allowed: boolean;
+  fields: MetadataCatalogField[];
+};
+
+export type MetadataCatalog = {
+  rulebook_title: string;
+  rulebook_version: string;
+  rulebook_source: string;
+  /** extraction-method code → plain-Spanish description. */
+  extraction_methods: Record<string, string>;
+  document_types: MetadataCatalogDocType[];
+};
+
+export async function getMetadataCatalog(): Promise<MetadataCatalog> {
+  return fetchJson("/api/v1/admin/metadata/catalog");
+}
+
 /**
  * Item 8 v2 — unified user provisioning. Replaces the older
  * createClient + provisionClient pair. One endpoint mints a temp
