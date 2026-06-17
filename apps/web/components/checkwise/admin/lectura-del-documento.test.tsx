@@ -125,6 +125,49 @@ describe("LecturaDelDocumento", () => {
     ).toBeInTheDocument();
   });
 
+  it("renders the comprehension obligation verdict, reasoning and key facts", () => {
+    const detail = makeDetail({
+      shadowOverride: {
+        comprehension: {
+          purpose: "Opinión 32-D del proveedor.",
+          key_facts: [{ label: "Sentido de la opinión", value: "Negativo" }],
+          status_assessment: {
+            validity: "valid",
+            currency_ok: true,
+            reasoning: null,
+          },
+          obligation_satisfaction: {
+            verdict: "not_satisfied",
+            confidence: 0.9,
+            reasoning: "Una opinión negativa indica incumplimiento.",
+          },
+          discrepancies: [
+            {
+              issue: "Sentido negativo",
+              severity: "high",
+              evidence: "El documento indica 'Negativo'.",
+            },
+          ],
+        },
+      },
+    });
+    render(<LecturaDelDocumento detail={detail} />);
+    expect(screen.getByText("No cumple la obligación")).toBeInTheDocument();
+    expect(
+      screen.getByText("Una opinión negativa indica incumplimiento."),
+    ).toBeInTheDocument();
+    expect(screen.getByText("Sentido de la opinión")).toBeInTheDocument();
+    expect(screen.getByText("Negativo")).toBeInTheDocument();
+    expect(screen.getByText("Sentido negativo")).toBeInTheDocument();
+  });
+
+  it("omits the comprehension section when the deep tier did not run", () => {
+    render(<LecturaDelDocumento detail={makeDetail()} />);
+    expect(
+      screen.queryByLabelText("Comprensión del documento"),
+    ).not.toBeInTheDocument();
+  });
+
   it("shows the mismatch verdict with the AI's reason verbatim", () => {
     const detail = makeDetail({
       shadowSignalsOverride: {

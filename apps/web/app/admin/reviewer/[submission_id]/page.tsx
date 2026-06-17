@@ -23,6 +23,7 @@ import {
   SubmissionDetailSkeleton,
 } from "@/components/checkwise/portal/state-surfaces";
 import { LecturaDelDocumento } from "@/components/checkwise/admin/lectura-del-documento";
+import { ExpedienteAssessmentCard } from "@/components/checkwise/admin/expediente-assessment-card";
 import { SubmissionTimeline } from "@/components/checkwise/portal/submission-timeline";
 import { FeedbackLauncher } from "@/components/feedback/feedback-launcher";
 import { Badge } from "@/components/ui/badge";
@@ -283,6 +284,7 @@ export default function ReviewerSubmissionPage({ params }: PageProps) {
             <ReviewerSubmissionPreview detail={detail} session={session} />
             <LineageStrip detail={detail} returnToHref={returnToHref} />
             <LecturaDelDocumento detail={detail} />
+            <ExpedienteAssessmentCard detail={detail} />
             <ProviderCard detail={detail} />
             <PreviousAttemptsCard detail={detail} returnToHref={returnToHref} />
             <SubmissionTimeline detail={detail} audience="admin" />

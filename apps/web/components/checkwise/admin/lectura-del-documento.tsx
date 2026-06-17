@@ -21,6 +21,8 @@ import { validationLabel } from "@/lib/constants/validation";
 import { cn } from "@/lib/utils";
 import type { ConfidenceLevel } from "@/lib/types";
 import type {
+  DocumentComprehension,
+  ObligationVerdict,
   ShadowAnalysisPayload,
   ShadowAnalysisSignals,
   SubmissionDetail,
@@ -299,6 +301,7 @@ export function LecturaDelDocumento({
   const payload = detail.shadow_analysis ?? null;
   const reasons = detail.reasons ?? [];
   const mismatchReason = detail.document?.mismatch_reason ?? null;
+  const comprehension = payload?.shadow.comprehension ?? null;
   const [signalsOpen, setSignalsOpen] = React.useState(false);
   const [tecnicosOpen, setTecnicosOpen] = React.useState(false);
 
@@ -324,7 +327,10 @@ export function LecturaDelDocumento({
   // there's nothing to show. Hide the card entirely (matches the
   // pre-Phase-2 "old submissions" decision).
   const hasAnything =
-    verdict !== null || reasons.length > 0 || mismatchReason !== null;
+    verdict !== null ||
+    reasons.length > 0 ||
+    mismatchReason !== null ||
+    comprehension !== null;
   if (!hasAnything) return null;
 
   return (
@@ -350,6 +356,10 @@ export function LecturaDelDocumento({
       </CardHeader>
       <CardContent className="space-y-4">
         {verdict ? <VerdictRow verdict={verdict} /> : null}
+
+        {comprehension ? (
+          <ComprehensionSection comprehension={comprehension} />
+        ) : null}
 
         {payload?.shadow.signals || payload?.heuristic.signals ? (
           <FactsTable
@@ -390,6 +400,125 @@ export function LecturaDelDocumento({
 // ─────────────────────────────────────────────────────────────────────
 // Subcomponents
 // ─────────────────────────────────────────────────────────────────────
+
+const OBLIGATION_META: Record<
+  ObligationVerdict,
+  {
+    label: string;
+    icon: typeof CheckCircle;
+    tone: "ok" | "attention" | "error" | "neutral";
+  }
+> = {
+  satisfied: { label: "Cumple la obligación", icon: CheckCircle, tone: "ok" },
+  partial: { label: "Cumple parcialmente", icon: WarningCircle, tone: "attention" },
+  not_satisfied: { label: "No cumple la obligación", icon: XCircle, tone: "error" },
+  indeterminate: { label: "No se pudo determinar", icon: Info, tone: "neutral" },
+};
+
+function toneBoxClasses(tone: "ok" | "attention" | "error" | "neutral"): string {
+  switch (tone) {
+    case "ok":
+      return "border-[color:var(--status-success-border,transparent)] bg-[color:var(--status-success-bg,transparent)]";
+    case "attention":
+      return "border-[color:var(--status-warning-border,transparent)] bg-[color:var(--status-warning-bg,transparent)]";
+    case "error":
+      return "border-[color:var(--status-error-border,transparent)] bg-[color:var(--status-error-bg,transparent)]";
+    default:
+      return "border-[color:var(--border-subtle)] bg-[color:var(--bg-muted)]";
+  }
+}
+
+/**
+ * Phase 1 comprehension — what the deep tier understood about THIS
+ * document: whether it satisfies the obligation (the headline, since a
+ * correctly-typed document can still fail the obligation — e.g. an
+ * Opinión 32-D that is "Negativo"), the key facts, validity, and any
+ * contextual discrepancies. Only rendered when the deep tier ran.
+ */
+function ComprehensionSection({
+  comprehension,
+}: {
+  comprehension: DocumentComprehension;
+}) {
+  const ob = comprehension.obligation_satisfaction;
+  const meta = OBLIGATION_META[ob.verdict] ?? OBLIGATION_META.indeterminate;
+  const Icon = meta.icon;
+  const status = comprehension.status_assessment;
+  const showStatusWarning =
+    status.validity === "expired" || status.currency_ok === false;
+  return (
+    <section
+      aria-label="Comprensión del documento"
+      data-internal="comprehension"
+      className={cn("space-y-3 rounded-md border px-4 py-3", toneBoxClasses(meta.tone))}
+    >
+      <div className="flex items-start gap-3">
+        <Icon
+          className="mt-0.5 h-5 w-5 shrink-0 text-[color:var(--text-secondary)]"
+          weight="regular"
+          aria-hidden={true}
+        />
+        <div className="min-w-0 space-y-1">
+          <p className="text-sm font-medium leading-snug text-[color:var(--text-primary)]">
+            {meta.label}
+          </p>
+          {ob.reasoning ? (
+            <p className="text-xs leading-snug text-[color:var(--text-secondary)]">
+              {ob.reasoning}
+            </p>
+          ) : null}
+        </div>
+      </div>
+
+      {comprehension.purpose ? (
+        <p className="text-xs leading-snug text-[color:var(--text-tertiary)]">
+          {comprehension.purpose}
+        </p>
+      ) : null}
+
+      {comprehension.key_facts.length > 0 ? (
+        <dl className="grid gap-x-3 gap-y-1 text-xs sm:grid-cols-[180px_1fr]">
+          {comprehension.key_facts.map((fact, i) => (
+            <React.Fragment key={`${fact.label}-${i}`}>
+              <dt className="text-[color:var(--text-tertiary)]">{fact.label}</dt>
+              <dd className="break-words font-medium text-[color:var(--text-primary)]">
+                {fact.value}
+              </dd>
+            </React.Fragment>
+          ))}
+        </dl>
+      ) : null}
+
+      {showStatusWarning ? (
+        <p className="text-xs leading-snug text-[color:var(--status-warning-text,inherit)]">
+          {status.validity === "expired" ? "Vigencia vencida. " : ""}
+          {status.currency_ok === false
+            ? "Puede no ser suficientemente reciente para el periodo. "
+            : ""}
+          {status.reasoning ?? ""}
+        </p>
+      ) : null}
+
+      {comprehension.discrepancies.length > 0 ? (
+        <ul className="space-y-1">
+          {comprehension.discrepancies.map((d, i) => (
+            <li
+              key={`${d.issue}-${i}`}
+              className="flex items-start gap-1.5 text-xs text-[color:var(--text-secondary)]"
+            >
+              <WarningCircle
+                className="mt-0.5 h-3.5 w-3.5 shrink-0 text-[color:var(--status-warning-text,inherit)]"
+                weight="fill"
+                aria-hidden={true}
+              />
+              <span className="break-words">{d.issue}</span>
+            </li>
+          ))}
+        </ul>
+      ) : null}
+    </section>
+  );
+}
 
 function VerdictRow({ verdict }: { verdict: Verdict }) {
   const Icon = verdict.icon;

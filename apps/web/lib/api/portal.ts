@@ -430,7 +430,60 @@ export type ShadowAnalysisPayload = {
     error: string | null;
     confidence: number | null;
     signals: ShadowAnalysisSignals | null;
+    /** Phase 1 — deep-tier comprehension; null on the triage tier / legacy rows. */
+    comprehension?: DocumentComprehension | null;
   };
+};
+
+export type ObligationVerdict =
+  | "satisfied"
+  | "partial"
+  | "not_satisfied"
+  | "indeterminate";
+
+export type DocumentValidity = "valid" | "expired" | "indeterminate";
+
+export type FindingSeverity = "info" | "low" | "medium" | "high";
+
+/** Phase 1 — what the deep tier understood about ONE document: what it
+ *  proves, whether it is current, and whether it satisfies the obligation. */
+export type DocumentComprehension = {
+  purpose: string | null;
+  key_facts: { label: string; value: string }[];
+  status_assessment: {
+    validity: DocumentValidity;
+    currency_ok: boolean | null;
+    reasoning: string | null;
+  };
+  obligation_satisfaction: {
+    verdict: ObligationVerdict;
+    confidence: number | null;
+    reasoning: string | null;
+  };
+  discrepancies: { issue: string; severity: FindingSeverity; evidence: string }[];
+};
+
+export type ExpedienteCoherence =
+  | "coherent"
+  | "minor_issues"
+  | "incoherent"
+  | "indeterminate";
+
+/** Phase 2 — situational assessment across a provider's whole document set
+ *  for a period (cross-document findings the per-document card cannot show). */
+export type ExpedienteAssessmentPayload = {
+  coherence: ExpedienteCoherence | null;
+  summary_for_reviewer: string | null;
+  findings: {
+    code: string;
+    severity: FindingSeverity;
+    detail_es: string;
+    evidence: string;
+  }[];
+  coverage_gaps: { requirement_code: string; detail_es: string }[];
+  document_count: number;
+  provider_id: string | null;
+  completed_at: string | null;
 };
 
 export type SubmissionDetail = {
@@ -462,6 +515,10 @@ export type SubmissionDetail = {
   /** Phase 2 (Claude shadow) — admin-only comparison block. Omitted
    *  on the provider-facing endpoint. */
   shadow_analysis?: ShadowAnalysisPayload | null;
+  /** Phase 2/3 — expediente-level situational assessment for this
+   *  submission's (client, vendor, period). Admin-only; null until the
+   *  situational pass runs for the scope. */
+  expediente_assessment?: ExpedienteAssessmentPayload | null;
 };
 
 export async function getSubmissionDetail(
