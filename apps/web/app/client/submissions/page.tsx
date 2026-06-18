@@ -20,6 +20,7 @@ import {
 } from "@/lib/api/client";
 import { INSTITUTION_LABELS } from "@/lib/api/portal";
 import { statusLabel, statusVariant } from "@/lib/constants/statuses";
+import { formatDateTime } from "@/lib/format/datetime";
 
 // Filter dropdown order matches the reviewer workflow: actionable first,
 // then resolved. Labels come from the canonical statusLabel() so this
@@ -249,7 +250,7 @@ const SUBMISSIONS_COLUMNS: DataTableColumn<ClientSubmissionItem>[] = [
     width: "140px",
     cell: (row) => (
       <span className="font-mono text-[11px] tabular-nums text-[color:var(--text-secondary)]">
-        {new Date(row.submitted_at).toLocaleString("es-MX", {
+        {formatDateTime(row.submitted_at, {
           day: "2-digit",
           month: "short",
           hour: "2-digit",

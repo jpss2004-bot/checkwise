@@ -39,6 +39,7 @@ import {
   updateUserStatus,
 } from "@/lib/api/admin";
 import { roleLabel } from "@/lib/constants/labels";
+import { formatDateTime } from "@/lib/format/datetime";
 
 /**
  * /platform/users — listing + lifecycle surface for existing users
@@ -85,13 +86,11 @@ function apiErrorMessage(err: unknown, fallback: string): string {
 }
 
 function formatDate(iso: string): string {
-  const date = new Date(iso);
-  if (Number.isNaN(date.getTime())) return iso;
-  return date.toLocaleDateString("es-MX", {
-    day: "2-digit",
-    month: "short",
-    year: "numeric",
-  });
+  return formatDateTime(
+    iso,
+    { day: "2-digit", month: "short", year: "numeric" },
+    iso,
+  );
 }
 
 /** Same humanisation ladder the portal dashboard uses for recency. */
