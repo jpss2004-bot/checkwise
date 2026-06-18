@@ -9,6 +9,7 @@
  */
 
 import { readAdminSession } from "@/lib/session/admin";
+import { dedupeRead, invalidateRead } from "@/lib/api/request-cache";
 
 const API_BASE_URL =
   process.env.NEXT_PUBLIC_API_BASE_URL ?? "http://127.0.0.1:8000";
@@ -469,14 +470,28 @@ export type ClientMetadataResponse = {
 // ---------------------------------------------------------------------------
 
 export async function getClientMe(): Promise<ClientMe> {
-  return fetchJson<ClientMe>("/api/v1/client/me");
+  // The shell's consent gate (re-runs on every navigation) and the dashboard
+  // both read /me. Coalesce concurrent calls and serve a short TTL so moving
+  // around the portal doesn't re-hit the network each time.
+  // ``acceptClientLegalConsent`` invalidates this key so a freshly granted
+  // consent is observed immediately by the gate (no stale "blocked" loop).
+  return dedupeRead(
+    "client:me",
+    () => fetchJson<ClientMe>("/api/v1/client/me"),
+    30_000,
+  );
 }
 
 /** Record the client_admin's acceptance of the current legal package. */
 export async function acceptClientLegalConsent(): Promise<ClientLegalConsentResponse> {
-  return fetchJson<ClientLegalConsentResponse>("/api/v1/client/legal-consent", {
-    method: "POST",
-  });
+  const result = await fetchJson<ClientLegalConsentResponse>(
+    "/api/v1/client/legal-consent",
+    { method: "POST" },
+  );
+  // The consent gate re-reads /me after acceptance; drop the cached identity
+  // so it observes the new consent state instead of the pre-grant snapshot.
+  invalidateRead("client:me");
+  return result;
 }
 
 export async function getClientOverview(params?: {
@@ -589,8 +604,11 @@ export async function listClientActivity(params?: {
 export async function getClientNotificationSummary(params?: {
   client_id?: string;
 }): Promise<ClientNotificationSummary> {
-  return fetchJson<ClientNotificationSummary>(
-    `/api/v1/client/notifications/summary${qs(params)}`,
+  const path = `/api/v1/client/notifications/summary${qs(params)}`;
+  // Coalesce the shell + any concurrent page read of the same summary. No TTL:
+  // the bell is polled, so each interval tick should fetch fresh.
+  return dedupeRead(`GET ${path}`, () =>
+    fetchJson<ClientNotificationSummary>(path),
   );
 }
 
