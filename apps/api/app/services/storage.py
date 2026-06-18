@@ -419,11 +419,19 @@ def _build_s3_client(
     # integrity checksums. ``when_required`` keeps the checksum logic
     # only for operations that mandate it (e.g. multipart finalize),
     # which is what R2 expects.
+    # Bound every R2 call. Without explicit timeouts botocore defaults to ~60s
+    # per attempt × 3 retries, so a hung/slow endpoint could pin a worker for
+    # ~3 minutes on the metadata re-materialize and document-stream paths — and
+    # the DB statement_timeout does NOT cover network I/O (perf audit P2-5).
+    # ``read_timeout`` is the max gap between bytes, so a generous 60s keeps
+    # legitimate large-object streams working while still failing a dead socket.
     config = Config(
         signature_version="s3v4",
         request_checksum_calculation="when_required",
         response_checksum_validation="when_required",
         retries={"max_attempts": 3, "mode": "standard"},
+        connect_timeout=10,
+        read_timeout=60,
     )
     return boto3.client(
         "s3",

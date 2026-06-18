@@ -2,11 +2,13 @@
 
 from __future__ import annotations
 
+import logging
 import os
 import re
 import tempfile
 import unicodedata
 import zipfile
+from collections import OrderedDict
 from dataclasses import dataclass
 from pathlib import Path
 from xml.etree import ElementTree as ET
@@ -16,11 +18,24 @@ from fastapi import HTTPException, status
 from app.core.config import settings
 from app.models import Client
 
+logger = logging.getLogger(__name__)
+
 
 @dataclass(frozen=True)
 class MetadataSheetPreview:
     name: str
     rows: list[list[str]]
+
+
+# perf audit P0-1 — the master workbook was unzipped + XML-parsed synchronously
+# on every /client/metadata (and /admin) load, re-parsing identical bytes each
+# time. Cache the parsed preview keyed by the file's identity (path + mtime +
+# size): a re-upload changes mtime/size and busts the entry automatically. The
+# cache is intentionally tiny and process-local — a bounded LRU, no TTL needed.
+_PREVIEW_CACHE_MAX_ENTRIES = 32
+_preview_cache: OrderedDict[
+    tuple[str, int, int, int, int], list[MetadataSheetPreview]
+] = OrderedDict()
 
 
 def client_master_file_path(client: Client) -> Path:
@@ -46,30 +61,59 @@ def read_xlsx_preview(
     path: Path, *, max_rows_per_sheet: int = 40, max_columns: int = 12
 ) -> list[MetadataSheetPreview]:
     try:
-        with zipfile.ZipFile(path, "r") as archive:
-            workbook_xml = archive.read("xl/workbook.xml")
-            sheet_names = _xlsx_sheet_names(workbook_xml)
-            previews = []
-            for index, name in enumerate(sheet_names, start=1):
-                worksheet_path = f"xl/worksheets/sheet{index}.xml"
-                if worksheet_path not in archive.namelist():
-                    continue
-                previews.append(
-                    MetadataSheetPreview(
-                        name=name,
-                        rows=_xlsx_sheet_rows(
-                            archive.read(worksheet_path),
-                            max_rows=max_rows_per_sheet,
-                            max_columns=max_columns,
-                        ),
-                    )
-                )
-            return previews
-    except (KeyError, zipfile.BadZipFile, ET.ParseError) as exc:
+        stat = path.stat()
+        cache_key = (
+            str(path),
+            stat.st_mtime_ns,
+            stat.st_size,
+            max_rows_per_sheet,
+            max_columns,
+        )
+        cached = _preview_cache.get(cache_key)
+        if cached is not None:
+            _preview_cache.move_to_end(cache_key)  # LRU bump
+            return cached
+        previews = _parse_xlsx_preview(
+            path, max_rows_per_sheet=max_rows_per_sheet, max_columns=max_columns
+        )
+        _preview_cache[cache_key] = previews
+        _preview_cache.move_to_end(cache_key)
+        while len(_preview_cache) > _PREVIEW_CACHE_MAX_ENTRIES:
+            _preview_cache.popitem(last=False)
+        return previews
+    except (KeyError, zipfile.BadZipFile, ET.ParseError, OSError) as exc:
+        # P3-6 — never echo parser internals (zip/XML/path fragments) across the
+        # trust boundary; the workbook is server-generated, so the client only
+        # needs a static message. The detail is logged server-side instead.
+        logger.warning("metadata xlsx preview failed for %s: %s", path, exc)
         raise HTTPException(
             status.HTTP_422_UNPROCESSABLE_ENTITY,
-            detail=f"No se pudo leer el XLSX de metadata: {exc}",
+            detail="No se pudo leer el archivo de metadata.",
         ) from exc
+
+
+def _parse_xlsx_preview(
+    path: Path, *, max_rows_per_sheet: int, max_columns: int
+) -> list[MetadataSheetPreview]:
+    with zipfile.ZipFile(path, "r") as archive:
+        workbook_xml = archive.read("xl/workbook.xml")
+        sheet_names = _xlsx_sheet_names(workbook_xml)
+        previews = []
+        for index, name in enumerate(sheet_names, start=1):
+            worksheet_path = f"xl/worksheets/sheet{index}.xml"
+            if worksheet_path not in archive.namelist():
+                continue
+            previews.append(
+                MetadataSheetPreview(
+                    name=name,
+                    rows=_xlsx_sheet_rows(
+                        archive.read(worksheet_path),
+                        max_rows=max_rows_per_sheet,
+                        max_columns=max_columns,
+                    ),
+                )
+            )
+        return previews
 
 
 def _export_slug(value: str) -> str:

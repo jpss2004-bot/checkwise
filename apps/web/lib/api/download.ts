@@ -16,6 +16,14 @@
 
 import { readAdminSession } from "@/lib/session/admin";
 
+/**
+ * File downloads (ZIPs, large PDFs) can legitimately take longer than a JSON
+ * read, so they get their own, more generous ceiling — but they MUST still be
+ * bounded. Without it a stalled R2/zip stream leaves the "Descargando…" button
+ * spinning forever with no recovery (perf audit P1-5).
+ */
+const DOWNLOAD_TIMEOUT_MS = 120_000;
+
 export class DownloadError extends Error {
   status: number;
   constructor(status: number, message: string) {
@@ -53,14 +61,25 @@ export async function downloadAuthenticatedFile(
   if (!session?.access_token) {
     throw new DownloadError(401, "No active staff session.");
   }
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => controller.abort(), DOWNLOAD_TIMEOUT_MS);
   let response: Response;
   try {
     response = await fetch(url, {
       headers: { Authorization: `Bearer ${session.access_token}` },
       credentials: "include",
+      signal: controller.signal,
     });
   } catch {
+    if (controller.signal.aborted) {
+      throw new DownloadError(
+        0,
+        "La descarga tardó demasiado. Inténtalo de nuevo.",
+      );
+    }
     throw new DownloadError(0, "No pudimos contactar al servidor.");
+  } finally {
+    clearTimeout(timeoutId);
   }
   if (!response.ok) {
     const raw = await response.text().catch(() => "");

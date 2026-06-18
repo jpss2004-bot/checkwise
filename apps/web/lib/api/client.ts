@@ -17,6 +17,10 @@ const API_BASE_URL =
 // Default per-request timeout so a stalled API surfaces a clear error
 // instead of an infinite spinner (audit 2026-06-09).
 const REQUEST_TIMEOUT_MS = 30_000;
+// File/blob downloads (metadata XLSX, document PDFs) bypass fetchJson, so they
+// need their own abort ceiling — without it a stalled stream hangs the button
+// indefinitely (perf audit P1-5). More generous than JSON since files are bigger.
+const DOWNLOAD_TIMEOUT_MS = 120_000;
 
 export class ClientApiError extends Error {
   status: number;
@@ -654,14 +658,30 @@ export async function downloadClientMetadata(params?: {
   if (!session?.access_token) {
     throw new ClientApiError(401, "No active staff session.");
   }
-  const response = await fetch(
-    `${API_BASE_URL}/api/v1/client/metadata/download${qs(params)}`,
-    {
-      headers: {
-        Authorization: `Bearer ${session.access_token}`,
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => controller.abort(), DOWNLOAD_TIMEOUT_MS);
+  let response: Response;
+  try {
+    response = await fetch(
+      `${API_BASE_URL}/api/v1/client/metadata/download${qs(params)}`,
+      {
+        headers: {
+          Authorization: `Bearer ${session.access_token}`,
+        },
+        signal: controller.signal,
       },
-    },
-  );
+    );
+  } catch (err) {
+    if (controller.signal.aborted) {
+      throw new ClientApiError(
+        0,
+        "La descarga tardó demasiado. Inténtalo de nuevo.",
+      );
+    }
+    throw err;
+  } finally {
+    clearTimeout(timeoutId);
+  }
   if (!response.ok) {
     const detail = await response.text().catch(() => "");
     throw new ClientApiError(response.status, detail || response.statusText);
@@ -730,13 +750,29 @@ export async function fetchClientSubmissionDocumentBlob(
   }
   const headers = new Headers();
   headers.set("Authorization", `Bearer ${session.access_token}`);
-  const response = await fetch(
-    clientSubmissionDocumentUrl(submissionId, { ...opts, proxy: true }),
-    {
-      headers,
-      credentials: "include",
-    },
-  );
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => controller.abort(), DOWNLOAD_TIMEOUT_MS);
+  let response: Response;
+  try {
+    response = await fetch(
+      clientSubmissionDocumentUrl(submissionId, { ...opts, proxy: true }),
+      {
+        headers,
+        credentials: "include",
+        signal: controller.signal,
+      },
+    );
+  } catch (err) {
+    if (controller.signal.aborted) {
+      throw new ClientApiError(
+        0,
+        "La descarga tardó demasiado. Inténtalo de nuevo.",
+      );
+    }
+    throw err;
+  } finally {
+    clearTimeout(timeoutId);
+  }
   if (!response.ok) {
     const detail = await response.text().catch(() => "");
     throw new ClientApiError(response.status, detail || response.statusText);
