@@ -10,14 +10,23 @@ Detection rules:
                   (matches both ``Vendor.rfc`` and ``Client.rfc``).
     * Periodo  — ``YYYY-Mxx`` / ``YYYY-Bx`` / ``YYYY-Qx`` / ``YYYY-A``
                   (matches the denormalized ``Submission.period_key``).
-    * Folio    — anything else, treated as a case-insensitive substring
-                  match against ``Contract.repse_folio`` plus the
-                  submission ID prefix so reviewers can paste a
-                  partial UUID from a ticket.
+    * Name     — free text that reads like a company name (has a space
+                  or no digit): accent-insensitive substring match on
+                  ``Vendor.name`` / ``Client.name``. Deduplicated to one
+                  row per vendor so typing a provider name returns a
+                  clean provider list, not one row per submission. This
+                  is the most common query for a cliente corporativo
+                  monitoring a portfolio of providers.
+    * Folio    — anything else (a folio code / UUID fragment), treated
+                  as a case-insensitive substring match against
+                  ``Contract.repse_folio`` plus the submission ID prefix
+                  so reviewers can paste a partial UUID from a ticket.
 
-The point of detecting first (rather than ORing every column) is so a
-short string like "AB" doesn't accidentally match thousands of RFCs;
-folio queries already cap themselves with ILIKE substrings.
+Both the name and folio paths search names AND folio/UUID, so a
+misclassified query degrades to a broader substring match rather than
+to zero results. The point of detecting first (rather than ORing every
+column blindly) is so a short string like "AB" doesn't accidentally
+match thousands of RFCs, and so name matches can be deduped per vendor.
 """
 
 from __future__ import annotations
@@ -29,6 +38,7 @@ from typing import Literal
 from sqlalchemy import or_, select
 from sqlalchemy.orm import Session
 
+from app.core.text_search import accent_ci_contains
 from app.models import (
     Client,
     Contract,
@@ -55,16 +65,22 @@ _PERIOD_RE = re.compile(
     r"^\d{4}-(?:M\d{2}|B[1-6]|Q[1-3]|A|\d{1,2})$", re.IGNORECASE
 )
 
-QueryType = Literal["rfc", "period", "folio"]
+# A REPSE folio / UUID fragment is a single token that contains a digit;
+# a provider/client name has a space or is purely alphabetic. Used to
+# route free text to the name path (the common case) vs the folio path.
+_HAS_DIGIT_RE = re.compile(r"\d")
+
+QueryType = Literal["rfc", "period", "folio", "name"]
 
 
 def detect_query_type(query: str) -> QueryType:
     """Return the detected query type from the input shape.
 
-    Falls back to ``"folio"`` whenever the input doesn't match the RFC
-    or period regex — the folio path runs as a permissive ILIKE so a
-    miscategorised query degrades to a substring search rather than to
-    no results.
+    Free text that reads like a company name (has a space or no digit)
+    routes to ``"name"``; everything else that isn't an RFC/period falls
+    to ``"folio"``. Both name and folio paths search names AND
+    folio/UUID, so a miscategorised query degrades to a broader
+    substring search rather than to no results.
     """
 
     q = query.strip()
@@ -74,6 +90,8 @@ def detect_query_type(query: str) -> QueryType:
         return "rfc"
     if _PERIOD_RE.match(q):
         return "period"
+    if (" " in q) or (not _HAS_DIGIT_RE.search(q)):
+        return "name"
     return "folio"
 
 
@@ -150,6 +168,13 @@ def search_submissions(
         return []
 
     qtype = detect_query_type(query)
+    dialect = db.get_bind().dialect.name
+    term = query.strip()
+
+    # Name queries dedupe to one row per vendor below, so over-fetch a
+    # generous window first — otherwise a single chatty provider's recent
+    # submissions could fill ``limit`` and crowd out every other match.
+    fetch_limit = limit if qtype != "name" else min(max(limit * 10, 200), 1000)
 
     stmt = (
         select(Submission, Vendor, Client, Period, Institution, Requirement, Contract)
@@ -160,22 +185,24 @@ def search_submissions(
         .join(Requirement, Submission.requirement_id == Requirement.id)
         .outerjoin(Contract, Submission.contract_id == Contract.id)
         .order_by(Submission.created_at.desc())
-        .limit(limit)
+        .limit(fetch_limit)
     )
 
     if qtype == "rfc":
-        rfc = query.strip().upper()
+        rfc = term.upper()
         stmt = stmt.where(or_(Vendor.rfc == rfc, Client.rfc == rfc))
     elif qtype == "period":
         period_key = _normalize_period(query)
         stmt = stmt.where(Submission.period_key == period_key)
-    else:  # folio
-        like = f"%{query.strip()}%"
-        # Limit folio search to fields a public-facing user is plausibly
-        # quoting from. Submission.id ILIKE keeps reviewers' "paste the
-        # ticket UUID" workflow working without a separate lookup.
+    else:  # name or folio — search provider/client names AND folio/UUID
+        like = f"%{term}%"
+        # Accent-insensitive name match (Spanish diacritics) plus the
+        # folio + submission-id substrings a user might paste. Searching
+        # both keeps a misclassified query from returning nothing.
         stmt = stmt.where(
             or_(
+                accent_ci_contains(dialect, Vendor.name, term),
+                accent_ci_contains(dialect, Client.name, term),
                 Contract.repse_folio.ilike(like),
                 Submission.id.ilike(like),
             )
@@ -213,4 +240,21 @@ def search_submissions(
                 created_at=sub.created_at.isoformat(),
             )
         )
+
+    # For a name search the user wants the matching PROVIDERS, not every
+    # submission they ever filed. Collapse to one (most-recent) hit per
+    # vendor — rows are already ordered created_at desc — and re-apply
+    # the caller's ``limit`` to the deduplicated set.
+    if qtype == "name":
+        seen: set[str] = set()
+        deduped: list[SearchHit] = []
+        for hit in hits:
+            if hit.vendor_id in seen:
+                continue
+            seen.add(hit.vendor_id)
+            deduped.append(hit)
+            if len(deduped) >= limit:
+                break
+        return deduped
+
     return hits
