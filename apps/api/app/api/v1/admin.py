@@ -3154,6 +3154,18 @@ class AdminCalendarMonthForecast(BaseModel):
     by_institution: dict[str, int]
 
 
+class AdminCalendarMonthStatus(BaseModel):
+    """Expected-vs-delivered gap for one month (the cheap month summary that
+    replaces dumping every obligation: the FE renders it instantly from the
+    overview without a per-month refetch)."""
+
+    month: int
+    expected: int
+    delivered: int
+    # institution -> {"expected": n, "delivered": n}
+    by_institution: dict[str, dict[str, int]]
+
+
 class AdminCalendarObligation(BaseModel):
     client_id: str
     client_name: str
@@ -3185,12 +3197,18 @@ class AdminCalendarGridResponse(BaseModel):
     cells: list[AdminCalendarCell]
     month_totals: list[int]
     forecast: list[AdminCalendarMonthForecast]
+    # Per-month expected-vs-delivered gap. Lets the FE show a month summary
+    # WITHOUT fetching or rendering the whole portfolio's obligations — the
+    # detail rows load per-client on drill instead.
+    month_status: list[AdminCalendarMonthStatus]
     triage: AdminCalendarTriage
     # Populated for the detail panel: every obligation of the requested
-    # client (when ``client_id`` is set), or every obligation due in the
-    # requested ``month`` across the portfolio. Empty otherwise — the grid
-    # cells are enough to render the calendar; detail loads on selection.
+    # client (when ``client_id`` is set). The overview no longer returns the
+    # cross-portfolio month dump — detail loads per-client on selection.
     obligations: list[AdminCalendarObligation]
+    # Total clients in the portfolio (>= clients_scanned when capped) so the
+    # FE can paginate / show "N of M".
+    clients_total: int
     clients_scanned: int
     truncated: bool
 
@@ -3200,6 +3218,32 @@ def _due_in_days(deadline_iso: str, today: date) -> int:
         return (date.fromisoformat(deadline_iso) - today).days
     except ValueError:
         return 0
+
+
+def _month_status_from_obligations(obligations: list) -> list[AdminCalendarMonthStatus]:
+    """Tally per-month expected vs delivered (on_track) per institution."""
+    acc = {
+        m: {"expected": 0, "delivered": 0, "by_inst": {}} for m in range(1, 13)
+    }
+    for ob in obligations:
+        slot = acc[ob.due_month]
+        delivered = 1 if ob.risk_level == "on_track" else 0
+        slot["expected"] += 1
+        slot["delivered"] += delivered
+        inst = slot["by_inst"].setdefault(
+            ob.institution, {"expected": 0, "delivered": 0}
+        )
+        inst["expected"] += 1
+        inst["delivered"] += delivered
+    return [
+        AdminCalendarMonthStatus(
+            month=m,
+            expected=acc[m]["expected"],
+            delivered=acc[m]["delivered"],
+            by_institution=acc[m]["by_inst"],
+        )
+        for m in range(1, 13)
+    ]
 
 
 def _admin_obligation(
@@ -3298,8 +3342,10 @@ def get_admin_calendar_grid(
                     AdminCalendarMonthForecast(month=m, total=0, by_institution={})
                     for m in range(1, 13)
                 ],
+                month_status=_month_status_from_obligations([]),
                 triage=AdminCalendarTriage(overdue_total=0, due_7d_total=0),
                 obligations=[],
+                clients_total=0,
                 clients_scanned=0,
                 truncated=False,
             )
@@ -3353,10 +3399,12 @@ def get_admin_calendar_grid(
                 )
                 for m in range(1, 13)
             ],
+            month_status=_month_status_from_obligations(agg.obligations),
             triage=AdminCalendarTriage(
                 overdue_total=overdue_total, due_7d_total=due_7d_total
             ),
             obligations=obligations,
+            clients_total=1,
             clients_scanned=1,
             truncated=False,
         )
@@ -3370,6 +3418,9 @@ def get_admin_calendar_grid(
     cells: list[AdminCalendarCell] = []
     month_totals = [0] * 12
     inst_acc = {m: {} for m in range(1, 13)}
+    status_acc = {
+        m: {"expected": 0, "delivered": 0, "by_inst": {}} for m in range(1, 13)
+    }
     overdue_total = due_7d_total = 0
     month_obligations: list[AdminCalendarObligation] = []
 
@@ -3410,6 +3461,15 @@ def get_admin_calendar_grid(
             month_totals[ob.due_month - 1] += 1
             inst = inst_acc[ob.due_month]
             inst[ob.institution] = inst.get(ob.institution, 0) + 1
+            delivered = 1 if ob.risk_level == "on_track" else 0
+            slot = status_acc[ob.due_month]
+            slot["expected"] += 1
+            slot["delivered"] += delivered
+            sinst = slot["by_inst"].setdefault(
+                ob.institution, {"expected": 0, "delivered": 0}
+            )
+            sinst["expected"] += 1
+            sinst["delivered"] += delivered
             if ob.risk_level == "overdue":
                 overdue_total += 1
             elif 0 <= _due_in_days(ob.deadline_iso, today) <= 7 and ob.risk_level != "on_track":
@@ -3439,10 +3499,20 @@ def get_admin_calendar_grid(
             )
             for m in range(1, 13)
         ],
+        month_status=[
+            AdminCalendarMonthStatus(
+                month=m,
+                expected=status_acc[m]["expected"],
+                delivered=status_acc[m]["delivered"],
+                by_institution=status_acc[m]["by_inst"],
+            )
+            for m in range(1, 13)
+        ],
         triage=AdminCalendarTriage(
             overdue_total=overdue_total, due_7d_total=due_7d_total
         ),
         obligations=month_obligations,
+        clients_total=len(clients),
         clients_scanned=len(scan),
         truncated=truncated,
     )

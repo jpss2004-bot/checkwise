@@ -2737,8 +2737,19 @@ def test_calendar_grid_rolls_clients_into_month_cells(
     assert cell_total == sum(body["month_totals"]) == sum(
         f["total"] for f in body["forecast"]
     )
-    # Overview without a month selection carries no obligation detail.
+    # Overview without a month selection carries no obligation detail — the
+    # detail rows load per-client on drill instead.
     assert body["obligations"] == []
+    assert body["clients_total"] == 1
+
+    # The per-month status summary (expected vs delivered) lets the FE render a
+    # month without a refetch; expected must equal the month's forecast total.
+    assert len(body["month_status"]) == 12
+    for ms in body["month_status"]:
+        assert ms["expected"] == body["month_totals"][ms["month"] - 1]
+        assert 0 <= ms["delivered"] <= ms["expected"]
+        for inst_status in ms["by_institution"].values():
+            assert inst_status["delivered"] <= inst_status["expected"]
 
     # A month with load returns its obligations across the portfolio.
     busiest = max(body["forecast"], key=lambda f: f["total"])
