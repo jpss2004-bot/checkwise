@@ -737,22 +737,28 @@ def get_rollup(db: DbSession, current: AdminUser) -> AdminRollup:
         or 0
     )
     # Correction requests live as audit rows; ``pending`` is in
-    # ``event_metadata.status`` and JSON-column WHEREs are not portable
-    # across SQLite (tests) / Postgres (prod) — same constraint as
-    # ``list_correction_requests``. Fetch only the metadata column and
-    # count in Python (cheaper than the list endpoint's full ORM scan,
-    # but still O(rows); fine at current volume).
-    correction_requests_pending = 0
-    for (meta,) in db.execute(
-        select(AuditLog.event_metadata).where(
-            AuditLog.action == "correction_request.submitted"
+    # ``event_metadata.status``. This used to fetch EVERY
+    # ``correction_request.submitted`` row and count in Python — an O(rows)
+    # scan over an append-only table that grows forever, so the dashboard got
+    # slower every week. Count in SQL instead, dialect-aware because the JSON
+    # extraction operator differs across SQLite (tests) and Postgres (prod).
+    # A missing/NULL status counts as pending, matching the old Python default.
+    dialect_name = db.get_bind().dialect.name
+    if dialect_name == "sqlite":
+        status_expr = func.json_extract(AuditLog.event_metadata, "$.status")
+    else:
+        status_expr = AuditLog.event_metadata.op("->>")("status")
+    correction_requests_pending = int(
+        db.scalar(
+            select(func.count())
+            .select_from(AuditLog)
+            .where(
+                AuditLog.action == "correction_request.submitted",
+                or_(status_expr == "pending", status_expr.is_(None)),
+            )
         )
-    ):
-        meta_status = (
-            meta.get("status", "pending") if isinstance(meta, dict) else "pending"
-        )
-        if meta_status == "pending":
-            correction_requests_pending += 1
+        or 0
+    )
     feedback_reports_new = int(
         db.scalar(
             select(func.count())

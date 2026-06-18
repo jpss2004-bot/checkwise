@@ -1289,6 +1289,52 @@ def test_rollup_queue_is_empty_safe(api_client: TestClient, db_factory) -> None:
     assert queue["oldest_age_hours"] is None
 
 
+def test_rollup_counts_pending_correction_requests_in_sql(
+    api_client: TestClient, db_factory
+) -> None:
+    """``correction_requests_pending`` is a dialect-aware SQL COUNT over the
+    audit rows: pending + status-less rows count, resolved ones don't."""
+    token = _admin_token(api_client, db_factory)
+    db = db_factory()
+    try:
+        db.add_all(
+            [
+                AuditLog(
+                    action="correction_request.submitted",
+                    entity_type="submission",
+                    entity_id="sub-pending",
+                    actor_type="client",
+                    actor_id="c1",
+                    event_metadata={"status": "pending"},
+                ),
+                # No status key — the old Python default treated this as
+                # pending; the SQL count must match.
+                AuditLog(
+                    action="correction_request.submitted",
+                    entity_type="submission",
+                    entity_id="sub-nostatus",
+                    actor_type="client",
+                    actor_id="c2",
+                    event_metadata={"note": "sin estado"},
+                ),
+                AuditLog(
+                    action="correction_request.submitted",
+                    entity_type="submission",
+                    entity_id="sub-resolved",
+                    actor_type="client",
+                    actor_id="c3",
+                    event_metadata={"status": "resolved"},
+                ),
+            ]
+        )
+        db.commit()
+    finally:
+        db.close()
+
+    body = api_client.get("/api/v1/admin/rollup", headers=_h(token)).json()
+    assert body["inbox"]["correction_requests_pending"] == 2
+
+
 def test_rollup_vendors_at_risk_orders_red_before_yellow_and_excludes_green(
     api_client: TestClient, db_factory
 ) -> None:
