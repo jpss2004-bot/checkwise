@@ -64,12 +64,13 @@ const nextConfig: NextConfig = {
     NEXT_PUBLIC_GIT_SHA: gitSha,
   },
   // FE-PERF-2 — @phosphor-icons/react is imported via its barrel in 130+
-  // files. Without this, Next pulls a large icon-module graph into dev
-  // compilation and can ship unused icons. optimizePackageImports rewrites
-  // the barrel imports to per-icon deep imports automatically (no code
-  // change), shrinking route bundles and speeding dev refresh.
+  // files, and motion (motion/react) in ~22. Without this, Next pulls the
+  // whole module graph into dev compilation and can ship unused exports.
+  // optimizePackageImports rewrites the barrel imports to per-export deep
+  // imports automatically (no code change), shrinking route bundles and
+  // speeding dev refresh.
   experimental: {
-    optimizePackageImports: ["@phosphor-icons/react"],
+    optimizePackageImports: ["@phosphor-icons/react", "motion"],
   },
   // FE-SEC-5 — baseline security headers on every frontend response. The
   // API (Render) sets its own headers; these protect the user-facing app
