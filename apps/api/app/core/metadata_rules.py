@@ -82,6 +82,13 @@ class DocumentMetadataRule:
     fixed_tags: tuple[str, ...] = ()
     annex_document_type_codes: tuple[str, ...] = ()
     notes: tuple[str, ...] = ()
+    # The ``description`` field is, per the source PDF, "texto fijo, listado de
+    # anexos o vacío" depending on the document type. When the rulebook
+    # prescribes a *fixed* description for a type (e.g. the CSF or the
+    # Registro Patronal / TIP), it lives here so the deterministic exporter
+    # can fill it without OCR/AI. Types whose description is an annex listing
+    # or legitimately empty leave this ``None``.
+    fixed_description: str | None = None
     human_review_required: bool = True
     legal_approval_allowed: bool = False
     # When True, this rule is a candidate when matching a document of ANY
@@ -464,6 +471,7 @@ def _rule(
     fixed_tags: tuple[str, ...] = (),
     annex_document_type_codes: tuple[str, ...] = (),
     notes: tuple[str, ...] = (),
+    fixed_description: str | None = None,
     applies_to_all_institutions: bool = False,
 ) -> DocumentMetadataRule:
     return DocumentMetadataRule(
@@ -484,6 +492,7 @@ def _rule(
         fixed_tags=fixed_tags,
         annex_document_type_codes=annex_document_type_codes,
         notes=notes,
+        fixed_description=fixed_description,
         applies_to_all_institutions=applies_to_all_institutions,
     )
 
@@ -645,7 +654,9 @@ _DOCUMENT_RULES: tuple[DocumentMetadataRule, ...] = (
         source_section="III.II. Constancia de Situación Fiscal",
         naming_pattern="{provider_nomenclature} CSF",
         required_field_keys=BASE_REQUIRED_FIELDS + ("issue_date", "taxpayer_name"),
+        conditional_field_keys=("description",),
         fixed_tags=(EXPEDIENTE_TAG, SAT_TAG),
+        fixed_description="Constancia de Situación Fiscal",
         notes=("Descripción fija: Constancia de Situación Fiscal.",),
     ),
     _rule(
@@ -681,8 +692,10 @@ _DOCUMENT_RULES: tuple[DocumentMetadataRule, ...] = (
             "is_current_for_report_year",
             "prior_registration_annexes",
             "annexes",
+            "description",
         ),
         fixed_tags=(EXPEDIENTE_TAG, IMSS_TAG),
+        fixed_description="Tarjeta de Identificación Patronal (TIP)",
         notes=("Descripción fija: Tarjeta de Identificación Patronal (TIP).",),
     ),
     _rule(

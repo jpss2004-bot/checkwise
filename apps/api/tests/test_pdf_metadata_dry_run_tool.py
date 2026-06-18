@@ -64,7 +64,14 @@ def test_payload_uses_real_rulebook_for_acuse_sisub(tmp_path: Path) -> None:
     assert payload["payload_type"] == "checkwise_local_pdf_metadata_dry_run"
     assert payload["metadata_rules_version"] == RULEBOOK_VERSION
     assert payload["document_type_code"] == "acuse_sisub"
-    assert payload["review_item_count"] == len(rule.required_field_keys)
+    # Review items now cover required + conditional + optional fields (deduped),
+    # not just required — so conditional fields like ``description`` can be
+    # filled by the deterministic layer or the AI tier instead of vanishing.
+    assert payload["review_item_count"] == len(
+        dict.fromkeys(
+            rule.required_field_keys + rule.conditional_field_keys + rule.optional_field_keys
+        )
+    )
     assert payload["template"]["document_type"]["code"] == "acuse_sisub"
     assert payload["validation_result"]["status"] == "passed"
     assert payload["safety"] == {
@@ -86,8 +93,14 @@ def test_payload_uses_real_rulebook_for_acuse_sisub(tmp_path: Path) -> None:
     assert by_key["upload_form_month"]["raw_value"] == "Mayo"
     assert by_key["reported_period"]["raw_value"] == "Cuatrimestre inmediato anterior"
     assert by_key["tags"]["raw_value"] == list(rule.fixed_tags)
+    # No readable dates in the blank fixture → date fields stay blank.
     assert by_key["issue_date"]["status"] == "pending"
-    assert by_key["participants"]["status"] == "pending"
+    # Participants are now derived from the upload context (the provider).
+    assert by_key["participants"]["status"] == "prefilled_needs_review"
+    assert by_key["participants"]["raw_value"] == ["SEGURIDAD PRI"]
+    # ``description`` is a conditional field with no rulebook-fixed text for
+    # this type; it is now present as a review item (was previously dropped).
+    assert by_key["description"]["status"] == "pending"
     assert by_key["pdf_quality_ocr"]["raw_value"]["ocr_confirmed"] is False
 
 
@@ -109,7 +122,13 @@ def test_payload_uses_real_rulebook_for_contract(tmp_path: Path) -> None:
     assert by_key["document_category"]["raw_value"] == "Contrato"
     assert by_key["document_subtype"]["raw_value"] == "Prestación de Servicios"
     assert by_key["start_date"]["status"] == "pending"
-    assert by_key["provider_participant"]["status"] == "pending"
+    # Contract participants are derived from context: provider + client.
+    assert by_key["provider_participant"]["raw_value"] == "ARTURO VILLAGRÁN JIMÉNEZ"
+    assert by_key["client_participant"]["raw_value"] == "CLIENTE DEMO, S.A. DE C.V."
+    assert by_key["participants"]["raw_value"] == [
+        "ARTURO VILLAGRÁN JIMÉNEZ",
+        "CLIENTE DEMO, S.A. DE C.V.",
+    ]
     assert payload["validation_result"]["status"] == "passed"
 
 
@@ -333,3 +352,78 @@ def test_list_document_type_codes_comes_from_rulebook() -> None:
     assert "acuse_sisub" in codes
     assert "contrato_prestacion_servicios" in codes
     assert "registro_repse" in codes
+
+
+def test_parse_detected_date_handles_mexican_and_iso_formats() -> None:
+    assert dry_run_tool._parse_detected_date("07/03/2024") == (2024, 3, 7)
+    assert dry_run_tool._parse_detected_date("9-5-24") == (2024, 5, 9)
+    assert dry_run_tool._parse_detected_date("2024-05-09") == (2024, 5, 9)
+    # Invalid / ambiguous tokens never fabricate a date.
+    assert dry_run_tool._parse_detected_date("31/13/2024") is None
+    assert dry_run_tool._parse_detected_date("not a date") is None
+
+
+def test_select_document_date_is_conservative() -> None:
+    ctx = {"reported_period": "2025-M03", "period_key": "2025-M03"}
+    # A single detected date is used.
+    assert dry_run_tool._select_document_date(
+        context=ctx, detected_dates=["12/03/2025"]
+    ) == ((2025, 3, 12), "12/03/2025", 0.6)
+    # With several dates, only the one inside the expected period is chosen.
+    assert dry_run_tool._select_document_date(
+        context=ctx, detected_dates=["01/01/2024", "12/03/2025", "28/02/2025"]
+    ) == ((2025, 3, 12), "12/03/2025", 0.7)
+    # Genuinely ambiguous → no value (better blank than wrong).
+    assert (
+        dry_run_tool._select_document_date(
+            context=ctx, detected_dates=["15/06/2025", "20/09/2025"]
+        )
+        is None
+    )
+    assert (
+        dry_run_tool._select_document_date(context=ctx, detected_dates=[]) is None
+    )
+
+
+def test_detected_dates_fill_date_fields_via_precomputed_signals(tmp_path: Path) -> None:
+    """Dates from the intake classifier flow into main_date + derived labels."""
+    pdf_path = tmp_path / "csf.pdf"
+    _write_blank_pdf(pdf_path)
+    precomputed = {
+        "pdf_text_extraction_used": True,
+        "method": "reused_prevalidation_inspection",
+        "ocr_used": False,
+        "text_char_count": 100,
+        "has_text": True,
+        "is_probably_scanned": False,
+        "text_sample": "",
+        "signals": {
+            "detected_institution": "sat",
+            "detected_document_type": "constancia_situacion_fiscal",
+            "detected_rfcs": [],
+            "detected_dates": ["07/03/2024"],
+            "period_mentions": [],
+            "requirement_match_confidence": 0.9,
+            "mismatch_reason": None,
+            "anomaly_codes": [],
+        },
+    }
+    payload = build_pdf_metadata_dry_run_payload(
+        pdf_path=pdf_path,
+        document_type_code="constancia_situacion_fiscal",
+        context={
+            "client_legal_name": "CLIENTE DEMO, S.A. DE C.V.",
+            "provider_nomenclature": "SEGURIDAD PRI",
+            "expected_institution": "sat",
+        },
+        include_intelligence=True,
+        precomputed_text_extraction=precomputed,
+    )
+    by_key = {item["field_key"]: item for item in payload["review_items"]}
+    assert by_key["main_date"]["raw_value"] == "07/03/2024"
+    assert by_key["issue_date"]["raw_value"] == "07/03/2024"
+    assert by_key["full_date_label"]["raw_value"] == "07 de marzo de 2024"
+    assert by_key["date_8_digits"]["raw_value"] == "07032024"
+    assert by_key["taxpayer_name"]["raw_value"] == "SEGURIDAD PRI"
+    # CSF carries a rulebook-fixed description.
+    assert by_key["description"]["raw_value"] == "Constancia de Situación Fiscal"

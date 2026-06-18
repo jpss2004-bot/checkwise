@@ -15,6 +15,7 @@ import argparse
 import hashlib
 import json
 import mimetypes
+import re
 import shutil
 import subprocess
 import sys
@@ -39,11 +40,37 @@ from app.core.metadata_rules import (  # noqa: E402
     n8n_template_for_document_type,
     validate_metadata_rulebook,
 )
-from app.services.document_intelligence import analyze_document_text  # noqa: E402
+from app.services.document_intelligence import (  # noqa: E402
+    analyze_document_text,
+    normalize_period_key,
+)
 from app.services.pdf_validation import inspect_pdf  # noqa: E402
 
 PAYLOAD_TYPE = "checkwise_local_pdf_metadata_dry_run"
 OCR_TEXT_SAMPLE_LIMIT = 6000
+
+# Spanish month names for the human-readable "Fecha Completa" label
+# (``DD de mes de AAAA``) and to build the 8-digit nomenclature date.
+_SPANISH_MONTHS = (
+    "enero",
+    "febrero",
+    "marzo",
+    "abril",
+    "mayo",
+    "junio",
+    "julio",
+    "agosto",
+    "septiembre",
+    "octubre",
+    "noviembre",
+    "diciembre",
+)
+
+# Date fields whose value is "the document's date" — all resolve from the
+# same conservatively-selected detected date (see ``_select_document_date``).
+_DETECTED_DATE_FIELDS = frozenset(
+    {"main_date", "issue_date", "expedition_date", "deed_date", "start_date"}
+)
 
 
 def _utc_now_iso() -> str:
@@ -157,12 +184,109 @@ def inspect_local_pdf(pdf_path: str | Path) -> dict[str, Any]:
     }
 
 
+def _parse_detected_date(value: str) -> tuple[int, int, int] | None:
+    """Parse a detected date token into ``(year, month, day)``.
+
+    Handles the Mexican ``DD/MM/AAAA`` (and ``DD-MM-AA``) convention plus
+    ISO ``AAAA-MM-DD``. Returns ``None`` for anything ambiguous or invalid so
+    the caller never fabricates a date.
+    """
+    token = (value or "").strip()
+    iso = re.match(r"^(\d{4})[/-](\d{1,2})[/-](\d{1,2})$", token)
+    if iso:
+        year, month, day = int(iso.group(1)), int(iso.group(2)), int(iso.group(3))
+    else:
+        dmy = re.match(r"^(\d{1,2})[/-](\d{1,2})[/-](\d{2,4})$", token)
+        if not dmy:
+            return None
+        day, month, year = int(dmy.group(1)), int(dmy.group(2)), int(dmy.group(3))
+        if year < 100:
+            year += 2000
+    if not (1 <= month <= 12 and 1 <= day <= 31 and 1900 <= year <= 2100):
+        return None
+    return year, month, day
+
+
+def _select_document_date(
+    *,
+    context: dict[str, Any],
+    detected_dates: list[str] | None,
+) -> tuple[tuple[int, int, int], str, float] | None:
+    """Conservatively pick the document's principal date from detected dates.
+
+    Returns ``(parsed_date, raw_token, confidence)`` or ``None``. To avoid
+    guessing on documents that contain many dates, a value is only returned
+    when (a) exactly one distinct date was detected, or (b) exactly one
+    detected date falls in the upload's expected period month. Everything
+    else stays blank for the reviewer / AI tier.
+    """
+    parsed: list[tuple[tuple[int, int, int], str]] = []
+    seen: set[tuple[int, int, int]] = set()
+    for raw in detected_dates or []:
+        candidate = _parse_detected_date(raw)
+        if candidate is not None and candidate not in seen:
+            seen.add(candidate)
+            parsed.append((candidate, raw))
+    if not parsed:
+        return None
+    if len(parsed) == 1:
+        return parsed[0][0], parsed[0][1], 0.6
+
+    expected = normalize_period_key(
+        context.get("reported_period") or context.get("period_key")
+    )
+    if expected:
+        year_str, month_str = expected.split("-")
+        period = (int(year_str), int(month_str))
+        in_period = [
+            entry for entry in parsed if (entry[0][0], entry[0][1]) == period
+        ]
+        if len(in_period) == 1:
+            return in_period[0][0], in_period[0][1], 0.7
+    return None
+
+
+def _full_date_label(parsed: tuple[int, int, int]) -> str:
+    year, month, day = parsed
+    return f"{day:02d} de {_SPANISH_MONTHS[month - 1]} de {year}"
+
+
+def _date_8_digits(parsed: tuple[int, int, int]) -> str:
+    year, month, day = parsed
+    return f"{day:02d}{month:02d}{year:04d}"
+
+
+def _participants_value(
+    *, document_type: dict[str, Any], context: dict[str, Any]
+) -> list[str] | None:
+    """Derive the participant list from upload context.
+
+    The provider is the subject of essentially every document type; contracts
+    additionally name the client as the counterparty. Notaries, witnesses and
+    other comparecientes are intentionally excluded (rulebook rule).
+    """
+    provider = _meaningful(context.get("provider_nomenclature")) or _meaningful(
+        context.get("vendor_legal_name")
+    )
+    client = _meaningful(context.get("client_legal_name"))
+    parties: list[str] = []
+    if document_type.get("category") == "Contrato":
+        if provider:
+            parties.append(provider)
+        if client:
+            parties.append(client)
+    elif provider:
+        parties.append(provider)
+    return parties or None
+
+
 def _context_value_for_field(
     field_key: str,
     *,
     context: dict[str, Any],
     template: dict[str, Any],
     pdf_inspection: dict[str, Any],
+    detected_dates: list[str] | None = None,
 ) -> tuple[Any, str | None, str, float]:
     """Return raw value, source, extraction method, confidence for a field."""
     document_type = template["document_type"]
@@ -223,6 +347,57 @@ def _context_value_for_field(
         }
         return value, "local_file_inspection", "local_file_inspection", 0.8
 
+    # ── Participant fields derived from upload context ────────────────────
+    # The provider/client identities are known at upload time, so these
+    # fields no longer need OCR/AI for the common case. The reviewer still
+    # confirms (status stays ``*_needs_review``).
+    if field_key == "participants":
+        participants = _participants_value(document_type=document_type, context=context)
+        if participants:
+            return participants, "upload_context", "context", 0.9
+        return None, None, "pending_human_review", 0.0
+
+    if field_key in {"provider_participant", "society_participant", "taxpayer_name"}:
+        provider = _meaningful(context.get("provider_nomenclature")) or _meaningful(
+            context.get("vendor_legal_name")
+        )
+        if provider is not None:
+            return provider, "upload_context", "context", 0.85
+        return None, None, "pending_human_review", 0.0
+
+    if field_key == "client_participant":
+        client = _meaningful(context.get("client_legal_name"))
+        if client is not None:
+            return client, "upload_context", "context", 0.85
+        return None, None, "pending_human_review", 0.0
+
+    # ── Fixed description from the rulebook (e.g. CSF, TIP) ───────────────
+    if field_key == "description":
+        fixed = document_type.get("fixed_description")
+        if fixed:
+            return fixed, "rulebook_fixed_value", "rulebook_fixed_value", 1.0
+        return None, None, "pending_human_review", 0.0
+
+    # ── Date fields from conservatively-selected detected dates ───────────
+    if field_key in _DETECTED_DATE_FIELDS:
+        selected = _select_document_date(context=context, detected_dates=detected_dates)
+        if selected is not None:
+            _parsed, raw_token, confidence = selected
+            return raw_token, "pdf_detected_dates", "pdf_text", confidence
+        return None, None, "pending_human_review", 0.0
+
+    if field_key in {"full_date_label", "date_8_digits"}:
+        selected = _select_document_date(context=context, detected_dates=detected_dates)
+        if selected is not None:
+            parsed, _raw_token, confidence = selected
+            value = (
+                _full_date_label(parsed)
+                if field_key == "full_date_label"
+                else _date_8_digits(parsed)
+            )
+            return value, "pdf_detected_dates", "deterministic", confidence
+        return None, None, "pending_human_review", 0.0
+
     return None, None, "pending_human_review", 0.0
 
 
@@ -233,6 +408,7 @@ def _build_review_item(
     template: dict[str, Any],
     pdf_inspection: dict[str, Any],
     field_suggestions: dict[str, dict[str, Any]] | None = None,
+    detected_dates: list[str] | None = None,
 ) -> dict[str, Any]:
     field_key = field["key"]
     raw_value, source, extraction_method, confidence = _context_value_for_field(
@@ -240,6 +416,7 @@ def _build_review_item(
         context=context,
         template=template,
         pdf_inspection=pdf_inspection,
+        detected_dates=detected_dates,
     )
     status = "prefilled_needs_review" if raw_value is not None else "pending"
     if field_key == "pdf_quality_ocr":
@@ -275,6 +452,24 @@ def _build_review_item(
         "human_review_required": field["human_review_required"],
         "reviewer_notes": reviewer_notes,
     }
+
+
+def _fields_for_review(template: dict[str, Any]) -> list[dict[str, Any]]:
+    """Return the actionable fields (required + conditional + optional).
+
+    De-duplicates by field key (preserving first occurrence) so a field that
+    appears in more than one bucket yields a single review item.
+    """
+    fields: list[dict[str, Any]] = []
+    seen: set[str] = set()
+    for bucket in ("required", "conditional", "optional"):
+        for field in template["fields"].get(bucket, []):
+            key = field["key"]
+            if key in seen:
+                continue
+            seen.add(key)
+            fields.append(field)
+    return fields
 
 
 def _field_value(review_items: list[dict[str, Any]], field_key: str) -> Any:
@@ -615,18 +810,6 @@ def build_pdf_metadata_dry_run_payload(
     context.setdefault("size_bytes", pdf_inspection["size_bytes"])
     context.setdefault("page_count", pdf_inspection["page_count"])
 
-    required_fields = template["fields"]["required"]
-    review_items = [
-        _build_review_item(
-            field,
-            context=context,
-            template=template,
-            pdf_inspection=pdf_inspection,
-            field_suggestions=field_suggestions,
-        )
-        for field in required_fields
-    ]
-
     safety = {
         "legal_approval_allowed": False,
         "ocr_used": False,
@@ -638,19 +821,40 @@ def build_pdf_metadata_dry_run_payload(
         "human_review_required": True,
     }
 
+    # Build the text-extraction package first so its detected dates are
+    # available to the deterministic date derivation below.
     text_extraction: dict[str, Any] | None = None
     ocr_status: dict[str, Any] | None = None
+    detected_dates: list[str] = []
     if include_intelligence:
         if precomputed_text_extraction is not None:
             text_extraction = precomputed_text_extraction
         else:
             text_extraction = _build_pdf_text_extraction(pdf_path, template)
+        detected_dates = list((text_extraction.get("signals") or {}).get("detected_dates") or [])
         ocr_status = _build_ocr_status(
             text_extraction,
             pdf_path=pdf_path,
             enable_ocr=enable_ocr,
         )
         safety["ocr_used"] = bool(ocr_status["ocr_used"])
+
+    # Build review items for every field the reviewer can act on: required,
+    # conditional and optional. Conditional/optional fields were previously
+    # skipped entirely, which silently dropped both deterministic values and
+    # AI suggestions for them (e.g. ``description``). ``blank`` fields stay
+    # out — the rulebook says they are intentionally empty.
+    review_items = [
+        _build_review_item(
+            field,
+            context=context,
+            template=template,
+            pdf_inspection=pdf_inspection,
+            field_suggestions=field_suggestions,
+            detected_dates=detected_dates,
+        )
+        for field in _fields_for_review(template)
+    ]
 
     validation_errors: list[str] = []
     if rulebook_problems:

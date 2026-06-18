@@ -216,3 +216,54 @@ def test_cli_writes_csv_file(tmp_path: Path) -> None:
 
     assert exit_code == 0
     assert output_path.exists()
+
+
+def test_client_master_summary_populates_date_participants_description(
+    tmp_path: Path,
+) -> None:
+    """The end-user master columns Fecha/Participantes/Descripción now fill.
+
+    Regression guard for the three fields that were blank for every document:
+    the conditional-field drop (``description``) plus the missing deterministic
+    derivation of dates and participants.
+    """
+    from tools.export_pdf_metadata_table import _client_document_summary
+
+    pdf_path = tmp_path / "csf.pdf"
+    _write_blank_pdf(pdf_path)
+    precomputed = {
+        "pdf_text_extraction_used": True,
+        "method": "reused_prevalidation_inspection",
+        "ocr_used": False,
+        "text_char_count": 100,
+        "has_text": True,
+        "is_probably_scanned": False,
+        "text_sample": "",
+        "signals": {
+            "detected_institution": "sat",
+            "detected_document_type": "constancia_situacion_fiscal",
+            "detected_rfcs": [],
+            "detected_dates": ["07/03/2024"],
+            "period_mentions": [],
+            "requirement_match_confidence": 0.9,
+            "mismatch_reason": None,
+            "anomaly_codes": [],
+        },
+    }
+    payload = build_pdf_metadata_dry_run_payload(
+        pdf_path=pdf_path,
+        document_type_code="constancia_situacion_fiscal",
+        context={
+            "submission_id": "sub-csf-1",
+            "document_id": "doc-csf-1",
+            "client_legal_name": "CLIENTE DEMO, S.A. DE C.V.",
+            "provider_nomenclature": "SEGURIDAD PRI",
+            "expected_institution": "sat",
+        },
+        include_intelligence=True,
+        precomputed_text_extraction=precomputed,
+    )
+    summary = _client_document_summary(build_metadata_field_rows(payload))
+    assert summary["Fecha principal"] == "07/03/2024"
+    assert summary["Participantes"] == "SEGURIDAD PRI"
+    assert summary["Descripcion"] == "Constancia de Situación Fiscal"

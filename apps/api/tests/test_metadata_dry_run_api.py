@@ -62,7 +62,9 @@ def test_metadata_dry_run_pdf_endpoint_uses_real_rulebook() -> None:
     assert by_key["document_name"]["raw_value"] == "SEGURIDAD PRI Acuse SISUB Mayo"
     assert by_key["document_category"]["raw_value"] == "Formatos"
     assert by_key["upload_form_month"]["raw_value"] == "Mayo"
-    assert by_key["participants"]["status"] == "pending"
+    # Participants are derived from the upload context (the provider).
+    assert by_key["participants"]["status"] == "prefilled_needs_review"
+    assert by_key["participants"]["raw_value"] == ["SEGURIDAD PRI"]
 
 
 def test_metadata_dry_run_pdf_endpoint_can_include_intelligence_package() -> None:
