@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
 import {
@@ -671,6 +671,73 @@ function EventDrawer({
   event: CalendarEntry;
   onClose: () => void;
 }) {
+  const asideRef = useRef<HTMLElement | null>(null);
+
+  // Accessibility — hand-rolled drawer was missing the affordances a
+  // modal dialog needs: Escape to close, focus moved in on open and
+  // restored to the trigger on close, focus trapped inside the panel,
+  // and a background scroll lock so the page behind can't move.
+  useEffect(() => {
+    const previouslyFocused =
+      document.activeElement instanceof HTMLElement
+        ? document.activeElement
+        : null;
+
+    const aside = asideRef.current;
+    // Move focus into the panel so screen-reader / keyboard users land
+    // inside the dialog rather than on the page behind it.
+    const focusFirst = () => {
+      const focusable = aside?.querySelector<HTMLElement>(
+        'button, [href], input, select, textarea, [tabindex]:not([tabindex="-1"])',
+      );
+      (focusable ?? aside)?.focus();
+    };
+    focusFirst();
+
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === "Escape") {
+        e.preventDefault();
+        onClose();
+        return;
+      }
+      if (e.key !== "Tab" || !aside) return;
+      const focusable = Array.from(
+        aside.querySelectorAll<HTMLElement>(
+          'button, [href], input, select, textarea, [tabindex]:not([tabindex="-1"])',
+        ),
+      ).filter((el) => !el.hasAttribute("disabled"));
+      if (focusable.length === 0) {
+        e.preventDefault();
+        aside.focus();
+        return;
+      }
+      const first = focusable[0];
+      const last = focusable[focusable.length - 1];
+      const active = document.activeElement;
+      if (e.shiftKey) {
+        if (active === first || !aside.contains(active)) {
+          e.preventDefault();
+          last.focus();
+        }
+      } else if (active === last) {
+        e.preventDefault();
+        first.focus();
+      }
+    };
+
+    document.addEventListener("keydown", handleKeyDown);
+
+    // Background scroll lock while the drawer is mounted.
+    const previousOverflow = document.body.style.overflow;
+    document.body.style.overflow = "hidden";
+
+    return () => {
+      document.removeEventListener("keydown", handleKeyDown);
+      document.body.style.overflow = previousOverflow;
+      previouslyFocused?.focus();
+    };
+  }, [onClose]);
+
   return (
     <div
       role="dialog"
@@ -685,6 +752,8 @@ function EventDrawer({
         aria-label="Cerrar"
       />
       <aside
+        ref={asideRef}
+        tabIndex={-1}
         className="absolute right-0 top-0 h-full w-full max-w-md overflow-y-auto border-l border-[color:var(--border-default)] bg-[color:var(--surface-overlay)] shadow-xl cw-fade-up"
         style={{ animationDuration: "300ms" }}
       >
@@ -960,15 +1029,18 @@ function formatLongDate(iso: string): string {
 
 // ─── Legend ─────────────────────────────────────────────────────
 
+// The grid badges only ever surface six distinct labels. ``uploaded``
+// and ``empty`` render the same labels as ``in_review`` and ``pending``
+// respectively (see DocStateBadge), so listing them here produced four
+// visually duplicate legend entries. Keep ``pending`` + ``in_review`` as
+// the canonical labels for those two pairs.
 const LEGEND_STATES: CalendarEntry["state"][] = [
-  "approved",
-  "in_review",
-  "uploaded",
   "pending",
+  "in_review",
+  "approved",
   "needs_review",
   "rejected",
   "expired",
-  "empty",
 ];
 
 function Legend() {

@@ -108,7 +108,9 @@ export function EmptyExpedienteHero({
               {summary.completed} / {summary.total_required} obligatorios
             </span>
           </div>
-          {steps.length === 0 ? (
+          {onboarding === null ? (
+            <StepsSkeleton />
+          ) : steps.length === 0 ? (
             <EmptyStepsState summary={summary} />
           ) : (
             <ol className="space-y-2.5">
@@ -283,6 +285,31 @@ function StepCta({ status }: { status: StepStatus }) {
         Subir
       </span>
     </Button>
+  );
+}
+
+function StepsSkeleton() {
+  // Mirrors StepRow's height/spacing so the list reserves space and reads
+  // as loading rather than swapping content once the onboarding payload
+  // resolves. Distinct from EmptyStepsState — only shown while the payload
+  // is unavailable (``onboarding === null``), never as a completion state.
+  return (
+    <div role="status" aria-busy="true" className="space-y-2.5">
+      <span className="sr-only">Cargando tus primeros pasos…</span>
+      {Array.from({ length: 4 }).map((_, idx) => (
+        <div
+          key={idx}
+          aria-hidden="true"
+          className="flex items-start gap-3 rounded-lg border border-[color:var(--border-default)] bg-[color:var(--surface-raised)] px-4 py-3"
+        >
+          <div className="mt-0.5 h-7 w-7 shrink-0 animate-pulse rounded-full bg-[color:var(--surface-page)]" />
+          <div className="min-w-0 flex-1 space-y-2">
+            <div className="h-3.5 w-7/12 animate-pulse rounded bg-[color:var(--surface-page)]" />
+            <div className="h-2.5 w-3/12 animate-pulse rounded bg-[color:var(--surface-page)]" />
+          </div>
+        </div>
+      ))}
+    </div>
   );
 }
 

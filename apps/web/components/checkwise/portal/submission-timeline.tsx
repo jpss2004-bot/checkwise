@@ -118,10 +118,10 @@ const ACTOR_TYPE_LABEL: Record<string, string> = {
 };
 
 const STATE_DOT_CLASS: Record<DocumentStateCode, string> = {
-  empty: "bg-[color:var(--doc-empty-border)]",
-  pending: "bg-[color:var(--doc-pending-border)]",
-  uploaded: "bg-[color:var(--doc-uploaded-border)]",
-  in_review: "bg-[color:var(--doc-in-review-border)]",
+  empty: "bg-[color:var(--doc-empty-text)]",
+  pending: "bg-[color:var(--doc-pending-text)]",
+  uploaded: "bg-[color:var(--doc-uploaded-text)]",
+  in_review: "bg-[color:var(--doc-in-review-text)]",
   approved: "bg-[color:var(--doc-approved-text)]",
   rejected: "bg-[color:var(--doc-rejected-text)]",
   expired: "bg-[color:var(--doc-expired-text)]",
@@ -226,7 +226,10 @@ function TimelineRow({
   isLast: boolean;
   index: number;
 }) {
-  const staggerStyle = { "--cw-index": index } as React.CSSProperties;
+  // Clamp the stagger delay to the same 8-step (480ms) cap the
+  // nth-child fallback uses in globals.css, so late timeline rows
+  // don't stay invisible for a second-plus on long histories.
+  const staggerStyle = { "--cw-index": Math.min(index, 8) } as React.CSSProperties;
   if (item.kind === "status") {
     const ActorIcon = actorIcon(item.actor.split(":")[0] ?? item.actor);
     return (

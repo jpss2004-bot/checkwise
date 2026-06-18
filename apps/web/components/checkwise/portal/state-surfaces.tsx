@@ -174,7 +174,7 @@ export function ErrorState({
             <p className="text-sm font-semibold text-[color:var(--status-warning-text)]">
               {title}
             </p>
-            <p className="text-sm text-[color:var(--status-warning-text)]/80">
+            <p className="text-sm text-[color:var(--status-warning-text)]">
               {description}
             </p>
           </div>

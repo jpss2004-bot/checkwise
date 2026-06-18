@@ -38,6 +38,14 @@ import {
 import { fetchCurrentSession, type PortalSession } from "@/lib/session/portal";
 import { statusLabel } from "@/lib/constants/statuses";
 
+// "otros" is the synthetic bucket for submissions whose institution code is
+// empty/unknown; it has no entry in INSTITUTION_LABELS, so resolve it to a
+// proper Spanish label here rather than leaking the lowercase code to users.
+function institutionLabel(code: string): string {
+  if (code === "otros") return "Otros";
+  return INSTITUTION_LABELS[code] ?? code;
+}
+
 type Grouped = {
   institutionCode: string;
   institutionLabel: string;
@@ -90,7 +98,13 @@ export default function SubmissionsIndexPage() {
       })
       .catch((err: unknown) => {
         if (cancelled) return;
-        if (err instanceof PortalApiError && err.status !== 401) {
+        if (err instanceof PortalApiError && err.status === 401) {
+          // Session expired/invalid — send the provider back to sign in
+          // instead of showing a silent "no documents" empty state.
+          router.replace("/");
+          return;
+        }
+        if (err instanceof PortalApiError) {
           setErrorKind("network");
         }
         setItems([]);
@@ -98,16 +112,13 @@ export default function SubmissionsIndexPage() {
     return () => {
       cancelled = true;
     };
-  }, [session]);
+  }, [session, router]);
 
   const institutionOptions = useMemo(() => {
     const set = new Set<string>();
     for (const it of items ?? []) set.add(it.institution || "otros");
     return Array.from(set).sort((a, b) =>
-      (INSTITUTION_LABELS[a] ?? a).localeCompare(
-        INSTITUTION_LABELS[b] ?? b,
-        "es",
-      ),
+      institutionLabel(a).localeCompare(institutionLabel(b), "es"),
     );
   }, [items]);
 
@@ -279,7 +290,7 @@ function ProviderSubmissionsFilters({
           <option value="">Todas</option>
           {institutionOptions.map((code) => (
             <option key={code} value={code}>
-              {INSTITUTION_LABELS[code] ?? code}
+              {institutionLabel(code)}
             </option>
           ))}
         </Select>
@@ -368,7 +379,7 @@ function groupSubmissions(items: WorkspaceSubmissionListItem[]): Grouped[] {
   return Array.from(byInstitution.entries())
     .map(([code, years]) => ({
       institutionCode: code,
-      institutionLabel: INSTITUTION_LABELS[code] ?? code,
+      institutionLabel: institutionLabel(code),
       years: Array.from(years.entries())
         .sort((a, b) => b[0] - a[0])
         .map(([year, months]) => ({
@@ -458,10 +469,10 @@ function GroupedList({
                     <ul className="divide-y divide-border rounded-md border border-border bg-white">
                       {monthBlock.items.map((item) => (
                         <li key={item.submission_id}>
-                          <div className="flex items-center gap-2 p-3 hover:bg-muted/30">
+                          <div className="flex flex-wrap items-center gap-x-2 gap-y-2 p-3 hover:bg-muted/30">
                             <Link
                               href={`/portal/submissions/${item.submission_id}`}
-                              className="flex min-w-0 flex-1 items-center gap-3"
+                              className="flex min-w-0 flex-1 basis-48 items-center gap-3"
                             >
                               <FileText
                                 className="h-4 w-4 shrink-0 text-muted-foreground"
@@ -478,19 +489,20 @@ function GroupedList({
                                     : ""}
                                 </p>
                               </div>
-                              <RequirementStatusBadge
-                                status={item.status as RequirementStatus}
-                              />
                               <ArrowRight
                                 className="h-4 w-4 shrink-0 text-muted-foreground"
                                 aria-hidden="true"
                               />
                             </Link>
+                            <RequirementStatusBadge
+                              status={item.status as RequirementStatus}
+                            />
                             {item.can_cancel ? (
                               <Button
                                 type="button"
                                 variant="destructive"
                                 size="sm"
+                                className="shrink-0"
                                 loading={cancelingId === item.submission_id}
                                 onClick={() => onCancel(item)}
                               >

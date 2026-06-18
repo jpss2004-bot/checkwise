@@ -169,10 +169,17 @@ function OnboardingInner({ session }: { session: PortalSession }) {
     router.push(`/portal/upload?${params.toString()}`);
   }
 
-  return (
-    <PortalAppShell session={session}>
-      <main className="mx-auto max-w-6xl space-y-8 px-5 py-8">
-        {loadError && (
+  // A failed fetch and a genuinely empty expediente are NOT "gate
+  // satisfied". In both cases ``requirements`` is an empty array, which
+  // would otherwise make ``countOnboardingCards`` report
+  // ``is_gate_satisfied: true`` and render a false green "ya puedes
+  // entrar" hero plus an active gate-clearing CTA. Render only the
+  // explanatory Alert and suppress GateHero + ActivateDashboardCard
+  // until we actually have requirements to act on.
+  if (loadError) {
+    return (
+      <PortalAppShell session={session}>
+        <main className="mx-auto max-w-6xl space-y-8 px-5 py-8">
           <Alert variant="warning">
             <AlertTitle>No pudimos cargar tu expediente</AlertTitle>
             <AlertDescription>
@@ -180,8 +187,15 @@ function OnboardingInner({ session }: { session: PortalSession }) {
               intentar de nuevo; tu sesión sigue activa.
             </AlertDescription>
           </Alert>
-        )}
-        {!loadError && requirements.length === 0 && (
+        </main>
+      </PortalAppShell>
+    );
+  }
+
+  if (requirements.length === 0) {
+    return (
+      <PortalAppShell session={session}>
+        <main className="mx-auto max-w-6xl space-y-8 px-5 py-8">
           <Alert>
             <AlertTitle>Tu expediente está vacío</AlertTitle>
             <AlertDescription>
@@ -189,7 +203,14 @@ function OnboardingInner({ session }: { session: PortalSession }) {
               es un error, contacta a tu administrador de cumplimiento.
             </AlertDescription>
           </Alert>
-        )}
+        </main>
+      </PortalAppShell>
+    );
+  }
+
+  return (
+    <PortalAppShell session={session}>
+      <main className="mx-auto max-w-6xl space-y-8 px-5 py-8">
         <GateHero
           counts={counts}
           banner={banner}

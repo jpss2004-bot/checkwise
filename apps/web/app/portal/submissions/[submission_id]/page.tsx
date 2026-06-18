@@ -1,6 +1,6 @@
 "use client";
 
-import { use, useCallback, useEffect, useState } from "react";
+import { use, useCallback, useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import {
@@ -40,6 +40,7 @@ import {
   type SubmissionSuggestedAction,
 } from "@/lib/api/portal";
 import { DocumentStatus, statusExplainer } from "@/lib/constants/statuses";
+import { cadenceLabel } from "@/lib/constants/labels";
 import { GroupedValidationSummary } from "@/components/checkwise/portal/grouped-validation-summary";
 import type { ValidationSignal } from "@/components/checkwise/validation-summary";
 import { fetchCurrentSession, type PortalSession } from "@/lib/session/portal";
@@ -59,6 +60,9 @@ export default function SubmissionDetailPage({ params }: PageProps) {
   const [errorKind, setErrorKind] = useState<ErrorKind | null>(null);
   const [reloadKey, setReloadKey] = useState(0);
   const [canceling, setCanceling] = useState(false);
+  // Tracks whether we already have detail in hand, so background
+  // async-intake polls don't re-trigger the full-page skeleton.
+  const hasDetailRef = useRef(false);
 
   useEffect(() => {
     let cancelled = false;
@@ -75,14 +79,28 @@ export default function SubmissionDetailPage({ params }: PageProps) {
     };
   }, [router]);
 
+  // Navigating to a different submission (e.g. a previous attempt) is a
+  // genuine fresh load: drop the stale detail and re-arm the skeleton.
+  useEffect(() => {
+    hasDetailRef.current = false;
+    setDetail(null);
+    setLoading(true);
+  }, [submission_id]);
+
   useEffect(() => {
     if (!session) return;
     let cancelled = false;
-    setLoading(true);
+    // Only show the full-page skeleton on the initial load. Background
+    // async-intake polls (driven by ``reloadKey``) keep ``detail`` mounted
+    // so the verdict swaps in place instead of flashing the skeleton — and
+    // the inline PDF preview stays mounted rather than remounting/refetching.
+    if (!hasDetailRef.current) setLoading(true);
     setErrorKind(null);
     getSubmissionDetail(session, submission_id)
       .then((payload) => {
-        if (!cancelled) setDetail(payload);
+        if (cancelled) return;
+        hasDetailRef.current = true;
+        setDetail(payload);
       })
       .catch((err: unknown) => {
         if (cancelled) return;
@@ -569,7 +587,7 @@ function ContextCard({ detail }: { detail: SubmissionDetail }) {
             value={detail.period.period_key ?? "—"}
           />
           <Field label="Periodo capturado" value={detail.period.code ?? "—"} />
-          <Field label="Tipo de carga" value={detail.load_type} />
+          <Field label="Tipo de carga" value={loadTypeLabel(detail.load_type)} />
           <Field label="Carga registrada" value={submittedDate} />
         </dl>
       </CardContent>
@@ -808,31 +826,45 @@ function LineageStrip({ detail }: { detail: SubmissionDetail }) {
       {detail.supersedes_submission_id ? (
         <p>
           <span className="font-medium text-[color:var(--text-primary)]">
-            Reemplaza intento anterior:
+            Reemplaza un intento anterior.
           </span>{" "}
           <Link
             href={`/portal/submissions/${detail.supersedes_submission_id}`}
-            className="font-mono text-xs text-[color:var(--text-brand)] underline-offset-2 hover:underline"
+            className="text-[color:var(--text-brand)] underline-offset-2 hover:underline"
           >
-            {detail.supersedes_submission_id}
+            Ver el intento anterior
           </Link>
         </p>
       ) : null}
       {detail.superseded_by_submission_id ? (
         <p className={detail.supersedes_submission_id ? "mt-2" : ""}>
           <span className="font-medium text-[color:var(--text-primary)]">
-            Reemplazado por intento más reciente:
+            Este envío fue reemplazado por uno más reciente.
           </span>{" "}
           <Link
             href={`/portal/submissions/${detail.superseded_by_submission_id}`}
-            className="font-mono text-xs text-[color:var(--text-brand)] underline-offset-2 hover:underline"
+            className="text-[color:var(--text-brand)] underline-offset-2 hover:underline"
           >
-            {detail.superseded_by_submission_id}
+            Ver el intento que lo reemplazó
           </Link>
         </p>
       ) : null}
     </section>
   );
+}
+
+// ``cadenceLabel`` covers the cadence-style load_type codes
+// ("alta_inicial", "bimestral", …); the two non-cadence codes get explicit
+// labels (the humanizer would drop the accent in "Renovación"). Matches the
+// backend catalog labels and the mapping used on /admin/requirements.
+const LOAD_TYPE_LABELS_EXTRA: Record<string, string> = {
+  contrato: "Contrato",
+  renovacion: "Renovación",
+};
+
+function loadTypeLabel(code: string | null | undefined): string {
+  if (!code) return "—";
+  return LOAD_TYPE_LABELS_EXTRA[code] ?? cadenceLabel(code);
 }
 
 function formatDate(iso: string): string {

@@ -9,6 +9,7 @@ import { Canvas } from "@/components/checkwise/reports/canvas";
 import { ReportMasthead } from "@/components/checkwise/reports/report-masthead";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
+import { Spinner } from "@/components/ui/spinner";
 import {
   REPORT_AUDIENCE_LABEL,
   REPORT_STATUS_LABEL,
@@ -90,7 +91,7 @@ export default function PrintPage() {
     [content],
   );
 
-  if (error || !report || !content) {
+  if (error) {
     return (
       <main className="mx-auto max-w-2xl px-6 py-12">
         <Alert variant="warning">
@@ -98,7 +99,7 @@ export default function PrintPage() {
             <WarningCircle className="h-4 w-4" weight="bold" aria-hidden="true" />
             Reporte no disponible
           </AlertTitle>
-          <AlertDescription>{error ?? "Cargando…"}</AlertDescription>
+          <AlertDescription>{error}</AlertDescription>
         </Alert>
         <Button asChild variant="outline" size="sm" className="mt-4">
           <Link href="/portal/reports">
@@ -106,6 +107,15 @@ export default function PrintPage() {
             Volver
           </Link>
         </Button>
+      </main>
+    );
+  }
+
+  if (!report || !content) {
+    return (
+      <main className="mx-auto flex max-w-2xl items-center gap-3 px-6 py-12 text-sm text-[color:var(--text-secondary)]">
+        <Spinner label="Preparando el reporte para imprimir…" />
+        <span>Preparando el reporte para imprimir…</span>
       </main>
     );
   }
@@ -193,7 +203,8 @@ export default function PrintPage() {
 
         <footer className="cw-print-footer mt-12 border-t border-[color:var(--border-default)] pt-4 text-[10px] text-[color:var(--text-tertiary)]">
           <p>
-            CheckWise · {report.title} · v{report.current_version?.version_number}
+            CheckWise · {report.title} · v
+            {report.current_version?.version_number ?? "—"}
             {" · "}Generado el{" "}
             {new Date().toLocaleDateString("es-MX", { dateStyle: "long" })}
             {" · "}Plataforma de cumplimiento REPSE

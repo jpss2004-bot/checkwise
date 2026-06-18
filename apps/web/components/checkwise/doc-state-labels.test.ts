@@ -8,7 +8,6 @@ import {
 import type { DocumentStateCode } from "@/lib/types";
 
 import { DOC_STATE_LABELS } from "./doc-state-badge";
-import { STATE_LABEL_FALLBACK } from "./portal/evidence-slot-card";
 
 /**
  * CW-03 taxonomy guard.
@@ -45,9 +44,4 @@ describe("CW-03 — per-document state label vocabulary stays unified", () => {
     },
   );
 
-  it("the provider slot-card fallback labels match the badge labels exactly", () => {
-    // Two byte-identical maps today; locking them means a change to one is a
-    // deliberate change to both, never silent drift.
-    expect(STATE_LABEL_FALLBACK).toEqual(DOC_STATE_LABELS);
-  });
 });

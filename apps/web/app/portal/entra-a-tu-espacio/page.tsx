@@ -270,9 +270,17 @@ function EntraATuEspacioInner({ session }: { session: PortalSession }) {
                 id="legal-consent-links"
                 className="mt-3 text-[11px] text-[color:var(--text-tertiary)]"
               >
-                Cada enlace abre el documento en una pestaña nueva. Versión
-                vigente <code className="font-mono">v2</code> · efectiva desde
-                el 3 de junio de 2026.
+                Cada enlace abre el documento en una pestaña nueva.
+                {liveSession.current_legal_consent_version ? (
+                  <>
+                    {" "}
+                    Versión vigente{" "}
+                    <code className="font-mono">
+                      {liveSession.current_legal_consent_version}
+                    </code>
+                    .
+                  </>
+                ) : null}
               </p>
               {consentError ? (
                 <Alert variant="error" className="mt-4">

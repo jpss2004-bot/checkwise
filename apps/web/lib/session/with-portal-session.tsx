@@ -3,6 +3,7 @@
 import { useEffect, useState, type ComponentType } from "react";
 import { usePathname, useRouter } from "next/navigation";
 
+import { Spinner } from "@/components/ui/spinner";
 import { enterPortal } from "@/lib/api/auth";
 import { clearAdminSession, readAdminSession } from "@/lib/session/admin";
 import {
@@ -167,7 +168,19 @@ export function withPortalSession<P extends { session: PortalSession }>(
       router.replace("/portal/entra-a-tu-espacio");
     }, [router, pathname, session]);
 
-    if (!session) return null;
+    if (!session) {
+      // The session resolves via /portal/me (and possibly /portal/enter),
+      // a real round-trip. Show a centred spinner so the page reads as
+      // loading instead of flashing a blank screen.
+      return (
+        <div className="flex min-h-[100dvh] items-center justify-center bg-[color:var(--surface-page)]">
+          <Spinner
+            className="text-[color:var(--text-secondary)]"
+            label="Cargando tu espacio…"
+          />
+        </div>
+      );
+    }
     // Block render on un-consented sessions for non-exempt paths so the
     // page doesn't flash while the redirect above resolves.
     if (

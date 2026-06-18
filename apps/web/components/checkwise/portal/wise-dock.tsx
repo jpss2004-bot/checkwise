@@ -74,18 +74,17 @@ const AUDIENCE_PILL: Record<WiseAudience, string> = {
   mature: "Cumplimiento al día",
 };
 
-const TONE_BAR: Record<NonNullable<WiseMessage["tone"]>, string> = {
-  brand: "bg-[color:var(--text-teal)]",
-  info: "bg-[color:var(--status-info-text)]",
-  warning: "bg-[color:var(--status-warning-text)]",
-  success: "bg-[color:var(--status-success-text)]",
-};
-
-const TONE_TEXT: Record<NonNullable<WiseMessage["tone"]>, string> = {
-  brand: "text-[color:var(--text-teal)]",
-  info: "text-[color:var(--status-info-text)]",
-  warning: "text-[color:var(--status-warning-text)]",
-  success: "text-[color:var(--status-success-text)]",
+// Dock-local on-dark palette. The shared status/teal tokens
+// (``--text-teal`` = teal-800, ``--status-*-text``) are tuned for LIGHT
+// surfaces and collapse to <3:1 on the navy dock (``--surface-brand`` =
+// navy-800). These lighter steps of the same brand/status scales all
+// clear ~7:1+ on navy-800 so the tone cue carries on the dark surface.
+const DOCK_TEAL = "hsl(175 88% 60%)"; // teal-300 — 9.3:1 on navy-800
+const DOCK_TONE_COLOR: Record<NonNullable<WiseMessage["tone"]>, string> = {
+  brand: DOCK_TEAL,
+  info: "hsl(214 75% 80%)", // blue-200 — 7.4:1 on navy-800
+  warning: "hsl(38 85% 72%)", // amber-200 — 8.2:1 on navy-800
+  success: "hsl(142 72% 72%)", // green-200 — 8.9:1 on navy-800
 };
 
 interface WiseDockProps {
@@ -362,6 +361,14 @@ export function WiseDock({
 
   const hasWarning = messages.some((m) => m.tone === "warning");
 
+  // In-flight guard: a Wise answer is pending whenever a transient
+  // ``wise-pending-`` placeholder is still in the conversation. Used to
+  // disable the composer so rapid submits can't fan out into multiple
+  // concurrent ``/wise/ask`` requests.
+  const isAsking = turns.some(
+    (turn) => turn.kind === "wise" && turn.message.id.startsWith("wise-pending-"),
+  );
+
   return (
     <WiseDockShell
       storageKey={STORAGE_KEY}
@@ -416,7 +423,11 @@ export function WiseDock({
           quickQuestions={quickQuestions}
           inputValue={inputValue}
           onInputChange={setInputValue}
+          pending={isAsking}
           onSubmit={(prompt) => {
+            // Block new asks while one is still in flight so a fast
+            // double-submit can't open two concurrent LLM requests.
+            if (isAsking) return;
             submitPrompt(prompt);
             setInputValue("");
           }}
@@ -446,7 +457,7 @@ function DockBody({
   if (turns.length === 0) {
     return (
       <div className="flex flex-1 flex-col items-center justify-center gap-2 px-5 py-10 text-center text-white/80">
-        <Sparkle className="h-6 w-6 text-[color:var(--text-teal)]" weight="fill" aria-hidden="true" />
+        <Sparkle className="h-6 w-6" style={{ color: DOCK_TEAL }} weight="fill" aria-hidden="true" />
         <p className="text-[13px]">Estás al día. Te aviso cuando pase algo.</p>
       </div>
     );
@@ -472,7 +483,10 @@ function DockBody({
             </li>
           ) : (
             <li key={turn.id} className="flex justify-end">
-              <p className="max-w-[78%] rounded-2xl rounded-br-md bg-[color:var(--text-teal)] px-3.5 py-2 text-[13px] leading-snug text-[color:var(--surface-brand)]">
+              <p
+                className="max-w-[78%] rounded-2xl rounded-br-md px-3.5 py-2 text-[13px] leading-snug text-[color:var(--surface-brand)]"
+                style={{ backgroundColor: DOCK_TEAL }}
+              >
                 {turn.text}
               </p>
             </li>
@@ -511,14 +525,16 @@ function MessageBubble({
     >
       <span
         aria-hidden="true"
-        className={cn("absolute inset-y-0 left-0 w-1", TONE_BAR[message.tone])}
+        className="absolute inset-y-0 left-0 w-1"
+        style={{ backgroundColor: DOCK_TONE_COLOR[message.tone] }}
       />
       <div className="space-y-2 pl-2">
         {message.meta ? (
           <p className="flex items-center gap-1.5 font-mono text-[10px] uppercase tracking-wide text-white/55">
             {message.tone === "warning" ? (
               <Warning
-                className={cn("h-3 w-3", TONE_TEXT[message.tone])}
+                className="h-3 w-3"
+                style={{ color: DOCK_TONE_COLOR[message.tone] }}
                 weight="fill"
                 aria-hidden="true"
               />
@@ -534,7 +550,8 @@ function MessageBubble({
         {message.reviewerNote ? (
           <blockquote className="flex gap-2 rounded-md border border-white/10 bg-white/[0.05] px-3 py-2 text-[12px] italic leading-snug text-white/85">
             <Quotes
-              className="h-3.5 w-3.5 shrink-0 text-[color:var(--text-teal)]"
+              className="h-3.5 w-3.5 shrink-0"
+              style={{ color: DOCK_TEAL }}
               weight="fill"
               aria-hidden="true"
             />
@@ -545,7 +562,8 @@ function MessageBubble({
           <Button
             asChild
             size="sm"
-            className="bg-[color:var(--text-teal)] text-[color:var(--surface-brand)] hover:bg-[color:var(--text-teal)]/90"
+            style={{ backgroundColor: DOCK_TEAL }}
+            className="text-[color:var(--surface-brand)] hover:opacity-90"
           >
             <Link href={message.ctaHref} onClick={onCtaClick}>
               <span>{message.ctaLabel}</span>
@@ -572,16 +590,48 @@ function DockComposer({
   inputValue,
   onInputChange,
   onSubmit,
+  pending,
 }: {
   quickQuestions: readonly WiseQuickQuestion[];
   inputValue: string;
   onInputChange: (value: string) => void;
   onSubmit: (prompt: string) => void;
+  /** True while a Wise answer is in flight — disables send + Enter so
+   *  rapid submits can't fan out into concurrent LLM requests. */
+  pending: boolean;
 }) {
+  const textareaRef = React.useRef<HTMLTextAreaElement | null>(null);
+
+  // Auto-grow the textarea from 1 up to ~4 rows as the user types a
+  // multi-line question, so longer prompts stay fully visible instead of
+  // scrolling out of a single line. Caps the height; past the cap it
+  // scrolls internally.
+  const MAX_TEXTAREA_HEIGHT = 112; // ~4 rows at the 13px/1.5 line box
+  React.useEffect(() => {
+    const el = textareaRef.current;
+    if (!el) return;
+    el.style.height = "auto";
+    el.style.height = `${Math.min(el.scrollHeight, MAX_TEXTAREA_HEIGHT)}px`;
+  }, [inputValue]);
+
+  const canSend = inputValue.trim().length > 0 && !pending;
+
   const handleSubmit = (event: React.FormEvent<HTMLFormElement>) => {
     event.preventDefault();
+    if (!canSend) return;
     onSubmit(inputValue);
   };
+
+  const handleKeyDown = (event: React.KeyboardEvent<HTMLTextAreaElement>) => {
+    // Enter sends; Shift+Enter inserts a newline so providers can write
+    // multi-line questions and proofread before sending.
+    if (event.key === "Enter" && !event.shiftKey) {
+      event.preventDefault();
+      if (!canSend) return;
+      onSubmit(inputValue);
+    }
+  };
+
   return (
     <footer className="border-t border-white/10 bg-[color:var(--surface-brand)]/95 px-4 py-3">
       <p className="mb-1.5 font-mono text-[10px] uppercase tracking-wide text-[color:var(--text-inverse-muted)]">
@@ -592,33 +642,45 @@ function DockComposer({
           <button
             key={q.id}
             type="button"
+            disabled={pending}
             onClick={() => onSubmit(q.prompt)}
-            className="inline-flex items-center rounded-full border border-white/15 bg-white/[0.04] px-2.5 py-1 text-[11px] text-white/80 transition-colors hover:border-[color:var(--text-teal)]/60 hover:bg-[color:var(--text-teal)]/15 hover:text-white focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[color:var(--text-teal)]/60"
+            className="inline-flex items-center rounded-full border border-white/15 bg-white/[0.04] px-2.5 py-1 text-[11px] text-white/80 transition-colors hover:border-[color:var(--text-teal)]/60 hover:bg-[color:var(--text-teal)]/15 hover:text-white focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[color:var(--text-teal)]/60 disabled:cursor-not-allowed disabled:opacity-40"
           >
             {q.label}
           </button>
         ))}
       </div>
-      <form onSubmit={handleSubmit} className="flex items-center gap-2">
+      <form onSubmit={handleSubmit} className="flex items-end gap-2">
         <label htmlFor="wise-input" className="sr-only">
           Pregúntale a Wise
         </label>
-        <input
+        <textarea
           id="wise-input"
-          type="text"
+          ref={textareaRef}
+          rows={1}
           autoComplete="off"
           value={inputValue}
           onChange={(event) => onInputChange(event.target.value)}
+          onKeyDown={handleKeyDown}
           placeholder="Pregúntale a Wise…"
-          className="flex-1 rounded-full border border-white/15 bg-white/[0.06] px-3.5 py-1.5 text-[13px] text-white placeholder:text-[color:var(--text-inverse-muted)] focus:border-[color:var(--text-teal)]/60 focus:outline-none focus:ring-2 focus:ring-[color:var(--text-teal)]/40"
+          className="flex-1 resize-none rounded-2xl border border-white/15 bg-white/[0.06] px-3.5 py-1.5 text-[13px] leading-[1.5] text-white placeholder:text-[color:var(--text-inverse-muted)] focus:border-[color:var(--text-teal)]/60 focus:outline-none focus:ring-2 focus:ring-[color:var(--text-teal)]/40"
         />
         <button
           type="submit"
           aria-label="Enviar"
-          disabled={inputValue.trim().length === 0}
-          className="inline-flex h-9 w-9 items-center justify-center rounded-full bg-[color:var(--text-teal)] text-[color:var(--surface-brand)] transition-all hover:bg-[color:var(--text-teal)]/90 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[color:var(--text-teal)]/40 disabled:cursor-not-allowed disabled:opacity-40"
+          aria-busy={pending}
+          disabled={!canSend}
+          style={{ backgroundColor: DOCK_TEAL }}
+          className="inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-full text-[color:var(--surface-brand)] transition-all hover:opacity-90 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[color:var(--text-teal)]/40 disabled:cursor-not-allowed disabled:opacity-40"
         >
-          <PaperPlaneTilt className="h-4 w-4" weight="fill" aria-hidden="true" />
+          {pending ? (
+            <span
+              aria-hidden="true"
+              className="h-4 w-4 animate-spin rounded-full border-2 border-current border-t-transparent"
+            />
+          ) : (
+            <PaperPlaneTilt className="h-4 w-4" weight="fill" aria-hidden="true" />
+          )}
         </button>
       </form>
     </footer>

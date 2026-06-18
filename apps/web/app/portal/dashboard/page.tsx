@@ -291,12 +291,17 @@ function DashboardInner({ session }: { session: PortalSession }) {
           aria-label="Indicadores clave"
           className="cw-stagger grid gap-4 sm:grid-cols-2 lg:grid-cols-4"
         >
+          {/* "Por atender" is a backlog COUNT (needs_action + expired),
+              not a 14-day upload pulse, so it intentionally omits a
+              sparkline — pairing the backlog headline with the
+              upload-activity trend measured two different populations
+              and read as a contradiction (audit 2026-06-18). */}
           <KpiCard
             label="Por atender"
             value={onboarding.needs_action + counts.expired}
             tone={onboarding.needs_action + counts.expired > 0 ? "warning" : "success"}
             icon={Warning}
-            sparkData={uploadActivity.byBucketAttention}
+            sparkData={[]}
             caption={
               onboarding.needs_action + counts.expired > 0
                 ? "Documentos que necesitan tu acción"
@@ -1234,7 +1239,7 @@ function OperationalQueues({
         icon={Warning}
         emptyTitle="Sin pendientes críticos"
         emptyDescription="No tienes documentos rechazados, vencidos o con observaciones."
-        href={attention.length > 0 ? "/portal/onboarding" : undefined}
+        href={attention.length > 0 ? "/portal/calendar" : undefined}
         rows={attention.slice(0, 5).map((row) => ({
           key: row.id,
           title: row.title,
@@ -1247,10 +1252,10 @@ function OperationalQueues({
       />
 
       <QueuePanel
-        title="Vence pronto"
+        title="Documentos faltantes"
         icon={CalendarBlank}
-        emptyTitle="Sin vencimientos en 14 días"
-        emptyDescription="Ningún documento obligatorio vence en las próximas dos semanas."
+        emptyTitle="Sin documentos faltantes"
+        emptyDescription="No tienes documentos obligatorios por cargar en este momento."
         href={dueSoon.length > 0 ? "/portal/calendar" : undefined}
         rows={dueSoon.slice(0, 5).map((row) => ({
           key: row.id,
@@ -1662,16 +1667,31 @@ const _ZIP_STATUS_OPTIONS: ReadonlyArray<{ value: string; label: string }> = [
   { value: "excepcion_legal", label: "Excepción legal" },
 ];
 
+// Canonical period_key shapes accepted by the backend (see
+// apps/api/app/models/entities.py:155): ``YYYY-Mxx`` (mensual, 01-12),
+// ``YYYY-Bn`` (bimestral, 1-6), ``YYYY-Qn`` (cuatrimestral, 1-3),
+// ``YYYY-A`` (anual). An unrecognized key is silently treated as "no
+// filter" by the ZIP endpoint, so we validate before firing the
+// download to avoid a misleading full pull.
+const _PERIOD_KEY_RE = /^\d{4}-(M(0[1-9]|1[0-2])|B[1-6]|Q[1-3]|A)$/;
+
 function ExpedienteDownloadDialog({ session }: { session: PortalSession }) {
   const [open, setOpen] = useState(false);
   const [institution, setInstitution] = useState("");
   const [periodKey, setPeriodKey] = useState("");
   const [statusFilter, setStatusFilter] = useState("");
 
+  const trimmedPeriod = periodKey.trim();
+  const periodError =
+    trimmedPeriod !== "" && !_PERIOD_KEY_RE.test(trimmedPeriod)
+      ? "Formato no reconocido. Usa YYYY-Mnn, YYYY-Bn, YYYY-Qn o YYYY-A."
+      : null;
+
   function handleSubmit() {
+    if (periodError) return;
     const url = expedienteZipUrl(session, {
       institution: institution || null,
-      period_key: periodKey || null,
+      period_key: trimmedPeriod || null,
       status: statusFilter || null,
     });
     window.open(url, "_blank", "noopener,noreferrer");
@@ -1716,7 +1736,8 @@ function ExpedienteDownloadDialog({ session }: { session: PortalSession }) {
           <Field
             label="Periodo (opcional)"
             htmlFor="zip-filter-period"
-            helper="Formato YYYY-MM (ej. 2026-M05) o YYYY-Bn / YYYY-Qn / YYYY-A."
+            helper="Formato YYYY-Mnn (ej. 2026-M05), o YYYY-Bn / YYYY-Qn / YYYY-A."
+            error={periodError}
           >
             <input
               id="zip-filter-period"
@@ -1748,7 +1769,7 @@ function ExpedienteDownloadDialog({ session }: { session: PortalSession }) {
           >
             Cancelar
           </Button>
-          <Button type="button" onClick={handleSubmit}>
+          <Button type="button" onClick={handleSubmit} disabled={!!periodError}>
             <DownloadSimple
               className="h-4 w-4"
               weight="bold"

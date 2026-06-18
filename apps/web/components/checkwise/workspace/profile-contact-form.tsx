@@ -68,6 +68,11 @@ export function ProfileContactForm({
 
   async function handleSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
+    if (phoneError) {
+      setSaveError(phoneError);
+      document.getElementById("profile-phone")?.focus();
+      return;
+    }
     setSubmitting(true);
     setSaveError(null);
     const fullName = `${profile.first_name.trim()} ${profile.last_name.trim()}`
@@ -225,7 +230,12 @@ export function ProfileContactForm({
             Guardado
           </p>
         ) : null}
-        <Button type="submit" loading={submitting} disabled={justSaved} size="lg">
+        <Button
+          type="submit"
+          loading={submitting}
+          disabled={justSaved || !!phoneError}
+          size="lg"
+        >
           <span>{justSaved ? "Volviendo…" : submitLabel}</span>
           {!submitting && !justSaved && (
             <ArrowRight className="h-4 w-4" weight="bold" aria-hidden="true" />

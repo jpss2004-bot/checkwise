@@ -308,7 +308,15 @@ function PortalUploadInner() {
   ]);
 
   if (!session) {
-    return null;
+    // While the session resolves (and before any redirect fires), keep the
+    // portal frame visible and show the same skeleton used by the Suspense
+    // fallback, so the real fetch wait has a perceptible loading state
+    // instead of a blank screen.
+    return (
+      <main className="mx-auto max-w-7xl space-y-5 px-5 py-6">
+        <UploadWizardSkeleton />
+      </main>
+    );
   }
 
   // Provider-portal UX pass (2026-05-25) — when /portal/upload is
@@ -455,10 +463,7 @@ function PortalUploadInner() {
             )}
           </section>
           <Alert variant="info">
-            <AlertTitle className="flex items-center gap-2">
-              <Info className="h-4 w-4" weight="bold" aria-hidden="true" />
-              ¿Por qué no muestro un formulario?
-            </AlertTitle>
+            <AlertTitle>¿Por qué no muestro un formulario?</AlertTitle>
             <AlertDescription>
               Cargar un documento sin contexto puede dejarlo asignado al
               cliente, periodo o institución equivocados. Pasar por el

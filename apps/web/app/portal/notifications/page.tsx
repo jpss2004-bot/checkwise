@@ -33,6 +33,7 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { PageHeader } from "@/components/ui/page-header";
+import { toast } from "@/components/ui/toast";
 import { cn } from "@/lib/utils";
 import type { NotificationSeverity } from "@/lib/api/client";
 import {
@@ -108,6 +109,7 @@ function PortalNotificationsInner({ session }: { session: PortalSession }) {
   const [tab, setTab] = useState<TabKey>("pending");
   const [categoryFilter, setCategoryFilter] =
     useState<NotificationCategory | null>(null);
+  const [markingAll, setMarkingAll] = useState(false);
 
   useEffect(() => {
     let cancelled = false;
@@ -168,6 +170,13 @@ function PortalNotificationsInner({ session }: { session: PortalSession }) {
 
   async function markOne(row: ProviderNotificationItem) {
     if (row.read_at) return;
+    // Optimistic: mark read immediately so the click always produces feedback.
+    const optimisticReadAt = new Date().toISOString();
+    setRows((current) =>
+      current?.map((item) =>
+        item.id === row.id ? { ...item, read_at: optimisticReadAt } : item,
+      ) ?? current,
+    );
     try {
       const updated = await markProviderNotificationRead(session, row.id);
       setRows((current) =>
@@ -175,22 +184,40 @@ function PortalNotificationsInner({ session }: { session: PortalSession }) {
         current,
       );
     } catch {
-      // Non-fatal — the link still navigates and the user can refresh.
+      // Roll back the optimistic update and tell the user.
+      setRows((current) =>
+        current?.map((item) =>
+          item.id === row.id ? { ...item, read_at: row.read_at } : item,
+        ) ?? current,
+      );
+      toast.error("No pudimos marcarla como leída.", {
+        description: "Revisa tu conexión e inténtalo de nuevo.",
+      });
     }
   }
 
   async function markAll() {
+    if (markingAll) return;
+    setMarkingAll(true);
+    // Optimistic: flip everything to read immediately, snapshotting prior
+    // state so we can roll back if the request fails.
+    const snapshot = rows;
+    setRows((current) =>
+      current?.map((item) => ({
+        ...item,
+        read_at: item.read_at ?? new Date().toISOString(),
+      })) ?? current,
+    );
     try {
       await markAllProviderNotificationsRead(session);
-      setRows((current) =>
-        current?.map((item) => ({
-          ...item,
-          read_at: item.read_at ?? new Date().toISOString(),
-        })) ?? current,
-      );
+      toast.success("Marcamos todas como leídas.");
     } catch {
-      // Non-fatal — the user can re-trigger; the summary will reflect
-      // reality on next fetch.
+      setRows(snapshot);
+      toast.error("No pudimos marcarlas como leídas.", {
+        description: "Revisa tu conexión e inténtalo de nuevo.",
+      });
+    } finally {
+      setMarkingAll(false);
     }
   }
 
@@ -208,13 +235,14 @@ function PortalNotificationsInner({ session }: { session: PortalSession }) {
                 size="sm"
                 variant="outline"
                 onClick={markAll}
+                disabled={markingAll}
               >
                 <CheckCircle
                   className="h-3.5 w-3.5"
                   weight="bold"
                   aria-hidden
                 />
-                Marcar todas como leídas
+                {markingAll ? "Marcando…" : "Marcar todas como leídas"}
               </Button>
             ) : null
           }
@@ -288,8 +316,11 @@ function TabBar({
   counts: { pending: number; all: number; resolved: number };
 }) {
   return (
+    // Segmented filter, not a true tab/tabpanel pattern: selecting a segment
+    // filters the list below rather than swapping panels, so we expose it as a
+    // group of toggle buttons (aria-pressed) — matching the category chips.
     <div
-      role="tablist"
+      role="group"
       aria-label="Filtrar notificaciones"
       className="flex items-center gap-1 rounded-lg border border-[color:var(--border-default)] bg-[color:var(--surface-raised)] p-1"
     >
@@ -300,8 +331,7 @@ function TabBar({
           <button
             key={key}
             type="button"
-            role="tab"
-            aria-selected={selected}
+            aria-pressed={selected}
             onClick={() => onSelect(key)}
             className={cn(
               "flex flex-1 items-center justify-center gap-2 rounded-md px-3 py-2 text-sm font-medium transition",
@@ -460,8 +490,13 @@ function NotificationRow({
     >
       <span
         className={cn(
-          "flex h-8 w-8 shrink-0 items-center justify-center rounded-md",
-          "bg-[color:var(--surface-page)] text-[color:var(--text-secondary)]",
+          "flex h-8 w-8 shrink-0 items-center justify-center rounded-md text-[color:var(--text-secondary)]",
+          // Keep the chip a step apart from the row surface in both states:
+          // read rows already sit on --surface-page, so a same-tone chip
+          // disappears — drop it to --surface-sunken there.
+          unread
+            ? "bg-[color:var(--surface-page)]"
+            : "bg-[color:var(--surface-sunken)]",
         )}
       >
         <RowIcon className="h-4 w-4" weight="bold" aria-hidden />
@@ -492,7 +527,8 @@ function NotificationRow({
         <Link href={row.action_url} onClick={onRead} className="block">
           {content}
         </Link>
-      ) : (
+      ) : unread ? (
+        // No destination, but still has an unread state to toggle.
         <button
           type="button"
           onClick={onRead}
@@ -500,6 +536,10 @@ function NotificationRow({
         >
           {content}
         </button>
+      ) : (
+        // Already read and nowhere to navigate — not actionable, so don't
+        // announce it as a button.
+        <div className="block">{content}</div>
       )}
     </li>
   );

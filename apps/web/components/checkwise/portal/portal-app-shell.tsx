@@ -350,21 +350,23 @@ export function PortalAppShell({
                 <X className="h-5 w-5" weight="bold" />
               </Button>
             </div>
-            <div className="px-3 pb-3">
-              <WorkspaceCard session={session} />
+            <div className="min-h-0 flex-1 overflow-y-auto">
+              <div className="px-3 pb-3">
+                <WorkspaceCard session={session} />
+              </div>
+              <SidebarNav
+                pathname={pathname ?? ""}
+                items={primaryNav}
+                title="Operación"
+                onNavigate={() => setMobileOpen(false)}
+              />
+              <SidebarNav
+                pathname={pathname ?? ""}
+                items={SECONDARY_NAV}
+                title="Cuenta"
+                onNavigate={() => setMobileOpen(false)}
+              />
             </div>
-            <SidebarNav
-              pathname={pathname ?? ""}
-              items={primaryNav}
-              title="Operación"
-              onNavigate={() => setMobileOpen(false)}
-            />
-            <SidebarNav
-              pathname={pathname ?? ""}
-              items={SECONDARY_NAV}
-              title="Cuenta"
-              onNavigate={() => setMobileOpen(false)}
-            />
             <div className="mt-auto p-3">
               {pct !== null ? (
                 <SidebarProgress pct={pct} complete={isComplete} />

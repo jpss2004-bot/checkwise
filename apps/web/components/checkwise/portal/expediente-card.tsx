@@ -112,7 +112,7 @@ interface ExpedienteCardProps {
  * Spec: docs/DESIGN_SYSTEM.md §6.1 (Onboarding patterns)
  */
 export function ExpedienteCard({ requirement, onAction }: ExpedienteCardProps) {
-  const IconComponent = INSTITUTION_ICON[requirement.institution];
+  const IconComponent = INSTITUTION_ICON[requirement.institution] ?? Buildings;
   const cardTone = toneForState(requirement.state);
 
   return (
@@ -140,7 +140,7 @@ export function ExpedienteCard({ requirement, onAction }: ExpedienteCardProps) {
           </span>
           <div className="min-w-0">
             <p className="font-mono text-[10px] uppercase tracking-wide text-[color:var(--text-tertiary)]">
-              {INSTITUTION_LABEL[requirement.institution]}
+              {INSTITUTION_LABEL[requirement.institution] ?? requirement.institution}
               {requirement.requirement_code && (
                 <>
                   {" · "}
