@@ -71,6 +71,7 @@ from app.models import (
     AuditLog,
     Client,
     ContactRequest,
+    Contract,
     Document,
     FeedbackReport,
     Institution,
@@ -3153,12 +3154,19 @@ class AdminCalendarRow(BaseModel):
     due_soon_count: int
 
 
+class AdminCalendarCellInst(BaseModel):
+    count: int
+    worst_risk: str
+
+
 class AdminCalendarCell(BaseModel):
     row_id: str
     month: int
     count: int
     worst_risk: str
-    by_institution: dict[str, int]
+    # Per-institution {count, worst_risk} so the FE can recolor/recount the
+    # grid by a single authority client-side, with no refetch.
+    by_institution: dict[str, AdminCalendarCellInst]
 
 
 class AdminCalendarMonthForecast(BaseModel):
@@ -3295,14 +3303,20 @@ def _cells_from_obligations(obligations: list, *, row_id_of) -> list[AdminCalend
             acc[key] = cell
         cell["count"] += 1
         cell["risks"].append(ob.risk_level)
-        cell["by_inst"][ob.institution] = cell["by_inst"].get(ob.institution, 0) + 1
+        inst = cell["by_inst"].setdefault(ob.institution, [])
+        inst.append(ob.risk_level)
     return [
         AdminCalendarCell(
             row_id=row_id,
             month=month,
             count=cell["count"],
             worst_risk=_worst_calendar_risk(cell["risks"]),
-            by_institution=cell["by_inst"],
+            by_institution={
+                code: AdminCalendarCellInst(
+                    count=len(risks), worst_risk=_worst_calendar_risk(risks)
+                )
+                for code, risks in cell["by_inst"].items()
+            },
         )
         for (row_id, month), cell in acc.items()
     ]
@@ -3527,6 +3541,140 @@ def get_admin_calendar_grid(
         obligations=month_obligations,
         clients_total=len(clients),
         clients_scanned=len(scan),
+        truncated=truncated,
+    )
+
+
+# ---------------------------------------------------------------------------
+# Calendar renewals lane (P2) — the date-precise obligations the 17th-of-month
+# grid structurally can't model: real contract expiries (Contract.end_date) and
+# approval-anchored credential renewals (CSF / REPSE / registro patronal via
+# compute_renewal_actions). Served on its own route so the FE loads it lazily,
+# never blocking the calendar grid. The credential pass is the one bounded
+# per-vendor fan-out we accept here (renewals aren't catalog-month-anchored).
+# ---------------------------------------------------------------------------
+
+_RENEWAL_VENDOR_SCAN_CAP = 300
+
+
+class AdminRenewalContract(BaseModel):
+    client_id: str
+    client_name: str
+    vendor_id: str
+    vendor_name: str
+    end_date: str
+    days_until: int  # negative = already expired
+    status: str  # "overdue" | "due_soon" | "upcoming"
+    repse_folio: str | None
+
+
+class AdminRenewalCredential(BaseModel):
+    client_id: str | None
+    client_name: str | None
+    vendor_id: str
+    vendor_name: str
+    title: str
+    requirement_code: str
+    status: str  # "overdue" | "due_soon"
+
+
+class AdminRenewalsResponse(BaseModel):
+    as_of: str
+    contracts: list[AdminRenewalContract]
+    credentials: list[AdminRenewalCredential]
+    vendors_scanned: int
+    truncated: bool
+
+
+@router.get("/calendar/renewals", response_model=AdminRenewalsResponse)
+def get_admin_calendar_renewals(
+    db: DbSession,
+    current: AdminUser,
+    horizon_days: Annotated[int, Query(ge=7, le=365)] = 90,
+) -> AdminRenewalsResponse:
+    """Date-precise renewals across the portfolio: contract expiries +
+    credential renewals (CSF/REPSE/registro patronal), urgency-sorted."""
+    _ = current
+    from app.services.dashboard_compute import (
+        compute_renewal_actions,
+        resolve_workspace_for_vendor,
+    )
+
+    today = date.today()
+    horizon = today + timedelta(days=horizon_days)
+
+    # --- Contract expiries (real end_date — cheap set-based query) -----
+    crows = db.execute(
+        select(
+            Contract.client_id,
+            Contract.vendor_id,
+            Contract.end_date,
+            Contract.repse_folio,
+            Client.name,
+            Vendor.name,
+        )
+        .join(Client, Client.id == Contract.client_id)
+        .join(Vendor, Vendor.id == Contract.vendor_id)
+        .where(
+            Contract.status == "active",
+            Contract.end_date.isnot(None),
+            Contract.end_date <= horizon,
+        )
+        .order_by(Contract.end_date.asc())
+    ).all()
+    contracts: list[AdminRenewalContract] = []
+    for cclient, cvendor, end_date, folio, cname, vname in crows:
+        days = (end_date - today).days
+        status = "overdue" if days < 0 else "due_soon" if days <= 30 else "upcoming"
+        contracts.append(
+            AdminRenewalContract(
+                client_id=cclient,
+                client_name=cname,
+                vendor_id=cvendor,
+                vendor_name=vname,
+                end_date=end_date.isoformat(),
+                days_until=days,
+                status=status,
+                repse_folio=folio,
+            )
+        )
+
+    # --- Credential renewals (bounded per-vendor pass) ----------------
+    vrows = db.execute(
+        select(Vendor.id, Vendor.client_id, Vendor.name)
+        .where(Vendor.status == "active")
+        .order_by(Vendor.name.asc())
+    ).all()
+    truncated = len(vrows) > _RENEWAL_VENDOR_SCAN_CAP
+    scan = vrows[:_RENEWAL_VENDOR_SCAN_CAP]
+    client_names = dict(db.execute(select(Client.id, Client.name)).all())
+
+    credentials: list[AdminRenewalCredential] = []
+    for vid, vclient, vname in scan:
+        ws = resolve_workspace_for_vendor(db, vid)
+        if ws is None:
+            continue
+        for act in compute_renewal_actions(db, ws, today):
+            credentials.append(
+                AdminRenewalCredential(
+                    client_id=vclient,
+                    client_name=client_names.get(vclient) if vclient else None,
+                    vendor_id=vid,
+                    vendor_name=vname,
+                    title=act.get("title") or "Renovación",
+                    requirement_code=act.get("requirement_code") or "",
+                    status="overdue" if act.get("priority") == "high" else "due_soon",
+                )
+            )
+
+    # Overdue first within each list.
+    contracts.sort(key=lambda c: c.days_until)
+    credentials.sort(key=lambda c: 0 if c.status == "overdue" else 1)
+    return AdminRenewalsResponse(
+        as_of=today.isoformat(),
+        contracts=contracts,
+        credentials=credentials,
+        vendors_scanned=len(scan),
         truncated=truncated,
     )
 
