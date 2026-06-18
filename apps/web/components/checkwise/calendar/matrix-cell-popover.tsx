@@ -58,11 +58,16 @@ const RISK_DOT: Record<CalendarRisk, string> = {
 type Position = { top: number; left: number; placement: "below" | "above" };
 
 function computePosition(triggerRect: DOMRect, popoverHeight: number): Position {
-  let left = triggerRect.left + triggerRect.width / 2 - POPOVER_WIDTH / 2;
-  if (left < VIEWPORT_MARGIN) left = VIEWPORT_MARGIN;
+  // Left-align to the cell (extends rightward) rather than centering on it.
+  // Centering made the popover for the left-edge month cells spill left OVER
+  // the sticky provider-name column — which read as the popover "covering the
+  // names". Anchoring to the cell's left edge keeps it clear of that column;
+  // the viewport clamp below still pulls it in for the right-edge months.
+  let left = triggerRect.left;
   if (left + POPOVER_WIDTH > window.innerWidth - VIEWPORT_MARGIN) {
     left = window.innerWidth - POPOVER_WIDTH - VIEWPORT_MARGIN;
   }
+  if (left < VIEWPORT_MARGIN) left = VIEWPORT_MARGIN;
   let top = triggerRect.bottom + GAP;
   let placement: Position["placement"] = "below";
   if (top + popoverHeight > window.innerHeight - VIEWPORT_MARGIN) {

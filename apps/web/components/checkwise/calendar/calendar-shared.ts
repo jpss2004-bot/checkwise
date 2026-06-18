@@ -109,6 +109,32 @@ export const SEMAPHORE_DOT: Record<"red" | "yellow" | "green", string> = {
   green: "bg-[color:var(--status-success-text)]",
 };
 
+// Per-risk solid fill (CSS color value) for the in-cell composition bar and
+// its legend. Unlike the 5 coarse BUCKET tones — which merge ``overdue`` and
+// ``action_required`` into one red — these give all SIX severities a distinct
+// hue, so a matrix cell can show at a glance how many obligations are overdue
+// (red) vs awaiting the provider's correction (orange) vs in review (blue) vs
+// on track (green), instead of one worst-case block that hides the mix.
+export const RISK_BAR_COLOR: Record<CalendarRisk, string> = {
+  overdue: "hsl(var(--red-500))",
+  action_required: "hsl(var(--orange-500))",
+  due_soon: "hsl(var(--amber-500))",
+  in_review: "hsl(var(--navy-500))",
+  upcoming: "hsl(var(--gray-400))",
+  on_track: "hsl(var(--green-500))",
+};
+
+// Worst-first ordering for stacked bars + legends, so the most urgent slice
+// always leads. Mirrors RISK_ORDER.
+export const RISK_LEVELS_WORST_FIRST: CalendarRisk[] = [
+  "overdue",
+  "action_required",
+  "due_soon",
+  "in_review",
+  "upcoming",
+  "on_track",
+];
+
 // ─── Date helpers ───────────────────────────────────────────────
 // deadline_iso is "YYYY-MM-DD" with the conventional day-17 cutoff.
 // Parsed as a *local* date so "in N days" never drifts at a UTC boundary.

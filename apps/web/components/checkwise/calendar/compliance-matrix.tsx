@@ -7,8 +7,10 @@ import { MONTH_LABELS_ES, MONTH_LABELS_SHORT_ES } from "@/lib/api/portal";
 
 import {
   BUCKET_CELL,
+  RISK_BAR_COLOR,
   RISK_ICON,
   RISK_LABEL,
+  RISK_LEVELS_WORST_FIRST,
   SEMAPHORE_DOT,
   riskBucket,
   type CalendarRisk,
@@ -193,17 +195,33 @@ export function ComplianceMatrix({
           <li className="font-mono text-[10px] uppercase tracking-wide text-[color:var(--text-tertiary)]">
             Leyenda
           </li>
-          {LEGEND.map(({ bucket, label }) => (
-            <li key={bucket} className="flex items-center gap-1.5">
-              <span
-                aria-hidden="true"
-                className={"h-3.5 w-3.5 rounded border " + BUCKET_CELL[bucket]}
-              />
-              <span className="text-xs text-[color:var(--text-secondary)]">
-                {label}
-              </span>
-            </li>
-          ))}
+          {/* When the cells carry a composition bar (client calendar), the
+              legend decodes its six per-risk hues; the admin grid keeps the
+              coarser five-bucket fill legend. */}
+          {cellItems
+            ? RISK_LEVELS_WORST_FIRST.map((risk) => (
+                <li key={risk} className="flex items-center gap-1.5">
+                  <span
+                    aria-hidden="true"
+                    className="h-3 w-3 shrink-0 rounded-sm"
+                    style={{ backgroundColor: RISK_BAR_COLOR[risk] }}
+                  />
+                  <span className="text-xs text-[color:var(--text-secondary)]">
+                    {RISK_LABEL[risk]}
+                  </span>
+                </li>
+              ))
+            : LEGEND.map(({ bucket, label }) => (
+                <li key={bucket} className="flex items-center gap-1.5">
+                  <span
+                    aria-hidden="true"
+                    className={"h-3.5 w-3.5 rounded border " + BUCKET_CELL[bucket]}
+                  />
+                  <span className="text-xs text-[color:var(--text-secondary)]">
+                    {label}
+                  </span>
+                </li>
+              ))}
         </ul>
       </div>
 
@@ -322,6 +340,26 @@ function MatrixCell({
   const hasPreview = (preview?.length ?? 0) > 0;
   const previewTitle = `${MONTH_LABELS_ES[month]} · ${cell.count} ${cell.count === 1 ? "obligación" : "obligaciones"}`;
 
+  // Composition breakdown (worst-first, non-zero) from the per-cell preview, so
+  // the cell shows HOW the count splits across severities — overdue vs awaiting
+  // correction vs in review vs on track — instead of one worst-case block that
+  // hides the mix. The admin grid passes no preview and keeps the solid fill.
+  const segments: { risk: CalendarRisk; n: number }[] = [];
+  if (hasPreview) {
+    const counts = new Map<CalendarRisk, number>();
+    for (const it of preview ?? [])
+      counts.set(it.risk, (counts.get(it.risk) ?? 0) + 1);
+    for (const risk of RISK_LEVELS_WORST_FIRST) {
+      const n = counts.get(risk) ?? 0;
+      if (n > 0) segments.push({ risk, n });
+    }
+  }
+  const ariaLabel = hasPreview
+    ? `${rowName}, ${MONTH_LABELS_ES[month]}: ${cell.count} ${cell.count === 1 ? "obligación" : "obligaciones"} — ${segments
+        .map((s) => `${s.n} ${RISK_LABEL[s.risk].toLowerCase()}`)
+        .join(", ")}. Ver detalle.`
+    : `${rowName}: ${cell.count} ${cell.count === 1 ? "obligación" : "obligaciones"} en ${MONTH_LABELS_ES[month]}, estado ${RISK_LABEL[cell.worstRisk]}. Ver detalle.`;
+
   return (
     <div
       className="relative"
@@ -335,7 +373,7 @@ function MatrixCell({
         onFocus={hasPreview ? handleEnter : undefined}
         onBlur={hasPreview ? scheduleClose : undefined}
         aria-pressed={isSelected}
-        aria-label={`${rowName}: ${cell.count} ${cell.count === 1 ? "obligación" : "obligaciones"} en ${MONTH_LABELS_ES[month]}, estado ${RISK_LABEL[cell.worstRisk]}. Ver detalle.`}
+        aria-label={ariaLabel}
         // Native title only when there's no rich popover (avoid a double tooltip).
         title={
           hasPreview
@@ -343,8 +381,10 @@ function MatrixCell({
             : `${MONTH_LABELS_ES[month]} · ${RISK_LABEL[cell.worstRisk]} · ${cell.count}`
         }
         className={
-          "flex h-14 w-full flex-col items-center justify-center gap-0.5 rounded-md border transition-[transform,box-shadow] duration-150 ease-out hover:-translate-y-px hover:shadow-sm focus:outline-none focus-visible:ring-2 focus-visible:ring-[color:var(--border-focus)] " +
-          BUCKET_CELL[bucket] +
+          "flex h-14 w-full flex-col items-center justify-center gap-1 rounded-md border transition-[transform,box-shadow] duration-150 ease-out hover:-translate-y-px hover:shadow-sm focus:outline-none focus-visible:ring-2 focus-visible:ring-[color:var(--border-focus)] " +
+          (hasPreview
+            ? "border-[color:var(--border-default)] bg-[color:var(--surface-raised)] px-1.5"
+            : BUCKET_CELL[bucket]) +
           (isSelected
             ? " ring-2 ring-[color:var(--border-focus)]"
             : isCurrent
@@ -352,10 +392,36 @@ function MatrixCell({
               : "")
         }
       >
-        <Icon className="h-4 w-4 shrink-0" weight="bold" aria-hidden="true" />
-        <span className="font-mono text-sm font-semibold leading-none tabular-nums">
-          {cell.count}
-        </span>
+        {hasPreview ? (
+          <>
+            <span className="font-mono text-sm font-semibold leading-none tabular-nums text-[color:var(--text-primary)]">
+              {cell.count}
+            </span>
+            <span
+              aria-hidden="true"
+              className="flex h-1.5 w-full gap-px overflow-hidden rounded-full bg-[color:var(--surface-sunken)]"
+            >
+              {segments.map((s) => (
+                <span
+                  key={s.risk}
+                  className="h-full"
+                  style={{
+                    flexGrow: s.n,
+                    minWidth: "3px",
+                    backgroundColor: RISK_BAR_COLOR[s.risk],
+                  }}
+                />
+              ))}
+            </span>
+          </>
+        ) : (
+          <>
+            <Icon className="h-4 w-4 shrink-0" weight="bold" aria-hidden="true" />
+            <span className="font-mono text-sm font-semibold leading-none tabular-nums">
+              {cell.count}
+            </span>
+          </>
+        )}
       </button>
       {hasPreview ? (
         <MatrixCellPopover
