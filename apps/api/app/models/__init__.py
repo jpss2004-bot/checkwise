@@ -1,4 +1,5 @@
 from app.models.entities import (
+    AdminCalendarSnapshot,
     AuditLog,
     Client,
     ClientNotification,
@@ -39,6 +40,7 @@ from app.models.entities import (
 )
 
 __all__ = [
+    "AdminCalendarSnapshot",
     "AuditLog",
     "Client",
     "ClientNotification",

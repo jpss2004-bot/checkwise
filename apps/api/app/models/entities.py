@@ -1600,3 +1600,33 @@ class ExpedienteAssessment(TimestampMixin, Base):
 
     latency_ms: Mapped[int | None] = mapped_column(Integer)
     error: Mapped[str | None] = mapped_column(Text)
+
+
+class AdminCalendarSnapshot(TimestampMixin, Base):
+    """Precomputed per-client contribution to the admin calendar overview.
+
+    The overview is an ``O(clients)`` compliance scan (~90 ms/client); at
+    portfolio scale that is seconds per load. This caches each client's
+    cells + rollup as JSON so the overview reads and sums rows instead of
+    re-scanning. Refreshed stale-while-revalidate on read (and by a cron);
+    the per-client DRILL stays live, so obligation detail is never stale.
+    One row per (year, client_id) — a full replace per refresh.
+    """
+
+    __tablename__ = "admin_calendar_snapshots"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=new_id)
+    year: Mapped[int] = mapped_column(Integer, nullable=False)
+    client_id: Mapped[str] = mapped_column(String(36), nullable=False)
+    client_name: Mapped[str] = mapped_column(String(255), nullable=False)
+    payload: Mapped[dict] = mapped_column(JSON, nullable=False)
+    computed_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False
+    )
+
+    __table_args__ = (
+        UniqueConstraint(
+            "year", "client_id", name="uq_admin_calendar_snapshots_year_client"
+        ),
+        Index("ix_admin_calendar_snapshots_year", "year"),
+    )
