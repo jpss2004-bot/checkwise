@@ -22,6 +22,20 @@ export const metadata: Metadata = {
   },
 };
 
+// AboutPage tied to the shared Organization node (#organization, defined
+// in the homepage @graph) so search engines connect this page to the
+// entity behind the product.
+const ABOUT_LD = {
+  "@context": "https://schema.org",
+  "@type": "AboutPage",
+  "@id": `${SITE_URL}/sobre-checkwise#about`,
+  inLanguage: "es-MX",
+  name: "Sobre CheckWise — Cumplimiento REPSE por Legal Shelf",
+  url: `${SITE_URL}/sobre-checkwise`,
+  mainEntity: { "@id": `${SITE_URL}/#organization` },
+  publisher: { "@id": `${SITE_URL}/#organization` },
+};
+
 const LOGOS = [
   "Capgemini",
   "BIC",
@@ -45,6 +59,11 @@ export default function SobreCheckWisePage() {
       breadcrumbName="Sobre CheckWise"
       path="/sobre-checkwise"
     >
+      <script
+        type="application/ld+json"
+        dangerouslySetInnerHTML={{ __html: JSON.stringify(ABOUT_LD) }}
+      />
+
       <ArticleSection id="legal-shelf" heading="Legal Shelf">
         <p>
           <Link

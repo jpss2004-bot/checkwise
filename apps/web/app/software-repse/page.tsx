@@ -3,10 +3,12 @@ import Link from "next/link";
 
 import {
   ArticleCta,
+  ArticleFaq,
+  type ArticleFaqItem,
   ArticleSection,
   MarketingArticleShell,
 } from "@/components/marketing/article-shell";
-import { SITE_URL } from "@/lib/site";
+import { SITE_NAME, SITE_URL } from "@/lib/site";
 
 /**
  * /software-repse — commercial intent page.
@@ -31,6 +33,53 @@ export const metadata: Metadata = {
   },
 };
 
+// Page-level product node. References the shared Organization (#organization
+// from the homepage @graph) as publisher. No price/rating claims — only
+// what we can stand behind — so the markup stays honest and eligible.
+const SOFTWARE_LD = {
+  "@context": "https://schema.org",
+  "@type": "SoftwareApplication",
+  "@id": `${SITE_URL}/software-repse#software`,
+  name: SITE_NAME,
+  url: `${SITE_URL}/software-repse`,
+  applicationCategory: "BusinessApplication",
+  operatingSystem: "Web",
+  inLanguage: "es-MX",
+  description:
+    "Software de cumplimiento REPSE para empresas contratantes y proveedores: calendario de obligaciones por requisito y periodo, expediente auditable por proveedor, revisión documental con IA y validación humana, semáforo de riesgo del portafolio y reportes listos para auditoría.",
+  publisher: { "@id": `${SITE_URL}/#organization` },
+};
+
+// Commercial-intent FAQ: the questions a buyer evaluating a REPSE
+// platform asks. Reinforces the contratante wedge and feeds AI answers.
+const SOFTWARE_FAQ: readonly ArticleFaqItem[] = [
+  {
+    question: "¿Qué es un software de cumplimiento REPSE?",
+    answer:
+      "Es una plataforma que centraliza el control de la subcontratación especializada: calendario de obligaciones por requisito, periodo e institución; expediente digital por proveedor; revisión de documentos; semáforo de riesgo del portafolio; y reportes listos para auditoría. Sustituye el control disperso en hojas de cálculo, carpetas compartidas y correos.",
+  },
+  {
+    question: "¿Cómo ayuda a una empresa contratante a evitar multas y responsabilidad solidaria?",
+    answer:
+      "Anticipando el riesgo. El calendario y el semáforo detectan documentos faltantes, vencidos o inconsistentes antes de la fecha límite —cuando todavía se pueden corregir— en lugar de descubrirlos en una inspección. Así la verificación de proveedores deja de ser un trámite único al firmar y se vuelve un control continuo durante toda la relación.",
+  },
+  {
+    question: "¿La inteligencia artificial sustituye la revisión humana?",
+    answer:
+      "No. La IA analiza cada documento y detecta inconsistencias para acelerar la revisión, pero la decisión final siempre la toma un revisor humano y queda firmada y registrada. CheckWise es una solución de Legal Shelf; la IA asiste y la decisión legal es de una persona.",
+  },
+  {
+    question: "¿Sirve tanto para la empresa contratante como para el proveedor?",
+    answer:
+      "Sí. La empresa contratante ve su portafolio completo con semáforo de riesgo y genera los reportes de auditoría; el proveedor carga su evidencia una sola vez con un flujo guiado por requisito y periodo, y la reutiliza con todos sus clientes. Ambos trabajan sobre el mismo expediente auditable.",
+  },
+  {
+    question: "¿Qué reportes genera para una auditoría o inspección REPSE?",
+    answer:
+      "Reportes ejecutivos y paquetes de evidencia exportables en PDF, Excel o HTML, generados directamente del expediente: cada conclusión queda respaldada por el documento, el periodo, la institución y la decisión de revisión que la sustenta, con su historial de reemplazos.",
+  },
+];
+
 export default function SoftwareRepsePage() {
   return (
     <MarketingArticleShell
@@ -47,6 +96,11 @@ export default function SoftwareRepsePage() {
       breadcrumbName="Software de cumplimiento REPSE"
       path="/software-repse"
     >
+      <script
+        type="application/ld+json"
+        dangerouslySetInnerHTML={{ __html: JSON.stringify(SOFTWARE_LD) }}
+      />
+
       <ArticleSection
         id="por-que-no-excel"
         heading="Por qué las hojas de cálculo se quedan cortas"
@@ -130,7 +184,14 @@ export default function SoftwareRepsePage() {
           <li>
             <strong>Empresas contratantes</strong> que reciben servicios
             especializados y necesitan blindar la deducibilidad y el
-            acreditamiento de sus pagos con evidencia continua.
+            acreditamiento de sus pagos con evidencia continua.{" "}
+            <Link
+              href="/validar-proveedores-repse"
+              className="font-medium text-[color:var(--text-brand)] hover:underline"
+            >
+              Ve cómo validar a tus proveedores
+            </Link>
+            .
           </li>
           <li>
             <strong>Proveedores registrados en el REPSE</strong> que
@@ -144,6 +205,8 @@ export default function SoftwareRepsePage() {
           </li>
         </ul>
       </ArticleSection>
+
+      <ArticleFaq items={SOFTWARE_FAQ} path="/software-repse" />
 
       <ArticleCta
         title="Compara tu control actual contra CheckWise en 30 minutos."

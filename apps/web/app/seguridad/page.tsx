@@ -22,6 +22,20 @@ export const metadata: Metadata = {
   },
 };
 
+// Security/infrastructure page → TechArticle, attributed to the shared
+// Organization node (#organization from the homepage @graph).
+const SECURITY_LD = {
+  "@context": "https://schema.org",
+  "@type": "TechArticle",
+  "@id": `${SITE_URL}/seguridad#article`,
+  headline: "Seguridad e infraestructura — CheckWise",
+  inLanguage: "es-MX",
+  about: "Seguridad de la plataforma de cumplimiento REPSE CheckWise",
+  author: { "@id": `${SITE_URL}/#organization` },
+  publisher: { "@id": `${SITE_URL}/#organization` },
+  mainEntityOfPage: `${SITE_URL}/seguridad`,
+};
+
 export default function SeguridadPage() {
   return (
     <MarketingArticleShell
@@ -38,6 +52,11 @@ export default function SeguridadPage() {
       breadcrumbName="Seguridad"
       path="/seguridad"
     >
+      <script
+        type="application/ld+json"
+        dangerouslySetInnerHTML={{ __html: JSON.stringify(SECURITY_LD) }}
+      />
+
       <ArticleSection id="infraestructura" heading="Infraestructura gestionada">
         <p>
           La plataforma corre en tres capas, cada una administrada por un

@@ -3,6 +3,8 @@ import Link from "next/link";
 
 import {
   ArticleCta,
+  ArticleFaq,
+  type ArticleFaqItem,
   ArticleSection,
   MarketingArticleShell,
 } from "@/components/marketing/article-shell";
@@ -44,6 +46,42 @@ const ARTICLE_LD = {
   publisher: { "@id": `${SITE_URL}/#organization` },
   mainEntityOfPage: `${SITE_URL}/repse`,
 };
+
+// Page-specific FAQ. Deepens the pillar with the exact questions people
+// ask Google around vigencia, ICSOE vs SISUB, mid-contract loss of
+// registry and contratante liability — distinct from the landing FAQ.
+const REPSE_FAQ: readonly ArticleFaqItem[] = [
+  {
+    question: "¿Cada cuánto se renueva el REPSE?",
+    answer:
+      "El registro REPSE tiene una vigencia de tres años. La renovación debe tramitarse ante la STPS antes de que venza —la recomendación práctica es iniciarla con al menos 90 días de anticipación— porque operar con un registro vencido equivale a no tenerlo, con los mismos efectos fiscales y de responsabilidad para quien contrata.",
+  },
+  {
+    question: "¿Qué diferencia hay entre la ICSOE y el SISUB?",
+    answer:
+      "Son dos informativas cuatrimestrales distintas que presenta el proveedor registrado. La ICSOE (Informativa de Contratos de Servicios u Obras Especializadas) se presenta ante el IMSS; el SISUB (Sistema de Información de Subcontratación) se presenta ante el INFONAVIT. Ambas se entregan en enero, mayo y septiembre y reportan los contratos de servicios especializados del periodo.",
+  },
+  {
+    question: "¿Qué pasa si un proveedor pierde su registro REPSE a mitad del contrato?",
+    answer:
+      "Desde el momento en que el registro deja de estar vigente, los servicios que ese proveedor preste ya no cumplen la ley: los pagos pierden deducibilidad y acreditamiento, y la empresa contratante queda expuesta a multas y a responsabilidad solidaria. Por eso la verificación no es un trámite único al firmar, sino un control continuo durante toda la relación.",
+  },
+  {
+    question: "¿La empresa contratante también puede ser multada por el REPSE?",
+    answer:
+      "Sí. Recibir servicios especializados de un proveedor sin registro vigente se sanciona con multas de 2,000 a 50,000 veces la UMA, además de la pérdida de la deducción de ISR y del acreditamiento de IVA sobre esos pagos. La obligación de verificar y conservar evidencia recae expresamente sobre quien contrata.",
+  },
+  {
+    question: "¿Con qué frecuencia debo verificar a mis proveedores REPSE?",
+    answer:
+      "De forma continua, no solo al inicio. Como mínimo conviene revisar la vigencia del registro y la evidencia documental cada periodo en que existan pagos (la cadencia natural es cuatrimestral, ligada a ICSOE y SISUB), y siempre antes de deducir o acreditar un CFDI del proveedor. Un proveedor que cumplía al firmar puede dejar de cumplir meses después.",
+  },
+  {
+    question: "¿Son deducibles los pagos a un proveedor sin REPSE?",
+    answer:
+      "No. La legislación fiscal condiciona la deducción del ISR y el acreditamiento del IVA de los servicios especializados a que el proveedor cuente con registro REPSE vigente y a que el contratante conserve la evidencia de cumplimiento. Sin ese registro y esa documentación, el gasto no es deducible ni acreditable.",
+  },
+];
 
 export default function RepsePage() {
   return (
@@ -179,7 +217,21 @@ export default function RepsePage() {
           <strong>se repite durante toda la vigencia del contrato</strong>.
           Un proveedor que cumplía al firmar puede dejar de cumplir seis
           meses después, y el riesgo fiscal corre por cuenta del contratante
-          que no lo detectó.
+          que no lo detectó. Revisa{" "}
+          <Link
+            href="/validar-proveedores-repse"
+            className="font-medium text-[color:var(--text-brand)] hover:underline"
+          >
+            cómo validar a tus proveedores paso a paso
+          </Link>{" "}
+          y qué debe contener su{" "}
+          <Link
+            href="/expediente-repse"
+            className="font-medium text-[color:var(--text-brand)] hover:underline"
+          >
+            expediente REPSE auditable
+          </Link>
+          .
         </p>
       </ArticleSection>
 
@@ -198,7 +250,14 @@ export default function RepsePage() {
           <li>
             <strong>Responsabilidad solidaria:</strong> si el proveedor
             incumple sus obligaciones laborales y de seguridad social, la
-            empresa beneficiaria puede responder frente a los trabajadores.
+            empresa beneficiaria puede responder frente a los trabajadores.{" "}
+            <Link
+              href="/obligado-solidario-repse"
+              className="font-medium text-[color:var(--text-brand)] hover:underline"
+            >
+              Cómo funciona el obligado solidario y cómo evitarlo
+            </Link>
+            .
           </li>
           <li>
             <strong>Esquemas simulados:</strong> utilizar subcontratación
@@ -235,6 +294,8 @@ export default function RepsePage() {
           CheckWise.
         </p>
       </ArticleSection>
+
+      <ArticleFaq items={REPSE_FAQ} path="/repse" />
 
       <ArticleCta
         title="Ve tu operación REPSE completa en una demo guiada."

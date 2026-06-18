@@ -110,6 +110,69 @@ export function ArticleSection({
 }
 
 /**
+ * Plain-text FAQ item: serialized verbatim into `acceptedAnswer.text`,
+ * so answers carry no JSX. Keep each one self-contained and factual,
+ * amounts in UMA (never pesos) so the copy doesn't go stale.
+ */
+export type ArticleFaqItem = {
+  readonly question: string;
+  readonly answer: string;
+};
+
+/**
+ * Visible FAQ block + FAQPage JSON-LD for a content page, rendered from
+ * a single `items` array so the structured data can never drift from
+ * what the reader sees (a Google rich-results requirement, and the
+ * surface AI Overviews / "People Also Ask" pull answers from). Server
+ * component — the whole Q&A ships in the initial HTML.
+ */
+export function ArticleFaq({
+  items,
+  path,
+  heading = "Preguntas frecuentes",
+}: {
+  items: readonly ArticleFaqItem[];
+  path: string;
+  heading?: string;
+}) {
+  const faqLd = {
+    "@context": "https://schema.org",
+    "@type": "FAQPage",
+    "@id": `${SITE_URL}${path}#faq`,
+    inLanguage: "es-MX",
+    mainEntity: items.map((item) => ({
+      "@type": "Question",
+      name: item.question,
+      acceptedAnswer: { "@type": "Answer", text: item.answer },
+    })),
+  };
+
+  return (
+    <section id="faq">
+      <script
+        type="application/ld+json"
+        dangerouslySetInnerHTML={{ __html: JSON.stringify(faqLd) }}
+      />
+      <h2 className="text-[22px] font-semibold tracking-[-0.018em] text-[color:var(--text-primary)] md:text-[24px]">
+        {heading}
+      </h2>
+      <dl className="mt-4 space-y-6">
+        {items.map((item) => (
+          <div key={item.question}>
+            <dt className="text-[16px] font-semibold leading-[1.4] text-[color:var(--text-primary)]">
+              {item.question}
+            </dt>
+            <dd className="mt-2 text-[15px] leading-[1.7] text-[color:var(--text-secondary)]">
+              {item.answer}
+            </dd>
+          </div>
+        ))}
+      </dl>
+    </section>
+  );
+}
+
+/**
  * Demo CTA used at the bottom of each article. Routes to the landing
  * contact section — one conversion path for the whole public site.
  */
