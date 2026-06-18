@@ -443,61 +443,67 @@ def build_entries(
     requirement_rows = list(db.scalars(select(Requirement)))
     requirement_name_for: dict[str, str] = {r.code: r.name for r in requirement_rows}
 
+    # One client-scoped submissions query bucketed by vendor in Python, plus one
+    # documents query for all of them — instead of a SELECT submissions + SELECT
+    # documents per workspace (the per-workspace N+1 the preview / tree / ZIP all
+    # paid on every call, and the live filter re-paid on every toggle — perf
+    # audit P0-2). Ordering by (vendor_id, created_at) preserves the previous
+    # per-vendor created_at-asc iteration so arcname collision suffixing stays
+    # deterministic.
+    sub_stmt = (
+        select(Submission)
+        .where(
+            Submission.client_id == client.id,
+            Submission.vendor_id.in_(vendor_ids_seen),
+            Submission.status.in_(streamable_statuses),
+            Submission.status.notin_(_NO_BYTES_STATES),
+        )
+        .order_by(Submission.vendor_id, Submission.created_at.asc())
+    )
+    if institution_filter_ids:
+        sub_stmt = sub_stmt.where(
+            Submission.institution_id.in_(institution_filter_ids)
+        )
+    if filters.requirement_codes:
+        sub_stmt = sub_stmt.where(
+            Submission.requirement_code.in_(filters.requirement_codes)
+        )
+    all_submissions = list(db.scalars(sub_stmt))
+    submissions_by_vendor: dict[str, list[Submission]] = {}
+    for s in all_submissions:
+        submissions_by_vendor.setdefault(s.vendor_id, []).append(s)
+
+    # Batch-load the first document per submission in ONE query. A submission
+    # normally carries exactly one document; when several exist we keep the
+    # lowest id deterministically (matching the previous per-workspace behaviour).
+    docs_by_submission: dict[str, Document] = {}
+    if all_submissions:
+        for d in db.scalars(
+            select(Document)
+            .where(Document.submission_id.in_([s.id for s in all_submissions]))
+            .order_by(Document.submission_id, Document.id)
+        ):
+            docs_by_submission.setdefault(d.submission_id, d)
+
+    # Period range is applied in Python (not SQL): a date-range overlap rather
+    # than a lexicographic ``period_key`` comparison, which breaks when monthly
+    # keys mix with bimestral / cuatrimestral / annual ones (see period_range).
+    range_start, range_end = filter_period_from_to_range(
+        filters.period_from, filters.period_to
+    )
+    # Materialise the whitelist once; a missing filter is a no-op (every
+    # submission passes the membership check). ``frozenset`` keeps it O(1).
+    submission_id_whitelist: frozenset[str] | None = (
+        frozenset(filters.submission_ids) if filters.submission_ids else None
+    )
+
     entries: list[AuditPackageEntry] = []
     seen_arc: dict[str, int] = {}
     for ws in workspaces:
         vendor = vendor_for.get(ws.vendor_id)
         if vendor is None:
             continue
-        sub_stmt = (
-            select(Submission)
-            .where(
-                Submission.client_id == ws.client_id,
-                Submission.vendor_id == ws.vendor_id,
-                Submission.status.in_(streamable_statuses),
-                Submission.status.notin_(_NO_BYTES_STATES),
-            )
-            .order_by(Submission.created_at.asc())
-        )
-        if institution_filter_ids:
-            sub_stmt = sub_stmt.where(
-                Submission.institution_id.in_(institution_filter_ids)
-            )
-        if filters.requirement_codes:
-            sub_stmt = sub_stmt.where(
-                Submission.requirement_code.in_(filters.requirement_codes)
-            )
-        # Period range is applied in Python (not SQL) so the test
-        # is a date-range overlap rather than a string comparison
-        # on ``period_key``. See ``app.core.period_range`` for the
-        # full rationale; the short version is that lexicographic
-        # ``period_key`` ordering breaks when bimestral / cuatrimestral
-        # / annual keys mix with monthly keys.
-        range_start, range_end = filter_period_from_to_range(
-            filters.period_from, filters.period_to
-        )
-        submissions = list(db.scalars(sub_stmt))
-        # Batch-load the first document per submission in ONE query (was an
-        # N+1: a SELECT per submission). A submission normally carries
-        # exactly one document; when several exist we keep the lowest id,
-        # matching the previous ``LIMIT 1`` (which had no explicit order)
-        # deterministically.
-        docs_by_submission: dict[str, Document] = {}
-        if submissions:
-            for d in db.scalars(
-                select(Document)
-                .where(Document.submission_id.in_([s.id for s in submissions]))
-                .order_by(Document.submission_id, Document.id)
-            ):
-                docs_by_submission.setdefault(d.submission_id, d)
-        # Materialise the whitelist once per workspace pass; a missing
-        # filter is a no-op (every submission passes the membership
-        # check below). Using ``frozenset`` keeps the lookup O(1) even
-        # when the user ticks hundreds of rows.
-        submission_id_whitelist: frozenset[str] | None = (
-            frozenset(filters.submission_ids) if filters.submission_ids else None
-        )
-        for sub in submissions:
+        for sub in submissions_by_vendor.get(ws.vendor_id, []):
             if (
                 submission_id_whitelist is not None
                 and sub.id not in submission_id_whitelist
