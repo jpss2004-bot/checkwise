@@ -730,7 +730,7 @@ function DiffList({ title, entries }: { title: string; entries: DiffEntry[] }) {
             >
               {entry.key}
               {entry.kind !== "unchanged" ? (
-                <span className="text-[9px] font-normal uppercase tracking-wide opacity-80">
+                <span className="text-[9px] font-normal uppercase tracking-wide">
                   {DIFF_KIND_LABEL[entry.kind]}
                 </span>
               ) : null}

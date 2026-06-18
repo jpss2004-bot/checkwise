@@ -615,7 +615,7 @@ function ReviewerQueueBody() {
                         Inactive tabs show none — we no longer fake
                         per-tab totals from a truncated page. */}
                     {filter === key && queue ? (
-                      <span className="ml-1.5 font-mono text-[10px] tabular-nums opacity-70">
+                      <span className="ml-1.5 font-mono text-[10px] tabular-nums">
                         {key === "mismatch" ? filteredItems.length : queue.total}
                       </span>
                     ) : null}
@@ -1045,7 +1045,7 @@ function CounterCard({
     >
       <Icon className="h-6 w-6 shrink-0" weight="fill" aria-hidden />
       <div className="min-w-0">
-        <p className="font-mono text-[10px] uppercase tracking-wide opacity-80">
+        <p className="font-mono text-[10px] uppercase tracking-wide">
           {label}
         </p>
         <p className="text-2xl font-semibold tabular-nums">{value}</p>

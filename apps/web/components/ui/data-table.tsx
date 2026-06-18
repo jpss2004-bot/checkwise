@@ -156,14 +156,14 @@ export function DataTable<T, K extends string = string>({
               <TabsList>
                 <TabsTrigger value="all">
                   <span>Todos</span>
-                  <span className="ml-1.5 font-mono text-[10px] tabular-nums opacity-70">
+                  <span className="ml-1.5 font-mono text-[10px] tabular-nums">
                     {counts.all ?? 0}
                   </span>
                 </TabsTrigger>
                 {filters.map((f) => (
                   <TabsTrigger key={f.key} value={f.key}>
                     <span>{f.label}</span>
-                    <span className="ml-1.5 font-mono text-[10px] tabular-nums opacity-70">
+                    <span className="ml-1.5 font-mono text-[10px] tabular-nums">
                       {counts[f.key] ?? 0}
                     </span>
                   </TabsTrigger>

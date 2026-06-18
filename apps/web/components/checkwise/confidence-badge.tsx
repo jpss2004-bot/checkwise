@@ -64,7 +64,7 @@ export function ConfidenceBadge({ level, percent, className }: ConfidenceBadgePr
       <IconComponent className="h-3.5 w-3.5" weight={weight} aria-hidden="true" />
       <span>{CONFIDENCE_LABELS[level]}</span>
       {percent !== undefined && (
-        <span className="font-mono text-[10px] opacity-80">{Math.round(percent)}%</span>
+        <span className="font-mono text-[10px]">{Math.round(percent)}%</span>
       )}
     </Badge>
   );
