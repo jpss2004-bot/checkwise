@@ -46,7 +46,7 @@ from fastapi.responses import FileResponse
 from pydantic import BaseModel, EmailStr, Field
 from sqlalchemy import and_, func, or_, select, tuple_
 from sqlalchemy.exc import IntegrityError
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, selectinload
 
 from app.api.v1.auth import CurrentUser, require_any_role, require_role
 from app.api.v1.client import (
@@ -3314,6 +3314,51 @@ def _load_correction_context(
     return vendor, client, user
 
 
+def _load_correction_contexts(
+    db: Session, rows: list[AuditLog]
+) -> dict[str, tuple[Vendor | None, Client | None, User | None]]:
+    """Batched form of :func:`_load_correction_context` for a page of rows.
+
+    Collapses the per-row workspace -> vendor/client + actor-user lookups into
+    a few IN-queries (workspaces eager-load their vendor + client) instead of
+    ~4 queries per row. Returns ``{audit_row_id: (vendor, client, user)}``.
+    """
+    if not rows:
+        return {}
+    workspace_ids = {r.entity_id for r in rows if r.entity_id}
+    actor_ids = {r.actor_id for r in rows if r.actor_id}
+
+    workspaces: dict[str, ProviderWorkspace] = {}
+    if workspace_ids:
+        workspaces = {
+            w.id: w
+            for w in db.scalars(
+                select(ProviderWorkspace)
+                .where(ProviderWorkspace.id.in_(workspace_ids))
+                .options(
+                    selectinload(ProviderWorkspace.vendor),
+                    selectinload(ProviderWorkspace.client),
+                )
+            )
+        }
+
+    users: dict[str, User] = {}
+    if actor_ids:
+        users = {
+            u.id: u
+            for u in db.scalars(select(User).where(User.id.in_(actor_ids)))
+        }
+
+    result: dict[str, tuple[Vendor | None, Client | None, User | None]] = {}
+    for r in rows:
+        ws = workspaces.get(r.entity_id) if r.entity_id else None
+        vendor = ws.vendor if ws else None
+        client = ws.client if ws else None
+        user = users.get(r.actor_id) if r.actor_id else None
+        result[r.id] = (vendor, client, user)
+    return result
+
+
 def _get_correction_row_or_404(db: Session, request_id: str) -> AuditLog:
     row = db.get(AuditLog, request_id)
     if row is None or row.action != "correction_request.submitted":
@@ -3345,12 +3390,7 @@ def list_correction_requests(
     small enough that the in-memory filter is fine.
     """
     _ = current
-    stmt = (
-        select(AuditLog)
-        .where(AuditLog.action == "correction_request.submitted")
-        .order_by(AuditLog.created_at.desc())
-    )
-    rows = list(db.scalars(stmt))
+    submitted = AuditLog.action == "correction_request.submitted"
     resolutions = _resolution_index(db)
 
     def _row_status(r: AuditLog) -> str:
@@ -3364,13 +3404,43 @@ def list_correction_requests(
         )
 
     if status_filter:
-        rows = [r for r in rows if _row_status(r) == status_filter]
-    total = len(rows)
-    page = rows[offset : offset + limit]
+        # Status is derived from sibling resolution rows (JSON-linked, not a
+        # portable WHERE), so the filtered path still does the in-memory pass
+        # over the submitted rows.
+        rows = [
+            r
+            for r in db.scalars(
+                select(AuditLog).where(submitted).order_by(
+                    AuditLog.created_at.desc()
+                )
+            )
+            if _row_status(r) == status_filter
+        ]
+        total = len(rows)
+        page = rows[offset : offset + limit]
+    else:
+        # No status filter → push pagination into SQL so we never materialize
+        # the whole append-only action partition. created_at is covered by
+        # ix_audit_log_action_created (migration 0048).
+        total = int(
+            db.scalar(select(func.count()).select_from(AuditLog).where(submitted))
+            or 0
+        )
+        page = list(
+            db.scalars(
+                select(AuditLog)
+                .where(submitted)
+                .order_by(AuditLog.created_at.desc())
+                .limit(limit)
+                .offset(offset)
+            )
+        )
 
+    # One batched context load for the whole page instead of ~4 queries/row.
+    contexts = _load_correction_contexts(db, page)
     items: list[CorrectionRequestAdminItem] = []
     for row in page:
-        vendor, client, user = _load_correction_context(db, row)
+        vendor, client, user = contexts.get(row.id, (None, None, None))
         items.append(
             _correction_row_to_item(
                 row,
