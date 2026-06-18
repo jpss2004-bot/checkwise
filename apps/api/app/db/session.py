@@ -13,11 +13,25 @@ from app.core.config import settings
 # connections older than 30 min so we never sit on one past Neon's idle
 # ceiling. Both are purely client-side (no wire-protocol / pgbouncer
 # interaction), so they're safe against the pooled prod endpoint.
-engine = create_engine(
-    settings.sqlalchemy_url,
-    pool_pre_ping=True,
-    pool_recycle=1800,
-)
+_engine_kwargs: dict[str, object] = {
+    "pool_pre_ping": True,
+    "pool_recycle": 1800,
+}
+# B-PERF-10 — QueuePool sizing for the server-backed (Postgres) engine. The
+# SQLAlchemy default (pool_size=5 + max_overflow=10 = 15) sits below the
+# ~40-thread sync threadpool of a single uvicorn worker, so under modest
+# concurrency requests queue waiting for a pooled connection — tail latency
+# that reads as "the database is slow" when it is really pool starvation
+# (worsened by the sync handlers that hold a connection while doing the LLM /
+# PDF / large-list work). Size it up, tunable via env and kept under Neon's
+# connection ceiling (mind pgbouncer). SQLite (tests / local) uses its own
+# pool and ignores these knobs, so only set them for Postgres.
+if settings.sqlalchemy_url.startswith("postgresql"):
+    _engine_kwargs["pool_size"] = int(os.environ.get("DB_POOL_SIZE", "10"))
+    _engine_kwargs["max_overflow"] = int(
+        os.environ.get("DB_POOL_MAX_OVERFLOW", "20")
+    )
+engine = create_engine(settings.sqlalchemy_url, **_engine_kwargs)
 SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
 
 # PERF-9 — runaway-query / lock-wait backstop. Without these, a statement
