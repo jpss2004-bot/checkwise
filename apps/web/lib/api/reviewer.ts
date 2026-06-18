@@ -107,6 +107,10 @@ export type QueueFilters = {
   /** Server-side queue scope by client/provider. */
   client_id?: string;
   vendor_id?: string;
+  /** Server-side "Posible inconsistencia" filter — rows whose document
+   *  inspection flagged a mismatch. Replaces the old client-side filter
+   *  over loaded rows, so the count + pagination are truthful. */
+  mismatch_only?: boolean;
 };
 
 export type QueueFacets = {
@@ -132,6 +136,7 @@ export async function getReviewerQueue(
   if (filters.rfc) params.set("rfc", filters.rfc);
   if (filters.client_id) params.set("client_id", filters.client_id);
   if (filters.vendor_id) params.set("vendor_id", filters.vendor_id);
+  if (filters.mismatch_only) params.set("mismatch_only", "true");
   const qs = params.toString();
   return await fetchJson<QueueResponse>(
     `/api/v1/reviewer/queue${qs ? `?${qs}` : ""}`,

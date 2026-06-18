@@ -1,7 +1,17 @@
 "use client";
 
-import { Suspense, useCallback, useEffect, useMemo, useState } from "react";
+import {
+  forwardRef,
+  type HTMLAttributes,
+  type Ref,
+  Suspense,
+  useCallback,
+  useEffect,
+  useMemo,
+  useState,
+} from "react";
 import { useRouter, useSearchParams } from "next/navigation";
+import { useInfiniteQuery } from "@tanstack/react-query";
 import {
   Warning,
   ArrowRight,
@@ -18,12 +28,12 @@ import { Button } from "@/components/ui/button";
 import { PageHeader } from "@/components/ui/page-header";
 import {
   Table,
-  TableBody,
   TableCell,
   TableHead,
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
+import { VirtualTableBody } from "@/components/ui/virtual-rows";
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Select } from "@/components/ui/select";
 import { RequirementStatusBadge } from "@/components/checkwise/portal/requirement-status-badge";
@@ -45,7 +55,6 @@ import {
   ReviewerApiError,
   type QueueFacets,
   type QueueItem,
-  type QueueResponse,
 } from "@/lib/api/reviewer";
 
 const REVIEWER_ROLES = ["reviewer", "internal_admin"] as const;
@@ -89,10 +98,6 @@ const FILTER_SERVER_STATUS: Partial<Record<FilterKey, RequirementStatus>> = {
   in_review: "pendiente_revision",
   clarify: "requiere_aclaracion",
 };
-
-function isMismatchItem(item: QueueItem): boolean {
-  return item.has_mismatch || item.status === "posible_mismatch";
-}
 
 function parseFilterParam(raw: string | null): FilterKey {
   return (FILTER_KEYS as readonly string[]).includes(raw ?? "")
@@ -221,11 +226,7 @@ function ReviewerQueueBody() {
   const router = useRouter();
   const searchParams = useSearchParams();
   const [session, setSession] = useState<AdminSession | null>(null);
-  const [queue, setQueue] = useState<QueueResponse | null>(null);
   const [facets, setFacets] = useState<QueueFacets | null>(null);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
-  const [reloadKey, setReloadKey] = useState(0);
   // Audit fix 2026-06-10 — tab + institution seed from the URL so
   // back-navigation from a decision screen restores the filters
   // instead of resetting to "Todos / todas las instituciones".
@@ -253,8 +254,6 @@ function ReviewerQueueBody() {
   const [vendorId, setVendorId] = useState<string>(
     () => searchParams?.get("vendor_id") ?? "",
   );
-  const [loadingMore, setLoadingMore] = useState(false);
-  const [loadMoreError, setLoadMoreError] = useState(false);
   // Display-only sort. The server always returns oldest-first (FIFO);
   // "más recientes" just reverses the LOADED rows client-side.
   const [newestFirst, setNewestFirst] = useState(false);
@@ -333,97 +332,77 @@ function ReviewerQueueBody() {
     router.replace(currentQueueHref, { scroll: false });
   }, [currentQueueHref, router]);
 
-  // First page fetch. Depends on `serverStatus` (not `filter`) so
-  // toggling between "Todos" and the client-side mismatch filter
-  // reuses the already-loaded pages instead of refetching; changing
-  // to a server-filtered tab resets the list + cursor and refetches.
+  // First-page + pagination via React Query's infinite query: cached across
+  // navigations (instant back-nav), deduped, and cursor-paginated. The query
+  // key carries every server filter — including the now server-side
+  // ``mismatch_only`` — so changing any filter fetches (or serves cached) the
+  // right list, and React Query owns the cursor reset that used to be manual.
+  const mismatchOnly = filter === "mismatch";
+  const {
+    data,
+    error: queryError,
+    isLoading,
+    isError,
+    fetchNextPage,
+    hasNextPage,
+    isFetchingNextPage,
+    isFetchNextPageError,
+    refetch,
+  } = useInfiniteQuery({
+    queryKey: [
+      "reviewer-queue",
+      {
+        status: serverStatus ?? null,
+        institution: institution || null,
+        risk: risk || null,
+        rfc: rfc || null,
+        client_id: clientId || null,
+        vendor_id: vendorId || null,
+        mismatch_only: mismatchOnly,
+      },
+    ],
+    queryFn: ({ pageParam }) =>
+      getReviewerQueue(session!.access_token, {
+        status: serverStatus,
+        institution: institution || undefined,
+        risk: risk || undefined,
+        rfc: rfc || undefined,
+        client_id: clientId || undefined,
+        vendor_id: vendorId || undefined,
+        mismatch_only: mismatchOnly || undefined,
+        limit: PAGE_LIMIT,
+        cursor: pageParam,
+      }),
+    initialPageParam: undefined as string | undefined,
+    getNextPageParam: (lastPage) => lastPage.next_cursor ?? undefined,
+    enabled: Boolean(session),
+  });
+
+  // Redirect to login on an expired token, mirroring the facets handler.
   useEffect(() => {
-    if (!session) return;
-    let cancelled = false;
-    setLoading(true);
-    setError(null);
-    setLoadMoreError(false);
-    getReviewerQueue(session.access_token, {
-      status: serverStatus,
-      institution: institution || undefined,
-      risk: risk || undefined,
-      rfc: rfc || undefined,
-      client_id: clientId || undefined,
-      vendor_id: vendorId || undefined,
-      limit: PAGE_LIMIT,
-    })
-      .then((payload) => {
-        if (!cancelled) setQueue(payload);
-      })
-      .catch((err) => {
-        if (cancelled) return;
-        if (err instanceof ReviewerApiError && err.status === 401) {
-          clearAdminSession();
-          router.replace("/login");
-          return;
-        }
-        setError("No pudimos cargar la bandeja.");
-      })
-      .finally(() => {
-        if (!cancelled) setLoading(false);
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, [clientId, session, reloadKey, router, institution, serverStatus, risk, rfc, vendorId]);
-
-  const retry = useCallback(() => setReloadKey((k) => k + 1), []);
-
-  // Next-page fetch — APPENDS to the loaded list under the same
-  // filters; the scroll position is untouched. The functional update
-  // only merges when the cursor we requested is still the queue's
-  // current cursor, so a tab/institution change that races a slow
-  // load-more can't splice a stale page into the fresh list.
-  const loadMore = useCallback(() => {
-    if (!session || !queue?.next_cursor || loadingMore) return;
-    const requestedCursor = queue.next_cursor;
-    setLoadingMore(true);
-    setLoadMoreError(false);
-    getReviewerQueue(session.access_token, {
-      status: serverStatus,
-      institution: institution || undefined,
-      risk: risk || undefined,
-      rfc: rfc || undefined,
-      client_id: clientId || undefined,
-      vendor_id: vendorId || undefined,
-      limit: PAGE_LIMIT,
-      cursor: requestedCursor,
-    })
-      .then((payload) => {
-        setQueue((prev) =>
-          prev && prev.next_cursor === requestedCursor
-            ? { ...payload, items: [...prev.items, ...payload.items] }
-            : prev,
-        );
-      })
-      .catch((err) => {
-        if (err instanceof ReviewerApiError && err.status === 401) {
-          clearAdminSession();
-          router.replace("/login");
-          return;
-        }
-        setLoadMoreError(true);
-      })
-      .finally(() => setLoadingMore(false));
-  }, [clientId, session, queue, loadingMore, serverStatus, institution, risk, rfc, vendorId, router]);
+    if (queryError instanceof ReviewerApiError && queryError.status === 401) {
+      clearAdminSession();
+      router.replace("/login");
+    }
+  }, [queryError, router]);
 
   // F1: logout is now provided by the AdminShell header, so this
   // page no longer renders its own Cerrar sesión action.
 
-  const items = useMemo(() => queue?.items ?? [], [queue]);
-  const filteredItems = useMemo(
-    () => (filter === "mismatch" ? items.filter(isMismatchItem) : items),
-    [items, filter],
+  // ``total`` and the 7-day counters are first-page-only (the backend skips
+  // those COUNTs on cursor pages), so read them from page 0.
+  const firstPage = data?.pages[0];
+  const items = useMemo(
+    () => data?.pages.flatMap((page) => page.items) ?? [],
+    [data],
   );
   const displayItems = useMemo(
-    () => (newestFirst ? [...filteredItems].reverse() : filteredItems),
-    [filteredItems, newestFirst],
+    () => (newestFirst ? [...items].reverse() : items),
+    [items, newestFirst],
   );
+  const total = firstPage?.total ?? 0;
+  const isAuthError =
+    queryError instanceof ReviewerApiError && queryError.status === 401;
 
   if (!session) return null;
 
@@ -562,7 +541,7 @@ function ReviewerQueueBody() {
           when the actionable queue is empty so the reviewer always
           sees what got cleared this week. Hidden during the initial
           load so it doesn't flash 0 before the real numbers arrive. */}
-      {queue ? (
+      {firstPage ? (
         <section
           aria-label="Estado de la semana"
           className="grid gap-3 sm:grid-cols-2"
@@ -571,24 +550,24 @@ function ReviewerQueueBody() {
             icon={CheckCircle}
             tone="success"
             label="Aprobados (últimos 7 días)"
-            value={queue.approved_last_7d_count}
+            value={firstPage.approved_last_7d_count}
           />
           <CounterCard
             icon={XCircle}
             tone="destructive"
             label="Rechazados (últimos 7 días)"
-            value={queue.rejected_last_7d_count}
+            value={firstPage.rejected_last_7d_count}
           />
         </section>
       ) : null}
 
-      {loading ? (
+      {isLoading ? (
         <QueueTableSkeleton />
-      ) : error ? (
+      ) : isError && !isAuthError ? (
         <ErrorState
           title="No pudimos cargar la bandeja"
           description="Tu conexión pudo haberse interrumpido. Tu sesión sigue activa."
-          onRetry={retry}
+          onRetry={() => refetch()}
         />
       ) : (
         <section
@@ -609,14 +588,13 @@ function ReviewerQueueBody() {
                     }
                   >
                     <span>{FILTER_LABEL[key]}</span>
-                    {/* Only the ACTIVE tab shows a count: the server
-                        count for that filter (or, for the client-side
-                        mismatch filter, the matches among loaded rows).
-                        Inactive tabs show none — we no longer fake
-                        per-tab totals from a truncated page. */}
-                    {filter === key && queue ? (
+                    {/* Only the ACTIVE tab shows a count — the real server
+                        total under that filter (every tab, including the now
+                        server-side "mismatch", is truthful and paginated).
+                        Inactive tabs show none. */}
+                    {filter === key && firstPage ? (
                       <span className="ml-1.5 font-mono text-[10px] tabular-nums">
-                        {key === "mismatch" ? filteredItems.length : queue.total}
+                        {total}
                       </span>
                     ) : null}
                   </TabsTrigger>
@@ -650,7 +628,7 @@ function ReviewerQueueBody() {
                   title={`Sin resultados en "${FILTER_LABEL[filter]}"`}
                   description={
                     filter === "mismatch"
-                      ? "Ningún documento cargado tiene posible inconsistencia. Carga más documentos o cambia el filtro."
+                      ? "Ningún documento en cola tiene posible inconsistencia bajo los filtros actuales."
                       : "Cambia el filtro para ver otros documentos en la cola."
                   }
                   variant="muted"
@@ -686,28 +664,28 @@ function ReviewerQueueBody() {
                   <TableHead className="w-[40px]" aria-label="Acción" />
                 </TableRow>
               </TableHeader>
-              <TableBody>
-                {displayItems.map((item) => (
+              <VirtualTableBody
+                items={displayItems}
+                getRowKey={(item) => item.submission_id}
+                columnCount={8}
+                estimateRowHeight={72}
+                renderRow={(item) => (
                   <QueueTableRow
-                    key={item.submission_id}
                     item={item}
                     onOpen={() => router.push(reviewerDetailHref(item.submission_id))}
                   />
-                ))}
-              </TableBody>
+                )}
+              />
             </Table>
           )}
 
           {/* Truthful pagination footer: X = rows actually loaded,
               Y = the server's real total under the current filters. */}
-          {queue && items.length > 0 ? (
+          {firstPage && items.length > 0 ? (
             <footer className="flex flex-wrap items-center justify-between gap-3 border-t border-[color:var(--border-subtle)] px-5 py-3">
               <div className="space-y-0.5">
                 <p className="text-[12px] tabular-nums text-[color:var(--text-secondary)]">
-                  Mostrando {items.length} de {queue.total} documentos
-                  {filter === "mismatch"
-                    ? ` · ${filteredItems.length} con posible inconsistencia entre los cargados`
-                    : ""}
+                  Mostrando {items.length} de {total} documentos
                 </p>
                 <p className="text-[11px] text-[color:var(--text-tertiary)]">
                   Edad:{" "}
@@ -736,9 +714,9 @@ function ReviewerQueueBody() {
                   severidad alta
                 </p>
               </div>
-              {queue.next_cursor ? (
+              {hasNextPage ? (
                 <div className="flex items-center gap-3">
-                  {loadMoreError ? (
+                  {isFetchNextPageError ? (
                     <span className="text-[12px] text-[color:var(--status-error-text)]">
                       No pudimos cargar más. Intenta de nuevo.
                     </span>
@@ -746,8 +724,8 @@ function ReviewerQueueBody() {
                   <Button
                     variant="outline"
                     size="sm"
-                    loading={loadingMore}
-                    onClick={loadMore}
+                    loading={isFetchingNextPage}
+                    onClick={() => fetchNextPage()}
                   >
                     Cargar más
                   </Button>
@@ -761,13 +739,19 @@ function ReviewerQueueBody() {
   );
 }
 
-function QueueTableRow({
-  item,
-  onOpen,
-}: {
-  item: QueueItem;
-  onOpen: () => void;
-}) {
+// forwardRef + rest-spread so VirtualTableBody can inject the measurement
+// `ref` and `data-index` straight through to the underlying <tr>.
+const QueueTableRow = forwardRef(function QueueTableRow(
+  {
+    item,
+    onOpen,
+    ...rest
+  }: {
+    item: QueueItem;
+    onOpen: () => void;
+  } & HTMLAttributes<HTMLTableRowElement>,
+  ref: Ref<HTMLTableRowElement>,
+) {
   const ageText = formatAge(item.age_hours);
   const ageSlaTone = ageSla(item.age_hours);
   const institutionLabel = item.requirement.institution
@@ -776,6 +760,8 @@ function QueueTableRow({
 
   return (
     <TableRow
+      ref={ref}
+      {...rest}
       onClick={onOpen}
       onKeyDown={(e) => {
         if (e.key === "Enter" || e.key === " ") {
@@ -889,7 +875,7 @@ function QueueTableRow({
       </TableCell>
     </TableRow>
   );
-}
+});
 
 /**
  * Phase A — compact authenticity-risk badge for queue rows. Clean rows

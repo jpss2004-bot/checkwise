@@ -121,6 +121,7 @@ def _seed_submission(
     forensics: dict | None = None,
     verification: dict | None = None,
     rfc_alignment: str | None = None,
+    mismatch_reason: str | None = None,
 ) -> str:
     """Inserts the minimum row graph needed for a reviewer queue item.
 
@@ -228,6 +229,7 @@ def _seed_submission(
             authenticity_risk is not None
             or verification is not None
             or rfc_alignment is not None
+            or mismatch_reason is not None
         ):
             db.flush()
             db.add(
@@ -240,6 +242,7 @@ def _seed_submission(
                     verification=verification,
                     expected_rfc=vendor.rfc,
                     rfc_alignment=rfc_alignment,
+                    mismatch_reason=mismatch_reason,
                 )
             )
         db.commit()
@@ -362,6 +365,33 @@ def test_queue_filter_by_status(api_client: TestClient, db_factory) -> None:
     )
     payload = response.json()
     assert {item["submission_id"] for item in payload["items"]} == {mismatch_id}
+
+
+def test_queue_filter_by_mismatch_only(api_client: TestClient, db_factory) -> None:
+    """``mismatch_only=true`` narrows to rows whose inspection flagged a
+    non-empty mismatch reason, and the ``total`` reflects only those rows —
+    the tab is a real server filter, not a client-side pass over loaded rows."""
+    _seed_user(db_factory, email="rev@x.mx", role="reviewer")
+    token = _login(api_client, "rev@x.mx", "Hunter2 Correct horse")
+    flagged_id = _seed_submission(
+        db_factory,
+        period_key="2026-M01",
+        mismatch_reason="El RFC del documento no coincide con el del proveedor.",
+    )
+    # A clean row and an empty-string reason must both be excluded.
+    _seed_submission(db_factory, period_key="2026-M02")
+    _seed_submission(db_factory, period_key="2026-M03", mismatch_reason="")
+
+    response = api_client.get(
+        "/api/v1/reviewer/queue",
+        params={"mismatch_only": "true"},
+        headers={"Authorization": f"Bearer {token}"},
+    )
+    assert response.status_code == 200, response.text
+    payload = response.json()
+    assert {item["submission_id"] for item in payload["items"]} == {flagged_id}
+    assert payload["items"][0]["has_mismatch"] is True
+    assert payload["total"] == 1
 
 
 def test_queue_filter_by_institution(api_client: TestClient, db_factory) -> None:

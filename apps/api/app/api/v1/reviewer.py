@@ -233,6 +233,7 @@ def get_queue(
         | None,
         Query(),
     ] = None,
+    mismatch_only: Annotated[bool, Query()] = False,
     cursor: Annotated[str | None, Query()] = None,
 ) -> QueueResponse:
     """List submissions waiting on a human decision.
@@ -242,9 +243,10 @@ def get_queue(
     statuses; passing one narrows it. ``institution`` is the institution
     code (e.g. ``sat``, ``imss``). ``risk`` narrows to submissions whose
     document carries that authenticity verdict from the intake
-    forensics pass. ``cursor`` is the opaque keyset cursor from a
-    previous page's ``next_cursor``; pass it back to get the next page
-    under the same FIFO ordering.
+    forensics pass. ``mismatch_only`` narrows to rows whose document
+    inspection flagged a possible inconsistency. ``cursor`` is the
+    opaque keyset cursor from a previous page's ``next_cursor``; pass it
+    back to get the next page under the same FIFO ordering.
     """
 
     # Imported locally (matching the batch-lookup below) to dodge a
@@ -298,6 +300,18 @@ def get_queue(
         inspection_filters.append(DocumentInspection.authenticity_risk == risk)
     if rfc:
         inspection_filters.append(DocumentInspection.rfc_alignment == rfc)
+    if mismatch_only:
+        # "Posible inconsistencia" is now a real SERVER filter: a row matches
+        # when its document inspection carries a non-empty mismatch reason
+        # (the same signal that drives ``has_mismatch`` per row). Previously
+        # this tab only filtered the already-loaded page, so its count and
+        # pagination were untruthful.
+        inspection_filters.append(
+            and_(
+                DocumentInspection.mismatch_reason.isnot(None),
+                DocumentInspection.mismatch_reason != "",
+            )
+        )
     if inspection_filters:
         # Server-side document-inspection filters: join through the
         # submission's documents to their inspection verdicts.
