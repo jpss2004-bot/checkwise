@@ -8,6 +8,7 @@ import {
   type FormEvent,
 } from "react";
 import Link from "next/link";
+import dynamic from "next/dynamic";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import {
   ArrowLeft,
@@ -22,11 +23,6 @@ import {
 } from "@phosphor-icons/react";
 
 import { Canvas } from "@/components/checkwise/reports/canvas";
-import {
-  ExportButton,
-  PreviewPdfButton,
-} from "@/components/checkwise/reports/editor/export-button";
-import { ShareDialog } from "@/components/checkwise/reports/editor/share-dialog";
 import { ReportActionsContext } from "@/components/checkwise/reports/freshness-label";
 import { StoryView } from "@/components/checkwise/reports/story-view";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
@@ -55,6 +51,32 @@ import {
   type ReportsEngineInfo,
 } from "@/lib/api/reports";
 import { useReportGeneration } from "@/lib/reports/use-generation";
+
+// The export + share controls only render in the editing toolbar — read-only
+// and auditor views return early to StoryView before this point — so load them
+// on demand. This keeps the editor-only chunks out of the read-only report
+// viewer bundle that the client/admin/portal /reports/[id] routes ship.
+const ExportButton = dynamic(
+  () =>
+    import("@/components/checkwise/reports/editor/export-button").then(
+      (m) => m.ExportButton,
+    ),
+  { ssr: false },
+);
+const PreviewPdfButton = dynamic(
+  () =>
+    import("@/components/checkwise/reports/editor/export-button").then(
+      (m) => m.PreviewPdfButton,
+    ),
+  { ssr: false },
+);
+const ShareDialog = dynamic(
+  () =>
+    import("@/components/checkwise/reports/editor/share-dialog").then(
+      (m) => m.ShareDialog,
+    ),
+  { ssr: false },
+);
 
 /**
  * Shared report editor body — R1.0.1.
