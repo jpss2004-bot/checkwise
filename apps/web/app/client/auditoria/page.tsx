@@ -17,6 +17,7 @@ import { PeriodPicker } from "@/components/checkwise/period-picker";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Label } from "@/components/ui/label";
+import { Spinner } from "@/components/ui/spinner";
 import {
   CaretDown,
   CaretRight,
@@ -632,18 +633,25 @@ export default function ClientAuditoriaPage() {
             <Button
               type="button"
               disabled={downloadDisabled}
+              aria-busy={downloading || undefined}
               size="lg"
               onClick={onDownloadClick}
             >
-              <DownloadSimple
-                className="h-4 w-4"
-                weight="bold"
-                aria-hidden="true"
-              />
+              {downloading ? (
+                <Spinner className="h-4 w-4 text-current" label={null} />
+              ) : (
+                <DownloadSimple
+                  className="h-4 w-4"
+                  weight="bold"
+                  aria-hidden="true"
+                />
+              )}
               {downloading
                 ? "Preparando…"
                 : `Descargar ${selectionCount} documento${selectionCount === 1 ? "" : "s"}`}
-              <ArrowRight className="h-4 w-4" weight="bold" aria-hidden="true" />
+              {!downloading ? (
+                <ArrowRight className="h-4 w-4" weight="bold" aria-hidden="true" />
+              ) : null}
             </Button>
             {downloadError ? (
               <p className="text-[11px] text-[color:var(--status-error-text)]">

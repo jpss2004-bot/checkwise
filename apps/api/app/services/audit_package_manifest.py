@@ -96,10 +96,19 @@ def render_audit_manifest(
         tmp.close()
         tmp_path = Path(tmp.name)
         with sync_playwright() as p:
-            browser = p.chromium.launch(args=["--no-sandbox"])
+            # Bound every step. The INDICE renders inline before the audit
+            # package ZIP streams its first byte, so a cold or stuck Chromium
+            # must fail fast (surfaced as an error to the caller) rather than
+            # hang past the gateway timeout and present as a frozen download.
+            browser = p.chromium.launch(args=["--no-sandbox"], timeout=20_000)
             try:
                 page = browser.new_page()
-                page.goto(f"file://{tmp_path}", wait_until="networkidle")
+                page.set_default_timeout(15_000)
+                page.goto(
+                    f"file://{tmp_path}",
+                    wait_until="networkidle",
+                    timeout=15_000,
+                )
                 pdf_bytes = page.pdf(
                     format="Letter",
                     print_background=True,
