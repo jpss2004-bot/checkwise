@@ -29,7 +29,9 @@ from app.core.config import settings
 from app.core.rate_limit import (
     ai_heavy_limiter,
     enforce_ai_heavy_rate_limit,
+    enforce_export_rate_limit,
     enforce_share_unlock_rate_limit,
+    export_heavy_limiter,
     share_unlock_limiter,
 )
 from app.db.base import Base
@@ -65,12 +67,14 @@ def api_client() -> Generator[TestClient, None, None]:
 
 @pytest.fixture(autouse=True)
 def _reset_limiters() -> Generator[None, None, None]:
-    """Clear both M3 limiters before and after every case."""
+    """Clear the M3 limiters before and after every case."""
     ai_heavy_limiter.reset()
     share_unlock_limiter.reset()
+    export_heavy_limiter.reset()
     yield
     ai_heavy_limiter.reset()
     share_unlock_limiter.reset()
+    export_heavy_limiter.reset()
 
 
 # ─── Share-unlock brute-force limiter ───────────────────────────
@@ -183,6 +187,46 @@ def test_ai_heavy_limiter_disabled_when_limit_zero() -> None:
         enforce_ai_heavy_rate_limit("user-E", per_minute=0, per_hour=0)
 
 
+# ─── Heavy export limiter (P2-8) ────────────────────────────────
+
+
+def test_export_limiter_admits_below_cap() -> None:
+    for _ in range(10):
+        enforce_export_rate_limit("exp-A", per_minute=10, per_hour=200)
+
+
+def test_export_limiter_blocks_on_minute_overflow() -> None:
+    for _ in range(10):
+        enforce_export_rate_limit("exp-B", per_minute=10, per_hour=200)
+    with pytest.raises(HTTPException) as exc_info:
+        enforce_export_rate_limit("exp-B", per_minute=10, per_hour=200)
+    assert exc_info.value.status_code == 429
+    assert "Demasiados intentos" in exc_info.value.detail
+
+
+def test_export_limiter_isolates_users() -> None:
+    """One operator pulling many ZIPs must not deplete another's budget."""
+    for _ in range(10):
+        enforce_export_rate_limit("exp-C", per_minute=10, per_hour=200)
+    for _ in range(10):
+        enforce_export_rate_limit("exp-D", per_minute=10, per_hour=200)
+
+
+def test_export_limiter_does_not_share_bucket_with_ai_heavy() -> None:
+    """Segregated buckets: exhausting the export bucket leaves AI untouched."""
+    for _ in range(10):
+        enforce_export_rate_limit("exp-E", per_minute=10, per_hour=200)
+    with pytest.raises(HTTPException):
+        enforce_export_rate_limit("exp-E", per_minute=10, per_hour=200)
+    # Same user id, AI bucket is independent and still admits.
+    enforce_ai_heavy_rate_limit("exp-E", per_minute=15, per_hour=200)
+
+
+def test_export_limiter_disabled_when_limit_zero() -> None:
+    for _ in range(50):
+        enforce_export_rate_limit("exp-F", per_minute=0, per_hour=0)
+
+
 # ─── Settings carry sane defaults ───────────────────────────────
 
 
@@ -193,6 +237,8 @@ def test_m3_settings_defaults_are_finite_and_positive() -> None:
     assert settings.SHARE_UNLOCK_RATE_LIMIT_PER_HOUR > 0
     assert settings.AI_HEAVY_RATE_LIMIT_PER_MINUTE > 0
     assert settings.AI_HEAVY_RATE_LIMIT_PER_HOUR > 0
+    assert settings.EXPORT_RATE_LIMIT_PER_MINUTE > 0
+    assert settings.EXPORT_RATE_LIMIT_PER_HOUR > 0
 
 
 # ─── UploadTooLargeError → 413 contract ─────────────────────────

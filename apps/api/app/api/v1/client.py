@@ -25,6 +25,7 @@ duplicating slot logic.
 
 from __future__ import annotations
 
+import time
 from collections import defaultdict
 from datetime import UTC, date, datetime
 from typing import TYPE_CHECKING, Annotated, Literal
@@ -76,7 +77,7 @@ from app.core.compliance_catalog import (
 from app.core.config import settings
 from app.core.http_utils import content_disposition_header
 from app.core.period_validation import MAX_YEAR, MIN_YEAR, validate_period_key
-from app.core.rate_limit import enforce_ai_heavy_rate_limit
+from app.core.rate_limit import enforce_ai_heavy_rate_limit, enforce_export_rate_limit
 from app.core.text_search import normalize_for_search
 from app.db.session import get_db
 from app.models import (
@@ -419,10 +420,29 @@ def _portfolio_slot_inputs(
         submissions_by_vendor.setdefault(sub.vendor_id, []).append(sub)
     institutions_by_id: dict[str, str] | None = None
     if settings.RECURRING_CATALOG_V2:
-        institutions_by_id = {
-            inst.id: inst.code for inst in db.scalars(select(Institution))
-        }
+        institutions_by_id = _institutions_code_map(db)
     return submissions_by_vendor, institutions_by_id
+
+
+# The Institution catalog is global and effectively static (the SAT / IMSS /
+# INFONAVIT / STPS set), but the id→code map was re-SELECTed on every /overview,
+# /vendors, /calendar and Wise call (perf audit P2-4). Cache it process-wide
+# with a short TTL so a newly-added institution still appears within minutes
+# without a restart. The cached value is a plain str→str dict (no ORM objects),
+# safe to share read-only across requests and sessions.
+_INSTITUTIONS_CACHE_TTL_SECONDS = 300.0
+_institutions_code_map_cache: tuple[float, dict[str, str]] | None = None
+
+
+def _institutions_code_map(db: Session) -> dict[str, str]:
+    global _institutions_code_map_cache
+    now = time.monotonic()
+    cached = _institutions_code_map_cache
+    if cached is not None and now - cached[0] < _INSTITUTIONS_CACHE_TTL_SECONDS:
+        return cached[1]
+    fresh = {inst.id: inst.code for inst in db.scalars(select(Institution))}
+    _institutions_code_map_cache = (now, fresh)
+    return fresh
 
 
 def _submission_slot_key(sub: Submission) -> tuple[str, str, str, str] | None:
@@ -2005,6 +2025,13 @@ def client_vendor_expediente_zip(
     target_id, vendor = _resolve_client_id_for_vendor(
         db, current, vendor_id=vendor_id, requested=client_id
     )
+    # Heavy streaming export — throttle per user so it can't be used as a
+    # resource-exhaustion lever (perf audit P2-8).
+    enforce_export_rate_limit(
+        current.user.id,
+        per_minute=settings.EXPORT_RATE_LIMIT_PER_MINUTE,
+        per_hour=settings.EXPORT_RATE_LIMIT_PER_HOUR,
+    )
 
     workspace = db.scalar(
         select(ProviderWorkspace).where(
@@ -3518,6 +3545,13 @@ def _stream_audit_package_zip(
         raise HTTPException(
             status.HTTP_404_NOT_FOUND, detail="Cliente no encontrado."
         )
+    # Heavy export (multi-vendor ZIP + Chromium INDICE.pdf) — throttle per user
+    # so it can't be used as a resource-exhaustion lever (perf audit P2-8).
+    enforce_export_rate_limit(
+        current.user.id,
+        per_minute=settings.EXPORT_RATE_LIMIT_PER_MINUTE,
+        per_hour=settings.EXPORT_RATE_LIMIT_PER_HOUR,
+    )
 
     filters = _build_audit_filters(
         period_from,

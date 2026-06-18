@@ -263,6 +263,12 @@ ai_heavy_limiter = build_rate_limiter()
 # the WhatsApp send pipeline (each issuance is a paid Meta API
 # call). Defaults configured at the call site in ``app.api.v1.me``.
 phone_verify_limiter = build_rate_limiter()
+# Cap on heavy file-export endpoints: the client/provider audit-package and
+# expediente ZIPs stream up to hundreds of files / hundreds of MB and render a
+# Chromium-backed manifest PDF. Without this an authenticated operator can
+# repeatedly trigger them as a resource-exhaustion lever (perf audit P2-8).
+# Per-user buckets, segregated from ai_heavy so a ZIP burst can't starve Wise.
+export_heavy_limiter = build_rate_limiter()
 
 
 def hash_identifier(value: str) -> str:
@@ -368,6 +374,38 @@ def enforce_ai_heavy_rate_limit(
     )
     ok_hour = ai_heavy_limiter.check(
         f"ai:user-hour:{user_h}",
+        limit=per_hour,
+        window_seconds=3600,
+    )
+    if not ok_minute or not ok_hour:
+        raise HTTPException(
+            status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+            detail=_RATE_LIMITED_DETAIL,
+        )
+
+
+def enforce_export_rate_limit(
+    user_id: str,
+    *,
+    per_minute: int,
+    per_hour: int,
+) -> None:
+    """Throttle heavy ZIP / manifest-PDF export endpoints.
+
+    Per-user buckets so one operator repeatedly pulling large packages can't
+    exhaust the worker pool for other tenants. The minute bucket bounds bursts;
+    the hour bucket bounds a sustained scrape. Raises HTTP 429 with the standard
+    Spanish detail when either bucket is exhausted. Either limit at 0 disables
+    that bucket.
+    """
+    user_h = hash_identifier(user_id)
+    ok_minute = export_heavy_limiter.check(
+        f"export:user-min:{user_h}",
+        limit=per_minute,
+        window_seconds=60,
+    )
+    ok_hour = export_heavy_limiter.check(
+        f"export:user-hour:{user_h}",
         limit=per_hour,
         window_seconds=3600,
     )

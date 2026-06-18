@@ -276,6 +276,14 @@ class Settings(BaseSettings):
     AI_HEAVY_RATE_LIMIT_PER_MINUTE: int = 15
     AI_HEAVY_RATE_LIMIT_PER_HOUR: int = 120
 
+    # Heavy file-export endpoints (audit-package + expediente ZIPs). These
+    # stream up to hundreds of files / MB and render a Chromium manifest PDF, so
+    # the cap is tighter than the AI one: 10/minute covers legitimate "download
+    # a few packages" bursts; 60/hour bounds a scripted scrape. Set 0 to
+    # disable. (perf audit P2-8)
+    EXPORT_RATE_LIMIT_PER_MINUTE: int = 10
+    EXPORT_RATE_LIMIT_PER_HOUR: int = 60
+
     # Rate-limit shared backing store (M4 — 2026-06-02). Empty string
     # selects the in-memory sliding window: correct on a single
     # uvicorn worker, silently double-counts on every additional
