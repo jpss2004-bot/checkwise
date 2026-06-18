@@ -10,6 +10,7 @@ import {
 import { Button } from "@/components/ui/button";
 import { SearchInput } from "@/components/ui/search-input";
 import { MetadataStrip } from "@/components/ui/metadata-strip";
+import { VirtualTableBody } from "@/components/ui/virtual-rows";
 import { matchesAnyField } from "@/lib/search/normalize";
 import {
   downloadClientMetadata,
@@ -17,10 +18,12 @@ import {
   type ClientMetadataDocument,
   type ClientMetadataResponse,
 } from "@/lib/api/client";
+import { useUrlClientId } from "@/lib/workspace/use-url-client-id";
 
 import { ClientShell } from "../_shell";
 
 export default function ClientMetadataPage() {
+  const urlClientId = useUrlClientId();
   const [data, setData] = useState<ClientMetadataResponse | null>(null);
   const [query, setQuery] = useState("");
   const [error, setError] = useState<string | null>(null);
@@ -29,7 +32,7 @@ export default function ClientMetadataPage() {
   useEffect(() => {
     let cancelled = false;
     setError(null);
-    getClientMetadata()
+    getClientMetadata(urlClientId ? { client_id: urlClientId } : undefined)
       .then((payload) => {
         if (!cancelled) setData(payload);
       })
@@ -40,7 +43,7 @@ export default function ClientMetadataPage() {
     return () => {
       cancelled = true;
     };
-  }, []);
+  }, [urlClientId]);
 
   const documents = useMemo(() => data?.documents ?? [], [data?.documents]);
   const filtered = useMemo(() => {
@@ -65,7 +68,9 @@ export default function ClientMetadataPage() {
     if (!data?.master_available) return;
     setDownloading(true);
     try {
-      const blob = await downloadClientMetadata();
+      const blob = await downloadClientMetadata(
+        urlClientId ? { client_id: urlClientId } : undefined,
+      );
       const href = URL.createObjectURL(blob);
       const anchor = document.createElement("a");
       anchor.href = href;
@@ -150,9 +155,19 @@ function MetadataTable({ documents }: { documents: ClientMetadataDocument[] }) {
               <th className="px-3 py-2">Etiquetas</th>
             </tr>
           </thead>
-          <tbody className="divide-y divide-[color:var(--border-subtle)]">
-            {documents.map((row, index) => (
-              <tr key={`${row.nombre_documento}-${index}`} className="hover:bg-[color:var(--surface-hover)]">
+          {/* Windowed <tbody>: the metadata master can hold hundreds–thousands
+              of rows (grows with document count, not provider count), so render
+              only the rows near the viewport to keep the main thread free
+              (audit P2.10 / P12 perf). Falls back to rendering everything under
+              the component's threshold. */}
+          <VirtualTableBody<ClientMetadataDocument>
+            items={documents}
+            columnCount={9}
+            estimateRowHeight={40}
+            getRowKey={(row, index) => `${row.nombre_documento}-${index}`}
+            className="divide-y divide-[color:var(--border-subtle)]"
+            renderRow={(row) => (
+              <tr className="hover:bg-[color:var(--surface-hover)]">
                 <td className="px-3 py-2 font-medium text-[color:var(--text-primary)]">
                   {row.proveedor || "-"}
                 </td>
@@ -181,8 +196,8 @@ function MetadataTable({ documents }: { documents: ClientMetadataDocument[] }) {
                   {row.etiquetas || "-"}
                 </td>
               </tr>
-            ))}
-          </tbody>
+            )}
+          />
         </table>
       </div>
     </Surface>

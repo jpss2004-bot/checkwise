@@ -8,19 +8,19 @@ import { MagnifyingGlass } from "@phosphor-icons/react";
  * Shell-level search input.
  *
  * One smart input wired to a role-specific /buscar route. The backend
- * detects the query type by pattern (RFC, periodo, folio) so the user
- * never has to pick a "search type" up front. Submitting navigates to
- * ``${resultsHref}?q=<value>`` where the results page renders the
- * matches.
+ * detects the query type by shape (provider/client name, RFC, periodo,
+ * folio) so the user never has to pick a "search type" up front.
+ * Submitting navigates to ``${resultsHref}?q=<value>`` where the
+ * results page renders the matches.
  *
  * Placement: lives inside each shell's header next to the user menu /
  * notifications bell. Hidden on the narrowest mobile viewports
- * (``hidden sm:flex``) — small screens have a hamburger drawer where
- * the same /buscar route can be reached from the menu.
+ * (``hidden sm:flex``) — small screens reach the same /buscar route via
+ * the "Buscar" entry in the hamburger nav drawer.
  */
 export function SearchBar({
   resultsHref,
-  placeholder = "Buscar por RFC, folio o periodo…",
+  placeholder = "Buscar por nombre, RFC, folio o periodo…",
   className = "",
 }: {
   resultsHref: string;
@@ -58,7 +58,7 @@ export function SearchBar({
           placeholder={placeholder}
           value={value}
           onChange={(e) => setValue(e.target.value)}
-          aria-label="Buscar por RFC, folio o periodo"
+          aria-label="Buscar por nombre de proveedor, RFC, folio o periodo"
           className="h-8 w-[240px] rounded-md border border-[color:var(--border-subtle)] bg-[color:var(--surface-page)] pl-7 pr-2 text-[12.5px] text-[color:var(--text-primary)] placeholder:text-[color:var(--text-tertiary)] focus-visible:border-[color:var(--border-focus)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[color:var(--border-focus)]/30 lg:w-[280px]"
         />
       </div>

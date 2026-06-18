@@ -1,7 +1,13 @@
 "use client";
 
-import { useEffect, useState } from "react";
-import { ArrowsClockwise, ChatCircle, MagnifyingGlass } from "@phosphor-icons/react";
+import { useCallback, useEffect, useState } from "react";
+import { useRouter, useSearchParams } from "next/navigation";
+import {
+  ArrowsClockwise,
+  ChatCircle,
+  FileArrowDown,
+  MagnifyingGlass,
+} from "@phosphor-icons/react";
 
 import { Surface } from "@/components/checkwise/dashboard/stat-card";
 import { Badge } from "@/components/ui/badge";
@@ -13,6 +19,7 @@ import { ClientShell } from "../_shell";
 import { VendorRef } from "@/components/checkwise/vendor-ref";
 import { PeriodPicker } from "@/components/checkwise/period-picker";
 import {
+  fetchClientSubmissionDocumentBlob,
   listClientSubmissions,
   listClientVendors,
   type ClientSubmissionItem,
@@ -29,9 +36,13 @@ import { formatDateTime } from "@/lib/format/datetime";
 // "Prevalidado", 2026-06-10 vocabulary unification).
 const STATUS_OPTIONS: ReadonlyArray<{ value: string; label: string }> = [
   { value: "", label: "Todos los estados" },
+  // "En revisión" is a synthetic collapsed value: the backend expands it to
+  // recibido / pendiente_revision / prevalidado (which all read "En revisión"
+  // to the client). Filtering by the single raw pendiente_revision used to
+  // hide ~2/3 of the in-review queue (audit P2.11).
+  { value: "en_revision", label: "En revisión" },
   ...(
     [
-      "pendiente_revision",
       "requiere_aclaracion",
       "posible_mismatch",
       "rechazado",
@@ -56,46 +67,62 @@ const INSTITUTION_OPTIONS: ReadonlyArray<{ value: string; label: string }> = [
 ];
 
 const PAGE_SIZE_OPTIONS = [25, 50, 100, 200, 500] as const;
+const DEFAULT_LIMIT = 100;
+
+type SubmissionFilters = {
+  vendor_id: string;
+  status: string;
+  institution: string;
+  period_key: string;
+  limit: number;
+};
+
+// Seed the filter state from the URL so notification / calendar deep-links
+// such as ``/client/submissions?vendor_id=…&status=rechazado`` land
+// pre-filtered (repairs the alert→act loop). Falls back to sensible
+// defaults when a param is absent or malformed.
+function readFiltersFromUrl(
+  sp: ReturnType<typeof useSearchParams>,
+): SubmissionFilters {
+  const limitRaw = Number(sp?.get("limit"));
+  const limit = (PAGE_SIZE_OPTIONS as readonly number[]).includes(limitRaw)
+    ? limitRaw
+    : DEFAULT_LIMIT;
+  return {
+    vendor_id: sp?.get("vendor_id") ?? "",
+    status: sp?.get("status") ?? "",
+    institution: sp?.get("institution") ?? "",
+    period_key: sp?.get("period_key") ?? sp?.get("period") ?? "",
+    limit,
+  };
+}
 
 export default function ClientSubmissionsPage() {
+  const router = useRouter();
+  const searchParams = useSearchParams();
+  // ``?client_id`` is the inspection-scope param the shell threads through
+  // nav; preserve it on every URL we write and pass it to the API so a
+  // multi-client / internal user stays on the tenant they're viewing.
+  const clientId = searchParams?.get("client_id") ?? "";
   const [rows, setRows] = useState<ClientSubmissionItem[] | null>(null);
+  // True total from the API so the count is honest when the page is capped.
+  const [total, setTotal] = useState(0);
   const [vendors, setVendors] = useState<ClientVendorRow[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  const [filters, setFilters] = useState({
-    vendor_id: "",
-    status: "",
-    institution: "",
-    period_key: "",
-    limit: 100,
-  });
-
-  async function refresh() {
-    setLoading(true);
-    setError(null);
-    try {
-      const data = await listClientSubmissions({
-        vendor_id: filters.vendor_id || undefined,
-        status: filters.status || undefined,
-        institution: filters.institution || undefined,
-        period_key: filters.period_key || undefined,
-        limit: filters.limit,
-      });
-      setRows(data.items);
-    } catch (err) {
-      setError(err instanceof Error ? err.message : "Error al cargar entregas.");
-      setRows(null);
-    } finally {
-      setLoading(false);
-    }
-  }
+  // Bumped by the table's "Reintentar" so a failed fetch can re-run even
+  // when the URL (and therefore the filter params) hasn't changed.
+  const [reloadKey, setReloadKey] = useState(0);
+  const [filters, setFilters] = useState<SubmissionFilters>(() =>
+    readFiltersFromUrl(searchParams),
+  );
 
   // Load the vendor list ONCE so the dropdown can render names instead
   // of raw UUIDs. ``listClientVendors`` is the same endpoint the
   // vendors page uses, scoped to the active client.
   useEffect(() => {
     let cancelled = false;
-    listClientVendors()
+    listClientVendors(clientId ? { client_id: clientId } : undefined)
       .then((data) => {
         if (cancelled) return;
         setVendors(data.items);
@@ -107,12 +134,68 @@ export default function ClientSubmissionsPage() {
     return () => {
       cancelled = true;
     };
-  }, []);
+  }, [clientId]);
 
+  // Single source of truth for fetching: re-run whenever the URL's filter
+  // params change (mount, deep-link, Aplicar, page-size). Re-seeding the
+  // form from the URL keeps the controls and the results in lockstep and
+  // sidesteps the previous stale-closure page-size race.
+  const spKey = searchParams?.toString() ?? "";
   useEffect(() => {
-    refresh();
+    const next = readFiltersFromUrl(searchParams);
+    setFilters(next);
+    let cancelled = false;
+    setLoading(true);
+    setError(null);
+    listClientSubmissions({
+      client_id: clientId || undefined,
+      vendor_id: next.vendor_id || undefined,
+      status: next.status || undefined,
+      institution: next.institution || undefined,
+      period_key: next.period_key || undefined,
+      limit: next.limit,
+    })
+      .then((data) => {
+        if (cancelled) return;
+        setRows(data.items);
+        setTotal(data.total ?? data.items.length);
+      })
+      .catch((err) => {
+        if (cancelled) return;
+        setError(
+          err instanceof Error ? err.message : "Error al cargar entregas.",
+        );
+        setRows(null);
+      })
+      .finally(() => {
+        if (!cancelled) setLoading(false);
+      });
+    return () => {
+      cancelled = true;
+    };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  }, [spKey, clientId, reloadKey]);
+
+  // Apply = write the active filters to the URL; the effect above does
+  // the fetch. Preserves ``client_id`` and omits default/empty values so
+  // shared URLs stay clean.
+  const applyFilters = useCallback(
+    (next: SubmissionFilters) => {
+      const params = new URLSearchParams();
+      if (clientId) params.set("client_id", clientId);
+      if (next.vendor_id) params.set("vendor_id", next.vendor_id);
+      if (next.status) params.set("status", next.status);
+      if (next.institution) params.set("institution", next.institution);
+      if (next.period_key) params.set("period_key", next.period_key);
+      if (next.limit !== DEFAULT_LIMIT) params.set("limit", String(next.limit));
+      const query = params.toString();
+      router.replace(
+        query ? `/client/submissions?${query}` : "/client/submissions",
+        { scroll: false },
+      );
+    },
+    [clientId, router],
+  );
 
   const sortedVendors = [...vendors].sort((a, b) =>
     // Null-guard: a missing vendor_name from the API must not crash the
@@ -130,7 +213,7 @@ export default function ClientSubmissionsPage() {
           <form
             onSubmit={(e) => {
               e.preventDefault();
-              refresh();
+              applyFilters(filters);
             }}
             className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4"
           >
@@ -196,7 +279,9 @@ export default function ClientSubmissionsPage() {
 
         <div className="flex flex-wrap items-center justify-between gap-3 rounded-lg border border-[color:var(--border-subtle)] bg-[color:var(--surface-raised)] px-4 py-2">
           <p className="font-mono text-[11px] uppercase tracking-wide text-[color:var(--text-tertiary)]">
-            {rows?.length ?? 0} entregas mostradas
+            {total > (rows?.length ?? 0)
+              ? `Mostrando ${rows?.length ?? 0} de ${total} entregas`
+              : `${rows?.length ?? 0} entregas mostradas`}
           </p>
           <label className="inline-flex items-center gap-2 text-[12px] text-[color:var(--text-secondary)]">
             <span className="font-mono text-[10px] uppercase tracking-wide text-[color:var(--text-tertiary)]">
@@ -205,11 +290,10 @@ export default function ClientSubmissionsPage() {
             <Select
               value={String(filters.limit)}
               onChange={(e) => {
-                const next = Number(e.target.value) || 100;
-                setFilters((prev) => ({ ...prev, limit: next }));
-                // Refresh immediately when the page size changes —
-                // matches the user expectation of an inline pager.
-                window.setTimeout(refresh, 0);
+                const nextLimit = Number(e.target.value) || DEFAULT_LIMIT;
+                // Write the new size to the URL; the fetch effect re-runs
+                // with the fresh value (no stale-closure race).
+                applyFilters({ ...filters, limit: nextLimit });
               }}
               className="h-8 w-20 py-0 text-[12px]"
             >
@@ -229,13 +313,17 @@ export default function ClientSubmissionsPage() {
           items={rows}
           loading={loading}
           error={error}
-          onRetry={refresh}
+          onRetry={() => setReloadKey((k) => k + 1)}
           columns={SUBMISSIONS_COLUMNS}
           rowKey={(row) => row.submission_id}
           ariaLabel="Entregas del portafolio"
           emptyTitle="Sin entregas con esos filtros"
           emptyDescription="Modifica los filtros para ver más resultados."
-          metaBadge={`${rows?.length ?? 0} entregas`}
+          metaBadge={
+            total > (rows?.length ?? 0)
+              ? `${rows?.length ?? 0} de ${total}`
+              : `${rows?.length ?? 0} entregas`
+          }
           skeletonRows={8}
         />
       </div>
@@ -315,9 +403,10 @@ const SUBMISSIONS_COLUMNS: DataTableColumn<ClientSubmissionItem>[] = [
     cell: (row) => (
       <div className="text-[11px]">
         {row.filename ? (
-          <p className="truncate text-[color:var(--text-primary)]">
-            {row.filename}
-          </p>
+          <SubmissionFileButton
+            submissionId={row.submission_id}
+            filename={row.filename}
+          />
         ) : null}
         {row.reviewer_note ? (
           <p className="mt-0.5 flex items-center gap-1 truncate text-[color:var(--text-secondary)]">
@@ -345,6 +434,58 @@ const SUBMISSIONS_COLUMNS: DataTableColumn<ClientSubmissionItem>[] = [
     ),
   },
 ];
+
+// Entregas is the system of record for "what did this provider deliver";
+// a Legal Director / auditor must be able to OPEN the file from here to
+// verify it instead of leaving for the vendor expediente (audit P2.12).
+// The filename is a button that fetches the authenticated blob (the staff
+// JWT can't ride a plain navigation) and opens it in a new tab.
+function SubmissionFileButton({
+  submissionId,
+  filename,
+}: {
+  submissionId: string;
+  filename: string;
+}) {
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState<string | null>(null);
+  async function open() {
+    if (busy) return;
+    setBusy(true);
+    setErr(null);
+    try {
+      const url = await fetchClientSubmissionDocumentBlob(submissionId);
+      const win = window.open(url, "_blank", "noopener,noreferrer");
+      if (!win) setErr("Permite las ventanas emergentes para abrir el archivo.");
+    } catch (e) {
+      setErr(e instanceof Error ? e.message : "No se pudo abrir el archivo.");
+    } finally {
+      setBusy(false);
+    }
+  }
+  return (
+    <div>
+      <button
+        type="button"
+        onClick={open}
+        disabled={busy}
+        title={`Abrir ${filename}`}
+        className="flex max-w-full items-center gap-1 truncate rounded-sm text-left text-[color:var(--text-link)] hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[color:var(--border-focus)] focus-visible:ring-offset-1 disabled:opacity-60"
+      >
+        <FileArrowDown className="h-3 w-3 shrink-0" weight="bold" aria-hidden />
+        <span className="truncate">{busy ? "Abriendo…" : filename}</span>
+      </button>
+      {err ? (
+        <p
+          role="alert"
+          className="mt-0.5 text-[10px] text-[color:var(--status-error-text)]"
+        >
+          {err}
+        </p>
+      ) : null}
+    </div>
+  );
+}
 
 function FilterField({
   label,

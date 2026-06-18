@@ -36,6 +36,7 @@ import {
 } from "@/lib/api/client";
 import { downloadAuthenticatedFile, saveBlob } from "@/lib/api/download";
 import { INSTITUTION_LABELS } from "@/lib/api/portal";
+import { statusLabel, statusVariant } from "@/lib/constants/statuses";
 import { useUrlClientId } from "@/lib/workspace/use-url-client-id";
 
 /**
@@ -943,7 +944,7 @@ function TreeLeaf({
         </span>
         <span className="ml-auto flex shrink-0 items-center gap-2 text-[color:var(--text-tertiary)]">
           <span className="font-mono text-[10px]">{formatBytes(doc.size_bytes)}</span>
-          <Badge variant="outline">{doc.status}</Badge>
+          <Badge variant={statusVariant(doc.status)}>{statusLabel(doc.status)}</Badge>
         </span>
       </label>
     </li>

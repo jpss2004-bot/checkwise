@@ -233,6 +233,12 @@ interface SurfaceProps {
   bodyClassName?: string;
   /** Mute the surface — lighter background, used for subdued panels. */
   muted?: boolean;
+  /**
+   * Heading level for the panel title. Top-level panels sit directly under
+   * the page ``<h1>``, so default to ``h2`` to keep the document outline
+   * unbroken (no h1→h3 skip — audit P3.16). Pass 3 for a nested panel.
+   */
+  headingLevel?: 2 | 3;
 }
 
 /**
@@ -249,7 +255,9 @@ export function Surface({
   className,
   bodyClassName,
   muted = false,
+  headingLevel = 2,
 }: SurfaceProps) {
+  const HeadingTag = headingLevel === 3 ? "h3" : "h2";
   return (
     <section
       className={cn(
@@ -263,7 +271,7 @@ export function Surface({
       {(title || description || actions) && (
         <header className="flex flex-wrap items-start justify-between gap-3 border-b border-[color:var(--border-subtle)] px-5 py-3.5">
           <div className="min-w-0 space-y-0.5">
-            <h3 className="flex items-center gap-2 text-[13px] font-semibold uppercase tracking-wide text-[color:var(--text-primary)]">
+            <HeadingTag className="flex items-center gap-2 text-[13px] font-semibold uppercase tracking-wide text-[color:var(--text-primary)]">
               {IconComponent ? (
                 <IconComponent
                   className="h-4 w-4 text-[color:var(--text-brand)]"
@@ -272,7 +280,7 @@ export function Surface({
                 />
               ) : null}
               {title}
-            </h3>
+            </HeadingTag>
             {description ? (
               <p className="text-xs text-[color:var(--text-secondary)]">
                 {description}

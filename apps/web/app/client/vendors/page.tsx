@@ -30,7 +30,9 @@ import {
   listClientVendors,
   type ClientVendorNextRenewal,
   type ClientVendorRow,
+  type ClientVendorSort,
 } from "@/lib/api/client";
+import { Select } from "@/components/ui/select";
 import {
   createReportFromPreset,
   ReportsApiError,
@@ -52,11 +54,31 @@ function parseSemaphoreLevel(raw: string | null): SemaphoreLevel | "" {
   return raw === "green" || raw === "yellow" || raw === "red" ? raw : "";
 }
 
+const SORT_OPTIONS: ReadonlyArray<{ value: ClientVendorSort; label: string }> = [
+  { value: "risk", label: "Riesgo (peor primero)" },
+  { value: "compliance_asc", label: "Cumplimiento ↑" },
+  { value: "compliance_desc", label: "Cumplimiento ↓" },
+  { value: "missing_desc", label: "Más pendientes" },
+  { value: "name", label: "Nombre (A–Z)" },
+  { value: "recent", label: "Actividad reciente" },
+];
+
+const SORT_VALUES = new Set<ClientVendorSort>(SORT_OPTIONS.map((o) => o.value));
+
+function parseSort(raw: string | null): ClientVendorSort {
+  return raw && SORT_VALUES.has(raw as ClientVendorSort)
+    ? (raw as ClientVendorSort)
+    : "risk";
+}
+
 export default function ClientVendorsPage() {
   const router = useRouter();
   const searchParams = useSearchParams();
   const urlClientId = useUrlClientId();
   const [rows, setRows] = useState<ClientVendorRow[] | null>(null);
+  // True portfolio size from the API (not rows.length), so the count never
+  // under-reports when the response is capped (audit P2.10).
+  const [total, setTotal] = useState(0);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [search, setSearch] = useState(() => searchParams?.get("q") ?? "");
@@ -66,15 +88,19 @@ export default function ClientVendorsPage() {
   const [level, setLevel] = useState<SemaphoreLevel | "">(() =>
     parseSemaphoreLevel(searchParams?.get("level") ?? null),
   );
+  const [sort, setSort] = useState<ClientVendorSort>(() =>
+    parseSort(searchParams?.get("sort") ?? null),
+  );
   const [unreadByVendor, setUnreadByVendor] = useState<Record<string, number>>({});
   const vendorsHref = useMemo(() => {
     const params = new URLSearchParams();
     if (urlClientId) params.set("client_id", urlClientId);
     if (search.trim()) params.set("q", search.trim());
     if (level) params.set("level", level);
+    if (sort !== "risk") params.set("sort", sort);
     const qs = params.toString();
     return `/client/vendors${qs ? `?${qs}` : ""}`;
-  }, [level, search, urlClientId]);
+  }, [level, search, sort, urlClientId]);
 
   useEffect(() => {
     router.replace(vendorsHref, { scroll: false });
@@ -90,6 +116,7 @@ export default function ClientVendorsPage() {
           ...scope,
           search: debouncedSearch || undefined,
           semaphore_level: level || undefined,
+          sort,
         }),
         listClientNotifications({ ...scope, unread_only: true, limit: 200 }),
       ]);
@@ -99,6 +126,7 @@ export default function ClientVendorsPage() {
         counts[item.vendor_id] = (counts[item.vendor_id] ?? 0) + 1;
       }
       setRows(data.items);
+      setTotal(data.total ?? data.items.length);
       setUnreadByVendor(counts);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Error al cargar proveedores.");
@@ -106,7 +134,7 @@ export default function ClientVendorsPage() {
     } finally {
       setLoading(false);
     }
-  }, [urlClientId, debouncedSearch, level]);
+  }, [urlClientId, debouncedSearch, level, sort]);
 
   // Auto-search: re-fetch when the client scope, the debounced query, or the
   // semáforo filter changes — no manual "Aplicar" click needed.
@@ -274,6 +302,26 @@ export default function ClientVendorsPage() {
                 ))}
               </div>
             </div>
+            <div>
+              <label
+                htmlFor="vendor-sort"
+                className="block font-mono text-[10px] uppercase tracking-wide text-[color:var(--text-tertiary)]"
+              >
+                Ordenar por
+              </label>
+              <Select
+                id="vendor-sort"
+                value={sort}
+                onChange={(e) => setSort(parseSort(e.target.value))}
+                className="mt-1 w-[200px]"
+              >
+                {SORT_OPTIONS.map((opt) => (
+                  <option key={opt.value} value={opt.value}>
+                    {opt.label}
+                  </option>
+                ))}
+              </Select>
+            </div>
           </div>
         </Surface>
 
@@ -287,7 +335,11 @@ export default function ClientVendorsPage() {
           ariaLabel="Proveedores del portafolio"
           emptyTitle="Sin proveedores con esos filtros"
           emptyDescription="Modifica la búsqueda o limpia los filtros para ver más resultados."
-          metaBadge={`${rows?.length ?? 0} proveedor${(rows?.length ?? 0) === 1 ? "" : "es"}`}
+          metaBadge={
+            total > (rows?.length ?? 0)
+              ? `Mostrando ${rows?.length ?? 0} de ${total} proveedores`
+              : `${rows?.length ?? 0} proveedor${(rows?.length ?? 0) === 1 ? "" : "es"}`
+          }
         />
       </div>
     </ClientShell>
@@ -530,8 +582,13 @@ function SemaphorePill({ level }: { level: SemaphoreLevel }) {
   const IconComponent = meta.icon;
   return (
     <Tooltip content={SEMAPHORE_EXPLANATION[level]}>
+      {/* Focusable (tabIndex) + aria-label so the "why is this red" reason is
+          reachable by keyboard and announced to screen readers — a bare
+          <span> trigger was neither (WCAG 2.1.1/4.1.2, audit P3.16). */}
       <span
-        className={`inline-flex cursor-help items-center gap-1.5 rounded-full px-2 py-0.5 text-[12px] font-medium ${meta.tone}`}
+        tabIndex={0}
+        aria-label={`${meta.label}: ${SEMAPHORE_EXPLANATION[level]}`}
+        className={`inline-flex cursor-help items-center gap-1.5 rounded-full px-2 py-0.5 text-[12px] font-medium ${meta.tone} focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[color:var(--border-focus)] focus-visible:ring-offset-1`}
       >
         <IconComponent className="h-3 w-3" weight="bold" aria-hidden="true" />
         {meta.label}

@@ -36,6 +36,7 @@ import { safeReturnTo } from "@/lib/navigation/return-to";
 
 import { ClientShell } from "../../_shell";
 import {
+  ClientApiError,
   clientVendorExpedienteZipUrl,
   clientVendorMetadataDownloadUrl,
   fetchClientSubmissionDocumentBlob,
@@ -44,9 +45,20 @@ import {
   type ClientVendorDetail,
   type ClientVendorDocumentActionItem,
 } from "@/lib/api/client";
+import {
+  ErrorState,
+  NotFoundState,
+} from "@/components/checkwise/portal/state-surfaces";
 import { downloadAuthenticatedFile } from "@/lib/api/download";
 import { createReportFromPreset, ReportsApiError } from "@/lib/api/reports";
-import { slotStateLabel, slotStateVariant } from "@/lib/constants/statuses";
+import {
+  contractStatusLabel,
+  contractStatusVariant,
+  reviewerResultLabel,
+  slotStateLabel,
+  slotStateVariant,
+  suggestedActionLabel,
+} from "@/lib/constants/statuses";
 
 type PageProps = {
   params: Promise<{ vendor_id: string }>;
@@ -70,6 +82,10 @@ export default function ClientVendorDetailPage({ params }: PageProps) {
   const { vendor_id } = use(params);
   const [detail, setDetail] = useState<ClientVendorDetail | null>(null);
   const [error, setError] = useState<string | null>(null);
+  // HTTP status of a load failure so a true 404/403 (provider not found /
+  // not in scope) reads differently from a transient blip.
+  const [errorStatus, setErrorStatus] = useState<number | null>(null);
+  const [reloadKey, setReloadKey] = useState(0);
   const router = useRouter();
   const [generating, setGenerating] = useState(false);
   const [downloadingZip, setDownloadingZip] = useState(false);
@@ -138,18 +154,21 @@ export default function ClientVendorDetailPage({ params }: PageProps) {
 
   useEffect(() => {
     let cancelled = false;
+    setError(null);
+    setErrorStatus(null);
     getClientVendorDetail(vendor_id)
       .then((data) => {
         if (!cancelled) setDetail(data);
       })
       .catch((err: unknown) => {
         if (cancelled) return;
+        setErrorStatus(err instanceof ClientApiError ? err.status : null);
         setError(err instanceof Error ? err.message : "Error al cargar proveedor.");
       });
     return () => {
       cancelled = true;
     };
-  }, [vendor_id]);
+  }, [vendor_id, reloadKey]);
 
   // Deep-link focus: report findings, alerts, and the vendors-list count
   // cells link here with ?focus=<requirement_code|bucket>#documentos. Once the
@@ -168,6 +187,18 @@ export default function ClientVendorDetailPage({ params }: PageProps) {
     const t = window.setTimeout(() => setFocusKey(null), 4000);
     return () => window.clearTimeout(t);
   }, [detail]);
+
+  // Turn the (previously dead-end) suggested-action / attention rows into
+  // one-click drills: scroll to "Documentos por atender" and briefly
+  // highlight the rows matching this requirement (audit P2.12). Reuses the
+  // same focusKey machinery the deep-link effect above uses.
+  const focusOnDocuments = useCallback((code: string | null) => {
+    if (code) setFocusKey(code);
+    document
+      .getElementById("documentos")
+      ?.scrollIntoView({ behavior: "smooth", block: "start" });
+    if (code) window.setTimeout(() => setFocusKey(null), 4000);
+  }, []);
 
   return (
     <ClientShell
@@ -256,9 +287,33 @@ export default function ClientVendorDetailPage({ params }: PageProps) {
       }
     >
       {error ? (
-        <p className="rounded-md border border-[color:var(--status-warning-border)] bg-[color:var(--status-warning-bg)] p-3 text-sm text-[color:var(--status-warning-text)]">
-          {error}
-        </p>
+        errorStatus === 404 || errorStatus === 403 ? (
+          <NotFoundState
+            title="Proveedor no disponible"
+            description="Este proveedor no existe o no está dentro de tu portafolio."
+            action={
+              <Link href={vendorsReturnHref}>
+                <Button size="sm" variant="outline">
+                  {clientVendorReturnLabel(vendorsReturnHref)}
+                </Button>
+              </Link>
+            }
+          />
+        ) : (
+          <ErrorState
+            tone="error"
+            title="No pudimos cargar el proveedor"
+            description={error}
+            onRetry={() => setReloadKey((k) => k + 1)}
+            secondary={
+              <Link href={vendorsReturnHref}>
+                <Button size="sm" variant="outline">
+                  {clientVendorReturnLabel(vendorsReturnHref)}
+                </Button>
+              </Link>
+            }
+          />
+        )
       ) : !detail ? (
         <DetailSkeleton />
       ) : (
@@ -270,8 +325,8 @@ export default function ClientVendorDetailPage({ params }: PageProps) {
               <div id="documentos" className="scroll-mt-24">
                 <DocumentActionItemsCard detail={detail} focusKey={focusKey} />
               </div>
-              <SuggestedActionsCard detail={detail} />
-              <AttentionTodayCard detail={detail} />
+              <SuggestedActionsCard detail={detail} onFocus={focusOnDocuments} />
+              <AttentionTodayCard detail={detail} onFocus={focusOnDocuments} />
             </div>
             <div className="space-y-5">
               <DocumentBreakdownCard detail={detail} />
@@ -473,7 +528,9 @@ function ContractRow({ contract }: { contract: ClientVendorContractDoc }) {
         ) : null}
       </div>
       <div className="flex items-center gap-2">
-        <Badge variant="outline">{contract.status}</Badge>
+        <Badge variant={contractStatusVariant(contract.status)}>
+          {contractStatusLabel(contract.status)}
+        </Badge>
         <Button
           type="button"
           size="sm"
@@ -672,7 +729,13 @@ const PRIORITY_META: Record<"high" | "medium" | "low", { icon: Icon; tone: "dest
   low: { icon: ChatTeardrop, tone: "info", label: "Baja" },
 };
 
-function SuggestedActionsCard({ detail }: { detail: ClientVendorDetail }) {
+function SuggestedActionsCard({
+  detail,
+  onFocus,
+}: {
+  detail: ClientVendorDetail;
+  onFocus: (code: string | null) => void;
+}) {
   return (
     <Surface
       title="Acciones sugeridas"
@@ -712,8 +775,8 @@ function SuggestedActionsCard({ detail }: { detail: ClientVendorDetail }) {
                   <div className="min-w-0 flex-1">
                     <div className="flex flex-wrap items-center gap-2">
                       <Badge variant={meta.tone}>{meta.label}</Badge>
-                      <span className="font-mono text-[10px] uppercase tracking-wide text-[color:var(--text-tertiary)]">
-                        {a.type}
+                      <span className="text-[11px] text-[color:var(--text-tertiary)]">
+                        {suggestedActionLabel(a.type)}
                       </span>
                     </div>
                     <p className="mt-1 text-[13px] font-medium text-[color:var(--text-primary)]">
@@ -722,6 +785,14 @@ function SuggestedActionsCard({ detail }: { detail: ClientVendorDetail }) {
                     <p className="mt-0.5 text-[12px] leading-relaxed text-[color:var(--text-secondary)]">
                       {a.body}
                     </p>
+                    <button
+                      type="button"
+                      onClick={() => onFocus(a.requirement_code)}
+                      className="mt-2 inline-flex items-center gap-1 rounded-sm text-[12px] font-medium text-[color:var(--text-link)] hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[color:var(--border-focus)] focus-visible:ring-offset-1"
+                    >
+                      Ver documentos
+                      <ArrowRight className="h-3.5 w-3.5" weight="bold" aria-hidden />
+                    </button>
                   </div>
                 </div>
               </li>
@@ -735,9 +806,19 @@ function SuggestedActionsCard({ detail }: { detail: ClientVendorDetail }) {
 
 // ─── Attention today ─────────────────────────────────────────────
 
-function AttentionTodayCard({ detail }: { detail: ClientVendorDetail }) {
+function AttentionTodayCard({
+  detail,
+  onFocus,
+}: {
+  detail: ClientVendorDetail;
+  onFocus: (code: string | null) => void;
+}) {
   return (
-    <Surface title="Atención inmediata" icon={Warning}>
+    <Surface
+      title="Atención inmediata"
+      icon={Warning}
+      description="Lo más urgente de este proveedor. Toca un pendiente para ir a sus documentos."
+    >
       {detail.attention_today.length === 0 ? (
         <EmptyState
           icon={CheckCircle}
@@ -752,9 +833,13 @@ function AttentionTodayCard({ detail }: { detail: ClientVendorDetail }) {
               className="flex flex-wrap items-center justify-between gap-3 py-3 first:pt-0 last:pb-0"
             >
               <div className="min-w-0">
-                <p className="text-[13px] font-medium text-[color:var(--text-primary)]">
+                <button
+                  type="button"
+                  onClick={() => onFocus(null)}
+                  className="rounded-sm text-left text-[13px] font-medium text-[color:var(--text-primary)] hover:text-[color:var(--text-link)] hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[color:var(--border-focus)] focus-visible:ring-offset-1"
+                >
                   {a.title}
-                </p>
+                </button>
                 <p className="font-mono text-[10px] uppercase tracking-wide text-[color:var(--text-tertiary)]">
                   {a.institution}
                 </p>
@@ -776,7 +861,9 @@ function AttentionTodayCard({ detail }: { detail: ClientVendorDetail }) {
                       : `vencido ${Math.abs(a.due_in_days)}d`}
                   </span>
                 ) : null}
-                <Badge variant="outline">{a.state}</Badge>
+                <Badge variant={slotStateVariant(a.state)}>
+                  {slotStateLabel(a.state)}
+                </Badge>
               </div>
             </li>
           ))}
@@ -884,8 +971,9 @@ function ReviewerNotesCard({ detail }: { detail: ClientVendorDetail }) {
               key={`${n.submission_id}-${n.occurred_at}`}
               className="rounded-md border border-[color:var(--border-subtle)] bg-[color:var(--surface-page)] p-2.5"
             >
-              <p className="font-mono text-[10px] uppercase tracking-wide text-[color:var(--text-tertiary)]">
-                {new Date(n.occurred_at).toLocaleString("es-MX")} · {n.result}
+              <p className="text-[11px] text-[color:var(--text-tertiary)]">
+                {new Date(n.occurred_at).toLocaleString("es-MX")} ·{" "}
+                {reviewerResultLabel(n.result)}
               </p>
               <p className="mt-1 text-[12px] text-[color:var(--text-primary)]">
                 {n.message ?? "(sin mensaje)"}

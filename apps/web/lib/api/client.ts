@@ -105,12 +105,27 @@ export type ClientLegalConsentResponse = {
   legal_consent_version: string;
 };
 
+// One provider on the dashboard "Requieren tu atención" worklist.
+export type ClientRiskVendor = {
+  vendor_id: string;
+  vendor_name: string;
+  semaphore_level: "green" | "yellow" | "red";
+  compliance_pct: number;
+  overdue_count: number;
+  missing_required_count: number;
+  rejected_or_correction_count: number;
+  top_reason: string;
+};
+
 export type ClientOverview = {
   client_id: string;
   client_name: string;
   vendors_total: number;
   active_workspaces_total: number;
   compliance_pct: number;
+  // Month-over-month approval-rate momentum in points; null when there
+  // aren't two active months yet.
+  compliance_trend_delta: number | null;
   green_count: number;
   yellow_count: number;
   red_count: number;
@@ -118,8 +133,12 @@ export type ClientOverview = {
   rejected_or_correction_total: number;
   missing_required_total: number;
   due_soon_total: number;
+  // Lapsed obligations across the portfolio (highest-liability state).
+  overdue_total: number;
   recent_submissions_total: number;
   last_activity_at: string | null;
+  // Worst-first ranked attention list (top 5).
+  top_risk_vendors: ClientRiskVendor[];
 };
 
 // Phase 6D — most-urgent renewal-bearing slot for this vendor.
@@ -151,10 +170,20 @@ export type ClientVendorRow = {
   next_renewal: ClientVendorNextRenewal | null;
 };
 
+export type ClientVendorSort =
+  | "risk"
+  | "compliance_asc"
+  | "compliance_desc"
+  | "missing_desc"
+  | "name"
+  | "recent";
+
 export type ClientVendorListResponse = {
   client_id: string;
   items: ClientVendorRow[];
   total: number;
+  // True when more rows exist past this page.
+  has_more?: boolean;
 };
 
 export type ClientVendorDetail = {
@@ -532,7 +561,9 @@ export async function listClientVendors(params?: {
   status?: string;
   semaphore_level?: "green" | "yellow" | "red";
   search?: string;
+  sort?: ClientVendorSort;
   limit?: number;
+  offset?: number;
 }): Promise<ClientVendorListResponse> {
   return fetchJson<ClientVendorListResponse>(`/api/v1/client/vendors${qs(params)}`);
 }
@@ -1042,12 +1073,19 @@ export async function downloadClientAuditPackageZipPost(
   const headers = new Headers();
   headers.set("Authorization", `Bearer ${session.access_token}`);
   headers.set("Content-Type", "application/json");
-  const response = await fetch(
-    `${API_BASE_URL}/api/v1/client/audit-package.zip`,
-    {
+  // Bound the request the same way the GET download path is: a stalled
+  // large-ZIP / headless-Chromium INDICE.pdf stream during a live audit
+  // must reject into a visible error, not an infinite "Preparando…"
+  // spinner. 120s matches DOWNLOAD_TIMEOUT_MS in download.ts.
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => controller.abort(), 120_000);
+  let response: Response;
+  try {
+    response = await fetch(`${API_BASE_URL}/api/v1/client/audit-package.zip`, {
       method: "POST",
       headers,
       credentials: "include",
+      signal: controller.signal,
       body: JSON.stringify({
         client_id: body.client_id ?? null,
         period_from: body.period_from ?? null,
@@ -1058,8 +1096,18 @@ export async function downloadClientAuditPackageZipPost(
         vendor_ids: body.vendor_ids ?? null,
         submission_ids: body.submission_ids,
       }),
-    },
-  );
+    });
+  } catch (err) {
+    if (controller.signal.aborted) {
+      throw new ClientApiError(
+        408,
+        "La preparación del paquete tardó demasiado. Inténtalo de nuevo.",
+      );
+    }
+    throw err;
+  } finally {
+    clearTimeout(timeoutId);
+  }
   if (!response.ok) {
     const detail = await response.text().catch(() => "");
     throw new ClientApiError(response.status, detail || response.statusText);

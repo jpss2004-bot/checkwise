@@ -5,6 +5,7 @@ import Link from "next/link";
 import {
   ArrowsLeftRight,
   CaretDown,
+  Gear,
   IdentificationCard,
   SignOut,
   User,
@@ -46,6 +47,12 @@ export type UserMenuProps = {
   /** Label for the profile link. Defaults to "Mi perfil". */
   profileLabel?: string;
   /**
+   * Extra settings rows below the profile link (e.g. the client shell's
+   * "Preferencias de notificaciones") so settings are reachable from the
+   * account menu, not just from inside one page (audit P3.19).
+   */
+  secondaryLinks?: ReadonlyArray<{ href: string; label: string }>;
+  /**
    * Shell switcher — when set, renders a "Cambiar a X" row above
    * the sign-out action. Used by the AdminShell ↔ PlatformShell
    * pair so the same internal_admin can flip between the
@@ -67,6 +74,7 @@ export function UserMenu({
   roles,
   profileHref,
   profileLabel = "Mi perfil",
+  secondaryLinks,
   shellSwitch,
   onSignOut,
   className,
@@ -163,6 +171,23 @@ export function UserMenu({
                 </Link>
               </li>
             ) : null}
+            {secondaryLinks?.map((link) => (
+              <li role="none" key={link.href}>
+                <Link
+                  href={link.href}
+                  role="menuitem"
+                  className="flex items-center gap-2 px-4 py-2 text-sm text-[color:var(--text-primary)] hover:bg-[color:var(--surface-hover)]"
+                  onClick={() => setOpen(false)}
+                >
+                  <Gear
+                    className="h-4 w-4 text-[color:var(--text-tertiary)]"
+                    weight="bold"
+                    aria-hidden="true"
+                  />
+                  {link.label}
+                </Link>
+              </li>
+            ))}
             {shellSwitch ? (
               <li role="none">
                 <Link
