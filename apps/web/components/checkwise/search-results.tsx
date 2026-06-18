@@ -1,10 +1,12 @@
 "use client";
 
 import Link from "next/link";
+import { useRouter } from "next/navigation";
 import { useEffect, useState } from "react";
 import { ArrowRight, MagnifyingGlass } from "@phosphor-icons/react";
 
 import { Badge } from "@/components/ui/badge";
+import { SearchInput } from "@/components/ui/search-input";
 import { INSTITUTION_LABELS } from "@/lib/api/portal";
 import { statusLabel } from "@/lib/constants/statuses";
 import type {
@@ -29,15 +31,28 @@ export function SearchResults({
   runSearch,
   buildHref,
   emptyHint,
+  searchPath,
 }: {
   query: string;
   runSearch: (q: string) => Promise<SearchResponse>;
   buildHref: (hit: SearchHit) => string;
   emptyHint?: string;
+  /** Base path of this portal's search page (e.g. "/admin/buscar"). When set,
+   *  an always-visible search box renders above the results so users can search
+   *  and refine directly here — critical on mobile, where the header search bar
+   *  is hidden. */
+  searchPath?: string;
 }) {
+  const router = useRouter();
+  const [draft, setDraft] = useState(query);
   const [data, setData] = useState<SearchResponse | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+
+  // Keep the box in sync with the URL-driven query (back/forward, header search).
+  useEffect(() => {
+    setDraft(query);
+  }, [query]);
 
   useEffect(() => {
     if (!query.trim()) {
@@ -63,53 +78,84 @@ export function SearchResults({
     };
   }, [query, runSearch]);
 
-  if (!query.trim()) {
-    return (
-      <EmptyShell hint={emptyHint ?? "Escribe arriba para empezar a buscar."} />
-    );
-  }
-  if (loading) {
-    return (
-      <p className="text-[13px] text-[color:var(--text-tertiary)]">
-        Buscando…
-      </p>
-    );
-  }
-  if (error) {
-    return (
-      <div
-        role="alert"
-        className="rounded-md border border-[color:var(--status-error-border)] bg-[color:var(--status-error-bg)] px-3 py-2 text-[13px] text-[color:var(--status-error-text)]"
-      >
-        {error}
-      </div>
-    );
-  }
-  if (!data || data.total === 0) {
-    return (
-      <EmptyShell
-        hint={`Sin resultados para "${query}". Intenta con un RFC, periodo (YYYY-Mxx) o un folio.`}
-      />
-    );
-  }
+  const body = renderBody();
 
   return (
-    <section aria-label="Resultados de búsqueda" className="space-y-4">
-      <header className="flex flex-wrap items-baseline gap-x-4 gap-y-1">
-        <p className="text-[13px] text-[color:var(--text-secondary)]">
-          <strong className="text-[color:var(--text-primary)]">
-            {data.total}
-          </strong>{" "}
-          {data.total === 1 ? "resultado" : "resultados"} para
-        </p>
-        <span className="font-mono text-[12.5px] font-semibold text-[color:var(--text-primary)]">
-          “{query}”
-        </span>
-        <MatchedByPill matched={data.matched_by} />
-      </header>
+    <div className="space-y-4">
+      {searchPath ? (
+        <form
+          onSubmit={(e) => {
+            e.preventDefault();
+            const trimmed = draft.trim();
+            if (trimmed) {
+              router.push(`${searchPath}?q=${encodeURIComponent(trimmed)}`);
+            }
+          }}
+        >
+          <SearchInput
+            value={draft}
+            onValueChange={setDraft}
+            placeholder="Buscar por RFC, folio o periodo…"
+            ariaLabel="Buscar por RFC, folio o periodo"
+            className="max-w-md"
+          />
+        </form>
+      ) : null}
+      {body}
+    </div>
+  );
 
-      <ul className="divide-y divide-[color:var(--border-subtle)] overflow-hidden rounded-lg border border-[color:var(--border-subtle)] bg-[color:var(--surface-raised)]">
-        {data.items.map((hit) => (
+  function renderBody() {
+    if (!query.trim()) {
+      return (
+        <EmptyShell hint={emptyHint ?? "Escribe arriba para empezar a buscar."} />
+      );
+    }
+    if (loading) {
+      return (
+        <p className="text-[13px] text-[color:var(--text-tertiary)]">Buscando…</p>
+      );
+    }
+    if (error) {
+      return (
+        <div
+          role="alert"
+          className="rounded-md border border-[color:var(--status-error-border)] bg-[color:var(--status-error-bg)] px-3 py-2 text-[13px] text-[color:var(--status-error-text)]"
+        >
+          {error}
+        </div>
+      );
+    }
+    if (!data || data.total === 0) {
+      return (
+        <EmptyShell
+          hint={`Sin resultados para "${query}". Intenta con un RFC, periodo (YYYY-Mxx) o un folio.`}
+        />
+      );
+    }
+
+    return (
+      <section aria-label="Resultados de búsqueda" className="space-y-4">
+        <header className="flex flex-wrap items-baseline gap-x-4 gap-y-1">
+          <p className="text-[13px] text-[color:var(--text-secondary)]">
+            <strong className="text-[color:var(--text-primary)]">
+              {data.total}
+            </strong>{" "}
+            {data.total === 1 ? "resultado" : "resultados"} para
+          </p>
+          <span className="font-mono text-[12.5px] font-semibold text-[color:var(--text-primary)]">
+            “{query}”
+          </span>
+          <MatchedByPill matched={data.matched_by} />
+          {data.items.length < data.total ? (
+            <span className="text-[12px] text-[color:var(--text-tertiary)]">
+              mostrando los primeros {data.items.length}
+            </span>
+          ) : null}
+        </header>
+
+        <ul className="divide-y divide-[color:var(--border-subtle)] overflow-hidden rounded-lg border border-[color:var(--border-subtle)] bg-[color:var(--surface-raised)]">
+          {data.items.map((hit) => (
           <li key={hit.submission_id} className="px-4 py-3">
             <Link
               href={buildHref(hit)}
@@ -146,7 +192,8 @@ export function SearchResults({
         ))}
       </ul>
     </section>
-  );
+    );
+  }
 }
 
 function EmptyShell({ hint }: { hint: string }) {

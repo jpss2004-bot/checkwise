@@ -41,6 +41,7 @@ function ClientBuscarBody() {
   return (
     <SearchResults
       query={q}
+      searchPath="/client/buscar"
       runSearch={run}
       buildHref={buildHref}
       emptyHint="Escribe el RFC de uno de tus proveedores, un periodo (por ejemplo 2026-M05) o un folio."

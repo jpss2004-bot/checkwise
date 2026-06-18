@@ -43,6 +43,7 @@ function PortalBuscarBody() {
   return (
     <SearchResults
       query={q}
+      searchPath="/portal/buscar"
       runSearch={run}
       buildHref={buildHref}
       emptyHint="Escribe un periodo (por ejemplo 2026-M05) o un folio para encontrar una entrega de tu expediente."

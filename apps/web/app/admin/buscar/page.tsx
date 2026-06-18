@@ -40,6 +40,7 @@ function AdminBuscarBody() {
   return (
     <SearchResults
       query={q}
+      searchPath="/admin/buscar"
       runSearch={run}
       buildHref={buildHref}
       emptyHint="Empieza por un RFC, un periodo como 2026-M05, o un folio para encontrar la entrega en cualquier cliente."
