@@ -605,14 +605,22 @@ export async function listClientActivity(params?: {
   return fetchJson<ClientActivityResponse>(`/api/v1/client/activity${qs(params)}`);
 }
 
+// Key prefix for the bell-summary cache; mutations that change the unread set
+// invalidate it so the badge never shows a stale count.
+const CLIENT_NOTIFICATION_SUMMARY_KEY = "GET /api/v1/client/notifications/summary";
+// The shell remounts on every navigation and re-reads this, and it does not
+// poll — so a short TTL coalesces the per-navigation refetches without risking
+// staleness (mark-read mutations invalidate it explicitly). Perf audit P2-2.
+const CLIENT_NOTIFICATION_SUMMARY_TTL_MS = 15_000;
+
 export async function getClientNotificationSummary(params?: {
   client_id?: string;
 }): Promise<ClientNotificationSummary> {
   const path = `/api/v1/client/notifications/summary${qs(params)}`;
-  // Coalesce the shell + any concurrent page read of the same summary. No TTL:
-  // the bell is polled, so each interval tick should fetch fresh.
-  return dedupeRead(`GET ${path}`, () =>
-    fetchJson<ClientNotificationSummary>(path),
+  return dedupeRead(
+    `GET ${path}`,
+    () => fetchJson<ClientNotificationSummary>(path),
+    CLIENT_NOTIFICATION_SUMMARY_TTL_MS,
   );
 }
 
@@ -630,19 +638,25 @@ export async function markClientNotificationRead(
   notificationId: string,
   params?: { client_id?: string },
 ): Promise<ClientNotificationItem> {
-  return fetchJson<ClientNotificationItem>(
+  const result = await fetchJson<ClientNotificationItem>(
     `/api/v1/client/notifications/${notificationId}/read${qs(params)}`,
     { method: "POST" },
   );
+  // The unread set changed — drop the cached bell summary so the next read is
+  // fresh (perf audit P2-2).
+  invalidateRead(CLIENT_NOTIFICATION_SUMMARY_KEY);
+  return result;
 }
 
 export async function markAllClientNotificationsRead(params?: {
   client_id?: string;
 }): Promise<ClientNotificationSummary> {
-  return fetchJson<ClientNotificationSummary>(
+  const result = await fetchJson<ClientNotificationSummary>(
     `/api/v1/client/notifications/read-all${qs(params)}`,
     { method: "POST" },
   );
+  invalidateRead(CLIENT_NOTIFICATION_SUMMARY_KEY);
+  return result;
 }
 
 export async function getClientMetadata(params?: {
