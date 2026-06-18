@@ -2671,3 +2671,97 @@ def test_calendar_radar_returns_forward_shape(
     assert body["urgency_bands"], "urgency band labels for the FE"
     assert isinstance(body["awaiting_review_total"], int)
     assert body["truncated"] is False
+
+
+def test_calendar_grid_empty_portfolio_shape(
+    api_client: TestClient, db_factory
+) -> None:
+    """The grid returns the full clients×months shape on an empty portfolio
+    without erroring — 12-slot month_totals/forecast, integer triage, and no
+    obligations until a month/client is selected."""
+    token = _admin_token(api_client, db_factory)
+    resp = api_client.get("/api/v1/admin/calendar/grid", headers=_h(token))
+    assert resp.status_code == 200, resp.text
+    body = resp.json()
+    assert body["level"] == "clients"
+    assert body["rows"] == []
+    assert body["cells"] == []
+    assert len(body["month_totals"]) == 12
+    assert len(body["forecast"]) == 12
+    assert body["triage"]["overdue_total"] == 0
+    assert body["triage"]["due_7d_total"] == 0
+    assert body["obligations"] == []
+    assert body["truncated"] is False
+
+
+def test_calendar_grid_rolls_clients_into_month_cells(
+    api_client: TestClient, db_factory
+) -> None:
+    """With a seeded client/vendor/workspace the grid produces a client row,
+    risk-tinted month cells whose counts sum to the forecast totals, and —
+    only when a month or client is selected — the obligation detail."""
+    token = _admin_token(api_client, db_factory)
+    _seed_workspace(db_factory)
+
+    resp = api_client.get(
+        "/api/v1/admin/calendar/grid?year=2026", headers=_h(token)
+    )
+    assert resp.status_code == 200, resp.text
+    body = resp.json()
+    assert body["level"] == "clients"
+    assert body["clients_scanned"] == 1
+    rows = body["rows"]
+    assert len(rows) == 1 and rows[0]["name"] == "Cli ws"
+    client_id = rows[0]["id"]
+    assert rows[0]["semaphore_level"] in {"red", "yellow", "green"}
+
+    cells = body["cells"]
+    assert cells, "a seeded moral workspace must place obligations on months"
+    risk_vocab = {
+        "overdue",
+        "action_required",
+        "due_soon",
+        "in_review",
+        "upcoming",
+        "on_track",
+    }
+    for cell in cells:
+        assert 1 <= cell["month"] <= 12
+        assert cell["count"] >= 1
+        assert cell["worst_risk"] in risk_vocab
+        assert sum(cell["by_institution"].values()) == cell["count"]
+        assert cell["row_id"] == client_id
+
+    # Grid cell counts and the forecast strip come from the same aggregate.
+    cell_total = sum(c["count"] for c in cells)
+    assert cell_total == sum(body["month_totals"]) == sum(
+        f["total"] for f in body["forecast"]
+    )
+    # Overview without a month selection carries no obligation detail.
+    assert body["obligations"] == []
+
+    # A month with load returns its obligations across the portfolio.
+    busiest = max(body["forecast"], key=lambda f: f["total"])
+    month_resp = api_client.get(
+        f"/api/v1/admin/calendar/grid?year=2026&month={busiest['month']}",
+        headers=_h(token),
+    )
+    assert month_resp.status_code == 200, month_resp.text
+    month_body = month_resp.json()
+    assert month_body["obligations"], "selected month must surface its detail"
+    for ob in month_body["obligations"]:
+        assert ob["due_month"] == busiest["month"]
+        assert ob["client_name"] == "Cli ws"
+        assert ob["risk_level"] in risk_vocab
+
+    # Drilling a client switches the grid to its providers×months.
+    drill_resp = api_client.get(
+        f"/api/v1/admin/calendar/grid?year=2026&client_id={client_id}",
+        headers=_h(token),
+    )
+    assert drill_resp.status_code == 200, drill_resp.text
+    drill_body = drill_resp.json()
+    assert drill_body["level"] == "providers"
+    assert drill_body["client_name"] == "Cli ws"
+    assert any(r["name"] == "Vendor ws" for r in drill_body["rows"])
+    assert drill_body["obligations"], "drill carries the client's obligations"
