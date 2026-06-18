@@ -36,7 +36,6 @@ import { PageHeader } from "@/components/ui/page-header";
 import { cn } from "@/lib/utils";
 import type { NotificationSeverity } from "@/lib/api/client";
 import {
-  getProviderNotificationSummary,
   listProviderNotifications,
   markAllProviderNotificationsRead,
   markProviderNotificationRead,
@@ -132,21 +131,9 @@ function PortalNotificationsInner({ session }: { session: PortalSession }) {
     };
   }, [session, reloadKey]);
 
-  // Best-effort background refresh — keeps the bell + tab counts in
-  // sync when a reviewer decision lands while the tab is open.
-  useEffect(() => {
-    const handle = window.setInterval(() => {
-      getProviderNotificationSummary(session)
-        .then((s) => {
-          // No state to update here yet — the summary endpoint is
-          // the bell's source of truth on the shell. Reading it
-          // keeps the connection warm and surfaces a 401 early.
-          void s;
-        })
-        .catch(() => undefined);
-    }, 60_000);
-    return () => window.clearInterval(handle);
-  }, [session]);
+  // The bell + tab counts are owned by the portal shell, which already
+  // polls the notification summary every 60 s. A second interval here only
+  // duplicated that request (its result was discarded), so it was removed.
 
   const counts = useMemo(() => computeCounts(rows ?? []), [rows]);
 

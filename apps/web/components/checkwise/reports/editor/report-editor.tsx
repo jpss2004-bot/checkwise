@@ -357,10 +357,14 @@ export function ReportEditor({
       setSaving(false);
       setSavedAt(new Date());
       setIsDirty(false);
-      const fresh = await getReport(reportId);
-      setReport(fresh);
-      if (!isDirty) setContent(fresh.current_version?.content_json ?? content);
       console.info("[reports] saved version", v.version_number);
+      // The saved content already matches local state (createVersion persists
+      // content_json verbatim), so don't block the "guardado" feedback on a
+      // second round-trip. Refresh the report metadata (version_number /
+      // updated_at) in the background — mirrors the generation-done refresh.
+      getReport(reportId)
+        .then(setReport)
+        .catch(() => {});
     } catch (e) {
       setSaving(false);
       const msg =
@@ -369,7 +373,7 @@ export function ReportEditor({
       // in state so they can fix permissions or retry.
       toast.error(`No pudimos guardar la versión: ${msg}`);
     }
-  }, [content, reportId, isDirty]);
+  }, [content, reportId]);
 
   // ─── Render states ──────────────────────────────────────────
   if (loading) {
