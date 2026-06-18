@@ -767,7 +767,7 @@ function NextActionHero({
                     <p className="line-clamp-1 text-[12px] font-medium text-white/90">
                       {action.title}
                     </p>
-                    <p className="font-mono text-[10px] uppercase tracking-wide text-white/50">
+                    <p className="font-mono text-[10px] uppercase tracking-wide text-[color:var(--text-inverse-muted)]">
                       {action.requirement_code ?? action.period_key ?? "—"}
                     </p>
                   </div>

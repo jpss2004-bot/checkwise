@@ -413,7 +413,7 @@ export function WiseFeedbackRow({
   const rated = feedback !== undefined;
   return (
     <div className="flex items-center gap-1.5 pt-0.5">
-      <span className="text-[10px] text-white/40">
+      <span className="text-[10px] text-[color:var(--text-inverse-muted)]">
         {rated ? "Gracias por tu opinión." : "¿Te sirvió?"}
       </span>
       <button

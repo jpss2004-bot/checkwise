@@ -584,7 +584,7 @@ function DockComposer({
   };
   return (
     <footer className="border-t border-white/10 bg-[color:var(--surface-brand)]/95 px-4 py-3">
-      <p className="mb-1.5 font-mono text-[10px] uppercase tracking-wide text-white/45">
+      <p className="mb-1.5 font-mono text-[10px] uppercase tracking-wide text-[color:var(--text-inverse-muted)]">
         Sugerencias
       </p>
       <div className="mb-2 flex flex-wrap gap-1.5">
@@ -610,7 +610,7 @@ function DockComposer({
           value={inputValue}
           onChange={(event) => onInputChange(event.target.value)}
           placeholder="Pregúntale a Wise…"
-          className="flex-1 rounded-full border border-white/15 bg-white/[0.06] px-3.5 py-1.5 text-[13px] text-white placeholder:text-white/40 focus:border-[color:var(--text-teal)]/60 focus:outline-none focus:ring-2 focus:ring-[color:var(--text-teal)]/40"
+          className="flex-1 rounded-full border border-white/15 bg-white/[0.06] px-3.5 py-1.5 text-[13px] text-white placeholder:text-[color:var(--text-inverse-muted)] focus:border-[color:var(--text-teal)]/60 focus:outline-none focus:ring-2 focus:ring-[color:var(--text-teal)]/40"
         />
         <button
           type="submit"
