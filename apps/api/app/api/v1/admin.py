@@ -41,7 +41,16 @@ from typing import Annotated, Final, Literal
 from xml.etree import ElementTree as ET
 from zoneinfo import ZoneInfo
 
-from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response, status
+from fastapi import (
+    APIRouter,
+    BackgroundTasks,
+    Depends,
+    HTTPException,
+    Query,
+    Request,
+    Response,
+    status,
+)
 from fastapi.responses import FileResponse
 from pydantic import BaseModel, EmailStr, Field
 from sqlalchemy import and_, func, or_, select, tuple_
@@ -3232,6 +3241,10 @@ class AdminCalendarGridResponse(BaseModel):
     clients_total: int
     clients_scanned: int
     truncated: bool
+    # When the overview is served from the precomputed snapshot, the ISO time it
+    # was computed (so the FE can show "actualizado hace N min"). None = the
+    # response is live (cold cache, a forced refresh, or a per-client drill).
+    snapshot_at: str | None = None
 
 
 def _due_in_days(deadline_iso: str, today: date) -> int:
@@ -3322,13 +3335,105 @@ def _cells_from_obligations(obligations: list, *, row_id_of) -> list[AdminCalend
     ]
 
 
+def _overview_from_snapshot(
+    snap_rows: list, *, target_year: int, today: date, snapshot_at: datetime
+) -> AdminCalendarGridResponse:
+    """Rebuild the clients overview by summing cached per-client payloads —
+    the same response shape the live scan produces, without the scan."""
+    rows: list[AdminCalendarRow] = []
+    cells: list[AdminCalendarCell] = []
+    month_totals = [0] * 12
+    inst_acc: dict[int, dict[str, int]] = {m: {} for m in range(1, 13)}
+    status_acc = {
+        m: {"expected": 0, "delivered": 0, "by_inst": {}} for m in range(1, 13)
+    }
+    overdue_total = due_7d_total = 0
+    for snap in snap_rows:
+        p = snap.payload
+        rows.append(
+            AdminCalendarRow(
+                id=snap.client_id,
+                name=p["client_name"],
+                semaphore_level=p["semaphore_level"],
+                compliance_pct=p["compliance_pct"],
+                overdue_count=p["overdue_count"],
+                due_soon_count=p["due_soon_count"],
+            )
+        )
+        overdue_total += p.get("overdue_total", 0)
+        due_7d_total += p.get("due_7d_total", 0)
+        for cell in p["cells"]:
+            m = cell["month"]
+            by_inst = cell["by_institution"]
+            cells.append(
+                AdminCalendarCell(
+                    row_id=snap.client_id,
+                    month=m,
+                    count=cell["count"],
+                    worst_risk=cell["worst_risk"],
+                    by_institution={
+                        code: AdminCalendarCellInst(
+                            count=v["count"], worst_risk=v["worst_risk"]
+                        )
+                        for code, v in by_inst.items()
+                    },
+                )
+            )
+            month_totals[m - 1] += cell["count"]
+            sslot = status_acc[m]
+            sslot["expected"] += cell["count"]
+            sslot["delivered"] += cell["delivered"]
+            for code, v in by_inst.items():
+                inst_acc[m][code] = inst_acc[m].get(code, 0) + v["count"]
+                si = sslot["by_inst"].setdefault(
+                    code, {"expected": 0, "delivered": 0}
+                )
+                si["expected"] += v["count"]
+                si["delivered"] += v["delivered"]
+    return AdminCalendarGridResponse(
+        as_of=today.isoformat(),
+        year=target_year,
+        level="clients",
+        client_id=None,
+        client_name=None,
+        rows=rows,
+        cells=cells,
+        month_totals=month_totals,
+        forecast=[
+            AdminCalendarMonthForecast(
+                month=m, total=month_totals[m - 1], by_institution=inst_acc[m]
+            )
+            for m in range(1, 13)
+        ],
+        month_status=[
+            AdminCalendarMonthStatus(
+                month=m,
+                expected=status_acc[m]["expected"],
+                delivered=status_acc[m]["delivered"],
+                by_institution=status_acc[m]["by_inst"],
+            )
+            for m in range(1, 13)
+        ],
+        triage=AdminCalendarTriage(
+            overdue_total=overdue_total, due_7d_total=due_7d_total
+        ),
+        obligations=[],
+        clients_total=len(rows),
+        clients_scanned=len(rows),
+        truncated=False,
+        snapshot_at=snapshot_at.isoformat(),
+    )
+
+
 @router.get("/calendar/grid", response_model=AdminCalendarGridResponse)
 def get_admin_calendar_grid(
     db: DbSession,
     current: AdminUser,
+    background_tasks: BackgroundTasks,
     year: Annotated[int | None, Query(ge=MIN_YEAR, le=MAX_YEAR)] = None,
     client_id: str | None = None,
     month: Annotated[int | None, Query(ge=1, le=12)] = None,
+    refresh: Annotated[bool, Query()] = False,
 ) -> AdminCalendarGridResponse:
     """The cross-portfolio calendar grid.
 
@@ -3437,6 +3542,38 @@ def get_admin_calendar_grid(
         )
 
     # ---- Overview: every client × months ------------------------------
+    # Served from the precomputed snapshot (stale-while-revalidate) for the
+    # normal no-month overview — the O(clients) scan only runs on a cold cache,
+    # a forced refresh, or the legacy ?month= dump path. The per-client drill
+    # above is always live.
+    if month is None:
+        from app.services.calendar_snapshot import (
+            is_stale,
+            load_admin_calendar_snapshot,
+            refresh_admin_calendar_snapshot,
+            refresh_admin_calendar_snapshot_background,
+        )
+
+        if refresh:
+            refresh_admin_calendar_snapshot(db, year=target_year, today=today)
+        snap_rows = load_admin_calendar_snapshot(db, target_year)
+        if snap_rows is not None:
+            computed_at = min(r.computed_at for r in snap_rows)
+            if is_stale(computed_at):
+                background_tasks.add_task(
+                    refresh_admin_calendar_snapshot_background, target_year
+                )
+            return _overview_from_snapshot(
+                snap_rows,
+                target_year=target_year,
+                today=today,
+                snapshot_at=computed_at,
+            )
+        # Cold cache → compute live once and populate for next time.
+        background_tasks.add_task(
+            refresh_admin_calendar_snapshot_background, target_year
+        )
+
     clients = list(db.scalars(select(Client).order_by(Client.name.asc())))
     truncated = len(clients) > _GRID_CLIENT_SCAN_CAP
     scan = clients[:_GRID_CLIENT_SCAN_CAP]

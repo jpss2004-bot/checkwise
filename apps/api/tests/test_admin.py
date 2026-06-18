@@ -2805,3 +2805,45 @@ def test_calendar_renewals_returns_lane_shape(
         assert c["status"] in {"overdue", "due_soon", "upcoming"}
     for c in body["credentials"]:
         assert c["status"] in {"overdue", "due_soon"}
+
+
+def test_calendar_grid_serves_from_snapshot(
+    api_client: TestClient, db_factory
+) -> None:
+    """A forced refresh populates the per-client snapshot; subsequent overview
+    loads are served from it (snapshot_at set) and match the live scan exactly —
+    the same cells, totals and triage, without re-scanning."""
+    token = _admin_token(api_client, db_factory)
+    _seed_workspace(db_factory)
+
+    # The live month path (?month=) bypasses the snapshot — use it as the oracle.
+    live = api_client.get(
+        "/api/v1/admin/calendar/grid?year=2026&month=1", headers=_h(token)
+    ).json()
+
+    # Force-refresh builds the snapshot, then the response is served from it.
+    forced = api_client.get(
+        "/api/v1/admin/calendar/grid?year=2026&refresh=true", headers=_h(token)
+    ).json()
+    assert forced["snapshot_at"], "a forced refresh is served from the snapshot"
+
+    # A plain overview load is now served from the snapshot (no scan).
+    cached = api_client.get(
+        "/api/v1/admin/calendar/grid?year=2026", headers=_h(token)
+    ).json()
+    assert cached["snapshot_at"], "the warm overview is served from the snapshot"
+
+    # Parity: snapshot-served numbers equal the live scan.
+    def _cellmap(body: dict) -> dict:
+        return {
+            (c["row_id"], c["month"]): (c["count"], c["worst_risk"])
+            for c in body["cells"]
+        }
+
+    assert _cellmap(cached) == _cellmap(live)
+    assert cached["month_totals"] == live["month_totals"]
+    assert cached["triage"] == live["triage"]
+    assert cached["clients_total"] == live["clients_total"]
+    # Per-institution cell detail survives the round-trip through the cache.
+    for c in cached["cells"]:
+        assert sum(v["count"] for v in c["by_institution"].values()) == c["count"]
