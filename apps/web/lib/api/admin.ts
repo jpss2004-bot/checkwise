@@ -213,6 +213,14 @@ export type AdminCalendarMonthForecast = {
   by_institution: Record<string, number>;
 };
 
+export type AdminCalendarMonthStatus = {
+  month: number;
+  expected: number;
+  delivered: number;
+  /** institution -> { expected, delivered } */
+  by_institution: Record<string, { expected: number; delivered: number }>;
+};
+
 export type AdminCalendarObligation = {
   client_id: string;
   client_name: string;
@@ -240,9 +248,13 @@ export type AdminCalendarGrid = {
   cells: AdminCalendarCell[];
   month_totals: number[];
   forecast: AdminCalendarMonthForecast[];
+  /** Per-month expected-vs-delivered gap (drives the cheap month summary). */
+  month_status: AdminCalendarMonthStatus[];
   triage: { overdue_total: number; due_7d_total: number };
-  /** Populated for a selected month (across the portfolio) or a drilled client. */
+  /** Obligation rows — populated only for a drilled client (?client_id). The
+   *  overview no longer returns the cross-portfolio month dump. */
   obligations: AdminCalendarObligation[];
+  clients_total: number;
   clients_scanned: number;
   truncated: boolean;
 };

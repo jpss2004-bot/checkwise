@@ -7,6 +7,7 @@ import {
   ArrowRight,
   CalendarBlank,
   ClipboardText,
+  MagnifyingGlass,
   PencilSimpleLine,
   WarningOctagon,
 } from "@phosphor-icons/react";
@@ -34,13 +35,15 @@ import {
   getAdminCalendarGrid,
   getRollup,
   type AdminCalendarGrid,
+  type AdminCalendarMonthStatus,
   type AdminCalendarObligation,
   type AdminCalendarRow,
   type AdminRollup,
 } from "@/lib/api/admin";
-import { MONTH_LABELS_ES, MONTH_LABELS_SHORT_ES } from "@/lib/api/portal";
+import { INSTITUTION_LABELS, MONTH_LABELS_ES, MONTH_LABELS_SHORT_ES } from "@/lib/api/portal";
 
 const SEMAPHORE_RANK: Record<string, number> = { red: 0, yellow: 1, green: 2 };
+const ROW_PAGE = 20;
 
 function cellMap(grid: AdminCalendarGrid): Map<string, ComplianceMatrixCell> {
   const map = new Map<string, ComplianceMatrixCell>();
@@ -60,34 +63,31 @@ export default function AdminCalendarPage() {
   );
   const currentMonth = today.getFullYear() === year ? today.getMonth() + 1 : 1;
 
-  const [grid, setGrid] = useState<AdminCalendarGrid | null>(null);
+  // Overview is fetched ONCE per year — month selection is pure client-side
+  // state below, so picking a month never re-runs the portfolio scan.
+  const [overview, setOverview] = useState<AdminCalendarGrid | null>(null);
   const [rollup, setRollup] = useState<AdminRollup | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [reloadKey, setReloadKey] = useState(0);
 
-  // Selection drives the detail panel: a month (whole portfolio that month),
-  // or a row (client/provider) within that month. ``selectedMonth`` also
-  // refetches the top grid so we have that month's obligations.
   const [selectedMonth, setSelectedMonth] = useState<number>(currentMonth);
-  const [selectedRowId, setSelectedRowId] = useState<string | null>(null);
   const [showAllClients, setShowAllClients] = useState(false);
+  const [rowLimit, setRowLimit] = useState(ROW_PAGE);
 
-  // Drill: when set, the grid shows one client's providers×months (its full
-  // obligation set comes with it, so selection within the drill is local).
-  const [drillClientId, setDrillClientId] = useState<string | null>(null);
-  const [drill, setDrill] = useState<AdminCalendarGrid | null>(null);
+  // Detail is always ONE client: the only path that loads obligation rows.
+  const [detailClientId, setDetailClientId] = useState<string | null>(null);
+  const [detail, setDetail] = useState<AdminCalendarGrid | null>(null);
+  const [selectedProviderId, setSelectedProviderId] = useState<string | null>(null);
 
-  // Top-level grid + rollup: refetch on year / selectedMonth / reload.
+  // ── Overview fetch (per year) ──────────────────────────────────
   useEffect(() => {
     let cancelled = false;
     setError(null);
-    Promise.all([
-      getAdminCalendarGrid({ year, month: selectedMonth }),
-      getRollup(),
-    ])
+    setOverview(null);
+    Promise.all([getAdminCalendarGrid({ year }), getRollup()])
       .then(([g, r]) => {
         if (cancelled) return;
-        setGrid(g);
+        setOverview(g);
         setRollup(r);
       })
       .catch((err: unknown) => {
@@ -99,56 +99,52 @@ export default function AdminCalendarPage() {
     return () => {
       cancelled = true;
     };
-  }, [year, selectedMonth, reloadKey]);
+  }, [year, reloadKey]);
 
-  // Drill fetch when a client is selected.
+  // ── Detail fetch (one client) ──────────────────────────────────
   useEffect(() => {
-    if (!drillClientId) {
-      setDrill(null);
+    if (!detailClientId) {
+      setDetail(null);
       return;
     }
     let cancelled = false;
-    setDrill(null);
-    getAdminCalendarGrid({ year, client_id: drillClientId })
+    setDetail(null);
+    getAdminCalendarGrid({ year, client_id: detailClientId })
       .then((d) => {
-        if (!cancelled) setDrill(d);
+        if (!cancelled) setDetail(d);
       })
       .catch(() => {
-        if (!cancelled) setDrillClientId(null);
+        if (!cancelled) setDetailClientId(null);
       });
     return () => {
       cancelled = true;
     };
-  }, [drillClientId, year]);
+  }, [detailClientId, year]);
 
-  function scrollToDetail() {
-    requestAnimationFrame(() => {
-      document
-        .getElementById("admin-calendar-detail")
-        ?.scrollIntoView({ behavior: "smooth", block: "start" });
-    });
+  function enterClient(id: string, month?: number) {
+    if (month) setSelectedMonth(month);
+    setSelectedProviderId(null);
+    setDetailClientId(id);
+    requestAnimationFrame(() =>
+      window.scrollTo({ top: 0, behavior: "smooth" }),
+    );
+  }
+  function exitClient() {
+    setDetailClientId(null);
+    setSelectedProviderId(null);
   }
 
-  function selectMonth(month: number) {
-    setSelectedMonth(month);
-    setSelectedRowId(null);
-    scrollToDetail();
-  }
+  // Reset pagination when the scope/year changes.
+  useEffect(() => {
+    setRowLimit(ROW_PAGE);
+  }, [year, showAllClients]);
 
-  function selectCell(rowId: string, month: number) {
-    setSelectedMonth(month);
-    setSelectedRowId(rowId);
-    scrollToDetail();
-  }
+  const inClient = Boolean(detailClientId);
 
-  const inDrill = Boolean(drillClientId);
-  const activeGrid = inDrill ? drill : grid;
-
-  // Rows for the matrix. Top level: clients, worst-first, optionally only the
-  // at-risk ones (the dashboard already lists every client). Drill: providers.
-  const matrixRows = useMemo<ComplianceMatrixRow[]>(() => {
-    if (!activeGrid) return [];
-    const rows = [...activeGrid.rows];
+  // ── Portfolio-view derived data ────────────────────────────────
+  const sortedClients = useMemo<AdminCalendarRow[]>(() => {
+    if (!overview) return [];
+    const rows = [...overview.rows];
     rows.sort(
       (a, b) =>
         (SEMAPHORE_RANK[a.semaphore_level] ?? 3) -
@@ -156,48 +152,91 @@ export default function AdminCalendarPage() {
         a.compliance_pct - b.compliance_pct ||
         a.name.localeCompare(b.name),
     );
-    const scoped =
-      inDrill || showAllClients
-        ? rows
-        : rows.filter((r) => r.semaphore_level !== "green");
-    return scoped.map((r) => ({
-      id: r.id,
-      name: r.name,
-      semaphore_level: r.semaphore_level,
-      subtitle: rowSubtitle(r),
-    }));
-  }, [activeGrid, inDrill, showAllClients]);
+    return showAllClients
+      ? rows
+      : rows.filter((r) => r.semaphore_level !== "green");
+  }, [overview, showAllClients]);
 
-  const matrixCells = useMemo(
+  const portfolioRows = useMemo<ComplianceMatrixRow[]>(
     () =>
-      activeGrid ? cellMap(activeGrid) : new Map<string, ComplianceMatrixCell>(),
-    [activeGrid],
+      sortedClients.slice(0, rowLimit).map((r) => ({
+        id: r.id,
+        name: r.name,
+        semaphore_level: r.semaphore_level,
+        subtitle: rowSubtitle(r),
+      })),
+    [sortedClients, rowLimit],
+  );
+  const portfolioCells = useMemo(
+    () => (overview ? cellMap(overview) : new Map<string, ComplianceMatrixCell>()),
+    [overview],
+  );
+  const hiddenGreen = useMemo(() => {
+    if (showAllClients || !overview) return 0;
+    return overview.rows.filter((r) => r.semaphore_level === "green").length;
+  }, [overview, showAllClients]);
+
+  // Clients with obligations in the selected month, worst-first — the cheap
+  // "who's in this month" list that replaces the cross-portfolio dump.
+  const clientsThisMonth = useMemo(() => {
+    if (!overview) return [];
+    const nameById = new Map(overview.rows.map((r) => [r.id, r]));
+    return overview.cells
+      .filter((c) => c.month === selectedMonth && c.count > 0)
+      .map((c) => ({
+        client: nameById.get(c.row_id),
+        count: c.count,
+        worstRisk: c.worst_risk as CalendarRisk,
+      }))
+      .filter((x) => x.client)
+      .sort(
+        (a, b) =>
+          (RISK_ORDER[a.worstRisk] ?? 9) - (RISK_ORDER[b.worstRisk] ?? 9) ||
+          b.count - a.count,
+      );
+  }, [overview, selectedMonth]);
+
+  const monthStatus: AdminCalendarMonthStatus | null = useMemo(
+    // Optional-chain ``month_status`` so a transient old-backend response
+    // (during a deploy where the FE updates before the API) degrades to the
+    // empty summary instead of throwing.
+    () => overview?.month_status?.find((s) => s.month === selectedMonth) ?? null,
+    [overview, selectedMonth],
   );
 
-  const hiddenGreen = useMemo(() => {
-    if (inDrill || showAllClients || !grid) return 0;
-    return grid.rows.filter((r) => r.semaphore_level === "green").length;
-  }, [grid, inDrill, showAllClients]);
-
-  // Obligations behind the current selection. At the top level we hold only
-  // the selected month's obligations (across the portfolio); on drill we hold
-  // the whole client and filter by month locally.
-  const detailObligations = useMemo<AdminCalendarObligation[]>(() => {
-    if (!activeGrid) return [];
-    let obs = activeGrid.obligations;
-    if (inDrill) obs = obs.filter((o) => o.due_month === selectedMonth);
-    if (selectedRowId) {
-      obs = obs.filter((o) =>
-        inDrill ? o.vendor_id === selectedRowId : o.client_id === selectedRowId,
-      );
-    }
+  // ── Client-view derived data ───────────────────────────────────
+  const providerRows = useMemo<ComplianceMatrixRow[]>(() => {
+    if (!detail) return [];
+    return [...detail.rows]
+      .sort(
+        (a, b) =>
+          (SEMAPHORE_RANK[a.semaphore_level] ?? 3) -
+            (SEMAPHORE_RANK[b.semaphore_level] ?? 3) ||
+          a.compliance_pct - b.compliance_pct ||
+          a.name.localeCompare(b.name),
+      )
+      .map((r) => ({
+        id: r.id,
+        name: r.name,
+        semaphore_level: r.semaphore_level,
+        subtitle: rowSubtitle(r),
+      }));
+  }, [detail]);
+  const providerCells = useMemo(
+    () => (detail ? cellMap(detail) : new Map<string, ComplianceMatrixCell>()),
+    [detail],
+  );
+  const clientObligations = useMemo<AdminCalendarObligation[]>(() => {
+    if (!detail) return [];
+    let obs = detail.obligations.filter((o) => o.due_month === selectedMonth);
+    if (selectedProviderId) obs = obs.filter((o) => o.vendor_id === selectedProviderId);
     return obs;
-  }, [activeGrid, inDrill, selectedMonth, selectedRowId]);
+  }, [detail, selectedMonth, selectedProviderId]);
 
   return (
     <AdminShell
       title="Calendario operativo"
-      description="El año de cumplimiento de toda la cartera: clientes en las filas, meses en las columnas, el color marca lo más crítico que vence ese mes. Entra a un cliente para ver sus proveedores."
+      description="El año de cumplimiento de toda la cartera. Toca un mes para ver su resumen, y entra a un cliente para ver el detalle de sus obligaciones."
       actions={<YearPicker year={year} onYear={setYear} />}
     >
       {error ? (
@@ -206,89 +245,125 @@ export default function AdminCalendarPage() {
           description={error}
           onRetry={() => setReloadKey((k) => k + 1)}
         />
-      ) : !grid || !rollup ? (
+      ) : !overview || !rollup ? (
         <CalendarSkeleton />
-      ) : (
+      ) : inClient ? (
+        // ─────────────── Single-client view ───────────────
         <div className="space-y-6">
-          <TriageBand grid={grid} rollup={rollup} />
+          <button
+            type="button"
+            onClick={exitClient}
+            className="inline-flex items-center gap-1.5 text-xs font-medium text-[color:var(--text-brand)] hover:underline"
+          >
+            <ArrowLeft className="h-3.5 w-3.5" weight="bold" aria-hidden="true" />
+            Volver a la cartera
+          </button>
+
+          {!detail ? (
+            <>
+              <Skeleton className="h-72 w-full rounded-lg" />
+              <Skeleton className="h-48 w-full rounded-lg" />
+            </>
+          ) : (
+            <>
+              <Surface
+                title={`${detail.client_name ?? "Cliente"} · ${year}`}
+                description="Proveedores de este cliente por mes. Toca un mes o un proveedor para ver el detalle abajo."
+                bodyClassName="p-4"
+              >
+                {providerRows.length === 0 ? (
+                  <p className="px-2 py-8 text-center text-sm text-[color:var(--text-secondary)]">
+                    Este cliente no tiene proveedores con obligaciones este año.
+                  </p>
+                ) : (
+                  <ComplianceMatrix
+                    rows={providerRows}
+                    cells={providerCells}
+                    currentMonth={today.getFullYear() === year ? currentMonth : null}
+                    rowHeader="Proveedor"
+                    selected={{ rowId: selectedProviderId, month: selectedMonth }}
+                    onSelectCell={(rowId, month) => {
+                      setSelectedMonth(month);
+                      setSelectedProviderId(rowId);
+                    }}
+                    onSelectMonth={(month) => {
+                      setSelectedMonth(month);
+                      setSelectedProviderId(null);
+                    }}
+                    onSelectRow={(rowId) => setSelectedProviderId(rowId)}
+                  />
+                )}
+              </Surface>
+
+              <ObligationDetail
+                title={`${MONTH_LABELS_ES[selectedMonth]} ${year}${selectedProviderId ? "" : " · todos los proveedores"}`}
+                obligations={clientObligations}
+                today={today}
+              />
+            </>
+          )}
+        </div>
+      ) : (
+        // ─────────────── Portfolio view ───────────────
+        <div className="space-y-6">
+          <TriageBand overview={overview} rollup={rollup} />
 
           <ForecastWaveStrip
-            grid={grid}
+            overview={overview}
             currentMonth={today.getFullYear() === year ? currentMonth : null}
-            selectedMonth={inDrill ? null : selectedMonth}
-            onSelectMonth={selectMonth}
+            selectedMonth={selectedMonth}
+            onSelectMonth={setSelectedMonth}
           />
 
           <Surface
-            title={
-              inDrill ? `${drill?.client_name ?? "Cliente"} · ${year}` : `Cartera ${year}`
-            }
-            description={
-              inDrill
-                ? "Proveedores de este cliente por mes. Vuelve a la cartera para comparar clientes."
-                : "Cada cliente por mes. Entra a un cliente para ver sus proveedores, o toca un mes para ver todo lo que vence."
-            }
+            title={`Cartera ${year}`}
+            description="Cada cliente por mes. Toca un mes para su resumen, o entra a un cliente para ver sus obligaciones."
             actions={
-              inDrill ? (
-                <button
-                  type="button"
-                  onClick={() => {
-                    setDrillClientId(null);
-                    setSelectedRowId(null);
-                  }}
-                  className="inline-flex items-center gap-1 text-xs font-medium text-[color:var(--text-brand)] hover:underline"
-                >
-                  <ArrowLeft className="h-3 w-3" weight="bold" aria-hidden="true" />
-                  Volver a la cartera
-                </button>
-              ) : (
+              <div className="flex flex-wrap items-center gap-2">
+                <ClientPicker clients={sortedClients} onPick={enterClient} />
                 <ScopeToggle
                   showAll={showAllClients}
                   hiddenGreen={hiddenGreen}
                   onToggle={() => setShowAllClients((v) => !v)}
                 />
-              )
+              </div>
             }
             bodyClassName="p-4"
           >
-            {!activeGrid ? (
-              <Skeleton className="h-64 w-full rounded-lg" />
-            ) : matrixRows.length === 0 ? (
+            {portfolioRows.length === 0 ? (
               <EmptyGrid
                 showAll={showAllClients}
                 onShowAll={() => setShowAllClients(true)}
               />
             ) : (
-              <ComplianceMatrix
-                rows={matrixRows}
-                cells={matrixCells}
-                currentMonth={today.getFullYear() === year ? currentMonth : null}
-                rowHeader={inDrill ? "Proveedor" : "Cliente"}
-                selected={{ rowId: selectedRowId, month: selectedMonth }}
-                onSelectCell={selectCell}
-                onSelectMonth={selectMonth}
-                onSelectRow={
-                  inDrill
-                    ? (rowId) => selectCell(rowId, selectedMonth)
-                    : (rowId) => {
-                        setDrillClientId(rowId);
-                        setSelectedRowId(null);
-                      }
-                }
-              />
+              <>
+                <ComplianceMatrix
+                  rows={portfolioRows}
+                  cells={portfolioCells}
+                  currentMonth={today.getFullYear() === year ? currentMonth : null}
+                  rowHeader="Cliente"
+                  selected={{ rowId: null, month: selectedMonth }}
+                  onSelectCell={(clientId, month) => enterClient(clientId, month)}
+                  onSelectMonth={setSelectedMonth}
+                  onSelectRow={(clientId) => enterClient(clientId)}
+                />
+                <PaginationFooter
+                  shown={portfolioRows.length}
+                  filtered={sortedClients.length}
+                  total={overview.clients_total ?? sortedClients.length}
+                  onMore={() => setRowLimit((n) => n + ROW_PAGE)}
+                />
+              </>
             )}
           </Surface>
 
-          <div id="admin-calendar-detail" className="scroll-mt-4">
-            <DetailPanel
-              obligations={detailObligations}
-              monthLabel={MONTH_LABELS_ES[selectedMonth]}
-              year={year}
-              scopeLabel={inDrill ? (drill?.client_name ?? null) : null}
-              today={today}
-              truncated={grid.truncated}
-            />
-          </div>
+          <MonthSummary
+            month={selectedMonth}
+            year={year}
+            status={monthStatus}
+            clientsThisMonth={clientsThisMonth}
+            onPickClient={(id) => enterClient(id, selectedMonth)}
+          />
         </div>
       )}
     </AdminShell>
@@ -304,13 +379,7 @@ function rowSubtitle(r: AdminCalendarRow): string {
 
 // ─── Year picker ────────────────────────────────────────────────
 
-function YearPicker({
-  year,
-  onYear,
-}: {
-  year: number;
-  onYear: (y: number) => void;
-}) {
+function YearPicker({ year, onYear }: { year: number; onYear: (y: number) => void }) {
   return (
     <label className="flex items-center gap-2 rounded-md border border-[color:var(--border-default)] bg-[color:var(--surface-raised)] px-3 py-1 text-xs">
       <CalendarBlank
@@ -331,6 +400,79 @@ function YearPicker({
       />
     </label>
   );
+}
+
+// ─── Client picker (jump straight to a client) ──────────────────
+
+function ClientPicker({
+  clients,
+  onPick,
+}: {
+  clients: AdminCalendarRow[];
+  onPick: (id: string) => void;
+}) {
+  const [q, setQ] = useState("");
+  const [open, setOpen] = useState(false);
+  const matches = useMemo(() => {
+    const needle = q.trim().toLowerCase();
+    const base = needle
+      ? clients.filter((c) => c.name.toLowerCase().includes(needle))
+      : clients;
+    return base.slice(0, 8);
+  }, [clients, q]);
+
+  return (
+    <div className="relative">
+      <div className="flex items-center gap-1.5 rounded-md border border-[color:var(--border-default)] bg-[color:var(--surface-raised)] px-2.5 py-1.5">
+        <MagnifyingGlass
+          className="h-3.5 w-3.5 text-[color:var(--text-tertiary)]"
+          weight="bold"
+          aria-hidden="true"
+        />
+        <input
+          type="text"
+          value={q}
+          placeholder="Ir a un cliente…"
+          aria-label="Buscar cliente"
+          onChange={(e) => {
+            setQ(e.target.value);
+            setOpen(true);
+          }}
+          onFocus={() => setOpen(true)}
+          onBlur={() => setTimeout(() => setOpen(false), 120)}
+          className="w-40 bg-transparent text-xs text-[color:var(--text-primary)] outline-none placeholder:text-[color:var(--text-tertiary)]"
+        />
+      </div>
+      {open && matches.length > 0 ? (
+        <ul className="absolute right-0 z-20 mt-1 max-h-72 w-64 overflow-auto rounded-md border border-[color:var(--border-default)] bg-[color:var(--surface-raised)] py-1 shadow-[var(--shadow-md)]">
+          {matches.map((c) => (
+            <li key={c.id}>
+              <button
+                type="button"
+                onMouseDown={() => onPick(c.id)}
+                className="flex w-full items-center gap-2 px-3 py-1.5 text-left text-xs hover:bg-[color:var(--surface-hover)]"
+              >
+                <span
+                  aria-hidden="true"
+                  className={"h-2 w-2 shrink-0 rounded-full " + dotFor(c.semaphore_level)}
+                />
+                <span className="min-w-0 flex-1 truncate text-[color:var(--text-primary)]">
+                  {c.name}
+                </span>
+                <span className="font-mono text-[10px] tabular-nums text-[color:var(--text-tertiary)]">
+                  {c.compliance_pct}%
+                </span>
+              </button>
+            </li>
+          ))}
+        </ul>
+      ) : null}
+    </div>
+  );
+}
+
+function dotFor(level: string): string {
+  return SEMAPHORE_DOT[level as "red" | "yellow" | "green"] ?? SEMAPHORE_DOT.yellow;
 }
 
 function ScopeToggle({
@@ -356,37 +498,55 @@ function ScopeToggle({
   );
 }
 
-// ─── Triage band (Esta semana) ──────────────────────────────────
+function PaginationFooter({
+  shown,
+  filtered,
+  total,
+  onMore,
+}: {
+  shown: number;
+  filtered: number;
+  total: number;
+  onMore: () => void;
+}) {
+  return (
+    <div className="mt-3 flex items-center justify-between gap-3 border-t border-[color:var(--border-subtle)] pt-3">
+      <p className="text-[11px] text-[color:var(--text-tertiary)]">
+        Mostrando {shown} de {filtered}
+        {filtered !== total ? ` (${total} en total)` : ""}
+      </p>
+      {shown < filtered ? (
+        <button
+          type="button"
+          onClick={onMore}
+          className="text-xs font-medium text-[color:var(--text-brand)] hover:underline"
+        >
+          Mostrar más
+        </button>
+      ) : null}
+    </div>
+  );
+}
+
+// ─── Triage band ────────────────────────────────────────────────
 
 function TriageBand({
-  grid,
+  overview,
   rollup,
 }: {
-  grid: AdminCalendarGrid;
+  overview: AdminCalendarGrid;
   rollup: AdminRollup;
 }) {
   const slaAtRisk =
     rollup.queue.age_buckets.over_72h + rollup.queue.age_buckets.over_7d;
-  const corrections = rollup.inbox.correction_requests_pending;
   return (
     <div>
       <p className="mb-2 font-mono text-[10px] uppercase tracking-wide text-[color:var(--text-tertiary)]">
-        Esta semana
+        En la cartera
       </p>
       <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
-        <TriageTile
-          value={grid.triage.overdue_total}
-          label="Vencido"
-          tone="error"
-          icon={WarningOctagon}
-          scrollTo="admin-calendar-detail"
-        />
-        <TriageTile
-          value={grid.triage.due_7d_total}
-          label="Vence ≤ 7 días"
-          tone="warning"
-          scrollTo="admin-calendar-detail"
-        />
+        <TriageTile value={overview.triage.overdue_total} label="Vencido (año)" tone="error" icon={WarningOctagon} />
+        <TriageTile value={overview.triage.due_7d_total} label="Vence ≤ 7 días" tone="warning" />
         <TriageTile
           value={slaAtRisk}
           label="SLA revisión > 72 h"
@@ -395,7 +555,7 @@ function TriageBand({
           href="/admin/reviewer"
         />
         <TriageTile
-          value={corrections}
+          value={rollup.inbox.correction_requests_pending}
           label="Correcciones"
           tone="neutral"
           icon={PencilSimpleLine}
@@ -418,14 +578,12 @@ function TriageTile({
   tone,
   icon: Icon,
   href,
-  scrollTo,
 }: {
   value: number;
   label: string;
   tone: "error" | "warning" | "neutral";
   icon?: typeof WarningOctagon;
   href?: string;
-  scrollTo?: string;
 }) {
   const body = (
     <>
@@ -440,57 +598,43 @@ function TriageTile({
       <p className="mt-1.5 inline-flex items-center gap-1 text-[12px] text-[color:var(--text-secondary)]">
         {Icon ? <Icon className="h-3.5 w-3.5" weight="bold" aria-hidden="true" /> : null}
         {label}
-        {href ? (
-          <ArrowRight className="h-3 w-3 opacity-60" weight="bold" aria-hidden="true" />
-        ) : null}
+        {href ? <ArrowRight className="h-3 w-3 opacity-60" weight="bold" aria-hidden="true" /> : null}
       </p>
     </>
   );
   const className =
-    "block rounded-lg border border-[color:var(--border-default)] bg-[color:var(--surface-raised)] px-4 py-3.5 text-left transition-colors hover:bg-[color:var(--surface-hover)]";
-  if (href) {
-    return (
-      <Link href={href} className={className}>
-        {body}
-      </Link>
-    );
-  }
-  return (
-    <button
-      type="button"
-      onClick={() =>
-        scrollTo &&
-        document.getElementById(scrollTo)?.scrollIntoView({ behavior: "smooth" })
-      }
-      className={className}
-    >
+    "block rounded-lg border border-[color:var(--border-default)] bg-[color:var(--surface-raised)] px-4 py-3.5 text-left";
+  return href ? (
+    <Link href={href} className={className + " transition-colors hover:bg-[color:var(--surface-hover)]"}>
       {body}
-    </button>
+    </Link>
+  ) : (
+    <div className={className}>{body}</div>
   );
 }
 
 // ─── Forecast wave strip ────────────────────────────────────────
 
 function ForecastWaveStrip({
-  grid,
+  overview,
   currentMonth,
   selectedMonth,
   onSelectMonth,
 }: {
-  grid: AdminCalendarGrid;
+  overview: AdminCalendarGrid;
   currentMonth: number | null;
   selectedMonth: number | null;
   onSelectMonth: (month: number) => void;
 }) {
-  const max = Math.max(1, ...grid.forecast.map((f) => f.total));
+  const max = Math.max(1, ...overview.forecast.map((f) => f.total));
   return (
     <Surface
       title="Onda de carga del año"
-      description="Obligaciones esperadas por mes en toda la cartera. Toca un mes para ver su detalle."
+      description="Obligaciones esperadas por mes en toda la cartera. Toca un mes para ver su resumen."
       bodyClassName="p-4"
     >
       <div className="flex items-end gap-1.5" style={{ height: 96 }}>
-        {grid.forecast.map((f) => {
+        {overview.forecast.map((f) => {
           const isCurrent = currentMonth === f.month;
           const isSelected = selectedMonth === f.month;
           const h = f.total === 0 ? 3 : Math.round(12 + (f.total / max) * 72);
@@ -513,7 +657,7 @@ function ForecastWaveStrip({
                 aria-hidden="true"
                 style={{ height: h }}
                 className={
-                  "w-full max-w-[26px] rounded-sm transition-colors " +
+                  "w-full max-w-[26px] rounded-sm transition-colors motion-reduce:transition-none " +
                   (isSelected
                     ? "bg-[color:var(--interactive-primary)]"
                     : isCurrent
@@ -524,9 +668,7 @@ function ForecastWaveStrip({
               <span
                 className={
                   "text-[10px] font-medium uppercase tracking-wide " +
-                  (isCurrent
-                    ? "text-[color:var(--text-brand)]"
-                    : "text-[color:var(--text-tertiary)]")
+                  (isCurrent ? "text-[color:var(--text-brand)]" : "text-[color:var(--text-tertiary)]")
                 }
               >
                 {MONTH_LABELS_SHORT_ES[f.month - 1]}
@@ -539,82 +681,176 @@ function ForecastWaveStrip({
   );
 }
 
-// ─── Detail panel ───────────────────────────────────────────────
+// ─── Month summary (gap + who's in this month) ──────────────────
 
-function DetailPanel({
-  obligations,
-  monthLabel,
+function MonthSummary({
+  month,
   year,
-  scopeLabel,
-  today,
-  truncated,
+  status,
+  clientsThisMonth,
+  onPickClient,
 }: {
-  obligations: AdminCalendarObligation[];
-  monthLabel: string;
+  month: number;
   year: number;
-  scopeLabel: string | null;
-  today: Date;
-  truncated: boolean;
+  status: AdminCalendarMonthStatus | null;
+  clientsThisMonth: {
+    client: AdminCalendarRow | undefined;
+    count: number;
+    worstRisk: CalendarRisk;
+  }[];
+  onPickClient: (id: string) => void;
 }) {
-  // Group by client → provider, each group sorted worst-first.
+  const expected = status?.expected ?? 0;
+  const delivered = status?.delivered ?? 0;
+  const outstanding = expected - delivered;
+  const institutions = status
+    ? Object.entries(status.by_institution).sort((a, b) => b[1].expected - a[1].expected)
+    : [];
+
+  return (
+    <div id="admin-calendar-detail" className="scroll-mt-4">
+      <Surface
+        title={`${MONTH_LABELS_ES[month]} ${year} · resumen de la cartera`}
+        description="Esperadas vs. entregadas este mes. Entra a un cliente para ver sus obligaciones."
+        bodyClassName="p-4 sm:p-5"
+      >
+        {expected === 0 ? (
+          <p className="px-1 py-6 text-center text-sm text-[color:var(--text-secondary)]">
+            Sin obligaciones en {MONTH_LABELS_ES[month]}.
+          </p>
+        ) : (
+          <div className="space-y-5">
+            <div className="grid grid-cols-3 gap-3">
+              <SummaryStat label="Esperadas" value={expected} tone="neutral" />
+              <SummaryStat label="Entregadas" value={delivered} tone="success" />
+              <SummaryStat label="Pendientes" value={outstanding} tone={outstanding > 0 ? "warning" : "neutral"} />
+            </div>
+
+            {institutions.length > 0 ? (
+              <div className="space-y-2">
+                <p className="font-mono text-[10px] uppercase tracking-wide text-[color:var(--text-tertiary)]">
+                  Por institución
+                </p>
+                {institutions.map(([inst, v]) => {
+                  const pct = v.expected ? Math.round((v.delivered / v.expected) * 100) : 0;
+                  return (
+                    <div key={inst} className="flex items-center gap-3">
+                      <span className="w-28 shrink-0 text-xs text-[color:var(--text-secondary)]">
+                        {INSTITUTION_LABELS[inst] ?? inst}
+                      </span>
+                      <div className="h-2 flex-1 overflow-hidden rounded-full bg-[color:var(--surface-page)]">
+                        <div
+                          className="h-full rounded-full bg-[color:var(--status-success-text)]"
+                          style={{ width: `${pct}%` }}
+                        />
+                      </div>
+                      <span className="w-20 shrink-0 text-right font-mono text-[11px] tabular-nums text-[color:var(--text-tertiary)]">
+                        {v.delivered}/{v.expected}
+                      </span>
+                    </div>
+                  );
+                })}
+              </div>
+            ) : null}
+
+            {clientsThisMonth.length > 0 ? (
+              <div className="space-y-2 border-t border-[color:var(--border-subtle)] pt-4">
+                <p className="font-mono text-[10px] uppercase tracking-wide text-[color:var(--text-tertiary)]">
+                  Clientes con obligaciones este mes ({clientsThisMonth.length})
+                </p>
+                <ul className="flex flex-wrap gap-2">
+                  {clientsThisMonth.map(({ client, count }) =>
+                    client ? (
+                      <li key={client.id}>
+                        <button
+                          type="button"
+                          onClick={() => onPickClient(client.id)}
+                          className="inline-flex items-center gap-2 rounded-full border border-[color:var(--border-default)] bg-[color:var(--surface-raised)] px-3 py-1.5 text-xs hover:bg-[color:var(--surface-hover)]"
+                        >
+                          <span aria-hidden="true" className={"h-2 w-2 shrink-0 rounded-full " + dotFor(client.semaphore_level)} />
+                          <span className="max-w-[180px] truncate text-[color:var(--text-primary)]">
+                            {client.name}
+                          </span>
+                          <span className="font-mono text-[10px] tabular-nums text-[color:var(--text-tertiary)]">
+                            {count}
+                          </span>
+                          <ArrowRight className="h-3 w-3 text-[color:var(--text-tertiary)]" weight="bold" aria-hidden="true" />
+                        </button>
+                      </li>
+                    ) : null,
+                  )}
+                </ul>
+              </div>
+            ) : null}
+          </div>
+        )}
+      </Surface>
+    </div>
+  );
+}
+
+function SummaryStat({
+  label,
+  value,
+  tone,
+}: {
+  label: string;
+  value: number;
+  tone: "success" | "warning" | "neutral";
+}) {
+  return (
+    <div className="rounded-md bg-[color:var(--surface-page)] px-4 py-3">
+      <p className={"font-mono text-2xl font-semibold tabular-nums leading-none " + (TRIAGE_TONE[tone] ?? "")}>
+        {value}
+      </p>
+      <p className="mt-1 text-[11px] text-[color:var(--text-secondary)]">{label}</p>
+    </div>
+  );
+}
+
+// ─── Obligation detail (one client) ─────────────────────────────
+
+function ObligationDetail({
+  title,
+  obligations,
+  today,
+}: {
+  title: string;
+  obligations: AdminCalendarObligation[];
+  today: Date;
+}) {
   const groups = useMemo(() => {
-    const byKey = new Map<
-      string,
-      { clientName: string; vendorName: string; items: AdminCalendarObligation[] }
-    >();
+    const byVendor = new Map<string, { vendorName: string; items: AdminCalendarObligation[] }>();
     for (const o of obligations) {
-      const key = `${o.client_id}::${o.vendor_id}`;
-      const g = byKey.get(key) ?? {
-        clientName: o.client_name,
-        vendorName: o.vendor_name,
-        items: [],
-      };
+      const g = byVendor.get(o.vendor_id) ?? { vendorName: o.vendor_name, items: [] };
       g.items.push(o);
-      byKey.set(key, g);
+      byVendor.set(o.vendor_id, g);
     }
     const worstOf = (items: AdminCalendarObligation[]) =>
       Math.min(...items.map((i) => RISK_ORDER[i.risk_level as CalendarRisk] ?? 9));
-    return [...byKey.values()].sort((a, b) => worstOf(a.items) - worstOf(b.items));
+    return [...byVendor.values()].sort((a, b) => worstOf(a.items) - worstOf(b.items));
   }, [obligations]);
-
-  const title = scopeLabel
-    ? `${scopeLabel} · ${monthLabel} ${year}`
-    : `${monthLabel} ${year} · toda la cartera`;
 
   return (
     <Surface bodyClassName="p-4 sm:p-5">
       <div className="mb-4 border-b border-[color:var(--border-subtle)] pb-3">
         <p className="text-sm font-semibold text-[color:var(--text-primary)]">{title}</p>
         <p className="text-xs text-[color:var(--text-tertiary)]">
-          {obligations.length}{" "}
-          {obligations.length === 1 ? "obligación" : "obligaciones"}
-          {groups.length
-            ? ` · ${groups.length} ${groups.length === 1 ? "proveedor" : "proveedores"}`
-            : ""}
+          {obligations.length} {obligations.length === 1 ? "obligación" : "obligaciones"}
+          {groups.length ? ` · ${groups.length} ${groups.length === 1 ? "proveedor" : "proveedores"}` : ""}
         </p>
       </div>
-
       {groups.length === 0 ? (
         <p className="px-1 py-6 text-center text-sm text-[color:var(--text-secondary)]">
-          Sin obligaciones en esta selección.
+          Sin obligaciones en este mes para la selección.
         </p>
       ) : (
         <div className="space-y-5">
           {groups.map((g) => (
-            <section key={`${g.clientName}-${g.vendorName}`}>
-              <h3 className="mb-2 flex flex-wrap items-baseline gap-x-2 text-sm font-semibold text-[color:var(--text-primary)]">
-                <span className="flex items-center gap-2">
-                  <span
-                    aria-hidden="true"
-                    className={
-                      "h-2.5 w-2.5 shrink-0 rounded-full " + SEMAPHORE_DOT[worstDot(g.items)]
-                    }
-                  />
-                  {g.vendorName}
-                </span>
-                <span className="text-xs font-normal text-[color:var(--text-tertiary)]">
-                  {g.clientName}
-                </span>
+            <section key={g.vendorName}>
+              <h3 className="mb-2 flex items-center gap-2 text-sm font-semibold text-[color:var(--text-primary)]">
+                <span aria-hidden="true" className={"h-2.5 w-2.5 shrink-0 rounded-full " + SEMAPHORE_DOT[worstDot(g.items)]} />
+                {g.vendorName}
                 <span className="font-mono text-[11px] font-normal tabular-nums text-[color:var(--text-tertiary)]">
                   {g.items.length}
                 </span>
@@ -639,21 +875,12 @@ function DetailPanel({
           ))}
         </div>
       )}
-
-      {truncated ? (
-        <p className="mt-4 text-[11px] text-[color:var(--text-tertiary)]">
-          La cartera excede el límite de escaneo; se muestran los primeros
-          clientes.
-        </p>
-      ) : null}
     </Surface>
   );
 }
 
 function worstDot(items: AdminCalendarObligation[]): "red" | "yellow" | "green" {
-  const worst = Math.min(
-    ...items.map((i) => RISK_ORDER[i.risk_level as CalendarRisk] ?? 9),
-  );
+  const worst = Math.min(...items.map((i) => RISK_ORDER[i.risk_level as CalendarRisk] ?? 9));
   if (worst <= 1) return "red";
   if (worst <= 2) return "yellow";
   return "green";
@@ -661,13 +888,7 @@ function worstDot(items: AdminCalendarObligation[]): "red" | "yellow" | "green" 
 
 // ─── Empty + loading states ─────────────────────────────────────
 
-function EmptyGrid({
-  showAll,
-  onShowAll,
-}: {
-  showAll: boolean;
-  onShowAll: () => void;
-}) {
+function EmptyGrid({ showAll, onShowAll }: { showAll: boolean; onShowAll: () => void }) {
   return (
     <div className="flex flex-col items-center gap-2 px-4 py-12 text-center">
       <p className="text-[13px] font-medium text-[color:var(--text-primary)]">
