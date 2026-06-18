@@ -25,6 +25,14 @@ const API_BASE_URL =
 // POSTs (generate / plan / regenerate) intentionally omit this.
 const READ_TIMEOUT_MS = 25_000;
 
+// Client-side ceiling for quick (non-AI) writes — entity create/patch, version
+// save, share + export create. These are short DB round-trips, so a timeout
+// converts a hung backend into a visible error instead of an infinite spinner.
+// AI POSTs (generate/regenerate/explain/suggest/refresh and auto-generate
+// presets) and downloads stay unbounded on purpose — they legitimately run
+// long (the backend LLM cap is ~120s).
+const WRITE_TIMEOUT_MS = 30_000;
+
 export class ReportsApiError extends Error {
   status: number;
   constructor(status: number, message: string) {
@@ -200,10 +208,14 @@ export function createReport(
   const qs = options.organizationId
     ? `?organization_id=${encodeURIComponent(options.organizationId)}`
     : "";
-  return fetchJson<ReportRead>(`/api/v1/reports${qs}`, {
-    method: "POST",
-    body: JSON.stringify(input),
-  });
+  return fetchJson<ReportRead>(
+    `/api/v1/reports${qs}`,
+    {
+      method: "POST",
+      body: JSON.stringify(input),
+    },
+    WRITE_TIMEOUT_MS,
+  );
 }
 
 export interface ListReportsOptions {
@@ -252,10 +264,14 @@ export function patchReport(
   reportId: string,
   input: PatchReportInput,
 ): Promise<ReportRead> {
-  return fetchJson<ReportRead>(`/api/v1/reports/${reportId}`, {
-    method: "PATCH",
-    body: JSON.stringify(input),
-  });
+  return fetchJson<ReportRead>(
+    `/api/v1/reports/${reportId}`,
+    {
+      method: "PATCH",
+      body: JSON.stringify(input),
+    },
+    WRITE_TIMEOUT_MS,
+  );
 }
 
 export interface CreateVersionInput {
@@ -272,14 +288,22 @@ export function createVersion(
   reportId: string,
   input: CreateVersionInput,
 ): Promise<ReportVersionRead> {
-  return fetchJson<ReportVersionRead>(`/api/v1/reports/${reportId}/versions`, {
-    method: "POST",
-    body: JSON.stringify({ ...input, generated_by: input.generated_by ?? "user" }),
-  });
+  return fetchJson<ReportVersionRead>(
+    `/api/v1/reports/${reportId}/versions`,
+    {
+      method: "POST",
+      body: JSON.stringify({ ...input, generated_by: input.generated_by ?? "user" }),
+    },
+    WRITE_TIMEOUT_MS,
+  );
 }
 
 export function listVersions(reportId: string): Promise<ReportVersionList> {
-  return fetchJson<ReportVersionList>(`/api/v1/reports/${reportId}/versions`);
+  return fetchJson<ReportVersionList>(
+    `/api/v1/reports/${reportId}/versions`,
+    {},
+    READ_TIMEOUT_MS,
+  );
 }
 
 export function getVersion(
@@ -288,6 +312,8 @@ export function getVersion(
 ): Promise<ReportVersionRead> {
   return fetchJson<ReportVersionRead>(
     `/api/v1/reports/${reportId}/versions/${versionNumber}`,
+    {},
+    READ_TIMEOUT_MS,
   );
 }
 
@@ -489,14 +515,22 @@ export function createReportExport(
   reportId: string,
   params: { format: ReportExportFormat; version_id?: string },
 ): Promise<ReportExport> {
-  return fetchJson<ReportExport>(`/api/v1/reports/${reportId}/exports`, {
-    method: "POST",
-    body: JSON.stringify(params),
-  });
+  return fetchJson<ReportExport>(
+    `/api/v1/reports/${reportId}/exports`,
+    {
+      method: "POST",
+      body: JSON.stringify(params),
+    },
+    WRITE_TIMEOUT_MS,
+  );
 }
 
 export function getReportExport(exportId: string): Promise<ReportExport> {
-  return fetchJson<ReportExport>(`/api/v1/reports/exports/${exportId}`);
+  return fetchJson<ReportExport>(
+    `/api/v1/reports/exports/${exportId}`,
+    {},
+    READ_TIMEOUT_MS,
+  );
 }
 
 /**
@@ -702,6 +736,7 @@ export async function createReportShare(
       method: "POST",
       body: JSON.stringify(params),
     },
+    WRITE_TIMEOUT_MS,
   );
   // The backend returns an ABSOLUTE consume URL only when PUBLIC_BASE_URL
   // is configured; otherwise it falls back to a bare path like
@@ -722,6 +757,8 @@ export function listReportShares(
 ): Promise<{ items: ReportShare[] }> {
   return fetchJson<{ items: ReportShare[] }>(
     `/api/v1/reports/${reportId}/shares`,
+    {},
+    READ_TIMEOUT_MS,
   );
 }
 
