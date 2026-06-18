@@ -249,6 +249,46 @@ def _strip_numeric_constraints(node: Any) -> Any:
     return node
 
 
+def _fix_nullable_enums(node: Any) -> Any:
+    """Recursively rewrite nullable-enum nodes for structured outputs.
+
+    A field declared ``{"type": ["string", "null"], "enum": [...]}`` is a
+    valid tool ``input_schema`` (the triage path accepts it), but the
+    structured-outputs validator rejects the union-type + ``enum`` combo
+    ("Enum value 'sat' does not match declared type ['string', 'null']").
+    The accepted equivalent is an ``anyOf`` of the non-null enum branch
+    and an explicit null branch, which preserves nullability. Non-nullable
+    enums and plain nullable fields (no ``enum``) are already accepted and
+    pass through untouched.
+    """
+    if isinstance(node, dict):
+        node_type = node.get("type")
+        if (
+            "enum" in node
+            and isinstance(node_type, list)
+            and "null" in node_type
+        ):
+            non_null_types = [t for t in node_type if t != "null"]
+            branch_type = (
+                non_null_types[0] if len(non_null_types) == 1 else non_null_types
+            )
+            branch = {
+                "type": branch_type,
+                "enum": [value for value in node["enum"] if value is not None],
+            }
+            rewritten = {
+                key: _fix_nullable_enums(value)
+                for key, value in node.items()
+                if key not in ("type", "enum")
+            }
+            rewritten["anyOf"] = [branch, {"type": "null"}]
+            return rewritten
+        return {key: _fix_nullable_enums(value) for key, value in node.items()}
+    if isinstance(node, list):
+        return [_fix_nullable_enums(item) for item in node]
+    return node
+
+
 # Phase 1 — the comprehension object the deep tier returns IN ADDITION to
 # the extraction + authenticity fields. This is where "understanding" goes:
 # what the document proves, whether it is current, and whether it actually
@@ -354,7 +394,9 @@ def _build_comprehension_schema() -> dict[str, Any]:
         _DOCUMENT_UNDERSTANDING_SCHEMA
     )
     schema["required"] = [*schema["required"], "document_understanding"]
-    return schema
+    # Structured outputs reject the nullable-enum union shape the tool
+    # schema uses; rewrite those fields into the accepted anyOf form.
+    return _fix_nullable_enums(schema)
 
 
 # Deep/comprehension-tier format: extraction + authenticity + the
