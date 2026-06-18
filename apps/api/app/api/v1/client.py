@@ -35,7 +35,7 @@ if TYPE_CHECKING:
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response, status
 from fastapi.responses import FileResponse
 from pydantic import BaseModel, EmailStr, Field
-from sqlalchemy import and_, func, select
+from sqlalchemy import and_, func, select, update
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session, selectinload
 from starlette.background import BackgroundTask
@@ -77,6 +77,7 @@ from app.core.config import settings
 from app.core.http_utils import content_disposition_header
 from app.core.period_validation import MAX_YEAR, MIN_YEAR, validate_period_key
 from app.core.rate_limit import enforce_ai_heavy_rate_limit
+from app.core.text_search import normalize_for_search
 from app.db.session import get_db
 from app.models import (
     Client,
@@ -553,6 +554,10 @@ class ClientVendorListResponse(BaseModel):
     client_id: str
     items: list[ClientVendorRow]
     total: int
+    # ``total`` is the full filtered count; ``has_more`` says whether rows
+    # remain past this page (perf audit P1-1 — enables real offset paging
+    # instead of a silently truncated cap).
+    has_more: bool = False
 
 
 class ClientVendorContractDoc(BaseModel):
@@ -647,6 +652,7 @@ class ClientSubmissionsResponse(BaseModel):
     scope_description: str
     items: list[ClientSubmissionItem]
     total: int
+    has_more: bool = False
 
 
 class ClientActivityItem(BaseModel):
@@ -666,6 +672,7 @@ class ClientActivityResponse(BaseModel):
     items: list[ClientActivityItem]
     total: int
     limit: int
+    has_more: bool = False
 
 
 class ClientNotificationItem(BaseModel):
@@ -710,6 +717,7 @@ class ClientNotificationsResponse(BaseModel):
     # info-tier rows never inflate it.
     unread_actionable_count: int
     limit: int
+    has_more: bool = False
 
 
 class ClientNotificationSummary(BaseModel):
@@ -1273,6 +1281,7 @@ def client_vendors(
     semaphore_level: Literal["green", "yellow", "red"] | None = None,
     search: str | None = None,
     limit: Annotated[int, Query(ge=1, le=500)] = 100,
+    offset: Annotated[int, Query(ge=0)] = 0,
 ) -> ClientVendorListResponse:
     target_id = _resolve_client_id(db, current, requested=client_id)
     today = date.today()
@@ -1284,22 +1293,29 @@ def client_vendors(
     last_sub_map, last_review_map = _last_activity_timestamps_bulk(db, vendor_ids)
     subs_by_vendor, institutions_by_id = _portfolio_slot_inputs(db, target_id)
 
-    needle = (search or "").strip().lower()
-    rows: list[ClientVendorRow] = []
+    needle = normalize_for_search(search or "")
+
+    # Apply the cheap filters first (status + name/RFC search). These don't
+    # need the compliance projection, so when no semaphore filter is set we can
+    # page *before* computing compliance and only project the requested page —
+    # instead of computing every vendor then truncating (perf audit P1-1/P2-2).
+    candidates: list[ProviderWorkspace] = []
     for ws in workspaces:
         if status_filter and ws.status != status_filter:
             continue
         vendor = vendors.get(ws.vendor_id)
         if vendor is None:
             continue
-        if needle:
-            haystack = " ".join(
-                v.lower()
-                for v in [vendor.name, vendor.rfc or "", ws.display_name or ""]
-            )
-            if needle not in haystack:
-                continue
-        summary = _vendor_compliance(
+        if needle and not any(
+            needle in normalize_for_search(field)
+            for field in (vendor.name, vendor.rfc or "", ws.display_name or "")
+        ):
+            # Accent-insensitive, matched per-field (no cross-field joins).
+            continue
+        candidates.append(ws)
+
+    def _compliance(ws: ProviderWorkspace) -> dict:
+        return _vendor_compliance(
             db,
             ws,
             today=today,
@@ -1307,38 +1323,57 @@ def client_vendors(
             prefetched_submissions=subs_by_vendor.get(ws.vendor_id, []),
             institutions_by_id=institutions_by_id,
         )
-        if semaphore_level and summary["semaphore_level"] != semaphore_level:
-            continue
-        last_sub = last_sub_map.get(vendor.id)
-        last_review = last_review_map.get(vendor.id)
-        rows.append(
-            ClientVendorRow(
-                vendor_id=vendor.id,
-                workspace_id=ws.id,
-                vendor_name=vendor.name,
-                vendor_rfc=vendor.rfc,
-                persona_type=vendor.persona_type,
-                workspace_status=ws.status,
-                compliance_pct=summary["compliance_pct"],
-                semaphore_level=summary["semaphore_level"],
-                pending_reviews_count=summary["pending_reviews_count"],
-                missing_required_count=summary["missing_required_count"],
-                rejected_or_correction_count=summary["rejected_or_correction_count"],
-                due_soon_count=summary["due_soon_count"],
-                last_submission_at=last_sub,
-                last_review_at=last_review,
-                next_renewal=_next_renewal_for_workspace(
-                    db,
-                    ws,
-                    today=today,
-                    prefetched_submissions=subs_by_vendor.get(ws.vendor_id, []),
-                ),
-            )
+
+    def _build_row(ws: ProviderWorkspace, summary: dict) -> ClientVendorRow:
+        vendor = vendors[ws.vendor_id]
+        return ClientVendorRow(
+            vendor_id=vendor.id,
+            workspace_id=ws.id,
+            vendor_name=vendor.name,
+            vendor_rfc=vendor.rfc,
+            persona_type=vendor.persona_type,
+            workspace_status=ws.status,
+            compliance_pct=summary["compliance_pct"],
+            semaphore_level=summary["semaphore_level"],
+            pending_reviews_count=summary["pending_reviews_count"],
+            missing_required_count=summary["missing_required_count"],
+            rejected_or_correction_count=summary["rejected_or_correction_count"],
+            due_soon_count=summary["due_soon_count"],
+            last_submission_at=last_sub_map.get(vendor.id),
+            last_review_at=last_review_map.get(vendor.id),
+            next_renewal=_next_renewal_for_workspace(
+                db,
+                ws,
+                today=today,
+                prefetched_submissions=subs_by_vendor.get(ws.vendor_id, []),
+            ),
         )
-        if len(rows) >= limit:
-            break
+
+    if semaphore_level:
+        # The semaphore level is derived from compliance, so it can't be
+        # filtered in SQL: compute every candidate to learn the true total,
+        # then build full rows only for the matching page.
+        matched = [
+            (ws, summary)
+            for ws in candidates
+            if (summary := _compliance(ws))["semaphore_level"] == semaphore_level
+        ]
+        total = len(matched)
+        page = [
+            _build_row(ws, summary) for ws, summary in matched[offset : offset + limit]
+        ]
+    else:
+        total = len(candidates)
+        page = [
+            _build_row(ws, _compliance(ws))
+            for ws in candidates[offset : offset + limit]
+        ]
+
     return ClientVendorListResponse(
-        client_id=target_id, items=rows, total=len(rows)
+        client_id=target_id,
+        items=page,
+        total=total,
+        has_more=offset + len(page) < total,
     )
 
 
@@ -2438,6 +2473,7 @@ def client_submissions(
     # catalog addition can ship before this code is updated.
     institution: str | None = None,
     limit: Annotated[int, Query(ge=1, le=500)] = 100,
+    offset: Annotated[int, Query(ge=0)] = 0,
 ) -> ClientSubmissionsResponse:
     # Stage 2.5 (BL-T7) — reject impossible periods at the wire. Same
     # rationale as the portal/admin variants: a stale or hostile
@@ -2478,11 +2514,18 @@ def client_submissions(
         else:
             filters.append(Submission.institution_id == inst_id)
 
+    # True total for the filtered set so the client can page (perf audit P1-2),
+    # rather than inferring it from a silently-capped page length.
+    total_count = int(
+        db.scalar(select(func.count()).select_from(Submission).where(and_(*filters)))
+        or 0
+    )
     rows = list(
         db.scalars(
             select(Submission)
             .where(and_(*filters))
             .order_by(Submission.created_at.desc())
+            .offset(offset)
             .limit(limit)
             # Eager-load the requirement + institution the serializer reads
             # so they don't lazy-load one round-trip per row.
@@ -2576,7 +2619,8 @@ def client_submissions(
             "requeridas, incluidas las que todavía no tienen envío."
         ),
         items=items,
-        total=len(items),
+        total=total_count,
+        has_more=offset + len(items) < total_count,
     )
 
 
@@ -2604,6 +2648,7 @@ def client_activity(
     current: ClientUser,
     client_id: str | None = None,
     limit: Annotated[int, Query(ge=1, le=200)] = 50,
+    offset: Annotated[int, Query(ge=0)] = 0,
 ) -> ClientActivityResponse:
     """Sanitised, client-scoped activity feed.
 
@@ -2621,12 +2666,40 @@ def client_activity(
             client_id=target_id, items=[], total=0, limit=limit
         )
 
+    # The feed merges two sorted sources. To page it correctly we need at most
+    # ``offset + limit`` rows from EACH source (any item in the global top
+    # ``offset+limit`` is in its own source's top ``offset+limit``), then merge,
+    # sort, and slice. Bounds the fetch instead of pulling a fixed page from
+    # each and truncating (perf audit P1-3).
+    window = offset + limit
+    upload_filters = [Submission.client_id == target_id]
+    event_join_filters = [
+        Submission.client_id == target_id,
+        ValidationEvent.event_type.in_(_CLIENT_VISIBLE_EVENTS),
+    ]
+    total_uploads = int(
+        db.scalar(
+            select(func.count()).select_from(Submission).where(*upload_filters)
+        )
+        or 0
+    )
+    total_events = int(
+        db.scalar(
+            select(func.count())
+            .select_from(ValidationEvent)
+            .join(Submission, ValidationEvent.submission_id == Submission.id)
+            .where(*event_join_filters)
+        )
+        or 0
+    )
+    total = total_uploads + total_events
+
     upload_rows = list(
         db.scalars(
             select(Submission)
-            .where(Submission.client_id == target_id)
+            .where(*upload_filters)
             .order_by(Submission.created_at.desc())
-            .limit(limit)
+            .limit(window)
         )
     )
 
@@ -2634,22 +2707,24 @@ def client_activity(
         db.scalars(
             select(ValidationEvent)
             .join(Submission, ValidationEvent.submission_id == Submission.id)
-            .where(
-                Submission.client_id == target_id,
-                ValidationEvent.event_type.in_(_CLIENT_VISIBLE_EVENTS),
-            )
+            .where(*event_join_filters)
             .order_by(ValidationEvent.created_at.desc())
-            .limit(limit)
+            .limit(window)
         )
     )
 
-    # Batch the event submissions in one query instead of a db.get per
-    # event row below.
-    event_subs: dict[str, Submission] = {}
-    event_sub_ids = [ev.submission_id for ev in event_rows if ev.submission_id]
-    if event_sub_ids:
+    # Reuse the submissions already materialised for the upload rows; only fetch
+    # the event submissions we don't already hold (drops the redundant blanket
+    # re-fetch the audit flagged).
+    event_subs: dict[str, Submission] = {s.id: s for s in upload_rows}
+    missing_sub_ids = [
+        ev.submission_id
+        for ev in event_rows
+        if ev.submission_id and ev.submission_id not in event_subs
+    ]
+    if missing_sub_ids:
         for s in db.scalars(
-            select(Submission).where(Submission.id.in_(event_sub_ids))
+            select(Submission).where(Submission.id.in_(missing_sub_ids))
         ):
             event_subs[s.id] = s
 
@@ -2722,9 +2797,13 @@ def client_activity(
             )
         )
     feed.sort(key=lambda r: r[0], reverse=True)
-    items = [item for _, item in feed[:limit]]
+    items = [item for _, item in feed[offset : offset + limit]]
     return ClientActivityResponse(
-        client_id=target_id, items=items, total=len(items), limit=limit
+        client_id=target_id,
+        items=items,
+        total=total,
+        limit=limit,
+        has_more=offset + len(items) < total,
     )
 
 
@@ -2779,16 +2858,25 @@ def client_notifications(
     client_id: str | None = None,
     unread_only: bool = False,
     limit: Annotated[int, Query(ge=1, le=200)] = 50,
+    offset: Annotated[int, Query(ge=0)] = 0,
 ) -> ClientNotificationsResponse:
     target_id = _resolve_client_id(db, current, requested=client_id)
     filters = [ClientNotification.client_id == target_id]
     if unread_only:
         filters.append(ClientNotification.read_at.is_(None))
+    # True total for the filtered set so the inbox can page (perf audit P1-6).
+    total_count = int(
+        db.scalar(
+            select(func.count()).select_from(ClientNotification).where(and_(*filters))
+        )
+        or 0
+    )
     rows = list(
         db.scalars(
             select(ClientNotification)
             .where(and_(*filters))
             .order_by(ClientNotification.created_at.desc())
+            .offset(offset)
             .limit(limit)
         )
     )
@@ -2800,10 +2888,11 @@ def client_notifications(
             _notification_item(row, vendor_lookup.get(row.vendor_id or ""))
             for row in rows
         ],
-        total=len(rows),
+        total=total_count,
         unread_count=unread_count,
         unread_actionable_count=unread_actionable_count,
         limit=limit,
+        has_more=offset + len(rows) < total_count,
     )
 
 
@@ -2852,18 +2941,27 @@ def mark_all_client_notifications_read(
     client_id: str | None = None,
 ) -> ClientNotificationSummary:
     target_id = _resolve_client_id(db, current, requested=client_id)
-    rows = list(
+    now = datetime.now(UTC)
+    # Capture the ids with a cheap id-only SELECT (no full-row ORM hydration),
+    # then flip them all in a single UPDATE instead of loading every unread row
+    # into memory and mutating it one by one (a client that never reads
+    # notifications can accumulate thousands) — perf audit P2-7. The ids are
+    # still recorded in the audit payload for forensic traceability.
+    unread_ids = list(
         db.scalars(
-            select(ClientNotification).where(
+            select(ClientNotification.id).where(
                 ClientNotification.client_id == target_id,
                 ClientNotification.read_at.is_(None),
             )
         )
     )
-    now = datetime.now(UTC)
-    for row in rows:
-        row.read_at = now
-    if rows:
+    if unread_ids:
+        db.execute(
+            update(ClientNotification)
+            .where(ClientNotification.id.in_(unread_ids))
+            .values(read_at=now)
+            .execution_options(synchronize_session=False)
+        )
         # Audit only when at least one notification was actually flipped.
         # A no-op call (everything already read) is intentionally silent
         # — see the per-notification handler above for the same rationale.
@@ -2875,8 +2973,8 @@ def mark_all_client_notifications_read(
             actor_type="client_admin",
             actor_id=current.user.id,
             after={
-                "marked_count": len(rows),
-                "notification_ids": [row.id for row in rows],
+                "marked_count": len(unread_ids),
+                "notification_ids": unread_ids,
                 "read_at": now.isoformat(),
             },
         )

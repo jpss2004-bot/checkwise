@@ -2446,3 +2446,92 @@ def test_client_audit_package_zip_fails_loudly_when_manifest_render_breaks(
         assert downloads == 0
     finally:
         db.close()
+
+
+def test_client_submissions_offset_pagination(
+    api_client: TestClient, db_factory
+) -> None:
+    """Perf audit P1-2 — /submissions exposes true total + offset paging.
+
+    Status-independent (does not depend on the comprehension tier), so it is a
+    deterministic check of the limit/offset/has_more contract.
+    """
+    client_id = _seed_client(db_factory)
+    _, ws_id = _seed_vendor_with_workspace(db_factory, client_id=client_id)
+    for pk in ("2026-B1", "2026-B2", "2026-B4"):
+        _seed_submission_for_workspace(
+            api_client, db_factory, ws_id, period_key=pk, period_code=pk
+        )
+    _, email, pw = _seed_user_with_role(
+        db_factory, role="client_admin", client_id=client_id, email_prefix="ca-pg"
+    )
+    token = _login(api_client, email, pw)
+
+    full = api_client.get("/api/v1/client/submissions", headers=_h(token)).json()
+    total = full["total"]
+    assert total >= 3
+    assert full["has_more"] is False  # default limit (100) covers everything
+
+    first = api_client.get(
+        "/api/v1/client/submissions?limit=1&offset=0", headers=_h(token)
+    ).json()
+    assert first["total"] == total
+    assert len(first["items"]) == 1
+    assert first["has_more"] is True
+
+    last = api_client.get(
+        f"/api/v1/client/submissions?limit=1&offset={total - 1}", headers=_h(token)
+    ).json()
+    assert last["total"] == total
+    assert len(last["items"]) == 1
+    assert last["has_more"] is False
+    # Distinct rows across the window — no overlap between first and last page.
+    assert first["items"][0]["submission_id"] != last["items"][0]["submission_id"]
+
+    beyond = api_client.get(
+        f"/api/v1/client/submissions?limit=5&offset={total}", headers=_h(token)
+    ).json()
+    assert beyond["items"] == []
+    assert beyond["total"] == total
+    assert beyond["has_more"] is False
+
+
+def test_client_notifications_offset_pagination(
+    api_client: TestClient, db_factory
+) -> None:
+    """Perf audit P1-6 — /notifications exposes true total + offset paging."""
+    client_id = _seed_client(db_factory)
+    _, ws_id = _seed_vendor_with_workspace(db_factory, client_id=client_id)
+    sub_id = _seed_submission_for_workspace(api_client, db_factory, ws_id)
+
+    # A reviewer decision generates a client notification.
+    db = db_factory()
+    try:
+        sub = db.get(Submission, sub_id)
+        assert sub is not None
+        apply_reviewer_decision(
+            db,
+            submission=sub,
+            action=ReviewerAction.APPROVE,
+            reason=None,
+            reviewer_user_id="rev-user-pg",
+        )
+    finally:
+        db.close()
+
+    _, email, pw = _seed_user_with_role(
+        db_factory, role="client_admin", client_id=client_id, email_prefix="ca-npg"
+    )
+    token = _login(api_client, email, pw)
+
+    full = api_client.get("/api/v1/client/notifications", headers=_h(token)).json()
+    total = full["total"]
+    assert total >= 1
+    assert full["has_more"] is False
+
+    page = api_client.get(
+        "/api/v1/client/notifications?limit=1&offset=0", headers=_h(token)
+    ).json()
+    assert page["total"] == total
+    assert len(page["items"]) == 1
+    assert page["has_more"] is (total > 1)
