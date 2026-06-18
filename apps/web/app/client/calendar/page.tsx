@@ -18,6 +18,7 @@ import {
   type ComplianceMatrixCell,
   type ComplianceMatrixRow,
 } from "@/components/checkwise/calendar/compliance-matrix";
+import type { CellPreviewItem } from "@/components/checkwise/calendar/matrix-cell-popover";
 import {
   CLIENT_RISK_ORDER,
   SEMAPHORE_DOT,
@@ -35,7 +36,7 @@ import {
   type ClientCalendarProvider,
   type ClientVendorListResponse,
 } from "@/lib/api/client";
-import { MONTH_LABELS_ES } from "@/lib/api/portal";
+import { INSTITUTION_LABELS, MONTH_LABELS_ES } from "@/lib/api/portal";
 import {
   CALENDAR_MAX_YEAR,
   CALENDAR_MIN_YEAR,
@@ -210,6 +211,31 @@ export default function ClientCalendarPage() {
     return map;
   }, [itemsByCell]);
 
+  // Per-cell obligation preview for the matrix hover/focus popover — worst-first
+  // so the most urgent obligation in a busy provider-month leads. Same cell key
+  // as `matrixCells` so the matrix lines them up.
+  const cellItems = useMemo(() => {
+    const map = new Map<string, CellPreviewItem[]>();
+    for (const [key, items] of itemsByCell) {
+      const preview: CellPreviewItem[] = items
+        .slice()
+        .sort(
+          (a, b) =>
+            CLIENT_RISK_ORDER[a.risk_level ?? "on_track"] -
+            CLIENT_RISK_ORDER[b.risk_level ?? "on_track"],
+        )
+        .map((item) => ({
+          key: `${item.vendor_id}-${item.requirement_code ?? item.requirement_name}-${item.period_key ?? ""}`,
+          label: item.requirement_name,
+          risk: item.risk_level ?? "on_track",
+          deadline: formatShortDate(item.deadline_iso),
+          sublabel: `${INSTITUTION_LABELS[item.institution] ?? item.institution} · ${item.period_label}`,
+        }));
+      map.set(key, preview);
+    }
+    return map;
+  }, [itemsByCell]);
+
   // Default selection when the data / filter context changes: the current
   // month across all providers, else the first month that has anything.
   useEffect(() => {
@@ -317,6 +343,7 @@ export default function ClientCalendarPage() {
                 <ComplianceMatrix
                   rows={matrixRows}
                   cells={matrixCells}
+                  cellItems={cellItems}
                   currentMonth={currentMonthForMatrix}
                   selected={
                     selected && selected.month !== null

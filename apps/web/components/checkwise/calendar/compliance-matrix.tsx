@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { CaretDown, CaretRight } from "@phosphor-icons/react";
 
 import { MONTH_LABELS_ES, MONTH_LABELS_SHORT_ES } from "@/lib/api/portal";
@@ -14,6 +14,10 @@ import {
   type CalendarRisk,
   type RiskBucket,
 } from "./calendar-shared";
+import {
+  MatrixCellPopover,
+  type CellPreviewItem,
+} from "./matrix-cell-popover";
 
 /**
  * A rows×12-months compliance heatmap — the shared calendar grid. Rows are
@@ -60,6 +64,7 @@ function dotClass(level: string): string {
 export function ComplianceMatrix({
   rows,
   cells,
+  cellItems,
   currentMonth,
   selected,
   onSelectCell,
@@ -70,6 +75,11 @@ export function ComplianceMatrix({
   rows: ComplianceMatrixRow[];
   /** key = `${rowId}-${month}` (month 1-12). */
   cells: Map<string, ComplianceMatrixCell>;
+  /** Optional per-cell obligation preview (same `${rowId}-${month}` key). When
+   *  given, a populated cell shows a hover/focus popover listing its contents
+   *  so a busy cell can be scanned without the click + scroll-to-detail trip.
+   *  Omit it (e.g. the admin grid) to disable the preview entirely. */
+  cellItems?: Map<string, CellPreviewItem[]>;
   currentMonth: number | null;
   selected: ComplianceMatrixSelection;
   onSelectCell: (rowId: string, month: number) => void;
@@ -166,6 +176,7 @@ export function ComplianceMatrix({
                         cell={cell}
                         month={month}
                         rowName={row.name}
+                        preview={cellItems?.get(`${row.id}-${month}`)}
                         isCurrent={currentMonth === month}
                         isSelected={isSel}
                         onClick={() => onSelectCell(row.id, month)}
@@ -255,6 +266,7 @@ function MatrixCell({
   cell,
   month,
   rowName,
+  preview,
   isCurrent,
   isSelected,
   onClick,
@@ -262,10 +274,34 @@ function MatrixCell({
   cell: ComplianceMatrixCell | undefined;
   month: number;
   rowName: string;
+  preview?: CellPreviewItem[];
   isCurrent: boolean;
   isSelected: boolean;
   onClick: () => void;
 }) {
+  // Hover/focus preview state. Hooks must run unconditionally (an empty cell
+  // returns early below), so they're declared first. The 120ms close delay
+  // lets the pointer travel from the cell onto the popover without it closing
+  // — same pattern as the provider calendar's MonthCell.
+  const [open, setOpen] = useState(false);
+  const buttonRef = useRef<HTMLButtonElement>(null);
+  const closeTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const clearTimer = () => {
+    if (closeTimer.current) {
+      clearTimeout(closeTimer.current);
+      closeTimer.current = null;
+    }
+  };
+  const scheduleClose = () => {
+    clearTimer();
+    closeTimer.current = setTimeout(() => setOpen(false), 120);
+  };
+  const handleEnter = () => {
+    clearTimer();
+    setOpen(true);
+  };
+  useEffect(() => clearTimer, []);
+
   if (!cell || cell.count === 0) {
     return (
       <div
@@ -283,28 +319,55 @@ function MatrixCell({
   }
   const bucket = riskBucket(cell.worstRisk);
   const Icon = RISK_ICON[cell.worstRisk];
+  const hasPreview = (preview?.length ?? 0) > 0;
+  const previewTitle = `${MONTH_LABELS_ES[month]} · ${cell.count} ${cell.count === 1 ? "obligación" : "obligaciones"}`;
+
   return (
-    <button
-      type="button"
-      onClick={onClick}
-      aria-pressed={isSelected}
-      aria-label={`${rowName}: ${cell.count} ${cell.count === 1 ? "obligación" : "obligaciones"} en ${MONTH_LABELS_ES[month]}, estado ${RISK_LABEL[cell.worstRisk]}. Ver detalle.`}
-      title={`${MONTH_LABELS_ES[month]} · ${RISK_LABEL[cell.worstRisk]} · ${cell.count}`}
-      className={
-        "flex h-14 w-full flex-col items-center justify-center gap-0.5 rounded-md border transition-[transform,box-shadow] duration-150 ease-out hover:-translate-y-px hover:shadow-sm focus:outline-none focus-visible:ring-2 focus-visible:ring-[color:var(--border-focus)] " +
-        BUCKET_CELL[bucket] +
-        (isSelected
-          ? " ring-2 ring-[color:var(--border-focus)]"
-          : isCurrent
-            ? " ring-1 ring-[color:var(--border-focus)]"
-            : "")
-      }
+    <div
+      className="relative"
+      onMouseEnter={hasPreview ? handleEnter : undefined}
+      onMouseLeave={hasPreview ? scheduleClose : undefined}
     >
-      <Icon className="h-4 w-4 shrink-0" weight="bold" aria-hidden="true" />
-      <span className="font-mono text-sm font-semibold leading-none tabular-nums">
-        {cell.count}
-      </span>
-    </button>
+      <button
+        ref={buttonRef}
+        type="button"
+        onClick={onClick}
+        onFocus={hasPreview ? handleEnter : undefined}
+        onBlur={hasPreview ? scheduleClose : undefined}
+        aria-pressed={isSelected}
+        aria-label={`${rowName}: ${cell.count} ${cell.count === 1 ? "obligación" : "obligaciones"} en ${MONTH_LABELS_ES[month]}, estado ${RISK_LABEL[cell.worstRisk]}. Ver detalle.`}
+        // Native title only when there's no rich popover (avoid a double tooltip).
+        title={
+          hasPreview
+            ? undefined
+            : `${MONTH_LABELS_ES[month]} · ${RISK_LABEL[cell.worstRisk]} · ${cell.count}`
+        }
+        className={
+          "flex h-14 w-full flex-col items-center justify-center gap-0.5 rounded-md border transition-[transform,box-shadow] duration-150 ease-out hover:-translate-y-px hover:shadow-sm focus:outline-none focus-visible:ring-2 focus-visible:ring-[color:var(--border-focus)] " +
+          BUCKET_CELL[bucket] +
+          (isSelected
+            ? " ring-2 ring-[color:var(--border-focus)]"
+            : isCurrent
+              ? " ring-1 ring-[color:var(--border-focus)]"
+              : "")
+        }
+      >
+        <Icon className="h-4 w-4 shrink-0" weight="bold" aria-hidden="true" />
+        <span className="font-mono text-sm font-semibold leading-none tabular-nums">
+          {cell.count}
+        </span>
+      </button>
+      {hasPreview ? (
+        <MatrixCellPopover
+          triggerRef={buttonRef}
+          items={preview ?? []}
+          title={previewTitle}
+          open={open}
+          onEnter={handleEnter}
+          onLeave={scheduleClose}
+        />
+      ) : null}
+    </div>
   );
 }
 
