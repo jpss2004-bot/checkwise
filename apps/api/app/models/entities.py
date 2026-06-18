@@ -132,6 +132,13 @@ class Contract(TimestampMixin, Base):
     vendor: Mapped[Vendor] = relationship(back_populates="contracts")
     submissions: Mapped[list[Submission]] = relationship(back_populates="contract")
 
+    __table_args__ = (
+        # PERF (B-PERF-4) — contracts is looked up by (client_id, vendor_id) on
+        # every provider upload and expediente analysis; without a composite
+        # index that was a sequential scan per upload. Mirrors migration 0050.
+        Index("ix_contracts_client_vendor", "client_id", "vendor_id"),
+    )
+
 
 class Period(TimestampMixin, Base):
     __tablename__ = "periods"
