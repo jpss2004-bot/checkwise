@@ -2,17 +2,13 @@
 
 import { use, useCallback, useEffect, useMemo, useState } from "react";
 import Link from "next/link";
-import {
-  ArrowLeft,
-  DownloadSimple,
-  FileXls,
-  MagnifyingGlass,
-} from "@phosphor-icons/react";
+import { ArrowLeft, DownloadSimple, FileXls } from "@phosphor-icons/react";
 
 import { AdminShell } from "../../../_shell";
 import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
+import { SearchInput } from "@/components/ui/search-input";
 import { MetadataStrip } from "@/components/ui/metadata-strip";
+import { matchesAnyField } from "@/lib/search/normalize";
 import {
   EmptyState,
   ErrorState,
@@ -61,22 +57,21 @@ export default function ClientMetadataPage({ params }: PageProps) {
 
   const documents = useMemo(() => data?.documents ?? [], [data?.documents]);
   const filtered = useMemo(() => {
-    const q = query.trim().toLowerCase();
-    if (!q) return documents;
+    if (!query.trim()) return documents;
     return documents.filter((item) =>
-      [
-        item.proveedor,
-        item.periodo,
-        item.nombre_documento,
-        item.tipo_documento,
-        item.subtipo,
-        item.institucion,
-        item.etiquetas,
-        item.archivo_pdf,
-      ]
-        .join(" ")
-        .toLowerCase()
-        .includes(q),
+      matchesAnyField(
+        [
+          item.proveedor,
+          item.periodo,
+          item.nombre_documento,
+          item.tipo_documento,
+          item.subtipo,
+          item.institucion,
+          item.etiquetas,
+          item.archivo_pdf,
+        ],
+        query,
+      ),
     );
   }, [documents, query]);
 
@@ -155,20 +150,14 @@ export default function ClientMetadataPage({ params }: PageProps) {
           />
 
           <div className="flex flex-wrap items-center justify-between gap-3">
-            <div className="relative w-full max-w-sm">
-              <MagnifyingGlass
-                className="absolute left-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-[color:var(--text-tertiary)]"
-                weight="bold"
-                aria-hidden
-              />
-              <Input
-                value={query}
-                onChange={(event) => setQuery(event.target.value)}
-                placeholder="Buscar proveedor, documento o periodo"
-                className="h-8 pl-8 text-xs"
-                aria-label="Buscar metadata"
-              />
-            </div>
+            <SearchInput
+              value={query}
+              onValueChange={setQuery}
+              placeholder="Buscar proveedor, documento o periodo"
+              ariaLabel="Buscar metadata"
+              className="w-full max-w-sm"
+              inputClassName="h-8 text-xs"
+            />
             <p className="font-mono text-[11px] text-[color:var(--text-tertiary)]">
               {filtered.length} de {documents.length} documentos
             </p>

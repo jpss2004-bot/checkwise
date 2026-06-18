@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
-import { Books, MagnifyingGlass, Plus, X } from "@phosphor-icons/react";
+import { Books, Plus, X } from "@phosphor-icons/react";
 
 import { Surface } from "@/components/checkwise/dashboard/stat-card";
 import { Badge } from "@/components/ui/badge";
@@ -9,7 +9,9 @@ import { Button } from "@/components/ui/button";
 import { DataTable } from "@/components/ui/data-table";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { SearchInput } from "@/components/ui/search-input";
 import { Select } from "@/components/ui/select";
+import { matchesAnyField } from "@/lib/search/normalize";
 
 import { AdminShell } from "../_shell";
 import {
@@ -114,13 +116,9 @@ export default function AdminRequirementsPage() {
   }, []);
 
   const filtered = useMemo(() => {
-    const q = search.trim().toLowerCase();
-    if (!q) return rows;
-    return rows.filter(
-      (r) =>
-        r.code.toLowerCase().includes(q) ||
-        r.name.toLowerCase().includes(q) ||
-        r.load_type.toLowerCase().includes(q),
+    if (!search.trim()) return rows;
+    return rows.filter((r) =>
+      matchesAnyField([r.code, r.name, r.load_type], search),
     );
   }, [rows, search]);
 
@@ -179,20 +177,14 @@ export default function AdminRequirementsPage() {
           </Surface>
         )}
 
-        <div className="relative w-56">
-          <MagnifyingGlass
-            className="absolute left-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-[color:var(--text-tertiary)]"
-            weight="bold"
-            aria-hidden="true"
-          />
-          <Input
-            value={search}
-            onChange={(e) => setSearch(e.target.value)}
-            placeholder="Código, nombre o tipo"
-            className="h-8 pl-8 text-xs"
-            aria-label="Buscar requisito"
-          />
-        </div>
+        <SearchInput
+          value={search}
+          onValueChange={setSearch}
+          placeholder="Código, nombre o tipo"
+          ariaLabel="Buscar requisito"
+          className="w-56"
+          inputClassName="h-8 text-xs"
+        />
 
         <DataTable<AdminRequirement>
           items={loading ? null : filtered}

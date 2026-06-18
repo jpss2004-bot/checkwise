@@ -7,13 +7,13 @@ import {
   ArrowSquareOut,
   CircleNotch,
   Info,
-  MagnifyingGlass,
   Warning,
 } from "@phosphor-icons/react";
 
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
-import { Input } from "@/components/ui/input";
+import { SearchInput } from "@/components/ui/search-input";
+import { matchesAnyField } from "@/lib/search/normalize";
 
 import { AdminShell } from "../_shell";
 import {
@@ -113,13 +113,9 @@ export default function AdminMetadataPage() {
 
   const docTypes = useMemo(() => {
     if (!catalog) return [];
-    const q = query.trim().toLowerCase();
-    if (!q) return catalog.document_types;
-    return catalog.document_types.filter(
-      (d) =>
-        d.name.toLowerCase().includes(q) ||
-        d.code.toLowerCase().includes(q) ||
-        d.institution.toLowerCase().includes(q),
+    if (!query.trim()) return catalog.document_types;
+    return catalog.document_types.filter((d) =>
+      matchesAnyField([d.name, d.code, d.institution], query),
     );
   }, [catalog, query]);
 
@@ -216,17 +212,14 @@ export default function AdminMetadataPage() {
               <h2 className="cw-eyebrow">
                 Tipos de documento ({docTypes.length})
               </h2>
-              <label className="flex items-center gap-2 rounded-md border border-[color:var(--border-default)] bg-[color:var(--surface-raised)] px-2 py-1">
-                <MagnifyingGlass className="h-3.5 w-3.5 text-[color:var(--text-tertiary)]" weight="bold" aria-hidden="true" />
-                <Input
-                  type="search"
-                  value={query}
-                  onChange={(e) => setQuery(e.target.value)}
-                  placeholder="Buscar tipo o institución…"
-                  className="h-6 w-48 border-0 bg-transparent p-0 text-[12px] focus-visible:ring-0"
-                  aria-label="Buscar tipo de documento"
-                />
-              </label>
+              <SearchInput
+                value={query}
+                onValueChange={setQuery}
+                placeholder="Buscar tipo o institución…"
+                ariaLabel="Buscar tipo de documento"
+                className="w-56"
+                inputClassName="h-8 text-[12px]"
+              />
             </header>
 
             <div className="space-y-2">

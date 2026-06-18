@@ -1,15 +1,16 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
-import { DownloadSimple, FileXls, MagnifyingGlass } from "@phosphor-icons/react";
+import { DownloadSimple, FileXls } from "@phosphor-icons/react";
 
 import {
   EmptyState,
   Surface,
 } from "@/components/checkwise/dashboard/stat-card";
 import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
+import { SearchInput } from "@/components/ui/search-input";
 import { MetadataStrip } from "@/components/ui/metadata-strip";
+import { matchesAnyField } from "@/lib/search/normalize";
 import {
   downloadClientMetadata,
   getClientMetadata,
@@ -43,21 +44,20 @@ export default function ClientMetadataPage() {
 
   const documents = useMemo(() => data?.documents ?? [], [data?.documents]);
   const filtered = useMemo(() => {
-    const needle = query.trim().toLowerCase();
-    if (!needle) return documents;
+    if (!query.trim()) return documents;
     return documents.filter((row) =>
-      [
-        row.proveedor,
-        row.periodo,
-        row.nombre_documento,
-        row.tipo_documento,
-        row.subtipo,
-        row.institucion,
-        row.etiquetas,
-      ]
-        .join(" ")
-        .toLowerCase()
-        .includes(needle),
+      matchesAnyField(
+        [
+          row.proveedor,
+          row.periodo,
+          row.nombre_documento,
+          row.tipo_documento,
+          row.subtipo,
+          row.institucion,
+          row.etiquetas,
+        ],
+        query,
+      ),
     );
   }, [documents, query]);
 
@@ -117,19 +117,12 @@ export default function ClientMetadataPage() {
           />
 
           <Surface title="Buscar metadata">
-            <div className="relative">
-              <MagnifyingGlass
-                className="absolute left-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-[color:var(--text-tertiary)]"
-                weight="bold"
-                aria-hidden
-              />
-              <Input
-                value={query}
-                onChange={(event) => setQuery(event.target.value)}
-                placeholder="Proveedor, documento, periodo, institucion"
-                className="pl-8"
-              />
-            </div>
+            <SearchInput
+              value={query}
+              onValueChange={setQuery}
+              placeholder="Proveedor, documento, periodo, institución"
+              ariaLabel="Buscar metadata"
+            />
           </Surface>
 
           <MetadataTable documents={filtered} />

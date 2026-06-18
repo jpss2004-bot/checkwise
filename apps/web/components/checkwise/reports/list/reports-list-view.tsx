@@ -42,6 +42,7 @@ import {
 } from "@/lib/api/reports";
 import { listClientVendors, type ClientVendorRow } from "@/lib/api/client";
 import { listClients, type AdminClient } from "@/lib/api/admin";
+import { normalizeForSearch } from "@/lib/search/normalize";
 
 const PER_PROVIDER_PRESET_ID = "client-vendor-detail";
 
@@ -224,9 +225,11 @@ export function ReportsListView({
   // ─── Client-side title search + sort ───────────────────────
   const filteredReports = useMemo(() => {
     if (!reports) return null;
-    const q = search.trim().toLowerCase();
+    // Accent- and case-insensitive, consistent with the title sort below
+    // (which already uses Spanish base-sensitivity collation).
+    const q = normalizeForSearch(search);
     const matched = q
-      ? reports.filter((r) => r.title.toLowerCase().includes(q))
+      ? reports.filter((r) => normalizeForSearch(r.title).includes(q))
       : reports;
     if (sortBy === "updated_desc") return matched;
     const sorted = [...matched];
