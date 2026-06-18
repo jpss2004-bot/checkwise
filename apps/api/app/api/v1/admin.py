@@ -231,6 +231,11 @@ def _vendor_to_dict(row: Vendor) -> dict:
     return {
         "id": row.id,
         "client_id": row.client_id,
+        # Denormalised so the vendors roster can render the owning client's
+        # name without the page loading the entire clients catalog (which
+        # defeated server-side pagination). list_vendors eager-loads
+        # ``Vendor.client`` to keep this from being an N+1.
+        "client_name": row.client.name if row.client else None,
         "name": row.name,
         "rfc": row.rfc,
         "contact_name": row.contact_name,
@@ -842,10 +847,40 @@ class ClientUpdate(BaseModel):
 
 
 @router.get("/clients")
-def list_clients(db: DbSession, current: AdminUser) -> dict:
+def list_clients(
+    db: DbSession,
+    current: AdminUser,
+    search: Annotated[str | None, Query()] = None,
+    limit: Annotated[int, Query(ge=1, le=200)] = 50,
+    offset: Annotated[int, Query(ge=0)] = 0,
+) -> dict:
+    """Paginated, server-searched clients catalog.
+
+    ``search`` matches name / RFC / responsible (case-insensitive). ``total``
+    is the count under the current search, independent of limit/offset, so the
+    client can show "X de Y" and decide whether to load more. This replaces the
+    old "return every row, filter in the browser" shape that froze the page and
+    shipped the whole catalog on every visit.
+    """
     _ = current
-    rows = list(db.scalars(select(Client).order_by(Client.created_at.desc())))
-    return {"items": [_client_to_dict(r) for r in rows], "total": len(rows)}
+    stmt = select(Client)
+    count_stmt = select(func.count(Client.id))
+    if search and search.strip():
+        like = f"%{search.strip()}%"
+        cond = or_(
+            Client.name.ilike(like),
+            Client.rfc.ilike(like),
+            Client.responsible_name.ilike(like),
+        )
+        stmt = stmt.where(cond)
+        count_stmt = count_stmt.where(cond)
+    total = db.scalar(count_stmt) or 0
+    rows = list(
+        db.scalars(
+            stmt.order_by(Client.created_at.desc()).offset(offset).limit(limit)
+        )
+    )
+    return {"items": [_client_to_dict(r) for r in rows], "total": int(total)}
 
 
 @router.get("/clients/{client_id}")
@@ -2442,13 +2477,40 @@ def list_vendors(
     db: DbSession,
     current: AdminUser,
     client_id: str | None = None,
+    search: Annotated[str | None, Query()] = None,
+    limit: Annotated[int, Query(ge=1, le=200)] = 50,
+    offset: Annotated[int, Query(ge=0)] = 0,
 ) -> dict:
+    """Paginated, server-searched, optionally client-scoped vendors catalog.
+
+    ``search`` matches name / RFC / contact email (case-insensitive). The
+    owning client's name is eager-loaded onto each row (see _vendor_to_dict)
+    so the page no longer pulls the entire clients catalog just to label rows.
+    ``total`` is the count under the current filters. Replaces the old
+    return-everything shape that froze on large catalogs.
+    """
     _ = current
-    stmt = select(Vendor).order_by(Vendor.created_at.desc())
+    stmt = select(Vendor).options(selectinload(Vendor.client))
+    count_stmt = select(func.count(Vendor.id))
     if client_id:
         stmt = stmt.where(Vendor.client_id == client_id)
-    rows = list(db.scalars(stmt))
-    return {"items": [_vendor_to_dict(r) for r in rows], "total": len(rows)}
+        count_stmt = count_stmt.where(Vendor.client_id == client_id)
+    if search and search.strip():
+        like = f"%{search.strip()}%"
+        cond = or_(
+            Vendor.name.ilike(like),
+            Vendor.rfc.ilike(like),
+            Vendor.contact_email.ilike(like),
+        )
+        stmt = stmt.where(cond)
+        count_stmt = count_stmt.where(cond)
+    total = db.scalar(count_stmt) or 0
+    rows = list(
+        db.scalars(
+            stmt.order_by(Vendor.created_at.desc()).offset(offset).limit(limit)
+        )
+    )
+    return {"items": [_vendor_to_dict(r) for r in rows], "total": int(total)}
 
 
 @router.get("/vendors/{vendor_id}")

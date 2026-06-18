@@ -347,6 +347,35 @@ def test_admin_can_update_client_and_write_audit(
     assert (row.after or {}).get("name") == "Cliente A Renombrado"
 
 
+def test_list_clients_paginates_and_searches(
+    api_client: TestClient, db_factory
+) -> None:
+    token = _admin_token(api_client, db_factory)
+    _seed_client_via_db(db_factory, name="Alfa Corp", rfc="ALF260101AAA")
+    _seed_client_via_db(db_factory, name="Beta Industries", rfc="BET260101BBB")
+    _seed_client_via_db(db_factory, name="Gamma Servicios", rfc="GAM260101CCC")
+
+    # Server-side search narrows (case-insensitive) and sets a truthful total.
+    body = api_client.get(
+        "/api/v1/admin/clients", params={"search": "beta"}, headers=_h(token)
+    ).json()
+    assert body["total"] == 1
+    assert [c["name"] for c in body["items"]] == ["Beta Industries"]
+
+    # Pagination: limit/offset walk the set with a page-capped item count and
+    # no overlap between pages.
+    page1 = api_client.get(
+        "/api/v1/admin/clients", params={"limit": 2, "offset": 0}, headers=_h(token)
+    ).json()
+    page2 = api_client.get(
+        "/api/v1/admin/clients", params={"limit": 2, "offset": 2}, headers=_h(token)
+    ).json()
+    assert page1["total"] >= 3
+    assert len(page1["items"]) == 2
+    ids = {c["id"] for c in page1["items"]} | {c["id"] for c in page2["items"]}
+    assert len(ids) == len(page1["items"]) + len(page2["items"])
+
+
 # ---------------------------------------------------------------------------
 # Vendors
 # ---------------------------------------------------------------------------
@@ -390,6 +419,48 @@ def test_admin_create_vendor_for_missing_client_fails(
         headers=_h(token),
     )
     assert resp.status_code == 404
+
+
+def test_list_vendors_paginates_searches_and_labels_client(
+    api_client: TestClient, db_factory
+) -> None:
+    token = _admin_token(api_client, db_factory)
+    client_id = _seed_client_via_db(db_factory, name="Tenant Uno")
+    for name, rfc in (
+        ("Proveedor Uno", "PUN260101AB1"),
+        ("Proveedor Dos", "PDO260101AB2"),
+    ):
+        created = api_client.post(
+            "/api/v1/admin/vendors",
+            json={
+                "client_id": client_id,
+                "name": name,
+                "rfc": rfc,
+                "persona_type": "moral",
+            },
+            headers=_h(token),
+        )
+        assert created.status_code == 201, created.text
+
+    # Each row carries the denormalised client name (so the roster never has to
+    # load the whole clients catalog to label rows).
+    listed = api_client.get("/api/v1/admin/vendors", headers=_h(token)).json()
+    assert listed["total"] >= 2
+    assert all(v["client_name"] == "Tenant Uno" for v in listed["items"])
+
+    # Server-side search narrows by vendor name (not the client name).
+    one = api_client.get(
+        "/api/v1/admin/vendors", params={"search": "Uno"}, headers=_h(token)
+    ).json()
+    assert {v["name"] for v in one["items"]} == {"Proveedor Uno"}
+    assert one["total"] == 1
+
+    # Pagination caps the page count.
+    capped = api_client.get(
+        "/api/v1/admin/vendors", params={"limit": 1, "offset": 0}, headers=_h(token)
+    ).json()
+    assert len(capped["items"]) == 1
+    assert capped["total"] >= 2
 
 
 def test_admin_can_update_vendor_and_write_audit(

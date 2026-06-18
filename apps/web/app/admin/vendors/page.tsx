@@ -2,6 +2,7 @@
 
 import { Suspense, useEffect, useMemo, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
+import { useInfiniteQuery, useQuery } from "@tanstack/react-query";
 import {
   Buildings,
   DownloadSimple,
@@ -35,6 +36,9 @@ import {
   updateVendor,
 } from "@/lib/api/admin";
 import { downloadAuthenticatedFile } from "@/lib/api/download";
+import { useDebouncedValue } from "@/lib/hooks/use-debounced-value";
+
+const PAGE_SIZE = 50;
 
 export default function AdminVendorsPage() {
   // useSearchParams must live under a Suspense boundary so Next can
@@ -49,13 +53,12 @@ export default function AdminVendorsPage() {
 function AdminVendorsBody() {
   const router = useRouter();
   const searchParams = useSearchParams();
-  const [rows, setRows] = useState<AdminVendor[]>([]);
-  const [clients, setClients] = useState<AdminClient[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
   const [editing, setEditing] = useState<AdminVendor | null>(null);
   const [createOpen, setCreateOpen] = useState(false);
   const [search, setSearch] = useState("");
+  // Search + client filter run SERVER-side now (ILIKE + WHERE), so the page no
+  // longer fetches the whole vendor catalog and filters it in the browser.
+  const debouncedSearch = useDebouncedValue(search.trim(), 300);
   // Audit fix 2026-06-10 — the client filter seeds from `?client_id=`
   // so deep links (e.g. the "Proveedores" quick link on the client
   // detail page) land pre-scoped, and mirrors back to the URL so the
@@ -67,18 +70,64 @@ function AdminVendorsBody() {
   // must carry the staff JWT, so it downloads via fetch+Blob instead
   // of a plain navigation (audit 2026-06-12).
   const [downloadingId, setDownloadingId] = useState<string | null>(null);
+  const [downloadError, setDownloadError] = useState<string | null>(null);
+
+  // Clients power the filter dropdown + the create form's selector. They're the
+  // platform's top-level tenants (modest cardinality), so a capped fetch is
+  // fine here — vendors/submissions are the high-cardinality entities that need
+  // true pagination. Row labels no longer depend on this list (client_name is
+  // denormalised onto each vendor by the API).
+  const { data: clientsData } = useQuery({
+    queryKey: ["admin-clients-options"],
+    queryFn: () => listClients({ limit: 200 }),
+  });
+  const clients = useMemo<AdminClient[]>(
+    () => clientsData?.items ?? [],
+    [clientsData],
+  );
+
+  const {
+    data,
+    isLoading,
+    isError,
+    error,
+    refetch,
+    fetchNextPage,
+    hasNextPage,
+    isFetchingNextPage,
+    isFetchNextPageError,
+  } = useInfiniteQuery({
+    queryKey: ["admin-vendors", clientFilter || null, debouncedSearch],
+    queryFn: ({ pageParam }) =>
+      listVendors({
+        client_id: clientFilter || undefined,
+        search: debouncedSearch || undefined,
+        limit: PAGE_SIZE,
+        offset: pageParam,
+      }),
+    initialPageParam: 0,
+    getNextPageParam: (lastPage, allPages) => {
+      const loaded = allPages.reduce((n, p) => n + p.items.length, 0);
+      return loaded < lastPage.total ? loaded : undefined;
+    },
+  });
+  const rows = useMemo(
+    () => data?.pages.flatMap((p) => p.items) ?? [],
+    [data],
+  );
+  const total = data?.pages[0]?.total ?? 0;
 
   async function onDownloadExpediente(vendorId: string) {
     if (downloadingId) return;
     setDownloadingId(vendorId);
-    setError(null);
+    setDownloadError(null);
     try {
       await downloadAuthenticatedFile(
         adminVendorExpedienteZipUrl(vendorId),
         "expediente.zip",
       );
     } catch (err) {
-      setError(
+      setDownloadError(
         err instanceof Error ? err.message : "No pudimos preparar la descarga.",
       );
     } finally {
@@ -92,40 +141,6 @@ function AdminVendorsBody() {
     const qs = params.toString();
     router.replace(`/admin/vendors${qs ? `?${qs}` : ""}`, { scroll: false });
   }, [clientFilter, router]);
-
-  async function refresh() {
-    setError(null);
-    setLoading(true);
-    try {
-      const [vendorsResp, clientsResp] = await Promise.all([
-        listVendors(),
-        listClients(),
-      ]);
-      setRows(vendorsResp.items);
-      setClients(clientsResp.items);
-    } catch (err) {
-      setError(err instanceof Error ? err.message : "Error al cargar proveedores.");
-    } finally {
-      setLoading(false);
-    }
-  }
-
-  useEffect(() => {
-    refresh();
-  }, []);
-
-  const filtered = useMemo(() => {
-    const q = search.trim().toLowerCase();
-    return rows.filter((r) => {
-      if (clientFilter && r.client_id !== clientFilter) return false;
-      if (!q) return true;
-      return (
-        r.name.toLowerCase().includes(q) ||
-        r.rfc.toLowerCase().includes(q) ||
-        (r.contact_email ?? "").toLowerCase().includes(q)
-      );
-    });
-  }, [rows, search, clientFilter]);
 
   return (
     <AdminShell
@@ -178,7 +193,7 @@ function AdminVendorsBody() {
                   await createVendor(data);
                   setCreateOpen(false);
                 }
-                await refresh();
+                await refetch();
               }}
               onCancel={() => {
                 setCreateOpen(false);
@@ -218,11 +233,23 @@ function AdminVendorsBody() {
           </select>
         </div>
 
+        {downloadError ? (
+          <p className="text-xs text-[color:var(--status-error-text)]">
+            {downloadError}
+          </p>
+        ) : null}
+
         <DataTable<AdminVendor>
-          items={loading ? null : filtered}
-          loading={loading}
-          error={error}
-          onRetry={refresh}
+          items={isLoading ? null : rows}
+          loading={isLoading}
+          error={
+            isError
+              ? error instanceof Error
+                ? error.message
+                : "Error al cargar proveedores."
+              : null
+          }
+          onRetry={() => refetch()}
           columns={[
             {
               id: "name",
@@ -251,19 +278,16 @@ function AdminVendorsBody() {
             {
               id: "client",
               header: "Cliente",
-              cell: (row) => {
-                const client = clients.find((c) => c.id === row.client_id);
-                return (
-                  <Badge variant="brand">
-                    <Buildings
-                      className="h-3 w-3"
-                      weight="bold"
-                      aria-hidden="true"
-                    />
-                    {client?.name ?? "Cliente no disponible"}
-                  </Badge>
-                );
-              },
+              cell: (row) => (
+                <Badge variant="brand">
+                  <Buildings
+                    className="h-3 w-3"
+                    weight="bold"
+                    aria-hidden="true"
+                  />
+                  {row.client_name ?? "Cliente no disponible"}
+                </Badge>
+              ),
             },
             {
               id: "persona",
@@ -333,8 +357,26 @@ function AdminVendorsBody() {
           ariaLabel="Catálogo de proveedores"
           emptyTitle="Sin proveedores"
           emptyDescription="No hay proveedores con esos filtros."
-          metaBadge={`${filtered.length} proveedor${filtered.length === 1 ? "" : "es"}`}
+          metaBadge={`${rows.length} de ${total}`}
         />
+
+        {hasNextPage ? (
+          <div className="flex items-center justify-center gap-3">
+            {isFetchNextPageError ? (
+              <span className="text-xs text-[color:var(--status-error-text)]">
+                No pudimos cargar más. Intenta de nuevo.
+              </span>
+            ) : null}
+            <Button
+              variant="outline"
+              size="sm"
+              loading={isFetchingNextPage}
+              onClick={() => fetchNextPage()}
+            >
+              Cargar más
+            </Button>
+          </div>
+        ) : null}
       </div>
     </AdminShell>
   );

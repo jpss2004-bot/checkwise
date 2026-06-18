@@ -74,8 +74,17 @@ export type AdminClient = {
 
 type ListResponse<T> = { items: T[]; total: number };
 
-export async function listClients(): Promise<ListResponse<AdminClient>> {
-  return fetchJson("/api/v1/admin/clients");
+export async function listClients(params?: {
+  search?: string;
+  limit?: number;
+  offset?: number;
+}): Promise<ListResponse<AdminClient>> {
+  const qs = new URLSearchParams();
+  if (params?.search) qs.set("search", params.search);
+  if (params?.limit !== undefined) qs.set("limit", String(params.limit));
+  if (params?.offset !== undefined) qs.set("offset", String(params.offset));
+  const suffix = qs.toString() ? `?${qs.toString()}` : "";
+  return fetchJson(`/api/v1/admin/clients${suffix}`);
 }
 
 export async function getClient(id: string): Promise<AdminClient> {
@@ -518,6 +527,9 @@ export async function restoreUser(
 export type AdminVendor = {
   id: string;
   client_id: string;
+  /** Owning client's name, denormalised by the API so the roster renders
+   *  without loading the whole clients catalog. Null if the link is missing. */
+  client_name: string | null;
   name: string;
   rfc: string;
   contact_name: string | null;
@@ -531,9 +543,15 @@ export type AdminVendor = {
 
 export async function listVendors(params?: {
   client_id?: string;
+  search?: string;
+  limit?: number;
+  offset?: number;
 }): Promise<ListResponse<AdminVendor>> {
   const qs = new URLSearchParams();
   if (params?.client_id) qs.set("client_id", params.client_id);
+  if (params?.search) qs.set("search", params.search);
+  if (params?.limit !== undefined) qs.set("limit", String(params.limit));
+  if (params?.offset !== undefined) qs.set("offset", String(params.offset));
   const suffix = qs.toString() ? `?${qs.toString()}` : "";
   return fetchJson(`/api/v1/admin/vendors${suffix}`);
 }

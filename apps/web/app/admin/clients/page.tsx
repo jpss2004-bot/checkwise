@@ -1,8 +1,9 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useMemo, useState } from "react";
 import Link from "next/link";
 import { ArrowRight, IdentificationCard, MagnifyingGlass, UserPlus } from "@phosphor-icons/react";
+import { useInfiniteQuery } from "@tanstack/react-query";
 
 import { Surface } from "@/components/checkwise/dashboard/stat-card";
 import { Badge } from "@/components/ui/badge";
@@ -10,6 +11,7 @@ import { Button } from "@/components/ui/button";
 import { DataTable } from "@/components/ui/data-table";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { useDebouncedValue } from "@/lib/hooks/use-debounced-value";
 
 import { AdminShell } from "../_shell";
 import {
@@ -19,40 +21,45 @@ import {
 } from "@/lib/api/admin";
 import { entityStatusLabel, entityStatusVariant } from "@/lib/constants/labels";
 
+const PAGE_SIZE = 50;
+
 export default function AdminClientsPage() {
-  const [rows, setRows] = useState<AdminClient[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
   const [editing, setEditing] = useState<AdminClient | null>(null);
   const [search, setSearch] = useState("");
+  // Search runs SERVER-side now (ILIKE on name/RFC/responsible). Debounce so a
+  // query fires once typing settles, not on every keystroke.
+  const debouncedSearch = useDebouncedValue(search.trim(), 300);
 
-  async function refresh() {
-    setError(null);
-    setLoading(true);
-    try {
-      const data = await listClients();
-      setRows(data.items);
-    } catch (err) {
-      setError(err instanceof Error ? err.message : "Error al cargar clientes.");
-    } finally {
-      setLoading(false);
-    }
-  }
+  const {
+    data,
+    isLoading,
+    isError,
+    error,
+    refetch,
+    fetchNextPage,
+    hasNextPage,
+    isFetchingNextPage,
+    isFetchNextPageError,
+  } = useInfiniteQuery({
+    queryKey: ["admin-clients", debouncedSearch],
+    queryFn: ({ pageParam }) =>
+      listClients({
+        search: debouncedSearch || undefined,
+        limit: PAGE_SIZE,
+        offset: pageParam,
+      }),
+    initialPageParam: 0,
+    getNextPageParam: (lastPage, allPages) => {
+      const loaded = allPages.reduce((n, p) => n + p.items.length, 0);
+      return loaded < lastPage.total ? loaded : undefined;
+    },
+  });
 
-  useEffect(() => {
-    refresh();
-  }, []);
-
-  const filtered = useMemo(() => {
-    const q = search.trim().toLowerCase();
-    if (!q) return rows;
-    return rows.filter(
-      (r) =>
-        r.name.toLowerCase().includes(q) ||
-        (r.rfc ?? "").toLowerCase().includes(q) ||
-        (r.responsible_name ?? "").toLowerCase().includes(q),
-    );
-  }, [rows, search]);
+  const rows = useMemo(
+    () => data?.pages.flatMap((p) => p.items) ?? [],
+    [data],
+  );
+  const total = data?.pages[0]?.total ?? 0;
 
   return (
     <AdminShell
@@ -85,7 +92,7 @@ export default function AdminClientsPage() {
                   status: data.status,
                 });
                 setEditing(null);
-                await refresh();
+                await refetch();
               }}
               onCancel={() => setEditing(null)}
             />
@@ -108,10 +115,16 @@ export default function AdminClientsPage() {
         </div>
 
         <DataTable<AdminClient>
-          items={loading ? null : filtered}
-          loading={loading}
-          error={error}
-          onRetry={refresh}
+          items={isLoading ? null : rows}
+          loading={isLoading}
+          error={
+            isError
+              ? error instanceof Error
+                ? error.message
+                : "Error al cargar clientes."
+              : null
+          }
+          onRetry={() => refetch()}
           columns={[
             {
               id: "name",
@@ -182,8 +195,26 @@ export default function AdminClientsPage() {
           ariaLabel="Catálogo de clientes"
           emptyTitle="Sin clientes"
           emptyDescription="Aún no hay clientes registrados con esos filtros."
-          metaBadge={`${filtered.length} cliente${filtered.length === 1 ? "" : "s"}`}
+          metaBadge={`${rows.length} de ${total}`}
         />
+
+        {hasNextPage ? (
+          <div className="flex items-center justify-center gap-3">
+            {isFetchNextPageError ? (
+              <span className="text-xs text-[color:var(--status-error-text)]">
+                No pudimos cargar más. Intenta de nuevo.
+              </span>
+            ) : null}
+            <Button
+              variant="outline"
+              size="sm"
+              loading={isFetchingNextPage}
+              onClick={() => fetchNextPage()}
+            >
+              Cargar más
+            </Button>
+          </div>
+        ) : null}
       </div>
     </AdminShell>
   );
