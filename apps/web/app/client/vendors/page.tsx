@@ -332,6 +332,7 @@ export default function ClientVendorsPage() {
           onRetry={refresh}
           columns={columns}
           rowKey={(row) => row.vendor_id}
+          mobileCards
           ariaLabel="Proveedores del portafolio"
           emptyTitle="Sin proveedores con esos filtros"
           emptyDescription="Modifica la búsqueda o limpia los filtros para ver más resultados."

@@ -37,9 +37,9 @@ export const reportVerdictDefinition: Omit<
 };
 
 const LEVEL: Record<Level, { bar: string; chip: string; print: string }> = {
-  red: { bar: "var(--state-red,#dc2626)", chip: semaphoreLabel("red"), print: "[En riesgo]" },
-  yellow: { bar: "var(--state-yellow,#d97706)", chip: semaphoreLabel("yellow"), print: "[En proceso]" },
-  green: { bar: "var(--state-green,#16a34a)", chip: semaphoreLabel("green"), print: "[Al día]" },
+  red: { bar: "var(--status-error-text)", chip: semaphoreLabel("red"), print: "[En riesgo]" },
+  yellow: { bar: "var(--status-warning-text)", chip: semaphoreLabel("yellow"), print: "[En proceso]" },
+  green: { bar: "var(--status-success-text)", chip: semaphoreLabel("green"), print: "[Al día]" },
 };
 
 export function ReportVerdictBlock({
@@ -96,8 +96,8 @@ export function ReportVerdictBlock({
               style={{
                 color:
                   v.trend > 0
-                    ? "var(--state-green,#16a34a)"
-                    : "var(--state-red,#dc2626)",
+                    ? "var(--status-success-text)"
+                    : "var(--status-error-text)",
               }}
               title="Cambio en la tasa de aprobación mensual respecto al mes anterior"
             >

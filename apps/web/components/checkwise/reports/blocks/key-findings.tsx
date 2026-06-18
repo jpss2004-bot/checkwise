@@ -53,9 +53,9 @@ export const keyFindingsDefinition: Omit<
 };
 
 const TONE: Record<Tone, { color: string; Icon: Icon }> = {
-  red: { color: "var(--state-red,#dc2626)", Icon: WarningOctagon },
-  yellow: { color: "var(--state-yellow,#d97706)", Icon: Warning },
-  green: { color: "var(--state-green,#16a34a)", Icon: CheckCircle },
+  red: { color: "var(--status-error-text)", Icon: WarningOctagon },
+  yellow: { color: "var(--status-warning-text)", Icon: Warning },
+  green: { color: "var(--status-success-text)", Icon: CheckCircle },
   info: { color: "var(--text-ai)", Icon: Info },
 };
 

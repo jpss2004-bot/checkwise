@@ -52,6 +52,8 @@ export type DataTableColumn<T> = {
   width?: string;
   align?: "left" | "right";
   className?: string;
+  /** Omit this column from the mobile card layout (e.g. low-priority numerics). */
+  mobileHidden?: boolean;
 };
 
 export type DataTableFilter<T, K extends string> = {
@@ -78,6 +80,14 @@ type DataTableProps<T, K extends string> = {
   caption?: string;
   className?: string;
   skeletonRows?: number;
+  /**
+   * Render rows as stacked label:value cards below ``md`` (the table still
+   * shows at ``md+``). For wide client tables that otherwise only
+   * horizontal-scroll on a phone — a Sponsor can't see semáforo + actions
+   * together (audit P3.18). Columns with ``mobileHidden`` are omitted from
+   * the card to keep it scannable.
+   */
+  mobileCards?: boolean;
 };
 
 export function DataTable<T, K extends string = string>({
@@ -98,6 +108,7 @@ export function DataTable<T, K extends string = string>({
   caption,
   className,
   skeletonRows = 5,
+  mobileCards = false,
 }: DataTableProps<T, K>) {
   const [filter, setFilter] = useState<K | "all">(
     (initialFilter as K | "all" | undefined) ?? "all",
@@ -202,6 +213,21 @@ export function DataTable<T, K extends string = string>({
           />
         </div>
       ) : (
+        <>
+          {mobileCards ? (
+            <ul className="divide-y divide-[color:var(--border-subtle)] md:hidden">
+              {visible.map((item) => (
+                <DataTableMobileCard
+                  key={rowKey(item)}
+                  item={item}
+                  columns={columns}
+                  onRowClick={onRowClick}
+                  rowLabel={rowLabel}
+                />
+              ))}
+            </ul>
+          ) : null}
+          <div className={cn(mobileCards && "hidden md:block")}>
         <Table>
           {caption ? (
             <caption className="sr-only">{caption}</caption>
@@ -239,8 +265,64 @@ export function DataTable<T, K extends string = string>({
             )}
           />
         </Table>
+          </div>
+        </>
       )}
     </section>
+  );
+}
+
+// Mobile (<md) card for one row: each non-hidden column rendered as a
+// label:value pair, so semáforo, key metrics and actions stack vertically
+// instead of forcing a horizontal scroll on a phone (audit P3.18).
+function DataTableMobileCard<T>({
+  item,
+  columns,
+  onRowClick,
+  rowLabel,
+}: {
+  item: T;
+  columns: DataTableColumn<T>[];
+  onRowClick?: (item: T) => void;
+  rowLabel?: (item: T) => string;
+}) {
+  const clickable = Boolean(onRowClick);
+  return (
+    <li
+      onClick={clickable ? () => onRowClick?.(item) : undefined}
+      onKeyDown={
+        clickable
+          ? (e) => {
+              if (e.key === "Enter" || e.key === " ") {
+                e.preventDefault();
+                onRowClick?.(item);
+              }
+            }
+          : undefined
+      }
+      tabIndex={clickable ? 0 : undefined}
+      role={clickable ? "link" : undefined}
+      aria-label={clickable && rowLabel ? rowLabel(item) : undefined}
+      className={cn(
+        "flex flex-col gap-2 px-4 py-3",
+        clickable &&
+          "cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-[color:var(--border-focus)]/40",
+      )}
+    >
+      {columns
+        .filter((col) => !col.mobileHidden)
+        .map((col) => (
+          <div
+            key={col.id}
+            className="flex items-start justify-between gap-3 text-[13px]"
+          >
+            <span className="shrink-0 font-mono text-[10px] uppercase tracking-wide text-[color:var(--text-tertiary)]">
+              {col.header}
+            </span>
+            <span className="min-w-0 text-right">{col.cell(item)}</span>
+          </div>
+        ))}
+    </li>
   );
 }
 

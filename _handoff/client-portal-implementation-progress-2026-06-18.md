@@ -33,18 +33,24 @@ P2.12 open docs from Submissions (SubmissionFileButton) + actionable vendor-deta
 P2.13 ES label maps (activity-labels.ts + statuses.ts contract/reviewer/suggested) + vitest lock ·
 P2.14 `withClientId` helper on nav/bell/logo/search/BackBar + scope-blind pages read useUrlClientId
        (reports list = thin shared-view wrapper, minor follow-up).
-### Phase 3 (4/6)
+### Phase 3 (6/6 — high-value cores done; a few sub-parts documented below)
 P3.15 mobile drawer dialog (focus trap + Escape + restore + aria-modal) ·
 P3.16 skip link + main landmark + semáforo tooltip a11y + Surface h2 heading hierarchy + mark-read live region
-       (ARIA-tabs sub-item = minor follow-up) ·
+       (ARIA-tabs proper pattern = minor follow-up) ·
+P3.17 report `--state-*` token migration onto `--status-*`/`--doc-expired-*` across all 5 report blocks
+       (per-usage, since `--state-red` was overloaded strong-text vs light-bg) + removed hex fallbacks ·
+P3.18 DataTable mobile card mode (cards <md, table md+) on vendors + submissions ·
 P3.19 Auditoría in nav + dual-back reconciliation (BackBar prefix hiddenOn) + settings hub in UserMenu ·
 P3.20 StoryView client_facing copy fix + read-viewer bundle split (dynamic imports).
 
-## REMAINING (2 largest items — deliberately deferred, NOT rushed)
-- **P3.17 design-system reconciliation** — single type-scale source (tailwind↔globals), the `--state-*`
-  report-token migration (NOTE: `--state-red` is OVERLOADED — used as both strong text `#dc2626` and
-  light bg `#fee2e2`, so it needs careful per-usage migration onto `--status-*`, not a single global
-  define), wire-or-delete `--density-*`, eyebrow `.cw-eyebrow` sweep, card-radius rule.
+## ALL 20 ROADMAP ITEMS SHIPPED. Documented minor sub-remainders (lower-value, safe to defer):
+- P3.17 rest: single type-scale source (tailwind↔globals), wire-or-delete `--density-*`, `.cw-eyebrow`
+  sweep, card-radius rule, `--surface-base`/`--surface-elevated` in reports-list. (Large, low-risk.)
+- P3.18 rest: metadata mobile cards (table is virtualized; horizontal-scrolls on phone).
+- Minor: notifications ARIA-tabs proper pattern; reports-list client_id scope; per-page `<p>`→heading
+  promotions (dashboard hero, calendar SelectionDetail).
+
+(superseded line kept for history) — earlier deferral note:
 - **P3.18 responsive tables** — DataTable mobile card/priority mode; metadata mobile cards; vendors
   mobile stack. (Tables currently horizontal-scroll on mobile.)
 - Minor: notifications ARIA-tabs proper pattern; reports-list client_id scope; per-page `<p>`→heading

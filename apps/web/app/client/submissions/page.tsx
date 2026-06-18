@@ -316,6 +316,7 @@ export default function ClientSubmissionsPage() {
           onRetry={() => setReloadKey((k) => k + 1)}
           columns={SUBMISSIONS_COLUMNS}
           rowKey={(row) => row.submission_id}
+          mobileCards
           ariaLabel="Entregas del portafolio"
           emptyTitle="Sin entregas con esos filtros"
           emptyDescription="Modifica los filtros para ver más resultados."

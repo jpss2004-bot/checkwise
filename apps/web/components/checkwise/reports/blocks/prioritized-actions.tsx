@@ -99,10 +99,10 @@ const PRIORITY_META: Record<
 };
 
 const TONE_CHIP: Record<"red" | "orange" | "gray", string> = {
-  red: "bg-[color:var(--state-red,#fee2e2)] text-[color:var(--state-red-fg,#991b1b)] border-[color:var(--state-red-border,#fca5a5)]",
+  red: "bg-[color:var(--status-error-bg)] text-[color:var(--status-error-text)] border-[color:var(--status-error-border)]",
   orange:
-    "bg-[color:var(--state-orange,#ffedd5)] text-[color:var(--state-orange-fg,#9a3412)] border-[color:var(--state-orange-border,#fdba74)]",
-  gray: "bg-[color:var(--surface-muted,#f1f5f9)] text-[color:var(--text-secondary)] border-[color:var(--border-subtle)]",
+    "bg-[color:var(--doc-expired-bg)] text-[color:var(--doc-expired-text)] border-[color:var(--doc-expired-border)]",
+  gray: "bg-[color:var(--surface-sunken)] text-[color:var(--text-secondary)] border-[color:var(--border-subtle)]",
 };
 
 const TYPE_CTA: Record<ActionType, string> = {
@@ -234,7 +234,7 @@ function ActionCard({
             Prioridad {priorityMeta.print}
           </span>
           {item.period_key && (
-            <span className="inline-flex items-center rounded-sm border border-[color:var(--border-subtle)] bg-[color:var(--surface-muted,transparent)] px-1.5 py-[1px] font-mono text-[10px] font-medium tabular-nums text-[color:var(--text-secondary)]">
+            <span className="inline-flex items-center rounded-sm border border-[color:var(--border-subtle)] bg-[color:var(--surface-sunken)] px-1.5 py-[1px] font-mono text-[10px] font-medium tabular-nums text-[color:var(--text-secondary)]">
               {item.period_key}
             </span>
           )}
@@ -269,7 +269,7 @@ function ActionCard({
               href={item.href}
               target="_blank"
               rel="noreferrer"
-              className="inline-flex items-center gap-1 rounded-sm border border-[color:var(--border-strong,var(--border-subtle))] bg-[color:var(--surface,#fff)] px-2.5 py-1 text-[12px] font-medium text-[color:var(--text-primary)] hover:bg-[color:var(--surface-hover)] focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-[color:var(--ring)] print:hidden"
+              className="inline-flex items-center gap-1 rounded-sm border border-[color:var(--border-strong)] bg-[color:var(--surface-raised)] px-2.5 py-1 text-[12px] font-medium text-[color:var(--text-primary)] hover:bg-[color:var(--surface-hover)] focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-[color:var(--ring)] print:hidden"
             >
               {ctaLabel}
             </a>
