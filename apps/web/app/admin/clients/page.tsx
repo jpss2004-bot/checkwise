@@ -2,7 +2,7 @@
 
 import { useMemo, useState } from "react";
 import Link from "next/link";
-import { ArrowRight, IdentificationCard, MagnifyingGlass, UserPlus } from "@phosphor-icons/react";
+import { ArrowRight, IdentificationCard, UserPlus } from "@phosphor-icons/react";
 import { useInfiniteQuery } from "@tanstack/react-query";
 
 import { Surface } from "@/components/checkwise/dashboard/stat-card";
@@ -11,6 +11,7 @@ import { Button } from "@/components/ui/button";
 import { DataTable } from "@/components/ui/data-table";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { SearchInput } from "@/components/ui/search-input";
 import { useDebouncedValue } from "@/lib/hooks/use-debounced-value";
 
 import { AdminShell } from "../_shell";
@@ -99,20 +100,14 @@ export default function AdminClientsPage() {
           </Surface>
         )}
 
-        <div className="relative w-56">
-          <MagnifyingGlass
-            className="absolute left-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-[color:var(--text-tertiary)]"
-            weight="bold"
-            aria-hidden="true"
-          />
-          <Input
-            value={search}
-            onChange={(e) => setSearch(e.target.value)}
-            placeholder="Buscar nombre o RFC"
-            className="h-8 pl-8 text-xs"
-            aria-label="Buscar cliente"
-          />
-        </div>
+        <SearchInput
+          value={search}
+          onValueChange={setSearch}
+          placeholder="Buscar nombre o RFC"
+          ariaLabel="Buscar cliente"
+          className="w-56"
+          inputClassName="h-8 text-xs"
+        />
 
         <DataTable<AdminClient>
           items={isLoading ? null : rows}

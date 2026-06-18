@@ -8,7 +8,6 @@ import {
   ArrowRight,
   Copy,
   Key,
-  MagnifyingGlass,
   PaperPlaneTilt,
   Prohibit,
   UserPlus,
@@ -26,7 +25,7 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
-import { Input } from "@/components/ui/input";
+import { SearchInput } from "@/components/ui/search-input";
 import { Select } from "@/components/ui/select";
 
 import { PlatformShell } from "../_shell";
@@ -315,20 +314,14 @@ export default function PlatformUsersPage() {
         <div className="flex flex-wrap items-end gap-3">
           <label className="flex flex-col gap-1 text-[11px] uppercase tracking-wide text-[color:var(--text-tertiary)]">
             Buscar
-            <span className="relative">
-              <MagnifyingGlass
-                className="absolute left-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-[color:var(--text-tertiary)]"
-                weight="bold"
-                aria-hidden="true"
-              />
-              <Input
-                value={q}
-                onChange={(e) => setQ(e.target.value)}
-                placeholder="Nombre o correo"
-                className="h-9 w-56 pl-8 text-[12px]"
-                aria-label="Buscar usuario por nombre o correo"
-              />
-            </span>
+            <SearchInput
+              value={q}
+              onValueChange={setQ}
+              placeholder="Nombre o correo"
+              ariaLabel="Buscar usuario por nombre o correo"
+              className="w-56"
+              inputClassName="h-9 text-[12px]"
+            />
           </label>
 
           <label className="flex flex-col gap-1 text-[11px] uppercase tracking-wide text-[color:var(--text-tertiary)]">

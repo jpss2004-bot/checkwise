@@ -8,7 +8,6 @@ import {
   ChartBar,
   CheckCircle,
   CircleNotch,
-  MagnifyingGlass,
   Package,
   Warning,
   WarningOctagon,
@@ -18,10 +17,11 @@ import {
 import { Surface } from "@/components/checkwise/dashboard/stat-card";
 import { Button } from "@/components/ui/button";
 import { DataTable, type DataTableColumn } from "@/components/ui/data-table";
-import { Input } from "@/components/ui/input";
 import { MetadataStrip } from "@/components/ui/metadata-strip";
 import { Progress } from "@/components/ui/progress";
+import { SearchInput } from "@/components/ui/search-input";
 import { Tooltip } from "@/components/ui/tooltip";
+import { useDebouncedValue } from "@/lib/hooks/use-debounced-value";
 
 import { ClientShell } from "../_shell";
 import { VendorRef } from "@/components/checkwise/vendor-ref";
@@ -60,6 +60,9 @@ export default function ClientVendorsPage() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [search, setSearch] = useState(() => searchParams?.get("q") ?? "");
+  // Search runs against the API; debounce so it fires as typing settles
+  // instead of needing a manual "Aplicar" click.
+  const debouncedSearch = useDebouncedValue(search.trim(), 300);
   const [level, setLevel] = useState<SemaphoreLevel | "">(() =>
     parseSemaphoreLevel(searchParams?.get("level") ?? null),
   );
@@ -77,7 +80,7 @@ export default function ClientVendorsPage() {
     router.replace(vendorsHref, { scroll: false });
   }, [router, vendorsHref]);
 
-  async function refresh() {
+  const refresh = useCallback(async () => {
     setLoading(true);
     setError(null);
     try {
@@ -85,7 +88,7 @@ export default function ClientVendorsPage() {
       const [data, notifications] = await Promise.all([
         listClientVendors({
           ...scope,
-          search: search || undefined,
+          search: debouncedSearch || undefined,
           semaphore_level: level || undefined,
         }),
         listClientNotifications({ ...scope, unread_only: true, limit: 200 }),
@@ -103,12 +106,13 @@ export default function ClientVendorsPage() {
     } finally {
       setLoading(false);
     }
-  }
+  }, [urlClientId, debouncedSearch, level]);
 
+  // Auto-search: re-fetch when the client scope, the debounced query, or the
+  // semáforo filter changes — no manual "Aplicar" click needed.
   useEffect(() => {
     refresh();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [urlClientId]);
+  }, [refresh]);
 
   const counts = useMemo(() => {
     const c = { green: 0, yellow: 0, red: 0 };
@@ -233,30 +237,18 @@ export default function ClientVendorsPage() {
 
         {/* Filters */}
         <Surface title="Buscar y filtrar">
-          <form
-            onSubmit={(e) => {
-              e.preventDefault();
-              refresh();
-            }}
-            className="flex flex-wrap items-end gap-3"
-          >
+          <div className="flex flex-wrap items-end gap-3">
             <div className="min-w-[220px] flex-1">
               <label className="block font-mono text-[10px] uppercase tracking-wide text-[color:var(--text-tertiary)]">
                 Buscar
               </label>
-              <div className="relative mt-1">
-                <MagnifyingGlass
-                  className="absolute left-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-[color:var(--text-tertiary)]"
-                  weight="bold"
-                  aria-hidden="true"
-                />
-                <Input
-                  value={search}
-                  onChange={(e) => setSearch(e.target.value)}
-                  placeholder="Nombre o RFC"
-                  className="pl-8"
-                />
-              </div>
+              <SearchInput
+                value={search}
+                onValueChange={setSearch}
+                placeholder="Nombre o RFC"
+                ariaLabel="Buscar proveedor por nombre o RFC"
+                className="mt-1"
+              />
             </div>
             <div>
               <label className="block font-mono text-[10px] uppercase tracking-wide text-[color:var(--text-tertiary)]">
@@ -282,10 +274,7 @@ export default function ClientVendorsPage() {
                 ))}
               </div>
             </div>
-            <Button type="submit" size="sm" loading={loading}>
-              Aplicar
-            </Button>
-          </form>
+          </div>
         </Surface>
 
         <DataTable<ClientVendorRow>

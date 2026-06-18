@@ -6,7 +6,6 @@ import { useInfiniteQuery, useQuery } from "@tanstack/react-query";
 import {
   Buildings,
   DownloadSimple,
-  MagnifyingGlass,
   Plus,
   Storefront,
   X,
@@ -18,6 +17,7 @@ import { Button } from "@/components/ui/button";
 import { DataTable } from "@/components/ui/data-table";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { SearchInput } from "@/components/ui/search-input";
 
 import { AdminShell } from "../_shell";
 import { VendorRef } from "@/components/checkwise/vendor-ref";
@@ -204,20 +204,14 @@ function AdminVendorsBody() {
         )}
 
         <div className="flex flex-wrap items-center gap-2">
-          <div className="relative w-56">
-            <MagnifyingGlass
-              className="absolute left-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-[color:var(--text-tertiary)]"
-              weight="bold"
-              aria-hidden="true"
-            />
-            <Input
-              value={search}
-              onChange={(e) => setSearch(e.target.value)}
-              placeholder="Buscar por nombre, RFC o email"
-              className="h-8 pl-8 text-xs"
-              aria-label="Buscar proveedor"
-            />
-          </div>
+          <SearchInput
+            value={search}
+            onValueChange={setSearch}
+            placeholder="Buscar por nombre, RFC o email"
+            ariaLabel="Buscar proveedor"
+            className="w-56"
+            inputClassName="h-8 text-xs"
+          />
           <select
             value={clientFilter}
             onChange={(e) => setClientFilter(e.target.value)}
