@@ -2,13 +2,18 @@
 
 import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
-import { ArrowRight, CalendarBlank, Clock, Tray } from "@phosphor-icons/react";
+import {
+  ArrowLeft,
+  ArrowRight,
+  CalendarBlank,
+  ClipboardText,
+  MagnifyingGlass,
+  PencilSimpleLine,
+  WarningOctagon,
+} from "@phosphor-icons/react";
 
-import { MiniBars } from "@/components/checkwise/charts";
 import { Surface } from "@/components/checkwise/dashboard/stat-card";
-import { Badge } from "@/components/ui/badge";
 import { Input } from "@/components/ui/input";
-import { MetadataStrip } from "@/components/ui/metadata-strip";
 import {
   ErrorState,
   Skeleton,
@@ -16,130 +21,223 @@ import {
 
 import { AdminShell } from "../_shell";
 import {
-  type AdminCalendar,
-  type AdminPeriod,
-  type CalendarRadar,
-  getAdminCalendar,
-  getAdminCalendarRadar,
-  listPeriods,
-} from "@/lib/api/admin";
+  ComplianceMatrix,
+  type ComplianceMatrixCell,
+  type ComplianceMatrixRow,
+} from "@/components/checkwise/calendar/compliance-matrix";
+import { AdminObligationBlock } from "@/components/checkwise/calendar/admin-obligation-block";
 import {
-  cadenceLabel,
-  INSTITUTION_LABELS,
-  personaLabel,
-} from "@/lib/constants/labels";
+  RISK_ORDER,
+  SEMAPHORE_DOT,
+  type CalendarRisk,
+} from "@/components/checkwise/calendar/calendar-shared";
+import {
+  getAdminCalendarGrid,
+  getRollup,
+  type AdminCalendarGrid,
+  type AdminCalendarMonthStatus,
+  type AdminCalendarObligation,
+  type AdminCalendarRow,
+  type AdminRollup,
+} from "@/lib/api/admin";
+import { INSTITUTION_LABELS, MONTH_LABELS_ES, MONTH_LABELS_SHORT_ES } from "@/lib/api/portal";
 
-const MONTH_SHORT = [
-  "Ene",
-  "Feb",
-  "Mar",
-  "Abr",
-  "May",
-  "Jun",
-  "Jul",
-  "Ago",
-  "Sep",
-  "Oct",
-  "Nov",
-  "Dic",
-];
+const SEMAPHORE_RANK: Record<string, number> = { red: 0, yellow: 1, green: 2 };
+const ROW_PAGE = 20;
 
-/** Urgency tone for a "due in N days" value — drives the badge color so the
- *  eye lands on what's most imminent first. */
-function dueTone(days: number): {
-  variant: "destructive" | "warning" | "outline";
-  text: string;
-} {
-  if (days <= 7) return { variant: "destructive", text: "var(--status-error-text)" };
-  if (days <= 14) return { variant: "warning", text: "var(--status-warning-text)" };
-  return { variant: "outline", text: "var(--text-secondary)" };
-}
-
-function dueLabel(days: number): string {
-  if (days <= 0) return "vence hoy";
-  if (days === 1) return "vence mañana";
-  return `vence en ${days} días`;
+function cellMap(grid: AdminCalendarGrid): Map<string, ComplianceMatrixCell> {
+  const map = new Map<string, ComplianceMatrixCell>();
+  for (const c of grid.cells) {
+    map.set(`${c.row_id}-${c.month}`, {
+      count: c.count,
+      worstRisk: c.worst_risk as CalendarRisk,
+    });
+  }
+  return map;
 }
 
 export default function AdminCalendarPage() {
-  const [year, setYear] = useState<number>(new Date().getFullYear() || 2026);
-  const [calendar, setCalendar] = useState<AdminCalendar | null>(null);
-  const [periods, setPeriods] = useState<AdminPeriod[]>([]);
-  const [radar, setRadar] = useState<CalendarRadar | null>(null);
+  const [today] = useState(() => new Date());
+  const [year, setYear] = useState<number>(
+    () => new Date().getFullYear() || 2026,
+  );
+  const currentMonth = today.getFullYear() === year ? today.getMonth() + 1 : 1;
+
+  // Overview is fetched ONCE per year — month selection is pure client-side
+  // state below, so picking a month never re-runs the portfolio scan.
+  const [overview, setOverview] = useState<AdminCalendarGrid | null>(null);
+  const [rollup, setRollup] = useState<AdminRollup | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [reloadKey, setReloadKey] = useState(0);
-  // "Periodos en BD" is a raw dump of the period rows — useful only
-  // when cross-referencing codes/period_keys against the backend, so
-  // it stays collapsed by default (same idiom as the reviewer's
-  // TraceabilityCard).
-  const [showPeriods, setShowPeriods] = useState(false);
-  // The static month catalog is now secondary to the operational radar
-  // (P2-07): kept for "is the year seeded correctly?" but collapsed so the
-  // forward view leads.
-  const [showCatalog, setShowCatalog] = useState(false);
 
+  const [selectedMonth, setSelectedMonth] = useState<number>(currentMonth);
+  const [showAllClients, setShowAllClients] = useState(false);
+  const [rowLimit, setRowLimit] = useState(ROW_PAGE);
+
+  // Detail is always ONE client: the only path that loads obligation rows.
+  const [detailClientId, setDetailClientId] = useState<string | null>(null);
+  const [detail, setDetail] = useState<AdminCalendarGrid | null>(null);
+  const [selectedProviderId, setSelectedProviderId] = useState<string | null>(null);
+
+  // ── Overview fetch (per year) ──────────────────────────────────
   useEffect(() => {
     let cancelled = false;
     setError(null);
-    // The radar is portfolio-wide (year-independent); the catalog is per-year.
-    Promise.all([
-      getAdminCalendar({ year }),
-      listPeriods({ year }),
-      getAdminCalendarRadar({ top: 40 }),
-    ])
-      .then(([cal, per, rad]) => {
+    setOverview(null);
+    Promise.all([getAdminCalendarGrid({ year }), getRollup()])
+      .then(([g, r]) => {
         if (cancelled) return;
-        setCalendar(cal);
-        setPeriods(per.items);
-        setRadar(rad);
+        setOverview(g);
+        setRollup(r);
       })
       .catch((err: unknown) => {
         if (cancelled) return;
-        setError(err instanceof Error ? err.message : "Error al cargar calendario.");
+        setError(
+          err instanceof Error ? err.message : "Error al cargar el calendario.",
+        );
       });
     return () => {
       cancelled = true;
     };
   }, [year, reloadKey]);
 
-  const expectedBars = useMemo(() => {
-    if (!calendar) return [];
-    return calendar.months.map((m) => ({
-      label: MONTH_SHORT[m.month - 1] ?? `${m.month}`,
-      value: m.expected_total,
-      tone: "brand" as const,
-    }));
-  }, [calendar]);
+  // ── Detail fetch (one client) ──────────────────────────────────
+  useEffect(() => {
+    if (!detailClientId) {
+      setDetail(null);
+      return;
+    }
+    let cancelled = false;
+    setDetail(null);
+    getAdminCalendarGrid({ year, client_id: detailClientId })
+      .then((d) => {
+        if (!cancelled) setDetail(d);
+      })
+      .catch(() => {
+        if (!cancelled) setDetailClientId(null);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [detailClientId, year]);
 
-  const totalExpected = useMemo(() => {
-    if (!calendar) return 0;
-    return calendar.months.reduce((sum, m) => sum + m.expected_total, 0);
-  }, [calendar]);
+  function enterClient(id: string, month?: number) {
+    if (month) setSelectedMonth(month);
+    setSelectedProviderId(null);
+    setDetailClientId(id);
+    requestAnimationFrame(() =>
+      window.scrollTo({ top: 0, behavior: "smooth" }),
+    );
+  }
+  function exitClient() {
+    setDetailClientId(null);
+    setSelectedProviderId(null);
+  }
+
+  // Reset pagination when the scope/year changes.
+  useEffect(() => {
+    setRowLimit(ROW_PAGE);
+  }, [year, showAllClients]);
+
+  const inClient = Boolean(detailClientId);
+
+  // ── Portfolio-view derived data ────────────────────────────────
+  const sortedClients = useMemo<AdminCalendarRow[]>(() => {
+    if (!overview) return [];
+    const rows = [...overview.rows];
+    rows.sort(
+      (a, b) =>
+        (SEMAPHORE_RANK[a.semaphore_level] ?? 3) -
+          (SEMAPHORE_RANK[b.semaphore_level] ?? 3) ||
+        a.compliance_pct - b.compliance_pct ||
+        a.name.localeCompare(b.name),
+    );
+    return showAllClients
+      ? rows
+      : rows.filter((r) => r.semaphore_level !== "green");
+  }, [overview, showAllClients]);
+
+  const portfolioRows = useMemo<ComplianceMatrixRow[]>(
+    () =>
+      sortedClients.slice(0, rowLimit).map((r) => ({
+        id: r.id,
+        name: r.name,
+        semaphore_level: r.semaphore_level,
+        subtitle: rowSubtitle(r),
+      })),
+    [sortedClients, rowLimit],
+  );
+  const portfolioCells = useMemo(
+    () => (overview ? cellMap(overview) : new Map<string, ComplianceMatrixCell>()),
+    [overview],
+  );
+  const hiddenGreen = useMemo(() => {
+    if (showAllClients || !overview) return 0;
+    return overview.rows.filter((r) => r.semaphore_level === "green").length;
+  }, [overview, showAllClients]);
+
+  // Clients with obligations in the selected month, worst-first — the cheap
+  // "who's in this month" list that replaces the cross-portfolio dump.
+  const clientsThisMonth = useMemo(() => {
+    if (!overview) return [];
+    const nameById = new Map(overview.rows.map((r) => [r.id, r]));
+    return overview.cells
+      .filter((c) => c.month === selectedMonth && c.count > 0)
+      .map((c) => ({
+        client: nameById.get(c.row_id),
+        count: c.count,
+        worstRisk: c.worst_risk as CalendarRisk,
+      }))
+      .filter((x) => x.client)
+      .sort(
+        (a, b) =>
+          (RISK_ORDER[a.worstRisk] ?? 9) - (RISK_ORDER[b.worstRisk] ?? 9) ||
+          b.count - a.count,
+      );
+  }, [overview, selectedMonth]);
+
+  const monthStatus: AdminCalendarMonthStatus | null = useMemo(
+    // Optional-chain ``month_status`` so a transient old-backend response
+    // (during a deploy where the FE updates before the API) degrades to the
+    // empty summary instead of throwing.
+    () => overview?.month_status?.find((s) => s.month === selectedMonth) ?? null,
+    [overview, selectedMonth],
+  );
+
+  // ── Client-view derived data ───────────────────────────────────
+  const providerRows = useMemo<ComplianceMatrixRow[]>(() => {
+    if (!detail) return [];
+    return [...detail.rows]
+      .sort(
+        (a, b) =>
+          (SEMAPHORE_RANK[a.semaphore_level] ?? 3) -
+            (SEMAPHORE_RANK[b.semaphore_level] ?? 3) ||
+          a.compliance_pct - b.compliance_pct ||
+          a.name.localeCompare(b.name),
+      )
+      .map((r) => ({
+        id: r.id,
+        name: r.name,
+        semaphore_level: r.semaphore_level,
+        subtitle: rowSubtitle(r),
+      }));
+  }, [detail]);
+  const providerCells = useMemo(
+    () => (detail ? cellMap(detail) : new Map<string, ComplianceMatrixCell>()),
+    [detail],
+  );
+  const clientObligations = useMemo<AdminCalendarObligation[]>(() => {
+    if (!detail) return [];
+    let obs = detail.obligations.filter((o) => o.due_month === selectedMonth);
+    if (selectedProviderId) obs = obs.filter((o) => o.vendor_id === selectedProviderId);
+    return obs;
+  }, [detail, selectedMonth, selectedProviderId]);
 
   return (
     <AdminShell
       title="Calendario operativo"
-      description="Radar de lo que vence pronto y lo que requiere intervención en todo el portafolio. El catálogo regulatorio del año queda como referencia secundaria."
-      actions={
-        <label className="flex items-center gap-2 rounded-md border border-[color:var(--border-default)] bg-[color:var(--surface-raised)] px-3 py-1 text-xs">
-          <CalendarBlank
-            className="h-3.5 w-3.5 text-[color:var(--text-secondary)]"
-            weight="bold"
-            aria-hidden="true"
-          />
-          <span className="font-mono text-[10px] uppercase tracking-wide text-[color:var(--text-tertiary)]">
-            Año
-          </span>
-          <Input
-            type="number"
-            min={2021}
-            max={2030}
-            value={year}
-            onChange={(e) => setYear(Number(e.target.value))}
-            className="h-7 w-20 border-0 bg-transparent p-0 font-mono text-sm font-semibold focus-visible:ring-0"
-          />
-        </label>
-      }
+      description="El año de cumplimiento de toda la cartera. Toca un mes para ver su resumen, y entra a un cliente para ver el detalle de sus obligaciones."
+      actions={<YearPicker year={year} onYear={setYear} />}
     >
       {error ? (
         <ErrorState
@@ -147,322 +245,685 @@ export default function AdminCalendarPage() {
           description={error}
           onRetry={() => setReloadKey((k) => k + 1)}
         />
-      ) : !calendar || !radar ? (
+      ) : !overview || !rollup ? (
         <CalendarSkeleton />
-      ) : (
+      ) : inClient ? (
+        // ─────────────── Single-client view ───────────────
         <div className="space-y-6">
-          {/* ─── Operational radar (primary) ─────────────────────── */}
-          {/* Urgency strip + awaiting-review, computed across every active
-              provider from the same deadline engine the portal uses. */}
-          <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-5">
-            {radar.urgency_bands.map((band) => {
-              const count = radar.urgency_buckets[band.key] ?? 0;
-              const tone =
-                band.key === "week"
-                  ? "var(--status-error-text)"
-                  : band.key === "fortnight"
-                    ? "var(--status-warning-text)"
-                    : "var(--text-primary)";
-              return (
-                <div
-                  key={band.key}
-                  className="rounded-md border border-[color:var(--border-default)] bg-[color:var(--surface-raised)] px-4 py-3 shadow-[var(--shadow-sm)]"
-                >
-                  <p
-                    className="text-[20px] font-semibold tabular-nums leading-none"
-                    style={{ color: count ? tone : "var(--text-tertiary)" }}
-                  >
-                    {count}
+          <button
+            type="button"
+            onClick={exitClient}
+            className="inline-flex items-center gap-1.5 text-xs font-medium text-[color:var(--text-brand)] hover:underline"
+          >
+            <ArrowLeft className="h-3.5 w-3.5" weight="bold" aria-hidden="true" />
+            Volver a la cartera
+          </button>
+
+          {!detail ? (
+            <>
+              <Skeleton className="h-72 w-full rounded-lg" />
+              <Skeleton className="h-48 w-full rounded-lg" />
+            </>
+          ) : (
+            <>
+              <Surface
+                title={`${detail.client_name ?? "Cliente"} · ${year}`}
+                description="Proveedores de este cliente por mes. Toca un mes o un proveedor para ver el detalle abajo."
+                bodyClassName="p-4"
+              >
+                {providerRows.length === 0 ? (
+                  <p className="px-2 py-8 text-center text-sm text-[color:var(--text-secondary)]">
+                    Este cliente no tiene proveedores con obligaciones este año.
                   </p>
-                  <p className="mt-1 text-[11px] text-[color:var(--text-secondary)]">
-                    {band.label}
-                  </p>
-                </div>
-              );
-            })}
-            <Link
-              href="/admin/reviewer"
-              className="group flex flex-col justify-between rounded-md border border-[color:var(--border-default)] bg-[color:var(--surface-raised)] px-4 py-3 shadow-[var(--shadow-sm)] transition-colors hover:bg-[color:var(--surface-hover)]"
-            >
-              <span className="flex items-center gap-1.5">
-                <Tray className="h-4 w-4 text-[color:var(--text-ai)]" weight="bold" aria-hidden="true" />
-                <span
-                  className="text-[20px] font-semibold tabular-nums leading-none"
-                  style={{
-                    color: radar.awaiting_review_total
-                      ? "var(--text-primary)"
-                      : "var(--text-tertiary)",
-                  }}
-                >
-                  {radar.awaiting_review_total}
-                </span>
-              </span>
-              <span className="mt-1 inline-flex items-center gap-1 text-[11px] text-[color:var(--text-secondary)]">
-                En revisión
-                <ArrowRight className="h-3 w-3 opacity-0 transition-opacity group-hover:opacity-100" weight="bold" aria-hidden="true" />
-              </span>
-            </Link>
-          </div>
+                ) : (
+                  <ComplianceMatrix
+                    rows={providerRows}
+                    cells={providerCells}
+                    currentMonth={today.getFullYear() === year ? currentMonth : null}
+                    rowHeader="Proveedor"
+                    selected={{ rowId: selectedProviderId, month: selectedMonth }}
+                    onSelectCell={(rowId, month) => {
+                      setSelectedMonth(month);
+                      setSelectedProviderId(rowId);
+                    }}
+                    onSelectMonth={(month) => {
+                      setSelectedMonth(month);
+                      setSelectedProviderId(null);
+                    }}
+                    onSelectRow={(rowId) => setSelectedProviderId(rowId)}
+                  />
+                )}
+              </Surface>
+
+              <ObligationDetail
+                title={`${MONTH_LABELS_ES[selectedMonth]} ${year}${selectedProviderId ? "" : " · todos los proveedores"}`}
+                obligations={clientObligations}
+                today={today}
+              />
+            </>
+          )}
+        </div>
+      ) : (
+        // ─────────────── Portfolio view ───────────────
+        <div className="space-y-6">
+          <TriageBand overview={overview} rollup={rollup} />
+
+          <ForecastWaveStrip
+            overview={overview}
+            currentMonth={today.getFullYear() === year ? currentMonth : null}
+            selectedMonth={selectedMonth}
+            onSelectMonth={setSelectedMonth}
+          />
 
           <Surface
-            title="Próximos vencimientos"
-            description="Obligaciones obligatorias más cercanas a vencer en todo el portafolio. Selecciona un proveedor para atender el pendiente."
-            bodyClassName="p-0"
+            title={`Cartera ${year}`}
+            description="Cada cliente por mes. Toca un mes para su resumen, o entra a un cliente para ver sus obligaciones."
+            actions={
+              <div className="flex flex-wrap items-center gap-2">
+                <ClientPicker clients={sortedClients} onPick={enterClient} />
+                <ScopeToggle
+                  showAll={showAllClients}
+                  hiddenGreen={hiddenGreen}
+                  onToggle={() => setShowAllClients((v) => !v)}
+                />
+              </div>
+            }
+            bodyClassName="p-4"
           >
-            {radar.upcoming.length === 0 ? (
-              <div className="flex flex-col items-center gap-2 px-4 py-10 text-center">
-                <Clock className="h-6 w-6 text-[color:var(--text-tertiary)]" weight="regular" aria-hidden="true" />
-                <p className="text-[13px] font-medium text-[color:var(--text-primary)]">
-                  Sin vencimientos próximos
-                </p>
-                <p className="max-w-md text-[12px] text-[color:var(--text-secondary)]">
-                  Ningún proveedor activo tiene obligaciones obligatorias por
-                  vencer. Aparecerán aquí conforme se acerquen sus fechas.
-                </p>
-              </div>
+            {portfolioRows.length === 0 ? (
+              <EmptyGrid
+                showAll={showAllClients}
+                onShowAll={() => setShowAllClients(true)}
+              />
             ) : (
-              <div className="overflow-x-auto">
-                <table className="w-full text-sm">
-                  <thead className="border-b border-[color:var(--border-subtle)] bg-[color:var(--surface-page)] text-left font-mono text-[10px] uppercase tracking-wide text-[color:var(--text-tertiary)]">
-                    <tr>
-                      <th className="px-4 py-2.5">Vence</th>
-                      <th className="px-3 py-2.5">Obligación</th>
-                      <th className="px-3 py-2.5">Proveedor</th>
-                      <th className="px-3 py-2.5">Institución</th>
-                      <th className="px-3 py-2.5 text-right">Abrir</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {radar.upcoming.map((item, i) => {
-                      const tone = dueTone(item.due_in_days);
-                      return (
-                        <tr
-                          key={`${item.vendor_id}-${item.period_key}-${item.title}-${i}`}
-                          className="border-b border-[color:var(--border-subtle)] last:border-0 hover:bg-[color:var(--surface-hover)]"
-                        >
-                          <td className="px-4 py-2.5">
-                            <Badge variant={tone.variant} className="whitespace-nowrap">
-                              {dueLabel(item.due_in_days)}
-                            </Badge>
-                          </td>
-                          <td className="px-3 py-2.5 text-[color:var(--text-primary)]">
-                            {item.title}
-                          </td>
-                          <td className="px-3 py-2.5">
-                            <Link
-                              href={`/admin/vendors/${item.vendor_id}`}
-                              className="text-[color:var(--text-link)] hover:underline"
-                            >
-                              {item.vendor_name}
-                            </Link>
-                          </td>
-                          <td className="px-3 py-2.5">
-                            <Badge variant="outline">
-                              {INSTITUTION_LABELS[item.institution] ?? item.institution}
-                            </Badge>
-                          </td>
-                          <td className="px-3 py-2.5 text-right">
-                            <Link
-                              href={`/admin/vendors/${item.vendor_id}`}
-                              aria-label={`Abrir ${item.vendor_name}`}
-                              className="inline-flex items-center justify-center rounded-sm p-1 text-[color:var(--text-tertiary)] hover:bg-[color:var(--surface-hover)] hover:text-[color:var(--text-primary)]"
-                            >
-                              <ArrowRight className="h-4 w-4" weight="bold" aria-hidden="true" />
-                            </Link>
-                          </td>
-                        </tr>
-                      );
-                    })}
-                  </tbody>
-                </table>
-              </div>
+              <>
+                <ComplianceMatrix
+                  rows={portfolioRows}
+                  cells={portfolioCells}
+                  currentMonth={today.getFullYear() === year ? currentMonth : null}
+                  rowHeader="Cliente"
+                  selected={{ rowId: null, month: selectedMonth }}
+                  onSelectCell={(clientId, month) => enterClient(clientId, month)}
+                  onSelectMonth={setSelectedMonth}
+                  onSelectRow={(clientId) => enterClient(clientId)}
+                />
+                <PaginationFooter
+                  shown={portfolioRows.length}
+                  filtered={sortedClients.length}
+                  total={overview.clients_total ?? sortedClients.length}
+                  onMore={() => setRowLimit((n) => n + ROW_PAGE)}
+                />
+              </>
             )}
           </Surface>
 
-          {radar.truncated ? (
-            <p className="text-[11px] text-[color:var(--text-tertiary)]">
-              Mostrando los proveedores más relevantes; el portafolio excede el
-              límite de escaneo del radar.
-            </p>
-          ) : null}
-
-          {/* ─── Year catalog (secondary reference) ──────────────── */}
-          <section className="rounded-lg border border-[color:var(--border-default)] bg-[color:var(--surface-raised)] shadow-xs">
-            <button
-              type="button"
-              onClick={() => setShowCatalog((v) => !v)}
-              aria-expanded={showCatalog}
-              className="flex w-full items-center justify-between px-5 py-3.5 text-left"
-            >
-              <div>
-                <h3 className="text-[13px] font-semibold uppercase tracking-wide text-[color:var(--text-primary)]">
-                  Catálogo regulatorio {calendar.year} (referencia)
-                </h3>
-                <p className="mt-0.5 text-[11px] text-[color:var(--text-tertiary)]">
-                  Distribución mensual esperada del catálogo — útil para
-                  confirmar que el año está bien sembrado.
-                </p>
-              </div>
-              <span className="font-mono text-[10px] uppercase tracking-wide text-[color:var(--text-tertiary)]">
-                {showCatalog ? "Ocultar" : "Mostrar"}
-              </span>
-            </button>
-            {showCatalog ? (
-              <div className="space-y-5 border-t border-[color:var(--border-subtle)] p-5">
-                <MetadataStrip
-                  items={[
-                    {
-                      label: "Esperadas",
-                      value: totalExpected.toString(),
-                      mono: true,
-                    },
-                    {
-                      label: "Periodos cargados",
-                      value: periods.length.toString(),
-                      mono: true,
-                      tone: "teal",
-                    },
-                    {
-                      label: "Meses con datos",
-                      value: `${calendar.months.length}/12`,
-                      mono: true,
-                    },
-                    {
-                      label: "Año",
-                      value: `${calendar.year} · ${personaLabel(calendar.persona_type)}`,
-                    },
-                  ]}
-                />
-
-                <Surface
-                  title="Distribución mensual"
-                  description="Cuántas obligaciones esperan los proveedores por mes."
-                >
-                  <MiniBars data={expectedBars} height={120} showValues />
-                </Surface>
-
-                <Surface title="Detalle por mes" bodyClassName="p-0">
-                  <div className="overflow-x-auto">
-                    <table className="w-full text-sm">
-                      <thead className="border-b border-[color:var(--border-subtle)] bg-[color:var(--surface-page)] text-left font-mono text-[10px] uppercase tracking-wide text-[color:var(--text-tertiary)]">
-                        <tr>
-                          <th className="px-4 py-2.5">Mes</th>
-                          <th className="px-3 py-2.5 text-right">Esperadas</th>
-                          <th className="px-3 py-2.5">Por institución</th>
-                        </tr>
-                      </thead>
-                      <tbody>
-                        {calendar.months.map((m) => (
-                          <tr
-                            key={m.month}
-                            className="border-b border-[color:var(--border-subtle)] last:border-0 hover:bg-[color:var(--surface-hover)]"
-                          >
-                            <td className="px-4 py-2.5 font-medium text-[color:var(--text-primary)]">
-                              {MONTH_SHORT[m.month - 1]}
-                            </td>
-                            <td className="px-3 py-2.5 text-right font-mono tabular-nums">
-                              {m.expected_total}
-                            </td>
-                            <td className="px-3 py-2.5">
-                              {m.institutions.length === 0 ? (
-                                <span className="text-[color:var(--text-tertiary)]">—</span>
-                              ) : (
-                                <div className="flex flex-wrap gap-1.5">
-                                  {m.institutions.map((i) => (
-                                    <Badge key={i.institution} variant="outline">
-                                      {INSTITUTION_LABELS[i.institution] ?? i.institution}: {i.expected}
-                                    </Badge>
-                                  ))}
-                                </div>
-                              )}
-                            </td>
-                          </tr>
-                        ))}
-                      </tbody>
-                    </table>
-                  </div>
-                </Surface>
-
-                <div className="rounded-md border border-[color:var(--border-subtle)]">
-                  <button
-                    type="button"
-                    onClick={() => setShowPeriods((v) => !v)}
-                    aria-expanded={showPeriods}
-                    className="flex w-full items-center justify-between px-4 py-3 text-left"
-                  >
-                    <h4 className="text-[12px] font-semibold uppercase tracking-wide text-[color:var(--text-secondary)]">
-                      Periodos en BD (referencia técnica)
-                    </h4>
-                    <span className="font-mono text-[10px] uppercase tracking-wide text-[color:var(--text-tertiary)]">
-                      {showPeriods ? "Ocultar" : `Mostrar (${periods.length})`}
-                    </span>
-                  </button>
-                  {showPeriods ? (
-                    <div className="overflow-x-auto border-t border-[color:var(--border-subtle)]">
-                      <table className="w-full text-sm">
-                        <thead className="border-b border-[color:var(--border-subtle)] bg-[color:var(--surface-page)] text-left font-mono text-[10px] uppercase tracking-wide text-[color:var(--text-tertiary)]">
-                          <tr>
-                            <th className="px-4 py-2.5">Código</th>
-                            <th className="px-3 py-2.5">Period key</th>
-                            <th className="px-3 py-2.5">Tipo</th>
-                            <th className="px-3 py-2.5">Año</th>
-                            <th className="px-3 py-2.5">Mes</th>
-                          </tr>
-                        </thead>
-                        <tbody>
-                          {periods.map((p) => (
-                            <tr
-                              key={p.id}
-                              className="border-b border-[color:var(--border-subtle)] last:border-0 hover:bg-[color:var(--surface-hover)]"
-                            >
-                              <td className="px-4 py-2.5 font-mono text-[11px] text-[color:var(--text-secondary)]">
-                                {p.code}
-                              </td>
-                              <td className="px-3 py-2.5 font-mono text-[11px] text-[color:var(--text-secondary)]">
-                                {p.period_key ?? "—"}
-                              </td>
-                              <td className="px-3 py-2.5">
-                                <Badge variant="outline">{cadenceLabel(p.period_type)}</Badge>
-                              </td>
-                              <td className="px-3 py-2.5 font-mono tabular-nums">
-                                {p.year ?? "—"}
-                              </td>
-                              <td className="px-3 py-2.5 font-mono tabular-nums">
-                                {p.month ?? "—"}
-                              </td>
-                            </tr>
-                          ))}
-                          {periods.length === 0 ? (
-                            <tr>
-                              <td
-                                colSpan={5}
-                                className="px-3 py-6 text-center text-xs text-[color:var(--text-tertiary)]"
-                              >
-                                Sin periodos para el año seleccionado.
-                              </td>
-                            </tr>
-                          ) : null}
-                        </tbody>
-                      </table>
-                    </div>
-                  ) : null}
-                </div>
-              </div>
-            ) : null}
-          </section>
+          <MonthSummary
+            month={selectedMonth}
+            year={year}
+            status={monthStatus}
+            clientsThisMonth={clientsThisMonth}
+            onPickClient={(id) => enterClient(id, selectedMonth)}
+          />
         </div>
       )}
     </AdminShell>
   );
 }
 
+function rowSubtitle(r: AdminCalendarRow): string {
+  if (r.overdue_count > 0) return `${r.compliance_pct}% · ${r.overdue_count} vencido`;
+  if (r.due_soon_count > 0)
+    return `${r.compliance_pct}% · ${r.due_soon_count} por vencer`;
+  return `${r.compliance_pct}% al día`;
+}
+
+// ─── Year picker ────────────────────────────────────────────────
+
+function YearPicker({ year, onYear }: { year: number; onYear: (y: number) => void }) {
+  return (
+    <label className="flex items-center gap-2 rounded-md border border-[color:var(--border-default)] bg-[color:var(--surface-raised)] px-3 py-1 text-xs">
+      <CalendarBlank
+        className="h-3.5 w-3.5 text-[color:var(--text-secondary)]"
+        weight="bold"
+        aria-hidden="true"
+      />
+      <span className="font-mono text-[10px] uppercase tracking-wide text-[color:var(--text-tertiary)]">
+        Año
+      </span>
+      <Input
+        type="number"
+        min={2021}
+        max={2030}
+        value={year}
+        onChange={(e) => onYear(Number(e.target.value))}
+        className="h-7 w-20 border-0 bg-transparent p-0 font-mono text-sm font-semibold focus-visible:ring-0"
+      />
+    </label>
+  );
+}
+
+// ─── Client picker (jump straight to a client) ──────────────────
+
+function ClientPicker({
+  clients,
+  onPick,
+}: {
+  clients: AdminCalendarRow[];
+  onPick: (id: string) => void;
+}) {
+  const [q, setQ] = useState("");
+  const [open, setOpen] = useState(false);
+  const matches = useMemo(() => {
+    const needle = q.trim().toLowerCase();
+    const base = needle
+      ? clients.filter((c) => c.name.toLowerCase().includes(needle))
+      : clients;
+    return base.slice(0, 8);
+  }, [clients, q]);
+
+  return (
+    <div className="relative">
+      <div className="flex items-center gap-1.5 rounded-md border border-[color:var(--border-default)] bg-[color:var(--surface-raised)] px-2.5 py-1.5">
+        <MagnifyingGlass
+          className="h-3.5 w-3.5 text-[color:var(--text-tertiary)]"
+          weight="bold"
+          aria-hidden="true"
+        />
+        <input
+          type="text"
+          value={q}
+          placeholder="Ir a un cliente…"
+          aria-label="Buscar cliente"
+          onChange={(e) => {
+            setQ(e.target.value);
+            setOpen(true);
+          }}
+          onFocus={() => setOpen(true)}
+          onBlur={() => setTimeout(() => setOpen(false), 120)}
+          className="w-40 bg-transparent text-xs text-[color:var(--text-primary)] outline-none placeholder:text-[color:var(--text-tertiary)]"
+        />
+      </div>
+      {open && matches.length > 0 ? (
+        <ul className="absolute right-0 z-20 mt-1 max-h-72 w-64 overflow-auto rounded-md border border-[color:var(--border-default)] bg-[color:var(--surface-raised)] py-1 shadow-[var(--shadow-md)]">
+          {matches.map((c) => (
+            <li key={c.id}>
+              <button
+                type="button"
+                onMouseDown={() => onPick(c.id)}
+                className="flex w-full items-center gap-2 px-3 py-1.5 text-left text-xs hover:bg-[color:var(--surface-hover)]"
+              >
+                <span
+                  aria-hidden="true"
+                  className={"h-2 w-2 shrink-0 rounded-full " + dotFor(c.semaphore_level)}
+                />
+                <span className="min-w-0 flex-1 truncate text-[color:var(--text-primary)]">
+                  {c.name}
+                </span>
+                <span className="font-mono text-[10px] tabular-nums text-[color:var(--text-tertiary)]">
+                  {c.compliance_pct}%
+                </span>
+              </button>
+            </li>
+          ))}
+        </ul>
+      ) : null}
+    </div>
+  );
+}
+
+function dotFor(level: string): string {
+  return SEMAPHORE_DOT[level as "red" | "yellow" | "green"] ?? SEMAPHORE_DOT.yellow;
+}
+
+function ScopeToggle({
+  showAll,
+  hiddenGreen,
+  onToggle,
+}: {
+  showAll: boolean;
+  hiddenGreen: number;
+  onToggle: () => void;
+}) {
+  return (
+    <button
+      type="button"
+      onClick={onToggle}
+      aria-pressed={!showAll}
+      className="inline-flex items-center gap-1.5 rounded-full border border-[color:var(--border-default)] bg-[color:var(--surface-raised)] px-3 py-1.5 text-xs font-medium text-[color:var(--text-secondary)] transition-colors hover:bg-[color:var(--surface-hover)]"
+    >
+      {showAll
+        ? "Mostrando todos los clientes"
+        : `Solo en riesgo${hiddenGreen ? ` · ${hiddenGreen} al día ocultos` : ""}`}
+    </button>
+  );
+}
+
+function PaginationFooter({
+  shown,
+  filtered,
+  total,
+  onMore,
+}: {
+  shown: number;
+  filtered: number;
+  total: number;
+  onMore: () => void;
+}) {
+  return (
+    <div className="mt-3 flex items-center justify-between gap-3 border-t border-[color:var(--border-subtle)] pt-3">
+      <p className="text-[11px] text-[color:var(--text-tertiary)]">
+        Mostrando {shown} de {filtered}
+        {filtered !== total ? ` (${total} en total)` : ""}
+      </p>
+      {shown < filtered ? (
+        <button
+          type="button"
+          onClick={onMore}
+          className="text-xs font-medium text-[color:var(--text-brand)] hover:underline"
+        >
+          Mostrar más
+        </button>
+      ) : null}
+    </div>
+  );
+}
+
+// ─── Triage band ────────────────────────────────────────────────
+
+function TriageBand({
+  overview,
+  rollup,
+}: {
+  overview: AdminCalendarGrid;
+  rollup: AdminRollup;
+}) {
+  const slaAtRisk =
+    rollup.queue.age_buckets.over_72h + rollup.queue.age_buckets.over_7d;
+  return (
+    <div>
+      <p className="mb-2 font-mono text-[10px] uppercase tracking-wide text-[color:var(--text-tertiary)]">
+        En la cartera
+      </p>
+      <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
+        <TriageTile value={overview.triage.overdue_total} label="Vencido (año)" tone="error" icon={WarningOctagon} />
+        <TriageTile value={overview.triage.due_7d_total} label="Vence ≤ 7 días" tone="warning" />
+        <TriageTile
+          value={slaAtRisk}
+          label="SLA revisión > 72 h"
+          tone="neutral"
+          icon={ClipboardText}
+          href="/admin/reviewer"
+        />
+        <TriageTile
+          value={rollup.inbox.correction_requests_pending}
+          label="Correcciones"
+          tone="neutral"
+          icon={PencilSimpleLine}
+          href="/admin/correction-requests"
+        />
+      </div>
+    </div>
+  );
+}
+
+const TRIAGE_TONE: Record<string, string> = {
+  error: "text-[color:var(--status-error-text)]",
+  warning: "text-[color:var(--status-warning-text)]",
+  neutral: "text-[color:var(--text-primary)]",
+};
+
+function TriageTile({
+  value,
+  label,
+  tone,
+  icon: Icon,
+  href,
+}: {
+  value: number;
+  label: string;
+  tone: "error" | "warning" | "neutral";
+  icon?: typeof WarningOctagon;
+  href?: string;
+}) {
+  const body = (
+    <>
+      <p
+        className={
+          "font-mono text-3xl font-semibold tabular-nums leading-none " +
+          (value > 0 ? TRIAGE_TONE[tone] : "text-[color:var(--text-tertiary)]")
+        }
+      >
+        {value}
+      </p>
+      <p className="mt-1.5 inline-flex items-center gap-1 text-[12px] text-[color:var(--text-secondary)]">
+        {Icon ? <Icon className="h-3.5 w-3.5" weight="bold" aria-hidden="true" /> : null}
+        {label}
+        {href ? <ArrowRight className="h-3 w-3 opacity-60" weight="bold" aria-hidden="true" /> : null}
+      </p>
+    </>
+  );
+  const className =
+    "block rounded-lg border border-[color:var(--border-default)] bg-[color:var(--surface-raised)] px-4 py-3.5 text-left";
+  return href ? (
+    <Link href={href} className={className + " transition-colors hover:bg-[color:var(--surface-hover)]"}>
+      {body}
+    </Link>
+  ) : (
+    <div className={className}>{body}</div>
+  );
+}
+
+// ─── Forecast wave strip ────────────────────────────────────────
+
+function ForecastWaveStrip({
+  overview,
+  currentMonth,
+  selectedMonth,
+  onSelectMonth,
+}: {
+  overview: AdminCalendarGrid;
+  currentMonth: number | null;
+  selectedMonth: number | null;
+  onSelectMonth: (month: number) => void;
+}) {
+  const max = Math.max(1, ...overview.forecast.map((f) => f.total));
+  return (
+    <Surface
+      title="Onda de carga del año"
+      description="Obligaciones esperadas por mes en toda la cartera. Toca un mes para ver su resumen."
+      bodyClassName="p-4"
+    >
+      <div className="flex items-end gap-1.5" style={{ height: 96 }}>
+        {overview.forecast.map((f) => {
+          const isCurrent = currentMonth === f.month;
+          const isSelected = selectedMonth === f.month;
+          const h = f.total === 0 ? 3 : Math.round(12 + (f.total / max) * 72);
+          const insts = Object.entries(f.by_institution)
+            .map(([k, v]) => `${k.toUpperCase()}: ${v}`)
+            .join(" · ");
+          return (
+            <button
+              key={f.month}
+              type="button"
+              onClick={() => onSelectMonth(f.month)}
+              aria-pressed={isSelected}
+              title={`${MONTH_LABELS_ES[f.month]}: ${f.total} esperadas${insts ? ` · ${insts}` : ""}`}
+              className="group flex flex-1 flex-col items-center justify-end gap-1 rounded-md px-0.5 py-1 hover:bg-[color:var(--surface-hover)] focus:outline-none focus-visible:ring-2 focus-visible:ring-[color:var(--border-focus)]"
+            >
+              <span className="font-mono text-[9px] tabular-nums text-[color:var(--text-tertiary)]">
+                {f.total || ""}
+              </span>
+              <span
+                aria-hidden="true"
+                style={{ height: h }}
+                className={
+                  "w-full max-w-[26px] rounded-sm transition-colors motion-reduce:transition-none " +
+                  (isSelected
+                    ? "bg-[color:var(--interactive-primary)]"
+                    : isCurrent
+                      ? "bg-[color:var(--text-secondary)]"
+                      : "bg-[color:var(--border-strong)] group-hover:bg-[color:var(--text-tertiary)]")
+                }
+              />
+              <span
+                className={
+                  "text-[10px] font-medium uppercase tracking-wide " +
+                  (isCurrent ? "text-[color:var(--text-brand)]" : "text-[color:var(--text-tertiary)]")
+                }
+              >
+                {MONTH_LABELS_SHORT_ES[f.month - 1]}
+              </span>
+            </button>
+          );
+        })}
+      </div>
+    </Surface>
+  );
+}
+
+// ─── Month summary (gap + who's in this month) ──────────────────
+
+function MonthSummary({
+  month,
+  year,
+  status,
+  clientsThisMonth,
+  onPickClient,
+}: {
+  month: number;
+  year: number;
+  status: AdminCalendarMonthStatus | null;
+  clientsThisMonth: {
+    client: AdminCalendarRow | undefined;
+    count: number;
+    worstRisk: CalendarRisk;
+  }[];
+  onPickClient: (id: string) => void;
+}) {
+  const expected = status?.expected ?? 0;
+  const delivered = status?.delivered ?? 0;
+  const outstanding = expected - delivered;
+  const institutions = status
+    ? Object.entries(status.by_institution).sort((a, b) => b[1].expected - a[1].expected)
+    : [];
+
+  return (
+    <div id="admin-calendar-detail" className="scroll-mt-4">
+      <Surface
+        title={`${MONTH_LABELS_ES[month]} ${year} · resumen de la cartera`}
+        description="Esperadas vs. entregadas este mes. Entra a un cliente para ver sus obligaciones."
+        bodyClassName="p-4 sm:p-5"
+      >
+        {expected === 0 ? (
+          <p className="px-1 py-6 text-center text-sm text-[color:var(--text-secondary)]">
+            Sin obligaciones en {MONTH_LABELS_ES[month]}.
+          </p>
+        ) : (
+          <div className="space-y-5">
+            <div className="grid grid-cols-3 gap-3">
+              <SummaryStat label="Esperadas" value={expected} tone="neutral" />
+              <SummaryStat label="Entregadas" value={delivered} tone="success" />
+              <SummaryStat label="Pendientes" value={outstanding} tone={outstanding > 0 ? "warning" : "neutral"} />
+            </div>
+
+            {institutions.length > 0 ? (
+              <div className="space-y-2">
+                <p className="font-mono text-[10px] uppercase tracking-wide text-[color:var(--text-tertiary)]">
+                  Por institución
+                </p>
+                {institutions.map(([inst, v]) => {
+                  const pct = v.expected ? Math.round((v.delivered / v.expected) * 100) : 0;
+                  return (
+                    <div key={inst} className="flex items-center gap-3">
+                      <span className="w-28 shrink-0 text-xs text-[color:var(--text-secondary)]">
+                        {INSTITUTION_LABELS[inst] ?? inst}
+                      </span>
+                      <div className="h-2 flex-1 overflow-hidden rounded-full bg-[color:var(--surface-page)]">
+                        <div
+                          className="h-full rounded-full bg-[color:var(--status-success-text)]"
+                          style={{ width: `${pct}%` }}
+                        />
+                      </div>
+                      <span className="w-20 shrink-0 text-right font-mono text-[11px] tabular-nums text-[color:var(--text-tertiary)]">
+                        {v.delivered}/{v.expected}
+                      </span>
+                    </div>
+                  );
+                })}
+              </div>
+            ) : null}
+
+            {clientsThisMonth.length > 0 ? (
+              <div className="space-y-2 border-t border-[color:var(--border-subtle)] pt-4">
+                <p className="font-mono text-[10px] uppercase tracking-wide text-[color:var(--text-tertiary)]">
+                  Clientes con obligaciones este mes ({clientsThisMonth.length})
+                </p>
+                <ul className="flex flex-wrap gap-2">
+                  {clientsThisMonth.map(({ client, count }) =>
+                    client ? (
+                      <li key={client.id}>
+                        <button
+                          type="button"
+                          onClick={() => onPickClient(client.id)}
+                          className="inline-flex items-center gap-2 rounded-full border border-[color:var(--border-default)] bg-[color:var(--surface-raised)] px-3 py-1.5 text-xs hover:bg-[color:var(--surface-hover)]"
+                        >
+                          <span aria-hidden="true" className={"h-2 w-2 shrink-0 rounded-full " + dotFor(client.semaphore_level)} />
+                          <span className="max-w-[180px] truncate text-[color:var(--text-primary)]">
+                            {client.name}
+                          </span>
+                          <span className="font-mono text-[10px] tabular-nums text-[color:var(--text-tertiary)]">
+                            {count}
+                          </span>
+                          <ArrowRight className="h-3 w-3 text-[color:var(--text-tertiary)]" weight="bold" aria-hidden="true" />
+                        </button>
+                      </li>
+                    ) : null,
+                  )}
+                </ul>
+              </div>
+            ) : null}
+          </div>
+        )}
+      </Surface>
+    </div>
+  );
+}
+
+function SummaryStat({
+  label,
+  value,
+  tone,
+}: {
+  label: string;
+  value: number;
+  tone: "success" | "warning" | "neutral";
+}) {
+  return (
+    <div className="rounded-md bg-[color:var(--surface-page)] px-4 py-3">
+      <p className={"font-mono text-2xl font-semibold tabular-nums leading-none " + (TRIAGE_TONE[tone] ?? "")}>
+        {value}
+      </p>
+      <p className="mt-1 text-[11px] text-[color:var(--text-secondary)]">{label}</p>
+    </div>
+  );
+}
+
+// ─── Obligation detail (one client) ─────────────────────────────
+
+function ObligationDetail({
+  title,
+  obligations,
+  today,
+}: {
+  title: string;
+  obligations: AdminCalendarObligation[];
+  today: Date;
+}) {
+  const groups = useMemo(() => {
+    const byVendor = new Map<string, { vendorName: string; items: AdminCalendarObligation[] }>();
+    for (const o of obligations) {
+      const g = byVendor.get(o.vendor_id) ?? { vendorName: o.vendor_name, items: [] };
+      g.items.push(o);
+      byVendor.set(o.vendor_id, g);
+    }
+    const worstOf = (items: AdminCalendarObligation[]) =>
+      Math.min(...items.map((i) => RISK_ORDER[i.risk_level as CalendarRisk] ?? 9));
+    return [...byVendor.values()].sort((a, b) => worstOf(a.items) - worstOf(b.items));
+  }, [obligations]);
+
+  return (
+    <Surface bodyClassName="p-4 sm:p-5">
+      <div className="mb-4 border-b border-[color:var(--border-subtle)] pb-3">
+        <p className="text-sm font-semibold text-[color:var(--text-primary)]">{title}</p>
+        <p className="text-xs text-[color:var(--text-tertiary)]">
+          {obligations.length} {obligations.length === 1 ? "obligación" : "obligaciones"}
+          {groups.length ? ` · ${groups.length} ${groups.length === 1 ? "proveedor" : "proveedores"}` : ""}
+        </p>
+      </div>
+      {groups.length === 0 ? (
+        <p className="px-1 py-6 text-center text-sm text-[color:var(--text-secondary)]">
+          Sin obligaciones en este mes para la selección.
+        </p>
+      ) : (
+        <div className="space-y-5">
+          {groups.map((g) => (
+            <section key={g.vendorName}>
+              <h3 className="mb-2 flex items-center gap-2 text-sm font-semibold text-[color:var(--text-primary)]">
+                <span aria-hidden="true" className={"h-2.5 w-2.5 shrink-0 rounded-full " + SEMAPHORE_DOT[worstDot(g.items)]} />
+                {g.vendorName}
+                <span className="font-mono text-[11px] font-normal tabular-nums text-[color:var(--text-tertiary)]">
+                  {g.items.length}
+                </span>
+              </h3>
+              <ul className="space-y-2">
+                {g.items
+                  .slice()
+                  .sort(
+                    (a, b) =>
+                      (RISK_ORDER[a.risk_level as CalendarRisk] ?? 9) -
+                      (RISK_ORDER[b.risk_level as CalendarRisk] ?? 9),
+                  )
+                  .map((o) => (
+                    <AdminObligationBlock
+                      key={`${o.vendor_id}-${o.requirement_name}-${o.period_key ?? ""}`}
+                      obligation={o}
+                      today={today}
+                    />
+                  ))}
+              </ul>
+            </section>
+          ))}
+        </div>
+      )}
+    </Surface>
+  );
+}
+
+function worstDot(items: AdminCalendarObligation[]): "red" | "yellow" | "green" {
+  const worst = Math.min(...items.map((i) => RISK_ORDER[i.risk_level as CalendarRisk] ?? 9));
+  if (worst <= 1) return "red";
+  if (worst <= 2) return "yellow";
+  return "green";
+}
+
+// ─── Empty + loading states ─────────────────────────────────────
+
+function EmptyGrid({ showAll, onShowAll }: { showAll: boolean; onShowAll: () => void }) {
+  return (
+    <div className="flex flex-col items-center gap-2 px-4 py-12 text-center">
+      <p className="text-[13px] font-medium text-[color:var(--text-primary)]">
+        {showAll ? "Sin clientes en la cartera" : "Ningún cliente en riesgo"}
+      </p>
+      <p className="max-w-md text-[12px] text-[color:var(--text-secondary)]">
+        {showAll
+          ? "Aún no hay clientes con proveedores activos."
+          : "Toda la cartera está al día este año."}
+      </p>
+      {!showAll ? (
+        <button
+          type="button"
+          onClick={onShowAll}
+          className="mt-1 text-xs font-medium text-[color:var(--text-brand)] hover:underline"
+        >
+          Mostrar todos los clientes
+        </button>
+      ) : null}
+    </div>
+  );
+}
+
 function CalendarSkeleton() {
   return (
-    <div className="space-y-5" aria-busy="true" aria-live="polite">
+    <div className="space-y-6" aria-busy="true" aria-live="polite">
       <span className="sr-only">Cargando calendario operativo…</span>
-      <Skeleton className="h-20 w-full rounded-md" />
-      <Skeleton className="h-64 w-full rounded-lg" />
-      <Skeleton className="h-12 w-full rounded-lg" />
+      <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
+        {Array.from({ length: 4 }, (_, i) => (
+          <Skeleton key={i} className="h-20 w-full rounded-lg" />
+        ))}
+      </div>
+      <Skeleton className="h-28 w-full rounded-lg" />
+      <Skeleton className="h-72 w-full rounded-lg" />
+      <Skeleton className="h-40 w-full rounded-lg" />
     </div>
   );
 }

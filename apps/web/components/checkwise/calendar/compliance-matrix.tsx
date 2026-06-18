@@ -3,10 +3,6 @@
 import { useState } from "react";
 import { CaretDown, CaretRight } from "@phosphor-icons/react";
 
-import type {
-  ClientCalendarItem,
-  ClientCalendarProvider,
-} from "@/lib/api/client";
 import { MONTH_LABELS_ES, MONTH_LABELS_SHORT_ES } from "@/lib/api/portal";
 
 import {
@@ -15,20 +11,37 @@ import {
   RISK_LABEL,
   SEMAPHORE_DOT,
   riskBucket,
-  worstRisk,
+  type CalendarRisk,
   type RiskBucket,
-} from "./client-calendar-shared";
+} from "./calendar-shared";
 
 /**
- * The client calendar itself: providers (rows, worst-first) × 12 months.
- * The meaningful unit of REPSE time is the month (≈every deadline lands on
- * the 17th), so the grid IS the calendar. Tap a cell for one provider's
- * month, or a month header for the whole portfolio that month; either
- * selection renders in detail below, grouped by provider.
+ * A rows×12-months compliance heatmap — the shared calendar grid. Rows are
+ * an abstract entity (providers for the client calendar, clients for the
+ * admin cross-portfolio grid); each cell carries a precomputed count + worst
+ * risk, so the matrix is portal-agnostic. The month is the meaningful unit of
+ * REPSE time (≈every deadline lands on the 17th), so the grid IS the calendar.
  *
- * Desktop shows the grid; below lg each provider becomes a collapsible row
- * of its active months, since a 13-column grid can't breathe on a phone.
+ * Tap a cell to select one row's month, a month header for that month across
+ * every row, or — when ``onSelectRow`` is given — a row label to drill into
+ * it. Desktop shows the grid; below lg each row becomes a collapsible list of
+ * its active months, since a 13-column grid can't breathe on a phone.
  */
+
+export type ComplianceMatrixRow = {
+  id: string;
+  name: string;
+  semaphore_level: string;
+  /** Optional muted second line, e.g. "82% al día" or a vendor count. */
+  subtitle?: string;
+};
+
+export type ComplianceMatrixCell = { count: number; worstRisk: CalendarRisk };
+
+export type ComplianceMatrixSelection = {
+  rowId: string | null;
+  month: number;
+} | null;
 
 const LEGEND: { bucket: RiskBucket; label: string }[] = [
   { bucket: "critical", label: "Vencido / por corregir" },
@@ -38,32 +51,39 @@ const LEGEND: { bucket: RiskBucket; label: string }[] = [
   { bucket: "ok", label: "Al día" },
 ];
 
-type Selected = { month: number; vendorId: string | null } | null;
+const SEMAPHORE_DOT_FALLBACK = SEMAPHORE_DOT.yellow;
 
-export function PortfolioMatrix({
-  providers,
-  itemsByCell,
+function dotClass(level: string): string {
+  return SEMAPHORE_DOT[level as "red" | "yellow" | "green"] ?? SEMAPHORE_DOT_FALLBACK;
+}
+
+export function ComplianceMatrix({
+  rows,
+  cells,
   currentMonth,
   selected,
   onSelectCell,
   onSelectMonth,
+  onSelectRow,
+  rowHeader = "Proveedor",
 }: {
-  providers: ClientCalendarProvider[];
-  /** key = `${vendor_id}-${month}` (month 1-12). */
-  itemsByCell: Map<string, ClientCalendarItem[]>;
+  rows: ComplianceMatrixRow[];
+  /** key = `${rowId}-${month}` (month 1-12). */
+  cells: Map<string, ComplianceMatrixCell>;
   currentMonth: number | null;
-  selected: Selected;
-  onSelectCell: (vendorId: string, month: number) => void;
+  selected: ComplianceMatrixSelection;
+  onSelectCell: (rowId: string, month: number) => void;
   onSelectMonth: (month: number) => void;
+  /** When set, the row label becomes a drill-in button. */
+  onSelectRow?: (rowId: string) => void;
+  rowHeader?: string;
 }) {
-  if (providers.length === 0) return null;
+  if (rows.length === 0) return null;
 
   const monthTotals = Array.from({ length: 12 }, (_, i) => {
     const month = i + 1;
     let count = 0;
-    for (const p of providers) {
-      count += itemsByCell.get(`${p.vendor_id}-${month}`)?.length ?? 0;
-    }
+    for (const r of rows) count += cells.get(`${r.id}-${month}`)?.count ?? 0;
     return count;
   });
 
@@ -84,13 +104,13 @@ export function PortfolioMatrix({
                 scope="col"
                 className="sticky left-0 z-10 bg-[color:var(--surface-raised)] px-3 py-2 text-left text-xs font-semibold text-[color:var(--text-secondary)]"
               >
-                Proveedor
+                {rowHeader}
               </th>
               {MONTH_LABELS_SHORT_ES.map((m, idx) => {
                 const month = idx + 1;
                 const isCurrent = currentMonth === month;
                 const isSelMonth =
-                  selected?.vendorId === null && selected?.month === month;
+                  selected?.rowId === null && selected?.month === month;
                 const total = monthTotals[idx];
                 return (
                   <th key={m} scope="col" className="px-1 pb-1.5 pt-1">
@@ -98,7 +118,7 @@ export function PortfolioMatrix({
                       type="button"
                       onClick={() => onSelectMonth(month)}
                       aria-pressed={isSelMonth}
-                      title={`Ver ${MONTH_LABELS_ES[month]} en todo el portafolio`}
+                      title={`Ver ${MONTH_LABELS_ES[month]} en todas las filas`}
                       className={
                         "flex w-full flex-col items-center rounded-md px-1 py-1 transition-colors hover:bg-[color:var(--surface-hover)] " +
                         (isSelMonth ? "bg-[color:var(--surface-selected)] " : "")
@@ -124,49 +144,31 @@ export function PortfolioMatrix({
             </tr>
           </thead>
           <tbody>
-            {providers.map((p) => (
+            {rows.map((row) => (
               <tr
-                key={p.vendor_id}
+                key={row.id}
                 className="border-b border-[color:var(--border-subtle)] last:border-0"
               >
                 <th
                   scope="row"
                   className="sticky left-0 z-10 bg-[color:var(--surface-raised)] px-3 py-2 text-left align-middle"
                 >
-                  <span className="flex items-center gap-2">
-                    <span
-                      aria-hidden="true"
-                      className={
-                        "h-2.5 w-2.5 shrink-0 rounded-full " +
-                        SEMAPHORE_DOT[p.semaphore_level]
-                      }
-                    />
-                    <span className="min-w-0">
-                      <span className="block truncate text-[13px] font-medium text-[color:var(--text-primary)]">
-                        {p.vendor_name}
-                      </span>
-                      <span className="font-mono text-[11px] tabular-nums text-[color:var(--text-tertiary)]">
-                        {p.compliance_pct}% al día
-                      </span>
-                    </span>
-                  </span>
+                  <RowLabel row={row} onSelectRow={onSelectRow} />
                 </th>
                 {Array.from({ length: 12 }, (_, monthIdx) => {
                   const month = monthIdx + 1;
-                  const cellItems =
-                    itemsByCell.get(`${p.vendor_id}-${month}`) ?? [];
+                  const cell = cells.get(`${row.id}-${month}`);
                   const isSel =
-                    selected?.vendorId === p.vendor_id &&
-                    selected?.month === month;
+                    selected?.rowId === row.id && selected?.month === month;
                   return (
                     <td key={month} className="p-1 align-middle">
                       <MatrixCell
-                        items={cellItems}
+                        cell={cell}
                         month={month}
-                        vendorName={p.vendor_name}
+                        rowName={row.name}
                         isCurrent={currentMonth === month}
                         isSelected={isSel}
-                        onClick={() => onSelectCell(p.vendor_id, month)}
+                        onClick={() => onSelectCell(row.id, month)}
                       />
                     </td>
                   );
@@ -194,15 +196,16 @@ export function PortfolioMatrix({
         </ul>
       </div>
 
-      {/* Mobile: per-provider accordion of active months */}
+      {/* Mobile: per-row accordion of active months */}
       <div className="space-y-2 lg:hidden">
-        {providers.map((p) => (
-          <ProviderMonthsAccordion
-            key={p.vendor_id}
-            provider={p}
-            itemsByCell={itemsByCell}
+        {rows.map((row) => (
+          <RowMonthsAccordion
+            key={row.id}
+            row={row}
+            cells={cells}
             selected={selected}
             onSelectCell={onSelectCell}
+            onSelectRow={onSelectRow}
           />
         ))}
       </div>
@@ -210,22 +213,60 @@ export function PortfolioMatrix({
   );
 }
 
+function RowLabel({
+  row,
+  onSelectRow,
+}: {
+  row: ComplianceMatrixRow;
+  onSelectRow?: (rowId: string) => void;
+}) {
+  const inner = (
+    <span className="flex items-center gap-2">
+      <span
+        aria-hidden="true"
+        className={"h-2.5 w-2.5 shrink-0 rounded-full " + dotClass(row.semaphore_level)}
+      />
+      <span className="min-w-0">
+        <span className="block truncate text-[13px] font-medium text-[color:var(--text-primary)]">
+          {row.name}
+        </span>
+        {row.subtitle ? (
+          <span className="font-mono text-[11px] tabular-nums text-[color:var(--text-tertiary)]">
+            {row.subtitle}
+          </span>
+        ) : null}
+      </span>
+    </span>
+  );
+  if (!onSelectRow) return inner;
+  return (
+    <button
+      type="button"
+      onClick={() => onSelectRow(row.id)}
+      title={`Ver el detalle de ${row.name}`}
+      className="-mx-1 flex w-full items-center rounded-md px-1 py-0.5 text-left transition-colors hover:bg-[color:var(--surface-hover)] focus:outline-none focus-visible:ring-2 focus-visible:ring-[color:var(--border-focus)]"
+    >
+      {inner}
+    </button>
+  );
+}
+
 function MatrixCell({
-  items,
+  cell,
   month,
-  vendorName,
+  rowName,
   isCurrent,
   isSelected,
   onClick,
 }: {
-  items: ClientCalendarItem[];
+  cell: ComplianceMatrixCell | undefined;
   month: number;
-  vendorName: string;
+  rowName: string;
   isCurrent: boolean;
   isSelected: boolean;
   onClick: () => void;
 }) {
-  if (items.length === 0) {
+  if (!cell || cell.count === 0) {
     return (
       <div
         aria-hidden="true"
@@ -240,16 +281,15 @@ function MatrixCell({
       />
     );
   }
-  const worst = worstRisk(items) ?? "on_track";
-  const bucket = riskBucket(worst);
-  const Icon = RISK_ICON[worst];
+  const bucket = riskBucket(cell.worstRisk);
+  const Icon = RISK_ICON[cell.worstRisk];
   return (
     <button
       type="button"
       onClick={onClick}
       aria-pressed={isSelected}
-      aria-label={`${vendorName}: ${items.length} ${items.length === 1 ? "obligación" : "obligaciones"} en ${MONTH_LABELS_ES[month]}, estado ${RISK_LABEL[worst]}. Ver detalle.`}
-      title={`${MONTH_LABELS_ES[month]} · ${RISK_LABEL[worst]} · ${items.length}`}
+      aria-label={`${rowName}: ${cell.count} ${cell.count === 1 ? "obligación" : "obligaciones"} en ${MONTH_LABELS_ES[month]}, estado ${RISK_LABEL[cell.worstRisk]}. Ver detalle.`}
+      title={`${MONTH_LABELS_ES[month]} · ${RISK_LABEL[cell.worstRisk]} · ${cell.count}`}
       className={
         "flex h-14 w-full flex-col items-center justify-center gap-0.5 rounded-md border transition-[transform,box-shadow] duration-150 ease-out hover:-translate-y-px hover:shadow-sm focus:outline-none focus-visible:ring-2 focus-visible:ring-[color:var(--border-focus)] " +
         BUCKET_CELL[bucket] +
@@ -262,28 +302,30 @@ function MatrixCell({
     >
       <Icon className="h-4 w-4 shrink-0" weight="bold" aria-hidden="true" />
       <span className="font-mono text-sm font-semibold leading-none tabular-nums">
-        {items.length}
+        {cell.count}
       </span>
     </button>
   );
 }
 
-function ProviderMonthsAccordion({
-  provider,
-  itemsByCell,
+function RowMonthsAccordion({
+  row,
+  cells,
   selected,
   onSelectCell,
+  onSelectRow,
 }: {
-  provider: ClientCalendarProvider;
-  itemsByCell: Map<string, ClientCalendarItem[]>;
-  selected: Selected;
-  onSelectCell: (vendorId: string, month: number) => void;
+  row: ComplianceMatrixRow;
+  cells: Map<string, ComplianceMatrixCell>;
+  selected: ComplianceMatrixSelection;
+  onSelectCell: (rowId: string, month: number) => void;
+  onSelectRow?: (rowId: string) => void;
 }) {
-  const [open, setOpen] = useState(provider.semaphore_level === "red");
-  const months: { month: number; items: ClientCalendarItem[] }[] = [];
+  const [open, setOpen] = useState(row.semaphore_level === "red");
+  const months: { month: number; cell: ComplianceMatrixCell }[] = [];
   for (let month = 1; month <= 12; month += 1) {
-    const items = itemsByCell.get(`${provider.vendor_id}-${month}`) ?? [];
-    if (items.length > 0) months.push({ month, items });
+    const cell = cells.get(`${row.id}-${month}`);
+    if (cell && cell.count > 0) months.push({ month, cell });
   }
   const Caret = open ? CaretDown : CaretRight;
   return (
@@ -301,34 +343,41 @@ function ProviderMonthsAccordion({
         />
         <span
           aria-hidden="true"
-          className={
-            "h-2.5 w-2.5 shrink-0 rounded-full " +
-            SEMAPHORE_DOT[provider.semaphore_level]
-          }
+          className={"h-2.5 w-2.5 shrink-0 rounded-full " + dotClass(row.semaphore_level)}
         />
         <span className="min-w-0 flex-1">
           <span className="block truncate text-[13px] font-medium text-[color:var(--text-primary)]">
-            {provider.vendor_name}
+            {row.name}
           </span>
           <span className="font-mono text-[10px] tabular-nums text-[color:var(--text-tertiary)]">
-            {provider.compliance_pct}% al día · {months.length}{" "}
+            {row.subtitle ? `${row.subtitle} · ` : ""}
+            {months.length}{" "}
             {months.length === 1 ? "mes con vencimientos" : "meses con vencimientos"}
           </span>
         </span>
       </button>
       {open ? (
         <ul className="divide-y divide-[color:var(--border-subtle)] border-t border-[color:var(--border-subtle)]">
-          {months.map(({ month, items }) => {
-            const worst = worstRisk(items) ?? "on_track";
-            const Icon = RISK_ICON[worst];
+          {onSelectRow ? (
+            <li>
+              <button
+                type="button"
+                onClick={() => onSelectRow(row.id)}
+                className="flex w-full items-center gap-2 px-4 py-2 text-left text-[12px] font-medium text-[color:var(--text-link)] hover:bg-[color:var(--surface-hover)]"
+              >
+                Ver detalle completo
+              </button>
+            </li>
+          ) : null}
+          {months.map(({ month, cell }) => {
+            const Icon = RISK_ICON[cell.worstRisk];
             const isSel =
-              selected?.vendorId === provider.vendor_id &&
-              selected?.month === month;
+              selected?.rowId === row.id && selected?.month === month;
             return (
               <li key={month}>
                 <button
                   type="button"
-                  onClick={() => onSelectCell(provider.vendor_id, month)}
+                  onClick={() => onSelectCell(row.id, month)}
                   aria-pressed={isSel}
                   className={
                     "flex w-full items-center gap-3 px-4 py-2.5 text-left hover:bg-[color:var(--surface-hover)] " +
@@ -341,14 +390,14 @@ function ProviderMonthsAccordion({
                   <span
                     className={
                       "inline-flex items-center gap-1 rounded-full border px-2 py-0.5 text-[11px] font-medium " +
-                      BUCKET_CELL[riskBucket(worst)]
+                      BUCKET_CELL[riskBucket(cell.worstRisk)]
                     }
                   >
                     <Icon className="h-3 w-3" weight="bold" aria-hidden="true" />
-                    {RISK_LABEL[worst]}
+                    {RISK_LABEL[cell.worstRisk]}
                   </span>
                   <span className="ml-auto font-mono text-[11px] tabular-nums text-[color:var(--text-secondary)]">
-                    {items.length}
+                    {cell.count}
                   </span>
                 </button>
               </li>

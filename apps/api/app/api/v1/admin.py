@@ -91,6 +91,7 @@ from app.services.auth import (
     generate_temp_password,
     hash_password,
 )
+from app.services.calendar_aggregate import aggregate_client_calendar
 from app.services.email_delivery import (
     send_owner_reset_temp_password_email,
     send_transactional_email,
@@ -3104,6 +3105,430 @@ def get_admin_calendar(
             for m in months.values()
         ],
     }
+
+
+# ---------------------------------------------------------------------------
+# Calendar grid (P0 rework) — the cross-portfolio, time-anchored calendar
+#
+# The radar above is a flat soonest-first list; the static ``/calendar``
+# distribution knows nothing about real provider state. This is the actual
+# calendar: every client's obligations placed on their authoritative month
+# and classified by risk, rolled up into a clients×12-months grid (drill a
+# client → its providers×12-months). It reuses ``aggregate_client_calendar``
+# (the same per-client batched pass ``/client/calendar`` uses), so it costs
+# order-of-clients batched queries — NOT the radar's per-vendor fan-out — and
+# the grid, the forecast strip and the client calendar can never disagree.
+# ---------------------------------------------------------------------------
+
+# Severity order mirrors ``client-calendar-shared.ts`` / ``_calendar_item_risk``
+# so a cell's worst-risk tint matches every other calendar surface.
+_CALENDAR_RISK_ORDER = {
+    "overdue": 0,
+    "action_required": 1,
+    "due_soon": 2,
+    "in_review": 3,
+    "upcoming": 4,
+    "on_track": 5,
+}
+_GRID_CLIENT_SCAN_CAP = 200
+
+
+def _worst_calendar_risk(risks: list[str]) -> str:
+    """Lowest-ordinal (most severe) risk in a set, defaulting to on_track."""
+    worst = "on_track"
+    for r in risks:
+        if _CALENDAR_RISK_ORDER.get(r, 9) < _CALENDAR_RISK_ORDER.get(worst, 9):
+            worst = r
+    return worst
+
+
+class AdminCalendarRow(BaseModel):
+    """A grid row — a client (top level) or a provider (drill level)."""
+
+    id: str
+    name: str
+    semaphore_level: str
+    compliance_pct: int
+    overdue_count: int
+    due_soon_count: int
+
+
+class AdminCalendarCell(BaseModel):
+    row_id: str
+    month: int
+    count: int
+    worst_risk: str
+    by_institution: dict[str, int]
+
+
+class AdminCalendarMonthForecast(BaseModel):
+    month: int
+    total: int
+    by_institution: dict[str, int]
+
+
+class AdminCalendarMonthStatus(BaseModel):
+    """Expected-vs-delivered gap for one month (the cheap month summary that
+    replaces dumping every obligation: the FE renders it instantly from the
+    overview without a per-month refetch)."""
+
+    month: int
+    expected: int
+    delivered: int
+    # institution -> {"expected": n, "delivered": n}
+    by_institution: dict[str, dict[str, int]]
+
+
+class AdminCalendarObligation(BaseModel):
+    client_id: str
+    client_name: str
+    vendor_id: str
+    vendor_name: str
+    requirement_name: str
+    institution: str
+    period_key: str | None
+    period_label: str
+    deadline_iso: str
+    due_month: int
+    due_in_days: int
+    status: str
+    risk_level: str
+
+
+class AdminCalendarTriage(BaseModel):
+    overdue_total: int
+    due_7d_total: int
+
+
+class AdminCalendarGridResponse(BaseModel):
+    as_of: str
+    year: int
+    level: str  # "clients" | "providers"
+    client_id: str | None
+    client_name: str | None
+    rows: list[AdminCalendarRow]
+    cells: list[AdminCalendarCell]
+    month_totals: list[int]
+    forecast: list[AdminCalendarMonthForecast]
+    # Per-month expected-vs-delivered gap. Lets the FE show a month summary
+    # WITHOUT fetching or rendering the whole portfolio's obligations — the
+    # detail rows load per-client on drill instead.
+    month_status: list[AdminCalendarMonthStatus]
+    triage: AdminCalendarTriage
+    # Populated for the detail panel: every obligation of the requested
+    # client (when ``client_id`` is set). The overview no longer returns the
+    # cross-portfolio month dump — detail loads per-client on selection.
+    obligations: list[AdminCalendarObligation]
+    # Total clients in the portfolio (>= clients_scanned when capped) so the
+    # FE can paginate / show "N of M".
+    clients_total: int
+    clients_scanned: int
+    truncated: bool
+
+
+def _due_in_days(deadline_iso: str, today: date) -> int:
+    try:
+        return (date.fromisoformat(deadline_iso) - today).days
+    except ValueError:
+        return 0
+
+
+def _month_status_from_obligations(obligations: list) -> list[AdminCalendarMonthStatus]:
+    """Tally per-month expected vs delivered (on_track) per institution."""
+    acc = {
+        m: {"expected": 0, "delivered": 0, "by_inst": {}} for m in range(1, 13)
+    }
+    for ob in obligations:
+        slot = acc[ob.due_month]
+        delivered = 1 if ob.risk_level == "on_track" else 0
+        slot["expected"] += 1
+        slot["delivered"] += delivered
+        inst = slot["by_inst"].setdefault(
+            ob.institution, {"expected": 0, "delivered": 0}
+        )
+        inst["expected"] += 1
+        inst["delivered"] += delivered
+    return [
+        AdminCalendarMonthStatus(
+            month=m,
+            expected=acc[m]["expected"],
+            delivered=acc[m]["delivered"],
+            by_institution=acc[m]["by_inst"],
+        )
+        for m in range(1, 13)
+    ]
+
+
+def _admin_obligation(
+    ob, *, client_id: str, client_name: str, today: date
+) -> AdminCalendarObligation:
+    return AdminCalendarObligation(
+        client_id=client_id,
+        client_name=client_name,
+        vendor_id=ob.vendor_id,
+        vendor_name=ob.vendor_name,
+        requirement_name=ob.requirement_name,
+        institution=ob.institution,
+        period_key=ob.period_key,
+        period_label=ob.period_label,
+        deadline_iso=ob.deadline_iso,
+        due_month=ob.due_month,
+        due_in_days=_due_in_days(ob.deadline_iso, today),
+        status=ob.status,
+        risk_level=ob.risk_level,
+    )
+
+
+def _cells_from_obligations(obligations: list, *, row_id_of) -> list[AdminCalendarCell]:
+    """Roll a flat obligation list into (row, month) cells.
+
+    ``row_id_of`` maps an obligation to its grid row id (client id at the top
+    level, vendor id on drill). Each cell carries the count, the worst risk
+    in it (the tint), and the per-institution breakdown.
+    """
+    acc: dict[tuple[str, int], dict] = {}
+    for ob in obligations:
+        key = (row_id_of(ob), ob.due_month)
+        cell = acc.get(key)
+        if cell is None:
+            cell = {"count": 0, "risks": [], "by_inst": {}}
+            acc[key] = cell
+        cell["count"] += 1
+        cell["risks"].append(ob.risk_level)
+        cell["by_inst"][ob.institution] = cell["by_inst"].get(ob.institution, 0) + 1
+    return [
+        AdminCalendarCell(
+            row_id=row_id,
+            month=month,
+            count=cell["count"],
+            worst_risk=_worst_calendar_risk(cell["risks"]),
+            by_institution=cell["by_inst"],
+        )
+        for (row_id, month), cell in acc.items()
+    ]
+
+
+@router.get("/calendar/grid", response_model=AdminCalendarGridResponse)
+def get_admin_calendar_grid(
+    db: DbSession,
+    current: AdminUser,
+    year: Annotated[int | None, Query(ge=MIN_YEAR, le=MAX_YEAR)] = None,
+    client_id: str | None = None,
+    month: Annotated[int | None, Query(ge=1, le=12)] = None,
+) -> AdminCalendarGridResponse:
+    """The cross-portfolio calendar grid.
+
+    Three modes off one route:
+
+    * no params — clients×months overview: one row per client, cells tinted
+      by the worst obligation risk due that month, plus the year's expected
+      load forecast and the overdue / ≤7-day triage counts. ``obligations``
+      empty (the cells render the grid; the detail panel loads on selection).
+    * ``month=M`` — same overview, plus every obligation due in month M across
+      the portfolio (the month-header detail panel).
+    * ``client_id=X`` — drill: that client's providers×months grid, plus all
+      of X's obligations so the panel can filter by cell/provider client-side.
+
+    Forecast volume and grid counts come from the SAME aggregate, so they can
+    never disagree; risk is the synthetic 17th-of-month convention the portals
+    already use, anchored to today (far-future cells show expected volume with
+    current-state risk).
+    """
+    _ = current
+    today = date.today()
+    target_year = year or today.year
+
+    # ---- Drill: one client's providers×months -------------------------
+    if client_id:
+        cl = db.get(Client, client_id)
+        if cl is None:
+            return AdminCalendarGridResponse(
+                as_of=today.isoformat(),
+                year=target_year,
+                level="providers",
+                client_id=client_id,
+                client_name=None,
+                rows=[],
+                cells=[],
+                month_totals=[0] * 12,
+                forecast=[
+                    AdminCalendarMonthForecast(month=m, total=0, by_institution={})
+                    for m in range(1, 13)
+                ],
+                month_status=_month_status_from_obligations([]),
+                triage=AdminCalendarTriage(overdue_total=0, due_7d_total=0),
+                obligations=[],
+                clients_total=0,
+                clients_scanned=0,
+                truncated=False,
+            )
+        agg = aggregate_client_calendar(
+            db, client_id=cl.id, year=target_year, today=today
+        )
+        rows = [
+            AdminCalendarRow(
+                id=p.vendor_id,
+                name=p.vendor_name,
+                semaphore_level=p.semaphore_level,
+                compliance_pct=p.compliance_pct,
+                overdue_count=p.overdue_count,
+                due_soon_count=p.due_soon_count,
+            )
+            for p in agg.providers
+        ]
+        cells = _cells_from_obligations(agg.obligations, row_id_of=lambda o: o.vendor_id)
+        month_totals = [0] * 12
+        inst_acc: dict[int, dict[str, int]] = {m: {} for m in range(1, 13)}
+        overdue_total = due_7d_total = 0
+        for ob in agg.obligations:
+            month_totals[ob.due_month - 1] += 1
+            inst = inst_acc[ob.due_month]
+            inst[ob.institution] = inst.get(ob.institution, 0) + 1
+            if ob.risk_level == "overdue":
+                overdue_total += 1
+            elif 0 <= _due_in_days(ob.deadline_iso, today) <= 7 and ob.risk_level != "on_track":
+                due_7d_total += 1
+        obligations = sorted(
+            (
+                _admin_obligation(
+                    ob, client_id=cl.id, client_name=cl.name, today=today
+                )
+                for ob in agg.obligations
+            ),
+            key=lambda o: (_CALENDAR_RISK_ORDER.get(o.risk_level, 9), o.deadline_iso),
+        )
+        return AdminCalendarGridResponse(
+            as_of=today.isoformat(),
+            year=target_year,
+            level="providers",
+            client_id=cl.id,
+            client_name=cl.name,
+            rows=rows,
+            cells=cells,
+            month_totals=month_totals,
+            forecast=[
+                AdminCalendarMonthForecast(
+                    month=m, total=month_totals[m - 1], by_institution=inst_acc[m]
+                )
+                for m in range(1, 13)
+            ],
+            month_status=_month_status_from_obligations(agg.obligations),
+            triage=AdminCalendarTriage(
+                overdue_total=overdue_total, due_7d_total=due_7d_total
+            ),
+            obligations=obligations,
+            clients_total=1,
+            clients_scanned=1,
+            truncated=False,
+        )
+
+    # ---- Overview: every client × months ------------------------------
+    clients = list(db.scalars(select(Client).order_by(Client.name.asc())))
+    truncated = len(clients) > _GRID_CLIENT_SCAN_CAP
+    scan = clients[:_GRID_CLIENT_SCAN_CAP]
+
+    rows: list[AdminCalendarRow] = []
+    cells: list[AdminCalendarCell] = []
+    month_totals = [0] * 12
+    inst_acc = {m: {} for m in range(1, 13)}
+    status_acc = {
+        m: {"expected": 0, "delivered": 0, "by_inst": {}} for m in range(1, 13)
+    }
+    overdue_total = due_7d_total = 0
+    month_obligations: list[AdminCalendarObligation] = []
+
+    for cl in scan:
+        agg = aggregate_client_calendar(
+            db, client_id=cl.id, year=target_year, today=today
+        )
+        # Client-level semáforo: worst provider level; mean provider pct (100
+        # when the client has no workspaces) — same convention as /rollup.
+        if agg.providers:
+            level = "green"
+            for p in agg.providers:
+                if p.semaphore_level == "red":
+                    level = "red"
+                    break
+                if p.semaphore_level == "yellow":
+                    level = "yellow"
+            compliance_pct = round(
+                sum(p.compliance_pct for p in agg.providers) / len(agg.providers)
+            )
+        else:
+            level = "green"
+            compliance_pct = 100
+        rows.append(
+            AdminCalendarRow(
+                id=cl.id,
+                name=cl.name,
+                semaphore_level=level,
+                compliance_pct=compliance_pct,
+                overdue_count=sum(p.overdue_count for p in agg.providers),
+                due_soon_count=sum(p.due_soon_count for p in agg.providers),
+            )
+        )
+        cells.extend(
+            _cells_from_obligations(agg.obligations, row_id_of=lambda _o, cid=cl.id: cid)
+        )
+        for ob in agg.obligations:
+            month_totals[ob.due_month - 1] += 1
+            inst = inst_acc[ob.due_month]
+            inst[ob.institution] = inst.get(ob.institution, 0) + 1
+            delivered = 1 if ob.risk_level == "on_track" else 0
+            slot = status_acc[ob.due_month]
+            slot["expected"] += 1
+            slot["delivered"] += delivered
+            sinst = slot["by_inst"].setdefault(
+                ob.institution, {"expected": 0, "delivered": 0}
+            )
+            sinst["expected"] += 1
+            sinst["delivered"] += delivered
+            if ob.risk_level == "overdue":
+                overdue_total += 1
+            elif 0 <= _due_in_days(ob.deadline_iso, today) <= 7 and ob.risk_level != "on_track":
+                due_7d_total += 1
+            if month is not None and ob.due_month == month:
+                month_obligations.append(
+                    _admin_obligation(
+                        ob, client_id=cl.id, client_name=cl.name, today=today
+                    )
+                )
+
+    month_obligations.sort(
+        key=lambda o: (_CALENDAR_RISK_ORDER.get(o.risk_level, 9), o.deadline_iso)
+    )
+    return AdminCalendarGridResponse(
+        as_of=today.isoformat(),
+        year=target_year,
+        level="clients",
+        client_id=None,
+        client_name=None,
+        rows=rows,
+        cells=cells,
+        month_totals=month_totals,
+        forecast=[
+            AdminCalendarMonthForecast(
+                month=m, total=month_totals[m - 1], by_institution=inst_acc[m]
+            )
+            for m in range(1, 13)
+        ],
+        month_status=[
+            AdminCalendarMonthStatus(
+                month=m,
+                expected=status_acc[m]["expected"],
+                delivered=status_acc[m]["delivered"],
+                by_institution=status_acc[m]["by_inst"],
+            )
+            for m in range(1, 13)
+        ],
+        triage=AdminCalendarTriage(
+            overdue_total=overdue_total, due_7d_total=due_7d_total
+        ),
+        obligations=month_obligations,
+        clients_total=len(clients),
+        clients_scanned=len(scan),
+        truncated=truncated,
+    )
 
 
 # ---------------------------------------------------------------------------

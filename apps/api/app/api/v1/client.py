@@ -54,7 +54,6 @@ from app.api.v1.portal import (
     DashboardUpcomingDeadline,
     _bucket_document_state,
     _calendar_deadline_iso,
-    _calendar_upload_href,
     _compute_attention_today,
     _compute_onboarding_summary,
     _compute_semaphore,
@@ -69,10 +68,7 @@ from app.core.compliance_catalog import (
     catalog_metadata,
     expediente_for_persona,
     normalize_persona_type,
-    recurring_anatomy,
     recurring_for_year,
-    recurring_required_document,
-    recurring_where_to_obtain,
 )
 from app.core.config import settings
 from app.core.http_utils import content_disposition_header
@@ -94,6 +90,7 @@ from app.models import (
     Vendor,
 )
 from app.services.audit_log import add_audit_event
+from app.services.calendar_aggregate import aggregate_client_calendar
 from app.services.client_metadata import (
     client_master_file_path,
     display_export_path,
@@ -2270,122 +2267,38 @@ def client_calendar(
     # previous hardcoded 2026 default would have gone stale every
     # January.
     year = year or today.year
-    workspaces = _scoped_workspaces(db, target_id)
-    if vendor_ids:
-        wanted = {v for v in vendor_ids if v}
-        workspaces = [w for w in workspaces if w.vendor_id in wanted]
-    vendor_lookup = _vendors_by_id(db, [w.vendor_id for w in workspaces])
+    # One placement+classification pass per client, shared with the admin
+    # calendar grid (``aggregate_client_calendar``) so the two surfaces can
+    # never disagree on which month a deadline lands in or its risk. The
+    # per-item shape below is unchanged from the inline loop this replaced.
+    agg = aggregate_client_calendar(
+        db, client_id=target_id, year=year, today=today, vendor_ids=vendor_ids
+    )
 
-    # PERF-4 — batch every workspace's submissions into a single query
-    # (the same proven helper the /overview + /vendors paths use) so the
-    # calendar is O(1) queries in the vendor count instead of O(N) full
-    # ``submissions`` scans. Behaviour-preserving.
-    subs_by_vendor, institutions_by_id = _portfolio_slot_inputs(db, target_id)
-
-    # Per workspace, walk the canonical recurring catalog so we have
-    # ``due_month`` + ``period_label`` (the slot view alone doesn't
-    # carry them). For each catalog item, look up the matching slot
-    # view to read the current state.
     months: dict[int, list[ClientCalendarItem]] = defaultdict(list)
     aggregate_vendors_per_month: dict[int, set[str]] = defaultdict(set)
-    # Per-provider risk rollup, keyed by vendor id, so the response can lead
-    # with "which providers put me at risk" instead of month totals.
-    provider_acc: dict[str, dict] = {}
-    for ws in workspaces:
-        vendor = vendor_lookup.get(ws.vendor_id)
-        if vendor is None:
-            continue
-        # One canonical compliance pass per workspace. ``_vendor_compliance``
-        # is the same helper ``/vendors`` uses, so the calendar's semaphore
-        # matches that screen by construction; we read its ``calendar_slots``
-        # back instead of calling ``build_workspace_calendar_slots`` a second
-        # time (the prefetched submissions keep it query-cheap — PERF-4).
-        compliance = _vendor_compliance(
-            db,
-            ws,
-            today=today,
-            year=year,
-            prefetched_submissions=subs_by_vendor.get(ws.vendor_id, []),
-            institutions_by_id=institutions_by_id,
+    for ob in agg.obligations:
+        months[ob.due_month].append(
+            ClientCalendarItem(
+                vendor_id=ob.vendor_id,
+                workspace_id=ob.workspace_id,
+                vendor_name=ob.vendor_name,
+                requirement_code=ob.requirement_code,
+                requirement_name=ob.requirement_name,
+                institution=ob.institution,
+                frequency=ob.frequency,
+                period_key=ob.period_key,
+                period_label=ob.period_label,
+                status=ob.status,
+                submission_id=ob.submission_id,
+                deadline_iso=ob.deadline_iso,
+                risk_level=ob.risk_level,
+                anatomy=ob.anatomy,
+                where_to_obtain=ob.where_to_obtain,
+                href=ob.client_href,
+            )
         )
-        view_by_key: dict[tuple[str | None, str | None], SlotView] = {
-            (v.slot_key.requirement_code, v.slot_key.period_key): v
-            for v in compliance["calendar_slots"]
-        }
-        acc = provider_acc.setdefault(
-            vendor.id,
-            {
-                "vendor_name": vendor.name,
-                "semaphore_level": compliance["semaphore_level"],
-                "compliance_pct": compliance["compliance_pct"],
-                "overdue": 0,
-                "due_soon": 0,
-                "action_required": 0,
-                "next_deadline": None,
-            },
-        )
-        # Bugfix (2026-05-21) — defensive normalize so legacy
-        # workspaces with non-canonical ``persona_type`` values still
-        # produce a non-empty client calendar.
-        catalog = recurring_for_year(year, normalize_persona_type(ws.persona_type))
-        for req in catalog:
-            view = view_by_key.get((req.code, req.period_key))
-            item_status = (
-                view.current_status if view and view.current_status else "pendiente"
-            )
-            deadline_iso = _calendar_deadline_iso(year, req.due_month, req.due_day)
-            risk_level = _calendar_item_risk(item_status, deadline_iso, today)
-            # Session 3 audit fix (2026-05-21) — surface v2 mode on
-            # client-side calendar hrefs too, so a client/admin who
-            # clicks through to /portal/upload gets the alternatives
-            # picker like the provider would.
-            href = _calendar_upload_href(
-                year=year,
-                code=req.code,
-                period_key=req.period_key,
-                name=req.name,
-                institution=req.institution,
-                load_type=req.frequency,
-                v2_mode=bool(req.accepts_documents),
-            )
-            months[req.due_month].append(
-                ClientCalendarItem(
-                    vendor_id=vendor.id,
-                    workspace_id=ws.id,
-                    vendor_name=vendor.name,
-                    requirement_code=req.code,
-                    requirement_name=recurring_required_document(req),
-                    institution=req.institution,
-                    frequency=req.frequency,
-                    period_key=req.period_key,
-                    period_label=req.period_label,
-                    status=item_status,
-                    submission_id=view.current_submission_id if view else None,
-                    deadline_iso=deadline_iso,
-                    risk_level=risk_level,
-                    anatomy=recurring_anatomy(req),
-                    where_to_obtain=recurring_where_to_obtain(req),
-                    href=href,
-                )
-            )
-            aggregate_vendors_per_month[req.due_month].add(vendor.id)
-            if risk_level == "overdue":
-                acc["overdue"] += 1
-            elif risk_level == "action_required":
-                acc["action_required"] += 1
-            elif risk_level == "due_soon":
-                acc["due_soon"] += 1
-            if risk_level != "on_track":
-                try:
-                    due_date: date | None = date.fromisoformat(deadline_iso)
-                except ValueError:
-                    due_date = None
-                if (
-                    due_date is not None
-                    and due_date >= today
-                    and (acc["next_deadline"] is None or due_date < acc["next_deadline"])
-                ):
-                    acc["next_deadline"] = due_date
+        aggregate_vendors_per_month[ob.due_month].add(ob.vendor_id)
 
     response_months: list[ClientCalendarMonth] = []
     for month in range(1, 13):
@@ -2447,30 +2360,20 @@ def client_calendar(
                 items=items,
             )
         )
+    # ``agg.providers`` is already sorted worst-first by the shared service.
     providers = [
         ClientCalendarProvider(
-            vendor_id=vid,
-            vendor_name=acc["vendor_name"],
-            semaphore_level=acc["semaphore_level"],
-            compliance_pct=acc["compliance_pct"],
-            overdue_count=acc["overdue"],
-            due_soon_count=acc["due_soon"],
-            action_required_count=acc["action_required"],
-            next_deadline_iso=(
-                acc["next_deadline"].isoformat() if acc["next_deadline"] else None
-            ),
+            vendor_id=p.vendor_id,
+            vendor_name=p.vendor_name,
+            semaphore_level=p.semaphore_level,
+            compliance_pct=p.compliance_pct,
+            overdue_count=p.overdue_count,
+            due_soon_count=p.due_soon_count,
+            action_required_count=p.action_required_count,
+            next_deadline_iso=p.next_deadline_iso,
         )
-        for vid, acc in provider_acc.items()
+        for p in agg.providers
     ]
-    providers.sort(
-        key=lambda p: (
-            _SEMAPHORE_SORT_ORDER.get(p.semaphore_level, 3),
-            -p.overdue_count,
-            -p.action_required_count,
-            -p.due_soon_count,
-            p.vendor_name.lower(),
-        )
-    )
     return ClientCalendarResponse(
         metadata=catalog_metadata(),
         client_id=target_id,
