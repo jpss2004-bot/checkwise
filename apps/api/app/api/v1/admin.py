@@ -65,6 +65,7 @@ from app.core.compliance_catalog import (
 from app.core.config import settings
 from app.core.period_validation import MAX_YEAR, MIN_YEAR
 from app.core.rate_limit import client_ip_from_request
+from app.core.text_search import accent_ci_contains
 from app.db.session import get_db
 from app.models import (
     AuditLog,
@@ -872,11 +873,12 @@ def list_clients(
     stmt = select(Client)
     count_stmt = select(func.count(Client.id))
     if search and search.strip():
-        like = f"%{search.strip()}%"
+        term = search.strip()
+        dialect = db.get_bind().dialect.name
         cond = or_(
-            Client.name.ilike(like),
-            Client.rfc.ilike(like),
-            Client.responsible_name.ilike(like),
+            accent_ci_contains(dialect, Client.name, term),
+            accent_ci_contains(dialect, Client.rfc, term),
+            accent_ci_contains(dialect, Client.responsible_name, term),
         )
         stmt = stmt.where(cond)
         count_stmt = count_stmt.where(cond)
@@ -1348,6 +1350,7 @@ def _admin_user_filters(
     status_value: str | None,
     role: str | None,
     include_deleted: bool = False,
+    dialect_name: str = "postgresql",
 ) -> list:
     filters: list = []
     # Soft-deleted accounts (migration 0042) are hidden by default so the
@@ -1356,9 +1359,12 @@ def _admin_user_filters(
     if not include_deleted:
         filters.append(User.deleted_at.is_(None))
     if q and q.strip():
-        needle = f"%{q.strip()}%"
+        term = q.strip()
         filters.append(
-            or_(User.email.ilike(needle), User.full_name.ilike(needle))
+            or_(
+                accent_ci_contains(dialect_name, User.email, term),
+                accent_ci_contains(dialect_name, User.full_name, term),
+            )
         )
     if status_value:
         filters.append(User.status == status_value)
@@ -1417,7 +1423,13 @@ def list_users(
     single IN query (no per-row lookups).
     """
     _ = current
-    filters = _admin_user_filters(q, status_filter, role, include_deleted)
+    filters = _admin_user_filters(
+        q,
+        status_filter,
+        role,
+        include_deleted,
+        dialect_name=db.get_bind().dialect.name,
+    )
 
     count_stmt = select(func.count()).select_from(User)
     page_stmt = select(User)
@@ -2502,11 +2514,12 @@ def list_vendors(
         stmt = stmt.where(Vendor.client_id == client_id)
         count_stmt = count_stmt.where(Vendor.client_id == client_id)
     if search and search.strip():
-        like = f"%{search.strip()}%"
+        term = search.strip()
+        dialect = db.get_bind().dialect.name
         cond = or_(
-            Vendor.name.ilike(like),
-            Vendor.rfc.ilike(like),
-            Vendor.contact_email.ilike(like),
+            accent_ci_contains(dialect, Vendor.name, term),
+            accent_ci_contains(dialect, Vendor.rfc, term),
+            accent_ci_contains(dialect, Vendor.contact_email, term),
         )
         stmt = stmt.where(cond)
         count_stmt = count_stmt.where(cond)
