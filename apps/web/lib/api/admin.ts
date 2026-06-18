@@ -185,6 +185,81 @@ export async function getAdminCalendarRadar(params?: {
   return fetchJson(`/api/v1/admin/calendar/radar${suffix}`);
 }
 
+// ---------------------------------------------------------------------------
+// Calendar grid (P0 rework) — the time-anchored clients×months calendar
+// ---------------------------------------------------------------------------
+
+export type AdminCalendarRow = {
+  id: string;
+  name: string;
+  semaphore_level: "red" | "yellow" | "green" | string;
+  compliance_pct: number;
+  overdue_count: number;
+  due_soon_count: number;
+};
+
+export type AdminCalendarCell = {
+  row_id: string;
+  month: number;
+  count: number;
+  /** One of the six ordered calendar risks. */
+  worst_risk: string;
+  by_institution: Record<string, number>;
+};
+
+export type AdminCalendarMonthForecast = {
+  month: number;
+  total: number;
+  by_institution: Record<string, number>;
+};
+
+export type AdminCalendarObligation = {
+  client_id: string;
+  client_name: string;
+  vendor_id: string;
+  vendor_name: string;
+  requirement_name: string;
+  institution: string;
+  period_key: string | null;
+  period_label: string;
+  deadline_iso: string;
+  due_month: number;
+  due_in_days: number;
+  status: string;
+  risk_level: string;
+};
+
+export type AdminCalendarGrid = {
+  as_of: string;
+  year: number;
+  /** "clients" at the top level, "providers" when drilled into one client. */
+  level: "clients" | "providers";
+  client_id: string | null;
+  client_name: string | null;
+  rows: AdminCalendarRow[];
+  cells: AdminCalendarCell[];
+  month_totals: number[];
+  forecast: AdminCalendarMonthForecast[];
+  triage: { overdue_total: number; due_7d_total: number };
+  /** Populated for a selected month (across the portfolio) or a drilled client. */
+  obligations: AdminCalendarObligation[];
+  clients_scanned: number;
+  truncated: boolean;
+};
+
+export async function getAdminCalendarGrid(params?: {
+  year?: number;
+  client_id?: string;
+  month?: number;
+}): Promise<AdminCalendarGrid> {
+  const qs = new URLSearchParams();
+  if (params?.year !== undefined) qs.set("year", String(params.year));
+  if (params?.client_id) qs.set("client_id", params.client_id);
+  if (params?.month !== undefined) qs.set("month", String(params.month));
+  const suffix = qs.toString() ? `?${qs.toString()}` : "";
+  return fetchJson(`/api/v1/admin/calendar/grid${suffix}`);
+}
+
 /**
  * Item 8 v2 — unified user provisioning. Replaces the older
  * createClient + provisionClient pair. One endpoint mints a temp
