@@ -43,6 +43,10 @@ class TimestampMixin:
 
 class Client(TimestampMixin, Base):
     __tablename__ = "clients"
+    __table_args__ = (
+        # Admin clients roster lists ORDER BY created_at DESC with limit/offset.
+        Index("ix_clients_created", "created_at"),
+    )
 
     id: Mapped[str] = mapped_column(String(36), primary_key=True, default=new_id)
     name: Mapped[str] = mapped_column(String(255), nullable=False)
@@ -89,6 +93,8 @@ class Vendor(TimestampMixin, Base):
     __table_args__ = (
         UniqueConstraint("client_id", "rfc", name="uq_vendors_client_rfc"),
         CheckConstraint(_PERSONA_TYPE_CHECK, name="ck_vendors_persona_type"),
+        # Admin vendors roster: WHERE client_id = ? ORDER BY created_at DESC.
+        Index("ix_vendors_client_created", "client_id", "created_at"),
     )
 
     id: Mapped[str] = mapped_column(String(36), primary_key=True, default=new_id)
@@ -238,6 +244,12 @@ class Submission(TimestampMixin, Base):
         # client-scoped ORDER BY created_at DESC lists / history ranges.
         Index("ix_submissions_vendor_id", "vendor_id"),
         Index("ix_submissions_client_created", "client_id", "created_at"),
+        # PERF (audit 2026-06-18, migration 0051). The reviewer queue filters
+        # WHERE status IN (...) ORDER BY created_at and COUNTs the same set on
+        # every load; the 7-day throughput counters (reviewer stat strip +
+        # admin /rollup) filter WHERE status IN (...) AND updated_at >= cutoff.
+        Index("ix_submissions_status_created", "status", "created_at"),
+        Index("ix_submissions_status_updated", "status", "updated_at"),
     )
     # NOTE: a unique partial index ``ux_submissions_active_slot`` enforces
     # "one active-genesis submission per evidence slot" in Postgres — see
