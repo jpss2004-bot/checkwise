@@ -23,6 +23,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from datetime import date
 
+from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.core.compliance_catalog import (
@@ -32,6 +33,7 @@ from app.core.compliance_catalog import (
     recurring_required_document,
     recurring_where_to_obtain,
 )
+from app.models import Document
 
 
 @dataclass
@@ -57,9 +59,15 @@ class CalendarObligation:
     deadline_iso: str
     due_month: int
     risk_level: str
+    suggested_action: str
+    submitted_at: str | None
     anatomy: str
     where_to_obtain: str
     client_href: str
+    # Resolved in a single batched pass after placement (filename + reviewer
+    # note need one query each over the whole portfolio, not per obligation).
+    filename: str | None = None
+    reviewer_note: str | None = None
 
 
 @dataclass
@@ -103,14 +111,20 @@ def aggregate_client_calendar(
     deferred-import idiom the admin radar endpoint already uses.
     """
     from app.api.v1.client import (
+        _REJECTED_OR_CORRECTION_STATUSES,
         _SEMAPHORE_SORT_ORDER,
         _calendar_item_risk,
+        _client_suggested_action,
         _portfolio_slot_inputs,
         _scoped_workspaces,
         _vendor_compliance,
         _vendors_by_id,
     )
-    from app.api.v1.portal import _calendar_deadline_iso, _calendar_upload_href
+    from app.api.v1.portal import (
+        _calendar_deadline_iso,
+        _calendar_upload_href,
+        _latest_reviewer_notes,
+    )
 
     workspaces = _scoped_workspaces(db, client_id)
     if vendor_ids:
@@ -161,6 +175,10 @@ def aggregate_client_calendar(
             )
             deadline_iso = _calendar_deadline_iso(year, req.due_month, req.due_day)
             risk_level = _calendar_item_risk(item_status, deadline_iso, today)
+            current_submission_id = view.current_submission_id if view else None
+            suggested_action = _client_suggested_action(
+                risk_level, bool(current_submission_id)
+            )
             href = _calendar_upload_href(
                 year=year,
                 code=req.code,
@@ -182,10 +200,12 @@ def aggregate_client_calendar(
                     period_key=req.period_key,
                     period_label=req.period_label,
                     status=item_status,
-                    submission_id=view.current_submission_id if view else None,
+                    submission_id=current_submission_id,
                     deadline_iso=deadline_iso,
                     due_month=req.due_month,
                     risk_level=risk_level,
+                    suggested_action=suggested_action,
+                    submitted_at=view.submitted_at_iso if view else None,
                     anatomy=recurring_anatomy(req),
                     where_to_obtain=recurring_where_to_obtain(req),
                     client_href=href,
@@ -211,6 +231,40 @@ def aggregate_client_calendar(
                     )
                 ):
                     acc["next_deadline"] = due_date
+
+    # Oversight evidence, resolved in two batched queries over the whole
+    # portfolio (never per-obligation): the uploaded filename for any current
+    # submission, and the reviewer's reason for the ones that came back
+    # rejected. ``submitted_at`` was already set inline from the slot view.
+    current_ids = [ob.submission_id for ob in obligations if ob.submission_id]
+    if current_ids:
+        filename_by_submission = {
+            sub_id: fname
+            for sub_id, fname in db.execute(
+                select(Document.submission_id, Document.original_filename).where(
+                    Document.submission_id.in_(current_ids)
+                )
+            ).all()
+        }
+        # The reviewer's reason only rides on obligations the provider must
+        # re-do (rejected / needs-clarification / mismatch) — gated on the
+        # status, not the risk, so a rejected-AND-overdue doc (where ``overdue``
+        # outranks ``action_required`` in the severity ordering) still carries
+        # its motive. The batched helper returns only non-empty latest notes.
+        rejected_ids = [
+            ob.submission_id
+            for ob in obligations
+            if ob.submission_id and ob.status in _REJECTED_OR_CORRECTION_STATUSES
+        ]
+        note_by_submission = (
+            _latest_reviewer_notes(db, rejected_ids) if rejected_ids else {}
+        )
+        for ob in obligations:
+            if ob.submission_id is None:
+                continue
+            ob.filename = filename_by_submission.get(ob.submission_id)
+            if ob.status in _REJECTED_OR_CORRECTION_STATUSES:
+                ob.reviewer_note = note_by_submission.get(ob.submission_id)
 
     providers = [
         CalendarProviderRollup(

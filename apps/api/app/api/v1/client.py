@@ -781,6 +781,19 @@ class ClientCalendarItem(BaseModel):
     submission_id: str | None
     deadline_iso: str
     risk_level: str | None
+    # Server-owned next step in the client's oversight voice (chase/wait,
+    # never "upload"), computed once by ``_client_suggested_action`` so the
+    # card instruction can't drift from the cell's risk color.
+    suggested_action: str
+    # Oversight evidence: what the provider already delivered and when, plus
+    # the reviewer's reason when the obligation was rejected — so the client
+    # can decide chase-vs-wait and relay the exact motive without first
+    # clicking into the expediente. ``filename`` / ``submitted_at`` are null
+    # until a submission exists; ``reviewer_note`` is only populated on
+    # ``action_required`` items that carry a reviewer decision message.
+    filename: str | None
+    submitted_at: str | None
+    reviewer_note: str | None
     # Document guidance, mirrored from the provider calendar so the client
     # review surface can show "what the document is, and where to get it"
     # inline instead of forcing a click-through. ``requirement_name`` already
@@ -1196,6 +1209,35 @@ def _calendar_item_risk(status: str, deadline_iso: str, today: date) -> str:
     ):
         return "in_review"
     return "upcoming"
+
+
+def _client_suggested_action(risk_level: str, has_submission: bool) -> str:
+    """Plain-Spanish next step for the CLIENT on one calendar obligation.
+
+    The client-portal analog of the provider's ``_calendar_suggested_action``
+    (``app.api.v1.portal``), but in the oversight voice: a hiring company can
+    never upload on a provider's behalf, so every step is "chase the provider"
+    or "wait on the reviewer" — never an upload instruction. This is the
+    server-side source of truth the calendar's obligation card consumes; the
+    frontend keeps a byte-for-byte matching ``nextActionFor`` fallback so a
+    stale backend (rolling deploy) still renders a sensible step.
+
+    Keyed off the already-computed ``risk_level`` (see ``_calendar_item_risk``)
+    rather than the raw status so the next step can never disagree with the
+    cell color the same obligation shows.
+    """
+    if risk_level == "action_required":
+        return "Pídele al proveedor que corrija y reemplace el documento."
+    if risk_level == "in_review":
+        return "En revisión por el equipo. No requiere acción de tu parte."
+    if risk_level == "on_track":
+        return "Al día. Sin acción pendiente."
+    # overdue / due_soon / upcoming
+    return (
+        "Da seguimiento con el proveedor."
+        if has_submission
+        else "Pídele al proveedor que suba el documento."
+    )
 
 
 @router.get("/overview", response_model=ClientOverview)
@@ -2293,6 +2335,10 @@ def client_calendar(
                 submission_id=ob.submission_id,
                 deadline_iso=ob.deadline_iso,
                 risk_level=ob.risk_level,
+                suggested_action=ob.suggested_action,
+                filename=ob.filename,
+                submitted_at=ob.submitted_at,
+                reviewer_note=ob.reviewer_note,
                 anatomy=ob.anatomy,
                 where_to_obtain=ob.where_to_obtain,
                 href=ob.client_href,

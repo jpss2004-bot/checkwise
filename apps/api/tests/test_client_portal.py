@@ -566,6 +566,113 @@ def test_client_calendar_items_carry_risk_level(
         assert isinstance(item["anatomy"], str)
 
 
+def test_client_calendar_items_carry_oversight_suggested_action(
+    api_client: TestClient, db_factory
+) -> None:
+    """Every item ships a server-owned suggested_action in the client's
+    oversight voice: present, non-empty, and NEVER an upload instruction —
+    a hiring company cannot upload on a provider's behalf, so the step is
+    always 'chase the provider' or 'wait on the reviewer'."""
+    client_id = _seed_client(db_factory)
+    _seed_vendor_with_workspace(db_factory, client_id=client_id)
+    _, email, pw = _seed_user_with_role(
+        db_factory, role="client_admin", client_id=client_id, email_prefix="ca"
+    )
+    token = _login(api_client, email, pw)
+    body = api_client.get(
+        "/api/v1/client/calendar?year=2026", headers=_h(token)
+    ).json()
+    items = [i for m in body["months"] for i in m["items"]]
+    assert items
+    for item in items:
+        action = item["suggested_action"]
+        assert isinstance(action, str) and action.strip(), item
+        # "sube" is the provider calendar's upload verb — it must never leak
+        # into the client's oversight copy.
+        assert "sube" not in action.lower(), item
+        # An un-delivered, still-open obligation tells the client to chase
+        # the provider (never to act themselves).
+        if item["submission_id"] is None and item["risk_level"] in {
+            "overdue",
+            "due_soon",
+            "upcoming",
+        }:
+            assert "proveedor" in action.lower(), item
+
+
+def test_client_calendar_delivered_item_carries_filename_and_date(
+    api_client: TestClient, db_factory
+) -> None:
+    """A slot with a current submission surfaces what the provider delivered
+    (filename) and when (submitted_at), so the client can confirm delivery
+    inline without opening the expediente."""
+    client_id = _seed_client(db_factory)
+    _, ws_id = _seed_vendor_with_workspace(db_factory, client_id=client_id)
+    _seed_approved_submission_for_workspace(api_client, db_factory, ws_id)
+    _, email, pw = _seed_user_with_role(
+        db_factory, role="client_admin", client_id=client_id, email_prefix="ca"
+    )
+    token = _login(api_client, email, pw)
+    body = api_client.get(
+        "/api/v1/client/calendar?year=2026", headers=_h(token)
+    ).json()
+    delivered = [
+        i
+        for m in body["months"]
+        for i in m["items"]
+        if i["submission_id"] is not None
+    ]
+    assert delivered, "expected the seeded submission to populate a current slot"
+    for item in delivered:
+        assert item["filename"] == "doc.pdf", item
+        assert item["submitted_at"], item
+
+
+def test_client_calendar_rejected_item_carries_reviewer_note(
+    api_client: TestClient, db_factory
+) -> None:
+    """A rejected obligation carries the reviewer's reason so the client can
+    relay the exact motive to the provider; on-track / in-review items never
+    carry a stale note."""
+    client_id = _seed_client(db_factory)
+    _, ws_id = _seed_vendor_with_workspace(db_factory, client_id=client_id)
+    sub_id = _seed_submission_for_workspace(api_client, db_factory, ws_id)
+    db = db_factory()
+    try:
+        sub = db.get(Submission, sub_id)
+        assert sub is not None
+        apply_reviewer_decision(
+            db,
+            submission=sub,
+            action=ReviewerAction.REJECT,
+            reason="Documento ilegible.",
+            reviewer_user_id="rev-user-cal",
+        )
+    finally:
+        db.close()
+    _, email, pw = _seed_user_with_role(
+        db_factory, role="client_admin", client_id=client_id, email_prefix="ca"
+    )
+    token = _login(api_client, email, pw)
+    body = api_client.get(
+        "/api/v1/client/calendar?year=2026", headers=_h(token)
+    ).json()
+    months = body["months"]
+    # The seeded obligation's deadline is in the past, so it reads as
+    # ``overdue`` (which outranks ``action_required``) — the reviewer note must
+    # ride on it anyway, gated on the rejected STATUS, not the risk level.
+    bounced = [
+        i for m in months for i in m["items"] if i["submission_id"] == sub_id
+    ]
+    assert bounced, "expected the rejected submission to surface its slot"
+    assert all(i["reviewer_note"] == "Documento ilegible." for i in bounced)
+    # The reason only rides on bounced items — never on still-open ones.
+    others = [
+        i for m in months for i in m["items"] if i["submission_id"] != sub_id
+    ]
+    assert all(i["reviewer_note"] is None for i in others)
+
+
 def test_client_calendar_providers_rollup_is_worst_first_and_consistent(
     api_client: TestClient, db_factory
 ) -> None:

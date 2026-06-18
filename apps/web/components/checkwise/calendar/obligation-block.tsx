@@ -1,10 +1,17 @@
 "use client";
 
 import Link from "next/link";
-import { ArrowRight, MapPin, Package, type Icon } from "@phosphor-icons/react";
+import {
+  ArrowRight,
+  Package,
+  Paperclip,
+  WarningCircle,
+  type Icon,
+} from "@phosphor-icons/react";
 
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import { DocumentGuidanceDisclosure } from "@/components/checkwise/portal/expediente-card";
 import { INSTITUTION_LABELS } from "@/lib/api/portal";
 import type { ClientCalendarItem } from "@/lib/api/client";
 import { withReturnTo } from "@/lib/navigation/return-to";
@@ -38,6 +45,22 @@ export function ObligationBlock({
     INSTITUTION_LABELS[item.institution] ?? item.institution;
   const statusDisplay = itemStatusDisplay(item);
   const overdue = item.risk_level === "overdue";
+
+  // Server-owned next step (oversight voice) with a FE fallback for a stale
+  // backend that hasn't shipped the field yet.
+  const nextStep = item.suggested_action ?? nextActionFor(item);
+  // Oversight evidence — what the provider delivered, and (on rejected items)
+  // the reviewer's reason so the client can relay it verbatim.
+  const deliveredFile =
+    item.submission_id && item.filename ? item.filename : null;
+  const deliveredOn = item.submitted_at ? formatLongDate(item.submitted_at) : null;
+  // The backend only sets reviewer_note on rejected / needs-clarification /
+  // mismatch items, so its mere presence is the signal to show it (an
+  // overdue-but-rejected doc still needs to surface why it bounced).
+  const reviewerNote = item.reviewer_note ?? null;
+  const hasGuidance =
+    (item.anatomy ?? "").trim().length > 0 ||
+    (item.where_to_obtain ?? "").trim().length > 0;
 
   const vendorHref = withReturnTo(
     `/client/vendors/${item.vendor_id}?focus=${focusForItem(item)}#documentos`,
@@ -75,15 +98,43 @@ export function ObligationBlock({
           value={`${relativeDeadline(item.deadline_iso, today)} (${formatLongDate(item.deadline_iso)})`}
           danger={overdue}
         />
-        {item.where_to_obtain ? (
+        {deliveredFile ? (
           <DetailLine
-            icon={MapPin}
-            label="Dónde se obtiene"
-            value={item.where_to_obtain}
+            icon={Paperclip}
+            label="Entregado"
+            value={deliveredOn ? `${deliveredFile} · ${deliveredOn}` : deliveredFile}
           />
         ) : null}
-        <DetailLine label="Siguiente paso" value={nextActionFor(item)} emphasis />
+        <DetailLine label="Siguiente paso" value={nextStep} emphasis />
       </dl>
+
+      {/* Reviewer's reason on bounced obligations — lets the client forward
+          the exact motive to the provider instead of a vague "please fix". */}
+      {reviewerNote ? (
+        <div className="mt-2.5 rounded-md border border-[color:var(--status-error-border)] bg-[color:var(--status-error-bg)] px-3 py-2">
+          <p className="flex items-center gap-1.5 font-mono text-[10px] uppercase tracking-wide text-[color:var(--status-error-text)]">
+            <WarningCircle className="h-3.5 w-3.5" weight="bold" aria-hidden="true" />
+            Observación del revisor
+          </p>
+          <p className="mt-1 text-xs leading-5 text-[color:var(--text-secondary)]">
+            {reviewerNote}
+          </p>
+        </div>
+      ) : null}
+
+      {/* Document literacy — what a valid document must contain and where the
+          provider gets it. The payload already carried `anatomy`; it was being
+          dropped before. Reuses the provider calendar's disclosure. */}
+      {hasGuidance ? (
+        <div className="mt-2.5">
+          <DocumentGuidanceDisclosure
+            anatomy={item.anatomy ?? ""}
+            where_to_obtain={item.where_to_obtain ?? ""}
+            common_errors={[]}
+            summary_label="Qué debe contener este documento"
+          />
+        </div>
+      ) : null}
 
       <div className="mt-3 flex flex-wrap items-center gap-2">
         <Button asChild size="sm" variant="outline">

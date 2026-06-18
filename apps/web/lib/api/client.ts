@@ -302,6 +302,14 @@ export type ClientCalendarItem = {
   submission_id: string | null;
   deadline_iso: string;
   risk_level: ClientCalendarRisk | null;
+  /** Server-owned next step in the client's oversight voice (chase/wait).
+   *  Optional so a stale backend falls back to the FE `nextActionFor`. */
+  suggested_action?: string;
+  /** Oversight evidence: what the provider delivered + when, and the
+   *  reviewer's reason on rejected items. Null/absent until applicable. */
+  filename?: string | null;
+  submitted_at?: string | null;
+  reviewer_note?: string | null;
   /** Supporting document guidance shown inline on the review card
    *  (requirement_name is the document; these describe + locate it). */
   anatomy: string;
