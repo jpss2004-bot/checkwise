@@ -358,6 +358,16 @@ class Validation(TimestampMixin, Base):
 
 class ValidationEvent(Base):
     __tablename__ = "validation_events"
+    __table_args__ = (
+        # Per-submission reviewer-decision lookups (vendor detail / activity /
+        # submissions "latest review") filter event_type then group by
+        # submission; the activity feed orders all visible events by created_at.
+        # Without these only the implicit FK on submission_id exists, so both
+        # the event_type filter and the created_at sort scan the table as it
+        # grows (perf audit P1-4).
+        Index("ix_validation_events_submission_type", "submission_id", "event_type"),
+        Index("ix_validation_events_type_created", "event_type", "created_at"),
+    )
 
     id: Mapped[str] = mapped_column(String(36), primary_key=True, default=new_id)
     submission_id: Mapped[str] = mapped_column(ForeignKey("submissions.id"), nullable=False)
