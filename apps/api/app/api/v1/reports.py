@@ -834,12 +834,28 @@ def post_generate(
 
     llm = get_llm_client()
 
-    try:
-        plan = plan_report(llm=llm, context=context, user_prompt=payload.prompt)
-    except LLMError as exc:
-        raise HTTPException(status.HTTP_502_BAD_GATEWAY, str(exc)) from exc
-
     def _sse_iter() -> Annotated[any, 'sse']:
+        # Flush an SSE comment immediately so the client receives bytes the
+        # moment the response opens, instead of waiting on the synchronous
+        # planning model call below. Planning previously ran before the
+        # StreamingResponse was even constructed — a blank wait of up to the
+        # LLM timeout with no signal the request was alive. The comment is
+        # ignored by both the browser EventSource parser and our frontend
+        # frame parser, so it changes nothing downstream.
+        yield ": planning\n\n"
+        try:
+            plan = plan_report(
+                llm=llm, context=context, user_prompt=payload.prompt
+            )
+        except LLMError as exc:
+            # The response is already streaming, so a planning failure is
+            # surfaced as an error frame (clients treat any non-`done` final
+            # state as a partial generation) rather than an HTTP 502.
+            yield _sse_frame(
+                "error",
+                {"code": "plan_failed", "message": str(exc)},
+            )
+            return
         try:
             for event_name, data in execute_plan(
                 db=db,
