@@ -103,32 +103,33 @@ function DashboardInner({ session }: { session: PortalSession }) {
 
   useEffect(() => {
     let cancelled = false;
-    // Fetch dashboard + onboarding in parallel. The onboarding payload
-    // powers the empty-state hero's "first 5 documents" checklist and
-    // the Wise dock's net-new welcome line. Failing onboarding is
-    // non-fatal — the dashboard still renders without the checklist.
-    Promise.all([
-      getDashboard(session),
-      getOnboarding(session).catch((err) => {
-        // Non-fatal, but don't swallow it silently — a recurring
-        // failure here means the empty-state checklist degrades with no
-        // signal (audit 2026-06-09). Dev-only so the prod console stays
-        // clean (audit 2026-06-12).
-        if (process.env.NODE_ENV !== "production") {
-          console.warn("[portal/dashboard] onboarding fetch failed:", err);
-        }
-        return null;
-      }),
-    ])
-      .then(([dash, onboarding]) => {
+    // Fetch dashboard + onboarding independently so the dashboard renders the
+    // instant its own payload lands — it must not wait on the secondary
+    // onboarding fetch. The onboarding payload only powers the empty-state
+    // hero's "first 5 documents" checklist and the Wise dock's net-new welcome
+    // line, and failing it is non-fatal (the dashboard renders without the
+    // checklist), so it streams in on its own.
+    getDashboard(session)
+      .then((dash) => {
         if (cancelled) return;
         setDashboard(dash);
-        setOnboardingPayload(onboarding);
         setLoadError(false);
       })
       .catch(() => {
         if (cancelled) return;
         setLoadError(true);
+      });
+    getOnboarding(session)
+      .then((onboarding) => {
+        if (!cancelled) setOnboardingPayload(onboarding);
+      })
+      .catch((err) => {
+        // Non-fatal, but don't swallow it silently — a recurring failure here
+        // means the empty-state checklist degrades with no signal (audit
+        // 2026-06-09). Dev-only so the prod console stays clean (2026-06-12).
+        if (process.env.NODE_ENV !== "production") {
+          console.warn("[portal/dashboard] onboarding fetch failed:", err);
+        }
       });
     return () => {
       cancelled = true;
