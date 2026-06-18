@@ -6,6 +6,7 @@ import { useRouter, useSearchParams } from "next/navigation";
 import {
   ArrowLeft,
   ArrowRight,
+  ArrowsClockwise,
   CalendarBlank,
   CaretDown,
   CaretRight,
@@ -97,6 +98,7 @@ export default function AdminCalendarPage() {
   const [rollup, setRollup] = useState<AdminRollup | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [reloadKey, setReloadKey] = useState(0);
+  const [refreshing, setRefreshing] = useState(false);
 
   const [selectedMonth, setSelectedMonth] = useState<number>(() => {
     const m = Number(searchParams?.get("month"));
@@ -181,6 +183,16 @@ export default function AdminCalendarPage() {
   function exitClient() {
     setDetailClientId(null);
     setSelectedProviderId(null);
+  }
+  async function refreshOverview() {
+    setRefreshing(true);
+    try {
+      setOverview(await getAdminCalendarGrid({ year, refresh: true }));
+    } catch {
+      // leave the existing (stale) data in place on failure
+    } finally {
+      setRefreshing(false);
+    }
   }
 
   useEffect(() => {
@@ -384,6 +396,11 @@ export default function AdminCalendarPage() {
             description="Cada cliente por mes. Toca un mes para su resumen, o entra a un cliente para ver sus obligaciones."
             actions={
               <div className="flex flex-wrap items-center gap-2">
+                <FreshnessChip
+                  snapshotAt={overview.snapshot_at}
+                  refreshing={refreshing}
+                  onRefresh={refreshOverview}
+                />
                 <ClientPicker clients={sortedClients} onPick={enterClient} />
                 <ScopeToggle
                   showAll={showAllClients}
@@ -585,6 +602,43 @@ function ClientPicker({
 
 function dotFor(level: string): string {
   return SEMAPHORE_DOT[level as "red" | "yellow" | "green"] ?? SEMAPHORE_DOT.yellow;
+}
+
+function relativeSince(iso: string): string {
+  const then = Date.parse(iso);
+  if (Number.isNaN(then)) return "";
+  const mins = Math.max(0, Math.round((Date.now() - then) / 60000));
+  if (mins < 1) return "hace un momento";
+  if (mins < 60) return `hace ${mins} min`;
+  return `hace ${Math.round(mins / 60)} h`;
+}
+
+function FreshnessChip({
+  snapshotAt,
+  refreshing,
+  onRefresh,
+}: {
+  snapshotAt: string | null;
+  refreshing: boolean;
+  onRefresh: () => void;
+}) {
+  const label = snapshotAt ? `Actualizado ${relativeSince(snapshotAt)}` : "En vivo";
+  return (
+    <button
+      type="button"
+      onClick={onRefresh}
+      disabled={refreshing}
+      title="Recalcular el resumen de la cartera"
+      className="inline-flex items-center gap-1.5 rounded-full border border-[color:var(--border-default)] bg-[color:var(--surface-raised)] px-3 py-1.5 text-xs font-medium text-[color:var(--text-secondary)] transition-colors hover:bg-[color:var(--surface-hover)] disabled:opacity-60"
+    >
+      <ArrowsClockwise
+        className={"h-3.5 w-3.5 motion-reduce:animate-none " + (refreshing ? "animate-spin" : "")}
+        weight="bold"
+        aria-hidden="true"
+      />
+      {refreshing ? "Actualizando…" : label}
+    </button>
+  );
 }
 
 function ScopeToggle({

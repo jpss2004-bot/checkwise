@@ -261,17 +261,23 @@ export type AdminCalendarGrid = {
   clients_total: number;
   clients_scanned: number;
   truncated: boolean;
+  /** ISO time the overview snapshot was computed, or null when the response is
+   *  live (cold cache, a forced refresh, or a per-client drill). */
+  snapshot_at: string | null;
 };
 
 export async function getAdminCalendarGrid(params?: {
   year?: number;
   client_id?: string;
   month?: number;
+  /** Force a synchronous snapshot rebuild before serving (the "Actualizar" action). */
+  refresh?: boolean;
 }): Promise<AdminCalendarGrid> {
   const qs = new URLSearchParams();
   if (params?.year !== undefined) qs.set("year", String(params.year));
   if (params?.client_id) qs.set("client_id", params.client_id);
   if (params?.month !== undefined) qs.set("month", String(params.month));
+  if (params?.refresh) qs.set("refresh", "true");
   const suffix = qs.toString() ? `?${qs.toString()}` : "";
   return fetchJson(`/api/v1/admin/calendar/grid${suffix}`);
 }
