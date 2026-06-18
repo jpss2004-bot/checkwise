@@ -414,7 +414,7 @@ export function PortalAppShell({
 function WorkspaceCard({ session }: { session: PortalSession }) {
   return (
     <div className="rounded-lg border border-[color:var(--border-subtle)] bg-[color:var(--surface-page)] px-3 py-2.5">
-      <p className="font-mono text-[9px] uppercase tracking-wide text-[color:var(--text-tertiary)]">
+      <p className="font-mono text-[10px] uppercase tracking-wide text-[color:var(--text-tertiary)]">
         Workspace activo
       </p>
       <p className="mt-0.5 truncate text-[13px] font-semibold text-[color:var(--text-primary)]">
@@ -427,7 +427,7 @@ function WorkspaceCard({ session }: { session: PortalSession }) {
         <Badge variant="outline" className="px-1.5 py-0">
           {session.persona_type === "moral" ? "Persona Moral" : "Persona Física"}
         </Badge>
-        <span className="truncate text-[10px] text-[color:var(--text-tertiary)]">
+        <span className="truncate text-[11px] text-[color:var(--text-secondary)]">
           {session.client_name}
         </span>
       </div>
@@ -472,7 +472,13 @@ function SidebarNav({
                 href={item.href}
                 onClick={onNavigate}
                 title={collapsed ? item.label : undefined}
-                aria-label={collapsed ? item.label : undefined}
+                aria-label={
+                  collapsed
+                    ? item.badge
+                      ? `${item.label}, ${item.badge} sin leer`
+                      : item.label
+                    : undefined
+                }
                 className={cn(
                   "group relative flex items-center rounded-md text-[13px] transition-colors duration-fast",
                   collapsed
@@ -502,8 +508,8 @@ function SidebarNav({
                   <>
                     <span className="min-w-0 flex-1 truncate">{item.label}</span>
                     {item.badge ? (
-                      <span className="rounded-full bg-[color:var(--surface-brand)] px-1.5 font-mono text-[10px] tabular-nums text-[color:var(--text-inverse)]">
-                        {item.badge}
+                      <span className="inline-flex min-w-[1.25rem] justify-center rounded-full bg-[color:var(--surface-brand)] px-1.5 font-mono text-[10px] tabular-nums text-[color:var(--text-inverse)]">
+                        {item.badge > 99 ? "99+" : item.badge}
                       </span>
                     ) : null}
                   </>

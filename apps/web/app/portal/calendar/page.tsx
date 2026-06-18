@@ -531,7 +531,7 @@ function FilterChips({
             <span
               className={
                 "font-mono text-[10px] tabular-nums " +
-                (active ? "opacity-80" : "text-[color:var(--text-tertiary)]")
+                (active ? "" : "text-[color:var(--text-tertiary)]")
               }
             >
               {counts[opt.value]}
@@ -566,7 +566,7 @@ function FilterChips({
         <span
           className={
             "font-mono text-[10px] tabular-nums " +
-            (onlyPending ? "opacity-80" : "text-[color:var(--text-tertiary)]")
+            (onlyPending ? "" : "text-[color:var(--text-tertiary)]")
           }
         >
           {counts.pending}

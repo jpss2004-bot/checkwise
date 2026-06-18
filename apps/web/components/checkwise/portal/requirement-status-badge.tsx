@@ -13,7 +13,10 @@ import {
 // (calendar, checklist, queue, detail) read consistently.
 const STATUS_VARIANT: Record<RequirementStatus, NonNullable<BadgeProps["variant"]>> = {
   pendiente: "doc-empty",
-  recibido: "doc-uploaded",
+  // recibido / pendiente_revision / prevalidado all render the same "En
+  // revisión" label (STATUS_LABELS_ES), so they share one variant to avoid a
+  // blue-vs-navy color split under an identical label.
+  recibido: "doc-in-review",
   pendiente_revision: "doc-in-review",
   prevalidado: "doc-in-review",
   posible_mismatch: "doc-needs-review",
@@ -31,9 +34,13 @@ export function RequirementStatusBadge({ status }: { status: RequirementStatus }
   // (badge, calendar, dashboard, queue, timeline, reports).
   const label = STATUS_LABELS_ES[status as DocumentStatusCode] ?? status;
   const explainer = STATUS_EXPLAINER_ES[status as DocumentStatusCode] ?? "";
+  // Fall back to a neutral chip if the backend ever sends an unmapped status,
+  // mirroring the label/explainer fallbacks above instead of silently
+  // defaulting to the brand-colored Badge.
+  const variant = STATUS_VARIANT[status] ?? "outline";
   return (
     <Badge
-      variant={STATUS_VARIANT[status]}
+      variant={variant}
       data-status={status}
       title={explainer}
       aria-label={explainer ? `${label}: ${explainer}` : label}

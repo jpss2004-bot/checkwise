@@ -46,7 +46,7 @@ function PortalBuscarBody() {
       searchPath="/portal/buscar"
       runSearch={run}
       buildHref={buildHref}
-      emptyHint="Escribe un periodo (por ejemplo 2026-M05) o un folio para encontrar una entrega de tu expediente."
+      emptyHint="Escribe un RFC, un periodo (por ejemplo 2026-M05) o un folio para encontrar una entrega de tu expediente."
     />
   );
 }

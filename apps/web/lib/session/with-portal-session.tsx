@@ -32,7 +32,7 @@ function isInternalStaff(): boolean {
 // their stored acceptance. When the backend omits the current version
 // (legacy summaries during a rollout) we fall back to a null-only
 // check so we never redirect-loop on missing data.
-function legalConsentRequired(session: {
+export function legalConsentRequired(session: {
   legal_consent_accepted_at: string | null;
   legal_consent_version: string | null;
   current_legal_consent_version: string | null;

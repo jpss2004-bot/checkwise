@@ -152,7 +152,7 @@ export function ExpedienteCard({ requirement, onAction }: ExpedienteCardProps) {
             </p>
             <h3
               id={`req-${requirement.id}-title`}
-              className="mt-1 text-[15px] font-semibold leading-5 text-[color:var(--text-primary)]"
+              className="mt-1 text-base font-semibold leading-5 text-[color:var(--text-primary)]"
             >
               {requirement.name}
             </h3>
@@ -236,7 +236,9 @@ export function ExpedienteCard({ requirement, onAction }: ExpedienteCardProps) {
           </span>{" "}
           {requirement.next_action}
         </p>
-        {requirement.state !== "approved" && requirement.state !== "in_review" && (
+        {requirement.state !== "approved" &&
+          requirement.state !== "in_review" &&
+          requirement.state !== "uploaded" && (
           <Button
             type="button"
             size="sm"
@@ -286,7 +288,6 @@ function ctaLabelForState(state: DocumentStateCode): string {
   if (state === "rejected") return "Corregir y volver a subir";
   if (state === "expired") return "Subir versión vigente";
   if (state === "needs_review") return "Revisar y confirmar";
-  if (state === "uploaded") return "Ver lo que enviaste";
   return "Subir documento";
 }
 
@@ -344,7 +345,7 @@ export function DocumentGuidanceDisclosure({
           aria-hidden="true"
         />
       </summary>
-      <div className="space-y-3 border-t border-[color:var(--border-subtle)] px-3 py-3 text-[12.5px] leading-5">
+      <div className="space-y-3 border-t border-[color:var(--border-subtle)] px-3 py-3 text-[13px] leading-5">
         {hasAnatomy ? (
           <p className="text-[color:var(--text-secondary)]">{anatomy}</p>
         ) : null}

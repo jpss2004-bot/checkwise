@@ -54,7 +54,6 @@ type Item =
       kind: "event";
       occurredAt: string;
       eventType: string;
-      result: string;
       severity: string;
       message: string | null;
       actorType: string;
@@ -209,6 +208,7 @@ export function SubmissionTimeline({
               item={item}
               isLast={idx === items.length - 1}
               index={idx}
+              audience={audience}
             />
           ))}
         </ol>
@@ -221,10 +221,12 @@ function TimelineRow({
   item,
   isLast,
   index,
+  audience,
 }: {
   item: Item;
   isLast: boolean;
   index: number;
+  audience: "provider" | "admin";
 }) {
   // Clamp the stagger delay to the same 8-step (480ms) cap the
   // nth-child fallback uses in globals.css, so late timeline rows
@@ -254,7 +256,7 @@ function TimelineRow({
                 ? `${STATUS_LABEL[item.from] ?? item.from} → ${STATUS_LABEL[item.to] ?? item.to}`
                 : (STATUS_LABEL[item.to] ?? item.to)}
             </p>
-            <Tooltip content={prettyActor(item.actor)} side="left">
+            <Tooltip content={item.actor} side="left">
               <span className="inline-flex items-center gap-1 font-mono text-[10px] uppercase tracking-wide text-[color:var(--text-tertiary)]">
                 <ActorIcon className="h-3 w-3" weight="bold" aria-hidden="true" />
                 {prettyActor(item.actor)}
@@ -292,13 +294,12 @@ function TimelineRow({
         <div className="flex flex-wrap items-baseline justify-between gap-2">
           <p className="flex items-center gap-1.5 text-[12px] font-medium text-[color:var(--text-secondary)]">
             <EventIcon className={cn("h-3.5 w-3.5", tone)} weight="bold" aria-hidden="true" />
-            {EVENT_LABEL[item.eventType] ?? item.eventType}
+            {EVENT_LABEL[item.eventType] ??
+              (audience === "admin" ? item.eventType : "Evento del sistema")}
           </p>
-          <Tooltip content={ACTOR_TYPE_LABEL[item.actorType] ?? item.actorType} side="left">
-            <span className="font-mono text-[10px] uppercase tracking-wide text-[color:var(--text-tertiary)]">
-              {ACTOR_TYPE_LABEL[item.actorType] ?? item.actorType}
-            </span>
-          </Tooltip>
+          <span className="font-mono text-[10px] uppercase tracking-wide text-[color:var(--text-tertiary)]">
+            {ACTOR_TYPE_LABEL[item.actorType] ?? item.actorType}
+          </span>
         </div>
         <p className="font-mono text-[10px] tabular-nums text-[color:var(--text-tertiary)]">
           {formatTime(item.occurredAt)}
@@ -338,7 +339,6 @@ function mergeAndSort(
       kind: "event",
       occurredAt: e.occurred_at,
       eventType: e.event_type,
-      result: e.result,
       severity: e.severity,
       message: e.message,
       actorType: e.actor_type,

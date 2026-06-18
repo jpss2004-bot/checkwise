@@ -288,7 +288,7 @@ function StatusHero({
       ? "rounded-lg border border-[color:var(--status-warning-border)] bg-[color:var(--status-warning-bg)] p-5"
       : tone === "approved"
         ? "rounded-lg border border-[color:var(--status-success-border)] bg-[color:var(--status-success-bg)] p-5"
-        : "rounded-lg border border-[color:var(--surface-brand-muted)] bg-[color:var(--surface-brand-muted)] p-5";
+        : "rounded-lg border border-[color:var(--border-default)] bg-[color:var(--surface-brand-muted)] p-5";
   const iconClass =
     tone === "attention"
       ? "bg-[color:var(--status-warning-text)] text-[color:var(--text-inverse)]"
@@ -562,6 +562,7 @@ function PrevalidationCard({ detail }: { detail: SubmissionDetail }) {
 
 function ContextCard({ detail }: { detail: SubmissionDetail }) {
   const submittedDate = formatDate(detail.submitted_at);
+  const uploadNote = detail.comments?.trim() || null;
   return (
     <Card>
       <CardHeader>
@@ -590,6 +591,16 @@ function ContextCard({ detail }: { detail: SubmissionDetail }) {
           <Field label="Tipo de carga" value={loadTypeLabel(detail.load_type)} />
           <Field label="Carga registrada" value={submittedDate} />
         </dl>
+        {uploadNote ? (
+          <div className="mt-3 rounded-md border border-border/70 bg-white px-3 py-2">
+            <dt className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
+              Tu nota al cargar
+            </dt>
+            <dd className="mt-1 whitespace-pre-line break-words text-sm font-medium">
+              {uploadNote}
+            </dd>
+          </div>
+        ) : null}
       </CardContent>
     </Card>
   );

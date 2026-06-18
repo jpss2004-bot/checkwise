@@ -202,6 +202,9 @@ function PortalNotificationsInner({ session }: { session: PortalSession }) {
     // Optimistic: flip everything to read immediately, snapshotting prior
     // state so we can roll back if the request fails.
     const snapshot = rows;
+    const markedCount = (rows ?? []).filter(
+      (item) => item.read_at === null,
+    ).length;
     setRows((current) =>
       current?.map((item) => ({
         ...item,
@@ -210,7 +213,12 @@ function PortalNotificationsInner({ session }: { session: PortalSession }) {
     );
     try {
       await markAllProviderNotificationsRead(session);
-      toast.success("Marcamos todas como leídas.");
+      toast.success(
+        markedCount === 1
+          ? "Marcamos 1 notificación como leída."
+          : `Marcamos ${markedCount} notificaciones como leídas.`,
+        { description: "Las encuentras en la pestaña Resueltas." },
+      );
     } catch {
       setRows(snapshot);
       toast.error("No pudimos marcarlas como leídas.", {
@@ -385,7 +393,7 @@ function CategoryChipRow({
           }
         >
           {CATEGORY_LABELS[category]}
-          <span className="ml-1.5 rounded-full bg-black/5 px-1.5 py-0.5 text-[10px] font-semibold">
+          <span className="ml-1.5 rounded-full bg-[color:var(--surface-page)] px-1.5 py-0.5 text-[10px] font-semibold">
             {count}
           </span>
         </Chip>

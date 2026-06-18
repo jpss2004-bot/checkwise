@@ -7,7 +7,6 @@ import {
   ArrowRight,
   PaperPlaneTilt,
   Quotes,
-  Sparkle,
   Warning,
 } from "@phosphor-icons/react";
 
@@ -454,14 +453,6 @@ function DockBody({
   feedbackByMessage: Record<string, "up" | "down">;
   onFeedback: (messageId: string, rating: "up" | "down") => void;
 }) {
-  if (turns.length === 0) {
-    return (
-      <div className="flex flex-1 flex-col items-center justify-center gap-2 px-5 py-10 text-center text-white/80">
-        <Sparkle className="h-6 w-6" style={{ color: DOCK_TEAL }} weight="fill" aria-hidden="true" />
-        <p className="text-[13px]">Estás al día. Te aviso cuando pase algo.</p>
-      </div>
-    );
-  }
   return (
     <div ref={scrollRef} className="flex-1 overflow-y-auto px-5 py-4">
       <ul className="space-y-3" aria-live="polite">

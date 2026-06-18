@@ -6,12 +6,15 @@
  * Jorge feedback (2026-05-21, /portal/dashboard): "ver los documentos
  * que se llevan cargados … ordenados por Institución, Mes y Año".
  *
- * Strictly read-only. The provider can browse what they uploaded, see
+ * Mostly read-only. The provider can browse what they uploaded, see
  * status at a glance, and drill into a row via the existing
  * /portal/submissions/[submission_id] detail page. We intentionally
- * surface no edit / delete / replace affordance on this page — Jorge
- * called out the risk of accidental alteration, and replacements
- * already have a first-class flow through the upload wizard.
+ * surface no edit / replace affordance on this page — Jorge called out
+ * the risk of accidental alteration, and replacements already have a
+ * first-class flow through the upload wizard. The one exception is a
+ * guarded, can_cancel-gated "Cancelar" action (added under CW-11) that
+ * lets a provider withdraw a not-yet-reviewed envío, behind a confirm
+ * dialog.
  */
 
 import { useEffect, useMemo, useState, type ReactNode } from "react";
@@ -235,9 +238,23 @@ export default function SubmissionsIndexPage() {
               }}
             />
             {(filteredItems?.length ?? 0) === 0 ? (
-              <p className="text-sm text-muted-foreground">
-                Ningún documento coincide con los filtros.
-              </p>
+              <div className="flex flex-wrap items-center gap-3">
+                <p className="text-sm text-muted-foreground">
+                  Ningún documento coincide con los filtros.
+                </p>
+                <Button
+                  type="button"
+                  size="sm"
+                  variant="ghost"
+                  onClick={() => {
+                    setFilterInstitution("");
+                    setFilterStatus("");
+                    setFilterYear("");
+                  }}
+                >
+                  Limpiar filtros
+                </Button>
+              </div>
             ) : (
               <GroupedList
                 groups={groupSubmissions(filteredItems ?? [])}
@@ -466,7 +483,7 @@ function GroupedList({
                     <p className="text-xs font-medium text-foreground">
                       {monthBlock.monthLabel}
                     </p>
-                    <ul className="divide-y divide-border rounded-md border border-border bg-white">
+                    <ul className="divide-y divide-border rounded-md border border-border bg-[color:var(--surface-raised)]">
                       {monthBlock.items.map((item) => (
                         <li key={item.submission_id}>
                           <div className="flex flex-wrap items-center gap-x-2 gap-y-2 p-3 hover:bg-muted/30">

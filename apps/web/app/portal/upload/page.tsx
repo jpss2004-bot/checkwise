@@ -370,7 +370,7 @@ function PortalUploadInner() {
                 </header>
                 <ul className="space-y-2">
                   {pendingPicker.map((item) => {
-                    const params = new URLSearchParams({
+                    const linkParams = new URLSearchParams({
                       requirement: item.name,
                       requirement_code: item.code,
                       institution: item.institution,
@@ -380,7 +380,7 @@ function PortalUploadInner() {
                     return (
                       <li key={item.code}>
                         <Link
-                          href={`/portal/upload?${params.toString()}`}
+                          href={`/portal/upload?${linkParams.toString()}`}
                           className="group flex items-center gap-3 rounded-lg border border-[color:var(--border-subtle)] bg-[color:var(--surface-page)] px-4 py-3 transition-colors hover:border-[color:var(--border-brand)] hover:bg-[color:var(--surface-brand-muted)]/40"
                         >
                           <FileText
@@ -491,13 +491,13 @@ function PortalUploadInner() {
             <>
               <Button asChild variant="outline" size="sm">
                 <Link href="/portal/onboarding">
-                  <ArrowLeft className="h-4 w-4" aria-hidden="true" />
+                  <FileText className="h-4 w-4" aria-hidden="true" />
                   Expediente
                 </Link>
               </Button>
               <Button asChild variant="outline" size="sm">
                 <Link href="/portal/calendar">
-                  <ArrowLeft className="h-4 w-4" aria-hidden="true" />
+                  <CalendarBlank className="h-4 w-4" aria-hidden="true" />
                   Calendario
                 </Link>
               </Button>

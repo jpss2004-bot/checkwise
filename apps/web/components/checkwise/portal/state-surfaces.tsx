@@ -23,14 +23,16 @@ import { cn } from "@/lib/utils";
 
 type SkeletonProps = {
   className?: string;
-  ariaHidden?: boolean;
 };
 
-export function Skeleton({ className, ariaHidden = true }: SkeletonProps) {
+export function Skeleton({ className }: SkeletonProps) {
   return (
     <div
-      aria-hidden={ariaHidden}
-      className={cn("animate-pulse rounded-md bg-muted/70", className)}
+      aria-hidden
+      className={cn(
+        "motion-safe:animate-pulse rounded-md bg-[color:var(--surface-sunken)]",
+        className,
+      )}
     />
   );
 }
@@ -240,14 +242,14 @@ export function DashboardSkeleton() {
       <span className="sr-only">Cargando calendario…</span>
       <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
         {Array.from({ length: 3 }).map((_, i) => (
-          <div key={i} className="rounded-md border border-border bg-white p-4">
+          <div key={i} className="rounded-md border border-[color:var(--border-default)] bg-[color:var(--surface-raised)] p-4">
             <Skeleton className="h-3 w-5/12" />
             <Skeleton className="mt-3 h-7 w-2/12" />
             <Skeleton className="mt-2 h-3 w-7/12" />
           </div>
         ))}
       </div>
-      <div className="rounded-md border border-border bg-white p-4">
+      <div className="rounded-md border border-[color:var(--border-default)] bg-[color:var(--surface-raised)] p-4">
         <Skeleton className="h-4 w-3/12" />
         <Skeleton className="mt-2 h-3 w-8/12" />
         <div className="mt-4 flex flex-wrap gap-2">
@@ -257,7 +259,7 @@ export function DashboardSkeleton() {
         </div>
         <div className="mt-5 space-y-3">
           {Array.from({ length: 2 }).map((_, i) => (
-            <div key={i} className="rounded-md border border-border/70 p-3">
+            <div key={i} className="rounded-md border border-[color:var(--border-subtle)] p-3">
               <Skeleton className="h-4 w-4/12" />
               <div className="mt-3 space-y-2">
                 {Array.from({ length: 3 }).map((__, j) => (
@@ -280,7 +282,7 @@ export function DashboardSkeleton() {
 
 export function OnboardingSkeleton() {
   return (
-    <div className="rounded-md border border-border bg-white p-5" aria-busy="true" aria-live="polite">
+    <div className="rounded-md border border-[color:var(--border-default)] bg-[color:var(--surface-raised)] p-5" aria-busy="true" aria-live="polite">
       <span className="sr-only">Cargando expediente corporativo…</span>
       <div className="flex items-start justify-between gap-3">
         <div className="space-y-2">
@@ -292,7 +294,7 @@ export function OnboardingSkeleton() {
       <Skeleton className="mt-4 h-2 w-full" />
       <div className="mt-6 space-y-4">
         {Array.from({ length: 3 }).map((_, i) => (
-          <div key={i} className="rounded-md border border-border/70 p-3">
+          <div key={i} className="rounded-md border border-[color:var(--border-subtle)] p-3">
             <Skeleton className="h-4 w-40" />
             <Skeleton className="mt-2 h-1.5 w-full" />
             <div className="mt-3 space-y-2">
@@ -318,7 +320,7 @@ export function SubmissionDetailSkeleton() {
     <div className="grid gap-5 lg:grid-cols-3" aria-busy="true" aria-live="polite">
       <span className="sr-only">Cargando documento…</span>
       <div className="space-y-5 lg:col-span-2">
-        <div className="rounded-md border border-border bg-white p-5">
+        <div className="rounded-md border border-[color:var(--border-default)] bg-[color:var(--surface-raised)] p-5">
           <div className="flex flex-wrap items-start justify-between gap-4">
             <div className="flex items-start gap-3">
               <Skeleton className="h-10 w-10 rounded-full" />
@@ -331,20 +333,20 @@ export function SubmissionDetailSkeleton() {
             <Skeleton className="h-9 w-40" />
           </div>
         </div>
-        <div className="rounded-md border border-border bg-white p-5 space-y-3">
+        <div className="rounded-md border border-[color:var(--border-default)] bg-[color:var(--surface-raised)] p-5 space-y-3">
           <Skeleton className="h-4 w-3/12" />
           {Array.from({ length: 2 }).map((_, i) => (
-            <div key={i} className="rounded-md border border-border/70 p-3 space-y-2">
+            <div key={i} className="rounded-md border border-[color:var(--border-subtle)] p-3 space-y-2">
               <Skeleton className="h-4 w-5/12" />
               <Skeleton className="h-3 w-9/12" />
             </div>
           ))}
         </div>
-        <div className="rounded-md border border-border bg-white p-5">
+        <div className="rounded-md border border-[color:var(--border-default)] bg-[color:var(--surface-raised)] p-5">
           <Skeleton className="h-4 w-3/12" />
           <div className="mt-3 grid gap-3 sm:grid-cols-2">
             {Array.from({ length: 6 }).map((_, i) => (
-              <div key={i} className="rounded-md border border-border/70 p-3 space-y-2">
+              <div key={i} className="rounded-md border border-[color:var(--border-subtle)] p-3 space-y-2">
                 <Skeleton className="h-3 w-4/12" />
                 <Skeleton className="h-4 w-7/12" />
               </div>
@@ -353,7 +355,7 @@ export function SubmissionDetailSkeleton() {
         </div>
       </div>
       <div className="space-y-5">
-        <div className="rounded-md border border-border bg-white p-5 space-y-3">
+        <div className="rounded-md border border-[color:var(--border-default)] bg-[color:var(--surface-raised)] p-5 space-y-3">
           <Skeleton className="h-4 w-5/12" />
           {Array.from({ length: 3 }).map((_, i) => (
             <div key={i} className="flex items-start gap-3">
@@ -365,7 +367,7 @@ export function SubmissionDetailSkeleton() {
             </div>
           ))}
         </div>
-        <div className="rounded-md border border-border bg-white p-5 space-y-2">
+        <div className="rounded-md border border-[color:var(--border-default)] bg-[color:var(--surface-raised)] p-5 space-y-2">
           <Skeleton className="h-4 w-5/12" />
           <Skeleton className="h-3 w-9/12" />
           <Skeleton className="h-3 w-8/12" />
@@ -377,7 +379,7 @@ export function SubmissionDetailSkeleton() {
 
 export function UploadWizardSkeleton() {
   return (
-    <div className="rounded-md border border-border bg-white p-5" aria-busy="true" aria-live="polite">
+    <div className="rounded-md border border-[color:var(--border-default)] bg-[color:var(--surface-raised)] p-5" aria-busy="true" aria-live="polite">
       <span className="sr-only">Preparando el formulario…</span>
       <div className="flex flex-wrap items-center gap-2">
         {Array.from({ length: 5 }).map((_, i) => (
@@ -403,10 +405,16 @@ export function UploadWizardSkeleton() {
 type InlineRetryProps = {
   message: string;
   onRetry: () => void;
+  retryLabel?: string;
   className?: string;
 };
 
-export function InlineRetry({ message, onRetry, className }: InlineRetryProps) {
+export function InlineRetry({
+  message,
+  onRetry,
+  retryLabel = "Reintentar",
+  className,
+}: InlineRetryProps) {
   return (
     <div
       role="alert"
@@ -424,7 +432,7 @@ export function InlineRetry({ message, onRetry, className }: InlineRetryProps) {
         onClick={onRetry}
         className="inline-flex items-center gap-1 rounded-md border border-[color:var(--status-warning-border)] bg-[color:var(--surface-raised)] px-2 py-1 text-xs font-medium text-[color:var(--status-warning-text)] transition-colors duration-fast hover:bg-[color:var(--status-warning-bg)]"
       >
-        Reintentar
+        {retryLabel}
         <ArrowRight className="h-3.5 w-3.5" weight="bold" aria-hidden />
       </button>
     </div>

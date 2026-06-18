@@ -3,8 +3,8 @@
 import * as React from "react";
 import {
   CheckCircle,
-  CircleDashed,
   CircleNotch,
+  Warning,
   XCircle,
 } from "@phosphor-icons/react";
 
@@ -35,9 +35,9 @@ import { cn } from "@/lib/utils";
  * classifier wrote in plain Spanish — never a rule_code or technical
  * identifier.
  *
- * The underlying per-rule signal list is available via the QA tooltip
- * on each row (title attribute) for support / debugging, but is never
- * the primary label.
+ * The underlying per-rule signal list is exposed via a `data-rule-codes`
+ * attribute on each row for support / debugging (inspector only), but is
+ * never rendered as a visible label or tooltip.
  */
 
 type IconComponent = React.ComponentType<{
@@ -48,7 +48,7 @@ type IconComponent = React.ComponentType<{
 
 const ICON_FOR_STATE: Record<GroupedValidationState, IconComponent> = {
   ok: CheckCircle,
-  warning: CircleDashed,
+  warning: Warning,
   failure: XCircle,
   pending: CircleNotch,
 };
@@ -78,7 +78,6 @@ export function GroupedValidationSummary({
   const groups = React.useMemo(() => groupValidations(validations), [validations]);
 
   React.useEffect(() => {
-    if (!groups.length) return;
     track("prevalidation.summary.shown", {
       surface,
       file_state: groups[0].state,
@@ -87,8 +86,6 @@ export function GroupedValidationSummary({
     // Intentionally fires once per mount with the snapshot of states.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
-
-  if (groups.length === 0) return null;
 
   return (
     <ul
@@ -115,10 +112,10 @@ function GroupedRow({ group }: { group: GroupedValidationOutcome }) {
         "border-[color:var(--border-subtle)] border-l-2",
         borderClass,
       )}
-      // QA tooltip: hover shows the underlying rule_codes that folded
-      // into this group. Never visible by default — it's an off-screen
-      // affordance for support, not a label.
-      title={group.ruleCodes.length ? `Reglas: ${group.ruleCodes.join(", ")}` : undefined}
+      // QA affordance: the underlying rule_codes that folded into this
+      // group are exposed only via a data attribute (inspector / support),
+      // never as a visible tooltip — providers never see raw identifiers.
+      data-rule-codes={group.ruleCodes.length ? group.ruleCodes.join(",") : undefined}
       data-group-id={group.id}
       data-state={group.state}
     >

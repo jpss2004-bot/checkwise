@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import {
@@ -32,7 +32,10 @@ import {
 import { acceptLegalConsent } from "@/lib/api/portal-session";
 import { buildWorkspaceContext } from "@/lib/workspace/resolver";
 import type { WorkspaceContext } from "@/lib/workspace/types";
-import { withPortalSession } from "@/lib/session/with-portal-session";
+import {
+  legalConsentRequired,
+  withPortalSession,
+} from "@/lib/session/with-portal-session";
 import {
   setCachedPortalSession,
   type ExpedienteStatus,
@@ -58,11 +61,9 @@ function EntraATuEspacioInner({ session }: { session: PortalSession }) {
 
   const [liveSession, setLiveSession] = useState<PortalSession>(session);
   const isFirstVisit = liveSession.profile_confirmed_at === null;
-  const needsLegalConsent =
-    liveSession.legal_consent_accepted_at === null ||
-    (liveSession.current_legal_consent_version !== null &&
-      liveSession.legal_consent_version !==
-        liveSession.current_legal_consent_version);
+  // Single source of truth for the consent gate — shared with the
+  // session HOC so the page and the guard can never drift apart.
+  const needsLegalConsent = legalConsentRequired(liveSession);
 
   const workspace = useMemo<WorkspaceContext>(
     () => buildWorkspaceContext(liveSession),
@@ -72,6 +73,7 @@ function EntraATuEspacioInner({ session }: { session: PortalSession }) {
   const [legalConsentAccepted, setLegalConsentAccepted] = useState(false);
   const [acceptingConsent, setAcceptingConsent] = useState(false);
   const [consentError, setConsentError] = useState<string | null>(null);
+  const consentCheckboxRef = useRef<HTMLButtonElement>(null);
 
   const [correctionOpen, setCorrectionOpen] = useState(false);
   useEffect(() => {
@@ -100,8 +102,17 @@ function EntraATuEspacioInner({ session }: { session: PortalSession }) {
   // "Entrar a mi espacio" click. Navigating here intentionally via the
   // "Mi espacio" nav (no param) keeps the identity view, and a pending
   // consent still renders the form below (the gate has a job to do).
-  // Effect-only (never during render) to avoid a hydration mismatch.
-  const [autoForwarding, setAutoForwarding] = useState(false);
+  //
+  // Resolve the intent synchronously in the useState initializer
+  // (SSR-guarded) so autoForwarding is already true on the first render
+  // — that keeps the gate content from painting then vanishing while the
+  // replace navigation lands. The actual router.replace stays in the
+  // effect below (navigation is a side effect, never run during render).
+  const [autoForwarding, setAutoForwarding] = useState(() => {
+    if (typeof window === "undefined") return false;
+    const params = new URLSearchParams(window.location.search);
+    return params.get("continue") === "1" && !needsLegalConsent;
+  });
   useEffect(() => {
     if (typeof window === "undefined") return;
     const params = new URLSearchParams(window.location.search);
@@ -111,14 +122,13 @@ function EntraATuEspacioInner({ session }: { session: PortalSession }) {
     }
   }, [router, needsLegalConsent, nextRouteAfterEntry]);
 
-  const canEnter = !needsLegalConsent;
-
   async function handleEnter() {
     if (needsLegalConsent) {
       if (!legalConsentAccepted) {
         setConsentError(
           "Marca la casilla para confirmar que aceptas los avisos legales.",
         );
+        consentCheckboxRef.current?.focus();
         return;
       }
       setAcceptingConsent(true);
@@ -228,12 +238,16 @@ function EntraATuEspacioInner({ session }: { session: PortalSession }) {
               </p>
               <label className="mt-4 flex items-start gap-3 text-sm text-[color:var(--text-primary)]">
                 <Checkbox
+                  ref={consentCheckboxRef}
                   id="legal-consent-checkbox"
                   checked={legalConsentAccepted}
-                  onCheckedChange={(value) =>
-                    setLegalConsentAccepted(value === true)
-                  }
+                  onCheckedChange={(value) => {
+                    const accepted = value === true;
+                    setLegalConsentAccepted(accepted);
+                    if (accepted) setConsentError(null);
+                  }}
                   aria-describedby="legal-consent-links"
+                  aria-invalid={consentError !== null}
                 />
                 <span>
                   Acepto el{" "}
@@ -311,9 +325,6 @@ function EntraATuEspacioInner({ session }: { session: PortalSession }) {
                 type="button"
                 size="lg"
                 loading={acceptingConsent}
-                disabled={
-                  !canEnter && !legalConsentAccepted
-                }
                 onClick={handleEnter}
               >
                 <span>

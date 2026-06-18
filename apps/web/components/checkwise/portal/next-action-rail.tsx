@@ -108,47 +108,43 @@ export function NextActionRail({ actions, emptyState, className }: NextActionRai
         {actions.map((action, idx) => (
           <li
             key={action.id}
-            className="contents"
+            className={cn(
+              "cw-fade-up cw-hover-lift flex min-w-[260px] flex-1 snap-start flex-col gap-3 rounded-md p-4",
+              "border border-[color:var(--border-default)] bg-[color:var(--surface-page)]",
+            )}
+            style={{ "--cw-index": idx } as React.CSSProperties}
             aria-label={`${PRIORITY_LABEL[action.priority]}: ${action.title}`}
           >
-            <article
-              className={cn(
-                "cw-fade-up cw-hover-lift flex min-w-[260px] flex-1 snap-start flex-col gap-3 rounded-md p-4",
-                "border border-[color:var(--border-default)] bg-[color:var(--surface-page)]",
-              )}
-              style={{ "--cw-index": idx } as React.CSSProperties}
+            <div className="flex items-center gap-2">
+              <span
+                aria-hidden="true"
+                className={cn("h-2 w-2 rounded-full", PRIORITY_DOT[action.priority])}
+              />
+              <span className="font-mono text-[11px] uppercase tracking-wide text-[color:var(--text-tertiary)]">
+                {action.meta ?? PRIORITY_LABEL[action.priority]}
+              </span>
+            </div>
+
+            <div className="min-w-0 space-y-1">
+              <h3 className="line-clamp-2 text-[14px] font-semibold leading-snug text-[color:var(--text-primary)]">
+                {action.title}
+              </h3>
+              <p className="line-clamp-2 text-xs leading-[1.5] text-[color:var(--text-secondary)]">
+                {action.body}
+              </p>
+            </div>
+
+            <Button
+              asChild
+              size="sm"
+              variant={action.priority === "high" ? "default" : "outline"}
+              className="mt-auto self-start"
             >
-              <div className="flex items-center gap-2">
-                <span
-                  aria-hidden="true"
-                  className={cn("h-2 w-2 rounded-full", PRIORITY_DOT[action.priority])}
-                />
-                <span className="font-mono text-[10px] uppercase tracking-wide text-[color:var(--text-tertiary)]">
-                  {action.meta ?? PRIORITY_LABEL[action.priority]}
-                </span>
-              </div>
-
-              <div className="min-w-0 space-y-1">
-                <h3 className="line-clamp-2 text-[14px] font-semibold leading-snug text-[color:var(--text-primary)]">
-                  {action.title}
-                </h3>
-                <p className="line-clamp-2 text-xs leading-[1.5] text-[color:var(--text-secondary)]">
-                  {action.body}
-                </p>
-              </div>
-
-              <Button
-                asChild
-                size="sm"
-                variant={action.priority === "high" ? "default" : "outline"}
-                className="mt-auto self-start"
-              >
-                <Link href={action.ctaHref}>
-                  <span>{action.ctaLabel}</span>
-                  <ArrowRight className="h-3.5 w-3.5" weight="bold" aria-hidden="true" />
-                </Link>
-              </Button>
-            </article>
+              <Link href={action.ctaHref}>
+                <span>{action.ctaLabel}</span>
+                <ArrowRight className="h-3.5 w-3.5" weight="bold" aria-hidden="true" />
+              </Link>
+            </Button>
           </li>
         ))}
       </ul>

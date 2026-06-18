@@ -61,6 +61,7 @@ export function EmptyExpedienteHero({
   className,
 }: EmptyExpedienteHeroProps) {
   const steps = pickSteps(onboarding, limit);
+  const greetingName = friendlyVendorName(vendorName).trim();
 
   return (
     <section
@@ -87,12 +88,13 @@ export function EmptyExpedienteHero({
             Empieza tu expediente
           </p>
           <h2 className="text-2xl font-semibold leading-tight tracking-[-0.01em] text-[color:var(--text-primary)] sm:text-3xl">
-            Hola {friendlyVendorName(vendorName)}.
+            Hola{greetingName ? ` ${greetingName}` : ""}.
             <br className="hidden sm:block" /> Vamos a armar tu cumplimiento, paso a paso.
           </h2>
           <p className="max-w-prose text-[13px] leading-relaxed text-[color:var(--text-secondary)]">
-            {semaphore.reason} El checklist de abajo tiene los documentos
-            obligatorios para que tu expediente quede listo.
+            {semaphore.reason.trim() ? <>{semaphore.reason.trim()} </> : null}
+            El checklist de abajo tiene los documentos obligatorios para que tu
+            expediente quede listo.
           </p>
         </div>
         <ProgressBadge summary={summary} />

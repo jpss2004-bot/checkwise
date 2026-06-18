@@ -1,9 +1,9 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import { useParams, useSearchParams } from "next/navigation";
-import { ArrowLeft, Printer, WarningCircle } from "@phosphor-icons/react";
+import { ArrowLeft, ArrowsClockwise, Printer } from "@phosphor-icons/react";
 
 import { Canvas } from "@/components/checkwise/reports/canvas";
 import { ReportMasthead } from "@/components/checkwise/reports/report-masthead";
@@ -45,8 +45,9 @@ export default function PrintPage() {
   const [content, setContent] = useState<ReportContent | null>(null);
   const [error, setError] = useState<string | null>(null);
 
-  useEffect(() => {
+  const load = useCallback(() => {
     let cancelled = false;
+    setError(null);
     getReport(reportId)
       .then((r) => {
         if (cancelled) return;
@@ -69,6 +70,17 @@ export default function PrintPage() {
       cancelled = true;
     };
   }, [reportId]);
+
+  useEffect(() => load(), [load]);
+
+  // On a fetch failure the autoprint below never fires, so the error branch
+  // offers a "Reintentar" that re-runs the load — a transient failure (e.g.
+  // a slow ?autoprint=1 deep-link) isn't a dead end.
+  const handleRetry = useCallback(() => {
+    setReport(null);
+    setContent(null);
+    load();
+  }, [load]);
 
   // ?autoprint=1 → trigger window.print() after the canvas has mounted
   // and a paint has happened, so the print dialog sees fully-rendered
@@ -95,18 +107,21 @@ export default function PrintPage() {
     return (
       <main className="mx-auto max-w-2xl px-6 py-12">
         <Alert variant="warning">
-          <AlertTitle className="flex items-center gap-2">
-            <WarningCircle className="h-4 w-4" weight="bold" aria-hidden="true" />
-            Reporte no disponible
-          </AlertTitle>
+          <AlertTitle>Reporte no disponible</AlertTitle>
           <AlertDescription>{error}</AlertDescription>
         </Alert>
-        <Button asChild variant="outline" size="sm" className="mt-4">
-          <Link href="/portal/reports">
-            <ArrowLeft className="h-4 w-4" weight="bold" aria-hidden="true" />
-            Volver
-          </Link>
-        </Button>
+        <div className="mt-4 flex flex-wrap items-center gap-2">
+          <Button variant="default" size="sm" onClick={handleRetry}>
+            <ArrowsClockwise className="h-4 w-4" weight="bold" aria-hidden="true" />
+            Reintentar
+          </Button>
+          <Button asChild variant="outline" size="sm">
+            <Link href="/portal/reports">
+              <ArrowLeft className="h-4 w-4" weight="bold" aria-hidden="true" />
+              Volver
+            </Link>
+          </Button>
+        </div>
       </main>
     );
   }
@@ -260,6 +275,9 @@ function PrintStyles({
   return (
     <style jsx global>{`
       @media print {
+        /* @page margin boxes can't resolve :root custom properties at print
+           time, so these grays are literals on purpose. They mirror the
+           documented gray tokens: #606e80 (--text-tertiary) for chrome. */
         @page {
           size: Letter;
           margin: 0.75in 0.75in 0.9in 0.75in;
@@ -290,7 +308,7 @@ function PrintStyles({
             font-family: -apple-system, BlinkMacSystemFont, "Segoe UI",
               sans-serif;
             font-size: 9pt;
-            color: #9ca3af;
+            color: #606e80;
           }
         }
 

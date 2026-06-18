@@ -73,10 +73,15 @@ export function ProfileContactForm({
       document.getElementById("profile-phone")?.focus();
       return;
     }
-    setSubmitting(true);
-    setSaveError(null);
     const fullName = `${profile.first_name.trim()} ${profile.last_name.trim()}`
       .trim();
+    if (!fullName) {
+      setSaveError("Captura tu nombre y apellido.");
+      document.getElementById("profile-first-name")?.focus();
+      return;
+    }
+    setSubmitting(true);
+    setSaveError(null);
     const updated = await patchWorkspaceProfile(
       workspace.protected.workspace_id,
       {
@@ -234,6 +239,7 @@ export function ProfileContactForm({
           type="submit"
           loading={submitting}
           disabled={justSaved || !!phoneError}
+          aria-busy={justSaved || undefined}
           size="lg"
         >
           <span>{justSaved ? "Volviendo…" : submitLabel}</span>

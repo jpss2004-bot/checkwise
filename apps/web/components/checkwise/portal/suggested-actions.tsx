@@ -97,13 +97,12 @@ export function SuggestedActions({
 }
 
 function formatDeadline(iso: string): string {
-  try {
-    const date = new Date(iso);
-    return date.toLocaleDateString("es-MX", {
-      day: "2-digit",
-      month: "short",
-    });
-  } catch {
+  const date = new Date(iso);
+  if (Number.isNaN(date.getTime())) {
     return iso;
   }
+  return date.toLocaleDateString("es-MX", {
+    day: "2-digit",
+    month: "short",
+  });
 }

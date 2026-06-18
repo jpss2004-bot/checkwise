@@ -220,6 +220,7 @@ function OnboardingInner({ session }: { session: PortalSession }) {
 
         {needsActionMandatory.length > 0 && (
           <ExpedienteSection
+            sectionId="mandatory"
             title="Obligatorios — desbloquean tu dashboard"
             description="Estos documentos te bloquean el dashboard. Atiéndelos primero."
             tone="attention"
@@ -239,6 +240,7 @@ function OnboardingInner({ session }: { session: PortalSession }) {
 
         {needsActionOptional.length > 0 && (
           <ExpedienteSection
+            sectionId="optional"
             title="Sugeridos · refuerzan tu expediente"
             description="No bloquean tu dashboard, pero te dejan más sólido frente a una auditoría. Súbelos cuando apliquen a tu caso."
             tone="info"
@@ -259,6 +261,7 @@ function OnboardingInner({ session }: { session: PortalSession }) {
 
         {inProgress.length > 0 && (
           <ExpedienteSection
+            sectionId="in-review"
             title="En revisión humana"
             description="Recibimos tu carga. No necesitas hacer nada — te avisamos por correo."
             tone="info"
@@ -278,6 +281,7 @@ function OnboardingInner({ session }: { session: PortalSession }) {
 
         {completed.length > 0 && (
           <ExpedienteSection
+            sectionId="approved"
             title="Aprobados"
             description="Estos documentos ya quedaron en regla. Los revisaremos por vigencia."
             tone="success"
@@ -296,13 +300,20 @@ function OnboardingInner({ session }: { session: PortalSession }) {
           </ExpedienteSection>
         )}
 
-        <ActivateDashboardCard
-          status={session.expediente_status}
-          counts={counts}
-          activating={activating}
-          error={activateError}
-          onActivate={handleActivateDashboard}
-        />
+        {/* The hero already surfaces the primary "Entrar al dashboard" CTA
+            once the gate is satisfied (or the expediente is complete), so
+            the persistent bottom card would only duplicate it. Show the
+            bottom card only while the user still has work to do. */}
+        {!counts.is_gate_satisfied &&
+          session.expediente_status !== "complete" && (
+            <ActivateDashboardCard
+              status={session.expediente_status}
+              counts={counts}
+              activating={activating}
+              error={activateError}
+              onActivate={handleActivateDashboard}
+            />
+          )}
       </main>
     </PortalAppShell>
   );
@@ -409,11 +420,7 @@ function GateHero({
   activating,
 }: {
   counts: ReturnType<typeof countOnboardingCards>;
-  banner:
-    | "none"
-    | "provisional_access"
-    | "expediente_blocked"
-    | "needs_workspace_confirmation";
+  banner: "none" | "provisional_access" | "expediente_blocked";
   onActivate: () => void;
   activating: boolean;
 }) {
@@ -556,7 +563,7 @@ function CountsSummary({
     <dl
       className={
         stacked
-          ? "grid grid-cols-3 gap-3 text-center sm:grid-cols-3"
+          ? "grid grid-cols-1 gap-3 text-center sm:grid-cols-3"
           : "grid w-full grid-cols-3 gap-3 text-center lg:w-auto lg:min-w-[260px] lg:grid-cols-1 lg:text-left"
       }
     >
@@ -597,6 +604,7 @@ function Stat({
 // ─── Section ─────────────────────────────────────────────────────
 
 interface SectionProps {
+  sectionId: string;
   title: string;
   description: string;
   tone: "attention" | "info" | "success";
@@ -606,6 +614,7 @@ interface SectionProps {
 }
 
 function ExpedienteSection({
+  sectionId,
   title,
   description,
   tone,
@@ -648,7 +657,7 @@ function ExpedienteSection({
         <span className="min-w-0">
           <span className="flex items-center gap-2">
             <span
-              id={`section-${title}`}
+              id={`section-${sectionId}`}
               className="text-[14.5px] font-semibold text-[color:var(--text-primary)]"
             >
               {title}
@@ -674,7 +683,7 @@ function ExpedienteSection({
           aria-hidden="true"
         />
         <h2
-          id={`section-${title}`}
+          id={`section-${sectionId}`}
           className="text-[15px] font-semibold text-[color:var(--text-primary)]"
         >
           {title}
@@ -702,7 +711,7 @@ function ExpedienteSection({
   );
 
   return (
-    <section aria-labelledby={`section-${title}`} className="cw-fade-up">
+    <section aria-labelledby={`section-${sectionId}`} className="cw-fade-up">
       {trigger}
       {open && children}
     </section>
