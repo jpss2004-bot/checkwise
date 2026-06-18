@@ -198,13 +198,17 @@ export type AdminCalendarRow = {
   due_soon_count: number;
 };
 
+export type AdminCalendarCellInst = { count: number; worst_risk: string };
+
 export type AdminCalendarCell = {
   row_id: string;
   month: number;
   count: number;
   /** One of the six ordered calendar risks. */
   worst_risk: string;
-  by_institution: Record<string, number>;
+  /** Per-institution {count, worst_risk} — lets the grid recolor by one
+   *  authority client-side without a refetch. */
+  by_institution: Record<string, AdminCalendarCellInst>;
 };
 
 export type AdminCalendarMonthForecast = {
@@ -270,6 +274,47 @@ export async function getAdminCalendarGrid(params?: {
   if (params?.month !== undefined) qs.set("month", String(params.month));
   const suffix = qs.toString() ? `?${qs.toString()}` : "";
   return fetchJson(`/api/v1/admin/calendar/grid${suffix}`);
+}
+
+// Renewals lane — date-precise obligations the 17th-of-month grid can't model.
+
+export type AdminRenewalContract = {
+  client_id: string;
+  client_name: string;
+  vendor_id: string;
+  vendor_name: string;
+  end_date: string;
+  days_until: number;
+  status: "overdue" | "due_soon" | "upcoming";
+  repse_folio: string | null;
+};
+
+export type AdminRenewalCredential = {
+  client_id: string | null;
+  client_name: string | null;
+  vendor_id: string;
+  vendor_name: string;
+  title: string;
+  requirement_code: string;
+  status: "overdue" | "due_soon";
+};
+
+export type AdminRenewals = {
+  as_of: string;
+  contracts: AdminRenewalContract[];
+  credentials: AdminRenewalCredential[];
+  vendors_scanned: number;
+  truncated: boolean;
+};
+
+export async function getAdminCalendarRenewals(params?: {
+  horizon_days?: number;
+}): Promise<AdminRenewals> {
+  const qs = new URLSearchParams();
+  if (params?.horizon_days !== undefined)
+    qs.set("horizon_days", String(params.horizon_days));
+  const suffix = qs.toString() ? `?${qs.toString()}` : "";
+  return fetchJson(`/api/v1/admin/calendar/renewals${suffix}`);
 }
 
 /**
