@@ -125,7 +125,9 @@ export function ExpedienteCard({ requirement, onAction }: ExpedienteCardProps) {
             ? "border-[color:var(--status-error-border)]"
             : cardTone === "approved"
               ? "border-[color:var(--status-success-border)]"
-              : "border-[color:var(--border-default)]",
+              : cardTone === "review"
+                ? "border-[color:var(--doc-uploaded-border)]"
+                : "border-[color:var(--border-default)]",
       )}
       aria-labelledby={`req-${requirement.id}-title`}
     >
@@ -277,10 +279,14 @@ export function ExpedienteCard({ requirement, onAction }: ExpedienteCardProps) {
 
 function toneForState(
   state: DocumentStateCode,
-): "attention" | "rejected" | "approved" | "neutral" {
+): "attention" | "rejected" | "approved" | "review" | "neutral" {
   if (state === "approved") return "approved";
   if (state === "rejected" || state === "expired") return "rejected";
   if (state === "needs_review" || state === "pending") return "attention";
+  // Documents under review (uploaded / in_review, both badged "En
+  // revisión") get a subtle review-tone border so the card frame — not
+  // only the badge — signals they're in the reviewer's hands.
+  if (state === "uploaded" || state === "in_review") return "review";
   return "neutral";
 }
 

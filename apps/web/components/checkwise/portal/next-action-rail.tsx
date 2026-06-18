@@ -104,7 +104,10 @@ export function NextActionRail({ actions, emptyState, className }: NextActionRai
         </span>
       </header>
 
-      <ul className="cw-stagger flex snap-x snap-mandatory gap-3 overflow-x-auto p-5 sm:grid sm:snap-none sm:grid-cols-2 sm:overflow-visible lg:grid-cols-3">
+      {/* Mobile: a right-edge fade hints there are more cards to scroll
+          to (on top of the deliberate next-card peek from min-w-[260px]).
+          Removed at sm+ where the rail becomes a static grid. */}
+      <ul className="cw-stagger flex snap-x snap-mandatory gap-3 overflow-x-auto p-5 [mask-image:linear-gradient(to_right,#000_84%,transparent)] sm:grid sm:snap-none sm:grid-cols-2 sm:overflow-visible sm:[mask-image:none] lg:grid-cols-3">
         {actions.map((action, idx) => (
           <li
             key={action.id}

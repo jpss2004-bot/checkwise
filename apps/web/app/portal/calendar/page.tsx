@@ -39,6 +39,8 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { PageHeader } from "@/components/ui/page-header";
 import { Skeleton } from "@/components/ui/skeleton";
+import { toast } from "@/components/ui/toast";
+import { downloadAuthenticatedFile } from "@/lib/api/download";
 import {
   expedienteZipUrl,
   getCalendar,
@@ -116,13 +118,37 @@ function CalendarInner({ session }: { session: PortalSession }) {
   const now = new Date();
   const [year] = useState(now.getFullYear() || 2026);
   const currentMonth = now.getMonth() + 1;
-  const viewingCurrentYear = year === now.getFullYear();
 
   const filterParam = searchParams.get("inst");
   const filterInstitution: CalendarInstitutionCode | "all" =
     filterParam && VALID_INSTITUTIONS.has(filterParam)
       ? (filterParam as CalendarInstitutionCode)
       : "all";
+
+  // Expediente ZIP download. Fetched with the session token (via
+  // downloadAuthenticatedFile) instead of a blind ``target=_blank`` GET,
+  // so the button can show a pending state and a slow/failed download
+  // surfaces an in-app error toast instead of an orphaned blank tab.
+  const [downloadingZip, setDownloadingZip] = useState(false);
+
+  async function handleDownloadZip() {
+    if (downloadingZip || filterInstitution === "all") return;
+    setDownloadingZip(true);
+    try {
+      await downloadAuthenticatedFile(
+        expedienteZipUrl(session, { institution: filterInstitution }),
+        `expediente-${filterInstitution}.zip`,
+      );
+    } catch (err) {
+      toast.error(
+        err instanceof Error
+          ? err.message
+          : "No pudimos preparar la descarga. Inténtalo de nuevo.",
+      );
+    } finally {
+      setDownloadingZip(false);
+    }
+  }
 
   // Phase 7 / Slice 7A — pendientes filter. Independent from the
   // institution filter so "Pendientes IMSS" works (both compose in
@@ -260,21 +286,19 @@ function CalendarInner({ session }: { session: PortalSession }) {
                   single-status; pendientes is a calendar-only UI
                   convenience that maps to four DB statuses. */}
               {filterInstitution !== "all" ? (
-                <Button asChild variant="outline" size="sm">
-                  <a
-                    href={expedienteZipUrl(session, {
-                      institution: filterInstitution,
-                    })}
-                    target="_blank"
-                    rel="noreferrer"
-                  >
-                    <DownloadSimple
-                      className="h-4 w-4"
-                      weight="bold"
-                      aria-hidden="true"
-                    />
-                    Descargar {INSTITUTION_LABELS[filterInstitution]}
-                  </a>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  loading={downloadingZip}
+                  disabled={downloadingZip}
+                  onClick={handleDownloadZip}
+                >
+                  <DownloadSimple
+                    className="h-4 w-4"
+                    weight="bold"
+                    aria-hidden="true"
+                  />
+                  Descargar {INSTITUTION_LABELS[filterInstitution]}
                 </Button>
               ) : null}
               <Button asChild variant="outline" size="sm">
@@ -360,7 +384,7 @@ function CalendarInner({ session }: { session: PortalSession }) {
           <div className="lg:hidden">
             <MobileMonthList
               events={filteredEvents}
-              currentMonth={viewingCurrentYear ? currentMonth : 1}
+              currentMonth={currentMonth}
               onSelect={setSelectedId}
             />
           </div>
@@ -396,7 +420,7 @@ function CalendarInner({ session }: { session: PortalSession }) {
                   </th>
                   {MONTH_LABELS_SHORT_ES.map((m, idx) => {
                     const monthNum = idx + 1;
-                    const isCurrent = viewingCurrentYear && monthNum === currentMonth;
+                    const isCurrent = monthNum === currentMonth;
                     return (
                       <th
                         key={m}
@@ -442,8 +466,8 @@ function CalendarInner({ session }: { session: PortalSession }) {
                       {Array.from({ length: 12 }, (_, monthIdx) => {
                         const month = monthIdx + 1;
                         const cellEvents = eventsByCell.get(`${inst}-${month}`) ?? [];
-                        const isCurrent = viewingCurrentYear && month === currentMonth;
-                        const isPast = viewingCurrentYear && month < currentMonth;
+                        const isCurrent = month === currentMonth;
+                        const isPast = month < currentMonth;
                         return (
                           <td key={month} className="p-1 align-middle">
                             <MonthCell

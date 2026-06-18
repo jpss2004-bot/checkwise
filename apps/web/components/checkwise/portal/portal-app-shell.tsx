@@ -125,6 +125,21 @@ type PortalAppShellProps = {
   children: React.ReactNode;
 };
 
+/**
+ * Per-route max-width for the global "Volver" bar so it lines up with
+ * each page's own content container instead of always sitting at 7xl.
+ * Keep these in sync with the outermost ``max-w-*`` on each page's
+ * ``<main>``. Routes not listed fall back to ``max-w-7xl`` (dashboard,
+ * submissions, upload). Hidden routes (dashboard home, onboarding,
+ * entra-a-tu-espacio) never render the bar, so they're omitted.
+ */
+const BACK_BAR_MAX_WIDTH: Record<string, string> = {
+  "/portal/calendar": "max-w-screen-2xl",
+  "/portal/notifications": "max-w-4xl",
+  "/portal/perfil": "max-w-3xl",
+  "/portal/buscar": "max-w-6xl",
+};
+
 export function PortalAppShell({
   session,
   onboardingPct,
@@ -392,6 +407,9 @@ export function PortalAppShell({
         <BackBar
           homeHref="/portal/dashboard"
           hiddenOn={["/portal/entra-a-tu-espacio", "/portal/onboarding"]}
+          maxWidthClassName={
+            BACK_BAR_MAX_WIDTH[pathname ?? ""] ?? "max-w-7xl"
+          }
         />
         <div className="flex-1">{children}</div>
       </div>

@@ -31,9 +31,18 @@ import { ArrowLeft } from "@phosphor-icons/react";
 export function BackBar({
   homeHref,
   hiddenOn = [],
+  maxWidthClassName = "max-w-7xl",
 }: {
   homeHref: string;
   hiddenOn?: ReadonlyArray<string>;
+  /**
+   * Max-width of the bar's centered canvas. Defaults to ``max-w-7xl``
+   * (unchanged for admin/client shells). The portal shell overrides it
+   * per-route so the "Volver" link aligns with the page's own content
+   * container (e.g. the narrower notifications/perfil views and the
+   * wider calendar matrix) instead of always sitting at 7xl.
+   */
+  maxWidthClassName?: string;
 }) {
   const router = useRouter();
   const pathname = usePathname();
@@ -54,7 +63,7 @@ export function BackBar({
   if (hiddenOn.includes(pathname ?? "")) return null;
 
   return (
-    <div className="mx-auto w-full max-w-7xl px-5 pt-4">
+    <div className={`mx-auto w-full ${maxWidthClassName} px-5 pt-4`}>
       <button
         type="button"
         onClick={() => router.back()}
