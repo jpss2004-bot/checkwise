@@ -11,7 +11,6 @@ import {
   CaretRight,
   ChartLineUp,
   ClipboardText,
-  CloudArrowUp,
   Files,
   House,
   IdentificationCard,
@@ -60,8 +59,19 @@ type NavItem = {
   hint?: string;
 };
 
+// §3.1/§3.2/§3.4 — "Subir documento" is intentionally NOT a primary nav
+// item: a context-free upload is a dead-end (the wizard needs a
+// requirement). Uploads start in context from the Dashboard, Calendario
+// (recurring) or Expediente (initial), which deep-link into the wizard;
+// the hints below spell out each surface's distinct job so the four
+// document-facing sections don't read as duplicates.
 const PRIMARY_NAV: NavItem[] = [
-  { href: "/portal/dashboard", label: "Dashboard", icon: House, hint: "Resumen del workspace" },
+  {
+    href: "/portal/dashboard",
+    label: "Dashboard",
+    icon: House,
+    hint: "Resumen y próxima acción",
+  },
   {
     href: "/portal/onboarding",
     label: "Expediente",
@@ -72,19 +82,13 @@ const PRIMARY_NAV: NavItem[] = [
     href: "/portal/calendar",
     label: "Calendario",
     icon: CalendarBlank,
-    hint: "Vista anual REPSE",
-  },
-  {
-    href: "/portal/upload",
-    label: "Subir documento",
-    icon: CloudArrowUp,
-    hint: "Carga guiada",
+    hint: "Obligaciones recurrentes",
   },
   {
     href: "/portal/submissions",
     label: "Documentos",
     icon: Files,
-    hint: "Historial por institución",
+    hint: "Historial de cargas",
   },
   {
     href: "/portal/reports",

@@ -7,6 +7,8 @@ import {
   ArrowLeft,
   ArrowRight,
   CalendarBlank,
+  CloudArrowUp,
+  FileText,
   Info,
 } from "@phosphor-icons/react";
 
@@ -115,6 +117,10 @@ function PortalUploadInner() {
   const [onboardingGuide, setOnboardingGuide] = useState<OnboardingItem | null>(
     null,
   );
+  // §3.2 — pending initial-expediente documents, used to turn the
+  // no-requirement empty state into a one-click launcher instead of a
+  // dead-end bounce.
+  const [pendingPicker, setPendingPicker] = useState<OnboardingItem[]>([]);
 
   useEffect(() => {
     if (!session || !isV2Mode || !requirementCode || !periodKey) {
@@ -225,6 +231,33 @@ function PortalUploadInner() {
     };
   }, [session, cameFromOnboarding, requirementCode]);
 
+  // §3.2 — when opened WITHOUT a requirement, fetch the pending initial
+  // documents so the empty state can offer them as one-click deep links
+  // (a launcher) instead of just bouncing the user away. Recurring
+  // obligations stay on the calendar (the CTA in the empty state).
+  useEffect(() => {
+    if (!session || requirementCode) {
+      setPendingPicker([]);
+      return;
+    }
+    let cancelled = false;
+    getOnboarding(session)
+      .then((payload) => {
+        if (cancelled) return;
+        setPendingPicker(
+          payload.sections
+            .flatMap((section) => section.items)
+            .filter((item) => item.required && item.submission_id === null),
+        );
+      })
+      .catch(() => {
+        if (!cancelled) setPendingPicker([]);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [session, requirementCode]);
+
   const prefill = useMemo<IntakeWizardPrefill | undefined>(() => {
     if (!session) return undefined;
     return {
@@ -303,45 +336,123 @@ function PortalUploadInner() {
           />
           <section
             className="rounded-xl border border-[color:var(--border-default)] bg-[color:var(--surface-raised)] p-6 shadow-sm sm:p-8"
-            aria-label="Selecciona un requisito antes de subir"
+            aria-label="Elige un documento para subir"
           >
-            <header className="mb-3 flex items-start gap-3">
-              <span
-                className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-[color:var(--surface-brand-muted)]"
-                aria-hidden="true"
-              >
-                <CalendarBlank
-                  className="h-5 w-5 text-[color:var(--text-brand)]"
-                  weight="duotone"
-                />
-              </span>
-              <div className="min-w-0">
-                <h2 className="text-base font-semibold text-[color:var(--text-primary)]">
-                  No hay un requisito seleccionado
-                </h2>
-                <p className="mt-1 text-[13px] text-[color:var(--text-secondary)]">
-                  Para evitar errores, selecciona primero el documento que
-                  quieres cargar desde el calendario. Así tu archivo queda
-                  asignado al cliente, periodo, institución y requisito
-                  correctos.
-                </p>
-              </div>
-            </header>
-            <div className="mt-5 flex flex-wrap items-center justify-end gap-2 border-t border-[color:var(--border-subtle)] pt-4">
-              <Button asChild variant="outline" size="sm">
-                <Link href="/portal/onboarding">Ir al expediente</Link>
-              </Button>
-              <Button asChild size="lg">
-                <Link href="/portal/calendar">
-                  <span>Seleccionar desde calendario</span>
-                  <ArrowRight
-                    className="h-4 w-4"
-                    weight="bold"
+            {pendingPicker.length > 0 ? (
+              <>
+                <header className="mb-4 flex items-start gap-3">
+                  <span
+                    className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-[color:var(--surface-brand-muted)]"
                     aria-hidden="true"
-                  />
-                </Link>
-              </Button>
-            </div>
+                  >
+                    <CloudArrowUp
+                      className="h-5 w-5 text-[color:var(--text-brand)]"
+                      weight="duotone"
+                    />
+                  </span>
+                  <div className="min-w-0">
+                    <h2 className="text-base font-semibold text-[color:var(--text-primary)]">
+                      Elige qué documento subir
+                    </h2>
+                    <p className="mt-1 text-[13px] text-[color:var(--text-secondary)]">
+                      Estos son los documentos iniciales que aún te faltan.
+                      Elige uno y abrimos la carga con el contexto ya resuelto.
+                    </p>
+                  </div>
+                </header>
+                <ul className="space-y-2">
+                  {pendingPicker.map((item) => {
+                    const params = new URLSearchParams({
+                      requirement: item.name,
+                      requirement_code: item.code,
+                      institution: item.institution,
+                      load_type: "alta_inicial",
+                      from: "onboarding",
+                    });
+                    return (
+                      <li key={item.code}>
+                        <Link
+                          href={`/portal/upload?${params.toString()}`}
+                          className="group flex items-center gap-3 rounded-lg border border-[color:var(--border-subtle)] bg-[color:var(--surface-page)] px-4 py-3 transition-colors hover:border-[color:var(--border-brand)] hover:bg-[color:var(--surface-brand-muted)]/40"
+                        >
+                          <FileText
+                            className="h-5 w-5 shrink-0 text-[color:var(--text-brand)]"
+                            aria-hidden="true"
+                          />
+                          <span className="min-w-0 flex-1">
+                            <span className="block truncate text-sm font-medium text-[color:var(--text-primary)]">
+                              {item.name}
+                            </span>
+                            {item.note ? (
+                              <span className="block truncate text-xs text-[color:var(--text-tertiary)]">
+                                {item.note}
+                              </span>
+                            ) : null}
+                          </span>
+                          <ArrowRight
+                            className="h-4 w-4 shrink-0 text-[color:var(--text-tertiary)] transition-transform group-hover:translate-x-0.5 group-hover:text-[color:var(--text-brand)]"
+                            weight="bold"
+                            aria-hidden="true"
+                          />
+                        </Link>
+                      </li>
+                    );
+                  })}
+                </ul>
+                <div className="mt-5 border-t border-[color:var(--border-subtle)] pt-4">
+                  <p className="text-xs text-[color:var(--text-secondary)]">
+                    ¿Buscas una obligación recurrente (IMSS, SAT, INFONAVIT,
+                    STPS)? Elígela desde tu calendario.
+                  </p>
+                  <Button asChild variant="outline" size="sm" className="mt-2">
+                    <Link href="/portal/calendar">
+                      <CalendarBlank className="h-4 w-4" aria-hidden="true" />
+                      Ir al calendario
+                    </Link>
+                  </Button>
+                </div>
+              </>
+            ) : (
+              <>
+                <header className="mb-3 flex items-start gap-3">
+                  <span
+                    className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-[color:var(--surface-brand-muted)]"
+                    aria-hidden="true"
+                  >
+                    <CalendarBlank
+                      className="h-5 w-5 text-[color:var(--text-brand)]"
+                      weight="duotone"
+                    />
+                  </span>
+                  <div className="min-w-0">
+                    <h2 className="text-base font-semibold text-[color:var(--text-primary)]">
+                      Elige desde dónde subir
+                    </h2>
+                    <p className="mt-1 text-[13px] text-[color:var(--text-secondary)]">
+                      Para que tu archivo quede asignado al cliente, periodo,
+                      institución y requisito correctos, elige el documento
+                      desde tu calendario (obligaciones recurrentes) o tu
+                      expediente (documentos iniciales).
+                    </p>
+                  </div>
+                </header>
+                <div className="mt-5 flex flex-wrap items-center justify-end gap-2 border-t border-[color:var(--border-subtle)] pt-4">
+                  <Button asChild variant="outline" size="sm">
+                    <Link href="/portal/onboarding">Ir al expediente</Link>
+                  </Button>
+                  <Button asChild size="lg">
+                    <Link href="/portal/calendar">
+                      <span>Seleccionar desde calendario</span>
+                      <ArrowRight
+                        className="h-4 w-4"
+                        weight="bold"
+                        aria-hidden="true"
+                      />
+                    </Link>
+                  </Button>
+                </div>
+              </>
+            )}
           </section>
           <Alert variant="info">
             <AlertTitle className="flex items-center gap-2">
