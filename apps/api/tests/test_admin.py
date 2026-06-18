@@ -2729,7 +2729,11 @@ def test_calendar_grid_rolls_clients_into_month_cells(
         assert 1 <= cell["month"] <= 12
         assert cell["count"] >= 1
         assert cell["worst_risk"] in risk_vocab
-        assert sum(cell["by_institution"].values()) == cell["count"]
+        # by_institution now carries per-institution {count, worst_risk} so the
+        # FE can recolor the grid by a single authority client-side.
+        assert sum(v["count"] for v in cell["by_institution"].values()) == cell["count"]
+        for v in cell["by_institution"].values():
+            assert v["worst_risk"] in risk_vocab
         assert cell["row_id"] == client_id
 
     # Grid cell counts and the forecast strip come from the same aggregate.
@@ -2776,3 +2780,28 @@ def test_calendar_grid_rolls_clients_into_month_cells(
     assert drill_body["client_name"] == "Cli ws"
     assert any(r["name"] == "Vendor ws" for r in drill_body["rows"])
     assert drill_body["obligations"], "drill carries the client's obligations"
+
+
+def test_calendar_renewals_returns_lane_shape(
+    api_client: TestClient, db_factory
+) -> None:
+    """The renewals lane returns contract-expiry + credential-renewal lists
+    (urgency-sorted, possibly empty) without erroring on a thin portfolio."""
+    token = _admin_token(api_client, db_factory)
+    _seed_workspace(db_factory)
+    resp = api_client.get(
+        "/api/v1/admin/calendar/renewals?horizon_days=120", headers=_h(token)
+    )
+    assert resp.status_code == 200, resp.text
+    body = resp.json()
+    assert "as_of" in body
+    assert isinstance(body["contracts"], list)
+    assert isinstance(body["credentials"], list)
+    assert body["truncated"] is False
+    # Contracts are overdue-first (ascending days_until).
+    days = [c["days_until"] for c in body["contracts"]]
+    assert days == sorted(days)
+    for c in body["contracts"]:
+        assert c["status"] in {"overdue", "due_soon", "upcoming"}
+    for c in body["credentials"]:
+        assert c["status"] in {"overdue", "due_soon"}

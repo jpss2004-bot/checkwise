@@ -2,11 +2,17 @@
 
 import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
+import { useRouter, useSearchParams } from "next/navigation";
 import {
   ArrowLeft,
   ArrowRight,
   CalendarBlank,
+  CaretDown,
+  CaretRight,
+  Certificate,
   ClipboardText,
+  FileText,
+  Funnel,
   MagnifyingGlass,
   PencilSimpleLine,
   WarningOctagon,
@@ -14,6 +20,7 @@ import {
 
 import { Surface } from "@/components/checkwise/dashboard/stat-card";
 import { Input } from "@/components/ui/input";
+import { Badge } from "@/components/ui/badge";
 import {
   ErrorState,
   Skeleton,
@@ -29,55 +36,99 @@ import { AdminObligationBlock } from "@/components/checkwise/calendar/admin-obli
 import {
   RISK_ORDER,
   SEMAPHORE_DOT,
+  relativeDeadline,
   type CalendarRisk,
 } from "@/components/checkwise/calendar/calendar-shared";
 import {
   getAdminCalendarGrid,
+  getAdminCalendarRenewals,
   getRollup,
   type AdminCalendarGrid,
   type AdminCalendarMonthStatus,
   type AdminCalendarObligation,
   type AdminCalendarRow,
+  type AdminRenewals,
   type AdminRollup,
 } from "@/lib/api/admin";
 import { INSTITUTION_LABELS, MONTH_LABELS_ES, MONTH_LABELS_SHORT_ES } from "@/lib/api/portal";
 
 const SEMAPHORE_RANK: Record<string, number> = { red: 0, yellow: 1, green: 2 };
 const ROW_PAGE = 20;
+const INSTITUTIONS = ["sat", "imss", "infonavit", "stps_repse"] as const;
 
-function cellMap(grid: AdminCalendarGrid): Map<string, ComplianceMatrixCell> {
+/** Build the matrix cell map, optionally scoped to one institution (recolor +
+ *  recount client-side — no refetch). */
+function cellMap(
+  grid: AdminCalendarGrid,
+  institution: string | null,
+): Map<string, ComplianceMatrixCell> {
   const map = new Map<string, ComplianceMatrixCell>();
   for (const c of grid.cells) {
-    map.set(`${c.row_id}-${c.month}`, {
-      count: c.count,
-      worstRisk: c.worst_risk as CalendarRisk,
-    });
+    if (institution) {
+      const inst = c.by_institution[institution];
+      if (!inst || inst.count === 0) continue;
+      map.set(`${c.row_id}-${c.month}`, {
+        count: inst.count,
+        worstRisk: inst.worst_risk as CalendarRisk,
+      });
+    } else {
+      map.set(`${c.row_id}-${c.month}`, {
+        count: c.count,
+        worstRisk: c.worst_risk as CalendarRisk,
+      });
+    }
   }
   return map;
 }
 
 export default function AdminCalendarPage() {
+  const router = useRouter();
+  const searchParams = useSearchParams();
   const [today] = useState(() => new Date());
-  const [year, setYear] = useState<number>(
-    () => new Date().getFullYear() || 2026,
-  );
+  const thisYear = new Date().getFullYear() || 2026;
+
+  const [year, setYear] = useState<number>(() => {
+    const y = Number(searchParams?.get("year"));
+    return y >= 2021 && y <= 2030 ? y : thisYear;
+  });
   const currentMonth = today.getFullYear() === year ? today.getMonth() + 1 : 1;
 
-  // Overview is fetched ONCE per year — month selection is pure client-side
-  // state below, so picking a month never re-runs the portfolio scan.
   const [overview, setOverview] = useState<AdminCalendarGrid | null>(null);
   const [rollup, setRollup] = useState<AdminRollup | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [reloadKey, setReloadKey] = useState(0);
 
-  const [selectedMonth, setSelectedMonth] = useState<number>(currentMonth);
+  const [selectedMonth, setSelectedMonth] = useState<number>(() => {
+    const m = Number(searchParams?.get("month"));
+    return m >= 1 && m <= 12 ? m : currentMonth;
+  });
+  const [institution, setInstitution] = useState<string | null>(() => {
+    const i = searchParams?.get("inst");
+    return i && INSTITUTIONS.includes(i as (typeof INSTITUTIONS)[number]) ? i : null;
+  });
   const [showAllClients, setShowAllClients] = useState(false);
   const [rowLimit, setRowLimit] = useState(ROW_PAGE);
 
-  // Detail is always ONE client: the only path that loads obligation rows.
-  const [detailClientId, setDetailClientId] = useState<string | null>(null);
+  const [detailClientId, setDetailClientId] = useState<string | null>(
+    () => searchParams?.get("client") ?? null,
+  );
   const [detail, setDetail] = useState<AdminCalendarGrid | null>(null);
   const [selectedProviderId, setSelectedProviderId] = useState<string | null>(null);
+
+  // ── URL-persist (shareable planning links) ─────────────────────
+  const calendarHref = useMemo(() => {
+    const p = new URLSearchParams();
+    if (year !== thisYear) p.set("year", String(year));
+    if (institution) p.set("inst", institution);
+    if (detailClientId) p.set("client", detailClientId);
+    if (selectedMonth !== currentMonth) p.set("month", String(selectedMonth));
+    const qs = p.toString();
+    return `/admin/calendar${qs ? `?${qs}` : ""}`;
+  }, [year, institution, detailClientId, selectedMonth, currentMonth, thisYear]);
+
+  useEffect(() => {
+    router.replace(calendarHref, { scroll: false });
+  }, [calendarHref, router]);
 
   // ── Overview fetch (per year) ──────────────────────────────────
   useEffect(() => {
@@ -125,19 +176,16 @@ export default function AdminCalendarPage() {
     if (month) setSelectedMonth(month);
     setSelectedProviderId(null);
     setDetailClientId(id);
-    requestAnimationFrame(() =>
-      window.scrollTo({ top: 0, behavior: "smooth" }),
-    );
+    requestAnimationFrame(() => window.scrollTo({ top: 0, behavior: "smooth" }));
   }
   function exitClient() {
     setDetailClientId(null);
     setSelectedProviderId(null);
   }
 
-  // Reset pagination when the scope/year changes.
   useEffect(() => {
     setRowLimit(ROW_PAGE);
-  }, [year, showAllClients]);
+  }, [year, showAllClients, institution]);
 
   const inClient = Boolean(detailClientId);
 
@@ -157,49 +205,59 @@ export default function AdminCalendarPage() {
       : rows.filter((r) => r.semaphore_level !== "green");
   }, [overview, showAllClients]);
 
+  const portfolioCells = useMemo(
+    () => (overview ? cellMap(overview, institution) : new Map<string, ComplianceMatrixCell>()),
+    [overview, institution],
+  );
+  // With an institution filter, only show client rows that have a cell that
+  // month-or-any for that institution (keeps the grid relevant).
+  const scopedClients = useMemo<AdminCalendarRow[]>(() => {
+    if (!institution) return sortedClients;
+    const withInst = new Set<string>();
+    for (const c of overview?.cells ?? []) {
+      if (c.by_institution[institution]) withInst.add(c.row_id);
+    }
+    return sortedClients.filter((r) => withInst.has(r.id));
+  }, [sortedClients, overview, institution]);
+
   const portfolioRows = useMemo<ComplianceMatrixRow[]>(
     () =>
-      sortedClients.slice(0, rowLimit).map((r) => ({
+      scopedClients.slice(0, rowLimit).map((r) => ({
         id: r.id,
         name: r.name,
         semaphore_level: r.semaphore_level,
         subtitle: rowSubtitle(r),
       })),
-    [sortedClients, rowLimit],
+    [scopedClients, rowLimit],
   );
-  const portfolioCells = useMemo(
-    () => (overview ? cellMap(overview) : new Map<string, ComplianceMatrixCell>()),
-    [overview],
-  );
+
   const hiddenGreen = useMemo(() => {
     if (showAllClients || !overview) return 0;
     return overview.rows.filter((r) => r.semaphore_level === "green").length;
   }, [overview, showAllClients]);
 
-  // Clients with obligations in the selected month, worst-first — the cheap
-  // "who's in this month" list that replaces the cross-portfolio dump.
   const clientsThisMonth = useMemo(() => {
     if (!overview) return [];
     const nameById = new Map(overview.rows.map((r) => [r.id, r]));
     return overview.cells
-      .filter((c) => c.month === selectedMonth && c.count > 0)
-      .map((c) => ({
-        client: nameById.get(c.row_id),
-        count: c.count,
-        worstRisk: c.worst_risk as CalendarRisk,
-      }))
-      .filter((x) => x.client)
+      .filter((c) => c.month === selectedMonth)
+      .map((c) => {
+        const scoped = institution ? c.by_institution[institution] : null;
+        const count = institution ? (scoped?.count ?? 0) : c.count;
+        const worstRisk = (institution ? scoped?.worst_risk : c.worst_risk) as
+          | CalendarRisk
+          | undefined;
+        return { client: nameById.get(c.row_id), count, worstRisk };
+      })
+      .filter((x) => x.client && x.count > 0 && x.worstRisk)
       .sort(
         (a, b) =>
-          (RISK_ORDER[a.worstRisk] ?? 9) - (RISK_ORDER[b.worstRisk] ?? 9) ||
-          b.count - a.count,
+          (RISK_ORDER[a.worstRisk as CalendarRisk] ?? 9) -
+            (RISK_ORDER[b.worstRisk as CalendarRisk] ?? 9) || b.count - a.count,
       );
-  }, [overview, selectedMonth]);
+  }, [overview, selectedMonth, institution]);
 
   const monthStatus: AdminCalendarMonthStatus | null = useMemo(
-    // Optional-chain ``month_status`` so a transient old-backend response
-    // (during a deploy where the FE updates before the API) degrades to the
-    // empty summary instead of throwing.
     () => overview?.month_status?.find((s) => s.month === selectedMonth) ?? null,
     [overview, selectedMonth],
   );
@@ -223,15 +281,18 @@ export default function AdminCalendarPage() {
       }));
   }, [detail]);
   const providerCells = useMemo(
-    () => (detail ? cellMap(detail) : new Map<string, ComplianceMatrixCell>()),
-    [detail],
+    () => (detail ? cellMap(detail, institution) : new Map<string, ComplianceMatrixCell>()),
+    [detail, institution],
   );
   const clientObligations = useMemo<AdminCalendarObligation[]>(() => {
     if (!detail) return [];
-    let obs = detail.obligations.filter((o) => o.due_month === selectedMonth);
-    if (selectedProviderId) obs = obs.filter((o) => o.vendor_id === selectedProviderId);
-    return obs;
-  }, [detail, selectedMonth, selectedProviderId]);
+    return detail.obligations.filter(
+      (o) =>
+        o.due_month === selectedMonth &&
+        (!institution || o.institution === institution) &&
+        (!selectedProviderId || o.vendor_id === selectedProviderId),
+    );
+  }, [detail, selectedMonth, selectedProviderId, institution]);
 
   return (
     <AdminShell
@@ -258,6 +319,8 @@ export default function AdminCalendarPage() {
             <ArrowLeft className="h-3.5 w-3.5" weight="bold" aria-hidden="true" />
             Volver a la cartera
           </button>
+
+          <InstitutionChips value={institution} onChange={setInstitution} />
 
           {!detail ? (
             <>
@@ -310,6 +373,7 @@ export default function AdminCalendarPage() {
 
           <ForecastWaveStrip
             overview={overview}
+            institution={institution}
             currentMonth={today.getFullYear() === year ? currentMonth : null}
             selectedMonth={selectedMonth}
             onSelectMonth={setSelectedMonth}
@@ -330,10 +394,15 @@ export default function AdminCalendarPage() {
             }
             bodyClassName="p-4"
           >
+            <div className="mb-3">
+              <InstitutionChips value={institution} onChange={setInstitution} />
+            </div>
             {portfolioRows.length === 0 ? (
               <EmptyGrid
                 showAll={showAllClients}
+                institution={institution}
                 onShowAll={() => setShowAllClients(true)}
+                onClearInstitution={() => setInstitution(null)}
               />
             ) : (
               <>
@@ -349,7 +418,7 @@ export default function AdminCalendarPage() {
                 />
                 <PaginationFooter
                   shown={portfolioRows.length}
-                  filtered={sortedClients.length}
+                  filtered={scopedClients.length}
                   total={overview.clients_total ?? sortedClients.length}
                   onMore={() => setRowLimit((n) => n + ROW_PAGE)}
                 />
@@ -361,9 +430,12 @@ export default function AdminCalendarPage() {
             month={selectedMonth}
             year={year}
             status={monthStatus}
+            institution={institution}
             clientsThisMonth={clientsThisMonth}
             onPickClient={(id) => enterClient(id, selectedMonth)}
           />
+
+          <RenewalLane year={year} today={today} />
         </div>
       )}
     </AdminShell>
@@ -399,6 +471,49 @@ function YearPicker({ year, onYear }: { year: number; onYear: (y: number) => voi
         className="h-7 w-20 border-0 bg-transparent p-0 font-mono text-sm font-semibold focus-visible:ring-0"
       />
     </label>
+  );
+}
+
+// ─── Institution filter chips ───────────────────────────────────
+
+function InstitutionChips({
+  value,
+  onChange,
+}: {
+  value: string | null;
+  onChange: (v: string | null) => void;
+}) {
+  const opts: { code: string | null; label: string }[] = [
+    { code: null, label: "Todas" },
+    ...INSTITUTIONS.map((c) => ({ code: c, label: INSTITUTION_LABELS[c] ?? c })),
+  ];
+  return (
+    <div className="flex flex-wrap items-center gap-1.5">
+      <Funnel
+        className="h-3.5 w-3.5 text-[color:var(--text-tertiary)]"
+        weight="bold"
+        aria-hidden="true"
+      />
+      {opts.map((o) => {
+        const active = value === o.code;
+        return (
+          <button
+            key={o.code ?? "all"}
+            type="button"
+            aria-pressed={active}
+            onClick={() => onChange(o.code)}
+            className={
+              "rounded-full border px-3 py-1 text-xs font-medium transition-colors " +
+              (active
+                ? "border-[color:var(--border-brand)] bg-[color:var(--surface-brand)] text-[color:var(--text-inverse)]"
+                : "border-[color:var(--border-default)] bg-[color:var(--surface-raised)] text-[color:var(--text-secondary)] hover:bg-[color:var(--surface-hover)]")
+            }
+          >
+            {o.label}
+          </button>
+        );
+      })}
+    </div>
   );
 }
 
@@ -452,10 +567,7 @@ function ClientPicker({
                 onMouseDown={() => onPick(c.id)}
                 className="flex w-full items-center gap-2 px-3 py-1.5 text-left text-xs hover:bg-[color:var(--surface-hover)]"
               >
-                <span
-                  aria-hidden="true"
-                  className={"h-2 w-2 shrink-0 rounded-full " + dotFor(c.semaphore_level)}
-                />
+                <span aria-hidden="true" className={"h-2 w-2 shrink-0 rounded-full " + dotFor(c.semaphore_level)} />
                 <span className="min-w-0 flex-1 truncate text-[color:var(--text-primary)]">
                   {c.name}
                 </span>
@@ -547,20 +659,8 @@ function TriageBand({
       <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
         <TriageTile value={overview.triage.overdue_total} label="Vencido (año)" tone="error" icon={WarningOctagon} />
         <TriageTile value={overview.triage.due_7d_total} label="Vence ≤ 7 días" tone="warning" />
-        <TriageTile
-          value={slaAtRisk}
-          label="SLA revisión > 72 h"
-          tone="neutral"
-          icon={ClipboardText}
-          href="/admin/reviewer"
-        />
-        <TriageTile
-          value={rollup.inbox.correction_requests_pending}
-          label="Correcciones"
-          tone="neutral"
-          icon={PencilSimpleLine}
-          href="/admin/correction-requests"
-        />
+        <TriageTile value={slaAtRisk} label="SLA revisión > 72 h" tone="neutral" icon={ClipboardText} href="/admin/reviewer" />
+        <TriageTile value={rollup.inbox.correction_requests_pending} label="Correcciones" tone="neutral" icon={PencilSimpleLine} href="/admin/correction-requests" />
       </div>
     </div>
   );
@@ -617,16 +717,21 @@ function TriageTile({
 
 function ForecastWaveStrip({
   overview,
+  institution,
   currentMonth,
   selectedMonth,
   onSelectMonth,
 }: {
   overview: AdminCalendarGrid;
+  institution: string | null;
   currentMonth: number | null;
   selectedMonth: number | null;
   onSelectMonth: (month: number) => void;
 }) {
-  const max = Math.max(1, ...overview.forecast.map((f) => f.total));
+  const totals = overview.forecast.map((f) =>
+    institution ? (f.by_institution[institution] ?? 0) : f.total,
+  );
+  const max = Math.max(1, ...totals);
   return (
     <Surface
       title="Onda de carga del año"
@@ -634,10 +739,11 @@ function ForecastWaveStrip({
       bodyClassName="p-4"
     >
       <div className="flex items-end gap-1.5" style={{ height: 96 }}>
-        {overview.forecast.map((f) => {
+        {overview.forecast.map((f, i) => {
+          const total = totals[i];
           const isCurrent = currentMonth === f.month;
           const isSelected = selectedMonth === f.month;
-          const h = f.total === 0 ? 3 : Math.round(12 + (f.total / max) * 72);
+          const h = total === 0 ? 3 : Math.round(12 + (total / max) * 72);
           const insts = Object.entries(f.by_institution)
             .map(([k, v]) => `${k.toUpperCase()}: ${v}`)
             .join(" · ");
@@ -647,11 +753,11 @@ function ForecastWaveStrip({
               type="button"
               onClick={() => onSelectMonth(f.month)}
               aria-pressed={isSelected}
-              title={`${MONTH_LABELS_ES[f.month]}: ${f.total} esperadas${insts ? ` · ${insts}` : ""}`}
+              title={`${MONTH_LABELS_ES[f.month]}: ${total} esperadas${!institution && insts ? ` · ${insts}` : ""}`}
               className="group flex flex-1 flex-col items-center justify-end gap-1 rounded-md px-0.5 py-1 hover:bg-[color:var(--surface-hover)] focus:outline-none focus-visible:ring-2 focus-visible:ring-[color:var(--border-focus)]"
             >
               <span className="font-mono text-[9px] tabular-nums text-[color:var(--text-tertiary)]">
-                {f.total || ""}
+                {total || ""}
               </span>
               <span
                 aria-hidden="true"
@@ -687,36 +793,43 @@ function MonthSummary({
   month,
   year,
   status,
+  institution,
   clientsThisMonth,
   onPickClient,
 }: {
   month: number;
   year: number;
   status: AdminCalendarMonthStatus | null;
+  institution: string | null;
   clientsThisMonth: {
     client: AdminCalendarRow | undefined;
     count: number;
-    worstRisk: CalendarRisk;
+    worstRisk: CalendarRisk | undefined;
   }[];
   onPickClient: (id: string) => void;
 }) {
-  const expected = status?.expected ?? 0;
-  const delivered = status?.delivered ?? 0;
+  const scoped = institution ? status?.by_institution[institution] : null;
+  const expected = institution ? (scoped?.expected ?? 0) : (status?.expected ?? 0);
+  const delivered = institution ? (scoped?.delivered ?? 0) : (status?.delivered ?? 0);
   const outstanding = expected - delivered;
-  const institutions = status
-    ? Object.entries(status.by_institution).sort((a, b) => b[1].expected - a[1].expected)
-    : [];
+  const institutions =
+    status && !institution
+      ? Object.entries(status.by_institution).sort((a, b) => b[1].expected - a[1].expected)
+      : [];
+
+  const instLabel = institution ? ` · ${INSTITUTION_LABELS[institution] ?? institution}` : "";
 
   return (
     <div id="admin-calendar-detail" className="scroll-mt-4">
       <Surface
-        title={`${MONTH_LABELS_ES[month]} ${year} · resumen de la cartera`}
+        title={`${MONTH_LABELS_ES[month]} ${year} · resumen de la cartera${instLabel}`}
         description="Esperadas vs. entregadas este mes. Entra a un cliente para ver sus obligaciones."
         bodyClassName="p-4 sm:p-5"
       >
         {expected === 0 ? (
           <p className="px-1 py-6 text-center text-sm text-[color:var(--text-secondary)]">
-            Sin obligaciones en {MONTH_LABELS_ES[month]}.
+            Sin obligaciones en {MONTH_LABELS_ES[month]}
+            {institution ? ` para ${INSTITUTION_LABELS[institution] ?? institution}` : ""}.
           </p>
         ) : (
           <div className="space-y-5">
@@ -739,10 +852,7 @@ function MonthSummary({
                         {INSTITUTION_LABELS[inst] ?? inst}
                       </span>
                       <div className="h-2 flex-1 overflow-hidden rounded-full bg-[color:var(--surface-page)]">
-                        <div
-                          className="h-full rounded-full bg-[color:var(--status-success-text)]"
-                          style={{ width: `${pct}%` }}
-                        />
+                        <div className="h-full rounded-full bg-[color:var(--status-success-text)]" style={{ width: `${pct}%` }} />
                       </div>
                       <span className="w-20 shrink-0 text-right font-mono text-[11px] tabular-nums text-[color:var(--text-tertiary)]">
                         {v.delivered}/{v.expected}
@@ -804,6 +914,173 @@ function SummaryStat({
         {value}
       </p>
       <p className="mt-1 text-[11px] text-[color:var(--text-secondary)]">{label}</p>
+    </div>
+  );
+}
+
+// ─── Renewals lane (contract expiries + credential renewals) ─────
+
+function RenewalLane({ year, today }: { year: number; today: Date }) {
+  const [data, setData] = useState<AdminRenewals | null>(null);
+  const [open, setOpen] = useState(false);
+  const [loadError, setLoadError] = useState(false);
+
+  useEffect(() => {
+    let cancelled = false;
+    setData(null);
+    setLoadError(false);
+    getAdminCalendarRenewals({ horizon_days: 90 })
+      .then((d) => {
+        if (!cancelled) setData(d);
+      })
+      .catch(() => {
+        if (!cancelled) setLoadError(true);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [year]);
+
+  const total = (data?.contracts.length ?? 0) + (data?.credentials.length ?? 0);
+  const Caret = open ? CaretDown : CaretRight;
+
+  return (
+    <section className="rounded-lg border border-[color:var(--border-default)] bg-[color:var(--surface-raised)] shadow-xs">
+      <button
+        type="button"
+        onClick={() => setOpen((v) => !v)}
+        aria-expanded={open}
+        className="flex w-full items-center justify-between px-5 py-3.5 text-left"
+      >
+        <div className="flex items-center gap-2">
+          <Caret className="h-3.5 w-3.5 text-[color:var(--text-tertiary)]" weight="bold" aria-hidden="true" />
+          <div>
+            <h3 className="text-[13px] font-semibold text-[color:var(--text-primary)]">
+              Renovaciones y vencimientos de fecha exacta
+            </h3>
+            <p className="mt-0.5 text-[11px] text-[color:var(--text-tertiary)]">
+              Contratos por vencer y credenciales por renovar (CSF, REPSE,
+              registro patronal) — fuera de la cuadrícula del día 17.
+            </p>
+          </div>
+        </div>
+        <span className="font-mono text-[11px] tabular-nums text-[color:var(--text-tertiary)]">
+          {data ? total : loadError ? "—" : "…"}
+        </span>
+      </button>
+      {open ? (
+        <div className="border-t border-[color:var(--border-subtle)] p-5">
+          {loadError ? (
+            <p className="text-sm text-[color:var(--text-secondary)]">
+              No se pudieron cargar las renovaciones.
+            </p>
+          ) : !data ? (
+            <Skeleton className="h-24 w-full rounded-md" />
+          ) : total === 0 ? (
+            <p className="text-sm text-[color:var(--text-secondary)]">
+              Sin contratos ni credenciales próximos a vencer en los próximos 90
+              días.
+            </p>
+          ) : (
+            <div className="grid gap-6 lg:grid-cols-2">
+              <RenewalGroup
+                icon={FileText}
+                title="Contratos por vencer"
+                empty="Sin contratos por vencer."
+                rows={data.contracts.map((c) => ({
+                  key: `${c.vendor_id}-${c.end_date}`,
+                  vendorId: c.vendor_id,
+                  vendorName: c.vendor_name,
+                  clientName: c.client_name,
+                  detail: relativeDeadline(c.end_date, today).split(" · ")[0],
+                  badge: c.status,
+                }))}
+              />
+              <RenewalGroup
+                icon={Certificate}
+                title="Credenciales por renovar"
+                empty="Sin credenciales por renovar."
+                rows={data.credentials.map((c, i) => ({
+                  key: `${c.vendor_id}-${c.requirement_code}-${i}`,
+                  vendorId: c.vendor_id,
+                  vendorName: c.vendor_name,
+                  clientName: c.client_name,
+                  detail: c.title,
+                  badge: c.status,
+                }))}
+              />
+            </div>
+          )}
+          {data?.truncated ? (
+            <p className="mt-4 text-[11px] text-[color:var(--text-tertiary)]">
+              La cartera excede el límite de escaneo de credenciales; se muestran
+              los primeros proveedores.
+            </p>
+          ) : null}
+        </div>
+      ) : null}
+    </section>
+  );
+}
+
+function RenewalGroup({
+  icon: Icon,
+  title,
+  empty,
+  rows,
+}: {
+  icon: typeof FileText;
+  title: string;
+  empty: string;
+  rows: {
+    key: string;
+    vendorId: string;
+    vendorName: string;
+    clientName: string | null;
+    detail: string;
+    badge: string;
+  }[];
+}) {
+  return (
+    <div>
+      <h4 className="mb-2 flex items-center gap-1.5 font-mono text-[10px] uppercase tracking-wide text-[color:var(--text-tertiary)]">
+        <Icon className="h-3.5 w-3.5" weight="bold" aria-hidden="true" />
+        {title} ({rows.length})
+      </h4>
+      {rows.length === 0 ? (
+        <p className="text-xs text-[color:var(--text-secondary)]">{empty}</p>
+      ) : (
+        <ul className="space-y-2">
+          {rows.map((r) => (
+            <li
+              key={r.key}
+              className="flex flex-wrap items-center gap-x-3 gap-y-1 rounded-lg border border-[color:var(--border-subtle)] bg-[color:var(--surface-page)] px-3.5 py-2.5"
+            >
+              <div className="min-w-0 flex-1">
+                <p className="truncate text-[13px] font-medium text-[color:var(--text-primary)]">
+                  {r.vendorName}
+                </p>
+                {r.clientName ? (
+                  <p className="truncate text-[11px] text-[color:var(--text-tertiary)]">{r.clientName}</p>
+                ) : null}
+              </div>
+              <span className="whitespace-nowrap text-[12px] text-[color:var(--text-secondary)]">
+                {r.detail}
+              </span>
+              <Badge variant={r.badge === "overdue" ? "destructive" : "warning"}>
+                {r.badge === "overdue" ? "Vencido" : r.badge === "due_soon" ? "Pronto" : "Próximo"}
+              </Badge>
+              <Link
+                href={`/admin/vendors/${r.vendorId}`}
+                className="inline-flex items-center gap-1 whitespace-nowrap text-[12px] font-medium text-[color:var(--text-link)] hover:underline"
+              >
+                Ver proveedor
+                <ArrowRight className="h-3 w-3" weight="bold" aria-hidden="true" />
+              </Link>
+            </li>
+          ))}
+        </ul>
+      )}
     </div>
   );
 }
@@ -888,7 +1165,33 @@ function worstDot(items: AdminCalendarObligation[]): "red" | "yellow" | "green" 
 
 // ─── Empty + loading states ─────────────────────────────────────
 
-function EmptyGrid({ showAll, onShowAll }: { showAll: boolean; onShowAll: () => void }) {
+function EmptyGrid({
+  showAll,
+  institution,
+  onShowAll,
+  onClearInstitution,
+}: {
+  showAll: boolean;
+  institution: string | null;
+  onShowAll: () => void;
+  onClearInstitution: () => void;
+}) {
+  if (institution) {
+    return (
+      <div className="flex flex-col items-center gap-2 px-4 py-12 text-center">
+        <p className="text-[13px] font-medium text-[color:var(--text-primary)]">
+          Ningún cliente con obligaciones de {INSTITUTION_LABELS[institution] ?? institution}
+        </p>
+        <button
+          type="button"
+          onClick={onClearInstitution}
+          className="mt-1 text-xs font-medium text-[color:var(--text-brand)] hover:underline"
+        >
+          Quitar filtro de institución
+        </button>
+      </div>
+    );
+  }
   return (
     <div className="flex flex-col items-center gap-2 px-4 py-12 text-center">
       <p className="text-[13px] font-medium text-[color:var(--text-primary)]">
