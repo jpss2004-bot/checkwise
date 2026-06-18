@@ -461,7 +461,17 @@ def invoke_and_parse(
         if client is None:
             client = Anthropic(api_key=api_key)
         respond_tool = _build_respond_tool(respond_tool_name)
-        response = client.messages.create(
+        # Bound the call server-side so a stalled model call can't pin the
+        # worker thread for minutes after the frontend abort. Real Anthropic
+        # clients expose ``with_options``; test doubles may not, so fall back to
+        # the bare client. APITimeoutError is an APIError → graceful fallback.
+        with_options = getattr(client, "with_options", None)
+        call_client = (
+            with_options(timeout=settings.WISE_REQUEST_TIMEOUT_SECONDS)
+            if callable(with_options)
+            else client
+        )
+        response = call_client.messages.create(
             model=WISE_MODEL,
             max_tokens=500,
             system=system_param,

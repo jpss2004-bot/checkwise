@@ -366,6 +366,13 @@ class Settings(BaseSettings):
     DOCUMENT_ANALYSIS_DEEP_MAX_TOKENS: int = 8192
     DOCUMENT_ANALYSIS_DEEP_TIMEOUT_SECONDS: float = 90.0
 
+    # Wise copilot (Haiku, max_tokens=500). The dock answer is returned
+    # synchronously inside the request, so the Anthropic call is bounded
+    # server-side. Without this the only guard was the frontend's 30 s abort
+    # while the worker thread kept running the call (SDK default 600 s) after
+    # the user already gave up. Wise prompts are small and fast — keep it tight.
+    WISE_REQUEST_TIMEOUT_SECONDS: float = 20.0
+
     # Phase 2 (expediente) — the situational pass reasons across a whole
     # provider+period document set. Opt-in (off by default) and counted
     # against the per-org escalation cap, since each run is a deep call on
