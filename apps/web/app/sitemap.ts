@@ -4,15 +4,19 @@ import { SITE_URL } from "@/lib/site";
 
 /**
  * Public sitemap. Only routes that should be indexed live here — the
- * landing page, the REPSE content pages, the login entry and the three
- * legal documents. The authenticated app (portal/client/admin/
- * platform/reports) is omitted deliberately and also disallowed in
- * `app/robots.ts`.
+ * landing page, the REPSE content pages (pillar + contratante cluster),
+ * the login entry and the three legal documents. The authenticated app
+ * (portal/client/admin/platform/reports) is omitted deliberately and
+ * also disallowed in `app/robots.ts`.
  *
  * `lastModified` is a content-stable date, not the build time, so the
  * sitemap does not churn its timestamps on every deploy.
  */
 const LAST_MODIFIED = "2026-06-16";
+
+// Publish date of the contratante content cluster (validar / obligado
+// solidario / expediente). Kept separate so older pages don't churn.
+const CLUSTER_MODIFIED = "2026-06-18";
 
 export default function sitemap(): MetadataRoute.Sitemap {
   return [
@@ -36,6 +40,24 @@ export default function sitemap(): MetadataRoute.Sitemap {
       lastModified: LAST_MODIFIED,
       changeFrequency: "monthly",
       priority: 0.8,
+    },
+    {
+      url: `${SITE_URL}/validar-proveedores-repse`,
+      lastModified: CLUSTER_MODIFIED,
+      changeFrequency: "monthly",
+      priority: 0.8,
+    },
+    {
+      url: `${SITE_URL}/obligado-solidario-repse`,
+      lastModified: CLUSTER_MODIFIED,
+      changeFrequency: "monthly",
+      priority: 0.75,
+    },
+    {
+      url: `${SITE_URL}/expediente-repse`,
+      lastModified: CLUSTER_MODIFIED,
+      changeFrequency: "monthly",
+      priority: 0.75,
     },
     {
       url: `${SITE_URL}/sobre-checkwise`,
