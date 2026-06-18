@@ -76,13 +76,41 @@ export function useReportGeneration(reportId: string): UseReportGeneration {
   // the SSE handler accumulates updates fast.
   const contentRef = useRef<ReportContent | null>(null);
 
+  // rAF-coalesced content flush. The SSE handler can emit a delta per token;
+  // pushing each straight into React state re-rendered the whole canvas
+  // hundreds of times and made generation feel frozen. Streaming deltas now
+  // mutate ``contentRef`` and request a single flush per animation frame, so
+  // the canvas re-renders at most ~once per frame. Terminal events flush
+  // synchronously so the final content is never stranded in a pending frame.
+  const flushHandle = useRef<number | null>(null);
+  const cancelContentFlush = useCallback(() => {
+    if (flushHandle.current != null) {
+      if (typeof cancelAnimationFrame !== "undefined") {
+        cancelAnimationFrame(flushHandle.current);
+      }
+      flushHandle.current = null;
+    }
+  }, []);
+  const scheduleContentFlush = useCallback(() => {
+    if (flushHandle.current != null) return;
+    if (typeof requestAnimationFrame === "undefined") {
+      setState((s) => ({ ...s, content: contentRef.current }));
+      return;
+    }
+    flushHandle.current = requestAnimationFrame(() => {
+      flushHandle.current = null;
+      setState((s) => ({ ...s, content: contentRef.current }));
+    });
+  }, []);
+
   const cancel = useCallback(() => {
+    cancelContentFlush();
     if (abortRef.current) {
       abortRef.current.abort();
       abortRef.current = null;
     }
     setState((s) => ({ ...s, status: "cancelled" }));
-  }, []);
+  }, [cancelContentFlush]);
 
   const reset = useCallback(() => {
     cancel();
@@ -100,6 +128,12 @@ export function useReportGeneration(reportId: string): UseReportGeneration {
   useEffect(
     () => () => {
       if (abortRef.current) abortRef.current.abort();
+      if (
+        flushHandle.current != null &&
+        typeof cancelAnimationFrame !== "undefined"
+      ) {
+        cancelAnimationFrame(flushHandle.current);
+      }
     },
     [],
   );
@@ -181,7 +215,13 @@ export function useReportGeneration(reportId: string): UseReportGeneration {
           while (boundary !== -1) {
             const raw = buffer.slice(0, boundary);
             buffer = buffer.slice(boundary + 2);
-            handleFrame(raw, contentRef, setState);
+            handleFrame(
+              raw,
+              contentRef,
+              setState,
+              scheduleContentFlush,
+              cancelContentFlush,
+            );
             boundary = buffer.indexOf("\n\n");
           }
         }
@@ -196,7 +236,7 @@ export function useReportGeneration(reportId: string): UseReportGeneration {
         if (abortRef.current === ctrl) abortRef.current = null;
       }
     },
-    [reportId],
+    [reportId, scheduleContentFlush, cancelContentFlush],
   );
 
   return { state, startGeneration, cancel, reset };
@@ -208,6 +248,8 @@ function handleFrame(
   raw: string,
   contentRef: React.MutableRefObject<ReportContent | null>,
   setState: React.Dispatch<React.SetStateAction<GenerationState>>,
+  scheduleContentFlush: () => void,
+  cancelContentFlush: () => void,
 ): void {
   let event = "";
   const dataLines: string[] = [];
@@ -226,7 +268,14 @@ function handleFrame(
   } catch {
     return;
   }
-  applyEvent(event, payload, contentRef, setState);
+  applyEvent(
+    event,
+    payload,
+    contentRef,
+    setState,
+    scheduleContentFlush,
+    cancelContentFlush,
+  );
 }
 
 function applyEvent(
@@ -234,6 +283,8 @@ function applyEvent(
   payload: Record<string, unknown>,
   contentRef: React.MutableRefObject<ReportContent | null>,
   setState: React.Dispatch<React.SetStateAction<GenerationState>>,
+  scheduleContentFlush: () => void,
+  cancelContentFlush: () => void,
 ): void {
   const c = contentRef.current;
   if (!c) return;
@@ -268,7 +319,7 @@ function applyEvent(
       if (block) {
         block.data = payload.data;
         contentRef.current = { ...c, blocks: [...c.blocks] };
-        setState((s) => ({ ...s, content: contentRef.current }));
+        scheduleContentFlush();
       }
       break;
     }
@@ -288,7 +339,7 @@ function applyEvent(
           text: existing + delta,
         };
         contentRef.current = { ...c, blocks: [...c.blocks] };
-        setState((s) => ({ ...s, content: contentRef.current }));
+        scheduleContentFlush();
       }
       break;
     }
@@ -298,21 +349,35 @@ function applyEvent(
       break;
     }
     case "version_saved": {
+      // Streaming content is complete by now — drop any pending frame and
+      // carry the final content so the saved version and the canvas agree.
+      cancelContentFlush();
       setState((s) => ({
         ...s,
         status: "saving",
         versionId: (payload.version_id as string) ?? null,
         versionNumber: (payload.version_number as number) ?? null,
+        content: contentRef.current,
       }));
       break;
     }
     case "done": {
-      setState((s) => ({ ...s, status: "done" }));
+      // Flush synchronously with the final content: the editor copies
+      // ``state.content`` the instant it sees ``done``, so it must not be a
+      // frame behind.
+      cancelContentFlush();
+      setState((s) => ({ ...s, status: "done", content: contentRef.current }));
       break;
     }
     case "error": {
       const msg = (payload.message as string) ?? "Error de generación";
-      setState((s) => ({ ...s, status: "error", error: msg }));
+      cancelContentFlush();
+      setState((s) => ({
+        ...s,
+        status: "error",
+        error: msg,
+        content: contentRef.current,
+      }));
       break;
     }
   }
