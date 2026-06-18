@@ -20,7 +20,7 @@ order-of-vendors fan-out the radar uses — it sidesteps the radar's
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import date
 
 from sqlalchemy import select
@@ -28,11 +28,15 @@ from sqlalchemy.orm import Session
 
 from app.core.compliance_catalog import (
     normalize_persona_type,
+    recurring_accepted_documents,
     recurring_anatomy,
+    recurring_common_errors,
     recurring_for_year,
+    recurring_for_year_v2,
     recurring_required_document,
     recurring_where_to_obtain,
 )
+from app.core.config import settings
 from app.models import Document
 
 
@@ -64,6 +68,12 @@ class CalendarObligation:
     anatomy: str
     where_to_obtain: str
     client_href: str
+    # Document literacy. ``common_errors`` is the pitfall checklist the client
+    # uses to validate a provider's submission; ``accepts_documents`` is the
+    # per-alternative detail for v2 obligations (empty on v1). Default to empty
+    # so the admin grid (which ignores them) and any legacy caller stay simple.
+    common_errors: list[str] = field(default_factory=list)
+    accepts_documents: list[dict] = field(default_factory=list)
     # Resolved in a single batched pass after placement (filename + reviewer
     # note need one query each over the whole portfolio, not per obligation).
     filename: str | None = None
@@ -167,7 +177,18 @@ def aggregate_client_calendar(
                 "next_deadline": None,
             },
         )
-        catalog = recurring_for_year(year, normalize_persona_type(ws.persona_type))
+        # Catalog version must match the one ``build_workspace_calendar_slots``
+        # used for ``compliance["calendar_slots"]`` above (it is flag-aware),
+        # or the ``(code, period_key)`` row→slot lookup misses for every row.
+        # No-op while the flag is off (v1, the prod default); when v2 is on the
+        # client surfaces the same accepts_documents alternatives the provider
+        # does. Same idiom the portal calendar endpoint uses.
+        persona = normalize_persona_type(ws.persona_type)
+        catalog = (
+            recurring_for_year_v2(year, persona)
+            if settings.RECURRING_CATALOG_V2
+            else recurring_for_year(year, persona)
+        )
         for req in catalog:
             view = view_by_key.get((req.code, req.period_key))
             item_status = (
@@ -208,6 +229,8 @@ def aggregate_client_calendar(
                     submitted_at=view.submitted_at_iso if view else None,
                     anatomy=recurring_anatomy(req),
                     where_to_obtain=recurring_where_to_obtain(req),
+                    common_errors=list(recurring_common_errors(req)),
+                    accepts_documents=recurring_accepted_documents(req),
                     client_href=href,
                 )
             )

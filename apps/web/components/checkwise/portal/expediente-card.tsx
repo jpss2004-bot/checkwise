@@ -320,6 +320,10 @@ export interface DocumentGuidanceProps {
    *  callers may want a periodicity-aware label for recurring
    *  obligations (e.g. "Acerca de este comprobante"). */
   summary_label?: string;
+  /** Optional override for the common-errors heading. Defaults to the
+   *  provider's "Antes de subir"; the client review surface passes
+   *  "Errores comunes a verificar" since the client validates, not uploads. */
+  errors_label?: string;
 }
 
 export function DocumentGuidanceDisclosure({
@@ -327,6 +331,7 @@ export function DocumentGuidanceDisclosure({
   where_to_obtain,
   common_errors,
   summary_label,
+  errors_label,
 }: DocumentGuidanceProps) {
   const hasAnatomy = anatomy.trim().length > 0;
   const hasWhere = where_to_obtain.trim().length > 0;
@@ -378,7 +383,7 @@ export function DocumentGuidanceDisclosure({
                 weight="bold"
                 aria-hidden="true"
               />
-              Antes de subir
+              {errors_label ?? "Antes de subir"}
             </p>
             <ul className="mt-1.5 space-y-1.5">
               {common_errors.map((err) => (

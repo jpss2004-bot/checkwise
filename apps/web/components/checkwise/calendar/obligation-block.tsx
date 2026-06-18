@@ -58,7 +58,12 @@ export function ObligationBlock({
   // mismatch items, so its mere presence is the signal to show it (an
   // overdue-but-rejected doc still needs to surface why it bounced).
   const reviewerNote = item.reviewer_note ?? null;
+  // Document literacy. v2 obligations satisfiable by any of several documents
+  // carry an `accepts_documents` list; v1 obligations carry the single-doc
+  // anatomy/where/common_errors instead.
+  const acceptsDocuments = item.accepts_documents ?? [];
   const hasGuidance =
+    acceptsDocuments.length > 0 ||
     (item.anatomy ?? "").trim().length > 0 ||
     (item.where_to_obtain ?? "").trim().length > 0;
 
@@ -122,17 +127,38 @@ export function ObligationBlock({
         </div>
       ) : null}
 
-      {/* Document literacy — what a valid document must contain and where the
-          provider gets it. The payload already carried `anatomy`; it was being
-          dropped before. Reuses the provider calendar's disclosure. */}
+      {/* Document literacy — what a valid document must contain, where the
+          provider gets it, and the pitfalls the client should verify. Framed
+          for review (the client validates, it does not upload). Reuses the
+          provider calendar's disclosure. */}
       {hasGuidance ? (
-        <div className="mt-2.5">
-          <DocumentGuidanceDisclosure
-            anatomy={item.anatomy ?? ""}
-            where_to_obtain={item.where_to_obtain ?? ""}
-            common_errors={[]}
-            summary_label="Qué debe contener este documento"
-          />
+        <div className="mt-2.5 space-y-2">
+          {acceptsDocuments.length > 0 ? (
+            <>
+              <p className="text-[11px] leading-4 text-[color:var(--text-secondary)]">
+                Cualquiera de estos documentos satisface la obligación — el
+                proveedor solo necesita entregar uno.
+              </p>
+              {acceptsDocuments.map((doc) => (
+                <DocumentGuidanceDisclosure
+                  key={doc.name}
+                  anatomy={doc.anatomy}
+                  where_to_obtain={doc.where_to_obtain}
+                  common_errors={doc.common_errors}
+                  summary_label={`Acerca de ${doc.name}`}
+                  errors_label="Errores comunes a verificar"
+                />
+              ))}
+            </>
+          ) : (
+            <DocumentGuidanceDisclosure
+              anatomy={item.anatomy ?? ""}
+              where_to_obtain={item.where_to_obtain ?? ""}
+              common_errors={item.common_errors ?? []}
+              summary_label="Qué debe contener este documento"
+              errors_label="Errores comunes a verificar"
+            />
+          )}
         </div>
       ) : null}
 

@@ -564,6 +564,10 @@ def test_client_calendar_items_carry_risk_level(
         # both fields must always be present as strings (possibly empty).
         assert isinstance(item["where_to_obtain"], str)
         assert isinstance(item["anatomy"], str)
+        # Pitfall checklist + v2 alternatives are always present as lists
+        # (accepts_documents is empty on v1 obligations).
+        assert isinstance(item["common_errors"], list)
+        assert isinstance(item["accepts_documents"], list)
 
 
 def test_client_calendar_items_carry_oversight_suggested_action(

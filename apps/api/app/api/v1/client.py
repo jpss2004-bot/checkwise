@@ -767,6 +767,19 @@ class ClientMetadataResponse(BaseModel):
     documents: list[ClientMetadataDocument]
 
 
+class ClientCalendarAcceptedDoc(BaseModel):
+    """One acceptable document for a v2 obligation that ANY single member of
+    satisfies (e.g. IMSS monthly = comprobante bancario OR CFDI OR cédula).
+    Mirrors the provider calendar's accepted-doc shape so the client review
+    surface can explain "cualquiera de estos satisface la obligación". Empty
+    on v1 obligations (no alternatives)."""
+
+    name: str
+    anatomy: str
+    where_to_obtain: str
+    common_errors: list[str]
+
+
 class ClientCalendarItem(BaseModel):
     vendor_id: str
     workspace_id: str
@@ -786,20 +799,23 @@ class ClientCalendarItem(BaseModel):
     # card instruction can't drift from the cell's risk color.
     suggested_action: str
     # Oversight evidence: what the provider already delivered and when, plus
-    # the reviewer's reason when the obligation was rejected — so the client
-    # can decide chase-vs-wait and relay the exact motive without first
-    # clicking into the expediente. ``filename`` / ``submitted_at`` are null
-    # until a submission exists; ``reviewer_note`` is only populated on
-    # ``action_required`` items that carry a reviewer decision message.
+    # the reviewer's reason when the obligation bounced — so the client can
+    # decide chase-vs-wait and relay the exact motive without first clicking
+    # into the expediente. ``filename`` / ``submitted_at`` are null until a
+    # submission exists; ``reviewer_note`` is only populated on rejected /
+    # needs-clarification / mismatch items that carry a reviewer message.
     filename: str | None
     submitted_at: str | None
     reviewer_note: str | None
     # Document guidance, mirrored from the provider calendar so the client
-    # review surface can show "what the document is, and where to get it"
-    # inline instead of forcing a click-through. ``requirement_name`` already
-    # carries the document name; these add the supporting detail.
+    # review surface can show "what the document is, where to get it, and the
+    # common pitfalls to verify" inline instead of forcing a click-through.
+    # ``accepts_documents`` is non-empty only for v2 obligations satisfiable
+    # by any one of several documents.
     anatomy: str
     where_to_obtain: str
+    common_errors: list[str]
+    accepts_documents: list[ClientCalendarAcceptedDoc]
     href: str
 
 
@@ -2341,6 +2357,8 @@ def client_calendar(
                 reviewer_note=ob.reviewer_note,
                 anatomy=ob.anatomy,
                 where_to_obtain=ob.where_to_obtain,
+                common_errors=ob.common_errors,
+                accepts_documents=ob.accepts_documents,
                 href=ob.client_href,
             )
         )

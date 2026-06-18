@@ -439,22 +439,30 @@ def test_is_v2_recurring_code_handles_every_v2_shape() -> None:
 
 
 def test_client_calendar_call_site_threads_v2_mode_flag() -> None:
-    """The client-side calendar endpoint at ``apps/api/app/api/v1/client.py``
-    also threads ``v2_mode=bool(req.accepts_documents)`` into
-    ``_calendar_upload_href`` — without this a staff/admin click on the
-    client-side surface would mount the wizard in v1 mode against a v2
-    row. Pin the call shape via source inspection so a refactor can't
-    silently drop the keyword argument."""
+    """The client-side calendar's upload-href call must thread
+    ``v2_mode=bool(req.accepts_documents)`` into ``_calendar_upload_href`` —
+    without this a staff/admin click on the client-side surface would mount the
+    wizard in v1 mode against a v2 row. The call now lives in the shared
+    ``app/services/calendar_aggregate.py`` service (extracted so the client
+    calendar and the admin grid place obligations identically). Pin the call
+    shape via source inspection so a refactor can't silently drop the keyword
+    argument."""
     from pathlib import Path
 
-    client_py = Path(__file__).resolve().parent.parent / "app" / "api" / "v1" / "client.py"
-    source = client_py.read_text(encoding="utf-8")
+    aggregate_py = (
+        Path(__file__).resolve().parent.parent
+        / "app"
+        / "services"
+        / "calendar_aggregate.py"
+    )
+    source = aggregate_py.read_text(encoding="utf-8")
     assert "_calendar_upload_href(" in source, (
-        "client.py no longer imports _calendar_upload_href — refactor needs review"
+        "calendar_aggregate.py no longer calls _calendar_upload_href "
+        "— refactor needs review"
     )
     # The call must thread v2_mode from the catalog row, not hardcode False.
     assert "v2_mode=bool(req.accepts_documents)" in source, (
-        "client.py _calendar_upload_href call dropped v2_mode "
+        "calendar_aggregate.py _calendar_upload_href call dropped v2_mode "
         "— v2 rows on client surface will mount wizard in v1 mode"
     )
 

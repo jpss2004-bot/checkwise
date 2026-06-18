@@ -57,7 +57,9 @@ const INSTITUTION_FILTERS: { code: string; label: string }[] = [
   { code: "stps_repse", label: "STPS / REPSE" },
 ];
 
-type Selected = { month: number; vendorId: string | null } | null;
+// ``month: null`` means "this provider across the whole year" — the worklist
+// you get by clicking a provider's row label (tier 5 provider-name drill).
+type Selected = { month: number | null; vendorId: string | null } | null;
 
 export default function ClientCalendarPage() {
   const router = useRouter();
@@ -226,7 +228,7 @@ export default function ClientCalendarPage() {
     if (!selected) return [] as ClientCalendarItem[];
     return filteredItems.filter(
       (i) =>
-        monthOf(i) === selected.month &&
+        (selected.month === null || monthOf(i) === selected.month) &&
         (selected.vendorId === null || i.vendor_id === selected.vendorId),
     );
   }, [filteredItems, selected]);
@@ -317,7 +319,7 @@ export default function ClientCalendarPage() {
                   cells={matrixCells}
                   currentMonth={currentMonthForMatrix}
                   selected={
-                    selected
+                    selected && selected.month !== null
                       ? { rowId: selected.vendorId, month: selected.month }
                       : null
                   }
@@ -326,6 +328,9 @@ export default function ClientCalendarPage() {
                   }
                   onSelectMonth={(month) =>
                     selectAndScroll({ month, vendorId: null })
+                  }
+                  onSelectRow={(rowId) =>
+                    selectAndScroll({ month: null, vendorId: rowId })
                   }
                 />
               </Surface>
@@ -397,11 +402,15 @@ function SelectionDetail({
     .map(([vendorId, g]) => ({ vendorId, ...g }))
     .sort((a, b) => worstOf(a.items) - worstOf(b.items));
 
-  const monthName = MONTH_LABELS_ES[selected.month];
+  // ``month === null`` is the whole-year provider worklist (row-label drill).
+  const periodLabel =
+    selected.month === null
+      ? `Todo ${year}`
+      : `${MONTH_LABELS_ES[selected.month]} ${year}`;
   const title =
     selected.vendorId === null
-      ? `${monthName} ${year} · todo el portafolio`
-      : `${byVendor.get(selected.vendorId)?.name ?? "Proveedor"} · ${monthName} ${year}`;
+      ? `${periodLabel} · todo el portafolio`
+      : `${byVendor.get(selected.vendorId)?.name ?? "Proveedor"} · ${periodLabel}`;
 
   return (
     <Surface bodyClassName="p-4 sm:p-5">

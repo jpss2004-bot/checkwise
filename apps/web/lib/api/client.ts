@@ -311,10 +311,24 @@ export type ClientCalendarItem = {
   submitted_at?: string | null;
   reviewer_note?: string | null;
   /** Supporting document guidance shown inline on the review card
-   *  (requirement_name is the document; these describe + locate it). */
+   *  (requirement_name is the document; these describe + locate it).
+   *  `accepts_documents` is non-empty only for v2 obligations satisfiable
+   *  by any one of several documents. `?? []`/`?? ""` on the consumer side
+   *  keeps a stale backend safe. */
   anatomy: string;
   where_to_obtain: string;
+  common_errors?: string[];
+  accepts_documents?: ClientCalendarAcceptedDoc[];
   href: string;
+};
+
+/** One acceptable document for a v2 obligation that any single member of
+ *  satisfies (e.g. IMSS monthly = comprobante bancario OR CFDI OR cédula). */
+export type ClientCalendarAcceptedDoc = {
+  name: string;
+  anatomy: string;
+  where_to_obtain: string;
+  common_errors: string[];
 };
 
 /** Per-provider rollup the calendar leads with: which providers put the
