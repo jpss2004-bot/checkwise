@@ -55,6 +55,7 @@ import {
   Lightbulb,
   PaperPlaneRight,
   Trash,
+  X,
 } from "@phosphor-icons/react";
 
 import { Button } from "@/components/ui/button";
@@ -118,6 +119,32 @@ export function FeedbackLauncher({
   const [submitting, setSubmitting] = useState(false);
   const [capturing, setCapturing] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  // §5.1 — the floating launcher is dismissible. A provider who finds the
+  // fixed bottom-right FAB invasive can hide it for the session; the
+  // always-available "Reportar problema" entry in the sidebar (which fires
+  // the same ``checkwise:open-feedback`` event the Dialog listens for)
+  // remains, so dismissing never strands the feedback path. Read in an
+  // effect (not during render) to avoid an SSR/client hydration mismatch.
+  const [dismissed, setDismissed] = useState(false);
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    try {
+      if (window.sessionStorage.getItem("checkwise.feedback.fab.dismissed") === "1") {
+        setDismissed(true);
+      }
+    } catch {
+      // sessionStorage can throw in private-mode / sandboxed frames — the
+      // FAB just stays visible, which is the safe default.
+    }
+  }, []);
+  const dismissFab = useCallback(() => {
+    setDismissed(true);
+    try {
+      window.sessionStorage.setItem("checkwise.feedback.fab.dismissed", "1");
+    } catch {
+      // Best-effort persistence; the in-memory state still hides it now.
+    }
+  }, []);
 
   const fileInputRef = useRef<HTMLInputElement>(null);
   // Bugfix (2026-05-21) — original page context captured at the
@@ -400,45 +427,65 @@ export function FeedbackLauncher({
 
   return (
     <div data-feedback-launcher="true">
-      <button
-        type="button"
-        aria-label={
-          capturing
-            ? "Capturando la página actual…"
-            : "Reportar bug o sugerir mejora"
-        }
-        aria-haspopup="dialog"
-        aria-expanded={open}
-        aria-busy={capturing}
-        disabled={capturing}
-        onClick={openWithCapture}
-        className={cn(
-          // ``feedback-launcher-fab``: lets the Wise drawer hide this
-          // while it owns the right gutter (see globals.css).
-          "feedback-launcher-fab fixed bottom-4 right-4 z-50",
-          "inline-flex items-center gap-2 rounded-full",
-          "border border-[color:var(--border-strong)]",
-          "bg-[color:var(--surface-overlay)] px-3.5 py-2",
-          "text-[12px] font-medium text-[color:var(--text-primary)]",
-          "shadow-md transition-[transform,box-shadow,background-color] duration-fast",
-          "hover:bg-[color:var(--surface-hover)] hover:shadow-lg",
-          "active:scale-[0.97]",
-          "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[color:var(--border-focus)]/40 focus-visible:ring-offset-2 focus-visible:ring-offset-[color:var(--surface-page)]",
-          "disabled:cursor-progress disabled:opacity-80",
-        )}
-      >
-        <ChatCenteredDots
-          className={cn(
-            "h-3.5 w-3.5",
-            capturing && "animate-pulse",
-          )}
-          weight="bold"
-          aria-hidden="true"
-        />
-        <span className="hidden sm:inline">
-          {capturing ? "Capturando…" : "Reportar"}
-        </span>
-      </button>
+      {/* §5.1 — the FAB is hidden once the provider dismisses it (the
+          sidebar "Reportar problema" entry keeps the path open). The
+          ``feedback-launcher-fab`` wrapper still lets the Wise drawer hide
+          this while it owns the right gutter (see globals.css). */}
+      {!dismissed ? (
+        <div className="feedback-launcher-fab fixed bottom-4 right-4 z-50">
+          <button
+            type="button"
+            aria-label={
+              capturing
+                ? "Capturando la página actual…"
+                : "Reportar bug o sugerir mejora"
+            }
+            aria-haspopup="dialog"
+            aria-expanded={open}
+            aria-busy={capturing}
+            disabled={capturing}
+            onClick={openWithCapture}
+            className={cn(
+              "inline-flex items-center gap-2 rounded-full",
+              "border border-[color:var(--border-strong)]",
+              "bg-[color:var(--surface-overlay)] px-3.5 py-2",
+              "text-[12px] font-medium text-[color:var(--text-primary)]",
+              "shadow-md transition-[transform,box-shadow,background-color] duration-fast",
+              "hover:bg-[color:var(--surface-hover)] hover:shadow-lg",
+              "active:scale-[0.97]",
+              "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[color:var(--border-focus)]/40 focus-visible:ring-offset-2 focus-visible:ring-offset-[color:var(--surface-page)]",
+              "disabled:cursor-progress disabled:opacity-80",
+            )}
+          >
+            <ChatCenteredDots
+              className={cn(
+                "h-3.5 w-3.5",
+                capturing && "animate-pulse",
+              )}
+              weight="bold"
+              aria-hidden="true"
+            />
+            <span className="hidden sm:inline">
+              {capturing ? "Capturando…" : "Reportar"}
+            </span>
+          </button>
+          <button
+            type="button"
+            aria-label="Ocultar el botón de reportar"
+            title="Ocultar este botón (sigue disponible en el menú lateral)"
+            onClick={dismissFab}
+            className={cn(
+              "absolute -right-1.5 -top-1.5 flex h-5 w-5 items-center justify-center",
+              "rounded-full border border-[color:var(--border-strong)]",
+              "bg-[color:var(--surface-overlay)] text-[color:var(--text-secondary)] shadow-sm",
+              "transition-colors hover:bg-[color:var(--surface-hover)] hover:text-[color:var(--text-primary)]",
+              "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[color:var(--border-focus)]/40",
+            )}
+          >
+            <X className="h-3 w-3" weight="bold" aria-hidden="true" />
+          </button>
+        </div>
+      ) : null}
 
       <Dialog
         open={open}
