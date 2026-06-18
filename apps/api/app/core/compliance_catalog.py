@@ -18,6 +18,7 @@ from __future__ import annotations
 
 import logging
 from dataclasses import asdict, dataclass, field
+from functools import lru_cache
 from typing import Literal
 
 from app.core.config import settings
@@ -563,15 +564,28 @@ def _annual_period_key(*, year: int) -> str:
     return f"{year - 1}-A"
 
 
+@lru_cache(maxsize=8)
+def _expediente_for_persona_cached(
+    persona_type: PersonaType,
+) -> tuple[OnboardingRequirement, ...]:
+    return tuple(req for req in _ONBOARDING_MORAL if persona_type in req.persona_types)
+
+
 def expediente_for_persona(persona_type: PersonaType) -> list[OnboardingRequirement]:
-    """Return the onboarding requirements applicable to a persona type."""
-    return [req for req in _ONBOARDING_MORAL if persona_type in req.persona_types]
+    """Return the onboarding requirements applicable to a persona type.
+
+    The filter is a pure function of ``persona_type`` over the static catalog,
+    so the build is memoized. Callers get a fresh ``list`` copy each call and
+    may mutate it freely without touching the cache (the rows themselves are
+    frozen dataclasses).
+    """
+    return list(_expediente_for_persona_cached(persona_type))
 
 
-def recurring_for_year(
-    year: int, persona_type: PersonaType = "moral"
-) -> list[RecurringRequirement]:
-    """Compute the full recurring requirement list for a given year and persona type."""
+@lru_cache(maxsize=64)
+def _recurring_for_year_cached(
+    year: int, persona_type: PersonaType
+) -> tuple[RecurringRequirement, ...]:
     result: list[RecurringRequirement] = []
 
     for due_month in range(1, 13):
@@ -664,7 +678,18 @@ def recurring_for_year(
                 )
             )
 
-    return [r for r in result if persona_type in r.persona_types]
+    return tuple(r for r in result if persona_type in r.persona_types)
+
+
+def recurring_for_year(
+    year: int, persona_type: PersonaType = "moral"
+) -> list[RecurringRequirement]:
+    """Compute the full recurring requirement list for a given year and persona type.
+
+    Pure function of ``(year, persona_type)`` over the static catalog, so the
+    ~140-row build is memoized. Callers get a fresh ``list`` copy each call.
+    """
+    return list(_recurring_for_year_cached(year, persona_type))
 
 
 # ---------------------------------------------------------------------------
@@ -743,9 +768,10 @@ def _v2_row(
     )
 
 
-def recurring_for_year_v2(
-    year: int, persona_type: PersonaType = "moral"
-) -> list[RecurringRequirement]:
+@lru_cache(maxsize=64)
+def _recurring_for_year_v2_cached(
+    year: int, persona_type: PersonaType
+) -> tuple[RecurringRequirement, ...]:
     """Return the collapsed v2 recurring catalog for a given year.
 
     One row per (institution, period). Each row's ``accepts_documents``
@@ -847,7 +873,14 @@ def recurring_for_year_v2(
                 )
             )
 
-    return [r for r in rows if persona_type in r.persona_types]
+    return tuple(r for r in rows if persona_type in r.persona_types)
+
+
+def recurring_for_year_v2(
+    year: int, persona_type: PersonaType = "moral"
+) -> list[RecurringRequirement]:
+    """Return the collapsed v2 recurring catalog (memoized; fresh list per call)."""
+    return list(_recurring_for_year_v2_cached(year, persona_type))
 
 
 def catalog_metadata() -> dict[str, str]:
