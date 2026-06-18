@@ -17,7 +17,10 @@ const LAST_MODIFIED = "2026-06-16";
 export default function sitemap(): MetadataRoute.Sitemap {
   return [
     {
-      url: SITE_URL,
+      // Trailing slash so the sitemap entry matches the homepage's
+      // canonical (`https://checkwise.com.mx/`). `SITE_URL` itself stays
+      // slash-free because `app/robots.ts` appends `/sitemap.xml` to it.
+      url: `${SITE_URL}/`,
       lastModified: LAST_MODIFIED,
       changeFrequency: "weekly",
       priority: 1,
