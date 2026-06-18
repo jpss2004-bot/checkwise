@@ -627,6 +627,43 @@ class TestAnthropicProviderResponseHandling:
         assert "main_date" in user_text
         assert "field_suggestions" in user_text
 
+    def test_field_suggestion_prompt_allows_generated_description(self):
+        provider = AnthropicDocumentAnalysisProvider(
+            api_key="sk-test", model="claude-sonnet-4-6", deep_authenticity=True
+        )
+        with_description = provider._build_user_prompt(  # noqa: SLF001 — prompt unit
+            requirement_name="CSF",
+            institution_code="sat",
+            period_code="2026-01",
+            metadata_field_schema=[
+                {
+                    "field_key": "description",
+                    "label": "Descripción",
+                    "requirement_level": "conditional",
+                    "description": "Texto fijo, listado de anexos o vacío.",
+                },
+            ],
+        )
+        # The description field may be generated when the document lacks one.
+        assert "REDÁCTALA" in with_description
+        assert "description" in with_description
+
+        without_description = provider._build_user_prompt(  # noqa: SLF001
+            requirement_name="CSF",
+            institution_code="sat",
+            period_code="2026-01",
+            metadata_field_schema=[
+                {
+                    "field_key": "main_date",
+                    "label": "Fecha principal",
+                    "requirement_level": "required",
+                    "description": "Fecha del documento",
+                },
+            ],
+        )
+        # The generation exception only appears when `description` is in scope.
+        assert "REDÁCTALA" not in without_description
+
     def test_deep_tier_without_schema_omits_field_suggestions(
         self, monkeypatch, tmp_path
     ):

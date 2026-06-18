@@ -474,6 +474,15 @@ def _rule(
     fixed_description: str | None = None,
     applies_to_all_institutions: bool = False,
 ) -> DocumentMetadataRule:
+    # Every document type can carry a ``description``: a rulebook-fixed text
+    # for a few types (see ``fixed_description``), otherwise an annex listing,
+    # an AI-generated brief summary, or blank. Guarantee the field exists as a
+    # conditional on every rule so the exporter and the comprehension tier can
+    # populate it uniformly instead of only on the handful of rules that
+    # happened to list it.
+    if "description" not in conditional_field_keys and "description" not in required_field_keys:
+        conditional_field_keys = conditional_field_keys + ("description",)
+
     return DocumentMetadataRule(
         code=code,
         name=name,
@@ -654,7 +663,6 @@ _DOCUMENT_RULES: tuple[DocumentMetadataRule, ...] = (
         source_section="III.II. Constancia de Situación Fiscal",
         naming_pattern="{provider_nomenclature} CSF",
         required_field_keys=BASE_REQUIRED_FIELDS + ("issue_date", "taxpayer_name"),
-        conditional_field_keys=("description",),
         fixed_tags=(EXPEDIENTE_TAG, SAT_TAG),
         fixed_description="Constancia de Situación Fiscal",
         notes=("Descripción fija: Constancia de Situación Fiscal.",),
@@ -692,7 +700,6 @@ _DOCUMENT_RULES: tuple[DocumentMetadataRule, ...] = (
             "is_current_for_report_year",
             "prior_registration_annexes",
             "annexes",
-            "description",
         ),
         fixed_tags=(EXPEDIENTE_TAG, IMSS_TAG),
         fixed_description="Tarjeta de Identificación Patronal (TIP)",

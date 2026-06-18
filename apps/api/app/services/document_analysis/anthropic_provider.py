@@ -389,7 +389,8 @@ def _build_comprehension_with_fields_schema() -> dict[str, Any]:
         "items": copy.deepcopy(_FIELD_SUGGESTION_ITEM_SCHEMA),
         "description": (
             "Valores propuestos para los campos de metadata indicados en el "
-            "prompt. Vacío si el documento no los contiene."
+            "prompt. Omite los que el documento no contenga, excepto "
+            "`description`, que puedes redactar brevemente si falta."
         ),
     }
     schema["required"] = [*schema["required"], "field_suggestions"]
@@ -727,6 +728,21 @@ class AnthropicDocumentAnalysisProvider:
                 description = str(field.get("description") or "").strip()
                 detail = " — ".join(part for part in [label, description] if part)
                 lines.append(f"- {key}: {detail}" if detail else f"- {key}")
+
+            if any(
+                str(field.get("field_key") or "").strip() == "description"
+                for field in metadata_field_schema
+            ):
+                lines += [
+                    "",
+                    "Excepción para `description`: si el documento no incluye una "
+                    "descripción explícita, REDÁCTALA tú en una sola frase breve "
+                    "(máx. ~20 palabras) que diga qué es el documento y qué "
+                    "acredita, con base en su tipo y contenido. Es el ÚNICO campo "
+                    "que puedes redactar (los demás solo se extraen); en `evidence` "
+                    "aclara que es una descripción generada y usa confianza "
+                    "moderada (~0.6).",
+                ]
 
         return "\n".join(lines)
 

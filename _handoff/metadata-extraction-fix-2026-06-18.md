@@ -64,12 +64,33 @@ STORAGE_BACKEND=s3 .venv/bin/python -m scripts.backfill_metadata --force --apply
 The backfill reads the persisted `DocumentInspection` signals — participants and
 description fill for every doc; dates fill where the original inspection captured them.
 
+## Part 2 — AI-generated brief description when none is found
+When a document has no rulebook-fixed description and none can be extracted, the
+comprehension tier now **writes** a brief one-sentence description instead of leaving
+it blank. Implementation:
+
+- **`metadata_rules.py`** — `description` is now a conditional field on *every* rule
+  (guaranteed centrally in `_rule`), so every document type has a description slot for
+  the deterministic layer / comprehension tier to populate. Previously most rules (the
+  compliance comprobantes, escrituras, registros, the report) didn't list it at all.
+- **`document_analysis/anthropic_provider.py`** — the field-suggestion prompt gains a
+  targeted exception: `description` is the **only** field the model may *write* (one
+  concise sentence, ~20 words, "what the document is and what it certifies") when the
+  document doesn't state one. Every other field stays extract-only ("no inventes"). It
+  rides the existing comprehension pass — **no extra model call, no new flag**.
+
+Precedence: rulebook `fixed_description` (CSF, TIP) > extracted/generated AI value >
+blank. The generated value is `prefilled_needs_review` with evidence noting it was
+AI-generated; the reviewer still confirms. Gated by the existing
+`COMPREHENSION_FIELD_SUGGESTIONS_ENABLED` + unlocked-codes flags — when comprehension
+is off, description stays blank (deterministic fixed ones still fill).
+
 ## Notes / follow-ups
-- Most documents legitimately have **no** description (the rulebook says it is "texto
-  fijo, listado de anexos o vacío"). Only the two fixed-text types fill deterministically;
-  annex-listing descriptions come from the comprehension tier or manual review. If
-  Legal Shelf wants standardized descriptions per compliance family, add them as
-  `fixed_description` on those rules.
+- When comprehension is **off** (current prod default), most documents still have a
+  blank description — only the two fixed-text types fill. Turning on
+  `COMPREHENSION_FIELD_SUGGESTIONS_ENABLED` (+ unlocked codes) activates AI generation.
+  If Legal Shelf wants standardized deterministic descriptions per compliance family,
+  add them as `fixed_description` on those rules.
 - Minor pre-existing: the admin metadata *preview* reader caps at 12 columns
   (`client_metadata._read_workbook_preview`), hiding the 13th column (Archivo PDF).
   Not related to the three fields. Left as-is.

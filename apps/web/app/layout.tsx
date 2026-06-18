@@ -4,8 +4,9 @@ import { GeistSans } from "geist/font/sans";
 import { Schibsted_Grotesk } from "next/font/google";
 
 import { Toaster } from "@/components/ui/toast";
-import { TooltipProvider } from "@/components/ui/tooltip";
 import { SITE_NAME, SITE_URL } from "@/lib/site";
+
+import { AppProviders } from "./providers";
 
 import "./globals.css";
 
@@ -100,9 +101,7 @@ export default function RootLayout({
       className={`${GeistSans.variable} ${GeistMono.variable} ${display.variable}`}
     >
       <body className="antialiased">
-        <TooltipProvider delayDuration={300} skipDelayDuration={150}>
-          {children}
-        </TooltipProvider>
+        <AppProviders>{children}</AppProviders>
         <Toaster />
       </body>
     </html>

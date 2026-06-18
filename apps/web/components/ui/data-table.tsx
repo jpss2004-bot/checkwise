@@ -1,17 +1,24 @@
 "use client";
 
-import { type ReactNode, useMemo, useState } from "react";
+import {
+  forwardRef,
+  type HTMLAttributes,
+  type ReactNode,
+  type Ref,
+  useMemo,
+  useState,
+} from "react";
 import { ArrowRight, Tray } from "@phosphor-icons/react";
 
 import { cn } from "@/lib/utils";
 import {
   Table,
-  TableBody,
   TableCell,
   TableHead,
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
+import { VirtualTableBody } from "@/components/ui/virtual-rows";
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Badge } from "@/components/ui/badge";
 import {
@@ -218,37 +225,43 @@ export function DataTable<T, K extends string = string>({
               ) : null}
             </TableRow>
           </TableHeader>
-          <TableBody>
-            {visible.map((item) => (
+          <VirtualTableBody
+            items={visible}
+            getRowKey={(item) => rowKey(item)}
+            columnCount={columns.length + (onRowClick ? 1 : 0)}
+            renderRow={(item) => (
               <DataTableRow
-                key={rowKey(item)}
                 item={item}
                 columns={columns}
                 onRowClick={onRowClick}
                 rowLabel={rowLabel}
               />
-            ))}
-          </TableBody>
+            )}
+          />
         </Table>
       )}
     </section>
   );
 }
 
-function DataTableRow<T>({
-  item,
-  columns,
-  onRowClick,
-  rowLabel,
-}: {
+// forwardRef + rest-spread so VirtualTableBody can inject the measurement
+// `ref` and `data-index` straight through to the underlying <tr>.
+type DataTableRowProps<T> = {
   item: T;
   columns: DataTableColumn<T>[];
   onRowClick?: (item: T) => void;
   rowLabel?: (item: T) => string;
-}) {
+} & HTMLAttributes<HTMLTableRowElement>;
+
+const DataTableRow = forwardRef(function DataTableRow<T>(
+  { item, columns, onRowClick, rowLabel, ...rest }: DataTableRowProps<T>,
+  ref: Ref<HTMLTableRowElement>,
+) {
   const clickable = Boolean(onRowClick);
   return (
     <TableRow
+      ref={ref}
+      {...rest}
       onClick={clickable ? () => onRowClick?.(item) : undefined}
       onKeyDown={
         clickable
@@ -290,7 +303,9 @@ function DataTableRow<T>({
       ) : null}
     </TableRow>
   );
-}
+}) as <T>(
+  props: DataTableRowProps<T> & { ref?: Ref<HTMLTableRowElement> },
+) => ReactNode;
 
 function DataTableSkeleton({
   rows = 5,
