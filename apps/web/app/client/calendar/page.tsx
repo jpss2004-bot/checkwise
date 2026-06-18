@@ -13,7 +13,11 @@ import {
 
 import { ClientShell } from "../_shell";
 import { ObligationBlock } from "@/components/checkwise/calendar/obligation-block";
-import { PortfolioMatrix } from "@/components/checkwise/calendar/portfolio-matrix";
+import {
+  ComplianceMatrix,
+  type ComplianceMatrixCell,
+  type ComplianceMatrixRow,
+} from "@/components/checkwise/calendar/compliance-matrix";
 import {
   CLIENT_RISK_ORDER,
   SEMAPHORE_DOT,
@@ -21,6 +25,7 @@ import {
   formatShortDate,
   monthOf,
   relativeDeadline,
+  worstRisk,
 } from "@/components/checkwise/calendar/client-calendar-shared";
 import {
   getClientCalendar,
@@ -179,6 +184,30 @@ export default function ClientCalendarPage() {
     return data.providers.filter((p) => withItems.has(p.vendor_id));
   }, [data, filteredItems, institutionFilter]);
 
+  // Adapt the client data to the shared ComplianceMatrix shape: providers are
+  // the rows, and each cell carries a precomputed count + worst risk.
+  const matrixRows = useMemo<ComplianceMatrixRow[]>(
+    () =>
+      visibleProviders.map((p) => ({
+        id: p.vendor_id,
+        name: p.vendor_name,
+        semaphore_level: p.semaphore_level,
+        subtitle: `${p.compliance_pct}% al día`,
+      })),
+    [visibleProviders],
+  );
+
+  const matrixCells = useMemo(() => {
+    const map = new Map<string, ComplianceMatrixCell>();
+    for (const [key, items] of itemsByCell) {
+      map.set(key, {
+        count: items.length,
+        worstRisk: worstRisk(items) ?? "on_track",
+      });
+    }
+    return map;
+  }, [itemsByCell]);
+
   // Default selection when the data / filter context changes: the current
   // month across all providers, else the first month that has anything.
   useEffect(() => {
@@ -283,13 +312,17 @@ export default function ClientCalendarPage() {
                 description="Proveedores en las filas, meses en las columnas. El color marca el estado más crítico de cada mes."
                 bodyClassName="p-4"
               >
-                <PortfolioMatrix
-                  providers={visibleProviders}
-                  itemsByCell={itemsByCell}
+                <ComplianceMatrix
+                  rows={matrixRows}
+                  cells={matrixCells}
                   currentMonth={currentMonthForMatrix}
-                  selected={selected}
-                  onSelectCell={(vendorId, month) =>
-                    selectAndScroll({ month, vendorId })
+                  selected={
+                    selected
+                      ? { rowId: selected.vendorId, month: selected.month }
+                      : null
+                  }
+                  onSelectCell={(rowId, month) =>
+                    selectAndScroll({ month, vendorId: rowId })
                   }
                   onSelectMonth={(month) =>
                     selectAndScroll({ month, vendorId: null })
