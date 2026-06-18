@@ -2733,6 +2733,28 @@ def client_activity(
 # ---------------------------------------------------------------------------
 
 
+def _client_unread_counts(db: Session, client_id: str) -> tuple[int, int]:
+    """Return ``(unread, unread_actionable)`` for a client in one query.
+
+    ``unread_actionable`` is the red+yellow subset that drives the bell badge
+    (N9b): info- and green-tier unread rows show in the feed but never inflate
+    the badge. One FILTERed aggregate replaces the two separate COUNTs every
+    notifications list/summary used to issue.
+    """
+    row = db.execute(
+        select(
+            func.count(ClientNotification.id),
+            func.count(ClientNotification.id).filter(
+                ClientNotification.severity.in_(("red", "yellow"))
+            ),
+        ).where(
+            ClientNotification.client_id == client_id,
+            ClientNotification.read_at.is_(None),
+        )
+    ).one()
+    return int(row[0] or 0), int(row[1] or 0)
+
+
 @router.get("/notifications/summary", response_model=ClientNotificationSummary)
 def client_notification_summary(
     db: DbSession,
@@ -2740,28 +2762,9 @@ def client_notification_summary(
     client_id: str | None = None,
 ) -> ClientNotificationSummary:
     target_id = _resolve_client_id(db, current, requested=client_id)
-    unread_count = int(
-        db.scalar(
-            select(func.count(ClientNotification.id)).where(
-                ClientNotification.client_id == target_id,
-                ClientNotification.read_at.is_(None),
-            )
-        )
-        or 0
-    )
-    # Bell badge math (N9b): only red+yellow contribute. Info-tier
-    # and green-tier unread rows are visible in the in-app feed but
-    # never inflate the badge.
-    unread_actionable_count = int(
-        db.scalar(
-            select(func.count(ClientNotification.id)).where(
-                ClientNotification.client_id == target_id,
-                ClientNotification.read_at.is_(None),
-                ClientNotification.severity.in_(("red", "yellow")),
-            )
-        )
-        or 0
-    )
+    # Bell badge math (N9b): only red+yellow unread contribute to the actionable
+    # subset; info/green unread rows show in the feed but never inflate the badge.
+    unread_count, unread_actionable_count = _client_unread_counts(db, target_id)
     return ClientNotificationSummary(
         client_id=target_id,
         unread_count=unread_count,
@@ -2790,25 +2793,7 @@ def client_notifications(
         )
     )
     vendor_lookup = _vendors_by_id(db, [row.vendor_id for row in rows if row.vendor_id])
-    unread_count = int(
-        db.scalar(
-            select(func.count(ClientNotification.id)).where(
-                ClientNotification.client_id == target_id,
-                ClientNotification.read_at.is_(None),
-            )
-        )
-        or 0
-    )
-    unread_actionable_count = int(
-        db.scalar(
-            select(func.count(ClientNotification.id)).where(
-                ClientNotification.client_id == target_id,
-                ClientNotification.read_at.is_(None),
-                ClientNotification.severity.in_(("red", "yellow")),
-            )
-        )
-        or 0
-    )
+    unread_count, unread_actionable_count = _client_unread_counts(db, target_id)
     return ClientNotificationsResponse(
         client_id=target_id,
         items=[

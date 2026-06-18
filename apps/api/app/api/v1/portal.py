@@ -513,6 +513,40 @@ def _latest_reviewer_note(db: Session, submission_id: str | None) -> str | None:
     return msg or None
 
 
+def _latest_reviewer_notes(
+    db: Session, submission_ids: list[str]
+) -> dict[str, str]:
+    """Batched form of ``_latest_reviewer_note`` for many submissions at once.
+
+    Returns ``{submission_id: note}`` for each submission whose most-recent
+    ``reviewer_decision`` event carries a non-empty message — matching the
+    single-row helper's semantics (only the latest event is considered; an
+    empty latest message yields no entry, i.e. ``None`` via ``.get``). Used by
+    builders that would otherwise issue one query per slot.
+    """
+    ids = [sid for sid in submission_ids if sid]
+    if not ids:
+        return {}
+    rows = db.execute(
+        select(ValidationEvent.submission_id, ValidationEvent.message)
+        .where(
+            ValidationEvent.submission_id.in_(ids),
+            ValidationEvent.event_type == "reviewer_decision",
+        )
+        .order_by(ValidationEvent.created_at.desc())
+    )
+    notes: dict[str, str] = {}
+    seen: set[str] = set()
+    for sid, message in rows:
+        if sid in seen:
+            continue  # DESC order → first row per submission is the latest
+        seen.add(sid)
+        msg = (message or "").strip()
+        if msg:
+            notes[sid] = msg
+    return notes
+
+
 def _calendar_deadline_iso(year: int, due_month: int, due_day: int) -> str:
     """Compute the conventional REPSE deadline as an ISO date string.
 
@@ -1487,6 +1521,17 @@ def get_workspace_onboarding(
     # the normalizer maps both to the canonical form so the expediente
     # never silently empties.
     expediente = expediente_for_persona(normalize_persona_type(workspace.persona_type))
+    # Batch the reviewer-note lookup for every slot's current submission so the
+    # onboarding builder issues one query instead of one per expediente slot.
+    reviewer_notes = _latest_reviewer_notes(
+        db,
+        [
+            slot.current_submission_id
+            for req in expediente
+            if (slot := slot_by_code.get(req.code)) is not None
+            and slot.current_submission_id is not None
+        ],
+    )
     sections: dict[str, dict] = {}
     received_required = 0
     total_required = 0
@@ -1532,7 +1577,7 @@ def get_workspace_onboarding(
             "annexes_required": req.annexes_required,
             "annexes_note": req.annexes_note,
             "next_action": _onboarding_next_action(item_status, req.required),
-            "reviewer_note": _latest_reviewer_note(db, current_submission_id),
+            "reviewer_note": reviewer_notes.get(current_submission_id),
         }
         section["items"].append(item)
         if req.required:
@@ -4013,6 +4058,23 @@ def _compute_recent_uploads(
         )
     )
     submissions = list(db.scalars(stmt))
+    # Batch the cancelability check. A submission can be cancelled only when
+    # no later submission supersedes it; resolving that per row was up to
+    # ``limit`` (10_000) extra round-trips on the submissions-list page. One
+    # IN-query collects every superseded id instead. This is equivalent to
+    # ``_submission_can_be_cancelled`` evaluated for each row.
+    sub_ids = [s.id for s in submissions]
+    superseded_ids: set[str] = (
+        set(
+            db.scalars(
+                select(Submission.supersedes_submission_id).where(
+                    Submission.supersedes_submission_id.in_(sub_ids)
+                )
+            )
+        )
+        if sub_ids
+        else set()
+    )
     rows: list[DashboardRecentUpload] = []
     for sub in submissions:
         # Pull the canonical name + institution via the requirement
@@ -4052,7 +4114,10 @@ def _compute_recent_uploads(
                 submitted_at=sub.created_at.isoformat(),
                 filename=filename,
                 href=_recent_upload_href(sub),
-                can_cancel=_submission_can_be_cancelled(db, sub),
+                can_cancel=(
+                    sub.status in _CANCELABLE_STATUSES
+                    and sub.id not in superseded_ids
+                ),
             )
         )
     return rows
@@ -4533,34 +4598,27 @@ def _provider_notification_item(
     )
 
 
-def _provider_unread_count(db: Session, workspace_id: str) -> int:
-    return int(
-        db.scalar(
-            select(func.count(ProviderNotification.id)).where(
-                ProviderNotification.workspace_id == workspace_id,
-                ProviderNotification.read_at.is_(None),
-            )
-        )
-        or 0
-    )
+def _provider_unread_counts(db: Session, workspace_id: str) -> tuple[int, int]:
+    """Return ``(unread, unread_actionable)`` for a workspace in one query.
 
-
-def _provider_unread_actionable_count(
-    db: Session, workspace_id: str
-) -> int:
-    """Subset of unread restricted to severity ∈ {red, yellow}.
-    Drives the portal sidebar bell so info-tier rows never inflate
-    the badge (parity with the client side, N9b)."""
-    return int(
-        db.scalar(
-            select(func.count(ProviderNotification.id)).where(
-                ProviderNotification.workspace_id == workspace_id,
-                ProviderNotification.read_at.is_(None),
-                ProviderNotification.severity.in_(("red", "yellow")),
-            )
+    ``unread_actionable`` is the subset of unread with severity ∈ {red, yellow}
+    — it drives the portal sidebar bell so info-tier rows never inflate the
+    badge (parity with the client side, N9b). This collapses the two separate
+    COUNTs every notifications list/summary used to issue into a single
+    round-trip via a FILTERed aggregate.
+    """
+    row = db.execute(
+        select(
+            func.count(ProviderNotification.id),
+            func.count(ProviderNotification.id).filter(
+                ProviderNotification.severity.in_(("red", "yellow"))
+            ),
+        ).where(
+            ProviderNotification.workspace_id == workspace_id,
+            ProviderNotification.read_at.is_(None),
         )
-        or 0
-    )
+    ).one()
+    return int(row[0] or 0), int(row[1] or 0)
 
 
 @router.get(
@@ -4573,12 +4631,11 @@ def get_provider_notification_summary(
     workspace: Annotated[ProviderWorkspace, Depends(current_portal_workspace)],
 ) -> ProviderNotificationSummary:
     _ = workspace_id  # tenant guard already enforced by dependency
+    unread, unread_actionable = _provider_unread_counts(db, workspace.id)
     return ProviderNotificationSummary(
         workspace_id=workspace.id,
-        unread_count=_provider_unread_count(db, workspace.id),
-        unread_actionable_count=_provider_unread_actionable_count(
-            db, workspace.id
-        ),
+        unread_count=unread,
+        unread_actionable_count=unread_actionable,
     )
 
 
@@ -4605,14 +4662,13 @@ def list_provider_notifications(
             .limit(limit)
         )
     )
+    unread, unread_actionable = _provider_unread_counts(db, workspace.id)
     return ProviderNotificationsResponse(
         workspace_id=workspace.id,
         items=[_provider_notification_item(row) for row in rows],
         total=len(rows),
-        unread_count=_provider_unread_count(db, workspace.id),
-        unread_actionable_count=_provider_unread_actionable_count(
-            db, workspace.id
-        ),
+        unread_count=unread,
+        unread_actionable_count=unread_actionable,
         limit=limit,
     )
 
@@ -4694,12 +4750,11 @@ def mark_all_provider_notifications_read(
             },
         )
         db.commit()
+    unread, unread_actionable = _provider_unread_counts(db, workspace.id)
     return ProviderNotificationSummary(
         workspace_id=workspace.id,
-        unread_count=_provider_unread_count(db, workspace.id),
-        unread_actionable_count=_provider_unread_actionable_count(
-            db, workspace.id
-        ),
+        unread_count=unread,
+        unread_actionable_count=unread_actionable,
     )
 
 
