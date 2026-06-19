@@ -487,7 +487,9 @@ def _seed_renewal_signal(db, *, provider, client_id, vendor_id, workspace_id):
         notification_type="renewal_due_soon",
         title=title,
         body=body,
-        action_url="/client/vendors",
+        # Renewals deep-link to the calendar (the future obligation lives
+        # there), matching the live emitter routing (2nd-review note 5.x).
+        action_url=f"/client/calendar?vendor_id={vendor_id}",
         payload={"scenario": SCENARIO_TAG, "requirement_code": sds.CSF_CODE,
                  "due_on": due.isoformat()},
         severity="yellow",
