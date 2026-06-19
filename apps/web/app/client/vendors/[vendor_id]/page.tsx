@@ -366,7 +366,7 @@ function VendorHero({ detail }: { detail: ClientVendorDetail }) {
           size={140}
           thickness={11}
           label={`${detail.semaphore.compliance_pct}%`}
-          caption="cumplimiento"
+          caption="cumplimiento anual"
         />
         <div className="min-w-0 space-y-3">
           <div className="flex flex-wrap items-center gap-2">
@@ -378,9 +378,6 @@ function VendorHero({ detail }: { detail: ClientVendorDetail }) {
               <ToneIcon className="h-3 w-3" weight="bold" aria-hidden="true" />
               {detail.semaphore.label}
             </Badge>
-            <span className="cw-eyebrow">
-              {detail.semaphore.on_track} de {detail.semaphore.total_tracked} obligaciones al día
-            </span>
             {detail.onboarding_summary.is_gate_satisfied ? (
               <Badge variant="brand">Expediente listo</Badge>
             ) : (
@@ -390,10 +387,78 @@ function VendorHero({ detail }: { detail: ClientVendorDetail }) {
           <p className="text-[15px] leading-relaxed text-[color:var(--text-primary)]">
             {detail.semaphore.reason}
           </p>
+          <ComplianceBreakdownStrip detail={detail} />
           <ExpedienteMicroBar detail={detail} />
         </div>
       </div>
     </section>
+  );
+}
+
+// Two reconciled compliance lenses (2nd-review note 2.4): the current
+// active cycle of each obligation vs. everything that's come due this year.
+// "Acumulado a hoy" is the same figure the dashboard shows, so the two
+// surfaces no longer disagree.
+function ComplianceBreakdownStrip({ detail }: { detail: ClientVendorDetail }) {
+  const b = detail.compliance_breakdown;
+  return (
+    <dl className="grid grid-cols-2 gap-2.5">
+      <BreakdownStat
+        label="Periodo vigente"
+        pct={b.current_period_pct}
+        onTrack={b.current_period_on_track}
+        due={b.current_period_due}
+        hint="Ciclo actual de cada obligación"
+      />
+      <BreakdownStat
+        label="Acumulado a hoy"
+        pct={b.year_to_date_pct}
+        onTrack={b.year_to_date_on_track}
+        due={b.year_to_date_due}
+        hint="Todo lo vencido del año · igual que tu panel"
+      />
+    </dl>
+  );
+}
+
+function BreakdownStat({
+  label,
+  pct,
+  onTrack,
+  due,
+  hint,
+}: {
+  label: string;
+  pct: number;
+  onTrack: number;
+  due: number;
+  hint: string;
+}) {
+  return (
+    <div className="rounded-md border border-[color:var(--border-subtle)] bg-[color:var(--surface-page)] px-3 py-2">
+      <dt className="font-mono text-[10px] uppercase tracking-wide text-[color:var(--text-tertiary)]">
+        {label}
+      </dt>
+      <dd className="mt-0.5 flex items-baseline gap-1.5">
+        {due === 0 ? (
+          <span className="text-[15px] font-semibold text-[color:var(--text-secondary)]">
+            —
+          </span>
+        ) : (
+          <>
+            <span className="font-mono text-[18px] font-semibold tabular-nums text-[color:var(--text-primary)]">
+              {pct}%
+            </span>
+            <span className="text-[11px] text-[color:var(--text-secondary)]">
+              {onTrack} de {due}
+            </span>
+          </>
+        )}
+      </dd>
+      <p className="mt-0.5 text-[10px] leading-3 text-[color:var(--text-tertiary)]">
+        {due === 0 ? "Sin obligaciones vencidas aún" : hint}
+      </p>
+    </div>
   );
 }
 

@@ -768,6 +768,27 @@ class ClientVendorDocumentActionItem(BaseModel):
     submission_id: str | None
 
 
+class VendorComplianceBreakdown(BaseModel):
+    """Two reconciled compliance lenses for one vendor (2nd-review note 2.4).
+
+    ``year_to_date_*`` mirrors the dashboard worklist's per-vendor math
+    EXACTLY (every obligation whose deadline has already passed this year),
+    so the detail page and the dashboard never disagree. ``current_period_*``
+    is the narrower "are they current right now" view: only the latest
+    already-due cycle of each recurring obligation, plus the always-due
+    onboarding expediente. ``*_due == 0`` means there's nothing to measure
+    yet (the FE shows "—" rather than a hollow 100%).
+    """
+
+    year: int
+    current_period_pct: int
+    current_period_on_track: int
+    current_period_due: int
+    year_to_date_pct: int
+    year_to_date_on_track: int
+    year_to_date_due: int
+
+
 class ClientVendorDetail(BaseModel):
     client_id: str
     vendor_id: str
@@ -777,6 +798,7 @@ class ClientVendorDetail(BaseModel):
     onboarding_summary: DashboardOnboardingSummary
     document_state_counts: DashboardDocumentStateCounts
     semaphore: DashboardSemaphore
+    compliance_breakdown: VendorComplianceBreakdown
     suggested_actions: list[DashboardSuggestedAction]
     attention_today: list[DashboardAttentionItem]
     upcoming_deadlines: list[DashboardUpcomingDeadline]
@@ -1444,6 +1466,59 @@ def _overview_recurring_rows(
             }
         )
     return rows
+
+
+def _vendor_compliance_breakdown(
+    recurring_rows: list[dict],
+    onboarding_slots: list,
+    *,
+    year: int,
+    today: date,
+) -> VendorComplianceBreakdown:
+    """Year-to-date + current-period compliance for one vendor.
+
+    ``recurring_rows`` come from :func:`_overview_recurring_rows` (same
+    deadlines/classification as the calendar). The year-to-date numerator/
+    denominator are computed the SAME way as the dashboard headline
+    (``v_rec_*`` + onboarding at the overview loop), so the two surfaces
+    reconcile by construction. Current-period collapses each recurring
+    requirement to its latest already-due cycle so an old miss doesn't keep
+    dragging the "right now" figure once a later cycle is filed.
+    """
+    onb_required = [s for s in onboarding_slots if s.required]
+    onb_due = len(onb_required)
+    onb_sat = sum(1 for s in onb_required if s.state in _RESOLVED_SLOT_STATES)
+
+    ytd_rec_due = ytd_rec_sat = 0
+    # requirement_code -> (latest deadline_date, on_track) among due cycles.
+    latest_by_req: dict[str | None, tuple[date, bool]] = {}
+    for r in recurring_rows:
+        deadline_date = r["deadline_date"]
+        if deadline_date is None or deadline_date > today:
+            continue
+        on_track = r["risk"] == "on_track"
+        ytd_rec_due += 1
+        if on_track:
+            ytd_rec_sat += 1
+        code = r["requirement_code"]
+        prev = latest_by_req.get(code)
+        if prev is None or deadline_date > prev[0]:
+            latest_by_req[code] = (deadline_date, on_track)
+
+    ytd_due = ytd_rec_due + onb_due
+    ytd_sat = ytd_rec_sat + onb_sat
+    cur_due = len(latest_by_req) + onb_due
+    cur_sat = sum(1 for _d, ok in latest_by_req.values() if ok) + onb_sat
+
+    return VendorComplianceBreakdown(
+        year=year,
+        current_period_pct=round(cur_sat / cur_due * 100) if cur_due else 100,
+        current_period_on_track=cur_sat,
+        current_period_due=cur_due,
+        year_to_date_pct=round(ytd_sat / ytd_due * 100) if ytd_due else 100,
+        year_to_date_on_track=ytd_sat,
+        year_to_date_due=ytd_due,
+    )
 
 
 def _active_contracts_by_vendor(db: Session, client_id: str) -> dict[str, Contract]:
@@ -2653,6 +2728,13 @@ def client_vendor_detail(
     counts = _empty_document_counts()
     for view in onboarding_slots + calendar_slots:
         _bucket_document_state(counts, view.state)
+    # Year-to-date (reconciles with the dashboard) + current-period lenses.
+    recurring_rows = _overview_recurring_rows(
+        workspace, calendar_slots, year=selected_year, today=today
+    )
+    compliance_breakdown = _vendor_compliance_breakdown(
+        recurring_rows, onboarding_slots, year=selected_year, today=today
+    )
 
     return ClientVendorDetail(
         client_id=target_id,
@@ -2663,6 +2745,7 @@ def client_vendor_detail(
         onboarding_summary=_compute_onboarding_summary(onboarding_slots, workspace),
         document_state_counts=counts,
         semaphore=_compute_semaphore(onboarding_slots, calendar_slots),
+        compliance_breakdown=compliance_breakdown,
         suggested_actions=_compute_suggested_actions(
             onboarding_slots,
             calendar_slots,

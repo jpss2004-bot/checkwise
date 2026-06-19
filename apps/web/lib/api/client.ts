@@ -269,6 +269,16 @@ export type ClientVendorDetail = {
     total_tracked: number;
     on_track: number;
   };
+  // Year-to-date (matches the dashboard) + current-period compliance lenses.
+  compliance_breakdown: {
+    year: number;
+    current_period_pct: number;
+    current_period_on_track: number;
+    current_period_due: number;
+    year_to_date_pct: number;
+    year_to_date_on_track: number;
+    year_to_date_due: number;
+  };
   document_action_items: Array<ClientVendorDocumentActionItem>;
   suggested_actions: Array<{
     id: string;
