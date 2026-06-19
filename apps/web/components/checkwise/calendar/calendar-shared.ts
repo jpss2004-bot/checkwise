@@ -49,6 +49,14 @@ export const RISK_ORDER: Record<CalendarRisk, number> = {
   on_track: 5,
 };
 
+/** Sort key for "most urgent first" ordering. Lower = more urgent; an unknown
+ *  or missing risk (e.g. a stale backend that hasn't shipped ``risk_level``)
+ *  sorts last so it never jumps ahead of a classified obligation. */
+export function riskRank(risk: CalendarRisk | string | null | undefined): number {
+  const ord = risk ? RISK_ORDER[risk as CalendarRisk] : undefined;
+  return ord ?? 99;
+}
+
 /** Worst (lowest-ordinal) risk among a set, or ``on_track`` when empty. */
 export function worstRiskOf(
   risks: ReadonlyArray<CalendarRisk | string | null | undefined>,

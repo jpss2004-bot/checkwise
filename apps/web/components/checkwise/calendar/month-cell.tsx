@@ -136,6 +136,15 @@ export function MonthCell({
   const states = uniqueStates(events);
   const isSingleState = states.length === 1;
   const urgent = hasUrgent(events);
+  // A6 — alert ring driven by the server risk tier: a month holding an overdue
+  // or action-required obligation reads as critical at a glance, regardless of
+  // whether it is in the past. Falls back to the legacy past-urgent signal when
+  // ``risk_level`` is absent (stale backend).
+  const hasCritical =
+    events.some(
+      (e) => e.risk_level === "overdue" || e.risk_level === "action_required",
+    ) ||
+    (urgent && isPast);
   // Bugfix (2026-05-21) — past months that contain real history
   // (approved uploads, in-review submissions, anything other than an
   // empty slot) must NOT be visually dimmed. A fully-compliant user
@@ -180,7 +189,7 @@ export function MonthCell({
             ? " ring-1 ring-[color:var(--border-focus)] "
             : " ") +
           "transition-[transform,box-shadow,border-color] duration-150 ease-out hover:-translate-y-px hover:border-[color:var(--border-default)] hover:shadow-sm focus:outline-none focus-visible:ring-2 focus-visible:ring-[color:var(--border-focus)] focus-visible:ring-offset-1 " +
-          (urgent && isPast ? "ring-1 ring-[color:var(--doc-rejected-border)] " : "")
+          (hasCritical ? "ring-1 ring-[color:var(--doc-rejected-border)] " : "")
         }
       >
         <SegmentBar events={events} />

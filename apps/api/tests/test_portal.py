@@ -422,6 +422,9 @@ def test_portal_calendar_emits_server_risk_level_on_every_item(
     }
     for item in items:
         assert item.get("risk_level") in valid_tiers, item
+        # Wave 2 / A4 — reviewer_note is always present (null unless the
+        # obligation was bounced and carries a reviewer message).
+        assert "reviewer_note" in item, item
 
 
 def test_portal_calendar_canonical_match_does_not_overflow_across_months(

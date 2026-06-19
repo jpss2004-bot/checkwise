@@ -103,7 +103,10 @@ from app.schemas.submissions import (
     SubmissionResponse,
 )
 from app.services.audit_log import add_audit_event
-from app.services.calendar_risk import calendar_item_risk
+from app.services.calendar_risk import (
+    REJECTED_OR_CORRECTION_STATUSES,
+    calendar_item_risk,
+)
 from app.services.contact_service import hash_ip
 from app.services.correction_request_service import (
     TIER_B_FIELD_LABEL_ES,
@@ -1657,6 +1660,20 @@ def get_workspace_calendar(
         for sub_id, fname in rows:
             filename_by_submission[sub_id] = fname
 
+    # A4 — surface the reviewer's reason on bounced obligations inline, so the
+    # provider sees *why* a document was rejected without a second fetch into
+    # the submission detail. One batched query over the rejected-status current
+    # submissions (mirrors the client calendar aggregate's pattern).
+    rejected_ids = [
+        view.current_submission_id
+        for view in slots
+        if view.current_submission_id
+        and view.current_status in REJECTED_OR_CORRECTION_STATUSES
+    ]
+    reviewer_note_by_submission: dict[str, str] = (
+        _latest_reviewer_notes(db, rejected_ids) if rejected_ids else {}
+    )
+
     # Session 2 (2026-05-21) — pick the catalog shape the slot resolver
     # used. Keeping them in lockstep matters: the resolver iterates v2
     # rows when the flag is on, so the endpoint must too, or the row
@@ -1728,6 +1745,14 @@ def get_workspace_calendar(
                     else None
                 ),
                 "submitted_at": view.submitted_at_iso if view else None,
+                # A4 — reviewer's reason, only on bounced obligations (rejected /
+                # needs-clarification / mismatch) that carry a note.
+                "reviewer_note": (
+                    reviewer_note_by_submission.get(current_submission_id)
+                    if current_submission_id
+                    and item_status in REJECTED_OR_CORRECTION_STATUSES
+                    else None
+                ),
                 "required_document": recurring_required_document(req),
                 "due_month": req.due_month,
                 "deadline_iso": deadline_iso,

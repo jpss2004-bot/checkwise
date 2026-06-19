@@ -16,6 +16,7 @@ import { DOC_STATE_LABELS } from "@/components/checkwise/doc-state-badge";
 import { INSTITUTION_LABELS, MONTH_LABELS_ES } from "@/lib/api/portal";
 import type { DocumentStateCode } from "@/lib/types";
 
+import { riskRank } from "./calendar-shared";
 import type { CalendarEntry, CalendarInstitutionCode } from "./types";
 
 /**
@@ -119,11 +120,14 @@ export function MobileMonthList({
     >
       {reordered.map((month) => {
         const monthEvents = byMonth.get(month) ?? [];
-        // Sort each month: actionable first, then pending, then
-        // resolved. Matches the dominant-state ordering on the
-        // desktop grid.
+        // A6 — most-urgent-first by the server risk tier (so an overdue but
+        // still-"pending" obligation leads over an upcoming one — the time
+        // dimension the state RANK alone misses), with the document-state RANK
+        // as the tiebreak within a tier.
         const sorted = [...monthEvents].sort(
-          (a, b) => RANK[a.state] - RANK[b.state],
+          (a, b) =>
+            riskRank(a.risk_level) - riskRank(b.risk_level) ||
+            RANK[a.state] - RANK[b.state],
         );
         const isCurrent = month === currentMonth;
         return (

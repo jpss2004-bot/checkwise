@@ -20,6 +20,7 @@ import {
   ShieldCheck,
   Stamp,
   Tray,
+  WarningCircle,
   X,
   type Icon,
 } from "@phosphor-icons/react";
@@ -104,6 +105,7 @@ function flattenCalendarPayload(payload: CalendarPayload): CalendarEntry[] {
           submission_id: item.submission_id,
           filename: item.filename ?? null,
           submitted_at: item.submitted_at ?? null,
+          reviewer_note: item.reviewer_note ?? null,
           anatomy: item.anatomy ?? "",
           where_to_obtain: item.where_to_obtain ?? "",
           common_errors: item.common_errors ?? [],
@@ -950,6 +952,24 @@ function EventDrawer({
               {event.suggested_action}
             </p>
           </div>
+
+          {/* A4 — reviewer's reason on a bounced obligation, inline so the
+              provider can correct without first opening the submission. */}
+          {event.reviewer_note ? (
+            <div className="rounded-lg border border-[color:var(--status-error-border)] bg-[color:var(--status-error-bg)] px-4 py-3">
+              <p className="flex items-center gap-1.5 font-mono text-[10px] uppercase tracking-wide text-[color:var(--status-error-text)]">
+                <WarningCircle
+                  className="h-3.5 w-3.5"
+                  weight="bold"
+                  aria-hidden="true"
+                />
+                Observación del revisor
+              </p>
+              <p className="mt-1 text-[13px] leading-5 text-[color:var(--text-primary)]">
+                {event.reviewer_note}
+              </p>
+            </div>
+          ) : null}
 
           {/* Session 3 (2026-05-21) — catalog v2 fan-out. A v2 row
               carries one ``accepts_documents`` entry per alternative

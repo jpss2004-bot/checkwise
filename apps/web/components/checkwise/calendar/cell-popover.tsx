@@ -7,6 +7,7 @@ import { DOC_STATE_LABELS } from "@/components/checkwise/doc-state-badge";
 import { MONTH_LABELS_ES } from "@/lib/api/portal";
 import type { DocumentStateCode } from "@/lib/types";
 
+import { riskRank } from "./calendar-shared";
 import type { CalendarEntry } from "./types";
 
 const MAX_VISIBLE = 6;
@@ -116,7 +117,15 @@ export function CellPopover({
 
   if (!mounted || !open || !position) return null;
 
-  const visible = events.slice(0, MAX_VISIBLE);
+  // A6 — most-urgent-first: order by the server risk tier (overdue → … →
+  // on_track), deadline as the tiebreak. So a busy month's overdue/rejected
+  // obligations lead instead of appearing in catalog order.
+  const ordered = [...events].sort(
+    (a, b) =>
+      riskRank(a.risk_level) - riskRank(b.risk_level) ||
+      a.deadline_iso.localeCompare(b.deadline_iso),
+  );
+  const visible = ordered.slice(0, MAX_VISIBLE);
   const overflow = events.length - visible.length;
 
   return createPortal(

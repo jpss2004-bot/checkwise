@@ -118,6 +118,10 @@ export type CalendarItem = {
   filename: string | null;
   /** ISO timestamp of the current submission, when one exists. */
   submitted_at: string | null;
+  /** A4 — the reviewer's reason, populated only on bounced obligations
+   *  (rejected / needs-clarification / mismatch) that carry a note. Lets the
+   *  drawer show *why* a document was rejected without a second fetch. */
+  reviewer_note: string | null;
   /** Phase 5 — backend-owned UX enrichment. */
   required_document: string;
   due_month: number;

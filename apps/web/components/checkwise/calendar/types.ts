@@ -42,6 +42,9 @@ export type CalendarEntry = {
   filename: string | null;
   /** ISO timestamp of the current submission, if any. */
   submitted_at: string | null;
+  /** A4 — reviewer's reason on a bounced obligation (rejected /
+   *  needs-clarification / mismatch); null otherwise. */
+  reviewer_note: string | null;
   anatomy: string;
   where_to_obtain: string;
   common_errors: string[];
