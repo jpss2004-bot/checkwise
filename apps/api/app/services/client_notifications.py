@@ -155,7 +155,13 @@ def notify_reviewer_decision(
         severity=_severity_for_decision(action),
         title=f"{vendor_name}: {label.lower()}",
         body=body,
-        action_url=f"/client/submissions?vendor_id={submission.vendor_id}",
+        # Deep-link to this exact outcome: a rejection lands on the
+        # provider's rejected docs, an approval on its approved ones —
+        # instead of the whole unfiltered list (2nd-review note 5.x).
+        action_url=(
+            f"/client/submissions?vendor_id={submission.vendor_id}"
+            f"&status={submission.status}"
+        ),
         payload={
             "reviewer_action": action.value,
             "status": submission.status,
@@ -200,7 +206,11 @@ def notify_client_of_renewal_due_soon(
         severity="yellow",
         title=f"{vendor.name}: renueva {requirement_name} en {days_left} día(s)",
         body=body,
-        action_url=f"/client/submissions?vendor_id={vendor.id}",
+        # A renewal is a FUTURE obligation — the submissions table (past
+        # uploads) has no matching row yet, so the calendar (where the
+        # upcoming obligation lives) is the actionable destination
+        # (2nd-review note 5.x).
+        action_url=f"/client/calendar?vendor_id={vendor.id}",
         payload={
             "requirement_code": requirement_code,
             "requirement_name": requirement_name,
@@ -253,7 +263,9 @@ def notify_client_of_renewal_overdue(
         severity="red",
         title=title,
         body=body,
-        action_url=f"/client/submissions?vendor_id={vendor.id}",
+        # Overdue renewal → calendar (the obligation), not submissions
+        # (past uploads). See note above (2nd-review note 5.x).
+        action_url=f"/client/calendar?vendor_id={vendor.id}",
         payload={
             "requirement_code": requirement_code,
             "requirement_name": requirement_name,

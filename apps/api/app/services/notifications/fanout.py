@@ -193,6 +193,40 @@ def _render(
     )
 
 
+def _derive_client_action_url(envelope: NotificationEnvelope) -> str | None:
+    """Best-effort client deep-link when an emitter set no ``cta_url``.
+
+    Several fanout emitters never populate ``cta_url``, so their client
+    in-app rows used to render as dead, non-clickable cards (2nd-review
+    note 5.x). This fills the gap from the event category + payload so
+    every client notification lands somewhere relevant. An explicit
+    ``cta_url`` always wins.
+    """
+    explicit = envelope.payload.get("cta_url")
+    if explicit:
+        return explicit
+    vendor_id = envelope.payload.get("vendor_id")
+    category = derive_category(envelope.event_type)
+    if category in ("renewal", "reporting"):
+        # Future/periodic obligations live on the calendar, not in the
+        # past-uploads submissions table.
+        return (
+            f"/client/calendar?vendor_id={vendor_id}"
+            if vendor_id
+            else "/client/calendar"
+        )
+    if category == "verification":
+        if not vendor_id:
+            return "/client/submissions"
+        status = envelope.payload.get("status")
+        return (
+            f"/client/submissions?vendor_id={vendor_id}&status={status}"
+            if status
+            else f"/client/submissions?vendor_id={vendor_id}"
+        )
+    return None
+
+
 def _write_inapp_row(
     db: Session,
     *,
@@ -250,7 +284,7 @@ def _write_inapp_row(
             category=derive_category(envelope.event_type),
             title=str(title_default)[:180],
             body=str(body_default),
-            action_url=envelope.payload.get("cta_url"),
+            action_url=_derive_client_action_url(envelope),
             payload=dict(envelope.payload),
         )
         db.add(notif)

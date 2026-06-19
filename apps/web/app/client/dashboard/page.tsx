@@ -829,9 +829,21 @@ function NovedadesCard({
                 }
               />
               <div className="min-w-0 flex-1">
-                <p className="truncate text-[12px] font-medium text-[color:var(--text-primary)]">
-                  {row.title}
-                </p>
+                {/* Honor the notification's deep-link here too, so the card
+                    behaves like the inbox instead of being inert
+                    (2nd-review note 5.x). */}
+                {row.action_url ? (
+                  <Link
+                    href={row.action_url}
+                    className="block truncate text-[12px] font-medium text-[color:var(--text-primary)] hover:text-[color:var(--text-link)] hover:underline"
+                  >
+                    {row.title}
+                  </Link>
+                ) : (
+                  <p className="truncate text-[12px] font-medium text-[color:var(--text-primary)]">
+                    {row.title}
+                  </p>
+                )}
                 <p className="mt-0.5 line-clamp-2 text-[11px] text-[color:var(--text-secondary)]">
                   {row.body}
                 </p>
