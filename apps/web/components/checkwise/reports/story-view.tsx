@@ -2,15 +2,36 @@
 
 import { useMemo } from "react";
 import Link from "next/link";
+import dynamic from "next/dynamic";
 import { ArrowLeft, CheckCircle, Pencil } from "@phosphor-icons/react";
 
 import { Canvas } from "@/components/checkwise/reports/canvas";
 import { ReportMasthead } from "@/components/checkwise/reports/report-masthead";
-import {
-  ExportButton,
-  PreviewPdfButton,
-} from "@/components/checkwise/reports/editor/export-button";
-import { ShareDialog } from "@/components/checkwise/reports/editor/share-dialog";
+// Export / Preview-PDF / Share pull in heavy chunks (html2canvas, the share
+// dialog) that the read-only client viewer only needs for the below-the-fold
+// closing CTA. Load them lazily so the buyer's most-scrutinised artifact paints
+// faster — mirrors how report-editor.tsx already code-splits them (audit P3.20).
+const ExportButton = dynamic(
+  () =>
+    import("@/components/checkwise/reports/editor/export-button").then(
+      (m) => m.ExportButton,
+    ),
+  { ssr: false },
+);
+const PreviewPdfButton = dynamic(
+  () =>
+    import("@/components/checkwise/reports/editor/export-button").then(
+      (m) => m.PreviewPdfButton,
+    ),
+  { ssr: false },
+);
+const ShareDialog = dynamic(
+  () =>
+    import("@/components/checkwise/reports/editor/share-dialog").then(
+      (m) => m.ShareDialog,
+    ),
+  { ssr: false },
+);
 import { Button } from "@/components/ui/button";
 import {
   REPORT_AUDIENCE_LABEL,
@@ -244,8 +265,10 @@ const FRAMING_BY_AUDIENCE: Record<ReportAudience, FramingCopy> = {
     opening:
       "Este reporte muestra el estado de cumplimiento de las obligaciones " +
       "REPSE de tus proveedores en el periodo. Las cifras provienen del " +
-      "expediente vigente; cualquier observación marcada es una acción " +
-      "pendiente que ya está siendo gestionada por nuestro equipo.",
+      "expediente vigente; las observaciones marcadas indican dónde " +
+      "concentrar el seguimiento. Las que están en revisión interna ya las " +
+      "está atendiendo nuestro equipo; el resto requiere que des seguimiento " +
+      "con el proveedor.",
     closingHeading: "Comparte este reporte con quien corresponda",
     closingBody:
       "Descarga el PDF para tu auditor o genera un enlace temporal " +

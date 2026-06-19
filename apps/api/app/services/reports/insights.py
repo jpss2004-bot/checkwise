@@ -15,7 +15,7 @@ from __future__ import annotations
 
 from datetime import date, timedelta
 
-from sqlalchemy import func, select
+from sqlalchemy import case, func, select
 from sqlalchemy.orm import Session
 
 from app.constants.reports import ReportAudience
@@ -115,53 +115,75 @@ def _month_bounds(today: date, offset: int) -> tuple[date, date]:
     return start, next_start
 
 
-def _approval_rate(
-    db: Session, start: date, next_start: date, *, client_id: str | None, vendor_id: str | None
-) -> int | None:
-    """% of submissions created in [start, next_start) that landed approved.
-    None when the month is too thin (<3) to read a trend into."""
-    def scoped(stmt):
-        stmt = stmt.where(
-            Submission.created_at >= start, Submission.created_at < next_start
-        )
-        if client_id:
-            stmt = stmt.where(Submission.client_id == client_id)
-        if vendor_id:
-            stmt = stmt.where(Submission.vendor_id == vendor_id)
-        return stmt
-
-    total = int(db.scalar(scoped(select(func.count(Submission.id)))) or 0)
-    if total < 3:
-        return None
-    approved = int(
-        db.scalar(
-            scoped(select(func.count(Submission.id))).where(
-                Submission.status == DocumentStatus.APROBADO.value
-            )
-        )
-        or 0
-    )
-    return round(100 * approved / total)
-
-
 def _approval_trend(
     db: Session, today: date, *, client_id: str | None = None, vendor_id: str | None = None
 ) -> int | None:
     """Change in approval rate (points) between the two most recent months
     that had activity — skipping quiet months so a slow current month doesn't
     blank the signal. None when fewer than two active months exist. An honest
-    momentum signal, not a snapshot of the cumplimiento %."""
+    momentum signal, not a snapshot of the cumplimiento %.
+
+    Computed in a SINGLE grouped query over a trailing ~8-month window so the
+    client dashboard's overview call stays cheap (this used to be up to eight
+    separate per-month scans). A month is "active" only with >=3 submissions
+    so a couple of stray uploads can't fake a trend.
+    """
+    dialect = db.get_bind().dialect.name
+    # Portable year-month bucket key ("YYYY-MM"): to_char on Postgres,
+    # strftime on SQLite (tests). String sort == chronological sort.
+    if dialect == "postgresql":
+        month_key = func.to_char(Submission.created_at, "YYYY-MM")
+    else:
+        month_key = func.strftime("%Y-%m", Submission.created_at)
+    window_start, _ = _month_bounds(today, 7)
+    stmt = (
+        select(
+            month_key.label("m"),
+            func.count(Submission.id),
+            func.sum(
+                case(
+                    (Submission.status == DocumentStatus.APROBADO.value, 1),
+                    else_=0,
+                )
+            ),
+        )
+        .where(Submission.created_at >= window_start)
+        .group_by(month_key)
+        .order_by(month_key.desc())
+    )
+    if client_id:
+        stmt = stmt.where(Submission.client_id == client_id)
+    if vendor_id:
+        stmt = stmt.where(Submission.vendor_id == vendor_id)
+
     rates: list[int] = []
-    for offset in range(0, 8):
-        start, next_start = _month_bounds(today, offset)
-        r = _approval_rate(db, start, next_start, client_id=client_id, vendor_id=vendor_id)
-        if r is not None:
-            rates.append(r)
+    for _m, total, approved in db.execute(stmt).all():
+        t = int(total or 0)
+        if t < 3:
+            continue
+        rates.append(round(100 * int(approved or 0) / t))
         if len(rates) == 2:
             break
     if len(rates) < 2:
         return None
     return rates[0] - rates[1]  # most recent − the one before it
+
+
+def approval_trend_points(
+    db: Session,
+    today: date,
+    *,
+    client_id: str | None = None,
+    vendor_id: str | None = None,
+) -> int | None:
+    """Public wrapper over :func:`_approval_trend`.
+
+    Lets non-report surfaces (the client dashboard momentum chip) reuse the
+    same honest month-over-month approval-rate delta the report engine uses,
+    without importing a private helper. ``None`` when fewer than two active
+    months exist.
+    """
+    return _approval_trend(db, today, client_id=client_id, vendor_id=vendor_id)
 
 
 def _count_status(db: Session, scope: ReportScope, status: DocumentStatus) -> int:
@@ -515,4 +537,9 @@ def compute_insight(db: Session, scope: ReportScope) -> dict | None:
     return compute_client_insight(db, scope)
 
 
-__all__ = ["compute_client_insight", "compute_vendor_insight", "compute_insight"]
+__all__ = [
+    "compute_client_insight",
+    "compute_vendor_insight",
+    "compute_insight",
+    "approval_trend_points",
+]

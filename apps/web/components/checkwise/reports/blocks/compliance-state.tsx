@@ -110,9 +110,9 @@ const BUCKETS: Array<{
 ];
 
 const LEVEL_DOT: Record<SemaphoreLevel, string> = {
-  red: "bg-[color:var(--state-red,#dc2626)]",
-  yellow: "bg-[color:var(--state-yellow,#d97706)]",
-  green: "bg-[color:var(--state-green,#16a34a)]",
+  red: "bg-[color:var(--status-error-text)]",
+  yellow: "bg-[color:var(--status-warning-text)]",
+  green: "bg-[color:var(--status-success-text)]",
 };
 
 const LEVEL_PRINT: Record<SemaphoreLevel, string> = {

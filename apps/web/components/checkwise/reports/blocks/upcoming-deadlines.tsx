@@ -136,17 +136,17 @@ function urgencyToneFor(days: number): "red" | "orange" | "yellow" | "gray" {
 }
 
 const TONE_FILL: Record<"red" | "orange" | "yellow" | "gray", string> = {
-  red: "var(--state-red,#dc2626)",
-  orange: "var(--state-orange,#ea580c)",
-  yellow: "var(--state-yellow,#d97706)",
-  gray: "var(--text-tertiary,#6b7280)",
+  red: "var(--status-error-text)",
+  orange: "var(--doc-expired-text)",
+  yellow: "var(--status-warning-text)",
+  gray: "var(--text-tertiary)",
 };
 
 const BAND_TINT: Record<"red" | "orange" | "yellow" | "gray", string> = {
-  red: "color-mix(in srgb, var(--state-red,#dc2626) 14%, transparent)",
-  orange: "color-mix(in srgb, var(--state-orange,#ea580c) 12%, transparent)",
-  yellow: "color-mix(in srgb, var(--state-yellow,#d97706) 10%, transparent)",
-  gray: "color-mix(in srgb, var(--text-tertiary,#6b7280) 8%, transparent)",
+  red: "color-mix(in srgb, var(--status-error-text) 14%, transparent)",
+  orange: "color-mix(in srgb, var(--doc-expired-text) 12%, transparent)",
+  yellow: "color-mix(in srgb, var(--status-warning-text) 10%, transparent)",
+  gray: "color-mix(in srgb, var(--text-tertiary) 8%, transparent)",
 };
 
 export const upcomingDeadlinesDefinition: Omit<

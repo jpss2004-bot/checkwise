@@ -60,7 +60,17 @@ export function BackBar({
 
   if (!hasHistory) return null;
   if (pathname === homeHref) return null;
-  if (hiddenOn.includes(pathname ?? "")) return null;
+  // A ``hiddenOn`` entry matches exactly, or — when it ends in "/" — as a
+  // path prefix, so dynamic detail routes (e.g. "/client/vendors/" hides
+  // "/client/vendors/{id}" but NOT the "/client/vendors" list) can suppress
+  // the global bar in favor of their own contextual back (audit P3.19).
+  const here = pathname ?? "";
+  if (
+    hiddenOn.some(
+      (p) => here === p || (p.endsWith("/") && here.startsWith(p)),
+    )
+  )
+    return null;
 
   return (
     <div className={`mx-auto w-full ${maxWidthClassName} px-5 pt-4`}>

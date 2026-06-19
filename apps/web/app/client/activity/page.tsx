@@ -25,9 +25,14 @@ import {
 import { ClientShell } from "../_shell";
 import { VendorRef } from "@/components/checkwise/vendor-ref";
 import {
+  activityActionLabel,
+  activityActorLabel,
+} from "@/lib/constants/activity-labels";
+import {
   listClientActivity,
   type ClientActivityItem,
 } from "@/lib/api/client";
+import { useUrlClientId } from "@/lib/workspace/use-url-client-id";
 
 /**
  * Activity feed — vertical timeline grouped by day. Replaces the
@@ -35,6 +40,7 @@ import {
  * actually read it.
  */
 export default function ClientActivityPage() {
+  const urlClientId = useUrlClientId();
   const [rows, setRows] = useState<ClientActivityItem[] | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [reloadKey, setReloadKey] = useState(0);
@@ -43,7 +49,10 @@ export default function ClientActivityPage() {
     let cancelled = false;
     setRows(null);
     setError(null);
-    listClientActivity({ limit: 200 })
+    listClientActivity({
+      ...(urlClientId ? { client_id: urlClientId } : {}),
+      limit: 200,
+    })
       .then((data) => {
         if (!cancelled) setRows(data.items);
       })
@@ -54,7 +63,7 @@ export default function ClientActivityPage() {
     return () => {
       cancelled = true;
     };
-  }, [reloadKey]);
+  }, [reloadKey, urlClientId]);
 
   const groups = useMemo(() => groupByDay(rows ?? []), [rows]);
 
@@ -127,9 +136,9 @@ function ActivityRow({ row }: { row: ClientActivityItem }) {
           </span>
         </div>
         <div className="mt-1 flex flex-wrap items-center gap-1.5">
-          <Badge variant="outline">{row.actor_type}</Badge>
-          <span className="font-mono text-[10px] text-[color:var(--text-tertiary)]">
-            {row.action}
+          <Badge variant="outline">{activityActorLabel(row.actor_type)}</Badge>
+          <span className="text-[11px] text-[color:var(--text-tertiary)]">
+            {activityActionLabel(row.action)}
           </span>
           {row.vendor_id && row.vendor_name ? (
             <VendorRef vendorId={row.vendor_id} vendorName={row.vendor_name}>

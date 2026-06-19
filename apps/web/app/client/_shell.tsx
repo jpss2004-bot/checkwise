@@ -1,6 +1,6 @@
 "use client";
 
-import { Suspense, useEffect, useState } from "react";
+import { Suspense, useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import { useRouter, usePathname } from "next/navigation";
 import {
@@ -12,6 +12,8 @@ import {
   FileXls,
   Gauge,
   List,
+  MagnifyingGlass,
+  Package,
   Storefront,
   X,
   type Icon,
@@ -31,6 +33,7 @@ import {
   getClientNotificationSummary,
 } from "@/lib/api/client";
 import { useUrlClientId } from "@/lib/workspace/use-url-client-id";
+import { withClientId } from "@/lib/navigation/with-client-id";
 import {
   type AdminSession,
   clearAdminSession,
@@ -78,14 +81,21 @@ function httpStatusOf(err: unknown): number | null {
   return null;
 }
 
+// Reportes sits next to the decision loop (Resumen→Proveedores→Calendario
+// →Entregas→Reportes) and Auditoría — the inspector-ready ZIP builder, a
+// headline value prop — is now reachable from every surface instead of
+// only the Proveedores banner. Notificaciones is also reachable via the
+// header bell, so its nav slot is the lower-priority tail alongside
+// Metadata (a power-user export) and Actividad.
 const NAV: { href: string; label: string; icon: Icon }[] = [
   { href: "/client/dashboard", label: "Resumen", icon: Gauge },
   { href: "/client/vendors", label: "Proveedores", icon: Storefront },
   { href: "/client/calendar", label: "Calendario", icon: CalendarBlank },
   { href: "/client/submissions", label: "Entregas", icon: Files },
+  { href: "/client/reports", label: "Reportes", icon: ChartLineUp },
+  { href: "/client/auditoria", label: "Auditoría", icon: Package },
   { href: "/client/notifications", label: "Notificaciones", icon: Bell },
   { href: "/client/metadata", label: "Metadata", icon: FileXls },
-  { href: "/client/reports", label: "Reportes", icon: ChartLineUp },
   { href: "/client/activity", label: "Actividad", icon: ClockClockwise },
 ];
 
@@ -114,6 +124,11 @@ export function ClientShell({
   const [session, setSession] = useState<AdminSession | null>(null);
   const [ready, setReady] = useState(false);
   const [drawerOpen, setDrawerOpen] = useState(false);
+  // Mobile drawer a11y (audit P3.15): the panel is the only nav < 1024px, so
+  // it must behave like a real dialog — trap Tab, close on Escape, focus the
+  // panel on open, and restore focus to the trigger on close.
+  const drawerPanelRef = useRef<HTMLElement | null>(null);
+  const drawerReturnFocusRef = useRef<HTMLElement | null>(null);
   const [unreadCount, setUnreadCount] = useState(0);
   // "checking" until /client/me resolves; "ok" to render; "blocked"
   // while the consent redirect is in flight; "error" when we could not
@@ -159,6 +174,51 @@ export function ClientShell({
   useEffect(() => {
     setDrawerOpen(false);
   }, [pathname]);
+
+  // Dialog focus management for the mobile nav drawer.
+  useEffect(() => {
+    if (!drawerOpen) return;
+    drawerReturnFocusRef.current =
+      document.activeElement instanceof HTMLElement
+        ? document.activeElement
+        : null;
+    const panel = drawerPanelRef.current;
+    const focusables = () =>
+      panel
+        ? Array.from(
+            panel.querySelectorAll<HTMLElement>(
+              'a[href],button:not([disabled]),[tabindex]:not([tabindex="-1"])',
+            ),
+          )
+        : [];
+    focusables()[0]?.focus();
+    function onKey(e: KeyboardEvent) {
+      if (e.key === "Escape") {
+        e.preventDefault();
+        setDrawerOpen(false);
+        return;
+      }
+      if (e.key !== "Tab") return;
+      const items = focusables();
+      if (items.length === 0) return;
+      const first = items[0];
+      const last = items[items.length - 1];
+      const active = document.activeElement;
+      if (e.shiftKey && active === first) {
+        e.preventDefault();
+        last.focus();
+      } else if (!e.shiftKey && active === last) {
+        e.preventDefault();
+        first.focus();
+      }
+    }
+    document.addEventListener("keydown", onKey);
+    return () => {
+      document.removeEventListener("keydown", onKey);
+      // Restore focus to whatever opened the drawer (the hamburger).
+      drawerReturnFocusRef.current?.focus();
+    };
+  }, [drawerOpen]);
 
   // Legal-consent gate. Runs once the session is ready: internal staff
   // and the acceptance page itself are exempt; everyone else must have
@@ -272,9 +332,21 @@ export function ClientShell({
       // that Wise is a bottom sheet (no push). See globals.css.
       className="wise-push-target min-h-screen bg-[color:var(--surface-page)]"
     >
+      {/* Skip-to-content: first focusable element, visually hidden until
+          focused, so keyboard/SR users bypass the logo + search + bell +
+          nav chips on every route (WCAG 2.4.1, audit P3.16). */}
+      <a
+        href="#client-main"
+        className="sr-only focus:not-sr-only focus:absolute focus:left-4 focus:top-3 focus:z-50 focus:rounded-md focus:border focus:border-[color:var(--border-focus)] focus:bg-[color:var(--surface-raised)] focus:px-3 focus:py-1.5 focus:text-sm focus:font-medium focus:text-[color:var(--text-primary)] focus:shadow-md"
+      >
+        Saltar al contenido
+      </a>
       <header className="sticky top-0 z-30 border-b border-[color:var(--border-subtle)] bg-[color:var(--surface-raised)]/95 backdrop-blur supports-[backdrop-filter]:bg-[color:var(--surface-raised)]/85">
         <div className="mx-auto flex max-w-7xl items-center gap-3 px-5 py-2.5">
-          <Link href="/client/dashboard" aria-label="CheckWise · vista cliente">
+          <Link
+            href={withClientId("/client/dashboard", urlClientId)}
+            aria-label="CheckWise · vista cliente"
+          >
             <BrandLogo size="md" />
           </Link>
           <span className="hidden h-6 w-px bg-[color:var(--border-subtle)] lg:block" />
@@ -282,9 +354,9 @@ export function ClientShell({
             Vista cliente · cumplimiento del portafolio
           </p>
           <div className="ml-auto flex items-center gap-2">
-            <SearchBar resultsHref="/client/buscar" />
+            <SearchBar resultsHref={withClientId("/client/buscar", urlClientId)} />
             <Link
-              href="/client/notifications"
+              href={withClientId("/client/notifications", urlClientId)}
               aria-label={
                 unreadCount > 0
                   ? `${unreadCount} notificaciones sin leer`
@@ -305,6 +377,15 @@ export function ClientShell({
               roles={session.roles}
               profileHref="/client/onboarding"
               profileLabel="Datos de mi empresa"
+              secondaryLinks={[
+                {
+                  href: withClientId(
+                    "/client/configuracion/notificaciones",
+                    urlClientId,
+                  ),
+                  label: "Preferencias de notificaciones",
+                },
+              ]}
               onSignOut={onLogout}
             />
             <button
@@ -333,7 +414,7 @@ export function ClientShell({
             return (
               <Link
                 key={item.href}
-                href={item.href}
+                href={withClientId(item.href, urlClientId)}
                 aria-current={isActive ? "page" : undefined}
                 className={cn(
                   "inline-flex shrink-0 items-center gap-1.5 rounded-md border px-2.5 py-1.5 text-[12px] font-medium transition-colors duration-fast",
@@ -357,6 +438,7 @@ export function ClientShell({
       {drawerOpen ? (
         <div
           role="dialog"
+          aria-modal="true"
           aria-label="Menú cliente"
           className="fixed inset-0 z-40 flex lg:hidden"
         >
@@ -367,10 +449,30 @@ export function ClientShell({
             className="absolute inset-0 bg-[color:var(--text-primary)]/40 backdrop-blur-sm"
           />
           <nav
-            aria-label="Portal cliente"
+            ref={drawerPanelRef}
+            aria-label="Menú de navegación"
             className="relative ml-auto flex h-full w-72 max-w-[85vw] flex-col gap-1 border-l border-[color:var(--border-subtle)] bg-[color:var(--surface-raised)] p-4 shadow-lg"
           >
             <p className="cw-eyebrow mb-2">Navegación</p>
+            {/* The header SearchBar is hidden < 640px, so the drawer is the
+                only way to reach search on a phone. */}
+            <Link
+              href={withClientId("/client/buscar", urlClientId)}
+              aria-current={pathname === "/client/buscar" ? "page" : undefined}
+              className={cn(
+                "flex items-center gap-2 rounded-md border px-3 py-2 text-sm font-medium transition-colors",
+                pathname === "/client/buscar"
+                  ? "border-[color:var(--border-brand)] bg-[color:var(--surface-brand)] text-[color:var(--text-inverse)]"
+                  : "border-transparent text-[color:var(--text-secondary)] hover:bg-[color:var(--surface-hover)] hover:text-[color:var(--text-primary)]",
+              )}
+            >
+              <MagnifyingGlass
+                className="h-4 w-4"
+                weight={pathname === "/client/buscar" ? "fill" : "bold"}
+                aria-hidden="true"
+              />
+              Buscar
+            </Link>
             {NAV.map((item) => {
               const isActive =
                 pathname === item.href || pathname?.startsWith(item.href + "/");
@@ -378,7 +480,7 @@ export function ClientShell({
               return (
                 <Link
                   key={item.href}
-                  href={item.href}
+                  href={withClientId(item.href, urlClientId)}
                   aria-current={isActive ? "page" : undefined}
                   className={cn(
                     "flex items-center gap-2 rounded-md border px-3 py-2 text-sm font-medium transition-colors",
@@ -401,13 +503,22 @@ export function ClientShell({
       ) : null}
 
       <BackBar
-        homeHref="/client/dashboard"
-        hiddenOn={["/client/onboarding"]}
+        homeHref={withClientId("/client/dashboard", urlClientId)}
+        hiddenOn={[
+          "/client/onboarding",
+          "/client/auditoria",
+          // Detail routes render their own deterministic "Volver"; the
+          // trailing slash hides only the dynamic child, not the list.
+          "/client/vendors/",
+          "/client/reports/",
+        ]}
       />
 
       <main
+        id="client-main"
+        tabIndex={-1}
         className={cn(
-          "mx-auto",
+          "mx-auto scroll-mt-20 focus:outline-none",
           unframed ? "w-full" : "max-w-7xl space-y-5 px-5 py-5",
         )}
       >

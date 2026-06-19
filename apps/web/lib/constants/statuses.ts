@@ -295,3 +295,73 @@ export const BUCKET_VARIANT: Record<BucketKey, StatusVariant> = {
 export function bucketLabel(key: BucketKey): string {
   return BUCKET_LABELS_ES[key];
 }
+
+// ===========================================================================
+// Adjacent vocabularies surfaced on client detail pages that previously
+// leaked raw machine tokens to executives (audit P2.13): contract status,
+// reviewer decision result, and suggested-action type. Each has a humanizing
+// fallback so an unknown value never renders as a dotted/underscored token.
+// ===========================================================================
+
+function humanizeToken(raw: string): string {
+  const cleaned = raw.replace(/[._]+/g, " ").trim();
+  if (!cleaned) return raw;
+  return cleaned.charAt(0).toUpperCase() + cleaned.slice(1);
+}
+
+// Contract.status (vendor detail "Contratos del proveedor").
+export const CONTRACT_STATUS_LABELS_ES: Record<string, string> = {
+  active: "Vigente",
+  draft: "Borrador",
+  pending: "Pendiente",
+  expired: "Vencido",
+  terminated: "Terminado",
+  suspended: "Suspendido",
+  cancelled: "Cancelado",
+  canceled: "Cancelado",
+};
+
+export const CONTRACT_STATUS_VARIANT: Record<string, StatusVariant> = {
+  active: "success",
+  draft: "secondary",
+  pending: "warning",
+  expired: "destructive",
+  terminated: "secondary",
+  suspended: "warning",
+  cancelled: "destructive",
+  canceled: "destructive",
+};
+
+export function contractStatusLabel(status: string): string {
+  return CONTRACT_STATUS_LABELS_ES[status] ?? humanizeToken(status);
+}
+
+export function contractStatusVariant(status: string): StatusVariant {
+  return CONTRACT_STATUS_VARIANT[status] ?? "secondary";
+}
+
+// Reviewer decision result (ValidationEvent.result = ReviewerAction value).
+export const REVIEWER_RESULT_LABELS_ES: Record<string, string> = {
+  approve: "Aprobado",
+  reject: "Rechazado",
+  request_clarification: "Solicitó aclaración",
+  mark_exception: "Excepción legal",
+};
+
+export function reviewerResultLabel(result: string): string {
+  return REVIEWER_RESULT_LABELS_ES[result] ?? humanizeToken(result);
+}
+
+// Suggested-action ``type`` on vendor detail (backend portal.py action kinds).
+export const SUGGESTED_ACTION_LABELS_ES: Record<string, string> = {
+  complete_onboarding: "Completar alta",
+  renewal: "Renovación",
+  upload: "Carga pendiente",
+  verify_mismatch: "Verificar inconsistencia",
+  correction: "Corrección",
+  review: "Revisión",
+};
+
+export function suggestedActionLabel(type: string): string {
+  return SUGGESTED_ACTION_LABELS_ES[type] ?? humanizeToken(type);
+}

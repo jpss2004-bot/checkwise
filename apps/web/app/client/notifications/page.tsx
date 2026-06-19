@@ -41,6 +41,7 @@ import {
   type NotificationCategory,
   type NotificationSeverity,
 } from "@/lib/api/client";
+import { useUrlClientId } from "@/lib/workspace/use-url-client-id";
 
 import { ClientShell } from "../_shell";
 import { VendorRef } from "@/components/checkwise/vendor-ref";
@@ -124,18 +125,25 @@ function matchesTab(row: ClientNotificationItem, tab: TabKey): boolean {
 // ---------------------------------------------------------------------------
 
 export default function ClientNotificationsPage() {
+  const urlClientId = useUrlClientId();
   const [rows, setRows] = useState<ClientNotificationItem[] | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [reloadKey, setReloadKey] = useState(0);
   const [tab, setTab] = useState<TabKey>("pending");
   const [categoryFilter, setCategoryFilter] =
     useState<NotificationCategory | null>(null);
+  // Polite live-region message so screen readers hear mark-as-read results
+  // (WCAG 4.1.3, audit P3.16).
+  const [liveMsg, setLiveMsg] = useState("");
 
   useEffect(() => {
     let cancelled = false;
     setRows(null);
     setError(null);
-    listClientNotifications({ limit: 100 })
+    listClientNotifications({
+      ...(urlClientId ? { client_id: urlClientId } : {}),
+      limit: 100,
+    })
       .then((data) => {
         if (cancelled) return;
         setRows(data.items);
@@ -151,7 +159,7 @@ export default function ClientNotificationsPage() {
     return () => {
       cancelled = true;
     };
-  }, [reloadKey]);
+  }, [reloadKey, urlClientId]);
 
   // ---- Derived state -----------------------------------------------------
   const counts = useMemo(() => computeCounts(rows ?? []), [rows]);
@@ -193,6 +201,7 @@ export default function ClientNotificationsPage() {
       current?.map((item) => (item.id === updated.id ? updated : item)) ??
       current,
     );
+    setLiveMsg("Notificación marcada como leída.");
   }
 
   async function markAll() {
@@ -203,6 +212,7 @@ export default function ClientNotificationsPage() {
         read_at: item.read_at ?? new Date().toISOString(),
       })) ?? current,
     );
+    setLiveMsg("Todas las notificaciones se marcaron como leídas.");
   }
 
   return (
@@ -229,6 +239,9 @@ export default function ClientNotificationsPage() {
         </div>
       }
     >
+      <p role="status" aria-live="polite" className="sr-only">
+        {liveMsg}
+      </p>
       {error ? (
         <Surface>
           <EmptyState
