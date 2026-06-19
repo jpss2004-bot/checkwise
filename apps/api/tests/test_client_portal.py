@@ -2646,3 +2646,111 @@ def test_client_notifications_offset_pagination(
     assert page["total"] == total
     assert len(page["items"]) == 1
     assert page["has_more"] is (total > 1)
+
+
+# ---------------------------------------------------------------------------
+# Decision-grade overview (canonical metric, exposure, trajectory) — 2026-06-19
+# ---------------------------------------------------------------------------
+
+
+def _overview_token(api_client: TestClient, db_factory) -> tuple[str, str]:
+    """Seed a client + one vendor and return (vendor_id, auth token)."""
+    client_id = _seed_client(db_factory)
+    vendor_id, _ws_id = _seed_vendor_with_workspace(db_factory, client_id=client_id)
+    _, email, pw = _seed_user_with_role(
+        db_factory, role="client_admin", client_id=client_id, email_prefix="ca"
+    )
+    return vendor_id, _login(api_client, email, pw)
+
+
+def test_overview_buckets_reconcile_with_calendar(
+    api_client: TestClient, db_factory
+) -> None:
+    """The dashboard's date-correct risk buckets must equal the calendar's.
+
+    Both surfaces derive from ``aggregate_client_calendar`` over the SAME
+    authoritative deadlines, so the per-risk counts must match exactly — the
+    core "truth-in-data" guarantee of the redesign (no more 387-vs-192-vs-417
+    disagreement between dashboard, calendar, and vendor pages).
+    """
+    _vendor_id, token = _overview_token(api_client, db_factory)
+    overview = api_client.get("/api/v1/client/overview", headers=_h(token)).json()
+    calendar = api_client.get("/api/v1/client/calendar", headers=_h(token)).json()
+
+    by_risk: dict[str, int] = {}
+    for month in calendar["months"]:
+        for item in month["items"]:
+            by_risk[item["risk_level"]] = by_risk.get(item["risk_level"], 0) + 1
+
+    assert overview["overdue_total"] == by_risk.get("overdue", 0)
+    assert overview["due_soon_total"] == by_risk.get("due_soon", 0)
+    assert overview["rejected_or_correction_total"] == by_risk.get(
+        "action_required", 0
+    )
+    assert overview["pending_reviews_total"] == by_risk.get("in_review", 0)
+    assert overview["proxima_total"] == by_risk.get("upcoming", 0)
+
+
+def test_overview_canonical_metric_and_exposure(
+    api_client: TestClient, db_factory
+) -> None:
+    """Canonical pooled metric is internally consistent, and the exposure card
+    appears exactly when there's a real liability."""
+    vendor_id, token = _overview_token(api_client, db_factory)
+    overview = api_client.get("/api/v1/client/overview", headers=_h(token)).json()
+
+    # New decision-layer fields are present.
+    for key in (
+        "obligations_due_total",
+        "obligations_on_track_total",
+        "proxima_total",
+        "biggest_exposure",
+        "ia_revisar_total",
+        "top_failure_pattern",
+    ):
+        assert key in overview, key
+
+    due = overview["obligations_due_total"]
+    on_track = overview["obligations_on_track_total"]
+    assert 0 <= on_track <= due or due == 0
+    expected = round(on_track / due * 100) if due else 100
+    assert overview["compliance_pct"] == expected
+
+    # AI rollup is empty for a non-pilot client → the UI hides it.
+    assert overview["ia_revisar_total"] == 0
+
+    # Exposure appears iff there's an overdue/needs-correction obligation.
+    has_liability = (
+        overview["overdue_total"] > 0
+        or overview["rejected_or_correction_total"] > 0
+    )
+    if has_liability:
+        assert overview["biggest_exposure"] is not None
+        assert overview["biggest_exposure"]["vendor_id"] == vendor_id
+        assert overview["biggest_exposure"]["headline"]
+        assert overview["biggest_exposure"]["reason"]
+    else:
+        assert overview["biggest_exposure"] is None
+
+
+def test_overview_trajectory_endpoint_shape(
+    api_client: TestClient, db_factory
+) -> None:
+    """Trajectory returns a well-formed period-anchored series (or an honest
+    empty state for a thin-history tenant)."""
+    _vendor_id, token = _overview_token(api_client, db_factory)
+    resp = api_client.get(
+        "/api/v1/client/overview/trajectory", headers=_h(token)
+    )
+    assert resp.status_code == 200, resp.text
+    body = resp.json()
+    assert body["target_pct"] == 85
+    assert isinstance(body["points"], list)
+    if body["has_history"]:
+        assert len(body["points"]) >= 3
+        for p in body["points"]:
+            assert p["due_total"] >= 1
+            assert 0 <= p["on_track"] <= p["due_total"]
+            assert 0 <= p["compliance_pct"] <= 100
+    else:
+        assert body["points"] == []

@@ -13,6 +13,7 @@ from here.
 
 from __future__ import annotations
 
+from collections import defaultdict
 from datetime import date, timedelta
 
 from sqlalchemy import case, func, select
@@ -184,6 +185,54 @@ def approval_trend_points(
     months exist.
     """
     return _approval_trend(db, today, client_id=client_id, vendor_id=vendor_id)
+
+
+def approval_trend_points_by_vendor(
+    db: Session, today: date, *, client_id: str
+) -> dict[str, int]:
+    """Per-vendor approval-rate momentum for a whole client in ONE query.
+
+    Returns ``{vendor_id: delta_points}`` (most recent active month − the one
+    before) for every vendor with ≥2 active months. Same definition as
+    :func:`_approval_trend`, but grouped by ``(vendor_id, month)`` so the
+    client dashboard can annotate its worklist without an N+1 — the portfolio
+    query-count contract stays constant in the vendor count.
+    """
+    dialect = db.get_bind().dialect.name
+    if dialect == "postgresql":
+        month_key = func.to_char(Submission.created_at, "YYYY-MM")
+    else:
+        month_key = func.strftime("%Y-%m", Submission.created_at)
+    window_start, _ = _month_bounds(today, 7)
+    stmt = (
+        select(
+            Submission.vendor_id,
+            month_key.label("m"),
+            func.count(Submission.id),
+            func.sum(
+                case(
+                    (Submission.status == DocumentStatus.APROBADO.value, 1),
+                    else_=0,
+                )
+            ),
+        )
+        .where(
+            Submission.created_at >= window_start,
+            Submission.client_id == client_id,
+        )
+        .group_by(Submission.vendor_id, month_key)
+        .order_by(Submission.vendor_id, month_key.desc())
+    )
+    rates: dict[str, list[int]] = defaultdict(list)
+    for vendor_id, _m, total, approved in db.execute(stmt).all():
+        t = int(total or 0)
+        if t < 3:
+            continue
+        if len(rates[vendor_id]) < 2:
+            rates[vendor_id].append(round(100 * int(approved or 0) / t))
+    return {
+        vid: pts[0] - pts[1] for vid, pts in rates.items() if len(pts) == 2
+    }
 
 
 def _count_status(db: Session, scope: ReportScope, status: DocumentStatus) -> int:

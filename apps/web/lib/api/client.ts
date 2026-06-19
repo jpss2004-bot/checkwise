@@ -115,6 +115,32 @@ export type ClientRiskVendor = {
   missing_required_count: number;
   rejected_or_correction_count: number;
   top_reason: string;
+  // Per-vendor approval-rate momentum (points vs the prior active month);
+  // null until two active months exist. ▲ improving / ▼ sliding.
+  momentum_delta: number | null;
+};
+
+// The single biggest legal/tax exposure right now (or null → hide the card).
+export type ClientExposure = {
+  vendor_id: string;
+  vendor_name: string;
+  requirement_name: string;
+  institution: string;
+  period_label: string | null;
+  deadline_iso: string | null;
+  days_overdue: number;
+  headline: string;
+  reason: string;
+  detail: string | null;
+  href: string;
+};
+
+// The dominant recurring failure across the portfolio (root-cause line).
+export type ClientFailurePattern = {
+  requirement_name: string;
+  institution: string;
+  vendor_count: number;
+  obligation_count: number;
 };
 
 export type ClientOverview = {
@@ -122,7 +148,11 @@ export type ClientOverview = {
   client_name: string;
   vendors_total: number;
   active_workspaces_total: number;
+  // CANONICAL pooled obligation-level "% al día (de las ya vencidas)".
   compliance_pct: number;
+  // Numerator / denominator behind compliance_pct ("236 de 248").
+  obligations_on_track_total: number;
+  obligations_due_total: number;
   // Month-over-month approval-rate momentum in points; null when there
   // aren't two active months yet.
   compliance_trend_delta: number | null;
@@ -135,10 +165,30 @@ export type ClientOverview = {
   due_soon_total: number;
   // Lapsed obligations across the portfolio (highest-liability state).
   overdue_total: number;
+  // Obligations not yet due (future periods) — the "Próximas" tile.
+  proxima_total: number;
   recent_submissions_total: number;
   last_activity_at: string | null;
+  biggest_exposure: ClientExposure | null;
+  // Count of in-queue docs an AI pass flagged; 0 → hide the indicator.
+  ia_revisar_total: number;
+  top_failure_pattern: ClientFailurePattern | null;
   // Worst-first ranked attention list (top 5).
   top_risk_vendors: ClientRiskVendor[];
+};
+
+export type ClientTrajectoryPoint = {
+  period: string;
+  label: string;
+  due_total: number;
+  on_track: number;
+  compliance_pct: number;
+};
+
+export type ClientTrajectory = {
+  points: ClientTrajectoryPoint[];
+  target_pct: number;
+  has_history: boolean;
 };
 
 // Phase 6D — most-urgent renewal-bearing slot for this vendor.
@@ -554,6 +604,15 @@ export async function getClientOverview(params?: {
   year?: number;
 }): Promise<ClientOverview> {
   return fetchJson<ClientOverview>(`/api/v1/client/overview${qs(params)}`);
+}
+
+export async function getClientOverviewTrajectory(params?: {
+  client_id?: string;
+  months?: number;
+}): Promise<ClientTrajectory> {
+  return fetchJson<ClientTrajectory>(
+    `/api/v1/client/overview/trajectory${qs(params)}`,
+  );
 }
 
 export async function listClientVendors(params?: {

@@ -8,25 +8,20 @@ import {
   Buildings,
   CalendarBlank,
   CheckCircle,
+  FileText,
   Files,
   HourglassHigh,
   IdentificationCard,
-  Storefront,
+  Sparkle,
   Warning,
   WarningOctagon,
 } from "@phosphor-icons/react";
 
 import {
-  Donut,
-  RadialGauge,
-  type ChartSegment,
-} from "@/components/checkwise/charts";
-import {
   EmptyState,
   Surface,
 } from "@/components/checkwise/dashboard/stat-card";
 import { ErrorState } from "@/components/checkwise/portal/state-surfaces";
-import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 
 import { ClientShell } from "../_shell";
@@ -34,55 +29,47 @@ import { VendorRef } from "@/components/checkwise/vendor-ref";
 import {
   getClientMe,
   getClientOverview,
+  getClientOverviewTrajectory,
   getClientProfile,
   listClientNotifications,
-  listClientActivity,
-  listClientSubmissions,
-  type ClientActivityItem,
+  type ClientExposure,
   type ClientMe,
   type ClientNotificationItem,
   type ClientOverview,
   type ClientProfile,
   type ClientRiskVendor,
-  type ClientSubmissionItem,
+  type ClientTrajectory,
 } from "@/lib/api/client";
 import { useUrlClientId } from "@/lib/workspace/use-url-client-id";
-import { statusLabel, statusVariant } from "@/lib/constants/statuses";
 
 /**
- * Client dashboard — redesigned.
+ * Client dashboard — decision-grade redesign (2026-06-19).
  *
- * Hero: a radial compliance gauge + headline status next to a
- * three-segment semaphore donut. KPI strip below with sparkline-ish
- * accents. Two-column body holds (left) the recent submission feed
- * and risk attention list; (right) due-soon, recent activity, and
- * quick links into the operational surfaces.
+ * Leads with ONE canonical, reconciled compliance number ("X de Y al día,
+ * de las ya vencidas"), a period-anchored coverage trajectory against the
+ * 85% target, and the single biggest legal/tax exposure right now. Below:
+ * date-correct risk tiles (Vencidos / Por vencer / Próximas / Rechazos / En
+ * revisión), a named worklist with momentum, and a de-cluttered novedades
+ * rail. A whisper-quiet AI advisory line appears only when there's something
+ * (and never overrides the human verdict).
  */
 export default function ClientDashboardPage() {
   const urlClientId = useUrlClientId();
   const [me, setMe] = useState<ClientMe | null>(null);
   const [overview, setOverview] = useState<ClientOverview | null>(null);
-  const [submissions, setSubmissions] = useState<ClientSubmissionItem[]>([]);
-  const [activity, setActivity] = useState<ClientActivityItem[]>([]);
+  const [trajectory, setTrajectory] = useState<ClientTrajectory | null>(null);
   const [notifications, setNotifications] = useState<ClientNotificationItem[]>([]);
   const [unreadCount, setUnreadCount] = useState(0);
   const [clientId, setClientId] = useState<string | null>(urlClientId);
   const [error, setError] = useState<string | null>(null);
   const [profile, setProfile] = useState<ClientProfile | null>(null);
-  // Bumped by the error surface's "Reintentar" to re-run the portfolio
-  // fetch without a full navigation.
   const [reloadKey, setReloadKey] = useState(0);
 
-  // Profile fetch is independent from overview so a late return on
-  // the heavier overview query doesn't block the "termina tu alta"
-  // banner from rendering. Failures are silent — the banner just
-  // stays hidden.
   useEffect(() => {
     let cancelled = false;
     getClientProfile(urlClientId ? { client_id: urlClientId } : undefined)
       .then((p) => {
-        if (cancelled) return;
-        setProfile(p);
+        if (!cancelled) setProfile(p);
       })
       .catch(() => {
         // Silent — the dashboard still works without the banner.
@@ -98,11 +85,6 @@ export default function ClientDashboardPage() {
       .then((meData) => {
         if (cancelled) return;
         setMe(meData);
-        // URL ``?client_id=`` wins over the user's default — that's
-        // how internal-admin inspection of any tenant works. For
-        // regular client_admin users the URL param normally matches
-        // ``default_client_id`` (or is absent), so this collapses to
-        // the previous behavior.
         setClientId(urlClientId ?? meData.default_client_id);
       })
       .catch((err: unknown) => {
@@ -121,15 +103,11 @@ export default function ClientDashboardPage() {
     const params = clientId ? { client_id: clientId } : undefined;
     Promise.all([
       getClientOverview(params),
-      listClientSubmissions({ ...(params ?? {}), limit: 6 }),
-      listClientActivity({ ...(params ?? {}), limit: 8 }),
-      listClientNotifications({ ...(params ?? {}), limit: 5 }),
+      listClientNotifications({ ...(params ?? {}), limit: 6 }),
     ])
-      .then(([ov, subs, act, notes]) => {
+      .then(([ov, notes]) => {
         if (cancelled) return;
         setOverview(ov);
-        setSubmissions(subs.items);
-        setActivity(act.items);
         setNotifications(notes.items);
         setUnreadCount(notes.unread_count);
       })
@@ -142,10 +120,28 @@ export default function ClientDashboardPage() {
     };
   }, [clientId, me, reloadKey]);
 
+  // Trajectory is lazy + independent: a slow or empty history never blocks or
+  // breaks the headline. Failures just hide the sparkline.
+  useEffect(() => {
+    if (!me && !clientId) return;
+    let cancelled = false;
+    const params = clientId ? { client_id: clientId } : undefined;
+    getClientOverviewTrajectory(params)
+      .then((t) => {
+        if (!cancelled) setTrajectory(t);
+      })
+      .catch(() => {
+        if (!cancelled) setTrajectory(null);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [clientId, me, reloadKey]);
+
   return (
     <ClientShell
       title="Resumen del cliente"
-      description="Cumplimiento de tus proveedores REPSE — riesgo, faltantes, entregas recientes y próximos vencimientos en una sola vista."
+      description="Cumplimiento de tus proveedores REPSE — tu mayor riesgo, tendencia y faltantes en una sola vista."
       actions={
         me && me.visible_client_ids.length > 1 ? (
           <ClientSwitcher
@@ -166,22 +162,29 @@ export default function ClientDashboardPage() {
       ) : !overview ? (
         <DashboardSkeleton />
       ) : (
-        <div className="space-y-7">
+        <div className="space-y-6">
           {profile && profile.onboarding_completed_at === null ? (
             <OnboardingPromptBanner clientName={profile.name} />
           ) : null}
-          <ClientHero overview={overview} />
-          <ClientKpiStrip overview={overview} />
+          <div className="cw-fade-up grid gap-5 lg:grid-cols-[1.05fr,1fr]">
+            <DecisionHero overview={overview} trajectory={trajectory} />
+            <BiggestExposureCard
+              exposure={overview.biggest_exposure}
+              overview={overview}
+            />
+          </div>
+          <InsightLine overview={overview} />
+          <SignalsStrip overview={overview} />
           <div className="cw-stagger grid gap-5 lg:grid-cols-3">
             <div className="space-y-5 lg:col-span-2">
-              <RiskWorklistCard vendors={overview.top_risk_vendors} />
-              <SemaphoreDistribution overview={overview} />
-              <RecentSubmissionsCard rows={submissions} />
+              <RiskWorklistCard
+                vendors={overview.top_risk_vendors}
+                pattern={overview.top_failure_pattern}
+              />
             </div>
             <div className="space-y-5">
-              <NotificationCard rows={notifications} unreadCount={unreadCount} />
-              <QuickLinks />
-              <RecentActivityCard rows={activity} />
+              <NovedadesCard rows={notifications} unreadCount={unreadCount} />
+              <ActionsCard />
             </div>
           </div>
         </div>
@@ -220,83 +223,95 @@ function ClientSwitcher({
   );
 }
 
-// ─── Hero (compliance + headline) ────────────────────────────────
+// ─── Hero: canonical number + distribution + trajectory ──────────
 
-// Where the hero headline / risk count drills to. Red providers first,
-// then yellow; the vendors page reads ``?level=`` and auto-filters.
 function heroDrillHref(o: ClientOverview): string | null {
   if (o.red_count > 0) return "/client/vendors?level=red";
   if (o.yellow_count > 0) return "/client/vendors?level=yellow";
   return null;
 }
 
-function ClientHero({ overview }: { overview: ClientOverview }) {
+function gapToTarget(o: ClientOverview, target: number): number {
+  if (o.obligations_due_total === 0) return 0;
+  const needed = Math.ceil((target / 100) * o.obligations_due_total);
+  return Math.max(0, needed - o.obligations_on_track_total);
+}
+
+function DecisionHero({
+  overview,
+  trajectory,
+}: {
+  overview: ClientOverview;
+  trajectory: ClientTrajectory | null;
+}) {
   const tone =
     overview.compliance_pct >= 85
-      ? "success"
+      ? "var(--status-success-text)"
       : overview.compliance_pct >= 60
-        ? "warning"
-        : "error";
+        ? "var(--status-warning-text)"
+        : "var(--status-error-text)";
+  const target = trajectory?.target_pct ?? 85;
+  const gap = gapToTarget(overview, target);
   const drillHref = heroDrillHref(overview);
-  const headline = summaryHeadline(overview);
+
   return (
-    <section className="cw-fade-up rounded-lg border border-[color:var(--border-default)] bg-[color:var(--surface-raised)] p-5 shadow-xs md:p-6">
-      <div className="grid gap-5 md:grid-cols-[auto,1fr] md:items-center md:gap-8">
-        <div className="flex flex-col items-center gap-2">
-          <RadialGauge
-            value={overview.compliance_pct}
-            tone={tone}
-            size={140}
-            thickness={12}
-            label={`${Math.round(overview.compliance_pct)}%`}
-            caption="cumplimiento"
-          />
-          <ComplianceTrendChip delta={overview.compliance_trend_delta} />
-        </div>
-        <div className="min-w-0 space-y-3">
-          <p className="cw-eyebrow">
-            {overview.client_name} · {overview.active_workspaces_total} workspace
-            {overview.active_workspaces_total === 1 ? "" : "s"} activo
-            {overview.active_workspaces_total === 1 ? "" : "s"}
-          </p>
-          {drillHref ? (
-            <Link
-              href={drillHref}
-              className="group inline-flex items-center gap-2 rounded-sm text-xl font-semibold leading-tight tracking-tight text-[color:var(--text-primary)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[color:var(--border-focus)] focus-visible:ring-offset-2"
-            >
-              <span className="group-hover:underline">{headline}</span>
-              <ArrowRight
-                className="h-4 w-4 shrink-0 text-[color:var(--text-tertiary)] transition-transform group-hover:translate-x-0.5 group-hover:text-[color:var(--text-primary)]"
-                weight="bold"
-                aria-hidden="true"
-              />
-            </Link>
-          ) : (
-            <p className="text-xl font-semibold leading-tight tracking-tight text-[color:var(--text-primary)]">
-              {headline}
-            </p>
-          )}
-          <p className="max-w-2xl text-[13px] leading-relaxed text-[color:var(--text-secondary)]">
-            {summaryDescription(overview)}
-          </p>
-          <p className="text-[11px] text-[color:var(--text-tertiary)]">
-            Promedio de cumplimiento de tus {overview.vendors_total} proveedor
-            {overview.vendors_total === 1 ? "" : "es"} · meta 85%
-          </p>
-          {overview.last_activity_at ? (
-            <p className="font-mono text-[11px] tabular-nums text-[color:var(--text-tertiary)]">
-              Última actividad ·{" "}
-              {new Date(overview.last_activity_at).toLocaleString("es-MX")}
-            </p>
-          ) : null}
-        </div>
+    <section className="rounded-lg border border-[color:var(--border-default)] bg-[color:var(--surface-raised)] p-5 shadow-xs md:p-6">
+      <p className="cw-eyebrow">
+        Obligaciones al día{" "}
+        <span className="normal-case tracking-normal text-[color:var(--text-tertiary)]">
+          (de las ya vencidas)
+        </span>
+      </p>
+      <div className="mt-1 flex flex-wrap items-baseline gap-x-3 gap-y-1">
+        <span
+          className="font-mono text-[40px] font-semibold leading-none tabular-nums"
+          style={{ color: tone }}
+        >
+          {Math.round(overview.compliance_pct)}
+          <span className="text-2xl">%</span>
+        </span>
+        <span className="text-[13px] text-[color:var(--text-secondary)]">
+          {overview.obligations_on_track_total} de {overview.obligations_due_total}
+        </span>
+        <ComplianceTrendChip delta={overview.compliance_trend_delta} />
       </div>
+
+      <DistributionBar overview={overview} />
+
+      {trajectory && trajectory.has_history && trajectory.points.length > 1 ? (
+        <TrajectorySparkline trajectory={trajectory} />
+      ) : null}
+
+      <p className="mt-3 text-[12px] text-[color:var(--text-secondary)]">
+        {gap > 0 ? (
+          <>
+            Te {gap === 1 ? "falta" : "faltan"}{" "}
+            <span className="font-semibold text-[color:var(--text-primary)]">
+              {gap} obligación{gap === 1 ? "" : "es"}
+            </span>{" "}
+            para la meta del {target}%
+            {drillHref ? (
+              <>
+                {" · "}
+                <Link
+                  href={drillHref}
+                  className="font-medium text-[color:var(--text-link)] hover:underline"
+                >
+                  ver proveedores en riesgo
+                </Link>
+              </>
+            ) : null}
+          </>
+        ) : (
+          <>Estás en la meta del {target}% · {overview.client_name}</>
+        )}
+      </p>
     </section>
   );
 }
 
-// Month-over-month momentum (approval-rate points). Up = improving (teal),
-// down = error, flat/none = muted. Honest signal, clearly labelled.
+// Month-over-month approval-rate momentum (clearly labelled — not the
+// cumplimiento %). Up = improving (teal), down = error, flat/none = muted.
 function ComplianceTrendChip({ delta }: { delta: number | null }) {
   if (delta === null) {
     return (
@@ -320,203 +335,314 @@ function ComplianceTrendChip({ delta }: { delta: number | null }) {
     >
       {sign} {Math.abs(delta)} pts
       <span className="font-normal text-[color:var(--text-tertiary)]">
-        vs mes anterior
+        aprobación vs mes anterior
       </span>
     </span>
   );
 }
 
-function summaryHeadline(o: ClientOverview): string {
-  if (o.red_count > 0)
-    return `Tienes ${o.red_count} proveedor${o.red_count === 1 ? "" : "es"} en riesgo`;
-  if (o.yellow_count > 0)
-    return `Tienes ${o.yellow_count} proveedor${o.yellow_count === 1 ? "" : "es"} en proceso`;
-  if (o.green_count > 0)
-    return "Todos tus proveedores están al día";
-  return "No hay proveedores activos para mostrar";
-}
-
-function summaryDescription(o: ClientOverview): string {
-  const parts: string[] = [];
-  if (o.missing_required_total > 0) parts.push(`${o.missing_required_total} faltantes obligatorios`);
-  if (o.rejected_or_correction_total > 0)
-    parts.push(`${o.rejected_or_correction_total} rechazos o aclaraciones pendientes`);
-  if (o.pending_reviews_total > 0)
-    parts.push(`${o.pending_reviews_total} en revisión por nuestro equipo`);
-  if (o.due_soon_total > 0)
-    parts.push(`${o.due_soon_total} obligaciones vencen en los próximos 14 días`);
-  if (parts.length === 0) return "Tu portafolio está al día. Te avisaremos cuando algo necesite tu atención.";
-  return parts.join(" · ") + ".";
-}
-
-// ─── KPI strip ────────────────────────────────────────────────────
-
-// Junta 2026-05-23 — soft banner that prompts the client_admin to
-// finish their self-service alta on /client/onboarding. Hidden once
-// ``onboarding_completed_at`` is set on the row.
-function OnboardingPromptBanner({ clientName }: { clientName: string }) {
+// Thin three-segment distribution — al día / en proceso / en riesgo. Replaces
+// the old redundant donut with something that costs no vertical space.
+function DistributionBar({ overview }: { overview: ClientOverview }) {
+  const total =
+    overview.green_count + overview.yellow_count + overview.red_count;
+  if (total === 0) return null;
+  const seg = [
+    { v: overview.green_count, c: "var(--status-success-text)", label: "al día" },
+    { v: overview.yellow_count, c: "var(--status-warning-text)", label: "en proceso" },
+    { v: overview.red_count, c: "var(--status-error-text)", label: "en riesgo" },
+  ];
   return (
-    <div className="flex flex-wrap items-center justify-between gap-3 rounded-md border border-[color:var(--status-warning-border)] bg-[color:var(--status-warning-bg)] p-4">
-      <div className="flex items-start gap-3">
-        <IdentificationCard
-          className="mt-0.5 h-5 w-5 text-[color:var(--status-warning-text)]"
-          weight="bold"
-          aria-hidden="true"
-        />
-        <div className="min-w-0">
-          <p className="text-sm font-semibold text-[color:var(--text-primary)]">
-            Termina tu alta, {clientName}
-          </p>
-          <p className="mt-0.5 text-xs text-[color:var(--text-secondary)]">
-            Nuestro equipo precargó tus datos básicos. Completa el
-            sector, domicilio fiscal y teléfono para activar tu
-            portafolio. No te pediremos archivos.
-          </p>
-        </div>
+    <div className="mt-3">
+      <div className="flex h-2 overflow-hidden rounded-full bg-[color:var(--surface-sunken)]">
+        {seg.map((s) =>
+          s.v > 0 ? (
+            <div
+              key={s.label}
+              style={{ width: `${(s.v / total) * 100}%`, backgroundColor: s.c }}
+              aria-hidden="true"
+            />
+          ) : null,
+        )}
       </div>
-      <Button asChild size="sm">
-        <Link href="/client/onboarding">
-          Completar mi alta
-          <ArrowRight className="h-3.5 w-3.5" weight="bold" aria-hidden="true" />
-        </Link>
-      </Button>
+      <div className="mt-1.5 flex flex-wrap gap-x-4 gap-y-0.5 text-[11px] text-[color:var(--text-secondary)]">
+        {seg.map((s) => (
+          <span key={s.label} className="inline-flex items-center gap-1.5">
+            <span
+              className="h-2 w-2 rounded-full"
+              style={{ backgroundColor: s.c }}
+              aria-hidden="true"
+            />
+            <span className="font-mono font-semibold tabular-nums text-[color:var(--text-primary)]">
+              {s.v}
+            </span>
+            {s.label}
+          </span>
+        ))}
+      </div>
     </div>
   );
 }
 
-function ClientKpiStrip({ overview }: { overview: ClientOverview }) {
-  // Ordered most-actionable-first: the two highest-liability buckets
-  // (lapsed, then rejected/correction) lead, and every risk-bearing tile
-  // drills into the surface where the client acts on it.
-  const rows: {
-    href?: string;
-    icon: typeof Storefront;
+// Period-anchored coverage line + fixed 85% reference. Honest history, never a
+// forecast curve. Inline SVG so it costs no chart bundle.
+function TrajectorySparkline({ trajectory }: { trajectory: ClientTrajectory }) {
+  const pts = trajectory.points;
+  const W = 320;
+  const H = 64;
+  const pad = 8;
+  const values = pts.map((p) => p.compliance_pct);
+  const lo = Math.max(0, Math.min(...values, trajectory.target_pct) - 6);
+  const hi = 100;
+  const x = (i: number) =>
+    pts.length === 1 ? W / 2 : pad + (i * (W - 2 * pad)) / (pts.length - 1);
+  const y = (v: number) => H - pad - ((v - lo) / (hi - lo)) * (H - 2 * pad);
+  const line = pts
+    .map((p, i) => `${x(i).toFixed(1)},${y(p.compliance_pct).toFixed(1)}`)
+    .join(" ");
+  const targetY = y(trajectory.target_pct);
+  const last = pts[pts.length - 1];
+  return (
+    <div className="mt-3">
+      <svg
+        viewBox={`0 0 ${W} ${H}`}
+        className="h-16 w-full"
+        role="img"
+        aria-label={`Cobertura de obligaciones por período: de ${pts[0].compliance_pct}% a ${last.compliance_pct}%, meta ${trajectory.target_pct}%`}
+      >
+        <line
+          x1={pad}
+          y1={targetY}
+          x2={W - pad}
+          y2={targetY}
+          stroke="var(--text-tertiary)"
+          strokeWidth={1}
+          strokeDasharray="3 3"
+          opacity={0.6}
+        />
+        <polyline
+          points={line}
+          fill="none"
+          stroke="var(--text-teal)"
+          strokeWidth={2}
+          strokeLinejoin="round"
+          strokeLinecap="round"
+        />
+        <circle
+          cx={x(pts.length - 1)}
+          cy={y(last.compliance_pct)}
+          r={3.5}
+          fill="var(--text-teal)"
+        />
+      </svg>
+      <div className="flex justify-between font-mono text-[10px] text-[color:var(--text-tertiary)]">
+        <span>{pts[0].label}</span>
+        <span>cobertura por período · meta {trajectory.target_pct}%</span>
+        <span>{last.label}</span>
+      </div>
+    </div>
+  );
+}
+
+// ─── Biggest exposure ────────────────────────────────────────────
+
+function BiggestExposureCard({
+  exposure,
+  overview,
+}: {
+  exposure: ClientExposure | null;
+  overview: ClientOverview;
+}) {
+  if (!exposure) {
+    return (
+      <section className="flex flex-col justify-center rounded-lg border border-[color:var(--status-success-border)] bg-[color:var(--status-success-bg)] p-5 md:p-6">
+        <p className="cw-eyebrow text-[color:var(--status-success-text)]">
+          Sin exposición crítica
+        </p>
+        <div className="mt-2 flex items-start gap-3">
+          <CheckCircle
+            className="mt-0.5 h-6 w-6 shrink-0 text-[color:var(--status-success-text)]"
+            weight="fill"
+            aria-hidden="true"
+          />
+          <p className="text-[13px] leading-relaxed text-[color:var(--text-secondary)]">
+            Ningún proveedor tiene obligaciones vencidas ni rechazos pendientes
+            ahora. Te avisaremos en cuanto algo necesite tu atención.
+          </p>
+        </div>
+        {overview.due_soon_total > 0 ? (
+          <p className="mt-3 text-[11px] text-[color:var(--text-tertiary)]">
+            {overview.due_soon_total} obligación
+            {overview.due_soon_total === 1 ? "" : "es"} por vencer en los
+            próximos 14 días.
+          </p>
+        ) : null}
+      </section>
+    );
+  }
+  return (
+    <Link
+      href={exposure.href}
+      className="group flex flex-col rounded-lg border border-[color:var(--status-error-border)] bg-[color:var(--status-error-bg)] p-5 transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[color:var(--border-focus)] focus-visible:ring-offset-2 md:p-6"
+    >
+      <p className="cw-eyebrow inline-flex items-center gap-1.5 text-[color:var(--status-error-text)]">
+        <WarningOctagon className="h-3.5 w-3.5" weight="fill" aria-hidden="true" />
+        Tu mayor exposición ahora
+      </p>
+      <p className="mt-2 truncate text-[15px] font-semibold text-[color:var(--text-primary)]">
+        {exposure.vendor_name}
+      </p>
+      <p className="mt-0.5 text-[13px] text-[color:var(--status-error-text)]">
+        {exposure.headline}
+      </p>
+      <p className="mt-2 text-[11px] leading-relaxed text-[color:var(--status-error-text)]">
+        {exposure.reason}
+        {exposure.detail ? (
+          <span className="text-[color:var(--text-secondary)]"> · {exposure.detail}</span>
+        ) : null}
+      </p>
+      <span className="mt-auto inline-flex items-center gap-1 pt-4 text-[12px] font-semibold text-[color:var(--status-error-text)]">
+        Ver proveedor
+        <ArrowRight
+          className="h-3.5 w-3.5 transition-transform group-hover:translate-x-0.5"
+          weight="bold"
+          aria-hidden="true"
+        />
+      </span>
+    </Link>
+  );
+}
+
+// ─── Insight line (AI advisory + root-cause pattern) ─────────────
+
+function InsightLine({ overview }: { overview: ClientOverview }) {
+  const showAi = overview.ia_revisar_total > 0;
+  const pattern = overview.top_failure_pattern;
+  if (!showAi && !pattern) return null;
+  return (
+    <div className="flex flex-wrap items-center gap-x-6 gap-y-2 px-1">
+      {showAi ? (
+        <span className="inline-flex items-center gap-2 text-[12px] text-[color:var(--status-warning-text)]">
+          <Sparkle className="h-4 w-4 shrink-0" weight="fill" aria-hidden="true" />
+          <span>
+            La IA marcó {overview.ia_revisar_total} documento
+            {overview.ia_revisar_total === 1 ? "" : "s"} en revisión para tu
+            atención
+          </span>
+          <span className="text-[11px] text-[color:var(--text-tertiary)]">
+            — sugerencia, la revisión humana decide
+          </span>
+        </span>
+      ) : null}
+      {pattern ? (
+        <span className="inline-flex items-center gap-2 text-[12px] text-[color:var(--text-secondary)]">
+          <Warning
+            className="h-4 w-4 shrink-0 text-[color:var(--status-warning-text)]"
+            weight="fill"
+            aria-hidden="true"
+          />
+          <span>
+            Patrón recurrente:{" "}
+            <span className="font-semibold text-[color:var(--text-primary)]">
+              {pattern.requirement_name}
+            </span>{" "}
+            pendiente en {pattern.vendor_count} proveedores
+          </span>
+        </span>
+      ) : null}
+    </div>
+  );
+}
+
+// ─── Signals strip (date-correct risk tiles) ─────────────────────
+
+function SignalsStrip({ overview }: { overview: ClientOverview }) {
+  const tiles: {
+    href: string;
+    icon: typeof WarningOctagon;
     label: string;
-    caption: string;
     value: number;
-    tone?: "default" | "warning" | "error" | "teal";
+    tone: "error" | "warning" | "muted";
   }[] = [
     {
       href: "/client/calendar",
       icon: WarningOctagon,
       label: "Vencidos",
-      caption: "Obligaciones que ya pasaron su fecha límite.",
       value: overview.overdue_total,
-      tone: overview.overdue_total > 0 ? "error" : "default",
-    },
-    {
-      href: "/client/submissions?status=rechazado",
-      icon: Warning,
-      label: "Rechazos / aclaraciones",
-      caption: "Documentos que requieren corrección o aclaración.",
-      value: overview.rejected_or_correction_total,
-      tone: overview.rejected_or_correction_total > 0 ? "error" : "default",
-    },
-    {
-      href: "/client/vendors?level=red",
-      icon: Files,
-      label: "Faltantes obligatorios",
-      caption: "Documentos REPSE pendientes de carga.",
-      value: overview.missing_required_total,
-      tone: overview.missing_required_total > 0 ? "warning" : "default",
+      tone: overview.overdue_total > 0 ? "error" : "muted",
     },
     {
       href: "/client/calendar",
       icon: CalendarBlank,
-      label: "Por vencer",
-      caption: "Próximas obligaciones críticas (≤14 días).",
+      label: "Por vencer ≤14d",
       value: overview.due_soon_total,
-      tone: overview.due_soon_total > 0 ? "warning" : "default",
+      tone: overview.due_soon_total > 0 ? "warning" : "muted",
+    },
+    {
+      href: "/client/calendar",
+      icon: Files,
+      label: "Próximas",
+      value: overview.proxima_total,
+      tone: "muted",
+    },
+    {
+      href: "/client/submissions?status=rechazado",
+      icon: Warning,
+      label: "Rechazos",
+      value: overview.rejected_or_correction_total,
+      tone: overview.rejected_or_correction_total > 0 ? "error" : "muted",
     },
     {
       href: "/client/submissions",
       icon: HourglassHigh,
       label: "En revisión",
-      caption: "Nuestro equipo legal está validando.",
       value: overview.pending_reviews_total,
-    },
-    {
-      href: "/client/vendors",
-      icon: Storefront,
-      label: "Proveedores",
-      caption: `${overview.active_workspaces_total} workspaces activos.`,
-      value: overview.vendors_total,
+      tone: "muted",
     },
   ];
-
   return (
     <section
       aria-label="Señales del portafolio"
-      className="cw-fade-up rounded-lg border border-[color:var(--border-default)] bg-[color:var(--surface-raised)] shadow-xs"
+      className="cw-fade-up grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-5"
     >
-      <header className="border-b border-[color:var(--border-subtle)] px-5 py-3">
-        <p className="cw-eyebrow">Señales del portafolio</p>
-      </header>
-      <ul className="divide-y divide-[color:var(--border-subtle)]">
-        {rows.map((row) => {
-          const Icon = row.icon;
-          const tone =
-            row.tone === "error"
-              ? "text-[color:var(--status-error-text)]"
-              : row.tone === "warning"
+      {tiles.map((t) => {
+        const Icon = t.icon;
+        const valueTone =
+          t.tone === "error"
+            ? "text-[color:var(--status-error-text)]"
+            : t.tone === "warning"
               ? "text-[color:var(--status-warning-text)]"
-              : row.tone === "teal"
-              ? "text-[color:var(--text-teal)]"
-              : "text-[color:var(--text-primary)]";
-          const content = (
-            <div className="flex items-center gap-3 px-5 py-3 transition-colors hover:bg-[color:var(--surface-hover)]">
-              <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-md bg-[color:var(--surface-sunken)] text-[color:var(--text-secondary)]">
-                <Icon className="h-4 w-4" weight="bold" aria-hidden />
-              </span>
-              <div className="min-w-0 flex-1">
-                <p className="text-[13px] font-semibold text-[color:var(--text-primary)]">
-                  {row.label}
-                </p>
-                <p className="text-[11px] text-[color:var(--text-tertiary)]">
-                  {row.caption}
-                </p>
-              </div>
-              <span
-                className={`font-mono text-lg font-semibold tabular-nums ${tone}`}
-              >
-                {row.value}
-              </span>
-              {row.href ? (
-                <ArrowRight
-                  className="h-4 w-4 shrink-0 text-[color:var(--text-tertiary)]"
-                  weight="bold"
-                  aria-hidden
-                />
-              ) : (
-                <span className="h-4 w-4 shrink-0" aria-hidden />
-              )}
+              : "text-[color:var(--text-secondary)]";
+        return (
+          <Link
+            key={t.label}
+            href={t.href}
+            className="group rounded-lg border border-[color:var(--border-default)] bg-[color:var(--surface-raised)] p-3.5 shadow-xs transition-colors hover:bg-[color:var(--surface-hover)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[color:var(--border-focus)]/40"
+          >
+            <div className="flex items-center justify-between">
+              <Icon
+                className="h-4 w-4 text-[color:var(--text-tertiary)]"
+                weight="bold"
+                aria-hidden="true"
+              />
+              <ArrowRight
+                className="h-3.5 w-3.5 text-[color:var(--text-tertiary)] opacity-0 transition-opacity group-hover:opacity-100"
+                weight="bold"
+                aria-hidden="true"
+              />
             </div>
-          );
-          return (
-            <li key={row.label}>
-              {row.href ? (
-                <Link
-                  href={row.href}
-                  className="block focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-[color:var(--border-focus)]/40"
-                >
-                  {content}
-                </Link>
-              ) : (
-                content
-              )}
-            </li>
-          );
-        })}
-      </ul>
+            <p className={`mt-2 font-mono text-2xl font-semibold tabular-nums ${valueTone}`}>
+              {t.value}
+            </p>
+            <p className="text-[11px] text-[color:var(--text-secondary)]">{t.label}</p>
+          </Link>
+        );
+      })}
     </section>
   );
 }
 
-// ─── Risk worklist ("Requieren tu atención") ─────────────────────
-//
-// The single highest-leverage panel: NAMES the at-risk providers
-// worst-first with their dominant problem and a one-click drill-in, so
-// the dashboard answers "which / what next", not just "how many".
+// ─── Risk worklist + root-cause pattern ──────────────────────────
 
 const RISK_DOT_TONE: Record<ClientRiskVendor["semaphore_level"], string> = {
   red: "var(--status-error-text)",
@@ -524,7 +650,29 @@ const RISK_DOT_TONE: Record<ClientRiskVendor["semaphore_level"], string> = {
   green: "var(--status-success-text)",
 };
 
-function RiskWorklistCard({ vendors }: { vendors: ClientRiskVendor[] }) {
+function MomentumChip({ delta }: { delta: number | null }) {
+  if (delta === null || delta === 0) return null;
+  const up = delta > 0;
+  return (
+    <span
+      className="font-mono text-[11px] tabular-nums"
+      style={{
+        color: up ? "var(--status-success-text)" : "var(--status-error-text)",
+      }}
+      title="Tendencia de aprobación vs mes anterior"
+    >
+      {up ? "▲" : "▼"} {Math.abs(delta)}
+    </span>
+  );
+}
+
+function RiskWorklistCard({
+  vendors,
+  pattern,
+}: {
+  vendors: ClientRiskVendor[];
+  pattern: ClientOverview["top_failure_pattern"];
+}) {
   if (vendors.length === 0) {
     return (
       <Surface title="Requieren tu atención" icon={CheckCircle}>
@@ -532,7 +680,7 @@ function RiskWorklistCard({ vendors }: { vendors: ClientRiskVendor[] }) {
           <CheckCircle
             className="h-5 w-5 shrink-0 text-[color:var(--status-success-text)]"
             weight="fill"
-            aria-hidden
+            aria-hidden="true"
           />
           Ningún proveedor necesita acción ahora. Te avisaremos cuando algo
           cambie.
@@ -550,7 +698,7 @@ function RiskWorklistCard({ vendors }: { vendors: ClientRiskVendor[] }) {
           className="inline-flex items-center gap-1 rounded-sm text-[12px] font-medium text-[color:var(--text-link)] hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[color:var(--border-focus)] focus-visible:ring-offset-2"
         >
           Ver todos
-          <ArrowRight className="h-3.5 w-3.5" weight="bold" aria-hidden />
+          <ArrowRight className="h-3.5 w-3.5" weight="bold" aria-hidden="true" />
         </Link>
       }
       bodyClassName="p-0"
@@ -565,7 +713,7 @@ function RiskWorklistCard({ vendors }: { vendors: ClientRiskVendor[] }) {
               <span
                 className="h-2.5 w-2.5 shrink-0 rounded-full"
                 style={{ backgroundColor: RISK_DOT_TONE[v.semaphore_level] }}
-                aria-hidden
+                aria-hidden="true"
               />
               <div className="min-w-0 flex-1">
                 <p className="truncate text-[13px] font-semibold text-[color:var(--text-primary)] group-hover:underline">
@@ -578,184 +726,43 @@ function RiskWorklistCard({ vendors }: { vendors: ClientRiskVendor[] }) {
                   {v.top_reason}
                 </p>
               </div>
+              <MomentumChip delta={v.momentum_delta} />
               <span className="font-mono text-[13px] font-semibold tabular-nums text-[color:var(--text-secondary)]">
                 {v.compliance_pct}%
               </span>
               <ArrowRight
                 className="h-4 w-4 shrink-0 text-[color:var(--text-tertiary)] transition-transform group-hover:translate-x-0.5 group-hover:text-[color:var(--text-primary)]"
                 weight="bold"
-                aria-hidden
+                aria-hidden="true"
               />
             </Link>
           </li>
         ))}
       </ul>
-    </Surface>
-  );
-}
-
-// ─── Semaphore distribution ──────────────────────────────────────
-
-function SemaphoreDistribution({ overview }: { overview: ClientOverview }) {
-  const segments: ChartSegment[] = [
-    { label: "Al día", value: overview.green_count, tone: "success" },
-    { label: "En proceso", value: overview.yellow_count, tone: "warning" },
-    { label: "En riesgo", value: overview.red_count, tone: "error" },
-  ];
-  const total = segments.reduce((sum, s) => sum + s.value, 0);
-  return (
-    <Surface
-      title="Distribución de tu portafolio"
-      description="Cómo se reparten tus proveedores según su nivel de cumplimiento."
-      actions={
-        <Button asChild variant="outline" size="sm">
-          <Link href="/client/vendors">
-            <span>Ver proveedores</span>
-            <ArrowRight className="h-3.5 w-3.5" weight="bold" aria-hidden="true" />
-          </Link>
-        </Button>
-      }
-    >
-      {total === 0 ? (
-        <EmptyState
-          icon={Storefront}
-          title="Sin proveedores activos"
-          description="Cuando registres proveedores, aquí verás cómo se distribuye su riesgo."
-        />
-      ) : (
-        <div className="grid gap-5 md:grid-cols-[auto,1fr] md:items-center">
-          <Donut
-            segments={segments}
-            size={132}
-            thickness={14}
-            centerLabel={total}
-            centerCaption="proveedores"
-            showLegend={false}
+      {pattern ? (
+        <div className="flex items-start gap-2 border-t border-[color:var(--border-subtle)] bg-[color:var(--surface-page)] px-5 py-2.5 text-[12px] text-[color:var(--text-secondary)]">
+          <Warning
+            className="mt-0.5 h-4 w-4 shrink-0 text-[color:var(--status-warning-text)]"
+            weight="fill"
+            aria-hidden="true"
           />
-          <div className="space-y-2.5">
-            {segments.map((seg) => (
-              <SemaphoreRow
-                key={seg.label}
-                segment={seg}
-                total={total}
-              />
-            ))}
-          </div>
+          <span>
+            Tu falla #1:{" "}
+            <span className="font-semibold text-[color:var(--text-primary)]">
+              {pattern.requirement_name}
+            </span>{" "}
+            ({pattern.institution}) — pendiente en {pattern.vendor_count}{" "}
+            proveedores. Atácala una vez en lugar de proveedor por proveedor.
+          </span>
         </div>
-      )}
+      ) : null}
     </Surface>
   );
 }
 
-function SemaphoreRow({
-  segment,
-  total,
-}: {
-  segment: ChartSegment;
-  total: number;
-}) {
-  const pct = total === 0 ? 0 : Math.round((segment.value / total) * 100);
-  const toneIcon =
-    segment.tone === "success"
-      ? CheckCircle
-      : segment.tone === "warning"
-        ? Warning
-        : WarningOctagon;
-  const Icon = toneIcon;
-  const toneText =
-    segment.tone === "success"
-      ? "text-[color:var(--status-success-text)]"
-      : segment.tone === "warning"
-        ? "text-[color:var(--status-warning-text)]"
-        : "text-[color:var(--status-error-text)]";
-  return (
-    <div className="flex items-center justify-between gap-3 rounded-md border border-[color:var(--border-subtle)] bg-[color:var(--surface-page)] px-3 py-2">
-      <span className={`flex items-center gap-2 text-[13px] font-medium ${toneText}`}>
-        <Icon className="h-4 w-4" weight="fill" aria-hidden="true" />
-        {segment.label}
-      </span>
-      <span className="flex items-center gap-2">
-        <span className="font-mono text-[11px] tabular-nums text-[color:var(--text-tertiary)]">
-          {pct}%
-        </span>
-        <span className="font-mono text-lg font-semibold tabular-nums text-[color:var(--text-primary)]">
-          {segment.value}
-        </span>
-      </span>
-    </div>
-  );
-}
+// ─── Novedades (single de-cluttered feed) ────────────────────────
 
-// ─── Recent submissions ──────────────────────────────────────────
-
-function RecentSubmissionsCard({ rows }: { rows: ClientSubmissionItem[] }) {
-  return (
-    <Surface
-      title="Entregas recientes"
-      icon={Files}
-      actions={
-        <Button asChild variant="outline" size="sm">
-          <Link href="/client/submissions">
-            <span>Ver todas</span>
-            <ArrowRight className="h-3.5 w-3.5" weight="bold" aria-hidden="true" />
-          </Link>
-        </Button>
-      }
-    >
-      {rows.length === 0 ? (
-        <EmptyState
-          icon={Files}
-          title="Sin entregas recientes"
-          description="Cuando tus proveedores suban documentos, aparecerán aquí."
-        />
-      ) : (
-        <ul className="divide-y divide-[color:var(--border-subtle)]">
-          {rows.slice(0, 6).map((row) => (
-            <li
-              key={row.submission_id}
-              className="flex items-start justify-between gap-3 py-3 first:pt-0 last:pb-0"
-            >
-              <div className="min-w-0">
-                <p className="truncate text-[13px] font-medium text-[color:var(--text-primary)]">
-                  <VendorRef vendorId={row.vendor_id} vendorName={row.vendor_name} />
-                </p>
-                <p className="truncate text-[12px] text-[color:var(--text-secondary)]">
-                  {row.requirement_name ?? row.requirement_code ?? "—"}
-                  {row.period_key ? (
-                    <span className="ml-2 font-mono text-[11px] text-[color:var(--text-tertiary)]">
-                      {row.period_key}
-                    </span>
-                  ) : null}
-                </p>
-              </div>
-              <div className="flex shrink-0 flex-col items-end gap-1">
-                <StatusPill status={row.status} />
-                <span className="font-mono text-[10px] text-[color:var(--text-tertiary)]">
-                  {timeAgo(row.submitted_at)}
-                </span>
-              </div>
-            </li>
-          ))}
-        </ul>
-      )}
-    </Surface>
-  );
-}
-
-// Both the label and the color tone are pulled from the central statuses
-// dictionary so a vocabulary or color change anywhere propagates here
-// without a hunt (Audit F2).
-function StatusPill({ status }: { status: string }) {
-  return (
-    <Badge variant={statusVariant(status)}>
-      {statusLabel(status)}
-    </Badge>
-  );
-}
-
-// ─── Quick links ─────────────────────────────────────────────────
-
-function NotificationCard({
+function NovedadesCard({
   rows,
   unreadCount,
 }: {
@@ -779,17 +786,19 @@ function NotificationCard({
         <EmptyState
           icon={Bell}
           title="Sin novedades"
-          description="Cuando un proveedor suba documentos o haya avances, apareceran aqui."
+          description="Cuando un proveedor suba documentos o haya avances, aparecerán aquí."
         />
       ) : (
         <ul className="space-y-3">
-          {rows.slice(0, 5).map((row) => (
+          {rows.slice(0, 6).map((row) => (
             <li key={row.id} className="flex items-start gap-3">
               <span
                 aria-hidden="true"
                 className={
                   "mt-1.5 h-2 w-2 shrink-0 rounded-full " +
-                  (row.read_at ? "bg-[color:var(--border-subtle)]" : "bg-[color:var(--text-teal)]")
+                  (row.read_at
+                    ? "bg-[color:var(--border-subtle)]"
+                    : "bg-[color:var(--text-teal)]")
                 }
               />
               <div className="min-w-0 flex-1">
@@ -825,114 +834,99 @@ function NotificationCard({
   );
 }
 
-function QuickLinks() {
-  const items: { href: string; label: string; helper: string }[] = [
+// ─── Action outcomes (not nav duplicates) ────────────────────────
+
+function ActionsCard() {
+  const items: {
+    href: string;
+    label: string;
+    helper: string;
+    icon: typeof FileText;
+  }[] = [
     {
-      href: "/client/vendors",
-      label: "Proveedores",
-      helper: "Lista filtrable con su semáforo.",
+      href: "/client/reports",
+      label: "Reporte ejecutivo",
+      helper: "Genera un PDF para tu dirección.",
+      icon: FileText,
     },
     {
-      href: "/client/calendar",
-      label: "Calendario",
-      helper: "Vista anual de obligaciones.",
-    },
-    {
-      href: "/client/submissions",
-      label: "Entregas",
-      helper: "Búsqueda + filtros de cargas.",
-    },
-    {
-      href: "/client/metadata",
-      label: "Metadata",
-      helper: "Excel maestro documental.",
+      href: "/client/auditoria",
+      label: "Paquete de auditoría",
+      helper: "Arma el ZIP con evidencia para un inspector.",
+      icon: Files,
     },
     {
       href: "/client/activity",
-      label: "Actividad",
-      helper: "Bitácora reciente del cliente.",
+      label: "Bitácora de actividad",
+      helper: "Historial completo del cliente.",
+      icon: HourglassHigh,
     },
   ];
   return (
-    <Surface title="Accesos rápidos" bodyClassName="p-0">
+    <Surface title="Acciones" bodyClassName="p-0">
       <ul className="divide-y divide-[color:var(--border-subtle)]">
-        {items.map((item) => (
-          <li key={item.href}>
-            <Link
-              href={item.href}
-              className="flex items-center justify-between gap-3 px-4 py-2.5 text-[12px] transition-colors hover:bg-[color:var(--surface-hover)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-[color:var(--border-focus)]/40"
-            >
-              <div className="min-w-0">
-                <p className="font-semibold text-[color:var(--text-primary)]">
-                  {item.label}
-                </p>
-                <p className="mt-0.5 text-[11px] text-[color:var(--text-secondary)]">
-                  {item.helper}
-                </p>
-              </div>
-              <ArrowRight
-                className="h-3.5 w-3.5 shrink-0 text-[color:var(--text-tertiary)]"
-                weight="bold"
-                aria-hidden
-              />
-            </Link>
-          </li>
-        ))}
+        {items.map((item) => {
+          const Icon = item.icon;
+          return (
+            <li key={item.href}>
+              <Link
+                href={item.href}
+                className="flex items-center gap-3 px-4 py-2.5 text-[12px] transition-colors hover:bg-[color:var(--surface-hover)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-[color:var(--border-focus)]/40"
+              >
+                <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-md bg-[color:var(--surface-sunken)] text-[color:var(--text-secondary)]">
+                  <Icon className="h-4 w-4" weight="bold" aria-hidden="true" />
+                </span>
+                <div className="min-w-0 flex-1">
+                  <p className="font-semibold text-[color:var(--text-primary)]">
+                    {item.label}
+                  </p>
+                  <p className="mt-0.5 text-[11px] text-[color:var(--text-secondary)]">
+                    {item.helper}
+                  </p>
+                </div>
+                <ArrowRight
+                  className="h-3.5 w-3.5 shrink-0 text-[color:var(--text-tertiary)]"
+                  weight="bold"
+                  aria-hidden="true"
+                />
+              </Link>
+            </li>
+          );
+        })}
       </ul>
     </Surface>
   );
 }
 
-// ─── Recent activity timeline ────────────────────────────────────
+// ─── Onboarding banner ───────────────────────────────────────────
 
-function RecentActivityCard({ rows }: { rows: ClientActivityItem[] }) {
+function OnboardingPromptBanner({ clientName }: { clientName: string }) {
   return (
-    <Surface
-      title="Actividad reciente"
-      actions={
-        <Link
-          href="/client/activity"
-          className="text-[11px] font-medium text-[color:var(--text-link)] hover:underline"
-        >
-          Ver más
-        </Link>
-      }
-    >
-      {rows.length === 0 ? (
-        <EmptyState
-          title="Sin actividad reciente"
-          description="Aún no hay eventos registrados para este cliente."
+    <div className="flex flex-wrap items-center justify-between gap-3 rounded-md border border-[color:var(--status-warning-border)] bg-[color:var(--status-warning-bg)] p-4">
+      <div className="flex items-start gap-3">
+        <IdentificationCard
+          className="mt-0.5 h-5 w-5 text-[color:var(--status-warning-text)]"
+          weight="bold"
+          aria-hidden="true"
         />
-      ) : (
-        <ol className="space-y-3">
-          {rows.slice(0, 6).map((row) => (
-            <li key={row.id} className="flex items-start gap-3">
-              <span
-                aria-hidden="true"
-                className="mt-1.5 h-2 w-2 shrink-0 rounded-full bg-[color:var(--text-teal)]"
-              />
-              <div className="min-w-0 flex-1">
-                <p className="truncate text-[12px] text-[color:var(--text-primary)]">
-                  {row.summary}
-                </p>
-                <p className="mt-0.5 truncate font-mono text-[10px] text-[color:var(--text-tertiary)]">
-                  {row.vendor_id && row.vendor_name ? (
-                    <VendorRef
-                      vendorId={row.vendor_id}
-                      vendorName={row.vendor_name}
-                      muted
-                    />
-                  ) : (
-                    row.vendor_name ?? "—"
-                  )}{" "}
-                  · {row.action} · {timeAgo(row.occurred_at)}
-                </p>
-              </div>
-            </li>
-          ))}
-        </ol>
-      )}
-    </Surface>
+        <div className="min-w-0">
+          <p className="text-sm font-semibold text-[color:var(--text-primary)]">
+            Termina tu alta, {clientName}
+          </p>
+          <p className="mt-0.5 text-xs text-[color:var(--text-secondary)]">
+            Nuestro equipo precargó tus datos básicos. Completa el sector,
+            domicilio fiscal y teléfono para activar tu portafolio. No te
+            pediremos archivos.
+          </p>
+        </div>
+      </div>
+      <Button asChild size="sm">
+        <Link href="/client/onboarding">
+          Completar mi alta
+          <ArrowRight className="h-3.5 w-3.5" weight="bold" aria-hidden="true" />
+        </Link>
+      </Button>
+    </div>
   );
 }
 
@@ -962,24 +956,21 @@ function timeAgo(iso: string): string {
 function DashboardSkeleton() {
   return (
     <div className="space-y-6">
-      <div className="h-40 animate-pulse rounded-xl border border-[color:var(--border-default)] bg-[color:var(--surface-raised)]" />
-      <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
-        {[0, 1, 2, 3].map((i) => (
+      <div className="grid gap-5 lg:grid-cols-[1.05fr,1fr]">
+        <div className="h-48 animate-pulse rounded-lg border border-[color:var(--border-default)] bg-[color:var(--surface-raised)]" />
+        <div className="h-48 animate-pulse rounded-lg border border-[color:var(--border-default)] bg-[color:var(--surface-raised)]" />
+      </div>
+      <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-5">
+        {[0, 1, 2, 3, 4].map((i) => (
           <div
             key={i}
-            className="h-28 animate-pulse rounded-lg border border-[color:var(--border-default)] bg-[color:var(--surface-raised)]"
+            className="h-24 animate-pulse rounded-lg border border-[color:var(--border-default)] bg-[color:var(--surface-raised)]"
           />
         ))}
       </div>
       <div className="grid gap-5 lg:grid-cols-3">
-        <div className="space-y-5 lg:col-span-2">
-          <div className="h-56 animate-pulse rounded-lg border border-[color:var(--border-default)] bg-[color:var(--surface-raised)]" />
-          <div className="h-56 animate-pulse rounded-lg border border-[color:var(--border-default)] bg-[color:var(--surface-raised)]" />
-        </div>
-        <div className="space-y-5">
-          <div className="h-40 animate-pulse rounded-lg border border-[color:var(--border-default)] bg-[color:var(--surface-raised)]" />
-          <div className="h-40 animate-pulse rounded-lg border border-[color:var(--border-default)] bg-[color:var(--surface-raised)]" />
-        </div>
+        <div className="h-64 animate-pulse rounded-lg border border-[color:var(--border-default)] bg-[color:var(--surface-raised)] lg:col-span-2" />
+        <div className="h-64 animate-pulse rounded-lg border border-[color:var(--border-default)] bg-[color:var(--surface-raised)]" />
       </div>
     </div>
   );

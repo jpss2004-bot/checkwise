@@ -36,7 +36,8 @@ if TYPE_CHECKING:
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response, status
 from fastapi.responses import FileResponse
 from pydantic import BaseModel, EmailStr, Field
-from sqlalchemy import and_, func, select, update
+from sqlalchemy import and_, cast, func, or_, select, update
+from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session, selectinload
 from starlette.background import BackgroundTask
@@ -69,6 +70,8 @@ from app.core.compliance_catalog import (
     expediente_for_persona,
     normalize_persona_type,
     recurring_for_year,
+    recurring_for_year_v2,
+    recurring_required_document,
 )
 from app.core.config import settings
 from app.core.http_utils import content_disposition_header
@@ -79,7 +82,9 @@ from app.db.session import get_db
 from app.models import (
     Client,
     ClientNotification,
+    Contract,
     Document,
+    DocumentInspection,
     Institution,
     Membership,
     Organization,
@@ -93,6 +98,9 @@ from app.services.audit_log import add_audit_event
 from app.services.calendar_aggregate import aggregate_client_calendar
 from app.services.calendar_risk import (
     REJECTED_OR_CORRECTION_STATUSES as _REJECTED_OR_CORRECTION_STATUSES,
+)
+from app.services.calendar_risk import (
+    calendar_item_risk as _calendar_item_risk,
 )
 from app.services.client_metadata import (
     client_master_file_path,
@@ -112,7 +120,10 @@ from app.services.evidence_slots import (
     renewal_status,
 )
 from app.services.metadata_store import ensure_local_export
-from app.services.reports.insights import approval_trend_points
+from app.services.reports.insights import (
+    approval_trend_points,
+    approval_trend_points_by_vendor,
+)
 from app.services.search_service import SearchHit, search_submissions
 
 router = APIRouter(prefix="/client", tags=["client"])
@@ -544,6 +555,48 @@ class ClientRiskVendor(BaseModel):
     missing_required_count: int
     rejected_or_correction_count: int
     top_reason: str
+    # Phase 2 — per-vendor month-over-month approval-rate momentum (points;
+    # most recent active month − the one before). None until two active
+    # months exist. Lets the worklist distinguish "bad but improving" from
+    # "sliding into red". Populated only for the worst-first top slice so the
+    # overview stays O(1) extra queries in the vendor count.
+    momentum_delta: int | None = None
+
+
+class ClientExposure(BaseModel):
+    """The single highest legal/tax-liability obligation across the portfolio.
+
+    Answers the executive's first question — "what's my biggest problem right
+    now?" — with one named provider + obligation, scored by severity ×
+    institution weight (SAT/IMSS/STPS) × contract materiality (headcount,
+    expiry) × how long it's been overdue. ``None`` when nothing is overdue or
+    needs correction, so the card simply hides.
+    """
+
+    vendor_id: str
+    vendor_name: str
+    requirement_name: str
+    institution: str
+    period_label: str | None = None
+    deadline_iso: str | None = None
+    days_overdue: int = 0
+    # "Opinión de Cumplimiento (SAT) vencida hace 23 días" — the headline.
+    headline: str
+    # The liability rationale ("Riesgo de deducibilidad y responsabilidad
+    # solidaria") so the number carries its "so what".
+    reason: str
+    # Optional contract context ("48 trabajadores · contrato vence en 18 días").
+    detail: str | None = None
+    href: str
+
+
+class ClientFailurePattern(BaseModel):
+    """The dominant recurring failure across the portfolio (root-cause line)."""
+
+    requirement_name: str
+    institution: str
+    vendor_count: int
+    obligation_count: int
 
 
 class ClientOverview(BaseModel):
@@ -551,7 +604,17 @@ class ClientOverview(BaseModel):
     client_name: str
     vendors_total: int
     active_workspaces_total: int
+    # CANONICAL headline metric (truth-in-data, 2026-06-19): the pooled,
+    # obligation-level "% of obligations already due that are al día" —
+    # numerator/denominator summed across the portfolio (NOT a mean-of-means),
+    # and future-period obligations excluded from the denominator so a quiet
+    # November doesn't depress the score. Derived from the SAME authoritative
+    # deadlines the calendar uses, so the surfaces can no longer disagree.
     compliance_pct: int
+    # The raw numerator/denominator behind ``compliance_pct`` so the hero can
+    # render "236 de 248" and the figure is auditable.
+    obligations_on_track_total: int = 0
+    obligations_due_total: int = 0
     # Month-over-month approval-rate momentum in points (most recent active
     # month − the one before), reused from the report engine. None when
     # there aren't two active months yet. Answers the CFO's "better or
@@ -567,11 +630,53 @@ class ClientOverview(BaseModel):
     # Lapsed obligations across the portfolio — the highest-liability state,
     # previously folded silently into the red bucket.
     overdue_total: int = 0
+    # Obligations not yet due (future periods) — surfaced as "Próximas" so the
+    # date-correct buckets stop conflating "overdue-and-missing" with
+    # "not-yet-due", which is why the old "Faltantes" number alarmed.
+    proxima_total: int = 0
     recent_submissions_total: int
     last_activity_at: datetime | None
+    # The single biggest legal/tax exposure right now (or None → hide card).
+    biggest_exposure: ClientExposure | None = None
+    # Phase 3 — count of in-queue documents an extra (AI) pass flagged for the
+    # client's attention. 0 (the default for every non-pilot client) → the UI
+    # hides the indicator entirely; it never asserts "AI vetted" what it never
+    # saw. The human reviewer's verdict always stays the source of truth.
+    ia_revisar_total: int = 0
+    # Phase 3 — the most common failure across the portfolio (one requirement
+    # failing across many providers), so the client fixes a systemic gap once
+    # instead of chasing every vendor. None when there's no clear cluster.
+    top_failure_pattern: ClientFailurePattern | None = None
     # Worst-first ranked attention list (top 5) so the flagship screen
     # answers "which providers" / "what next", not just "how many".
     top_risk_vendors: list[ClientRiskVendor] = []
+
+
+class ClientTrajectoryPoint(BaseModel):
+    """One month on the period-anchored compliance trajectory."""
+
+    period: str  # "2026-03"
+    label: str  # "mar"
+    due_total: int
+    on_track: int
+    compliance_pct: int
+
+
+class ClientTrajectory(BaseModel):
+    """Period-anchored compliance coverage over the trailing months.
+
+    The ONLY honest historical line on this data: for each past month we take
+    the obligations whose authoritative deadline fell in that month and were
+    already due, and compute resolved/total. Anchored to the obligation's own
+    period (not "today" or reviewer-click time), so re-uploads can't rewrite
+    the past. ``has_history`` is False (and ``points`` empty) until a tenant
+    has ≥3 active months, so a brand-new client never sees a misleading stub.
+    The 85% target is a fixed reference line — never an extrapolated forecast.
+    """
+
+    points: list[ClientTrajectoryPoint] = []
+    target_pct: int = 85
+    has_history: bool = False
 
 
 class ClientVendorNextRenewal(BaseModel):
@@ -1282,6 +1387,236 @@ def _risk_top_reason(summary: dict) -> str:
     return "Requiere seguimiento"
 
 
+def _overview_recurring_rows(
+    workspace: ProviderWorkspace,
+    calendar_slots: list,
+    *,
+    year: int,
+    today: date,
+) -> list[dict]:
+    """Authoritative per-obligation rows for one workspace's recurring calendar.
+
+    Mirrors :func:`app.services.calendar_aggregate.aggregate_client_calendar`'s
+    inner placement loop EXACTLY — same catalog selection, same
+    ``_calendar_deadline_iso`` deadline, same :func:`_calendar_item_risk`
+    classification — so the dashboard's overdue / due-soon / próxima counts
+    equal the calendar's by construction (truth-in-data, 2026-06-19). The slot
+    status comes from the prefetched ``calendar_slots`` (built once by
+    :func:`_vendor_compliance`), so this adds only an in-memory catalog walk —
+    no extra query.
+    """
+    persona = normalize_persona_type(workspace.persona_type)
+    catalog = (
+        recurring_for_year_v2(year, persona)
+        if settings.RECURRING_CATALOG_V2
+        else recurring_for_year(year, persona)
+    )
+    view_by_key = {
+        (v.slot_key.requirement_code, v.slot_key.period_key): v for v in calendar_slots
+    }
+    rows: list[dict] = []
+    for req in catalog:
+        view = view_by_key.get((req.code, req.period_key))
+        status = (
+            view.current_status if view and view.current_status else "pendiente"
+        )
+        deadline_iso = _calendar_deadline_iso(year, req.due_month, req.due_day)
+        risk = _calendar_item_risk(status, deadline_iso, today)
+        try:
+            deadline_date: date | None = date.fromisoformat(deadline_iso)
+        except ValueError:
+            deadline_date = None
+        rows.append(
+            {
+                "requirement_code": req.code,
+                "requirement_name": recurring_required_document(req),
+                "institution": req.institution,
+                "period_label": req.period_label,
+                "deadline_iso": deadline_iso,
+                "deadline_date": deadline_date,
+                "risk": risk,
+                "submission_id": view.current_submission_id if view else None,
+            }
+        )
+    return rows
+
+
+def _active_contracts_by_vendor(db: Session, client_id: str) -> dict[str, Contract]:
+    """One representative contract per vendor (active preferred) for the
+    exposure-materiality weighting. One query for the whole client."""
+    out: dict[str, Contract] = {}
+    for c in db.scalars(
+        select(Contract).where(Contract.client_id == client_id)
+    ).all():
+        existing = out.get(c.vendor_id)
+        if existing is None or (existing.status != "active" and c.status == "active"):
+            out[c.vendor_id] = c
+    return out
+
+
+def _exposure_institution_weight(institution: str) -> float:
+    """Liability weight by authority — SAT carries the highest peso risk
+    (CFDI deduction + IVA acreditamiento), then the social-security /
+    registry authorities (cuotas + responsabilidad solidaria)."""
+    inst = (institution or "").upper()
+    if "SAT" in inst:
+        return 3.0
+    if "IMSS" in inst or "INFONAVIT" in inst or "STPS" in inst or "REPSE" in inst:
+        return 2.0
+    return 1.0
+
+
+def _exposure_reason(institution: str) -> str:
+    inst = (institution or "").upper()
+    if "SAT" in inst:
+        return "Riesgo de deducibilidad y responsabilidad solidaria"
+    if "IMSS" in inst:
+        return "Cuotas obrero-patronales y responsabilidad solidaria"
+    if "INFONAVIT" in inst:
+        return "Aportaciones de vivienda y responsabilidad solidaria"
+    if "STPS" in inst or "REPSE" in inst:
+        return "Cumplimiento ante la STPS y registro REPSE"
+    return "Obligación de cumplimiento pendiente"
+
+
+def _pick_biggest_exposure(
+    candidates: list[dict],
+    *,
+    contracts_by_vendor: dict[str, Contract],
+    today: date,
+) -> ClientExposure | None:
+    """Score every real liability (overdue / needs-correction) and return the
+    single worst, weighting severity × authority × contract materiality × age.
+    ``None`` when there's nothing overdue or to correct, so the card hides."""
+    best: tuple[float, dict, int] | None = None
+    for c in candidates:
+        risk = c["risk"]
+        severity = 3.0 if risk == "overdue" else 2.0  # action_required
+        days_overdue = 0
+        age_mult = 1.0
+        deadline_date = c.get("deadline_date")
+        if deadline_date is not None and deadline_date < today:
+            days_overdue = (today - deadline_date).days
+            age_mult = 1.0 + min(days_overdue, 180) / 180.0
+        materiality = 1.0
+        contract = contracts_by_vendor.get(c["vendor_id"])
+        if contract is not None:
+            workers = contract.estimated_workers or 0
+            if workers >= 50:
+                materiality *= 1.5
+            elif workers >= 10:
+                materiality *= 1.2
+            if (
+                contract.end_date is not None
+                and (contract.end_date - today).days <= 30
+            ):
+                materiality *= 1.3
+            if not contract.repse_folio:
+                materiality *= 1.15
+        score = severity * _exposure_institution_weight(c["institution"]) * materiality * age_mult
+        if best is None or score > best[0] or (score == best[0] and days_overdue > best[2]):
+            best = (score, c, days_overdue)
+    if best is None:
+        return None
+    _score, c, days_overdue = best
+    if c["risk"] == "overdue" and days_overdue > 0:
+        when = f"vencida hace {days_overdue} día" + ("s" if days_overdue != 1 else "")
+    elif c["risk"] == "action_required":
+        when = "requiere corrección"
+    else:
+        when = "pendiente"
+    headline = f"{c['requirement_name']} ({c['institution']}) {when}"
+    detail_parts: list[str] = []
+    contract = contracts_by_vendor.get(c["vendor_id"])
+    if contract is not None:
+        if contract.estimated_workers:
+            detail_parts.append(
+                f"{contract.estimated_workers} trabajador"
+                + ("es" if contract.estimated_workers != 1 else "")
+            )
+        if contract.end_date is not None:
+            days_to_end = (contract.end_date - today).days
+            if days_to_end < 0:
+                detail_parts.append("contrato vencido")
+            elif days_to_end <= 30:
+                detail_parts.append(
+                    f"contrato vence en {days_to_end} día"
+                    + ("s" if days_to_end != 1 else "")
+                )
+    focus = "rejected" if c["risk"] == "action_required" else "missing"
+    return ClientExposure(
+        vendor_id=c["vendor_id"],
+        vendor_name=c["vendor_name"],
+        requirement_name=c["requirement_name"],
+        institution=c["institution"],
+        period_label=c.get("period_label"),
+        deadline_iso=c.get("deadline_iso"),
+        days_overdue=days_overdue,
+        headline=headline,
+        reason=_exposure_reason(c["institution"]),
+        detail=" · ".join(detail_parts) if detail_parts else None,
+        href=f"/client/vendors/{c['vendor_id']}?focus={focus}#documentos",
+    )
+
+
+_MONTH_ABBR_ES = (
+    "ene", "feb", "mar", "abr", "may", "jun",
+    "jul", "ago", "sep", "oct", "nov", "dic",
+)
+
+# In-queue statuses where a human reviewer has NOT yet ruled — the load-bearing
+# guard that keeps an AI flag advisory: once a human approves/rejects, the
+# document leaves this set and its AI flag stops counting.
+_REVIEWABLE_STATUSES = (
+    DocumentStatus.RECIBIDO.value,
+    DocumentStatus.PENDIENTE_REVISION.value,
+    DocumentStatus.PREVALIDADO.value,
+    DocumentStatus.POSIBLE_MISMATCH.value,
+)
+
+
+def _ia_revisar_total(db: Session, client_id: str) -> int:
+    """Count in-queue documents an extra AI pass flagged for the client.
+
+    A document counts only when it is BOTH (a) still awaiting a human decision
+    (status in :data:`_REVIEWABLE_STATUSES`) and (b) carries a non-clean AI
+    signal (suspicious/high-risk authenticity, or a not_satisfied/partial
+    comprehension verdict). Returns 0 for every non-pilot client — their
+    ``shadow_*`` columns are empty — so the UI hides the indicator entirely
+    rather than asserting the AI vetted documents it never saw.
+
+    The comprehension-verdict half is Postgres-only (JSON path); on SQLite
+    (tests) it degrades to the authenticity signal, mirroring the dialect-aware
+    SQL the admin rollup already uses.
+    """
+    ai_flag = DocumentInspection.authenticity_risk.in_(("suspicious", "high_risk"))
+    if db.get_bind().dialect.name == "postgresql":
+        # ``shadow_signals`` maps to a JSONB column. Its SQLAlchemy type is the
+        # generic ``JSON`` (so ``[...].astext`` isn't available and the
+        # ``json_*`` text helpers don't match a jsonb arg) — cast to JSONB and
+        # use ``jsonb_extract_path_text`` to pull the nested verdict as text.
+        verdict = func.jsonb_extract_path_text(
+            cast(DocumentInspection.shadow_signals, JSONB),
+            "comprehension",
+            "obligation_satisfaction",
+            "verdict",
+        )
+        ai_flag = or_(ai_flag, verdict.in_(("not_satisfied", "partial")))
+    stmt = (
+        select(func.count(func.distinct(Document.id)))
+        .select_from(Submission)
+        .join(Document, Document.submission_id == Submission.id)
+        .join(DocumentInspection, DocumentInspection.document_id == Document.id)
+        .where(
+            Submission.client_id == client_id,
+            Submission.status.in_(_REVIEWABLE_STATUSES),
+            DocumentInspection.shadow_completed_at.isnot(None),
+            ai_flag,
+        )
+    )
+    return int(db.scalar(stmt) or 0)
+
+
 @router.get("/overview", response_model=ClientOverview)
 def client_overview(
     db: DbSession,
@@ -1307,14 +1642,24 @@ def client_overview(
     vendors_total = len(vendors_by_id)
     active_workspaces_total = sum(1 for w in workspaces if w.status == "active")
 
+    contracts_by_vendor = _active_contracts_by_vendor(db, target_id)
+
     green = yellow = red = 0
     pending_reviews_total = 0
     rejected_or_correction_total = 0
     missing_required_total = 0
     due_soon_total = 0
     overdue_total = 0
-    weighted_pct_sum = 0
-    weighted_count = 0
+    proxima_total = 0
+    # Canonical pooled metric: numerator/denominator summed across the whole
+    # portfolio (truth-in-data) — NOT a mean of per-vendor percentages.
+    obligations_due_total = 0
+    obligations_on_track_total = 0
+    # Real liabilities (overdue / needs-correction) for the exposure pick, and
+    # a (requirement, institution) → {vendors, count} map for the root-cause
+    # cluster line.
+    exposure_candidates: list[dict] = []
+    failure_clusters: dict[tuple[str, str], dict] = {}
     # Collected per-vendor so we can rank the worst-first attention list
     # without a second pass over the (expensive) slot computation.
     risk_candidates: list[ClientRiskVendor] = []
@@ -1334,27 +1679,88 @@ def client_overview(
             yellow += 1
         else:
             red += 1
-        pending_reviews_total += summary["pending_reviews_count"]
-        rejected_or_correction_total += summary["rejected_or_correction_count"]
-        missing_required_total += summary["missing_required_count"]
-        due_soon_total += summary["due_soon_count"]
-        overdue_total += summary["overdue_count"]
-        weighted_pct_sum += summary["compliance_pct"]
-        weighted_count += 1
+
+        vendor = vendors_by_id.get(ws.vendor_id)
+        vendor_name = vendor.name if vendor else "Proveedor"
+
+        # Authoritative recurring obligations (same deadlines/classification as
+        # the calendar). Recurring "missing" splits into overdue / due_soon /
+        # próxima here — no more date-blind "Faltantes" bucket.
+        rows = _overview_recurring_rows(
+            ws, summary["calendar_slots"], year=selected_year, today=today
+        )
+        v_overdue = v_due_soon = v_action = v_in_review = v_proxima = 0
+        v_rec_due = v_rec_sat = 0
+        for r in rows:
+            risk = r["risk"]
+            if risk == "overdue":
+                v_overdue += 1
+            elif risk == "due_soon":
+                v_due_soon += 1
+            elif risk == "action_required":
+                v_action += 1
+            elif risk == "in_review":
+                v_in_review += 1
+            elif risk == "upcoming":
+                v_proxima += 1
+            deadline_date = r["deadline_date"]
+            if deadline_date is not None and deadline_date <= today:
+                v_rec_due += 1
+                if risk == "on_track":
+                    v_rec_sat += 1
+            if risk in ("overdue", "action_required"):
+                exposure_candidates.append(
+                    {**r, "vendor_id": ws.vendor_id, "vendor_name": vendor_name}
+                )
+                key = (r["requirement_name"], r["institution"])
+                cluster = failure_clusters.setdefault(
+                    key, {"vendors": set(), "count": 0}
+                )
+                cluster["vendors"].add(ws.vendor_id)
+                cluster["count"] += 1
+
+        # Onboarding (foundational expediente) is always "due" — fold it into
+        # the canonical numerator/denominator so a missing REPSE registration
+        # still drags the headline down, and surface its gap count as the
+        # worklist's "missing" reason.
+        onb_required = [s for s in summary["onboarding_slots"] if s.required]
+        onb_due = len(onb_required)
+        onb_sat = sum(1 for s in onb_required if s.state in _RESOLVED_SLOT_STATES)
+        onb_missing = sum(
+            1 for s in onb_required if s.state is SlotState.MISSING
+        )
+
+        overdue_total += v_overdue
+        due_soon_total += v_due_soon
+        rejected_or_correction_total += v_action
+        pending_reviews_total += v_in_review
+        proxima_total += v_proxima
+        missing_required_total += onb_missing
+        v_due_total = v_rec_due + onb_due
+        v_sat_total = v_rec_sat + onb_sat
+        obligations_due_total += v_due_total
+        obligations_on_track_total += v_sat_total
+        v_pct = round(v_sat_total / v_due_total * 100) if v_due_total else 100
+
         if level in ("red", "yellow"):
-            vendor = vendors_by_id.get(ws.vendor_id)
             risk_candidates.append(
                 ClientRiskVendor(
                     vendor_id=ws.vendor_id,
-                    vendor_name=(vendor.name if vendor else "Proveedor"),
+                    vendor_name=vendor_name,
                     semaphore_level=level,
-                    compliance_pct=summary["compliance_pct"],
-                    overdue_count=summary["overdue_count"],
-                    missing_required_count=summary["missing_required_count"],
-                    rejected_or_correction_count=summary[
-                        "rejected_or_correction_count"
-                    ],
-                    top_reason=_risk_top_reason(summary),
+                    compliance_pct=v_pct,
+                    overdue_count=v_overdue,
+                    missing_required_count=onb_missing,
+                    rejected_or_correction_count=v_action,
+                    top_reason=_risk_top_reason(
+                        {
+                            "overdue_count": v_overdue,
+                            "rejected_or_correction_count": v_action,
+                            "missing_required_count": onb_missing,
+                            "pending_reviews_count": v_in_review,
+                            "due_soon_count": v_due_soon,
+                        }
+                    ),
                 )
             )
 
@@ -1372,11 +1778,40 @@ def client_overview(
         )
     )
     top_risk_vendors = risk_candidates[:5]
+    # Per-vendor momentum from ONE batched query (constant in vendor count, so
+    # the portfolio N+1 contract holds): distinguishes "bad but improving" from
+    # "sliding into red".
+    momentum_by_vendor = approval_trend_points_by_vendor(
+        db, today, client_id=target_id
+    )
+    for rv in top_risk_vendors:
+        rv.momentum_delta = momentum_by_vendor.get(rv.vendor_id)
 
     compliance_pct = (
-        round(weighted_pct_sum / weighted_count) if weighted_count else 100
+        round(obligations_on_track_total / obligations_due_total * 100)
+        if obligations_due_total
+        else 100
     )
     compliance_trend_delta = approval_trend_points(db, today, client_id=target_id)
+    ia_revisar_total = _ia_revisar_total(db, target_id)
+    biggest_exposure = _pick_biggest_exposure(
+        exposure_candidates, contracts_by_vendor=contracts_by_vendor, today=today
+    )
+    # Root cause: the single (requirement, institution) failing across the most
+    # providers — needs ≥2 providers to count as a "pattern" worth fixing once.
+    top_failure_pattern: ClientFailurePattern | None = None
+    if failure_clusters:
+        (req_name, inst), cl = max(
+            failure_clusters.items(),
+            key=lambda kv: (len(kv[1]["vendors"]), kv[1]["count"]),
+        )
+        if len(cl["vendors"]) >= 2:
+            top_failure_pattern = ClientFailurePattern(
+                requirement_name=req_name,
+                institution=inst,
+                vendor_count=len(cl["vendors"]),
+                obligation_count=cl["count"],
+            )
 
     recent_submissions_total = int(
         db.scalar(
@@ -1396,6 +1831,8 @@ def client_overview(
         vendors_total=vendors_total,
         active_workspaces_total=active_workspaces_total,
         compliance_pct=compliance_pct,
+        obligations_on_track_total=obligations_on_track_total,
+        obligations_due_total=obligations_due_total,
         compliance_trend_delta=compliance_trend_delta,
         green_count=green,
         yellow_count=yellow,
@@ -1405,9 +1842,84 @@ def client_overview(
         missing_required_total=missing_required_total,
         due_soon_total=due_soon_total,
         overdue_total=overdue_total,
+        proxima_total=proxima_total,
         recent_submissions_total=min(recent_submissions_total, 200),
         last_activity_at=last_activity_at,
+        biggest_exposure=biggest_exposure,
+        ia_revisar_total=ia_revisar_total,
+        top_failure_pattern=top_failure_pattern,
         top_risk_vendors=top_risk_vendors,
+    )
+
+
+@router.get("/overview/trajectory", response_model=ClientTrajectory)
+def client_overview_trajectory(
+    db: DbSession,
+    current: ClientUser,
+    client_id: str | None = None,
+    months: Annotated[int, Query(ge=3, le=12)] = 8,
+) -> ClientTrajectory:
+    """Period-anchored compliance coverage over the trailing months.
+
+    For each of the last ``months`` calendar months, take the obligations whose
+    authoritative deadline fell in that month and were already due, and report
+    resolved/total. Lazy (separate from the hot ``/overview`` call) and reuses
+    the SAME ``aggregate_client_calendar`` pass the calendar uses, so the line
+    can never disagree with the grid. Empty until ≥3 active months exist.
+    """
+    target_id = _resolve_client_id(db, current, requested=client_id)
+    if db.get(Client, target_id) is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, detail="Cliente no encontrado.")
+    today = date.today()
+
+    # Trailing month-buckets, chronological.
+    wanted: list[tuple[int, int]] = []
+    y, m = today.year, today.month
+    for _ in range(months):
+        wanted.append((y, m))
+        m -= 1
+        if m == 0:
+            m, y = 12, y - 1
+    wanted.reverse()
+
+    # Aggregate each needed year once; bucket obligations by their deadline
+    # month (only those already due as of today).
+    by_month: dict[tuple[int, int], list] = {}
+    for yr in sorted({yy for yy, _ in wanted}):
+        agg = aggregate_client_calendar(
+            db, client_id=target_id, year=yr, today=today
+        )
+        for ob in agg.obligations:
+            try:
+                deadline = date.fromisoformat(ob.deadline_iso)
+            except ValueError:
+                continue
+            if deadline > today:
+                continue
+            by_month.setdefault((deadline.year, deadline.month), []).append(ob)
+
+    points: list[ClientTrajectoryPoint] = []
+    for yy, mm in wanted:
+        obs = by_month.get((yy, mm))
+        if not obs:
+            continue
+        total = len(obs)
+        on_track = sum(1 for o in obs if o.risk_level == "on_track")
+        points.append(
+            ClientTrajectoryPoint(
+                period=f"{yy:04d}-{mm:02d}",
+                label=_MONTH_ABBR_ES[mm - 1],
+                due_total=total,
+                on_track=on_track,
+                compliance_pct=round(on_track / total * 100) if total else 100,
+            )
+        )
+
+    has_history = len(points) >= 3
+    return ClientTrajectory(
+        points=points if has_history else [],
+        target_pct=85,
+        has_history=has_history,
     )
 
 
