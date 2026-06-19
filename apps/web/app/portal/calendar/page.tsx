@@ -24,8 +24,10 @@ import {
 import {
   BUCKET_CELL,
   INSTITUTION_ICON,
+  RISK_BAR_COLOR,
   RISK_ICON,
   RISK_LABEL,
+  RISK_LEVELS_WORST_FIRST,
   riskBucket,
 } from "@/components/checkwise/calendar/calendar-shared";
 import { InstitutionRowHeader } from "@/components/checkwise/calendar/institution-row-header";
@@ -1170,35 +1172,30 @@ function formatLongDate(iso: string): string {
 
 // ─── Legend ─────────────────────────────────────────────────────
 
-// The grid badges only ever surface six distinct labels. ``uploaded``
-// and ``empty`` render the same labels as ``in_review`` and ``pending``
-// respectively (see DocStateBadge), so listing them here produced four
-// visually duplicate legend entries. Keep ``pending`` + ``in_review`` as
-// the canonical labels for those two pairs.
-const LEGEND_STATES: CalendarEntry["state"][] = [
-  "pending",
-  "in_review",
-  "approved",
-  "needs_review",
-  "rejected",
-  "expired",
-];
-
+// Decodes the grid cells' six-tier risk-composition bar — the same legend the
+// client calendar shows, so the two read identically (the provider asked to
+// match the client's color language). Each swatch is the per-severity hue the
+// cell bar uses (RISK_BAR_COLOR), worst-first.
 function Legend() {
   return (
     <section className="rounded-lg border border-[color:var(--border-subtle)] bg-[color:var(--surface-raised)] px-4 py-3">
-      <div className="flex flex-wrap items-center gap-x-3 gap-y-2">
-        <p className="font-mono text-[10px] uppercase tracking-wide text-[color:var(--text-tertiary)]">
+      <ul className="flex flex-wrap items-center gap-x-4 gap-y-2">
+        <li className="font-mono text-[10px] uppercase tracking-wide text-[color:var(--text-tertiary)]">
           Leyenda
-        </p>
-        <ul className="flex flex-wrap gap-1.5">
-          {LEGEND_STATES.map((state) => (
-            <li key={state}>
-              <DocStateBadge state={state} />
-            </li>
-          ))}
-        </ul>
-      </div>
+        </li>
+        {RISK_LEVELS_WORST_FIRST.map((risk) => (
+          <li key={risk} className="flex items-center gap-1.5">
+            <span
+              aria-hidden="true"
+              className="h-3 w-3 shrink-0 rounded-sm"
+              style={{ backgroundColor: RISK_BAR_COLOR[risk] }}
+            />
+            <span className="text-xs text-[color:var(--text-secondary)]">
+              {RISK_LABEL[risk]}
+            </span>
+          </li>
+        ))}
+      </ul>
     </section>
   );
 }

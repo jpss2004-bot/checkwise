@@ -143,6 +143,29 @@ export const RISK_LEVELS_WORST_FIRST: CalendarRisk[] = [
   "on_track",
 ];
 
+export type RiskSegment = { risk: CalendarRisk; n: number };
+
+/** Group a set of obligation risks into worst-first, non-empty segments — the
+ *  composition a calendar heat cell's bar renders (how a month's count splits
+ *  across the six severities). Shared by the client matrix and the provider
+ *  grid so a cell reads identically on both. A null/unknown risk counts as
+ *  ``on_track`` (the least-urgent bucket). */
+export function riskSegments(
+  risks: ReadonlyArray<CalendarRisk | string | null | undefined>,
+): RiskSegment[] {
+  const counts = new Map<CalendarRisk, number>();
+  for (const r of risks) {
+    const key = (r && r in RISK_ORDER ? r : "on_track") as CalendarRisk;
+    counts.set(key, (counts.get(key) ?? 0) + 1);
+  }
+  const out: RiskSegment[] = [];
+  for (const risk of RISK_LEVELS_WORST_FIRST) {
+    const n = counts.get(risk) ?? 0;
+    if (n > 0) out.push({ risk, n });
+  }
+  return out;
+}
+
 // ─── Date helpers ───────────────────────────────────────────────
 // deadline_iso is "YYYY-MM-DD" with the conventional day-17 cutoff.
 // Parsed as a *local* date so "in N days" never drifts at a UTC boundary.

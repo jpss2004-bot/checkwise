@@ -26,6 +26,10 @@ export type PopoverPosition = {
   top: number;
   left: number;
   placement: PopoverPlacement;
+  /** Hard cap so the popover never spills past the viewport edge — the caller
+   *  applies it with ``overflow-y: auto`` so a tall list scrolls internally
+   *  instead of being clipped off-screen with no way to reach the bottom. */
+  maxHeight: number;
 };
 
 function computePosition(
@@ -45,16 +49,27 @@ function computePosition(
   }
   if (left < VIEWPORT_MARGIN) left = VIEWPORT_MARGIN;
 
-  let top = triggerRect.bottom + GAP;
-  let placement: PopoverPlacement = "below";
-  if (top + height > window.innerHeight - VIEWPORT_MARGIN) {
-    const aboveTop = triggerRect.top - height - GAP;
-    if (aboveTop >= VIEWPORT_MARGIN) {
-      top = aboveTop;
-      placement = "above";
-    }
+  // Space available in each direction. Open downward if the popover fits there
+  // OR there is at least as much room below as above; otherwise flip up. Either
+  // way the popover is capped to the space in its chosen direction (and made
+  // scrollable by the caller), so a list taller than the viewport — common on
+  // short laptop screens — is never clipped with its bottom unreachable.
+  const spaceBelow = window.innerHeight - VIEWPORT_MARGIN - (triggerRect.bottom + GAP);
+  const spaceAbove = triggerRect.top - GAP - VIEWPORT_MARGIN;
+
+  let top: number;
+  let placement: PopoverPlacement;
+  let maxHeight: number;
+  if (height <= spaceBelow || spaceBelow >= spaceAbove) {
+    placement = "below";
+    top = triggerRect.bottom + GAP;
+    maxHeight = spaceBelow;
+  } else {
+    placement = "above";
+    maxHeight = spaceAbove;
+    top = triggerRect.top - GAP - Math.min(height, spaceAbove);
   }
-  return { top, left, placement };
+  return { top, left, placement, maxHeight: Math.max(80, maxHeight) };
 }
 
 export function useAnchoredPopover({
@@ -91,6 +106,25 @@ export function useAnchoredPopover({
     const rect = triggerRef.current.getBoundingClientRect();
     setPosition(computePosition(rect, width, estimatedHeight, align));
   }, [open, triggerRef, width, estimatedHeight, align]);
+
+  // Re-place using the popover's REAL height once it has rendered. The pass
+  // above runs before the popover exists, so it uses ``estimatedHeight``; if the
+  // real content is taller (common — the estimate is a lower bound), an "above"
+  // placement computed from the estimate sits too low and its bottom spills off
+  // the bottom edge. Measuring after mount corrects the placement; the >1px
+  // guard stops it after it converges (no commit loop).
+  useLayoutEffect(() => {
+    if (!open || !position || !triggerRef.current || !popoverRef.current) return;
+    const rect = triggerRef.current.getBoundingClientRect();
+    const next = computePosition(rect, width, popoverRef.current.offsetHeight, align);
+    if (
+      Math.abs(next.top - position.top) > 1 ||
+      Math.abs(next.maxHeight - position.maxHeight) > 1 ||
+      next.placement !== position.placement
+    ) {
+      setPosition(next);
+    }
+  }, [open, position, triggerRef, width, align]);
 
   useEffect(() => {
     if (!open) return;

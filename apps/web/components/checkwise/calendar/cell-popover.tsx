@@ -89,6 +89,8 @@ export function CellPopover({
         top: position.top,
         left: position.left,
         width: POPOVER_WIDTH,
+        maxHeight: position.maxHeight,
+        overflowY: "auto",
         zIndex: 50,
       }}
       className="rounded-lg border border-[color:var(--border-default)] bg-[color:var(--surface-overlay)] p-2 shadow-lg cw-fade-up"
