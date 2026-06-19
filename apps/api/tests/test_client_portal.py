@@ -791,7 +791,15 @@ def test_client_submissions_filters_by_vendor_status_period(
 ) -> None:
     client_id = _seed_client(db_factory)
     vendor_id, ws_id = _seed_vendor_with_workspace(db_factory, client_id=client_id)
-    _seed_submission_for_workspace(api_client, db_factory, ws_id)
+    # Seed it as in-review explicitly — a blank test PDF now derives
+    # REQUIERE_ACLARACION under RFC hardening (7705c35); this test is about
+    # filtering an in-review submission.
+    _seed_submission_for_workspace(
+        api_client,
+        db_factory,
+        ws_id,
+        status_value=DocumentStatus.PENDIENTE_REVISION.value,
+    )
     _, email, pw = _seed_user_with_role(
         db_factory, role="client_admin", client_id=client_id, email_prefix="ca"
     )
@@ -1613,6 +1621,9 @@ def test_client_audit_package_zip_status_override_includes_in_review(
         api_client,
         db_factory,
         ws,
+        # Explicitly in-review so it matches the ?statuses=pendiente_revision
+        # filter (blank test PDFs now derive REQUIERE_ACLARACION, 7705c35).
+        status_value=DocumentStatus.PENDIENTE_REVISION.value,
         period_key="2026-B2",
         period_code="2026-B2",
     )

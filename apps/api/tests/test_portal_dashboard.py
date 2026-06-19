@@ -213,6 +213,10 @@ def test_calendar_uses_replacement_as_current_not_superseded_rejection(
     )
     assert second.status_code == 202, second.text
     new_id = second.json()["submission_id"]
+    # The replacement sits in the review queue; set that explicitly, since a
+    # blank test PDF now derives REQUIERE_ACLARACION under the RFC-alignment
+    # hardening (7705c35). This mirrors the sibling approved/rejected tests.
+    _set_status(api_client, new_id, DocumentStatus.PENDIENTE_REVISION.value)
 
     calendar = api_client.get(
         f"/api/v1/portal/workspaces/{ws['workspace_id']}/calendar?year=2026"
@@ -252,6 +256,9 @@ def test_onboarding_uses_replacement_as_current_not_superseded_rejection(
 
     second = _upload(api_client, ws["workspace_id"], data=base, supersedes=prior_id)
     new_id = second.json()["submission_id"]
+    # Replacement is in the review queue (see calendar test above for why this
+    # is set explicitly now).
+    _set_status(api_client, new_id, DocumentStatus.PENDIENTE_REVISION.value)
 
     onboarding = api_client.get(
         f"/api/v1/portal/workspaces/{ws['workspace_id']}/onboarding"
@@ -464,7 +471,15 @@ def test_dashboard_empty_workspace_reports_pending_counts(
 
 def test_dashboard_counts_in_review_slot_correctly(api_client: TestClient) -> None:
     ws = _setup_workspace(api_client)
-    _upload(api_client, ws["workspace_id"], data=_canonical_b1_payload())
+    upload = _upload(api_client, ws["workspace_id"], data=_canonical_b1_payload())
+    # Put the slot in the review queue explicitly — a blank test PDF now
+    # derives REQUIERE_ACLARACION under RFC hardening (7705c35), so we set the
+    # status this test is actually about, like the approved/rejected siblings.
+    _set_status(
+        api_client,
+        upload.json()["submission_id"],
+        DocumentStatus.PENDIENTE_REVISION.value,
+    )
     body = api_client.get(
         f"/api/v1/portal/workspaces/{ws['workspace_id']}/dashboard"
     ).json()
@@ -515,8 +530,13 @@ def test_dashboard_uses_replacement_submission_as_current_not_superseded(
     _set_status(api_client, prior_id, DocumentStatus.RECHAZADO.value)
 
     # Provider corrects → in_review.
-    _upload(
+    second = _upload(
         api_client, ws["workspace_id"], data=_canonical_b1_payload(), supersedes=prior_id
+    )
+    _set_status(
+        api_client,
+        second.json()["submission_id"],
+        DocumentStatus.PENDIENTE_REVISION.value,
     )
 
     body = api_client.get(

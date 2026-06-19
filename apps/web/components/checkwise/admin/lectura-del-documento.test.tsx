@@ -45,7 +45,9 @@ function makeShadow(
 function makeDetail(
   overrides: Partial<SubmissionDetail> & {
     shadowSignalsOverride?: Partial<ShadowAnalysisSignals>;
-    heuristicSignalsOverride?: Partial<ShadowAnalysisSignals>;
+    // `null` clears the heuristic signals entirely so the pending
+    // ("Procesando…") path can be exercised; undefined keeps the default.
+    heuristicSignalsOverride?: Partial<ShadowAnalysisSignals> | null;
     shadowOverride?: Partial<ShadowAnalysisPayload["shadow"]>;
     documentOverride?: Partial<NonNullable<SubmissionDetail["document"]>>;
   } = {},
@@ -57,7 +59,10 @@ function makeDetail(
     documentOverride,
     ...rest
   } = overrides;
-  const heuristicSignals = makeSignals(heuristicSignalsOverride);
+  const heuristicSignals =
+    heuristicSignalsOverride === null
+      ? null
+      : makeSignals(heuristicSignalsOverride);
   const shadow = makeShadow({
     signals: shadowSignalsOverride
       ? makeSignals(shadowSignalsOverride)
@@ -196,6 +201,9 @@ describe("LecturaDelDocumento", () => {
   it("shows the pending verdict when the shadow run hasn't finished", () => {
     const detail = makeDetail({
       shadowOverride: { completed_at: null, signals: null, error: null },
+      // No heuristic fallback either, so the component shows the pending
+      // "Procesando…" state instead of a heuristic verdict.
+      heuristicSignalsOverride: null,
     });
     render(<LecturaDelDocumento detail={detail} />);
     expect(
