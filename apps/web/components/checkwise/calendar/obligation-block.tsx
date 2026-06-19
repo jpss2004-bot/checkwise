@@ -175,9 +175,12 @@ export function ObligationBlock({
           </Link>
         </Button>
         <Button asChild size="sm" variant="ghost">
-          <Link href={auditHref} title="Empaquetar este periodo para auditoría">
+          <Link
+            href={auditHref}
+            title="Abre el paquete de auditoría con este periodo ya seleccionado para descargar los documentos."
+          >
             <Package className="h-3.5 w-3.5" weight="bold" aria-hidden="true" />
-            Empaquetar
+            Armar paquete de auditoría
           </Link>
         </Button>
       </div>

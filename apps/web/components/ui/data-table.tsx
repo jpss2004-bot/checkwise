@@ -73,6 +73,12 @@ type DataTableProps<T, K extends string> = {
   rowLabel?: (item: T) => string;
   emptyTitle?: string;
   emptyDescription?: string;
+  /**
+   * Optional CTA rendered inside the empty state — e.g. a "Limpiar filtros"
+   * button so a user who filtered into an empty result has a one-click way
+   * back to the full list instead of resetting each control by hand.
+   */
+  emptyAction?: ReactNode;
   filters?: DataTableFilter<T, K>[];
   initialFilter?: K;
   metaBadge?: ReactNode;
@@ -101,6 +107,7 @@ export function DataTable<T, K extends string = string>({
   rowLabel,
   emptyTitle = "Sin resultados",
   emptyDescription = "Cuando haya registros aparecerán aquí.",
+  emptyAction,
   filters,
   initialFilter,
   metaBadge,
@@ -152,6 +159,7 @@ export function DataTable<T, K extends string = string>({
         title={emptyTitle}
         description={emptyDescription}
         variant="muted"
+        action={emptyAction}
       />
     );
   }

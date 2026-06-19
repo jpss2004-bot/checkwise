@@ -799,6 +799,11 @@ class ClientSubmissionItem(BaseModel):
     # round-trippable (filter by value, render the same value back).
     institution: str | None
     period_key: str | None
+    # Distinguishes a recurring obligation (mensual/bimestral/…) from a
+    # one-time onboarding/expediente piece (``alta_inicial``). One-time docs
+    # legitimately have a null ``period_key``; the FE uses this to render a
+    # "Único" label instead of an ambiguous "—" (2nd-review note 4.1).
+    load_type: str | None
     status: str
     current_slot_status: str | None
     is_current_for_slot: bool
@@ -3261,6 +3266,7 @@ def client_submissions(
                     sub.institution.code if sub.institution else None
                 ),
                 period_key=sub.period_key,
+                load_type=sub.load_type,
                 status=sub.status,
                 current_slot_status=(
                     current_for_slot.status if current_for_slot else None

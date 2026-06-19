@@ -150,6 +150,12 @@ export default function ClientDashboardPage() {
             options={me.visible_client_ids}
             onChange={setClientId}
           />
+        ) : overview ? (
+          // Single-tenant users never see the switcher, so the client org
+          // name was otherwise unlabeled on a page full of *provider* names.
+          // A labeled "Cliente" chip makes "this is YOUR organization"
+          // unambiguous (2nd-review note 1.4).
+          <ClientBadge name={overview.client_name} />
         ) : null
       }
     >
@@ -224,6 +230,18 @@ function ClientSwitcher({
   );
 }
 
+// Read-only counterpart to ClientSwitcher for single-tenant users: same
+// chrome, but it states the client organization instead of switching it.
+function ClientBadge({ name }: { name: string }) {
+  return (
+    <span className="flex items-center gap-2 rounded-md border border-[color:var(--border-default)] bg-[color:var(--surface-raised)] px-3 py-1.5 text-xs text-[color:var(--text-secondary)]">
+      <Buildings className="h-3.5 w-3.5" weight="bold" aria-hidden="true" />
+      <span className="font-mono text-[10px] uppercase tracking-wide">Cliente</span>
+      <span className="font-medium text-[color:var(--text-primary)]">{name}</span>
+    </span>
+  );
+}
+
 // ─── Hero: canonical number + distribution + trajectory ──────────
 
 function heroDrillHref(o: ClientOverview): string | null {
@@ -276,6 +294,14 @@ function DecisionHero({
         </span>
         <ComplianceTrendChip delta={overview.compliance_trend_delta} />
       </div>
+
+      {/* Names what the number measures and over whom — the reviewer
+          couldn't tell the scope from "Obligaciones al día" alone
+          (2nd-review note 1.3). */}
+      <p className="mt-1.5 text-[11px] leading-4 text-[color:var(--text-tertiary)]">
+        De las obligaciones de tus {overview.vendors_total} proveedores con
+        fecha límite ya vencida este año.
+      </p>
 
       <DistributionBar overview={overview} />
 

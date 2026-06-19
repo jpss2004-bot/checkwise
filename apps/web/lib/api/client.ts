@@ -458,6 +458,10 @@ export type ClientSubmissionItem = {
    *  round-trippable. */
   institution: string | null;
   period_key: string | null;
+  /** ``alta_inicial`` for one-time onboarding/expediente docs (which have no
+   *  recurring period), or a recurring frequency. Lets the table show
+   *  "Único" instead of an ambiguous "—" when ``period_key`` is null. */
+  load_type: string | null;
   status: string;
   current_slot_status: string | null;
   is_current_for_slot: boolean;

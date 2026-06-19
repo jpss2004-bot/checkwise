@@ -7,6 +7,8 @@ import {
   ChatCircle,
   FileArrowDown,
   MagnifyingGlass,
+  Question,
+  X,
 } from "@phosphor-icons/react";
 
 import { Surface } from "@/components/checkwise/dashboard/stat-card";
@@ -26,7 +28,12 @@ import {
   type ClientVendorRow,
 } from "@/lib/api/client";
 import { INSTITUTION_LABELS } from "@/lib/api/portal";
-import { bucketLabel, statusLabel, statusVariant } from "@/lib/constants/statuses";
+import {
+  bucketLabel,
+  statusExplainerClient,
+  statusLabel,
+  statusVariant,
+} from "@/lib/constants/statuses";
 import { formatDateTime } from "@/lib/format/datetime";
 
 // Filter dropdown order matches the reviewer workflow: actionable first,
@@ -203,6 +210,25 @@ export default function ClientSubmissionsPage() {
     (a.vendor_name ?? "").localeCompare(b.vendor_name ?? "", "es"),
   );
 
+  // Any narrowing filter active? (Page size is a display preference, not a
+  // filter, so it doesn't count.) Drives the "Limpiar filtros" affordance —
+  // a one-click escape back to the full list, including when a notification
+  // or calendar deep-link drops the user into a pre-filtered (and sometimes
+  // empty) view.
+  const hasActiveFilters = Boolean(
+    filters.vendor_id || filters.status || filters.institution || filters.period_key,
+  );
+
+  const clearFilters = useCallback(() => {
+    applyFilters({
+      vendor_id: "",
+      status: "",
+      institution: "",
+      period_key: "",
+      limit: filters.limit,
+    });
+  }, [applyFilters, filters.limit]);
+
   return (
     <ClientShell
       title="Entregas"
@@ -268,11 +294,23 @@ export default function ClientSubmissionsPage() {
                 }
               />
             </FilterField>
-            <div className="sm:col-span-2 lg:col-span-4">
+            <div className="flex flex-wrap items-center gap-2 sm:col-span-2 lg:col-span-4">
               <Button type="submit" size="sm" loading={loading}>
                 <MagnifyingGlass className="h-3.5 w-3.5" weight="bold" aria-hidden="true" />
                 Aplicar filtros
               </Button>
+              {hasActiveFilters ? (
+                <Button
+                  type="button"
+                  size="sm"
+                  variant="ghost"
+                  onClick={clearFilters}
+                  title="Quitar todos los filtros y volver a la vista completa"
+                >
+                  <X className="h-3.5 w-3.5" weight="bold" aria-hidden="true" />
+                  Limpiar filtros
+                </Button>
+              ) : null}
             </div>
           </form>
         </Surface>
@@ -309,6 +347,8 @@ export default function ClientSubmissionsPage() {
           </label>
         </div>
 
+        <StatusLegend />
+
         <DataTable<ClientSubmissionItem>
           items={rows}
           loading={loading}
@@ -320,6 +360,19 @@ export default function ClientSubmissionsPage() {
           ariaLabel="Entregas del portafolio"
           emptyTitle="Sin entregas con esos filtros"
           emptyDescription="Modifica los filtros para ver más resultados."
+          emptyAction={
+            hasActiveFilters ? (
+              <Button
+                type="button"
+                size="sm"
+                variant="outline"
+                onClick={clearFilters}
+              >
+                <X className="h-3.5 w-3.5" weight="bold" aria-hidden="true" />
+                Limpiar filtros
+              </Button>
+            ) : undefined
+          }
           metaBadge={
             total > (rows?.length ?? 0)
               ? `${rows?.length ?? 0} de ${total}`
@@ -382,21 +435,48 @@ const SUBMISSIONS_COLUMNS: DataTableColumn<ClientSubmissionItem>[] = [
     id: "period",
     header: "Periodo",
     width: "100px",
-    cell: (row) => (
-      <span className="font-mono text-[11px] tabular-nums">
-        {row.period_key ?? "—"}
-      </span>
-    ),
+    cell: (row) => {
+      if (row.period_key) {
+        return (
+          <span className="font-mono text-[11px] tabular-nums">
+            {row.period_key}
+          </span>
+        );
+      }
+      // One-time onboarding/expediente docs have no recurring period by
+      // design — label it so a blank reads as "N/A", not "missing data"
+      // (2nd-review note 4.1).
+      if (row.load_type === "alta_inicial") {
+        return (
+          <span
+            className="text-[11px] text-[color:var(--text-secondary)]"
+            title="Documento único de expediente: no tiene periodo recurrente."
+          >
+            Único
+          </span>
+        );
+      }
+      return (
+        <span className="font-mono text-[11px] tabular-nums text-[color:var(--text-tertiary)]">
+          —
+        </span>
+      );
+    },
   },
   {
     id: "status",
     header: "Estado",
     width: "140px",
-    cell: (row) => (
-      <Badge variant={statusVariant(row.status)}>
-        {statusLabel(row.status)}
-      </Badge>
-    ),
+    cell: (row) => {
+      const explainer = statusExplainerClient(row.status);
+      return (
+        <span title={explainer ?? undefined}>
+          <Badge variant={statusVariant(row.status)}>
+            {statusLabel(row.status)}
+          </Badge>
+        </span>
+      );
+    },
   },
   {
     id: "file",
@@ -485,6 +565,48 @@ function SubmissionFileButton({
         </p>
       ) : null}
     </div>
+  );
+}
+
+// One representative code per DISTINCT user-facing label (recibido /
+// pendiente_revision / prevalidado all read "En revisión", so only
+// "recibido" appears). Ordered by where it sits in the review flow:
+// not-yet-delivered → in-review → needs-action → resolved.
+const STATUS_LEGEND_CODES = [
+  "pendiente",
+  "recibido",
+  "requiere_aclaracion",
+  "posible_mismatch",
+  "rechazado",
+  "vencido",
+  "aprobado",
+  "excepcion_legal",
+  "no_aplica",
+] as const;
+
+// Collapsible "what does each state mean" key for the Entregas table. The
+// client oversees but never uploads, so the copy is the client-voiced
+// statusExplainerClient(), not the provider-voiced one (2nd-review 4.2).
+function StatusLegend() {
+  return (
+    <details className="rounded-lg border border-[color:var(--border-subtle)] bg-[color:var(--surface-raised)] px-4 py-2.5">
+      <summary className="flex cursor-pointer list-none items-center gap-2 text-[12px] font-medium text-[color:var(--text-secondary)]">
+        <Question className="h-3.5 w-3.5" weight="bold" aria-hidden="true" />
+        ¿Qué significan los estados?
+      </summary>
+      <dl className="mt-3 grid gap-2.5 sm:grid-cols-2">
+        {STATUS_LEGEND_CODES.map((code) => (
+          <div key={code} className="flex items-start gap-2">
+            <dt className="shrink-0">
+              <Badge variant={statusVariant(code)}>{statusLabel(code)}</Badge>
+            </dt>
+            <dd className="text-[12px] leading-5 text-[color:var(--text-secondary)]">
+              {statusExplainerClient(code)}
+            </dd>
+          </div>
+        ))}
+      </dl>
+    </details>
   );
 }
 

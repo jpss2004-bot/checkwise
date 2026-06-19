@@ -81,14 +81,14 @@ function httpStatusOf(err: unknown): number | null {
   return null;
 }
 
-// Reportes sits next to the decision loop (Resumen→Proveedores→Calendario
+// Reportes sits next to the decision loop (Inicio→Proveedores→Calendario
 // →Entregas→Reportes) and Auditoría — the inspector-ready ZIP builder, a
 // headline value prop — is now reachable from every surface instead of
 // only the Proveedores banner. Notificaciones is also reachable via the
 // header bell, so its nav slot is the lower-priority tail alongside
 // Metadata (a power-user export) and Actividad.
 const NAV: { href: string; label: string; icon: Icon }[] = [
-  { href: "/client/dashboard", label: "Resumen", icon: Gauge },
+  { href: "/client/dashboard", label: "Inicio", icon: Gauge },
   { href: "/client/vendors", label: "Proveedores", icon: Storefront },
   { href: "/client/calendar", label: "Calendario", icon: CalendarBlank },
   { href: "/client/submissions", label: "Entregas", icon: Files },

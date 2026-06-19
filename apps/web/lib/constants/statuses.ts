@@ -167,6 +167,31 @@ export function statusExplainer(status: string): string | null {
   return STATUS_EXPLAINER_ES[status as DocumentStatusCode] ?? null;
 }
 
+/**
+ * Client-perspective explainers. The client OVERSEES providers — it never
+ * uploads — so ``STATUS_EXPLAINER_ES`` (written in the provider's "you must
+ * upload" voice) reads wrong on client surfaces. These say what the state
+ * means for the portfolio and who owes the next move (Entregas legend,
+ * 2nd-review note 4.2). Kept short (~80 chars) for a single line.
+ */
+export const STATUS_EXPLAINER_CLIENT_ES: Record<DocumentStatusCode, string> = {
+  [DocumentStatus.PENDIENTE]: "El proveedor aún no entrega este documento.",
+  [DocumentStatus.RECIBIDO]: "Recibido. El equipo legal lo está revisando.",
+  [DocumentStatus.PENDIENTE_REVISION]: "En cola para revisión del equipo legal.",
+  [DocumentStatus.PREVALIDADO]: "Pasó las primeras validaciones; falta la revisión humana.",
+  [DocumentStatus.POSIBLE_MISMATCH]: "Posible inconsistencia detectada; el equipo legal la revisa.",
+  [DocumentStatus.APROBADO]: "Aprobado por el equipo legal. Este requisito cumple.",
+  [DocumentStatus.RECHAZADO]: "Rechazado por el equipo legal; el proveedor debe subir uno nuevo.",
+  [DocumentStatus.VENCIDO]: "Ya no cubre el periodo vigente; el proveedor debe actualizarlo.",
+  [DocumentStatus.NO_APLICA]: "Este requisito no aplica para este proveedor.",
+  [DocumentStatus.REQUIERE_ACLARACION]: "El equipo legal pidió una aclaración al proveedor.",
+  [DocumentStatus.EXCEPCION_LEGAL]: "Aprobado bajo nota legal; conserva el sustento en el expediente.",
+};
+
+export function statusExplainerClient(status: string): string | null {
+  return STATUS_EXPLAINER_CLIENT_ES[status as DocumentStatusCode] ?? null;
+}
+
 // ===========================================================================
 // Canonical vocabulary unification (2026-06-10).
 //
