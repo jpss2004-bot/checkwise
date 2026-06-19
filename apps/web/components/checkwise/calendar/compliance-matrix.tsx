@@ -51,13 +51,27 @@ export type ComplianceMatrixSelection = {
   month: number;
 } | null;
 
-const LEGEND: { bucket: RiskBucket; label: string }[] = [
-  { bucket: "critical", label: "Vencido / por corregir" },
-  { bucket: "soon", label: "Vence pronto" },
-  { bucket: "review", label: "En revisión" },
-  { bucket: "upcoming", label: "Próximo" },
-  { bucket: "ok", label: "Al día" },
+// Five-bucket legend for the admin grid's solid-fill cells. The labels are
+// DERIVED from RISK_LABEL (the canonical risk vocabulary) grouped by bucket,
+// worst-first — never hand-written — so the legend can't contradict the cells.
+// The "critical" bucket folds two risks (overdue + action_required), so it
+// joins both canonical labels; every other bucket maps to a single risk.
+const LEGEND_BUCKET_ORDER: RiskBucket[] = [
+  "critical",
+  "soon",
+  "review",
+  "upcoming",
+  "ok",
 ];
+
+const LEGEND: { bucket: RiskBucket; label: string }[] = LEGEND_BUCKET_ORDER.map(
+  (bucket) => ({
+    bucket,
+    label: RISK_LEVELS_WORST_FIRST.filter((risk) => riskBucket(risk) === bucket)
+      .map((risk) => RISK_LABEL[risk])
+      .join(" / "),
+  }),
+);
 
 const SEMAPHORE_DOT_FALLBACK = SEMAPHORE_DOT.yellow;
 

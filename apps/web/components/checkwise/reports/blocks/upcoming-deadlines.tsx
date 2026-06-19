@@ -4,6 +4,7 @@ import { CalendarBlank } from "@phosphor-icons/react";
 
 import { BlockIntro } from "@/components/checkwise/reports/block-intro";
 import { FreshnessLabel } from "@/components/checkwise/reports/freshness-label";
+import { slotStateLabel } from "@/lib/constants/statuses";
 import type { BlockDefinition, BlockProps } from "@/lib/reports/registry";
 
 /**
@@ -98,18 +99,22 @@ const INSTITUTION_ORDER: Institution[] = [
   "interno_cliente",
 ];
 
-// State chip palette (matches attention_list).
+// State label sourced from the single state vocabulary (slotStateLabel),
+// never spelled inline — so the table reads "Requiere corrección" (not
+// "Rechazado"), "Por entregar" (not "Pendiente"), "Necesita aclaración"
+// (not "Por aclarar"), "Aprobado con nota legal" (not "Excepción") and
+// "En revisión" (not "Subido"), identically to every other surface.
 const STATE_LABEL: Record<SlotState, string> = {
-  rejected: "Rechazado",
-  needs_correction: "Por aclarar",
-  possible_mismatch: "Posible inconsistencia",
-  expired: "Vencido",
-  missing: "Pendiente",
-  in_review: "En revisión",
-  uploaded: "Subido",
-  approved: "Aprobado",
-  exception: "Excepción",
-  not_applicable: "No aplica",
+  rejected: slotStateLabel("rejected"),
+  needs_correction: slotStateLabel("needs_correction"),
+  possible_mismatch: slotStateLabel("possible_mismatch"),
+  expired: slotStateLabel("expired"),
+  missing: slotStateLabel("missing"),
+  in_review: slotStateLabel("in_review"),
+  uploaded: slotStateLabel("uploaded"),
+  approved: slotStateLabel("approved"),
+  exception: slotStateLabel("exception"),
+  not_applicable: slotStateLabel("not_applicable"),
 };
 
 // Band geometry — must agree with backend URGENCY_BANDS.
@@ -298,7 +303,7 @@ function TimelineSvg({
             x2={PAD_X + innerW}
             y1={BAND_Y + BAND_H}
             y2={BAND_Y + BAND_H}
-            stroke="var(--border-subtle,#e5e7eb)"
+            stroke="var(--border-subtle)"
             strokeWidth={1}
           />
           {ticks.map((t) => (
@@ -308,7 +313,7 @@ function TimelineSvg({
                 x2={t.x}
                 y1={BAND_Y}
                 y2={BAND_Y + BAND_H + 4}
-                stroke="var(--border-subtle,#e5e7eb)"
+                stroke="var(--border-subtle)"
                 strokeWidth={1}
               />
               <text
@@ -316,7 +321,7 @@ function TimelineSvg({
                 y={BAND_Y + BAND_H + 16}
                 textAnchor="middle"
                 fontSize={10}
-                fill="var(--text-tertiary,#6b7280)"
+                fill="var(--text-tertiary)"
               >
                 {t.label}
               </text>
@@ -327,7 +332,7 @@ function TimelineSvg({
             x={PAD_X}
             y={BAND_Y - 6}
             fontSize={10}
-            fill="var(--text-tertiary,#6b7280)"
+            fill="var(--text-tertiary)"
           >
             hoy
           </text>
@@ -336,7 +341,7 @@ function TimelineSvg({
             y={BAND_Y - 6}
             textAnchor="end"
             fontSize={10}
-            fill="var(--text-tertiary,#6b7280)"
+            fill="var(--text-tertiary)"
           >
             +{TIMELINE_MAX_DAYS}d
           </text>

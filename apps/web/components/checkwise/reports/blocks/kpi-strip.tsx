@@ -4,6 +4,7 @@ import { GridFour } from "@phosphor-icons/react";
 
 import { BlockIntro } from "@/components/checkwise/reports/block-intro";
 import { FreshnessLabel } from "@/components/checkwise/reports/freshness-label";
+import { semaphoreLabel, slotStateLabel } from "@/lib/constants/statuses";
 import type { BlockDefinition, BlockProps } from "@/lib/reports/registry";
 
 /**
@@ -49,14 +50,20 @@ interface KpiStripData {
   fetched_at?: string | null;
 }
 
+// Labels that correspond to a canonical state concept are sourced from
+// the shared helpers (semaphoreLabel/slotStateLabel) so they read the
+// same word as everywhere else: "En riesgo" (semáforo red), "Vencido"
+// (expired item), "En revisión" (in-review item), "Aprobado" (approved
+// item). The bespoke metric names (Cumplimiento, Proveedores, Envíos,
+// Revisión prom., Próximo en) stay as-is — they have no state analogue.
 const METRIC_LABEL: Record<MetricKey, string> = {
   completion_pct: "Cumplimiento",
   vendors_total: "Proveedores",
-  vendors_at_risk: "En riesgo",
+  vendors_at_risk: semaphoreLabel("red"),
   submissions_period: "Envíos",
-  overdue_count: "Vencidos",
-  in_review_count: "En revisión",
-  approved_pct: "Aprobados",
+  overdue_count: slotStateLabel("expired"),
+  in_review_count: slotStateLabel("in_review"),
+  approved_pct: slotStateLabel("approved"),
   avg_review_hours: "Revisión prom.",
   days_to_next_deadline: "Próximo en",
 };

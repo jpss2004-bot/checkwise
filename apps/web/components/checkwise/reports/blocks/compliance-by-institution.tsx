@@ -4,6 +4,7 @@ import { Buildings } from "@phosphor-icons/react";
 
 import { BlockIntro } from "@/components/checkwise/reports/block-intro";
 import { FreshnessLabel } from "@/components/checkwise/reports/freshness-label";
+import { semaphoreLabel } from "@/lib/constants/statuses";
 import type { BlockDefinition, BlockProps } from "@/lib/reports/registry";
 
 /**
@@ -56,9 +57,9 @@ const SEGMENTS: Array<{
   label: string;
   color: string;
 }> = [
-  { key: "al_dia", label: "Al día", color: "var(--status-success-text)" },
-  { key: "en_proceso", label: "En proceso", color: "var(--status-warning-text)" },
-  { key: "en_riesgo", label: "En riesgo", color: "var(--status-error-text)" },
+  { key: "al_dia", label: semaphoreLabel("green"), color: "var(--status-success-text)" },
+  { key: "en_proceso", label: semaphoreLabel("yellow"), color: "var(--status-warning-text)" },
+  { key: "en_riesgo", label: semaphoreLabel("red"), color: "var(--status-error-text)" },
 ];
 
 export function ComplianceByInstitutionBlock({

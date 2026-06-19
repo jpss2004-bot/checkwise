@@ -25,6 +25,7 @@ import { Button } from "@/components/ui/button";
 import { Progress } from "@/components/ui/progress";
 import { Skeleton } from "@/components/ui/skeleton";
 import { completeOnboarding, getOnboarding } from "@/lib/api/portal";
+import { bucketLabel } from "@/lib/constants/statuses";
 import { withPortalSession } from "@/lib/session/with-portal-session";
 import { fetchCurrentSession } from "@/lib/session/portal";
 import type { PortalSession } from "@/lib/session/portal";
@@ -568,7 +569,7 @@ function CountsSummary({
       }
     >
       <Stat label="Aprobados" value={counts.completed} tone="success" />
-      <Stat label="En revisión" value={counts.in_review} tone="info" />
+      <Stat label={bucketLabel("pending_reviews")} value={counts.in_review} tone="info" />
       <Stat label="Por atender" value={counts.needs_action} tone="warning" />
     </dl>
   );

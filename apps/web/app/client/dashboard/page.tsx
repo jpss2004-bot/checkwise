@@ -40,6 +40,7 @@ import {
   type ClientRiskVendor,
   type ClientTrajectory,
 } from "@/lib/api/client";
+import { bucketLabel } from "@/lib/constants/statuses";
 import { useUrlClientId } from "@/lib/workspace/use-url-client-id";
 
 /**
@@ -595,7 +596,7 @@ function SignalsStrip({ overview }: { overview: ClientOverview }) {
     {
       href: "/client/submissions",
       icon: HourglassHigh,
-      label: "En revisión",
+      label: bucketLabel("pending_reviews"),
       value: overview.pending_reviews_total,
       tone: "muted",
     },

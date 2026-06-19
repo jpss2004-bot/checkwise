@@ -4,6 +4,11 @@ import { ListChecks } from "@phosphor-icons/react";
 
 import { BlockIntro } from "@/components/checkwise/reports/block-intro";
 import { FreshnessLabel } from "@/components/checkwise/reports/freshness-label";
+import {
+  slotStateLabel,
+  slotStateVariant,
+  type StatusVariant,
+} from "@/lib/constants/statuses";
 import type { BlockDefinition, BlockProps } from "@/lib/reports/registry";
 
 /**
@@ -82,64 +87,52 @@ interface AttentionListData {
   total_before_filter: number;
 }
 
-// Severity buckets for the visual chip + the print-fallback label.
-// Mirrors WORKFLOW_STATE_MACHINE.md semantics on the wire; on screen
-// R4 rewrites the user-facing copy so the same state machine reads
-// without a glossary. ``Rechazado`` reads as fault assignment; this
-// list often goes in front of the vendor themselves and "Con
-// observaciones" frames it as a fixable item, not a verdict.
+// Chip label + print-fallback label come from the single state
+// vocabulary (slotStateLabel) and the tone from slotStateVariant, so a
+// state reads the EXACT same word and colour here as on every other
+// surface. This also fixes the prior divergence where ``expired``
+// rendered amber: slotStateVariant('expired') === 'destructive', so
+// Vencido is now RED (matching --doc-expired, which is now red). The
+// state codes stay unchanged on the wire so the backend contract is
+// untouched.
 const STATE_META: Record<
   SlotState,
-  {
-    label: string;
-    print: string;
-    tone: "red" | "orange" | "yellow" | "blue" | "gray";
-  }
-> = {
-  rejected: {
-    label: "Requiere corrección",
-    print: "[Requiere corrección]",
-    tone: "red",
+  { label: string; print: string; tone: StatusVariant }
+> = (
+  [
+    "rejected",
+    "needs_correction",
+    "possible_mismatch",
+    "expired",
+    "missing",
+    "in_review",
+    "uploaded",
+    "approved",
+    "exception",
+    "not_applicable",
+  ] as const
+).reduce(
+  (acc, state) => {
+    const label = slotStateLabel(state);
+    acc[state] = { label, print: `[${label}]`, tone: slotStateVariant(state) };
+    return acc;
   },
-  needs_correction: {
-    label: "Necesita aclaración",
-    print: "[Necesita aclaración]",
-    tone: "red",
-  },
-  possible_mismatch: {
-    label: "Posible inconsistencia",
-    print: "[Posible inconsistencia]",
-    tone: "orange",
-  },
-  expired: { label: "Vencido", print: "[Vencido]", tone: "orange" },
-  missing: { label: "Por entregar", print: "[Por entregar]", tone: "yellow" },
-  in_review: { label: "En revisión", print: "[En revisión]", tone: "blue" },
-  uploaded: { label: "En revisión", print: "[En revisión]", tone: "blue" },
-  approved: { label: "Aprobado", print: "[Aprobado]", tone: "gray" },
-  exception: {
-    label: "Excepción autorizada",
-    print: "[Excepción autorizada]",
-    tone: "gray",
-  },
-  not_applicable: { label: "No aplica", print: "[No aplica]", tone: "gray" },
-};
+  {} as Record<SlotState, { label: string; print: string; tone: StatusVariant }>,
+);
 
-// Migrated off ad-hoc `--state-*` hex-fallback variables (which were never
-// defined as tokens) onto the canonical semantic status family in
-// globals.css. red→error, orange/yellow→warning (the system has a single
-// amber attention tone; the chip label still distinguishes Vencido vs Por
-// entregar), blue→info, gray→neutral surfaces. Now fully theme-driven.
-const TONE_CLASS: Record<
-  "red" | "orange" | "yellow" | "blue" | "gray",
-  string
-> = {
-  red: "bg-[color:var(--status-error-bg)] text-[color:var(--status-error-text)] border-[color:var(--status-error-border)]",
-  orange:
+// Canonical semantic status family in globals.css, keyed by the shared
+// StatusVariant tone. destructive→error (red), warning→amber, info→blue,
+// success→green, secondary→neutral surfaces. Fully theme-driven.
+const TONE_CLASS: Record<StatusVariant, string> = {
+  destructive:
+    "bg-[color:var(--status-error-bg)] text-[color:var(--status-error-text)] border-[color:var(--status-error-border)]",
+  warning:
     "bg-[color:var(--status-warning-bg)] text-[color:var(--status-warning-text)] border-[color:var(--status-warning-border)]",
-  yellow:
-    "bg-[color:var(--status-warning-bg)] text-[color:var(--status-warning-text)] border-[color:var(--status-warning-border)]",
-  blue: "bg-[color:var(--status-info-bg)] text-[color:var(--status-info-text)] border-[color:var(--status-info-border)]",
-  gray: "bg-[color:var(--surface-hover)] text-[color:var(--text-secondary)] border-[color:var(--border-subtle)]",
+  info: "bg-[color:var(--status-info-bg)] text-[color:var(--status-info-text)] border-[color:var(--status-info-border)]",
+  success:
+    "bg-[color:var(--status-success-bg)] text-[color:var(--status-success-text)] border-[color:var(--status-success-border)]",
+  secondary:
+    "bg-[color:var(--surface-hover)] text-[color:var(--text-secondary)] border-[color:var(--border-subtle)]",
 };
 
 const INSTITUTION_LABEL: Record<string, string> = {

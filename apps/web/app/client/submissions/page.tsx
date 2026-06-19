@@ -26,7 +26,7 @@ import {
   type ClientVendorRow,
 } from "@/lib/api/client";
 import { INSTITUTION_LABELS } from "@/lib/api/portal";
-import { statusLabel, statusVariant } from "@/lib/constants/statuses";
+import { bucketLabel, statusLabel, statusVariant } from "@/lib/constants/statuses";
 import { formatDateTime } from "@/lib/format/datetime";
 
 // Filter dropdown order matches the reviewer workflow: actionable first,
@@ -40,7 +40,7 @@ const STATUS_OPTIONS: ReadonlyArray<{ value: string; label: string }> = [
   // recibido / pendiente_revision / prevalidado (which all read "En revisión"
   // to the client). Filtering by the single raw pendiente_revision used to
   // hide ~2/3 of the in-review queue (audit P2.11).
-  { value: "en_revision", label: "En revisión" },
+  { value: "en_revision", label: bucketLabel("pending_reviews") },
   ...(
     [
       "requiere_aclaracion",

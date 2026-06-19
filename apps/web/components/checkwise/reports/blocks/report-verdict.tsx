@@ -37,9 +37,9 @@ export const reportVerdictDefinition: Omit<
 };
 
 const LEVEL: Record<Level, { bar: string; chip: string; print: string }> = {
-  red: { bar: "var(--status-error-text)", chip: semaphoreLabel("red"), print: "[En riesgo]" },
-  yellow: { bar: "var(--status-warning-text)", chip: semaphoreLabel("yellow"), print: "[En proceso]" },
-  green: { bar: "var(--status-success-text)", chip: semaphoreLabel("green"), print: "[Al día]" },
+  red: { bar: "var(--status-error-text)", chip: semaphoreLabel("red"), print: `[${semaphoreLabel("red")}]` },
+  yellow: { bar: "var(--status-warning-text)", chip: semaphoreLabel("yellow"), print: `[${semaphoreLabel("yellow")}]` },
+  green: { bar: "var(--status-success-text)", chip: semaphoreLabel("green"), print: `[${semaphoreLabel("green")}]` },
 };
 
 export function ReportVerdictBlock({

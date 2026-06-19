@@ -27,6 +27,7 @@ import {
 } from "@/lib/api/admin";
 import { entityStatusLabel, entityStatusVariant } from "@/lib/constants/labels";
 import {
+  bucketLabel,
   semaphoreLabel,
   semaphoreVariant,
   type SemaphoreLevel,
@@ -175,9 +176,9 @@ function AdminClientDetail({ clientId }: { clientId: string }) {
                   badge={semaphoreVariant(level)}
                 />
               ))}
-              <Stat value={String(totals.missing)} label="Faltantes" />
-              <Stat value={String(totals.rejected)} label="Por corregir" />
-              <Stat value={String(totals.pending)} label="En revisión" />
+              <Stat value={String(totals.missing)} label={bucketLabel("missing_required")} />
+              <Stat value={String(totals.rejected)} label={bucketLabel("rejected_or_correction")} />
+              <Stat value={String(totals.pending)} label={bucketLabel("pending_reviews")} />
               <Stat value={String(totals.dueSoon)} label="Por vencer ≤14 d" />
             </div>
           </Surface>
@@ -238,14 +239,14 @@ function AdminClientDetail({ clientId }: { clientId: string }) {
                 },
                 {
                   id: "missing",
-                  header: "Faltantes",
+                  header: bucketLabel("missing_required"),
                   width: "90px",
                   align: "right",
                   cell: (row) => <CountCell value={row.missing_required_count} />,
                 },
                 {
                   id: "rejected",
-                  header: "Por corregir",
+                  header: bucketLabel("rejected_or_correction"),
                   width: "100px",
                   align: "right",
                   cell: (row) => (
@@ -254,14 +255,14 @@ function AdminClientDetail({ clientId }: { clientId: string }) {
                 },
                 {
                   id: "pending",
-                  header: "En revisión",
+                  header: bucketLabel("pending_reviews"),
                   width: "100px",
                   align: "right",
                   cell: (row) => <CountCell value={row.pending_reviews_count} />,
                 },
                 {
                   id: "due_soon",
-                  header: "Por vencer",
+                  header: bucketLabel("due_soon"),
                   width: "100px",
                   align: "right",
                   cell: (row) => <CountCell value={row.due_soon_count} />,

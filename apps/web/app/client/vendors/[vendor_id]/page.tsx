@@ -52,12 +52,14 @@ import {
 import { downloadAuthenticatedFile } from "@/lib/api/download";
 import { createReportFromPreset, ReportsApiError } from "@/lib/api/reports";
 import {
+  bucketLabel,
   contractStatusLabel,
   contractStatusVariant,
   reviewerResultLabel,
   slotStateLabel,
   slotStateVariant,
   suggestedActionLabel,
+  type StatusVariant,
 } from "@/lib/constants/statuses";
 
 type PageProps = {
@@ -402,8 +404,8 @@ function ExpedienteMicroBar({ detail }: { detail: ClientVendorDetail }) {
     s.total_required - s.completed - s.in_review - s.needs_action,
   );
   const segments: ChartSegment[] = [
-    { label: "Aprobados", value: s.completed, tone: "success" },
-    { label: "En revisión", value: s.in_review, tone: "info" },
+    { label: slotStateLabel("approved"), value: s.completed, tone: "success" },
+    { label: slotStateLabel("in_review"), value: s.in_review, tone: "info" },
     { label: slotStateLabel("needs_correction"), value: s.needs_action, tone: "warning" },
     { label: slotStateLabel("missing"), value: remaining, tone: "neutral" },
   ];
@@ -562,13 +564,16 @@ function ContractRow({ contract }: { contract: ClientVendorContractDoc }) {
 
 // ─── Documents To Act On ────────────────────────────────────────
 
+// Routed to the canonical item vocabulary so this subtitle can't drift from
+// the slot-state Badge rendered above it. Every action kind maps 1:1 to a
+// SlotState code except ``due_soon``, which is a count bucket ("Por vencer").
 const ACTION_KIND_LABEL: Record<ClientVendorDocumentActionItem["kind"], string> = {
-  missing: "Por entregar",
-  rejected: "Requiere corrección",
-  needs_correction: "Necesita aclaración",
-  possible_mismatch: "Posible inconsistencia",
-  expired: "Vencido",
-  due_soon: "Por vencer",
+  missing: slotStateLabel("missing"),
+  rejected: slotStateLabel("rejected"),
+  needs_correction: slotStateLabel("needs_correction"),
+  possible_mismatch: slotStateLabel("possible_mismatch"),
+  expired: slotStateLabel("expired"),
+  due_soon: bucketLabel("due_soon"),
 };
 
 function formatDeadline(value: string | null) {
@@ -878,13 +883,13 @@ function AttentionTodayCard({
 function DocumentBreakdownCard({ detail }: { detail: ClientVendorDetail }) {
   const c = detail.document_state_counts;
   const all: ChartSegment[] = [
-    { label: "Aprobados", value: c.approved, tone: "success" },
+    { label: slotStateLabel("approved"), value: c.approved, tone: "success" },
     // 2026-06-10: "Recibidos" (uploaded) and "En revisión" (in_review)
     // collapsed to a single client-facing state — sum both counts.
-    { label: "En revisión", value: c.in_review + c.uploaded, tone: "info" },
+    { label: slotStateLabel("in_review"), value: c.in_review + c.uploaded, tone: "info" },
     { label: slotStateLabel("needs_correction"), value: c.needs_review, tone: "warning" },
     { label: slotStateLabel("rejected"), value: c.rejected, tone: "error" },
-    { label: "Vencidos", value: c.expired, tone: "error" },
+    { label: slotStateLabel("expired"), value: c.expired, tone: "error" },
     // D6 — was "Pendientes", which collided with the Dashboard KPI
     // "Faltantes obligatorios" (same numeric definition, different
     // label) and with the calendar's "Pendientes" (an active
@@ -956,6 +961,20 @@ function UpcomingDeadlinesCard({ detail }: { detail: ClientVendorDetail }) {
 
 // ─── Reviewer notes ──────────────────────────────────────────────
 
+// A reviewer decision is consequential — a rejection should read red, an
+// approval green — so the result gets a toned Badge instead of plain grey
+// caption text. Maps onto the shared StatusVariant scale.
+const REVIEWER_RESULT_VARIANT: Record<string, StatusVariant> = {
+  approve: "success",
+  reject: "destructive",
+  request_clarification: "warning",
+  mark_exception: "success",
+};
+
+function reviewerResultVariant(result: string): StatusVariant {
+  return REVIEWER_RESULT_VARIANT[result] ?? "secondary";
+}
+
 function ReviewerNotesCard({ detail }: { detail: ClientVendorDetail }) {
   return (
     <Surface title="Notas del revisor">
@@ -971,9 +990,11 @@ function ReviewerNotesCard({ detail }: { detail: ClientVendorDetail }) {
               key={`${n.submission_id}-${n.occurred_at}`}
               className="rounded-md border border-[color:var(--border-subtle)] bg-[color:var(--surface-page)] p-2.5"
             >
-              <p className="text-[11px] text-[color:var(--text-tertiary)]">
-                {new Date(n.occurred_at).toLocaleString("es-MX")} ·{" "}
-                {reviewerResultLabel(n.result)}
+              <p className="flex flex-wrap items-center gap-1.5 text-[11px] text-[color:var(--text-tertiary)]">
+                <span>{new Date(n.occurred_at).toLocaleString("es-MX")}</span>
+                <Badge variant={reviewerResultVariant(n.result)}>
+                  {reviewerResultLabel(n.result)}
+                </Badge>
               </p>
               <p className="mt-1 text-[12px] text-[color:var(--text-primary)]">
                 {n.message ?? "(sin mensaje)"}

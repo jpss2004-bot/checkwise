@@ -39,7 +39,7 @@ import {
   type SubmissionPreviousAttempt,
   type SubmissionSuggestedAction,
 } from "@/lib/api/portal";
-import { DocumentStatus, statusExplainer } from "@/lib/constants/statuses";
+import { DocumentStatus, statusExplainer, statusLabel } from "@/lib/constants/statuses";
 import { cadenceLabel } from "@/lib/constants/labels";
 import { GroupedValidationSummary } from "@/components/checkwise/portal/grouped-validation-summary";
 import type { ValidationSignal } from "@/components/checkwise/validation-summary";
@@ -258,7 +258,7 @@ const STATUS_HEADLINE: Partial<Record<RequirementStatus, string>> = {
   prevalidado: "Recibimos tu documento. Un humano lo revisará pronto",
   recibido: "Recibimos tu documento",
   aprobado: "Documento aprobado",
-  excepcion_legal: "Aprobado con nota legal",
+  excepcion_legal: statusLabel("excepcion_legal"),
   no_aplica: "Este requisito no aplica para tu caso",
   pendiente: "Aún no hemos recibido este documento",
 };
@@ -453,7 +453,7 @@ const REVIEWER_NOTE_STATUSES: ReadonlySet<RequirementStatus> =
 const REVIEWER_NOTE_HEADINGS: Partial<Record<RequirementStatus, string>> = {
   rechazado: "Motivo del rechazo",
   requiere_aclaracion: "Aclaración solicitada",
-  posible_mismatch: "Posible inconsistencia",
+  posible_mismatch: statusLabel("posible_mismatch"),
 };
 
 function ReviewerNoteCard({ detail }: { detail: SubmissionDetail }) {

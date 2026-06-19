@@ -41,6 +41,7 @@ import {
   type RollupVendorAtRisk,
 } from "@/lib/api/admin";
 import {
+  bucketLabel,
   SEMAPHORE_LABELS_ES,
   semaphoreLabel,
   semaphoreVariant,
@@ -411,7 +412,7 @@ function ClientsRollupSection({ clients }: { clients: RollupClientRow[] }) {
           },
           {
             id: "missing",
-            header: "Faltantes",
+            header: bucketLabel("missing_required"),
             width: "90px",
             align: "right",
             cell: (row) => (
@@ -420,7 +421,7 @@ function ClientsRollupSection({ clients }: { clients: RollupClientRow[] }) {
           },
           {
             id: "reviews",
-            header: "En revisión",
+            header: bucketLabel("pending_reviews"),
             width: "100px",
             align: "right",
             cell: (row) => (

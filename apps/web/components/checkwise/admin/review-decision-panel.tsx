@@ -503,7 +503,7 @@ export function ReviewDecisionPanel({
             className="flex items-start gap-2 rounded-md border border-[color:var(--status-warning-border,transparent)] bg-[color:var(--status-warning-bg,transparent)] px-3 py-2 text-xs"
           >
             <Warning
-              className="mt-0.5 h-3.5 w-3.5 shrink-0 text-[color:var(--status-warning-text,#d97706)]"
+              className="mt-0.5 h-3.5 w-3.5 shrink-0 text-[color:var(--status-warning-text)]"
               weight="fill"
               aria-hidden="true"
             />

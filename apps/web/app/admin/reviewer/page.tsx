@@ -44,6 +44,7 @@ import {
   Skeleton,
 } from "@/components/checkwise/portal/state-surfaces";
 import { INSTITUTION_LABELS, type RequirementStatus } from "@/lib/api/portal";
+import { statusLabel } from "@/lib/constants/statuses";
 import {
   clearAdminSession,
   readAdminSession,
@@ -70,9 +71,9 @@ type FilterKey = (typeof FILTER_KEYS)[number];
 
 const FILTER_LABEL: Record<FilterKey, string> = {
   all: "Todos",
-  in_review: "Pendiente de revisión",
-  mismatch: "Posible inconsistencia",
-  clarify: "Aclaración",
+  in_review: statusLabel("pendiente_revision"),
+  mismatch: statusLabel("posible_mismatch"),
+  clarify: statusLabel("requiere_aclaracion"),
 };
 
 /**

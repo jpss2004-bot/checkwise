@@ -60,11 +60,11 @@ import { useUrlClientId } from "@/lib/workspace/use-url-client-id";
 const INSTITUTION_OPTIONS = ["sat", "imss", "infonavit", "stps_repse"] as const;
 
 const STATUS_OPTIONS: Array<{ value: string; label: string }> = [
-  { value: "aprobado", label: "Aprobado" },
-  { value: "pendiente_revision", label: "En revisión humana" },
-  { value: "rechazado", label: "Requiere corrección" },
-  { value: "requiere_aclaracion", label: "Necesita aclaración" },
-  { value: "excepcion_legal", label: "Excepción legal" },
+  { value: "aprobado", label: statusLabel("aprobado") },
+  { value: "pendiente_revision", label: statusLabel("pendiente_revision") },
+  { value: "rechazado", label: statusLabel("rechazado") },
+  { value: "requiere_aclaracion", label: statusLabel("requiere_aclaracion") },
+  { value: "excepcion_legal", label: statusLabel("excepcion_legal") },
 ];
 
 // One-click preset → resolves to a period_from / period_to range

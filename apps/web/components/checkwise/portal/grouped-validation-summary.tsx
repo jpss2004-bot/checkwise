@@ -54,16 +54,16 @@ const ICON_FOR_STATE: Record<GroupedValidationState, IconComponent> = {
 };
 
 const ICON_TONE_FOR_STATE: Record<GroupedValidationState, string> = {
-  ok: "text-[color:var(--status-success-text,#16a34a)]",
-  warning: "text-[color:var(--status-warning-text,#d97706)]",
-  failure: "text-[color:var(--status-error-text,#dc2626)]",
+  ok: "text-[color:var(--status-success-text)]",
+  warning: "text-[color:var(--status-warning-text)]",
+  failure: "text-[color:var(--status-error-text)]",
   pending: "text-[color:var(--text-tertiary)] animate-spin",
 };
 
 const BORDER_FOR_STATE: Record<GroupedValidationState, string> = {
-  ok: "border-l-[color:var(--status-success-text,#16a34a)]",
-  warning: "border-l-[color:var(--status-warning-text,#d97706)]",
-  failure: "border-l-[color:var(--status-error-text,#dc2626)]",
+  ok: "border-l-[color:var(--status-success-text)]",
+  warning: "border-l-[color:var(--status-warning-text)]",
+  failure: "border-l-[color:var(--status-error-text)]",
   pending: "border-l-[color:var(--border-subtle)]",
 };
 
@@ -108,7 +108,7 @@ function GroupedRow({ group }: { group: GroupedValidationOutcome }) {
   return (
     <li
       className={cn(
-        "flex items-start gap-3 rounded-md border bg-[color:var(--surface-primary,#fff)] p-3 sm:p-4",
+        "flex items-start gap-3 rounded-md border bg-[color:var(--surface-raised)] p-3 sm:p-4",
         "border-[color:var(--border-subtle)] border-l-2",
         borderClass,
       )}

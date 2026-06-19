@@ -4,6 +4,7 @@ import { ChartBar } from "@phosphor-icons/react";
 
 import { BlockIntro } from "@/components/checkwise/reports/block-intro";
 import { FreshnessLabel } from "@/components/checkwise/reports/freshness-label";
+import { bucketLabel, SEMAPHORE_DOT_CLASS } from "@/lib/constants/statuses";
 import type { BlockDefinition, BlockProps } from "@/lib/reports/registry";
 
 /**
@@ -70,13 +71,6 @@ export const complianceOverviewDefinition: Omit<
   description:
     "Banda de KPIs (cumplimiento, proveedores, críticos, en revisión) + barra de cumplimiento por proveedor. Solo datos, sin IA.",
   defaultConfig: { top_n_vendors: 12 },
-};
-
-// Solid fills for bars / dots — same semaphore mapping the radar uses.
-const SEMAPHORE_FILL: Record<SemaphoreLevel, string> = {
-  green: "var(--status-success-text)",
-  yellow: "var(--status-warning-text)",
-  red: "var(--status-error-text)",
 };
 
 function pct(n: number | undefined): number {
@@ -172,7 +166,7 @@ export function ComplianceOverviewBlock({
         </Kpi>
 
         {/* En revisión */}
-        <Kpi label="En revisión">
+        <Kpi label={bucketLabel("pending_reviews")}>
           <span className="font-mono text-[28px] font-semibold leading-none tabular-nums text-[color:var(--text-primary)]">
             {data.docs_in_review ?? 0}
           </span>
@@ -207,11 +201,10 @@ export function ComplianceOverviewBlock({
                 <div className="flex flex-1 items-center gap-2">
                   <Track className="flex-1">
                     <span
-                      className="block h-full rounded-full"
+                      className={`block h-full rounded-full ${SEMAPHORE_DOT_CLASS[v.semaphore_level]}`}
                       style={{
                         width: `${pct(v.compliance_pct)}%`,
                         minWidth: pct(v.compliance_pct) > 0 ? "0.5rem" : undefined,
-                        backgroundColor: SEMAPHORE_FILL[v.semaphore_level],
                       }}
                     />
                   </Track>
@@ -273,8 +266,8 @@ function SemaphoreBar({
   const seg = (n: number, level: SemaphoreLevel) =>
     n > 0 ? (
       <span
-        className="block h-full"
-        style={{ width: `${(n / total) * 100}%`, backgroundColor: SEMAPHORE_FILL[level] }}
+        className={`block h-full ${SEMAPHORE_DOT_CLASS[level]}`}
+        style={{ width: `${(n / total) * 100}%` }}
       />
     ) : null;
   return (
@@ -290,8 +283,7 @@ function Legend({ level, label }: { level: SemaphoreLevel; label: string }) {
   return (
     <span className="inline-flex items-center gap-1">
       <span
-        className="inline-block h-2 w-2 rounded-full"
-        style={{ backgroundColor: SEMAPHORE_FILL[level] }}
+        className={`inline-block h-2 w-2 rounded-full ${SEMAPHORE_DOT_CLASS[level]}`}
         aria-hidden="true"
       />
       {label}

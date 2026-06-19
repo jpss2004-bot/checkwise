@@ -71,7 +71,9 @@ export const RESOLVED_STATUSES: readonly DocumentStatusCode[] = [
  * code never changes; only the display string is softened.
  */
 export const STATUS_LABELS_ES: Record<DocumentStatusCode, string> = {
-  [DocumentStatus.PENDIENTE]: "Pendiente",
+  // Unified with SlotState.MISSING (2026-06-19): "no submission yet" reads
+  // "Por entregar" everywhere, not "Pendiente" on raw-status surfaces.
+  [DocumentStatus.PENDIENTE]: "Por entregar",
   // Collapsed (2026-06-10): a just-received document and one actively in
   // the reviewer queue read the same to a client — both "En revisión".
   [DocumentStatus.RECIBIDO]: "En revisión",
@@ -364,4 +366,55 @@ export const SUGGESTED_ACTION_LABELS_ES: Record<string, string> = {
 
 export function suggestedActionLabel(type: string): string {
   return SUGGESTED_ACTION_LABELS_ES[type] ?? humanizeToken(type);
+}
+
+// ===========================================================================
+// State-vocabulary unification (2026-06-19).
+//
+// SlotState + SLOT_STATE_LABELS_ES is the canonical ITEM-LEVEL vocabulary
+// (one label + one tone per concept). The reducer below collapses a raw
+// DocumentStatus onto it — mirroring the backend ``_STATUS_TO_SLOT_STATE``
+// (apps/api/app/services/evidence_slots.py) — so a surface that only has a
+// document status renders the EXACT same word and color as one that has the
+// slot state. With this, statusLabel(s) === slotStateLabel(...mapped...) for
+// every status (the drift test locks it), so "rejected" can never read
+// "Rechazado" on one screen and "Requiere corrección" on another.
+// ===========================================================================
+
+export const DOCUMENT_STATUS_TO_SLOT_STATE: Record<
+  DocumentStatusCode,
+  SlotStateCode
+> = {
+  [DocumentStatus.PENDIENTE]: SlotState.MISSING,
+  [DocumentStatus.RECIBIDO]: SlotState.UPLOADED,
+  [DocumentStatus.PENDIENTE_REVISION]: SlotState.IN_REVIEW,
+  [DocumentStatus.PREVALIDADO]: SlotState.IN_REVIEW,
+  [DocumentStatus.POSIBLE_MISMATCH]: SlotState.POSSIBLE_MISMATCH,
+  [DocumentStatus.APROBADO]: SlotState.APPROVED,
+  [DocumentStatus.RECHAZADO]: SlotState.REJECTED,
+  [DocumentStatus.VENCIDO]: SlotState.EXPIRED,
+  [DocumentStatus.NO_APLICA]: SlotState.NOT_APPLICABLE,
+  [DocumentStatus.REQUIERE_ACLARACION]: SlotState.NEEDS_CORRECTION,
+  [DocumentStatus.EXCEPCION_LEGAL]: SlotState.EXCEPTION,
+};
+
+export function documentStatusToSlotState(status: string): SlotStateCode {
+  return (
+    DOCUMENT_STATUS_TO_SLOT_STATE[status as DocumentStatusCode] ??
+    SlotState.MISSING
+  );
+}
+
+// The ONE semáforo dot fill (red/yellow/green → status token), so the ~6
+// surfaces that drew a traffic-light dot stop hand-rolling their own
+// {red,yellow,green} → token maps (which drifted on hue and token). Import
+// this instead of re-declaring the map.
+export const SEMAPHORE_DOT_CLASS: Record<SemaphoreLevel, string> = {
+  green: "bg-[color:var(--status-success-text)]",
+  yellow: "bg-[color:var(--status-warning-text)]",
+  red: "bg-[color:var(--status-error-text)]",
+};
+
+export function semaphoreDotClass(level: string): string {
+  return SEMAPHORE_DOT_CLASS[level as SemaphoreLevel] ?? SEMAPHORE_DOT_CLASS.green;
 }

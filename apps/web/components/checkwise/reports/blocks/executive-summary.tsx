@@ -3,6 +3,7 @@
 import { Sparkle } from "@phosphor-icons/react";
 
 import { FreshnessLabel } from "@/components/checkwise/reports/freshness-label";
+import { semaphoreLabel, slotStateLabel } from "@/lib/constants/statuses";
 import type { BlockDefinition, BlockProps } from "@/lib/reports/registry";
 
 /**
@@ -88,10 +89,14 @@ export function ExecutiveSummaryBlock({
     config.body && config.body.trim() ? config.body : deterministicSummary;
   const period = data?.period_label ?? config.period_label ?? "—";
   const scope = data?.scope_label ?? config.scope_label ?? "Alcance por definir";
+  // State-bearing labels are sourced from the canonical helpers so they
+  // read the same word as everywhere else: "En riesgo" (semáforo red) and
+  // "En revisión" (in-review item). "Cumplimiento" and "Próximo" are
+  // bespoke cover-metric names with no state analogue and stay as-is.
   const metrics: MetricRow[] = [
     { label: "Cumplimiento", value: formatPct(data?.headline_metrics?.completion_pct) },
-    { label: "En riesgo", value: formatCount(data?.headline_metrics?.vendors_at_risk) },
-    { label: "En revisión", value: formatCount(data?.headline_metrics?.submissions_in_review) },
+    { label: semaphoreLabel("red"), value: formatCount(data?.headline_metrics?.vendors_at_risk) },
+    { label: slotStateLabel("in_review"), value: formatCount(data?.headline_metrics?.submissions_in_review) },
     {
       label: "Próximo",
       value: data?.headline_metrics?.next_critical_deadline ?? "—",

@@ -191,19 +191,18 @@
   --doc-pending-bg:        hsl(var(--gray-50));
   --doc-pending-border:    hsl(var(--gray-200));
 
-  /* "Uploaded" = freshly arrived in our intake pipeline. Bright sky
-     blue separates it from the deeper navy of in_review (later in
-     the pipeline) so the two stages look adjacent but distinct. */
+  /* "Uploaded" + "In review" both surface to the user as "En revisión",
+     so they share ONE tone — the info blue (state-vocabulary unification
+     2026-06-19). Previously in_review used a separate navy, which made the
+     same "En revisión" concept read blue on Entregas but navy in the
+     calendar/expediente. One concept = one color. */
   --doc-uploaded-text:     hsl(var(--blue-700));
   --doc-uploaded-bg:       hsl(var(--blue-50));
   --doc-uploaded-border:   hsl(var(--blue-200));
 
-  /* "In review" = a reviewer is actively looking at it. Stronger
-     navy + thicker border so it pops against the lighter "uploaded"
-     blue. */
-  --doc-in-review-text:    hsl(var(--navy-700));
-  --doc-in-review-bg:      hsl(var(--navy-50));
-  --doc-in-review-border:  hsl(var(--navy-200));
+  --doc-in-review-text:    hsl(var(--blue-700));
+  --doc-in-review-bg:      hsl(var(--blue-50));
+  --doc-in-review-border:  hsl(var(--blue-200));
 
   --doc-approved-text:     hsl(var(--green-700));
   --doc-approved-bg:       hsl(var(--green-50));
@@ -213,9 +212,13 @@
   --doc-rejected-bg:       hsl(var(--red-50));
   --doc-rejected-border:   hsl(var(--red-100));
 
-  --doc-expired-text:      hsl(var(--orange-800));
-  --doc-expired-bg:        hsl(var(--orange-50));
-  --doc-expired-border:    hsl(var(--orange-100));
+  /* "Vencido" is a blocking, highest-liability state — RED, same as a
+     rejection (state-vocabulary unification 2026-06-19). Previously orange,
+     which both under-signalled the severity and collided with the calendar's
+     orange "Requiere corrección" bar (orange then meant two things). */
+  --doc-expired-text:      hsl(var(--red-700));
+  --doc-expired-bg:        hsl(var(--red-50));
+  --doc-expired-border:    hsl(var(--red-100));
 
   --doc-needs-review-text: hsl(var(--amber-800));
   --doc-needs-review-bg:   hsl(var(--amber-50));

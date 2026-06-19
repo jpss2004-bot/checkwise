@@ -8,7 +8,7 @@ import { ArrowRight, MagnifyingGlass } from "@phosphor-icons/react";
 import { Badge } from "@/components/ui/badge";
 import { SearchInput } from "@/components/ui/search-input";
 import { INSTITUTION_LABELS } from "@/lib/api/portal";
-import { statusLabel } from "@/lib/constants/statuses";
+import { statusLabel, statusVariant } from "@/lib/constants/statuses";
 import type {
   SearchHit,
   SearchMatchType,
@@ -227,11 +227,11 @@ function MatchedByPill({ matched }: { matched: SearchMatchType }) {
 }
 
 function StatusPill({ status }: { status: string }) {
-  // Status pulled from the central dictionary so all surfaces stay in
-  // sync. Kept as a compact outline badge so the row's primary value
-  // (vendor + requirement) still dominates.
+  // Status label + tone both pulled from the central dictionary so a
+  // rejected/expired hit reads red here exactly as it does everywhere else,
+  // instead of flattening every result to a neutral outline badge.
   return (
-    <Badge variant="outline" className="text-[10.5px]">
+    <Badge variant={statusVariant(status)} className="text-[10.5px]">
       {statusLabel(status)}
     </Badge>
   );

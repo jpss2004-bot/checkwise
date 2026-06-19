@@ -19,6 +19,8 @@ import {
   type Icon,
 } from "@phosphor-icons/react";
 
+import { SEMAPHORE_DOT_CLASS } from "@/lib/constants/statuses";
+
 // Institution → icon, app-wide. House (vivienda) for INFONAVIT disambiguates
 // it from IMSS (Buildings); Scales for SAT, ShieldCheck for STPS/REPSE.
 export const INSTITUTION_ICON: Record<string, Icon> = {
@@ -111,23 +113,21 @@ export const BUCKET_CELL: Record<RiskBucket, string> = {
   ok: "border-[color:var(--doc-approved-border)] bg-[color:var(--doc-approved-bg)] text-[color:var(--doc-approved-text)]",
 };
 
-export const SEMAPHORE_DOT: Record<"red" | "yellow" | "green", string> = {
-  red: "bg-[color:var(--status-error-text)]",
-  yellow: "bg-[color:var(--status-warning-text)]",
-  green: "bg-[color:var(--status-success-text)]",
-};
+// The semáforo dot fill is defined ONCE in lib/constants/statuses.ts; re-export
+// it here so calendar surfaces share the exact same red/yellow/green tone.
+export const SEMAPHORE_DOT = SEMAPHORE_DOT_CLASS;
 
-// Per-risk solid fill (CSS color value) for the in-cell composition bar and
-// its legend. Unlike the 5 coarse BUCKET tones — which merge ``overdue`` and
-// ``action_required`` into one red — these give all SIX severities a distinct
-// hue, so a matrix cell can show at a glance how many obligations are overdue
-// (red) vs awaiting the provider's correction (orange) vs in review (blue) vs
-// on track (green), instead of one worst-case block that hides the mix.
+// Per-risk solid fill for the in-cell composition bar + legend, pinned to the
+// ONE portal-wide tone scale (state-vocabulary unification 2026-06-19): a
+// color always means the same severity everywhere. The two blocking severities
+// (overdue + action_required) share RED — the label/icon distinguishes them —
+// instead of the old orange-for-correction, which collided with the orange
+// "Vencido" badge. in_review is the info BLUE used everywhere else (was navy).
 export const RISK_BAR_COLOR: Record<CalendarRisk, string> = {
   overdue: "hsl(var(--red-500))",
-  action_required: "hsl(var(--orange-500))",
+  action_required: "hsl(var(--red-500))",
   due_soon: "hsl(var(--amber-500))",
-  in_review: "hsl(var(--navy-500))",
+  in_review: "hsl(var(--blue-500))",
   upcoming: "hsl(var(--gray-400))",
   on_track: "hsl(var(--green-500))",
 };

@@ -1656,7 +1656,7 @@ function ExpectedDocumentsChecklist({
                   className="flex items-start gap-2 text-xs text-muted-foreground"
                 >
                   <Warning
-                    className="mt-0.5 h-3.5 w-3.5 shrink-0 text-[color:var(--state-yellow,#d97706)]"
+                    className="mt-0.5 h-3.5 w-3.5 shrink-0 text-[color:var(--status-warning-text)]"
                     aria-hidden="true"
                   />
                   <span>{err}</span>

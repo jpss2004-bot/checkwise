@@ -654,10 +654,10 @@ function SignalsList({ reasons }: { reasons: SubmissionReason[] }) {
           r.severity === "error" ? XCircle : r.severity === "warning" ? WarningCircle : CheckCircle;
         const tone =
           r.severity === "error"
-            ? "text-[color:var(--status-error-text,#dc2626)]"
+            ? "text-[color:var(--status-error-text)]"
             : r.severity === "warning"
-              ? "text-[color:var(--status-warning-text,#d97706)]"
-              : "text-[color:var(--status-success-text,#16a34a)]";
+              ? "text-[color:var(--status-warning-text)]"
+              : "text-[color:var(--status-success-text)]";
         return (
           <li
             key={r.rule_code}

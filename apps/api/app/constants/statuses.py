@@ -68,7 +68,9 @@ RESOLVED_STATUSES: tuple[DocumentStatus, ...] = (
 #   - excepcion_legal reads "Aprobado con nota legal" (it's a positive
 #     outcome, not an alarm).
 STATUS_LABELS_ES: dict[DocumentStatus, str] = {
-    DocumentStatus.PENDIENTE: "Pendiente",
+    # Unified with the missing-slot label (2026-06-19): "no submission yet"
+    # reads "Por entregar" everywhere, matching the frontend mirror.
+    DocumentStatus.PENDIENTE: "Por entregar",
     DocumentStatus.RECIBIDO: "En revisión",
     DocumentStatus.PENDIENTE_REVISION: "En revisión",
     DocumentStatus.PREVALIDADO: "En revisión",

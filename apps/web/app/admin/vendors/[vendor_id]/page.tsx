@@ -31,7 +31,7 @@ import {
   type ClientVendorDetail,
 } from "@/lib/api/client";
 import type { RequirementStatus } from "@/lib/api/portal";
-import { statusLabel } from "@/lib/constants/statuses";
+import { bucketLabel, statusLabel } from "@/lib/constants/statuses";
 import {
   entityStatusLabel,
   entityStatusVariant,
@@ -68,7 +68,7 @@ export default function AdminVendorDetailPage({ params }: PageProps) {
 
 const COUNT_LABELS: { key: keyof ClientVendorDetail["document_state_counts"]; label: string }[] = [
   { key: "approved", label: "Aprobados" },
-  { key: "in_review", label: "En revisión" },
+  { key: "in_review", label: bucketLabel("pending_reviews") },
   { key: "needs_review", label: "Por revisar" },
   { key: "uploaded", label: "Recibidos" },
   { key: "pending", label: "Pendientes" },

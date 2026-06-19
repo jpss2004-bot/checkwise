@@ -65,6 +65,7 @@ import {
   type OnboardingSummary,
   type RequirementStatus,
 } from "@/lib/api/portal";
+import { bucketLabel, statusLabel } from "@/lib/constants/statuses";
 import { withOnboardingGate } from "@/lib/session/with-onboarding-gate";
 import type { PortalSession } from "@/lib/session/portal";
 import type { DocumentStateCode } from "@/lib/types";
@@ -309,7 +310,7 @@ function DashboardInner({ session }: { session: PortalSession }) {
             }
           />
           <KpiCard
-            label="En revisión"
+            label={bucketLabel("pending_reviews")}
             value={onboarding.in_review}
             tone="info"
             icon={HourglassHigh}
@@ -463,7 +464,7 @@ function buildMetadataItems(args: {
       mono: true,
       tone: summary.needs_action > 0 ? "warning" : "default",
     },
-    { label: "En revisión", value: summary.in_review, mono: true },
+    { label: bucketLabel("pending_reviews"), value: summary.in_review, mono: true },
     { label: "Aprobados", value: counts.approved, mono: true },
     { label: "Próximo", value: deadlineLabel },
   ];
@@ -485,7 +486,7 @@ function ComplianceHeroCard({
   const IconComponent = TONE_TO_ICON[semaphore.level];
   const segments: ChartSegment[] = [
     { label: "Aprobados", value: counts.approved, tone: "success" },
-    { label: "En revisión", value: counts.in_review + counts.uploaded, tone: "info" },
+    { label: bucketLabel("pending_reviews"), value: counts.in_review + counts.uploaded, tone: "info" },
     {
       label: "Necesitan acción",
       value: counts.needs_review + counts.rejected + counts.expired,
@@ -564,7 +565,7 @@ function ComplianceHeroCard({
               tone="success"
             />
             <MiniStat
-              label="En revisión"
+              label={bucketLabel("pending_reviews")}
               value={summary.in_review}
               tone="info"
             />
@@ -1155,7 +1156,7 @@ function InstitutionBreakdownCard({
             {rows.map((row) => {
               const segments: ChartSegment[] = [
                 { label: "Aprobados", value: row.approved, tone: "success" },
-                { label: "En revisión", value: row.in_review, tone: "info" },
+                { label: bucketLabel("pending_reviews"), value: row.in_review, tone: "info" },
                 { label: "Por atender", value: row.needs_action, tone: "warning" },
                 { label: "Pendientes", value: row.pending, tone: "neutral" },
               ];
@@ -1269,7 +1270,7 @@ function OperationalQueues({
       />
 
       <QueuePanel
-        title="En revisión"
+        title={bucketLabel("pending_reviews")}
         icon={HourglassHigh}
         emptyTitle="Sin documentos en cola"
         emptyDescription="No hay cargas esperando revisión legal en este momento."
@@ -1532,7 +1533,7 @@ function ComplianceDonut({
 }) {
   const segments: ChartSegment[] = [
     { label: "Aprobados", value: counts.approved, tone: "success" },
-    { label: "En revisión", value: counts.in_review + counts.uploaded, tone: "info" },
+    { label: bucketLabel("pending_reviews"), value: counts.in_review + counts.uploaded, tone: "info" },
     {
       label: "Necesitan acción",
       value: counts.needs_review + counts.rejected + counts.expired,
@@ -1660,11 +1661,11 @@ const _ZIP_INSTITUTION_OPTIONS: ReadonlyArray<{ value: string; label: string }> 
 
 const _ZIP_STATUS_OPTIONS: ReadonlyArray<{ value: string; label: string }> = [
   { value: "", label: "Todos los estados" },
-  { value: "aprobado", label: "Aprobados" },
-  { value: "pendiente_revision", label: "En revisión" },
-  { value: "requiere_aclaracion", label: "Aclaración" },
-  { value: "rechazado", label: "Rechazados" },
-  { value: "excepcion_legal", label: "Excepción legal" },
+  { value: "aprobado", label: statusLabel("aprobado") },
+  { value: "pendiente_revision", label: statusLabel("pendiente_revision") },
+  { value: "requiere_aclaracion", label: statusLabel("requiere_aclaracion") },
+  { value: "rechazado", label: statusLabel("rechazado") },
+  { value: "excepcion_legal", label: statusLabel("excepcion_legal") },
 ];
 
 // Canonical period_key shapes accepted by the backend (see

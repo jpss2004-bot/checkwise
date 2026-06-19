@@ -35,10 +35,13 @@ import {
 } from "@/components/checkwise/calendar/compliance-matrix";
 import { AdminObligationBlock } from "@/components/checkwise/calendar/admin-obligation-block";
 import {
+  RISK_LABEL,
   RISK_ORDER,
   SEMAPHORE_DOT,
   relativeDeadline,
+  riskBucket,
   type CalendarRisk,
+  type RiskBucket,
 } from "@/components/checkwise/calendar/calendar-shared";
 import {
   getAdminCalendarGrid,
@@ -56,6 +59,19 @@ import { INSTITUTION_LABELS, MONTH_LABELS_ES, MONTH_LABELS_SHORT_ES } from "@/li
 const SEMAPHORE_RANK: Record<string, number> = { red: 0, yellow: 1, green: 2 };
 const ROW_PAGE = 20;
 const INSTITUTIONS = ["sat", "imss", "infonavit", "stps_repse"] as const;
+
+// Map a calendar heat bucket onto the Badge tone scale so the renewals lane
+// reads identically to the matrix cells (one meaning per color, never drifts).
+const RISK_BUCKET_BADGE_VARIANT: Record<
+  RiskBucket,
+  "success" | "warning" | "info" | "destructive" | "secondary"
+> = {
+  critical: "destructive",
+  soon: "warning",
+  review: "info",
+  upcoming: "secondary",
+  ok: "success",
+};
 
 /** Build the matrix cell map, optionally scoped to one institution (recolor +
  *  recount client-side — no refetch). */
@@ -1121,8 +1137,8 @@ function RenewalGroup({
               <span className="whitespace-nowrap text-[12px] text-[color:var(--text-secondary)]">
                 {r.detail}
               </span>
-              <Badge variant={r.badge === "overdue" ? "destructive" : "warning"}>
-                {r.badge === "overdue" ? "Vencido" : r.badge === "due_soon" ? "Pronto" : "Próximo"}
+              <Badge variant={RISK_BUCKET_BADGE_VARIANT[riskBucket(r.badge as CalendarRisk)]}>
+                {RISK_LABEL[r.badge as CalendarRisk]}
               </Badge>
               <Link
                 href={`/admin/vendors/${r.vendorId}`}

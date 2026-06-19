@@ -4,6 +4,7 @@ import { Table } from "@phosphor-icons/react";
 
 import { BlockIntro } from "@/components/checkwise/reports/block-intro";
 import { FreshnessLabel } from "@/components/checkwise/reports/freshness-label";
+import { slotStateLabel } from "@/lib/constants/statuses";
 import type { BlockDefinition, BlockProps } from "@/lib/reports/registry";
 
 /**
@@ -68,12 +69,13 @@ const INSTITUTION_LABEL: Record<InstitutionCode, string> = {
   stps_repse: "STPS",
 };
 
-// R4 (user-language taxonomy): chips in the risk matrix go in front of
-// auditors and executives — replaced punitive / vague terms with what
-// the reader actually needs to know ("Con observaciones" instead of
-// "Rechazado"; "Pendiente aclaración" instead of the cryptic "Acción").
-// State codes stay unchanged on the wire so the backend contract is
-// untouched.
+// The chip tint is the canonical per-doc-state token family (--doc-*),
+// and the LABEL is sourced from the single state vocabulary via
+// slotStateLabel() — never spelled inline — so "rejected" reads
+// "Requiere corrección" and "expired" reads "Vencido" identically here
+// and on every other surface. State codes stay unchanged on the wire so
+// the backend contract is untouched. Each matrix state maps to its
+// canonical SlotState code for the label lookup.
 const STATE_TONE: Record<
   DocumentStateCode,
   { bg: string; text: string; label: string }
@@ -81,37 +83,37 @@ const STATE_TONE: Record<
   pending: {
     bg: "bg-[color:var(--doc-pending-bg)]",
     text: "text-[color:var(--doc-pending-text)]",
-    label: "Por entregar",
+    label: slotStateLabel("missing"),
   },
   uploaded: {
     bg: "bg-[color:var(--doc-uploaded-bg)]",
     text: "text-[color:var(--doc-uploaded-text)]",
-    label: "En revisión",
+    label: slotStateLabel("uploaded"),
   },
   in_review: {
     bg: "bg-[color:var(--doc-in-review-bg)]",
     text: "text-[color:var(--doc-in-review-text)]",
-    label: "En revisión",
+    label: slotStateLabel("in_review"),
   },
   approved: {
     bg: "bg-[color:var(--doc-approved-bg)]",
     text: "text-[color:var(--doc-approved-text)]",
-    label: "Aprobado",
+    label: slotStateLabel("approved"),
   },
   rejected: {
     bg: "bg-[color:var(--doc-rejected-bg)]",
     text: "text-[color:var(--doc-rejected-text)]",
-    label: "Requiere corrección",
+    label: slotStateLabel("rejected"),
   },
   expired: {
     bg: "bg-[color:var(--doc-expired-bg)]",
     text: "text-[color:var(--doc-expired-text)]",
-    label: "Vencido",
+    label: slotStateLabel("expired"),
   },
   needs_review: {
     bg: "bg-[color:var(--doc-needs-review-bg)]",
     text: "text-[color:var(--doc-needs-review-text)]",
-    label: "Necesita aclaración",
+    label: slotStateLabel("needs_correction"),
   },
   empty: {
     bg: "bg-[color:var(--doc-empty-bg)]",

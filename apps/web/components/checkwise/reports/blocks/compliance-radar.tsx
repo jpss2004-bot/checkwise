@@ -4,6 +4,7 @@ import { Compass } from "@phosphor-icons/react";
 
 import { BlockIntro } from "@/components/checkwise/reports/block-intro";
 import { FreshnessLabel } from "@/components/checkwise/reports/freshness-label";
+import { SEMAPHORE_DOT_CLASS } from "@/lib/constants/statuses";
 import type { BlockDefinition, BlockProps } from "@/lib/reports/registry";
 
 /**
@@ -71,12 +72,22 @@ export const complianceRadarDefinition: Omit<
   },
 };
 
+// SVG fill/stroke + color-mix() need a bare ``var(--token)`` value, not a
+// Tailwind class, so we can't drop SEMAPHORE_DOT_CLASS in directly here.
+// Instead we DERIVE the bare value from the canonical dot-class map
+// (statuses.ts) — extracting the ``var(--status-*-text)`` it wraps — so
+// the semáforo tokens still come from the single source of truth (no
+// inline --status-* re-declaration) while the SVG keeps the exact value
+// form it needs. The rendered colour is unchanged.
+const semaphoreVar = (level: "green" | "yellow" | "red"): string => {
+  const match = SEMAPHORE_DOT_CLASS[level].match(/var\((--[^)]+)\)/);
+  return `var(${match?.[1] ?? "--status-success-text"})`;
+};
+
 const SEMAPHORE_COLOR = {
-  green: "var(--status-success-text)",
-  yellow: "var(--status-warning-text)",
-  // --status-danger-text was never defined → the red donut segment
-  // rendered colorless. Use the defined error token (matches the matrix).
-  red: "var(--status-error-text)",
+  green: semaphoreVar("green"),
+  yellow: semaphoreVar("yellow"),
+  red: semaphoreVar("red"),
 } as const;
 
 export function ComplianceRadarBlock({

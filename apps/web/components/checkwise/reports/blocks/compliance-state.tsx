@@ -4,6 +4,11 @@ import { Gauge } from "@phosphor-icons/react";
 
 import { BlockIntro } from "@/components/checkwise/reports/block-intro";
 import { FreshnessLabel } from "@/components/checkwise/reports/freshness-label";
+import {
+  SEMAPHORE_DOT_CLASS,
+  semaphoreLabel,
+  slotStateLabel,
+} from "@/lib/constants/statuses";
 import type { BlockDefinition, BlockProps } from "@/lib/reports/registry";
 
 /**
@@ -73,53 +78,42 @@ const BUCKETS: Array<{
 }> = [
   {
     key: "rejected",
-    label: "Requiere corrección",
+    label: slotStateLabel("rejected"),
     hint: "Documentos devueltos al proveedor para corrección.",
   },
   {
     key: "needs_review",
-    label: "Necesita aclaración",
+    label: slotStateLabel("needs_correction"),
     hint: "El proveedor debe atender un comentario antes de avanzar.",
   },
   {
     key: "expired",
-    label: "Vencidos",
+    label: slotStateLabel("expired"),
     hint: "Cuya vigencia ya expiró y deben renovarse.",
   },
   {
     key: "in_review",
-    label: "En revisión",
+    label: slotStateLabel("in_review"),
     hint: "Recibidos y en validación por el equipo de cumplimiento.",
     combineWith: ["uploaded"],
   },
   {
     key: "pending",
-    label: "Por entregar",
+    label: slotStateLabel("missing"),
     hint: "El proveedor todavía no carga el documento.",
   },
   {
     key: "approved",
-    label: "Aprobados",
+    label: slotStateLabel("approved"),
     hint: "Validados; cuentan como cumplimiento del periodo.",
   },
   {
     key: "exception",
-    label: "Excepción autorizada",
+    label: slotStateLabel("exception"),
     hint: "Documento no exigible por decisión documentada del cliente.",
   },
 ];
 
-const LEVEL_DOT: Record<SemaphoreLevel, string> = {
-  red: "bg-[color:var(--status-error-text)]",
-  yellow: "bg-[color:var(--status-warning-text)]",
-  green: "bg-[color:var(--status-success-text)]",
-};
-
-const LEVEL_PRINT: Record<SemaphoreLevel, string> = {
-  red: "[En riesgo]",
-  yellow: "[En proceso]",
-  green: "[Al día]",
-};
 
 export const complianceStateDefinition: Omit<
   BlockDefinition<ComplianceStateConfig, ComplianceStateData>,
@@ -178,11 +172,11 @@ export function ComplianceStateBlock({
           compliance % promoted as the block's hero figure. */}
       <div className="flex items-start gap-3">
         <span
-          className={`mt-1.5 inline-block h-3.5 w-3.5 rounded-full ${LEVEL_DOT[semaphore.level]} print:hidden`}
+          className={`mt-1.5 inline-block h-3.5 w-3.5 rounded-full ${SEMAPHORE_DOT_CLASS[semaphore.level]} print:hidden`}
           aria-hidden="true"
         />
         <span className="sr-only print:not-sr-only print:mr-1">
-          {LEVEL_PRINT[semaphore.level]}
+          [{semaphoreLabel(semaphore.level)}]
         </span>
         <div className="flex-1 space-y-1">
           <div className="flex items-baseline justify-between gap-3">
