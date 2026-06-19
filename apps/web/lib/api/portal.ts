@@ -90,6 +90,18 @@ export type OnboardingSummary = {
   };
 };
 
+/** Server-computed six-tier severity (most-severe first). Mirrors the
+ *  backend ``calendar_item_risk`` and the FE ``CalendarRisk`` in
+ *  calendar-shared.ts — the one urgency vocabulary shared by the provider,
+ *  client, and admin calendars. */
+export type CalendarRisk =
+  | "overdue"
+  | "action_required"
+  | "due_soon"
+  | "in_review"
+  | "upcoming"
+  | "on_track";
+
 export type CalendarItem = {
   code: string;
   name: string;
@@ -97,6 +109,9 @@ export type CalendarItem = {
   period_label: string;
   period_key: string;
   status: RequirementStatus;
+  /** Wave 1 / A1 — server-computed urgency tier, alongside ``status``. The
+   *  provider FE consumes this instead of re-deriving urgency from dates. */
+  risk_level: CalendarRisk | null;
   submission_id: string | null;
   /** Filename of the current submission's PDF, when one exists. Surfaced
    *  in the calendar cell popover + drawer per Jorge feedback. */

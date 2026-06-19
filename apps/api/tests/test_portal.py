@@ -392,6 +392,38 @@ def test_portal_calendar_emits_period_key_on_every_item(api_client: TestClient) 
         assert item["period_key"], item
 
 
+def test_portal_calendar_emits_server_risk_level_on_every_item(
+    api_client: TestClient,
+) -> None:
+    """Wave 1 / A1: the provider calendar now carries a server-computed 6-tier
+    ``risk_level`` on every item — the same ``calendar_item_risk`` classifier
+    the client and admin calendars use — so urgency is one source of truth
+    across all three surfaces instead of being re-derived on the provider FE."""
+    access = _setup_workspace_session(api_client)
+    headers = {"X-Workspace-Token": access["access_token"]}
+    payload = api_client.get(
+        f"/api/v1/portal/workspaces/{access['workspace_id']}/calendar?year=2026",
+        headers=headers,
+    ).json()
+    items = [
+        item
+        for month in payload["months"]
+        for inst in month["institutions"]
+        for item in inst["items"]
+    ]
+    assert items
+    valid_tiers = {
+        "overdue",
+        "action_required",
+        "due_soon",
+        "in_review",
+        "upcoming",
+        "on_track",
+    }
+    for item in items:
+        assert item.get("risk_level") in valid_tiers, item
+
+
 def test_portal_calendar_canonical_match_does_not_overflow_across_months(
     api_client: TestClient,
 ) -> None:

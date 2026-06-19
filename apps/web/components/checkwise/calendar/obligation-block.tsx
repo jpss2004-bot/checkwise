@@ -67,10 +67,15 @@ export function ObligationBlock({
     (item.anatomy ?? "").trim().length > 0 ||
     (item.where_to_obtain ?? "").trim().length > 0;
 
-  const vendorHref = withReturnTo(
-    `/client/vendors/${item.vendor_id}?focus=${focusForItem(item)}#documentos`,
-    returnToHref,
-  );
+  // B2 — prefer the server-owned oversight deep-link (single source of truth).
+  // The backend now fills ``item.href`` with the client expediente URL
+  // (pre-focused on this obligation's bucket); fall back to recomputing it
+  // locally only if a stale backend (rolling deploy) still sends the legacy
+  // provider-upload URL. ``withReturnTo`` preserves list context either way.
+  const oversightHref = item.href?.startsWith("/client/")
+    ? item.href
+    : `/client/vendors/${item.vendor_id}?focus=${focusForItem(item)}#documentos`;
+  const vendorHref = withReturnTo(oversightHref, returnToHref);
   const monthKey = `${item.deadline_iso.slice(0, 4)}-M${item.deadline_iso.slice(5, 7)}`;
   const auditHref = `/client/auditoria?period_from=${monthKey}&period_to=${monthKey}`;
 

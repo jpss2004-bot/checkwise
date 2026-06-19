@@ -103,6 +103,7 @@ from app.schemas.submissions import (
     SubmissionResponse,
 )
 from app.services.audit_log import add_audit_event
+from app.services.calendar_risk import calendar_item_risk
 from app.services.contact_service import hash_ip
 from app.services.correction_request_service import (
     TIER_B_FIELD_LABEL_ES,
@@ -1628,7 +1629,8 @@ def get_workspace_calendar(
 
     # Omitted year means "the year we are in" — the previous hardcoded
     # 2026 default would have gone stale every January.
-    year = year or date.today().year
+    today = date.today()
+    year = year or today.year
 
     slots = build_workspace_calendar_slots(db, workspace, year)
     slot_by_key: dict[tuple[str | None, str | None], SlotView] = {
@@ -1729,6 +1731,11 @@ def get_workspace_calendar(
                 "required_document": recurring_required_document(req),
                 "due_month": req.due_month,
                 "deadline_iso": deadline_iso,
+                # Server-computed 6-tier severity — same classifier the client
+                # and admin calendars use (app.services.calendar_risk), so the
+                # provider no longer re-derives urgency on the frontend and the
+                # three calendars can never disagree on what "overdue" means.
+                "risk_level": calendar_item_risk(item_status, deadline_iso, today),
                 "suggested_action": _calendar_suggested_action(item_status),
                 "href": href,
                 # Stage 2.7 (T5 parity, 2026-05-20) — single-doc

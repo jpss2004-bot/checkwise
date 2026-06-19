@@ -438,15 +438,21 @@ def test_is_v2_recurring_code_handles_every_v2_shape() -> None:
     assert is_v2_recurring_code("") is False
 
 
-def test_client_calendar_call_site_threads_v2_mode_flag() -> None:
-    """The client-side calendar's upload-href call must thread
-    ``v2_mode=bool(req.accepts_documents)`` into ``_calendar_upload_href`` —
-    without this a staff/admin click on the client-side surface would mount the
-    wizard in v1 mode against a v2 row. The call now lives in the shared
-    ``app/services/calendar_aggregate.py`` service (extracted so the client
-    calendar and the admin grid place obligations identically). Pin the call
-    shape via source inspection so a refactor can't silently drop the keyword
-    argument."""
+def test_client_calendar_href_is_oversight_not_provider_upload() -> None:
+    """The client calendar's per-obligation ``client_href`` must be a client
+    OVERSIGHT deep-link (``/client/vendors/{id}?focus=…#documentos``), never the
+    provider's upload URL.
+
+    A hiring company can never upload on a provider's behalf, so the previous
+    behaviour — ``calendar_aggregate.py`` filling ``client_href`` from
+    ``_calendar_upload_href`` (a provider wizard surface) — was a contract lie
+    the frontend had to ignore and recompute. Wave 1 / B2 repointed it at the
+    vendor expediente. Pin the corrected shape via source inspection so a
+    refactor can't reintroduce the upload URL on the client surface.
+
+    (The provider calendar still threads ``v2_mode`` into its own
+    ``_calendar_upload_href`` in ``portal.py`` — that surface DOES upload — so
+    the v2 wizard-mode concern remains covered there, not here.)"""
     from pathlib import Path
 
     aggregate_py = (
@@ -456,14 +462,20 @@ def test_client_calendar_call_site_threads_v2_mode_flag() -> None:
         / "calendar_aggregate.py"
     )
     source = aggregate_py.read_text(encoding="utf-8")
-    assert "_calendar_upload_href(" in source, (
-        "calendar_aggregate.py no longer calls _calendar_upload_href "
-        "— refactor needs review"
+    assert "_calendar_upload_href(" not in source, (
+        "calendar_aggregate.py builds client_href from _calendar_upload_href "
+        "again — the client never uploads; use the /client/vendors oversight link"
     )
-    # The call must thread v2_mode from the catalog row, not hardcode False.
-    assert "v2_mode=bool(req.accepts_documents)" in source, (
-        "calendar_aggregate.py _calendar_upload_href call dropped v2_mode "
-        "— v2 rows on client surface will mount wizard in v1 mode"
+    assert "/client/vendors/" in source, (
+        "calendar_aggregate.py no longer builds the /client/vendors oversight "
+        "deep-link for client_href — refactor needs review"
+    )
+    # The oversight link must stay pre-focused on the obligation's bucket
+    # (mirrors the frontend ``focusForItem`` so the field is a single source of
+    # truth the FE can consume instead of recomputing).
+    assert "focus=" in source, (
+        "calendar_aggregate.py client_href dropped the ?focus= bucket "
+        "— the vendor expediente will not pre-focus the obligation"
     )
 
 
