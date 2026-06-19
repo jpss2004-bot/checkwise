@@ -102,6 +102,15 @@ from app.services.auth import (
     hash_password,
 )
 from app.services.calendar_aggregate import aggregate_client_calendar
+from app.services.calendar_risk import (
+    REJECTED_OR_CORRECTION_STATUSES as _REJECTED_OR_CORRECTION_STATUSES,
+)
+from app.services.calendar_risk import (
+    RISK_ORDER as _CALENDAR_RISK_ORDER,
+)
+from app.services.calendar_risk import (
+    worst_calendar_risk as _worst_calendar_risk,
+)
 from app.services.email_delivery import (
     send_owner_reset_temp_password_email,
     send_transactional_email,
@@ -365,11 +374,8 @@ _QUEUE_STATUSES = (
     DocumentStatus.PREVALIDADO.value,
     DocumentStatus.POSIBLE_MISMATCH.value,
 )
-_REJECTED_OR_CORRECTION_STATUSES = (
-    DocumentStatus.RECHAZADO.value,
-    DocumentStatus.REQUIERE_ACLARACION.value,
-    DocumentStatus.POSIBLE_MISMATCH.value,
-)
+# ``_REJECTED_OR_CORRECTION_STATUSES`` now imported from
+# ``app.services.calendar_risk`` (one definition shared with client + provider).
 
 
 class AdminOverview(BaseModel):
@@ -3130,26 +3136,10 @@ def get_admin_calendar(
 # the grid, the forecast strip and the client calendar can never disagree.
 # ---------------------------------------------------------------------------
 
-# Severity order mirrors ``client-calendar-shared.ts`` / ``_calendar_item_risk``
-# so a cell's worst-risk tint matches every other calendar surface.
-_CALENDAR_RISK_ORDER = {
-    "overdue": 0,
-    "action_required": 1,
-    "due_soon": 2,
-    "in_review": 3,
-    "upcoming": 4,
-    "on_track": 5,
-}
+# ``_CALENDAR_RISK_ORDER`` (severity order) and ``_worst_calendar_risk`` now
+# come from ``app.services.calendar_risk`` (imported above under their legacy
+# names) — one severity vocabulary shared by every calendar surface and layer.
 _GRID_CLIENT_SCAN_CAP = 200
-
-
-def _worst_calendar_risk(risks: list[str]) -> str:
-    """Lowest-ordinal (most severe) risk in a set, defaulting to on_track."""
-    worst = "on_track"
-    for r in risks:
-        if _CALENDAR_RISK_ORDER.get(r, 9) < _CALENDAR_RISK_ORDER.get(worst, 9):
-            worst = r
-    return worst
 
 
 class AdminCalendarRow(BaseModel):

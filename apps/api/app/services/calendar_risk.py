@@ -15,9 +15,32 @@ router imports — so any layer may import it at module load.
 
 from __future__ import annotations
 
+from collections.abc import Iterable
 from datetime import date
 
 from app.constants.statuses import DocumentStatus
+
+# Most-severe-first ordinal for the six tiers. The single source the admin
+# cross-portfolio grid, the snapshot rollup, and the per-provider sorts all
+# order by; mirrors ``RISK_ORDER`` on the frontend (calendar-shared.ts) so the
+# colors and worst-risk math can never drift across calendars or layers.
+RISK_ORDER: dict[str, int] = {
+    "overdue": 0,
+    "action_required": 1,
+    "due_soon": 2,
+    "in_review": 3,
+    "upcoming": 4,
+    "on_track": 5,
+}
+
+
+def worst_calendar_risk(risks: Iterable[str]) -> str:
+    """Most-severe (lowest-ordinal) risk in a set, defaulting to ``on_track``."""
+    worst = "on_track"
+    for r in risks:
+        if RISK_ORDER.get(r, 9) < RISK_ORDER.get(worst, 9):
+            worst = r
+    return worst
 
 # Statuses where the provider must re-do the document (the reviewer bounced it).
 # Mirrors the legacy tuple in ``client.py`` / ``admin.py``; kept here as the

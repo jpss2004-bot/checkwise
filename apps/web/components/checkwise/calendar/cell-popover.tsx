@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useLayoutEffect, useRef, useState, type RefObject } from "react";
+import { type RefObject } from "react";
 import { createPortal } from "react-dom";
 
 import { DOC_STATE_LABELS } from "@/components/checkwise/doc-state-badge";
@@ -9,11 +9,10 @@ import type { DocumentStateCode } from "@/lib/types";
 
 import { riskRank } from "./calendar-shared";
 import type { CalendarEntry } from "./types";
+import { useAnchoredPopover } from "./use-anchored-popover";
 
 const MAX_VISIBLE = 6;
 const POPOVER_WIDTH = 300;
-const VIEWPORT_MARGIN = 8;
-const GAP = 6;
 
 const STATE_DOT: Record<DocumentStateCode, string> = {
   approved:     "bg-[color:var(--doc-approved-bg)]     ring-[color:var(--doc-approved-border)]",
@@ -37,35 +36,6 @@ function formatDay(iso: string): string {
   }
 }
 
-type Position = {
-  top: number;
-  left: number;
-  placement: "below" | "above";
-};
-
-function computePosition(
-  triggerRect: DOMRect,
-  popoverHeight: number,
-): Position {
-  let left = triggerRect.left + triggerRect.width / 2 - POPOVER_WIDTH / 2;
-  if (left < VIEWPORT_MARGIN) left = VIEWPORT_MARGIN;
-  if (left + POPOVER_WIDTH > window.innerWidth - VIEWPORT_MARGIN) {
-    left = window.innerWidth - POPOVER_WIDTH - VIEWPORT_MARGIN;
-  }
-
-  let top = triggerRect.bottom + GAP;
-  let placement: Position["placement"] = "below";
-  if (top + popoverHeight > window.innerHeight - VIEWPORT_MARGIN) {
-    const aboveTop = triggerRect.top - popoverHeight - GAP;
-    if (aboveTop >= VIEWPORT_MARGIN) {
-      top = aboveTop;
-      placement = "above";
-    }
-  }
-
-  return { top, left, placement };
-}
-
 export function CellPopover({
   triggerRef,
   events,
@@ -83,37 +53,16 @@ export function CellPopover({
   onEnter: () => void;
   onLeave: () => void;
 }) {
-  const popoverRef = useRef<HTMLDivElement>(null);
-  const [position, setPosition] = useState<Position | null>(null);
-  const [mounted, setMounted] = useState(false);
-
-  useEffect(() => setMounted(true), []);
-
-  useLayoutEffect(() => {
-    if (!open || !triggerRef.current) {
-      setPosition(null);
-      return;
-    }
-    const triggerRect = triggerRef.current.getBoundingClientRect();
-    const estimatedHeight =
-      36 + Math.min(events.length, MAX_VISIBLE) * 32 + (events.length > MAX_VISIBLE ? 28 : 0);
-    setPosition(computePosition(triggerRect, estimatedHeight));
-  }, [open, triggerRef, events.length]);
-
-  useEffect(() => {
-    if (!open) return;
-    const handleScroll = () => {
-      if (!triggerRef.current || !popoverRef.current) return;
-      const triggerRect = triggerRef.current.getBoundingClientRect();
-      setPosition(computePosition(triggerRect, popoverRef.current.offsetHeight));
-    };
-    window.addEventListener("scroll", handleScroll, true);
-    window.addEventListener("resize", handleScroll);
-    return () => {
-      window.removeEventListener("scroll", handleScroll, true);
-      window.removeEventListener("resize", handleScroll);
-    };
-  }, [open, triggerRef]);
+  // Provider cell popover anchors centered on its trigger cell.
+  const estimatedHeight =
+    36 + Math.min(events.length, MAX_VISIBLE) * 32 + (events.length > MAX_VISIBLE ? 28 : 0);
+  const { mounted, position, popoverRef } = useAnchoredPopover({
+    triggerRef,
+    open,
+    width: POPOVER_WIDTH,
+    align: "center",
+    estimatedHeight,
+  });
 
   if (!mounted || !open || !position) return null;
 

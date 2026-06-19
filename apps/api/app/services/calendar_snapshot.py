@@ -22,29 +22,13 @@ from sqlalchemy.orm import Session
 
 from app.models import AdminCalendarSnapshot, Client
 from app.services.calendar_aggregate import aggregate_client_calendar
+from app.services.calendar_risk import worst_calendar_risk as _worst
 
 STALE_AFTER_SECONDS = 1200  # 20 min — the map can lag this much; detail is live.
 
 # Dedup concurrent background refreshes of the same year (a read burst past the
 # staleness edge would otherwise kick N identical full scans).
 _refreshing: set[int] = set()
-
-_RISK_ORDER = {
-    "overdue": 0,
-    "action_required": 1,
-    "due_soon": 2,
-    "in_review": 3,
-    "upcoming": 4,
-    "on_track": 5,
-}
-
-
-def _worst(risks: list[str]) -> str:
-    worst = "on_track"
-    for r in risks:
-        if _RISK_ORDER.get(r, 9) < _RISK_ORDER.get(worst, 9):
-            worst = r
-    return worst
 
 
 def _due_in(deadline_iso: str, today: date) -> int:

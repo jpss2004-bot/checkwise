@@ -7,7 +7,6 @@ import {
   ArrowLeft,
   ArrowRight,
   ArrowsClockwise,
-  Buildings,
   CalendarBlank,
   Clock,
   CloudArrowUp,
@@ -15,9 +14,6 @@ import {
   Eye,
   Files,
   Funnel,
-  House,
-  Scales,
-  ShieldCheck,
   Stamp,
   Tray,
   WarningCircle,
@@ -27,6 +23,7 @@ import {
 
 import {
   BUCKET_CELL,
+  INSTITUTION_ICON,
   RISK_ICON,
   RISK_LABEL,
   riskBucket,
@@ -66,17 +63,9 @@ import {
 import { withOnboardingGate } from "@/lib/session/with-onboarding-gate";
 import type { PortalSession } from "@/lib/session/portal";
 
-// Phase 7 / Slice 7A — INFONAVIT was sharing the ``Buildings`` icon
-// with IMSS, which made the two institution rows visually
-// indistinguishable in the calendar header strip. ``House`` reads
-// directly as "instituto de vivienda" — semantically accurate AND
-// visually distinct from IMSS.
-const INSTITUTION_ICON: Record<CalendarInstitutionCode, Icon> = {
-  sat: Scales,
-  imss: Buildings,
-  infonavit: House,
-  stps_repse: ShieldCheck,
-};
+// ``INSTITUTION_ICON`` (incl. the INFONAVIT=House / IMSS=Buildings
+// disambiguation) is now the single app-wide map in calendar-shared.ts,
+// imported above — no per-surface copy to keep in sync.
 
 function flattenCalendarPayload(payload: CalendarPayload): CalendarEntry[] {
   const entries: CalendarEntry[] = [];
