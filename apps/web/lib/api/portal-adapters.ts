@@ -208,7 +208,7 @@ export function countRealExpediente(reqs: ExpedienteRequirement[]): ExpedienteCo
     ["uploaded", "in_review"].includes(r.state),
   ).length;
   const needs_action = required.filter((r) =>
-    ["pending", "empty", "rejected", "expired", "needs_review"].includes(r.state),
+    ["pending", "empty", "rejected", "expired", "possible_mismatch", "needs_review"].includes(r.state),
   ).length;
   const optional_pending = reqs.filter(
     (r) => !r.required && r.state !== "approved",

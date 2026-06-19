@@ -115,7 +115,7 @@ function OnboardingInner({ session }: { session: PortalSession }) {
     const blocking = requirements
       .filter((r) => r.required)
       .some((r) =>
-        ["empty", "pending", "rejected", "expired", "needs_review"].includes(r.state),
+        ["empty", "pending", "rejected", "expired", "possible_mismatch", "needs_review"].includes(r.state),
       );
     if (blocking) return "expediente_blocked";
     if (counts.in_review > 0) return "provisional_access";
@@ -135,7 +135,7 @@ function OnboardingInner({ session }: { session: PortalSession }) {
   }
 
   const needsAction = requirements.filter((r) =>
-    ["pending", "empty", "rejected", "expired", "needs_review"].includes(r.state),
+    ["pending", "empty", "rejected", "expired", "possible_mismatch", "needs_review"].includes(r.state),
   );
   // Mandatory items unlock the dashboard. Optional items can be done
   // later from the dashboard's settings area. Splitting them into two
@@ -743,7 +743,7 @@ function countOnboardingCards(items: ExpedienteCardItem[]): OnboardingCounts {
     ["uploaded", "in_review"].includes(r.state),
   ).length;
   const needs_action = required.filter((r) =>
-    ["pending", "empty", "rejected", "expired", "needs_review"].includes(r.state),
+    ["pending", "empty", "rejected", "expired", "possible_mismatch", "needs_review"].includes(r.state),
   ).length;
   const optional_pending = items.filter(
     (r) => !r.required && r.state !== "approved",

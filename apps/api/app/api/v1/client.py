@@ -59,6 +59,7 @@ from app.api.v1.portal import (
     _compute_semaphore,
     _compute_suggested_actions,
     _compute_upcoming_deadlines,
+    _currently_due_calendar_slots,
     _due_in_days_for_period,
     _empty_document_counts,
 )
@@ -91,6 +92,9 @@ from app.models import (
 )
 from app.services.audit_log import add_audit_event
 from app.services.calendar_aggregate import aggregate_client_calendar
+from app.services.calendar_risk import (
+    REJECTED_OR_CORRECTION_STATUSES as _REJECTED_OR_CORRECTION_STATUSES,
+)
 from app.services.client_metadata import (
     client_master_file_path,
     display_export_path,
@@ -109,6 +113,7 @@ from app.services.evidence_slots import (
     renewal_status,
 )
 from app.services.metadata_store import ensure_local_export
+from app.services.reports.insights import approval_trend_points
 from app.services.search_service import SearchHit, search_submissions
 
 router = APIRouter(prefix="/client", tags=["client"])
@@ -319,7 +324,11 @@ def _vendor_compliance(
     counts = _empty_document_counts()
     for view in onboarding_slots + calendar_slots:
         _bucket_document_state(counts, view.state)
-    semaphore = _compute_semaphore(onboarding_slots, calendar_slots)
+    # Reportes #7: the semaphore reflects current standing, so not-yet-due
+    # obligations don't drag it down (counts/KPIs below stay over all slots).
+    semaphore = _compute_semaphore(
+        onboarding_slots, _currently_due_calendar_slots(calendar_slots, today)
+    )
     required = [s for s in onboarding_slots if s.required] + [
         s for s in calendar_slots if s.required
     ]
@@ -333,13 +342,21 @@ def _vendor_compliance(
         if s.state in (SlotState.IN_REVIEW, SlotState.UPLOADED)
     )
     due_soon = 0
+    overdue = 0
     for s in calendar_slots:
         if not s.required:
             continue
         if s.state in _RESOLVED_SLOT_STATES:
             continue
         due_in = _due_in_days_for_period(s.period_key, today)
-        if due_in is not None and 0 <= due_in <= 14:
+        if due_in is None:
+            continue
+        if due_in < 0:
+            # Past its deadline and still unresolved = a lapsed obligation,
+            # the highest-liability state. Tracked separately from due_soon
+            # so the dashboard can surface "Vencidos" distinctly.
+            overdue += 1
+        elif due_in <= 14:
             due_soon += 1
     return {
         "compliance_pct": semaphore.compliance_pct,
@@ -349,6 +366,7 @@ def _vendor_compliance(
         "rejected_or_correction_count": rejected_or_correction,
         "pending_reviews_count": pending_reviews,
         "due_soon_count": due_soon,
+        "overdue_count": overdue,
         "onboarding_slots": onboarding_slots,
         "calendar_slots": calendar_slots,
         "semaphore": semaphore,
@@ -515,12 +533,35 @@ class ClientLegalConsentResponse(BaseModel):
     legal_consent_version: str
 
 
+class ClientRiskVendor(BaseModel):
+    """One provider on the dashboard's "Requieren tu atención" worklist.
+
+    ``top_reason`` is a short Spanish phrase naming the dominant problem
+    (vencidos > por corregir > faltantes > en revisión) so the exec sees
+    *why* a provider is flagged without leaving the dashboard.
+    """
+
+    vendor_id: str
+    vendor_name: str
+    semaphore_level: Literal["green", "yellow", "red"]
+    compliance_pct: int
+    overdue_count: int
+    missing_required_count: int
+    rejected_or_correction_count: int
+    top_reason: str
+
+
 class ClientOverview(BaseModel):
     client_id: str
     client_name: str
     vendors_total: int
     active_workspaces_total: int
     compliance_pct: int
+    # Month-over-month approval-rate momentum in points (most recent active
+    # month − the one before), reused from the report engine. None when
+    # there aren't two active months yet. Answers the CFO's "better or
+    # worse than last month?" without faking a historical snapshot.
+    compliance_trend_delta: int | None = None
     green_count: int
     yellow_count: int
     red_count: int
@@ -528,8 +569,14 @@ class ClientOverview(BaseModel):
     rejected_or_correction_total: int
     missing_required_total: int
     due_soon_total: int
+    # Lapsed obligations across the portfolio — the highest-liability state,
+    # previously folded silently into the red bucket.
+    overdue_total: int = 0
     recent_submissions_total: int
     last_activity_at: datetime | None
+    # Worst-first ranked attention list (top 5) so the flagship screen
+    # answers "which providers" / "what next", not just "how many".
+    top_risk_vendors: list[ClientRiskVendor] = []
 
 
 class ClientVendorNextRenewal(BaseModel):
@@ -1171,60 +1218,20 @@ _QUEUE_STATUSES = (
     DocumentStatus.PREVALIDADO.value,
     DocumentStatus.POSIBLE_MISMATCH.value,
 )
-_REJECTED_OR_CORRECTION_STATUSES = (
-    DocumentStatus.RECHAZADO.value,
-    DocumentStatus.REQUIERE_ACLARACION.value,
-    DocumentStatus.POSIBLE_MISMATCH.value,
+# ``_REJECTED_OR_CORRECTION_STATUSES`` + ``_calendar_item_risk`` now live in
+# ``app.services.calendar_risk`` (imported above under their legacy private
+# names) so the client, provider, and admin calendars share one risk classifier.
+# The three raw statuses that all display to the client as "En revisión".
+# Used by the submissions ``status=en_revision`` collapsed filter.
+_EN_REVISION_STATUSES = (
+    DocumentStatus.RECIBIDO.value,
+    DocumentStatus.PENDIENTE_REVISION.value,
+    DocumentStatus.PREVALIDADO.value,
 )
 
 # Worst-first ordering for the per-provider rollup. Red providers (something
 # is overdue or rejected) sort above yellow (in motion) above green (al día).
 _SEMAPHORE_SORT_ORDER = {"red": 0, "yellow": 1, "green": 2}
-
-
-def _calendar_item_risk(status: str, deadline_iso: str, today: date) -> str:
-    """Classify one calendar obligation's current severity.
-
-    Returns a single ordered severity the client agenda bands by and the
-    risk matrix colors by, so the frontend never re-derives urgency from raw
-    dates. Most-severe wins:
-
-    * ``on_track``        - resolved (aprobado / excepcion legal / no aplica)
-    * ``overdue``         - past its deadline (or VENCIDO) and not resolved
-    * ``action_required`` - rejected / needs clarification / possible mismatch
-    * ``due_soon``        - due within 14 days and not resolved
-    * ``in_review``       - submitted, with reviewer (recibido / prevalidado / en revision)
-    * ``upcoming``        - not yet submitted, due in 15+ days
-
-    The ``due_soon`` window (<=14 days, >=0) matches the existing
-    ``due_soon_total`` convention so the calendar's two surfaces never
-    disagree by a few days.
-    """
-    if status in (
-        DocumentStatus.APROBADO.value,
-        DocumentStatus.EXCEPCION_LEGAL.value,
-        DocumentStatus.NO_APLICA.value,
-    ):
-        return "on_track"
-    try:
-        days_until: int | None = (date.fromisoformat(deadline_iso) - today).days
-    except ValueError:
-        days_until = None
-    if status == DocumentStatus.VENCIDO.value or (
-        days_until is not None and days_until < 0
-    ):
-        return "overdue"
-    if status in _REJECTED_OR_CORRECTION_STATUSES:
-        return "action_required"
-    if days_until is not None and 0 <= days_until <= 14:
-        return "due_soon"
-    if status in (
-        DocumentStatus.RECIBIDO.value,
-        DocumentStatus.PENDIENTE_REVISION.value,
-        DocumentStatus.PREVALIDADO.value,
-    ):
-        return "in_review"
-    return "upcoming"
 
 
 def _client_suggested_action(risk_level: str, has_submission: bool) -> str:
@@ -1256,6 +1263,30 @@ def _client_suggested_action(risk_level: str, has_submission: bool) -> str:
     )
 
 
+def _risk_top_reason(summary: dict) -> str:
+    """Short Spanish phrase naming a vendor's dominant problem, worst-first.
+
+    Priority mirrors compliance liability: lapsed > to-correct > missing >
+    in-review > due-soon. Drives the dashboard "Requieren tu atención" list.
+    """
+    overdue = summary.get("overdue_count", 0)
+    if overdue:
+        return "1 obligación vencida" if overdue == 1 else f"{overdue} obligaciones vencidas"
+    rejected = summary.get("rejected_or_correction_count", 0)
+    if rejected:
+        return "1 documento por corregir" if rejected == 1 else f"{rejected} por corregir"
+    missing = summary.get("missing_required_count", 0)
+    if missing:
+        return "1 documento faltante" if missing == 1 else f"{missing} faltantes"
+    pending = summary.get("pending_reviews_count", 0)
+    if pending:
+        return "1 en revisión" if pending == 1 else f"{pending} en revisión"
+    due_soon = summary.get("due_soon_count", 0)
+    if due_soon:
+        return "1 por vencer" if due_soon == 1 else f"{due_soon} por vencer"
+    return "Requiere seguimiento"
+
+
 @router.get("/overview", response_model=ClientOverview)
 def client_overview(
     db: DbSession,
@@ -1272,10 +1303,13 @@ def client_overview(
 
     workspaces = _scoped_workspaces(db, target_id)
     subs_by_vendor, institutions_by_id = _portfolio_slot_inputs(db, target_id)
-    vendors_total = int(
-        db.scalar(select(func.count(Vendor.id)).where(Vendor.client_id == target_id))
-        or 0
-    )
+    vendors_by_id = {
+        v.id: v
+        for v in db.scalars(
+            select(Vendor).where(Vendor.client_id == target_id)
+        ).all()
+    }
+    vendors_total = len(vendors_by_id)
     active_workspaces_total = sum(1 for w in workspaces if w.status == "active")
 
     green = yellow = red = 0
@@ -1283,8 +1317,12 @@ def client_overview(
     rejected_or_correction_total = 0
     missing_required_total = 0
     due_soon_total = 0
+    overdue_total = 0
     weighted_pct_sum = 0
     weighted_count = 0
+    # Collected per-vendor so we can rank the worst-first attention list
+    # without a second pass over the (expensive) slot computation.
+    risk_candidates: list[ClientRiskVendor] = []
     for ws in workspaces:
         summary = _vendor_compliance(
             db,
@@ -1305,12 +1343,45 @@ def client_overview(
         rejected_or_correction_total += summary["rejected_or_correction_count"]
         missing_required_total += summary["missing_required_count"]
         due_soon_total += summary["due_soon_count"]
+        overdue_total += summary["overdue_count"]
         weighted_pct_sum += summary["compliance_pct"]
         weighted_count += 1
+        if level in ("red", "yellow"):
+            vendor = vendors_by_id.get(ws.vendor_id)
+            risk_candidates.append(
+                ClientRiskVendor(
+                    vendor_id=ws.vendor_id,
+                    vendor_name=(vendor.name if vendor else "Proveedor"),
+                    semaphore_level=level,
+                    compliance_pct=summary["compliance_pct"],
+                    overdue_count=summary["overdue_count"],
+                    missing_required_count=summary["missing_required_count"],
+                    rejected_or_correction_count=summary[
+                        "rejected_or_correction_count"
+                    ],
+                    top_reason=_risk_top_reason(summary),
+                )
+            )
+
+    # Worst-first: red before yellow, then lowest compliance %, then the
+    # most open problems. Top 5 keeps the dashboard panel scannable.
+    risk_candidates.sort(
+        key=lambda r: (
+            _SEMAPHORE_SORT_ORDER.get(r.semaphore_level, 9),
+            r.compliance_pct,
+            -(
+                r.overdue_count
+                + r.rejected_or_correction_count
+                + r.missing_required_count
+            ),
+        )
+    )
+    top_risk_vendors = risk_candidates[:5]
 
     compliance_pct = (
         round(weighted_pct_sum / weighted_count) if weighted_count else 100
     )
+    compliance_trend_delta = approval_trend_points(db, today, client_id=target_id)
 
     recent_submissions_total = int(
         db.scalar(
@@ -1330,6 +1401,7 @@ def client_overview(
         vendors_total=vendors_total,
         active_workspaces_total=active_workspaces_total,
         compliance_pct=compliance_pct,
+        compliance_trend_delta=compliance_trend_delta,
         green_count=green,
         yellow_count=yellow,
         red_count=red,
@@ -1337,14 +1409,81 @@ def client_overview(
         rejected_or_correction_total=rejected_or_correction_total,
         missing_required_total=missing_required_total,
         due_soon_total=due_soon_total,
+        overdue_total=overdue_total,
         recent_submissions_total=min(recent_submissions_total, 200),
         last_activity_at=last_activity_at,
+        top_risk_vendors=top_risk_vendors,
     )
 
 
 # ---------------------------------------------------------------------------
 # /vendors
 # ---------------------------------------------------------------------------
+
+
+def _sort_vendor_pairs(
+    pairs: list[tuple[ProviderWorkspace, dict]],
+    sort: str,
+    vendors: dict,
+) -> list[tuple[ProviderWorkspace, dict]]:
+    """Order (workspace, compliance-summary) pairs for the vendor list.
+
+    ``risk`` (default) is worst-first: red→yellow→green, then lowest
+    compliance %, then most open problems — the ranking the portfolio
+    screen exists to provide. Name is the stable tiebreak.
+    """
+
+    def name_of(ws: ProviderWorkspace) -> str:
+        v = vendors.get(ws.vendor_id)
+        return normalize_for_search(v.name if v else "")
+
+    if sort == "compliance_asc":
+        key = lambda p: (p[1]["compliance_pct"], name_of(p[0]))  # noqa: E731
+    elif sort == "compliance_desc":
+        key = lambda p: (-p[1]["compliance_pct"], name_of(p[0]))  # noqa: E731
+    elif sort == "missing_desc":
+        key = lambda p: (  # noqa: E731
+            -(p[1]["missing_required_count"] + p[1]["rejected_or_correction_count"]),
+            name_of(p[0]),
+        )
+    else:  # risk (default)
+        key = lambda p: (  # noqa: E731
+            _SEMAPHORE_SORT_ORDER.get(p[1]["semaphore_level"], 9),
+            p[1]["compliance_pct"],
+            -(
+                p[1].get("overdue_count", 0)
+                + p[1]["rejected_or_correction_count"]
+                + p[1]["missing_required_count"]
+            ),
+            name_of(p[0]),
+        )
+    return sorted(pairs, key=key)
+
+
+def _sort_candidates_cheap(
+    candidates: list[ProviderWorkspace],
+    sort: str,
+    vendors: dict,
+    last_sub_map: dict,
+) -> list[ProviderWorkspace]:
+    """Order candidates by a cheap row attribute (no compliance projection)."""
+    if sort == "name":
+        return sorted(
+            candidates,
+            key=lambda ws: normalize_for_search(
+                vendors.get(ws.vendor_id).name if vendors.get(ws.vendor_id) else ""
+            ),
+        )
+    # recent: most recent submission first; vendors with none sort last.
+    return sorted(
+        candidates,
+        key=lambda ws: (
+            last_sub_map.get(ws.vendor_id) is None,
+            -(last_sub_map.get(ws.vendor_id).timestamp())
+            if last_sub_map.get(ws.vendor_id)
+            else 0.0,
+        ),
+    )
 
 
 @router.get("/vendors", response_model=ClientVendorListResponse)
@@ -1355,6 +1494,12 @@ def client_vendors(
     status_filter: Annotated[str | None, Query(alias="status")] = None,
     semaphore_level: Literal["green", "yellow", "red"] | None = None,
     search: str | None = None,
+    sort: Annotated[
+        Literal[
+            "risk", "compliance_asc", "compliance_desc", "missing_desc", "name", "recent"
+        ],
+        Query(),
+    ] = "risk",
     limit: Annotated[int, Query(ge=1, le=500)] = 100,
     offset: Annotated[int, Query(ge=0)] = 0,
 ) -> ClientVendorListResponse:
@@ -1424,24 +1569,35 @@ def client_vendors(
             ),
         )
 
-    if semaphore_level:
-        # The semaphore level is derived from compliance, so it can't be
-        # filtered in SQL: compute every candidate to learn the true total,
-        # then build full rows only for the matching page.
-        matched = [
-            (ws, summary)
-            for ws in candidates
-            if (summary := _compliance(ws))["semaphore_level"] == semaphore_level
-        ]
-        total = len(matched)
+    # ``risk`` (default) and the compliance/missing sorts are derived from the
+    # slot projection, so they can't be ordered in SQL: compute every
+    # candidate, sort, then build rows for the requested page only. ``name`` /
+    # ``recent`` are cheap row attributes, so we keep the fast path (page first,
+    # project only the page) the perf pass introduced.
+    needs_full_compute = bool(semaphore_level) or sort in (
+        "risk",
+        "compliance_asc",
+        "compliance_desc",
+        "missing_desc",
+    )
+    if needs_full_compute:
+        pairs = [(ws, _compliance(ws)) for ws in candidates]
+        if semaphore_level:
+            pairs = [
+                p for p in pairs if p[1]["semaphore_level"] == semaphore_level
+            ]
+        pairs = _sort_vendor_pairs(pairs, sort, vendors)
+        total = len(pairs)
         page = [
-            _build_row(ws, summary) for ws, summary in matched[offset : offset + limit]
+            _build_row(ws, summary)
+            for ws, summary in pairs[offset : offset + limit]
         ]
     else:
-        total = len(candidates)
+        ordered = _sort_candidates_cheap(candidates, sort, vendors, last_sub_map)
+        total = len(ordered)
         page = [
             _build_row(ws, _compliance(ws))
-            for ws in candidates[offset : offset + limit]
+            for ws in ordered[offset : offset + limit]
         ]
 
     return ClientVendorListResponse(
@@ -1994,7 +2150,10 @@ def client_vendor_detail(
         workspace=_workspace_public(workspace),
         onboarding_summary=_compute_onboarding_summary(onboarding_slots, workspace),
         document_state_counts=counts,
-        semaphore=_compute_semaphore(onboarding_slots, calendar_slots),
+        # Reportes #7: semaphore over currently-due obligations only.
+        semaphore=_compute_semaphore(
+            onboarding_slots, _currently_due_calendar_slots(calendar_slots, today)
+        ),
         suggested_actions=_compute_suggested_actions(
             onboarding_slots,
             calendar_slots,
@@ -2488,7 +2647,15 @@ def client_submissions(
     if vendor_id:
         filters.append(Submission.vendor_id == vendor_id)
     if status_filter:
-        filters.append(Submission.status == status_filter)
+        # "En revisión" is a collapsed label: three raw statuses
+        # (recibido / pendiente_revision / prevalidado) all display as
+        # "En revisión" to the client, so the filter must match all three
+        # — an exact match on pendiente_revision silently hid ~2/3 of the
+        # in-review queue (audit P2.11).
+        if status_filter == "en_revision":
+            filters.append(Submission.status.in_(_EN_REVISION_STATUSES))
+        else:
+            filters.append(Submission.status == status_filter)
     if requirement_code:
         filters.append(Submission.requirement_code == requirement_code)
     if period_key:

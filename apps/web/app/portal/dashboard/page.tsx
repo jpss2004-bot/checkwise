@@ -1018,6 +1018,7 @@ function derive14DayActivity(rows: DashboardRecentUpload[]): ActivityWindow {
       byBucketReview[diffDays] += 1;
     } else if (
       code === "rejected" ||
+      code === "possible_mismatch" ||
       code === "needs_review" ||
       code === "expired"
     ) {
@@ -1189,7 +1190,7 @@ const SLOT_STATE_TO_DOC_CODE: Record<string, DocumentStateCode> = {
   approved: "approved",
   rejected: "rejected",
   needs_correction: "needs_review",
-  possible_mismatch: "needs_review",
+  possible_mismatch: "possible_mismatch",
   exception: "approved",
   expired: "expired",
   not_applicable: "approved",

@@ -90,6 +90,18 @@ export type OnboardingSummary = {
   };
 };
 
+/** Server-computed six-tier severity (most-severe first). Mirrors the
+ *  backend ``calendar_item_risk`` and the FE ``CalendarRisk`` in
+ *  calendar-shared.ts — the one urgency vocabulary shared by the provider,
+ *  client, and admin calendars. */
+export type CalendarRisk =
+  | "overdue"
+  | "action_required"
+  | "due_soon"
+  | "in_review"
+  | "upcoming"
+  | "on_track";
+
 export type CalendarItem = {
   code: string;
   name: string;
@@ -97,12 +109,19 @@ export type CalendarItem = {
   period_label: string;
   period_key: string;
   status: RequirementStatus;
+  /** Wave 1 / A1 — server-computed urgency tier, alongside ``status``. The
+   *  provider FE consumes this instead of re-deriving urgency from dates. */
+  risk_level: CalendarRisk | null;
   submission_id: string | null;
   /** Filename of the current submission's PDF, when one exists. Surfaced
    *  in the calendar cell popover + drawer per Jorge feedback. */
   filename: string | null;
   /** ISO timestamp of the current submission, when one exists. */
   submitted_at: string | null;
+  /** A4 — the reviewer's reason, populated only on bounced obligations
+   *  (rejected / needs-clarification / mismatch) that carry a note. Lets the
+   *  drawer show *why* a document was rejected without a second fetch. */
+  reviewer_note: string | null;
   /** Phase 5 — backend-owned UX enrichment. */
   required_document: string;
   due_month: number;
@@ -972,6 +991,7 @@ export function statusToDocumentStateCode(
     case "vencido":
       return "expired";
     case "posible_mismatch":
+      return "possible_mismatch";
     case "requiere_aclaracion":
       return "needs_review";
     case "no_aplica":

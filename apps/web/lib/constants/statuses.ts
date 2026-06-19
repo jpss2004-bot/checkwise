@@ -207,6 +207,27 @@ export function semaphoreVariant(level: string): StatusVariant {
   return SEMAPHORE_VARIANT[level as SemaphoreLevel] ?? "secondary";
 }
 
+/**
+ * One-line plain-Spanish meaning per semáforo level, distinct from the
+ * per-vendor ``reason`` string the backend computes. Surfaced as a report
+ * legend so a reader can tell "En proceso" (documents in motion, none
+ * rejected) apart from "En riesgo" (rejected / por corregir, or nothing
+ * approved yet) — the distinction reviewers flagged as unclear (Portal
+ * Proveedor, 2ª revisión, Reportes #9).
+ */
+export const SEMAPHORE_EXPLAINER_ES: Record<SemaphoreLevel, string> = {
+  green:
+    "Todas las obligaciones del periodo están aprobadas o al corriente. No se requiere acción.",
+  yellow:
+    "Hay documentos en trámite (por entregar, en revisión o por vencer), pero ninguno rechazado. Avanza según lo previsto.",
+  red:
+    "Hay documentos rechazados o por corregir —o aún ninguno aprobado—. Baja tu nivel de cumplimiento y tu cliente lo ve marcado; atiende estos documentos para recuperarlo.",
+};
+
+export function semaphoreExplainer(level: string): string | null {
+  return SEMAPHORE_EXPLAINER_ES[level as SemaphoreLevel] ?? null;
+}
+
 // ---------------------------------------------------------------------------
 // SlotState — the coarse UI projection of DocumentStatus the backend emits
 // for report blocks and the provider expediente grid (apps/api

@@ -36,6 +36,7 @@ import { safeReturnTo } from "@/lib/navigation/return-to";
 
 import { ClientShell } from "../../_shell";
 import {
+  ClientApiError,
   clientVendorExpedienteZipUrl,
   clientVendorMetadataDownloadUrl,
   fetchClientSubmissionDocumentBlob,
@@ -44,6 +45,10 @@ import {
   type ClientVendorDetail,
   type ClientVendorDocumentActionItem,
 } from "@/lib/api/client";
+import {
+  ErrorState,
+  NotFoundState,
+} from "@/components/checkwise/portal/state-surfaces";
 import { downloadAuthenticatedFile } from "@/lib/api/download";
 import { createReportFromPreset, ReportsApiError } from "@/lib/api/reports";
 import { slotStateLabel, slotStateVariant } from "@/lib/constants/statuses";
@@ -70,6 +75,10 @@ export default function ClientVendorDetailPage({ params }: PageProps) {
   const { vendor_id } = use(params);
   const [detail, setDetail] = useState<ClientVendorDetail | null>(null);
   const [error, setError] = useState<string | null>(null);
+  // HTTP status of a load failure so a true 404/403 (provider not found /
+  // not in scope) reads differently from a transient blip.
+  const [errorStatus, setErrorStatus] = useState<number | null>(null);
+  const [reloadKey, setReloadKey] = useState(0);
   const router = useRouter();
   const [generating, setGenerating] = useState(false);
   const [downloadingZip, setDownloadingZip] = useState(false);
@@ -138,18 +147,21 @@ export default function ClientVendorDetailPage({ params }: PageProps) {
 
   useEffect(() => {
     let cancelled = false;
+    setError(null);
+    setErrorStatus(null);
     getClientVendorDetail(vendor_id)
       .then((data) => {
         if (!cancelled) setDetail(data);
       })
       .catch((err: unknown) => {
         if (cancelled) return;
+        setErrorStatus(err instanceof ClientApiError ? err.status : null);
         setError(err instanceof Error ? err.message : "Error al cargar proveedor.");
       });
     return () => {
       cancelled = true;
     };
-  }, [vendor_id]);
+  }, [vendor_id, reloadKey]);
 
   // Deep-link focus: report findings, alerts, and the vendors-list count
   // cells link here with ?focus=<requirement_code|bucket>#documentos. Once the
@@ -256,9 +268,33 @@ export default function ClientVendorDetailPage({ params }: PageProps) {
       }
     >
       {error ? (
-        <p className="rounded-md border border-[color:var(--status-warning-border)] bg-[color:var(--status-warning-bg)] p-3 text-sm text-[color:var(--status-warning-text)]">
-          {error}
-        </p>
+        errorStatus === 404 || errorStatus === 403 ? (
+          <NotFoundState
+            title="Proveedor no disponible"
+            description="Este proveedor no existe o no está dentro de tu portafolio."
+            action={
+              <Link href={vendorsReturnHref}>
+                <Button size="sm" variant="outline">
+                  {clientVendorReturnLabel(vendorsReturnHref)}
+                </Button>
+              </Link>
+            }
+          />
+        ) : (
+          <ErrorState
+            tone="error"
+            title="No pudimos cargar el proveedor"
+            description={error}
+            onRetry={() => setReloadKey((k) => k + 1)}
+            secondary={
+              <Link href={vendorsReturnHref}>
+                <Button size="sm" variant="outline">
+                  {clientVendorReturnLabel(vendorsReturnHref)}
+                </Button>
+              </Link>
+            }
+          />
+        )
       ) : !detail ? (
         <DetailSkeleton />
       ) : (

@@ -13,6 +13,7 @@ import {
   RISK_LEVELS_WORST_FIRST,
   SEMAPHORE_DOT,
   riskBucket,
+  riskSegments,
   type CalendarRisk,
   type RiskBucket,
 } from "./calendar-shared";
@@ -20,6 +21,7 @@ import {
   MatrixCellPopover,
   type CellPreviewItem,
 } from "./matrix-cell-popover";
+import { RiskCompositionContent } from "./risk-composition-cell";
 
 /**
  * A rows×12-months compliance heatmap — the shared calendar grid. Rows are
@@ -250,12 +252,18 @@ function RowLabel({
   onSelectRow?: (rowId: string) => void;
 }) {
   const inner = (
-    <span className="flex items-center gap-2">
+    // ``min-w-0`` on this flex parent is load-bearing: without it the span
+    // keeps its auto (content-based) minimum width and never shrinks to the
+    // sticky name column, so the ``truncate`` on the name below has no
+    // constrained box to clip against and a long provider name overflows
+    // *across the grid cells*. ``min-w-0`` is needed at EVERY level of the
+    // nested flex chain (button → this span → text wrapper), not just the leaf.
+    <span className="flex min-w-0 items-center gap-2">
       <span
         aria-hidden="true"
         className={"h-2.5 w-2.5 shrink-0 rounded-full " + dotClass(row.semaphore_level)}
       />
-      <span className="min-w-0">
+      <span className="min-w-0 flex-1">
         <span className="block truncate text-[13px] font-medium text-[color:var(--text-primary)]">
           {row.name}
         </span>
@@ -343,17 +351,10 @@ function MatrixCell({
   // Composition breakdown (worst-first, non-zero) from the per-cell preview, so
   // the cell shows HOW the count splits across severities — overdue vs awaiting
   // correction vs in review vs on track — instead of one worst-case block that
-  // hides the mix. The admin grid passes no preview and keeps the solid fill.
-  const segments: { risk: CalendarRisk; n: number }[] = [];
-  if (hasPreview) {
-    const counts = new Map<CalendarRisk, number>();
-    for (const it of preview ?? [])
-      counts.set(it.risk, (counts.get(it.risk) ?? 0) + 1);
-    for (const risk of RISK_LEVELS_WORST_FIRST) {
-      const n = counts.get(risk) ?? 0;
-      if (n > 0) segments.push({ risk, n });
-    }
-  }
+  // hides the mix. Shared with the provider grid via ``riskSegments`` /
+  // ``RiskCompositionContent``. The admin grid passes no preview and keeps the
+  // solid fill.
+  const segments = hasPreview ? riskSegments((preview ?? []).map((it) => it.risk)) : [];
   const ariaLabel = hasPreview
     ? `${rowName}, ${MONTH_LABELS_ES[month]}: ${cell.count} ${cell.count === 1 ? "obligación" : "obligaciones"} — ${segments
         .map((s) => `${s.n} ${RISK_LABEL[s.risk].toLowerCase()}`)
@@ -393,27 +394,7 @@ function MatrixCell({
         }
       >
         {hasPreview ? (
-          <>
-            <span className="font-mono text-sm font-semibold leading-none tabular-nums text-[color:var(--text-primary)]">
-              {cell.count}
-            </span>
-            <span
-              aria-hidden="true"
-              className="flex h-1.5 w-full gap-px overflow-hidden rounded-full bg-[color:var(--surface-sunken)]"
-            >
-              {segments.map((s) => (
-                <span
-                  key={s.risk}
-                  className="h-full"
-                  style={{
-                    flexGrow: s.n,
-                    minWidth: "3px",
-                    backgroundColor: RISK_BAR_COLOR[s.risk],
-                  }}
-                />
-              ))}
-            </span>
-          </>
+          <RiskCompositionContent count={cell.count} segments={segments} />
         ) : (
           <>
             <Icon className="h-4 w-4 shrink-0" weight="bold" aria-hidden="true" />

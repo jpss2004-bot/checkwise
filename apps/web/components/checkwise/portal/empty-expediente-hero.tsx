@@ -219,6 +219,7 @@ function stepStatus(code: DocumentStateCode): StepStatus {
   if (
     code === "in_review" ||
     code === "uploaded" ||
+    code === "possible_mismatch" ||
     code === "needs_review" ||
     code === "rejected" ||
     code === "expired"

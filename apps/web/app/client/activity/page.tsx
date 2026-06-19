@@ -25,6 +25,10 @@ import {
 import { ClientShell } from "../_shell";
 import { VendorRef } from "@/components/checkwise/vendor-ref";
 import {
+  activityActionLabel,
+  activityActorLabel,
+} from "@/lib/constants/activity-labels";
+import {
   listClientActivity,
   type ClientActivityItem,
 } from "@/lib/api/client";
@@ -127,9 +131,9 @@ function ActivityRow({ row }: { row: ClientActivityItem }) {
           </span>
         </div>
         <div className="mt-1 flex flex-wrap items-center gap-1.5">
-          <Badge variant="outline">{row.actor_type}</Badge>
-          <span className="font-mono text-[10px] text-[color:var(--text-tertiary)]">
-            {row.action}
+          <Badge variant="outline">{activityActorLabel(row.actor_type)}</Badge>
+          <span className="text-[11px] text-[color:var(--text-tertiary)]">
+            {activityActionLabel(row.action)}
           </span>
           {row.vendor_id && row.vendor_name ? (
             <VendorRef vendorId={row.vendor_id} vendorName={row.vendor_name}>

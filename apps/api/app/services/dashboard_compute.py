@@ -245,16 +245,33 @@ def build_compliance_state_for_vendor(
             "persona_type": None,
         }
 
-    target_year = year or date.today().year
+    today = date.today()
+    target_year = year or today.year
     onboarding_slots = build_workspace_onboarding_slots(db, workspace)
     calendar_slots = build_workspace_calendar_slots(db, workspace, target_year)
 
+    # document_state_counts is the full-period inventory (it powers the
+    # breakdown strip), so it spans every tracked slot.
     counts = empty_document_counts()
     for view in onboarding_slots + calendar_slots:
         bucket_document_state(counts, view.state)
 
+    # Portal Proveedor, 2ª revisión, Reportes #7: a future-period obligation
+    # (deadline not yet reached) must not drag down the *current* compliance
+    # semaphore / % — it isn't late, it just isn't due yet. Compute the
+    # semaphore over obligations actually due (today or earlier); future ones
+    # still surface on the calendar + upcoming-deadlines views. Slots whose
+    # period can't be parsed stay in (conservative — never silently drop a
+    # real obligation).
+    due_calendar_slots = [
+        view
+        for view in calendar_slots
+        if (days := due_in_days_for_period(view.period_key, today)) is None
+        or days <= 0
+    ]
+
     return {
-        "semaphore": compute_semaphore(onboarding_slots, calendar_slots),
+        "semaphore": compute_semaphore(onboarding_slots, due_calendar_slots),
         "document_state_counts": counts,
         "workspace_id": workspace.id,
         "persona_type": workspace.persona_type,

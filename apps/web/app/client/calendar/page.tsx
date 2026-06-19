@@ -260,15 +260,23 @@ export default function ClientCalendarPage() {
   }, [filteredItems, selected]);
 
   const strip = useMemo(() => {
-    const atRisk = visibleProviders.filter(
-      (p) => p.semaphore_level === "red",
-    ).length;
     let overdue = 0;
     let dueSoon = 0;
     let next: { iso: string; vendor: string } | null = null;
+    // B4 — providers at risk *within the active scope*. When an institution
+    // filter is on, a provider that is red only because of, say, SAT must not
+    // count under an INFONAVIT filter; tally the distinct vendors carrying a
+    // critical (overdue / action_required) obligation in the filtered set.
+    const atRiskVendors = new Set<string>();
     for (const item of filteredItems) {
       if (item.risk_level === "overdue") overdue += 1;
       else if (item.risk_level === "due_soon") dueSoon += 1;
+      if (
+        item.risk_level === "overdue" ||
+        item.risk_level === "action_required"
+      ) {
+        atRiskVendors.add(item.vendor_id);
+      }
       if (item.risk_level === "on_track") continue;
       const n = daysUntil(item.deadline_iso, today);
       if (n === null || n < 0) continue;
@@ -276,8 +284,14 @@ export default function ClientCalendarPage() {
         next = { iso: item.deadline_iso, vendor: item.vendor_name };
       }
     }
+    // Unfiltered, keep the portfolio semaphore-red headline (the count the
+    // dashboard and vendors list show); filtered, use the scoped tally.
+    const atRisk =
+      institutionFilter === "all"
+        ? visibleProviders.filter((p) => p.semaphore_level === "red").length
+        : atRiskVendors.size;
     return { overdue, dueSoon, atRisk, next };
-  }, [filteredItems, visibleProviders, today]);
+  }, [filteredItems, visibleProviders, institutionFilter, today]);
 
   const currentMonthForMatrix =
     today.getFullYear() === year ? today.getMonth() + 1 : null;

@@ -12,6 +12,8 @@ import {
   FileXls,
   Gauge,
   List,
+  MagnifyingGlass,
+  Package,
   Storefront,
   X,
   type Icon,
@@ -78,14 +80,21 @@ function httpStatusOf(err: unknown): number | null {
   return null;
 }
 
+// Reportes sits next to the decision loop (Resumen→Proveedores→Calendario
+// →Entregas→Reportes) and Auditoría — the inspector-ready ZIP builder, a
+// headline value prop — is now reachable from every surface instead of
+// only the Proveedores banner. Notificaciones is also reachable via the
+// header bell, so its nav slot is the lower-priority tail alongside
+// Metadata (a power-user export) and Actividad.
 const NAV: { href: string; label: string; icon: Icon }[] = [
   { href: "/client/dashboard", label: "Resumen", icon: Gauge },
   { href: "/client/vendors", label: "Proveedores", icon: Storefront },
   { href: "/client/calendar", label: "Calendario", icon: CalendarBlank },
   { href: "/client/submissions", label: "Entregas", icon: Files },
+  { href: "/client/reports", label: "Reportes", icon: ChartLineUp },
+  { href: "/client/auditoria", label: "Auditoría", icon: Package },
   { href: "/client/notifications", label: "Notificaciones", icon: Bell },
   { href: "/client/metadata", label: "Metadata", icon: FileXls },
-  { href: "/client/reports", label: "Reportes", icon: ChartLineUp },
   { href: "/client/activity", label: "Actividad", icon: ClockClockwise },
 ];
 
@@ -371,6 +380,25 @@ export function ClientShell({
             className="relative ml-auto flex h-full w-72 max-w-[85vw] flex-col gap-1 border-l border-[color:var(--border-subtle)] bg-[color:var(--surface-raised)] p-4 shadow-lg"
           >
             <p className="cw-eyebrow mb-2">Navegación</p>
+            {/* The header SearchBar is hidden < 640px, so the drawer is the
+                only way to reach search on a phone. */}
+            <Link
+              href="/client/buscar"
+              aria-current={pathname === "/client/buscar" ? "page" : undefined}
+              className={cn(
+                "flex items-center gap-2 rounded-md border px-3 py-2 text-sm font-medium transition-colors",
+                pathname === "/client/buscar"
+                  ? "border-[color:var(--border-brand)] bg-[color:var(--surface-brand)] text-[color:var(--text-inverse)]"
+                  : "border-transparent text-[color:var(--text-secondary)] hover:bg-[color:var(--surface-hover)] hover:text-[color:var(--text-primary)]",
+              )}
+            >
+              <MagnifyingGlass
+                className="h-4 w-4"
+                weight={pathname === "/client/buscar" ? "fill" : "bold"}
+                aria-hidden="true"
+              />
+              Buscar
+            </Link>
             {NAV.map((item) => {
               const isActive =
                 pathname === item.href || pathname?.startsWith(item.href + "/");

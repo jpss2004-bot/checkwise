@@ -20,7 +20,7 @@ export default function ClientBuscarPage() {
         <PageHeader
           eyebrow="Buscar"
           title="Búsqueda en tu portafolio"
-          description="RFC, periodo (YYYY-Mxx) o folio. Solo verás resultados dentro de tus clientes."
+          description="Nombre de proveedor, RFC, periodo (YYYY-Mxx) o folio. Solo verás resultados dentro de tus clientes."
         />
         <Suspense fallback={null}>
           <ClientBuscarBody />
@@ -44,7 +44,7 @@ function ClientBuscarBody() {
       searchPath="/client/buscar"
       runSearch={run}
       buildHref={buildHref}
-      emptyHint="Escribe el RFC de uno de tus proveedores, un periodo (por ejemplo 2026-M05) o un folio."
+      emptyHint="Escribe el nombre o RFC de uno de tus proveedores, un periodo (por ejemplo 2026-M05) o un folio."
     />
   );
 }

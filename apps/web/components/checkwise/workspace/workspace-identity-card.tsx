@@ -126,6 +126,10 @@ export function WorkspaceIdentityCard({
         <summary className="cursor-pointer select-none">
           Código de soporte
         </summary>
+        <p className="mt-1 max-w-prose text-[11px] text-[color:var(--text-tertiary)]">
+          Compártelo solo cuando escribas a soporte: les permite ubicar tu
+          espacio al instante. No necesitas usarlo para ninguna otra cosa.
+        </p>
         <p className="mt-1 font-mono text-[11px] select-all">
           {workspace.protected.workspace_id}
         </p>

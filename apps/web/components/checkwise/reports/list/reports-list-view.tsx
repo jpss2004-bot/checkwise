@@ -147,6 +147,11 @@ export function ReportsListView({
     "all",
   );
   const [search, setSearch] = useState("");
+  // Portal Proveedor, 2ª revisión, Reportes #13: date-range filter over the
+  // "Actualizado" column, so a long report history can be sliced by when
+  // each report was last updated. Client-side, like search + sort.
+  const [dateFrom, setDateFrom] = useState("");
+  const [dateTo, setDateTo] = useState("");
   // P2-a (2026-05-20): sort control. The shared list view sorts
   // updated_at desc server-side; we offer client-side reordering on
   // top of that so a provider with several drafts can switch between
@@ -228,9 +233,19 @@ export function ReportsListView({
     // Accent- and case-insensitive, consistent with the title sort below
     // (which already uses Spanish base-sensitivity collation).
     const q = normalizeForSearch(search);
-    const matched = q
-      ? reports.filter((r) => normalizeForSearch(r.title).includes(q))
-      : reports;
+    // Inclusive day bounds: "desde" starts at 00:00, "hasta" runs to the
+    // last millisecond of the chosen day so the end date is included.
+    const fromTs = dateFrom ? new Date(`${dateFrom}T00:00:00`).getTime() : null;
+    const toTs = dateTo ? new Date(`${dateTo}T23:59:59.999`).getTime() : null;
+    const matched = reports.filter((r) => {
+      if (q && !normalizeForSearch(r.title).includes(q)) return false;
+      if (fromTs !== null || toTs !== null) {
+        const t = new Date(r.updated_at).getTime();
+        if (fromTs !== null && t < fromTs) return false;
+        if (toTs !== null && t > toTs) return false;
+      }
+      return true;
+    });
     if (sortBy === "updated_desc") return matched;
     const sorted = [...matched];
     if (sortBy === "updated_asc") {
@@ -244,7 +259,7 @@ export function ReportsListView({
       );
     }
     return sorted;
-  }, [reports, search, sortBy]);
+  }, [reports, search, sortBy, dateFrom, dateTo]);
 
   // R1 (one-click select-and-generate): preset cards used to drop the
   // user on a blank editor — they had to write/confirm a prompt and
@@ -358,6 +373,8 @@ export function ReportsListView({
     setStatusFilter("all");
     setAudienceFilter("all");
     setSearch("");
+    setDateFrom("");
+    setDateTo("");
     setSortBy("updated_desc");
   }, []);
 
@@ -365,6 +382,8 @@ export function ReportsListView({
     statusFilter !== "all" ||
     audienceFilter !== "all" ||
     search.trim() !== "" ||
+    dateFrom !== "" ||
+    dateTo !== "" ||
     sortBy !== "updated_desc";
 
   // ─── Render ────────────────────────────────────────────────
@@ -556,6 +575,10 @@ export function ReportsListView({
           audienceFilter={audienceFilter}
           onAudienceChange={setAudienceFilter}
           showAudienceFilter={showAudienceFilter}
+          dateFrom={dateFrom}
+          onDateFromChange={setDateFrom}
+          dateTo={dateTo}
+          onDateToChange={setDateTo}
           sortBy={sortBy}
           onSortChange={setSortBy}
           hasActive={hasActiveFilter}
@@ -612,6 +635,10 @@ function FilterBar({
   audienceFilter,
   onAudienceChange,
   showAudienceFilter,
+  dateFrom,
+  onDateFromChange,
+  dateTo,
+  onDateToChange,
   sortBy,
   onSortChange,
   hasActive,
@@ -624,6 +651,10 @@ function FilterBar({
   audienceFilter: ReportAudience | "all";
   onAudienceChange: (v: ReportAudience | "all") => void;
   showAudienceFilter: boolean;
+  dateFrom: string;
+  onDateFromChange: (v: string) => void;
+  dateTo: string;
+  onDateToChange: (v: string) => void;
   sortBy: "updated_desc" | "updated_asc" | "title_asc";
   onSortChange: (v: "updated_desc" | "updated_asc" | "title_asc") => void;
   hasActive: boolean;
@@ -669,6 +700,34 @@ function FilterBar({
           })),
         ]}
       />
+
+      {/* Date range — filters the "Actualizado" column (Reportes #13). */}
+      <label className="flex items-center gap-1.5 text-[11px] text-[color:var(--text-tertiary)]">
+        <span className="cw-eyebrow">Desde</span>
+        <input
+          type="date"
+          value={dateFrom}
+          max={dateTo || undefined}
+          onChange={(e: ChangeEvent<HTMLInputElement>) =>
+            onDateFromChange(e.target.value)
+          }
+          aria-label="Actualizado desde"
+          className="rounded-sm border border-[color:var(--border-default)] bg-[color:var(--surface-page)] px-2 py-1 text-[12px] text-[color:var(--text-primary)] outline-none focus:border-[color:var(--border-focus)]"
+        />
+      </label>
+      <label className="flex items-center gap-1.5 text-[11px] text-[color:var(--text-tertiary)]">
+        <span className="cw-eyebrow">Hasta</span>
+        <input
+          type="date"
+          value={dateTo}
+          min={dateFrom || undefined}
+          onChange={(e: ChangeEvent<HTMLInputElement>) =>
+            onDateToChange(e.target.value)
+          }
+          aria-label="Actualizado hasta"
+          className="rounded-sm border border-[color:var(--border-default)] bg-[color:var(--surface-page)] px-2 py-1 text-[12px] text-[color:var(--text-primary)] outline-none focus:border-[color:var(--border-focus)]"
+        />
+      </label>
 
       {/* Audience — admin only */}
       {showAudienceFilter && (

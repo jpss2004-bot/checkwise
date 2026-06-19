@@ -124,6 +124,7 @@ const STATE_DOT_CLASS: Record<DocumentStateCode, string> = {
   approved: "bg-[color:var(--doc-approved-text)]",
   rejected: "bg-[color:var(--doc-rejected-text)]",
   expired: "bg-[color:var(--doc-expired-text)]",
+  possible_mismatch: "bg-[color:var(--doc-needs-review-text)]",
   needs_review: "bg-[color:var(--doc-needs-review-text)]",
 };
 

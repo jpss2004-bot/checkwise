@@ -4,6 +4,10 @@ import { Gauge } from "@phosphor-icons/react";
 
 import { BlockIntro } from "@/components/checkwise/reports/block-intro";
 import { FreshnessLabel } from "@/components/checkwise/reports/freshness-label";
+import {
+  SEMAPHORE_EXPLAINER_ES,
+  SEMAPHORE_LABELS_ES,
+} from "@/lib/constants/statuses";
 import type { BlockDefinition, BlockProps } from "@/lib/reports/registry";
 
 /**
@@ -186,7 +190,10 @@ export function ComplianceStateBlock({
         </span>
         <div className="flex-1 space-y-1">
           <div className="flex items-baseline justify-between gap-3">
-            <h3 className="text-[15px] font-semibold text-[color:var(--text-primary)]">
+            <h3
+              className="text-[15px] font-semibold text-[color:var(--text-primary)]"
+              title={SEMAPHORE_EXPLAINER_ES[semaphore.level]}
+            >
               {semaphore.label}
             </h3>
             <span className="font-mono text-[22px] font-semibold leading-none tabular-nums text-[color:var(--text-primary)]">
@@ -227,6 +234,37 @@ export function ComplianceStateBlock({
           </div>
         </div>
       ) : null}
+
+      {/* Semáforo glossary. Reviewers found the legend ambiguous (Portal
+          Proveedor, 2ª revisión, Reportes #9): "En proceso" and "En
+          riesgo" weren't distinguishable. A collapsible legend spells out
+          all three levels without crowding the pulse; the current level is
+          emphasised. Prints expanded via the marker-less open fallback. */}
+      <details className="text-[11px] text-[color:var(--text-tertiary)] print:open">
+        <summary className="cursor-pointer select-none">
+          ¿Qué significan estos estados?
+        </summary>
+        <ul className="mt-2 space-y-1.5">
+          {(["green", "yellow", "red"] as const).map((level) => (
+            <li key={level} className="flex items-start gap-2">
+              <span
+                className={`mt-1 inline-block h-2 w-2 shrink-0 rounded-full ${LEVEL_DOT[level]}`}
+                aria-hidden="true"
+              />
+              <span
+                className={
+                  level === semaphore.level
+                    ? "text-[color:var(--text-secondary)]"
+                    : undefined
+                }
+              >
+                <span className="font-medium">{SEMAPHORE_LABELS_ES[level]}:</span>{" "}
+                {SEMAPHORE_EXPLAINER_ES[level]}
+              </span>
+            </li>
+          ))}
+        </ul>
+      </details>
 
       <FreshnessLabel fetchedAt={data.fetched_at} />
     </section>

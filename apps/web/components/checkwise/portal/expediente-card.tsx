@@ -260,6 +260,7 @@ export function ExpedienteCard({ requirement, onAction }: ExpedienteCardProps) {
       </div>
 
       {(requirement.state === "rejected" ||
+        requirement.state === "possible_mismatch" ||
         requirement.state === "needs_review" ||
         requirement.state === "expired") && (
         <p className="text-[11px] text-[color:var(--text-tertiary)]">
@@ -282,7 +283,12 @@ function toneForState(
 ): "attention" | "rejected" | "approved" | "review" | "neutral" {
   if (state === "approved") return "approved";
   if (state === "rejected" || state === "expired") return "rejected";
-  if (state === "needs_review" || state === "pending") return "attention";
+  if (
+    state === "needs_review" ||
+    state === "possible_mismatch" ||
+    state === "pending"
+  )
+    return "attention";
   // Documents under review (uploaded / in_review, both badged "En
   // revisión") get a subtle review-tone border so the card frame — not
   // only the badge — signals they're in the reviewer's hands.
@@ -293,6 +299,7 @@ function toneForState(
 function ctaLabelForState(state: DocumentStateCode): string {
   if (state === "rejected") return "Corregir y volver a subir";
   if (state === "expired") return "Subir versión vigente";
+  if (state === "possible_mismatch") return "Verificar archivo";
   if (state === "needs_review") return "Revisar y confirmar";
   return "Subir documento";
 }

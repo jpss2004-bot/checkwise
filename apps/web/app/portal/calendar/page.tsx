@@ -7,7 +7,6 @@ import {
   ArrowLeft,
   ArrowRight,
   ArrowsClockwise,
-  Buildings,
   CalendarBlank,
   Clock,
   CloudArrowUp,
@@ -15,15 +14,22 @@ import {
   Eye,
   Files,
   Funnel,
-  House,
-  Scales,
-  ShieldCheck,
   Stamp,
   Tray,
+  WarningCircle,
   X,
   type Icon,
 } from "@phosphor-icons/react";
 
+import {
+  BUCKET_CELL,
+  INSTITUTION_ICON,
+  RISK_BAR_COLOR,
+  RISK_ICON,
+  RISK_LABEL,
+  RISK_LEVELS_WORST_FIRST,
+  riskBucket,
+} from "@/components/checkwise/calendar/calendar-shared";
 import { InstitutionRowHeader } from "@/components/checkwise/calendar/institution-row-header";
 import { MobileMonthList } from "@/components/checkwise/calendar/mobile-month-list";
 import { MonthCell } from "@/components/checkwise/calendar/month-cell";
@@ -37,6 +43,7 @@ import { DocumentGuidanceDisclosure } from "@/components/checkwise/portal/expedi
 import { PortalAppShell } from "@/components/checkwise/portal/portal-app-shell";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
 import { PageHeader } from "@/components/ui/page-header";
 import { Skeleton } from "@/components/ui/skeleton";
 import { toast } from "@/components/ui/toast";
@@ -50,20 +57,17 @@ import {
   statusToDocumentStateCode,
   type CalendarPayload,
 } from "@/lib/api/portal";
+import {
+  CALENDAR_MAX_YEAR,
+  CALENDAR_MIN_YEAR,
+  parseCalendarYear,
+} from "@/lib/calendar-year";
 import { withOnboardingGate } from "@/lib/session/with-onboarding-gate";
 import type { PortalSession } from "@/lib/session/portal";
 
-// Phase 7 / Slice 7A — INFONAVIT was sharing the ``Buildings`` icon
-// with IMSS, which made the two institution rows visually
-// indistinguishable in the calendar header strip. ``House`` reads
-// directly as "instituto de vivienda" — semantically accurate AND
-// visually distinct from IMSS.
-const INSTITUTION_ICON: Record<CalendarInstitutionCode, Icon> = {
-  sat: Scales,
-  imss: Buildings,
-  infonavit: House,
-  stps_repse: ShieldCheck,
-};
+// ``INSTITUTION_ICON`` (incl. the INFONAVIT=House / IMSS=Buildings
+// disambiguation) is now the single app-wide map in calendar-shared.ts,
+// imported above — no per-surface copy to keep in sync.
 
 function flattenCalendarPayload(payload: CalendarPayload): CalendarEntry[] {
   const entries: CalendarEntry[] = [];
@@ -83,6 +87,7 @@ function flattenCalendarPayload(payload: CalendarPayload): CalendarEntry[] {
           required_document: item.required_document,
           deadline_iso: item.deadline_iso,
           state: statusToDocumentStateCode(item.status),
+          risk_level: item.risk_level ?? null,
           suggested_action: item.suggested_action,
           frequency: item.frequency,
           period_label: item.period_label,
@@ -91,6 +96,7 @@ function flattenCalendarPayload(payload: CalendarPayload): CalendarEntry[] {
           submission_id: item.submission_id,
           filename: item.filename ?? null,
           submitted_at: item.submitted_at ?? null,
+          reviewer_note: item.reviewer_note ?? null,
           anatomy: item.anatomy ?? "",
           where_to_obtain: item.where_to_obtain ?? "",
           common_errors: item.common_errors ?? [],
@@ -116,8 +122,25 @@ function CalendarInner({ session }: { session: PortalSession }) {
   const router = useRouter();
   const searchParams = useSearchParams();
   const now = new Date();
-  const [year] = useState(now.getFullYear() || 2026);
-  const currentMonth = now.getMonth() + 1;
+  // Year is URL-synced (``?year=``) and clamped, mirroring the client calendar
+  // (the backend already accepts the param — it was previously reachable only
+  // by hand-editing the URL, with no picker). Current-month highlighting only
+  // applies while actually viewing the current year.
+  const year = parseCalendarYear(searchParams.get("year"));
+  const setYear = (next: number) => {
+    const params = new URLSearchParams(searchParams.toString());
+    const clamped = Math.min(
+      CALENDAR_MAX_YEAR,
+      Math.max(CALENDAR_MIN_YEAR, Number.isNaN(next) ? now.getFullYear() : next),
+    );
+    if (clamped === now.getFullYear()) params.delete("year");
+    else params.set("year", String(clamped));
+    const qs = params.toString();
+    router.replace(qs ? `/portal/calendar?${qs}` : "/portal/calendar", {
+      scroll: false,
+    });
+  };
+  const currentMonth = now.getFullYear() === year ? now.getMonth() + 1 : 0;
 
   const filterParam = searchParams.get("inst");
   const filterInstitution: CalendarInstitutionCode | "all" =
@@ -185,6 +208,10 @@ function CalendarInner({ session }: { session: PortalSession }) {
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [events, setEvents] = useState<CalendarEntry[] | null>(null);
   const [loadError, setLoadError] = useState(false);
+  // Bumped by the error-state retry button to re-fire the calendar fetch
+  // (A2 — the load path previously had no retry; the only recovery was a
+  // full page reload).
+  const [retryNonce, setRetryNonce] = useState(0);
 
   useEffect(() => {
     let cancelled = false;
@@ -202,7 +229,7 @@ function CalendarInner({ session }: { session: PortalSession }) {
     return () => {
       cancelled = true;
     };
-  }, [session, year]);
+  }, [session, year, retryNonce]);
 
   const filteredEvents = useMemo(() => {
     if (!events) return [];
@@ -216,7 +243,7 @@ function CalendarInner({ session }: { session: PortalSession }) {
     // collapses to the provider's actual TODO list.
     if (onlyPending) {
       result = result.filter((e) =>
-        ["pending", "rejected", "expired", "needs_review"].includes(e.state),
+        ["pending", "rejected", "expired", "possible_mismatch", "needs_review"].includes(e.state),
       );
     }
     return result;
@@ -277,6 +304,29 @@ function CalendarInner({ session }: { session: PortalSession }) {
           description="Cada celda lista las obligaciones de ese mes: pendientes, entregadas y aprobadas. Toca un mes para ver el detalle o usa el filtro 'Pendientes' para ver solo lo que aún debes."
           actions={
             <>
+              {/* A3 — year picker. The backend already accepts ``?year=``; this
+                  surfaces it (previously the year was hard-coded to "now" and
+                  only changeable by hand-editing the URL). Mirrors the client
+                  calendar's clamped year input. */}
+              <label className="flex items-center gap-2 rounded-md border border-[color:var(--border-default)] bg-[color:var(--surface-raised)] px-3 py-1 text-xs">
+                <CalendarBlank
+                  className="h-3.5 w-3.5 text-[color:var(--text-secondary)]"
+                  weight="bold"
+                  aria-hidden="true"
+                />
+                <span className="font-mono text-[10px] uppercase tracking-wide text-[color:var(--text-tertiary)]">
+                  Año
+                </span>
+                <Input
+                  type="number"
+                  min={CALENDAR_MIN_YEAR}
+                  max={CALENDAR_MAX_YEAR}
+                  value={year}
+                  onChange={(e) => setYear(Number(e.target.value))}
+                  aria-label="Año del calendario"
+                  className="h-7 w-20 border-0 bg-transparent p-0 font-mono text-sm font-semibold focus-visible:ring-0"
+                />
+              </label>
               {/* Phase 5 / Slice 5C — filter-aware download. Passes
                   the active institution filter through to the
                   expediente ZIP endpoint so the provider can pull
@@ -323,17 +373,44 @@ function CalendarInner({ session }: { session: PortalSession }) {
             infonavit: events.filter((e) => e.institution === "infonavit").length,
             stps_repse: events.filter((e) => e.institution === "stps_repse").length,
             pending: events.filter((e) =>
-              ["pending", "rejected", "expired", "needs_review"].includes(e.state),
+              ["pending", "rejected", "expired", "possible_mismatch", "needs_review"].includes(e.state),
             ).length,
           }}
         />
 
-        {loadError && (
-          <p className="text-xs text-[color:var(--text-secondary)]">
-            No pudimos cargar tu calendario en este momento. Recarga la página
-            para intentar de nuevo; tu sesión sigue activa.
-          </p>
-        )}
+        {/* A2 — load error now offers an in-place retry instead of telling the
+            provider to reload the whole page. ``setEvents(null)`` drops back to
+            the skeleton while the refetch is in flight. */}
+        {loadError ? (
+          <section
+            className="rounded-lg border border-dashed border-[color:var(--status-warning-border)] bg-[color:var(--surface-raised)] px-6 py-10 text-center"
+            role="alert"
+          >
+            <p className="font-mono text-[10px] uppercase tracking-wide text-[color:var(--status-warning-text)]">
+              No pudimos cargar tu calendario
+            </p>
+            <p className="mt-2 text-sm text-[color:var(--text-primary)]">
+              Algo falló al traer tus obligaciones. Tu sesión sigue activa.
+            </p>
+            <Button
+              variant="outline"
+              size="sm"
+              className="mt-3"
+              onClick={() => {
+                setLoadError(false);
+                setEvents(null);
+                setRetryNonce((n) => n + 1);
+              }}
+            >
+              <ArrowsClockwise
+                className="h-4 w-4"
+                weight="bold"
+                aria-hidden="true"
+              />
+              Reintentar
+            </Button>
+          </section>
+        ) : null}
 
         {/* Bugfix (2026-05-21) — three distinct empty states.
               The legacy code collapsed them all into "Sin
@@ -347,9 +424,9 @@ function CalendarInner({ session }: { session: PortalSession }) {
                    → legitimate zero (no obligations for that
                    institution); offer a "quitar filtro" reset.
                 3. otherwise render the grid. */}
-        {totalCount === 0 && !loadError ? (
+        {loadError ? null : totalCount === 0 ? (
           <UnexpectedEmpty />
-        ) : filteredCount === 0 && !loadError ? (
+        ) : filteredCount === 0 ? (
           // Slice 7A — the empty state has three flavors now:
           //   * onlyPending active → "no tienes pendientes" celebratory copy
           //     with a CTA to clear the filter.
@@ -806,9 +883,33 @@ function EventDrawer({
         </header>
 
         <div className="space-y-5 px-6 py-5">
-          <div className="flex items-center gap-2">
+          <div className="flex flex-wrap items-center gap-2">
             <DocStateBadge state={event.state} />
             <Badge variant="outline">{frequencyLabel(event.frequency)}</Badge>
+            {/* A1 — server-computed urgency tier, shown alongside the document
+                state. ``state`` answers "what status is this?"; the severity
+                pill answers "how urgent is it?" (overdue vs upcoming) — the
+                axis the provider calendar previously couldn't express. */}
+            {event.risk_level ? (
+              <span
+                className={
+                  "inline-flex items-center gap-1 rounded-full border px-2 py-0.5 text-[11px] font-medium " +
+                  BUCKET_CELL[riskBucket(event.risk_level)]
+                }
+              >
+                {(() => {
+                  const RiskIcon = RISK_ICON[event.risk_level];
+                  return (
+                    <RiskIcon
+                      className="h-3 w-3"
+                      weight="bold"
+                      aria-hidden="true"
+                    />
+                  );
+                })()}
+                {RISK_LABEL[event.risk_level]}
+              </span>
+            ) : null}
           </div>
 
           <DetailRow
@@ -842,6 +943,24 @@ function EventDrawer({
               {event.suggested_action}
             </p>
           </div>
+
+          {/* A4 — reviewer's reason on a bounced obligation, inline so the
+              provider can correct without first opening the submission. */}
+          {event.reviewer_note ? (
+            <div className="rounded-lg border border-[color:var(--status-error-border)] bg-[color:var(--status-error-bg)] px-4 py-3">
+              <p className="flex items-center gap-1.5 font-mono text-[10px] uppercase tracking-wide text-[color:var(--status-error-text)]">
+                <WarningCircle
+                  className="h-3.5 w-3.5"
+                  weight="bold"
+                  aria-hidden="true"
+                />
+                Observación del revisor
+              </p>
+              <p className="mt-1 text-[13px] leading-5 text-[color:var(--text-primary)]">
+                {event.reviewer_note}
+              </p>
+            </div>
+          ) : null}
 
           {/* Session 3 (2026-05-21) — catalog v2 fan-out. A v2 row
               carries one ``accepts_documents`` entry per alternative
@@ -971,6 +1090,7 @@ function drawerAction(event: CalendarEntry): {
         icon: ArrowsClockwise,
         tone: "primary",
       };
+    case "possible_mismatch":
     case "needs_review":
       return {
         label: "Revisar y corregir",
@@ -1053,36 +1173,36 @@ function formatLongDate(iso: string): string {
 
 // ─── Legend ─────────────────────────────────────────────────────
 
-// The grid badges only ever surface six distinct labels. ``uploaded``
-// and ``empty`` render the same labels as ``in_review`` and ``pending``
-// respectively (see DocStateBadge), so listing them here produced four
-// visually duplicate legend entries. Keep ``pending`` + ``in_review`` as
-// the canonical labels for those two pairs.
-const LEGEND_STATES: CalendarEntry["state"][] = [
-  "pending",
-  "in_review",
-  "approved",
-  "needs_review",
-  "rejected",
-  "expired",
-];
-
+// Decodes the grid cells' six-tier risk-composition bar — the same legend the
+// client calendar shows, so the two read identically (the provider asked to
+// match the client's color language). Each swatch is the per-severity hue the
+// cell bar uses (RISK_BAR_COLOR), worst-first.
 function Legend() {
+  // Collapsed by default (Portal Proveedor, 2ª revisión, Calendario #1):
+  // the always-on legend added a full-width band of competing color to an
+  // already dense grid. A disclosure keeps the reference one click away
+  // without taxing the first glance. On mobile the grid is replaced by the
+  // month list, so this only affects the desktop grid view.
   return (
-    <section className="rounded-lg border border-[color:var(--border-subtle)] bg-[color:var(--surface-raised)] px-4 py-3">
-      <div className="flex flex-wrap items-center gap-x-3 gap-y-2">
-        <p className="font-mono text-[10px] uppercase tracking-wide text-[color:var(--text-tertiary)]">
-          Leyenda
-        </p>
-        <ul className="flex flex-wrap gap-1.5">
-          {LEGEND_STATES.map((state) => (
-            <li key={state}>
-              <DocStateBadge state={state} />
-            </li>
-          ))}
-        </ul>
-      </div>
-    </section>
+    <details className="rounded-lg border border-[color:var(--border-subtle)] bg-[color:var(--surface-raised)] px-4 py-3">
+      <summary className="cursor-pointer select-none font-mono text-[10px] uppercase tracking-wide text-[color:var(--text-tertiary)]">
+        Leyenda
+      </summary>
+      <ul className="mt-2 flex flex-wrap items-center gap-x-4 gap-y-2">
+        {RISK_LEVELS_WORST_FIRST.map((risk) => (
+          <li key={risk} className="flex items-center gap-1.5">
+            <span
+              aria-hidden="true"
+              className="h-3 w-3 shrink-0 rounded-sm"
+              style={{ backgroundColor: RISK_BAR_COLOR[risk] }}
+            />
+            <span className="text-xs text-[color:var(--text-secondary)]">
+              {RISK_LABEL[risk]}
+            </span>
+          </li>
+        ))}
+      </ul>
+    </details>
   );
 }
 

@@ -8,6 +8,7 @@ import {
   HourglassHigh,
   Tray,
   Warning,
+  WarningDiamond,
   XCircle,
   type Icon,
 } from "@phosphor-icons/react";
@@ -16,6 +17,7 @@ import { DOC_STATE_LABELS } from "@/components/checkwise/doc-state-badge";
 import { INSTITUTION_LABELS, MONTH_LABELS_ES } from "@/lib/api/portal";
 import type { DocumentStateCode } from "@/lib/types";
 
+import { riskRank } from "./calendar-shared";
 import type { CalendarEntry, CalendarInstitutionCode } from "./types";
 
 /**
@@ -46,6 +48,7 @@ const STATE_ICON: Record<DocumentStateCode, Icon> = {
   uploaded: Tray,
   rejected: XCircle,
   expired: Warning,
+  possible_mismatch: WarningDiamond,
   needs_review: FileMagnifyingGlass,
   pending: Clock,
   empty: CircleDashed,
@@ -62,6 +65,8 @@ const STATE_TONE: Record<DocumentStateCode, string> = {
     "border-[color:var(--doc-rejected-border)] bg-[color:var(--doc-rejected-bg)] text-[color:var(--doc-rejected-text)]",
   expired:
     "border-[color:var(--doc-expired-border)] bg-[color:var(--doc-expired-bg)] text-[color:var(--doc-expired-text)]",
+  possible_mismatch:
+    "border-[color:var(--doc-needs-review-border)] bg-[color:var(--doc-needs-review-bg)] text-[color:var(--doc-needs-review-text)]",
   needs_review:
     "border-[color:var(--doc-needs-review-border)] bg-[color:var(--doc-needs-review-bg)] text-[color:var(--doc-needs-review-text)]",
   pending:
@@ -119,11 +124,14 @@ export function MobileMonthList({
     >
       {reordered.map((month) => {
         const monthEvents = byMonth.get(month) ?? [];
-        // Sort each month: actionable first, then pending, then
-        // resolved. Matches the dominant-state ordering on the
-        // desktop grid.
+        // A6 — most-urgent-first by the server risk tier (so an overdue but
+        // still-"pending" obligation leads over an upcoming one — the time
+        // dimension the state RANK alone misses), with the document-state RANK
+        // as the tiebreak within a tier.
         const sorted = [...monthEvents].sort(
-          (a, b) => RANK[a.state] - RANK[b.state],
+          (a, b) =>
+            riskRank(a.risk_level) - riskRank(b.risk_level) ||
+            RANK[a.state] - RANK[b.state],
         );
         const isCurrent = month === currentMonth;
         return (
@@ -199,10 +207,11 @@ function StateBadge({ state }: { state: DocumentStateCode }) {
 const RANK: Record<DocumentStateCode, number> = {
   rejected: 0,
   expired: 1,
-  needs_review: 2,
-  pending: 3,
-  uploaded: 4,
-  in_review: 5,
-  approved: 6,
-  empty: 7,
+  possible_mismatch: 2,
+  needs_review: 3,
+  pending: 4,
+  uploaded: 5,
+  in_review: 6,
+  approved: 7,
+  empty: 8,
 };

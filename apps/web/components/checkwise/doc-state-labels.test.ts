@@ -29,6 +29,7 @@ const DOC_STATE_TO_SLOT: Record<DocumentStateCode, SlotStateCode> = {
   approved: SlotState.APPROVED,
   rejected: SlotState.REJECTED,
   expired: SlotState.EXPIRED,
+  possible_mismatch: SlotState.POSSIBLE_MISMATCH,
   needs_review: SlotState.NEEDS_CORRECTION,
 };
 

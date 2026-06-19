@@ -25,7 +25,36 @@ Method: four parallel read-only audits (FE bundle/loading, FE data-fetching/resp
 - F-RESP-2 (regenerate/refresh) — `RegenerateBlockResponse`/`RefreshDataResponse` return only summaries (block text / refreshed-block list), **not** full `content_json`. Dropping their re-fetch would show stale data. Needs the backend to return full content, or careful local patching — design it with the report-screen work.
 - OP-4 (Reports FE default timeout) — a blanket 30s default would abort legitimately-slow AI POSTs (regenerate/explain/suggest/refresh, backend LLM cap 120s). Needs per-endpoint classification (timeout the quick writes, leave AI/SSE/downloads unbounded).
 
-**Not yet committed.** Shared tree with concurrent agents — commit per surface soon to avoid clobbering.
+**Wave 1 committed** to local main (6 commits `ebbc278`→`5d9cdd3`), not pushed.
+
+### Wave 2 — COMPLETE (9 commits, verified tsc/eslint/vitest + targeted pytest)
+
+**Shipped + committed:**
+- F-RESP-1 (`5f2bbf5`) — new `lib/api/request-cache.ts` (in-flight coalescing + optional short TTL, errors never cached). `getClientMe` → coalesce + 30s TTL; notification summary coalesced; `acceptClientLegalConsent` invalidates `client:me`. Kills the duplicate `getClientMe` + per-navigation re-fetch. (Follow-up: extend to provider/admin reads + pass `me` via context.)
+- F-RESP-3 stream-batching (`70cbb48`) — generation coalesces per-token SSE flushes into one rAF flush; terminal events flush final content synchronously. New `use-generation.test.ts`. **Block-memoization half deferred** (stream mutates blocks in place → `React.memo` by ref would render stale; needs immutable-streaming refactor).
+- B-PERF-2 (`6ddb310`) — admin correction-requests: SQL pagination on the no-filter path (count + LIMIT/OFFSET on the 0048 index) + batched `_load_correction_contexts`.
+- OP-4 (`3f0cf6a`) — Reports FE per-endpoint timeouts: `WRITE_TIMEOUT_MS` on quick writes, `READ_TIMEOUT_MS` on the reads that lacked it; AI/SSE/downloads/`getReportsEngine` left unbounded.
+- F-RESP-5 portal (`68fdc06`) — provider dashboard renders without waiting on the secondary onboarding fetch. **Admin dashboard deferred** (OpsHero needs both overview + rollup.queue → deeper restructure).
+- OP-3 (`8b36650`) — report `/generate` plan call moved inside the SSE generator behind a heartbeat comment (no more blank pre-stream wait); plan failure → in-stream error frame.
+- OP-2 (`1a62aaa`) — audit-package INDICE Chromium render bounded (launch/goto/page timeouts) + animated FE "Preparando" spinner with aria-busy.
+- F-BUNDLE-2/3 (`39e9bf8`) — ShareDialog/ExportButton/PreviewPdfButton → `next/dynamic`; editable drag stack extracted to lazily-loaded `editable-block-list.tsx`, Canvas keeps a type-only `DragControls` import → read-only/print/StoryView carry zero motion runtime.
+- F-RESP-4 formatter (`72fcf31`) — new `lib/format/datetime.ts` caches one `Intl.DateTimeFormat` per options signature; submissions (≤500 rows) + platform users format through it (byte-identical). **Virtualization half deferred** (needs a windowing lib + cross-consumer testing of the shared DataTable).
+
+**Deferred from Wave 2 (with rationale):**
+- B-PERF-5 (admin clients/vendors/workspaces pagination) — the pages fetch-all + filter client-side, so a backend cap would break search + silently hide rows; serializers have no N+1. Needs a coordinated FE+BE server-side-search rework (pairs with virtualization).
+- F-RESP-4 virtualization, F-RESP-5 admin OpsHero restructure, F-RESP-3 block memoization, F-RESP-2 regenerate/refresh re-fetch (needs backend to return full content).
+
+**Waves 1 + 2 PUSHED to origin/main** (`c85c009..72fcf31`, 15 commits) — auto-deploys Render + Vercel. Full backend suite at baseline (24 failed / 1796 passed, all pre-existing env/manifest — zero introduced).
+
+### Wave 3 — infra (2 safe wins shipped; the rest is a coordinated FE+BE project)
+
+**Committed (not yet pushed):**
+- B-PERF-4 (`8cc6501`) — migration **0050** adds `ix_contracts_client_vendor` CONCURRENTLY (+ declared on the Contract model). `contracts` was a seq scan per upload/expediente. **Auto-runs via Render preDeployCommand on push → snapshot Neon first** + set `idle_in_transaction_session_timeout` (per the 0049 stall). Verified: alembic head 0050 linear, create_all smoke green.
+- B-PERF-10 (`0c5fbb3`) — `db/session.py` now sets `pool_size`/`max_overflow` (defaults 10/20, env-tunable `DB_POOL_SIZE`/`DB_POOL_MAX_OVERFLOW`). The single uvicorn worker's ~40-thread sync pool was starving on the default 15. Postgres-only. Safe to push anytime.
+
+**Deferred — all blocked on the same architectural finding:** B-PERF-9 (calendar/audit-tree/submissions payloads), B-PERF-5 (admin lists), F-RESP-4 virtualization — **the read endpoints aren't paginated because the FE fetches the full dataset and filters/renders it client-side** (admin clients/vendors/workspaces, provider submission history, the audit-package tree, the 12-month calendar grid). Capping any backend would break search / hide rows / truncate the grid. The correct fix is a coherent **server-side search + pagination + table virtualization** pass (FE+BE together), which deserves its own browser-verified project. B-PERF-11 skipped (marginal per-submission cleanups on env-fragile upload paths). F-RESP-6 streaming download progress + F-RESP-7 skeleton shaping deferred (moderate FE, hard to verify blind).
+
+Shared tree with concurrent agents — committed per surface to avoid clobbering.
 
 ---
 

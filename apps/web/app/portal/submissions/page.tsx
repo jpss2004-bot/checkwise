@@ -125,12 +125,15 @@ export default function SubmissionsIndexPage() {
     );
   }, [items]);
 
+  // Group by the visible label, not the raw status code: recibido /
+  // pendiente_revision / prevalidado all read "En revisión", so keying the
+  // dropdown on the code surfaced the same label two or three times. The
+  // option value is the label; filtering compares labels so one option
+  // matches every code behind it.
   const statusOptions = useMemo(() => {
     const set = new Set<string>();
-    for (const it of items ?? []) set.add(it.status);
-    return Array.from(set).sort((a, b) =>
-      statusLabel(a).localeCompare(statusLabel(b), "es"),
-    );
+    for (const it of items ?? []) set.add(statusLabel(it.status));
+    return Array.from(set).sort((a, b) => a.localeCompare(b, "es"));
   }, [items]);
 
   const yearOptions = useMemo(() => {
@@ -147,7 +150,7 @@ export default function SubmissionsIndexPage() {
         (it.institution || "otros") !== filterInstitution
       )
         return false;
-      if (filterStatus && it.status !== filterStatus) return false;
+      if (filterStatus && statusLabel(it.status) !== filterStatus) return false;
       if (filterYear && String(extractYearMonth(it).year) !== filterYear)
         return false;
       return true;
@@ -315,9 +318,9 @@ function ProviderSubmissionsFilters({
       <FilterControl label="Estado">
         <Select value={status} onChange={(e) => onStatus(e.target.value)}>
           <option value="">Todos</option>
-          {statusOptions.map((value) => (
-            <option key={value} value={value}>
-              {statusLabel(value)}
+          {statusOptions.map((label) => (
+            <option key={label} value={label}>
+              {label}
             </option>
           ))}
         </Select>

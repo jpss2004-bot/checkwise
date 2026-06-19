@@ -103,6 +103,10 @@ from app.schemas.submissions import (
     SubmissionResponse,
 )
 from app.services.audit_log import add_audit_event
+from app.services.calendar_risk import (
+    REJECTED_OR_CORRECTION_STATUSES,
+    calendar_item_risk,
+)
 from app.services.contact_service import hash_ip
 from app.services.correction_request_service import (
     TIER_B_FIELD_LABEL_ES,
@@ -1628,7 +1632,8 @@ def get_workspace_calendar(
 
     # Omitted year means "the year we are in" — the previous hardcoded
     # 2026 default would have gone stale every January.
-    year = year or date.today().year
+    today = date.today()
+    year = year or today.year
 
     slots = build_workspace_calendar_slots(db, workspace, year)
     slot_by_key: dict[tuple[str | None, str | None], SlotView] = {
@@ -1654,6 +1659,20 @@ def get_workspace_calendar(
         ).all()
         for sub_id, fname in rows:
             filename_by_submission[sub_id] = fname
+
+    # A4 — surface the reviewer's reason on bounced obligations inline, so the
+    # provider sees *why* a document was rejected without a second fetch into
+    # the submission detail. One batched query over the rejected-status current
+    # submissions (mirrors the client calendar aggregate's pattern).
+    rejected_ids = [
+        view.current_submission_id
+        for view in slots
+        if view.current_submission_id
+        and view.current_status in REJECTED_OR_CORRECTION_STATUSES
+    ]
+    reviewer_note_by_submission: dict[str, str] = (
+        _latest_reviewer_notes(db, rejected_ids) if rejected_ids else {}
+    )
 
     # Session 2 (2026-05-21) — pick the catalog shape the slot resolver
     # used. Keeping them in lockstep matters: the resolver iterates v2
@@ -1726,9 +1745,22 @@ def get_workspace_calendar(
                     else None
                 ),
                 "submitted_at": view.submitted_at_iso if view else None,
+                # A4 — reviewer's reason, only on bounced obligations (rejected /
+                # needs-clarification / mismatch) that carry a note.
+                "reviewer_note": (
+                    reviewer_note_by_submission.get(current_submission_id)
+                    if current_submission_id
+                    and item_status in REJECTED_OR_CORRECTION_STATUSES
+                    else None
+                ),
                 "required_document": recurring_required_document(req),
                 "due_month": req.due_month,
                 "deadline_iso": deadline_iso,
+                # Server-computed 6-tier severity — same classifier the client
+                # and admin calendars use (app.services.calendar_risk), so the
+                # provider no longer re-derives urgency on the frontend and the
+                # three calendars can never disagree on what "overdue" means.
+                "risk_level": calendar_item_risk(item_status, deadline_iso, today),
                 "suggested_action": _calendar_suggested_action(item_status),
                 "href": href,
                 # Stage 2.7 (T5 parity, 2026-05-20) — single-doc
@@ -3831,6 +3863,25 @@ def _due_in_days_for_period(period_key: str | None, today: date) -> int | None:
     return (deadline - today).days
 
 
+def _currently_due_calendar_slots(
+    calendar_slots: list[SlotView], today: date
+) -> list[SlotView]:
+    """Calendar slots whose deadline is today or earlier.
+
+    Future-period obligations (deadline not yet reached) are dropped so the
+    compliance semaphore reflects *current* standing instead of being dragged
+    down by work that simply isn't due yet (Portal Proveedor, 2ª revisión,
+    Reportes #7). Slots with an unparseable period stay in (conservative —
+    never silently drop a real obligation); anything due today or overdue is
+    kept. Counts, attention and upcoming-deadlines keep the full slot set.
+    """
+    return [
+        s
+        for s in calendar_slots
+        if (d := _due_in_days_for_period(s.period_key, today)) is None or d <= 0
+    ]
+
+
 def _compute_attention_today(
     onboarding_slots: list[SlotView],
     calendar_slots: list[SlotView],
@@ -4190,7 +4241,12 @@ def get_workspace_dashboard(
         persona_type=workspace.persona_type,
         onboarding_summary=_compute_onboarding_summary(onboarding_slots, workspace),
         document_state_counts=counts,
-        semaphore=_compute_semaphore(onboarding_slots, calendar_slots),
+        # Reportes #7: the semaphore reflects *current* standing — obligations
+        # not yet due don't drag it down (they still surface in upcoming /
+        # calendar). Counts above stay over the full slot set.
+        semaphore=_compute_semaphore(
+            onboarding_slots, _currently_due_calendar_slots(calendar_slots, today)
+        ),
         suggested_actions=_compute_suggested_actions(
             onboarding_slots,
             calendar_slots,

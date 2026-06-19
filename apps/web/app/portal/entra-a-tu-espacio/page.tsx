@@ -90,10 +90,13 @@ function EntraATuEspacioInner({ session }: { session: PortalSession }) {
 
   // Route per the existing first-visit logic: providers mid-onboarding
   // land on /onboarding so they pick up where they left off; completed
-  // expedientes go straight to the dashboard.
+  // expedientes open their working surface — the compliance calendar —
+  // rather than the dashboard, so "Entrar a mi espacio" lands the provider
+  // where they actually act, instead of an overview screen that read as a
+  // name/action mismatch (Portal Proveedor, 2ª revisión, Mi Espacio #15).
   const nextRouteAfterEntry =
     liveSession.expediente_status === "complete"
-      ? "/portal/dashboard"
+      ? "/portal/calendar"
       : "/portal/onboarding";
 
   // §4.7 — when the provider arrives here straight from login
@@ -339,34 +342,39 @@ function EntraATuEspacioInner({ session }: { session: PortalSession }) {
             </div>
           </footer>
 
+          {/* Restacked (Portal Proveedor, 2ª revisión, Mi Espacio #16): the
+              old justify-between row pinned the button to the far edge and
+              capped the copy at ~55ch, leaving a dead gap across the middle.
+              Title + action now share the top row and the description spans
+              the full width below, so the space reads as intentional. */}
           <section
             id="correccion"
-            className="cw-fade-up flex flex-wrap items-center justify-between gap-3 rounded-xl border border-[color:var(--border-default)] bg-[color:var(--surface-raised)] p-5 shadow-sm sm:p-6"
+            className="cw-fade-up rounded-xl border border-[color:var(--border-default)] bg-[color:var(--surface-raised)] p-5 shadow-sm sm:p-6"
             aria-label="Solicitar corrección de un dato de contacto"
           >
-            <div className="min-w-0">
+            <div className="flex flex-wrap items-center justify-between gap-3">
               <h2 className="text-base font-semibold text-[color:var(--text-primary)]">
                 ¿Necesitas corregir un dato?
               </h2>
-              <p className="mt-1 max-w-prose text-xs text-[color:var(--text-secondary)]">
-                Para corregir RFC, razón social o tu correo registrado, pide
-                la actualización aquí. Cada solicitud entra a revisión antes
-                de aplicarse.
-              </p>
+              <Button
+                type="button"
+                variant="outline"
+                onClick={() => setCorrectionOpen(true)}
+                aria-haspopup="dialog"
+              >
+                <IdentificationCard
+                  className="h-4 w-4"
+                  weight="bold"
+                  aria-hidden="true"
+                />
+                <span>Solicitar cambio</span>
+              </Button>
             </div>
-            <Button
-              type="button"
-              variant="outline"
-              onClick={() => setCorrectionOpen(true)}
-              aria-haspopup="dialog"
-            >
-              <IdentificationCard
-                className="h-4 w-4"
-                weight="bold"
-                aria-hidden="true"
-              />
-              <span>Solicitar cambio</span>
-            </Button>
+            <p className="mt-2 text-xs text-[color:var(--text-secondary)]">
+              Para corregir RFC, razón social o tu correo registrado, pide la
+              actualización aquí. Cada solicitud entra a revisión antes de
+              aplicarse.
+            </p>
           </section>
 
           {isFirstVisit ? (
@@ -434,6 +442,9 @@ function buildSteps(expedienteStatus: ExpedienteStatus): Step[] {
   };
 
   if (expedienteStatus === "complete") {
+    // "Entrar a mi espacio" lands a completed provider on the calendar, so
+    // the highlighted next step is the calendar (matches the landing); the
+    // dashboard follows as an overview they can reach from the nav.
     return [
       {
         icon: ClipboardText,
@@ -441,8 +452,8 @@ function buildSteps(expedienteStatus: ExpedienteStatus): Step[] {
         body: "Ya entregaste los documentos iniciales. Puedes seguir cargando los recurrentes desde el calendario.",
         state: "done",
       },
-      { ...dashboard, state: "primary" },
-      calendar,
+      { ...calendar, state: "primary" },
+      dashboard,
     ];
   }
 

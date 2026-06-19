@@ -38,6 +38,7 @@ from sqlalchemy.orm import Session
 from app.api.v1.portal import (
     _bucket_document_state,
     _compute_semaphore,
+    _currently_due_calendar_slots,
     _empty_document_counts,
 )
 from app.core.config import settings
@@ -185,7 +186,10 @@ def build_client_context(
         counts = _empty_document_counts()
         for view in onboarding_slots + calendar_slots:
             _bucket_document_state(counts, view.state)
-        semaphore = _compute_semaphore(onboarding_slots, calendar_slots)
+        # Reportes #7: semaphore over currently-due obligations only.
+        semaphore = _compute_semaphore(
+            onboarding_slots, _currently_due_calendar_slots(calendar_slots, today)
+        )
 
         required_views = [s for s in onboarding_slots if s.required] + [
             s for s in calendar_slots if s.required

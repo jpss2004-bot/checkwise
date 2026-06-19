@@ -19,6 +19,11 @@ export type DocumentStateCode =
   | "approved"
   | "rejected"
   | "expired"
+  // "Posible inconsistencia" — kept distinct from needs_review so the
+  // calendar/dashboard label it the same as the Documentos list does
+  // (Portal Proveedor, 2ª revisión, #4/#6). It is treated as actionable
+  // everywhere needs_review is, but renders its own label.
+  | "possible_mismatch"
   | "needs_review";
 
 /**

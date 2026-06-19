@@ -33,6 +33,13 @@ const READ_TIMEOUT_MS = 25_000;
 // long (the backend LLM cap is ~120s).
 const WRITE_TIMEOUT_MS = 30_000;
 
+// Client-side ceiling for the one-click preset generation (hybrid AI +
+// deterministic). Set generously ABOVE the backend ~120s LLM cap so a
+// legitimate slow generation still completes, but bounded so a true
+// server-side hang on the buyer's marquee action rejects into the 408
+// handler instead of spinning the full-screen overlay forever.
+const GENERATE_TIMEOUT_MS = 180_000;
+
 export class ReportsApiError extends Error {
   status: number;
   constructor(status: number, message: string) {
@@ -481,15 +488,22 @@ export function createReportFromPreset(
   // inline (hybrid: AI with deterministic fallback) so the caller can route
   // straight to a finished, read-only report — no client-side AI streaming,
   // no editing. ``vendorId`` scopes a per-provider report (client-vendor-detail).
-  return fetchJson<ReportRead>(`/api/v1/reports/from-preset`, {
-    method: "POST",
-    body: JSON.stringify({
-      preset_id: presetId,
-      auto_generate: autoGenerate,
-      ...(opts?.vendorId ? { vendor_id: opts.vendorId } : {}),
-      ...(opts?.clientId ? { client_id: opts.clientId } : {}),
-    }),
-  });
+  return fetchJson<ReportRead>(
+    `/api/v1/reports/from-preset`,
+    {
+      method: "POST",
+      body: JSON.stringify({
+        preset_id: presetId,
+        auto_generate: autoGenerate,
+        ...(opts?.vendorId ? { vendor_id: opts.vendorId } : {}),
+        ...(opts?.clientId ? { client_id: opts.clientId } : {}),
+      }),
+    },
+    // Auto-generate runs the inline AI build; bound it so a hung backend
+    // surfaces an error instead of an infinite overlay. The metadata-only
+    // create (autoGenerate=false) is a quick write, so reuse the write cap.
+    autoGenerate ? GENERATE_TIMEOUT_MS : WRITE_TIMEOUT_MS,
+  );
 }
 
 // ─── Exports (Phase 10A) ─────────────────────────────────────────

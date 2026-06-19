@@ -95,8 +95,8 @@ export function SearchResults({
           <SearchInput
             value={draft}
             onValueChange={setDraft}
-            placeholder="Buscar por RFC, folio o periodo…"
-            ariaLabel="Buscar por RFC, folio o periodo"
+            placeholder="Buscar por nombre, RFC, folio o periodo…"
+            ariaLabel="Buscar por nombre de proveedor, RFC, folio o periodo"
             className="max-w-md"
           />
         </form>
@@ -129,7 +129,7 @@ export function SearchResults({
     if (!data || data.total === 0) {
       return (
         <EmptyShell
-          hint={`Sin resultados para "${query}". Intenta con un RFC, periodo (YYYY-Mxx) o un folio.`}
+          hint={`Sin resultados para "${query}". Intenta con el nombre del proveedor, un RFC, un periodo (YYYY-Mxx) o un folio.`}
         />
       );
     }
@@ -159,10 +159,10 @@ export function SearchResults({
           <li key={hit.submission_id} className="px-4 py-3">
             <Link
               href={buildHref(hit)}
-              className="group flex flex-wrap items-center justify-between gap-3 focus-visible:outline-none"
+              className="group flex flex-wrap items-center justify-between gap-3 rounded-md focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[color:var(--border-focus)] focus-visible:ring-offset-2"
             >
               <div className="min-w-0 flex-1">
-                <p className="text-[14px] font-semibold leading-tight text-[color:var(--text-primary)] group-hover:underline">
+                <p className="text-[14px] font-semibold leading-tight text-[color:var(--text-primary)] group-hover:underline group-focus-visible:underline">
                   {hit.vendor_name}
                 </p>
                 <p className="mt-0.5 truncate text-[12.5px] text-[color:var(--text-secondary)]">
@@ -216,6 +216,7 @@ function MatchedByPill({ matched }: { matched: SearchMatchType }) {
     rfc: "RFC",
     period: "Periodo",
     folio: "Folio",
+    name: "Nombre",
   };
   return (
     <span className="inline-flex items-center gap-1 rounded-full border border-[color:var(--border-ai)] bg-[color:var(--surface-teal-muted)] px-2 py-0.5 font-mono text-[10px] uppercase tracking-[0.16em] text-[color:var(--text-teal)]">

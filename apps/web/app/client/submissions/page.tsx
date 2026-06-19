@@ -1,6 +1,7 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
+import { useRouter, useSearchParams } from "next/navigation";
 import { ArrowsClockwise, ChatCircle, MagnifyingGlass } from "@phosphor-icons/react";
 
 import { Surface } from "@/components/checkwise/dashboard/stat-card";
@@ -29,9 +30,13 @@ import { formatDateTime } from "@/lib/format/datetime";
 // "Prevalidado", 2026-06-10 vocabulary unification).
 const STATUS_OPTIONS: ReadonlyArray<{ value: string; label: string }> = [
   { value: "", label: "Todos los estados" },
+  // "En revisión" is a synthetic collapsed value: the backend expands it to
+  // recibido / pendiente_revision / prevalidado (which all read "En revisión"
+  // to the client). Filtering by the single raw pendiente_revision used to
+  // hide ~2/3 of the in-review queue (audit P2.11).
+  { value: "en_revision", label: "En revisión" },
   ...(
     [
-      "pendiente_revision",
       "requiere_aclaracion",
       "posible_mismatch",
       "rechazado",
@@ -56,46 +61,60 @@ const INSTITUTION_OPTIONS: ReadonlyArray<{ value: string; label: string }> = [
 ];
 
 const PAGE_SIZE_OPTIONS = [25, 50, 100, 200, 500] as const;
+const DEFAULT_LIMIT = 100;
+
+type SubmissionFilters = {
+  vendor_id: string;
+  status: string;
+  institution: string;
+  period_key: string;
+  limit: number;
+};
+
+// Seed the filter state from the URL so notification / calendar deep-links
+// such as ``/client/submissions?vendor_id=…&status=rechazado`` land
+// pre-filtered (repairs the alert→act loop). Falls back to sensible
+// defaults when a param is absent or malformed.
+function readFiltersFromUrl(
+  sp: ReturnType<typeof useSearchParams>,
+): SubmissionFilters {
+  const limitRaw = Number(sp?.get("limit"));
+  const limit = (PAGE_SIZE_OPTIONS as readonly number[]).includes(limitRaw)
+    ? limitRaw
+    : DEFAULT_LIMIT;
+  return {
+    vendor_id: sp?.get("vendor_id") ?? "",
+    status: sp?.get("status") ?? "",
+    institution: sp?.get("institution") ?? "",
+    period_key: sp?.get("period_key") ?? sp?.get("period") ?? "",
+    limit,
+  };
+}
 
 export default function ClientSubmissionsPage() {
+  const router = useRouter();
+  const searchParams = useSearchParams();
+  // ``?client_id`` is the inspection-scope param the shell threads through
+  // nav; preserve it on every URL we write and pass it to the API so a
+  // multi-client / internal user stays on the tenant they're viewing.
+  const clientId = searchParams?.get("client_id") ?? "";
   const [rows, setRows] = useState<ClientSubmissionItem[] | null>(null);
   const [vendors, setVendors] = useState<ClientVendorRow[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  const [filters, setFilters] = useState({
-    vendor_id: "",
-    status: "",
-    institution: "",
-    period_key: "",
-    limit: 100,
-  });
-
-  async function refresh() {
-    setLoading(true);
-    setError(null);
-    try {
-      const data = await listClientSubmissions({
-        vendor_id: filters.vendor_id || undefined,
-        status: filters.status || undefined,
-        institution: filters.institution || undefined,
-        period_key: filters.period_key || undefined,
-        limit: filters.limit,
-      });
-      setRows(data.items);
-    } catch (err) {
-      setError(err instanceof Error ? err.message : "Error al cargar entregas.");
-      setRows(null);
-    } finally {
-      setLoading(false);
-    }
-  }
+  // Bumped by the table's "Reintentar" so a failed fetch can re-run even
+  // when the URL (and therefore the filter params) hasn't changed.
+  const [reloadKey, setReloadKey] = useState(0);
+  const [filters, setFilters] = useState<SubmissionFilters>(() =>
+    readFiltersFromUrl(searchParams),
+  );
 
   // Load the vendor list ONCE so the dropdown can render names instead
   // of raw UUIDs. ``listClientVendors`` is the same endpoint the
   // vendors page uses, scoped to the active client.
   useEffect(() => {
     let cancelled = false;
-    listClientVendors()
+    listClientVendors(clientId ? { client_id: clientId } : undefined)
       .then((data) => {
         if (cancelled) return;
         setVendors(data.items);
@@ -107,12 +126,66 @@ export default function ClientSubmissionsPage() {
     return () => {
       cancelled = true;
     };
-  }, []);
+  }, [clientId]);
 
+  // Single source of truth for fetching: re-run whenever the URL's filter
+  // params change (mount, deep-link, Aplicar, page-size). Re-seeding the
+  // form from the URL keeps the controls and the results in lockstep and
+  // sidesteps the previous stale-closure page-size race.
+  const spKey = searchParams?.toString() ?? "";
   useEffect(() => {
-    refresh();
+    const next = readFiltersFromUrl(searchParams);
+    setFilters(next);
+    let cancelled = false;
+    setLoading(true);
+    setError(null);
+    listClientSubmissions({
+      client_id: clientId || undefined,
+      vendor_id: next.vendor_id || undefined,
+      status: next.status || undefined,
+      institution: next.institution || undefined,
+      period_key: next.period_key || undefined,
+      limit: next.limit,
+    })
+      .then((data) => {
+        if (!cancelled) setRows(data.items);
+      })
+      .catch((err) => {
+        if (cancelled) return;
+        setError(
+          err instanceof Error ? err.message : "Error al cargar entregas.",
+        );
+        setRows(null);
+      })
+      .finally(() => {
+        if (!cancelled) setLoading(false);
+      });
+    return () => {
+      cancelled = true;
+    };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  }, [spKey, clientId, reloadKey]);
+
+  // Apply = write the active filters to the URL; the effect above does
+  // the fetch. Preserves ``client_id`` and omits default/empty values so
+  // shared URLs stay clean.
+  const applyFilters = useCallback(
+    (next: SubmissionFilters) => {
+      const params = new URLSearchParams();
+      if (clientId) params.set("client_id", clientId);
+      if (next.vendor_id) params.set("vendor_id", next.vendor_id);
+      if (next.status) params.set("status", next.status);
+      if (next.institution) params.set("institution", next.institution);
+      if (next.period_key) params.set("period_key", next.period_key);
+      if (next.limit !== DEFAULT_LIMIT) params.set("limit", String(next.limit));
+      const query = params.toString();
+      router.replace(
+        query ? `/client/submissions?${query}` : "/client/submissions",
+        { scroll: false },
+      );
+    },
+    [clientId, router],
+  );
 
   const sortedVendors = [...vendors].sort((a, b) =>
     // Null-guard: a missing vendor_name from the API must not crash the
@@ -130,7 +203,7 @@ export default function ClientSubmissionsPage() {
           <form
             onSubmit={(e) => {
               e.preventDefault();
-              refresh();
+              applyFilters(filters);
             }}
             className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4"
           >
@@ -205,11 +278,10 @@ export default function ClientSubmissionsPage() {
             <Select
               value={String(filters.limit)}
               onChange={(e) => {
-                const next = Number(e.target.value) || 100;
-                setFilters((prev) => ({ ...prev, limit: next }));
-                // Refresh immediately when the page size changes —
-                // matches the user expectation of an inline pager.
-                window.setTimeout(refresh, 0);
+                const nextLimit = Number(e.target.value) || DEFAULT_LIMIT;
+                // Write the new size to the URL; the fetch effect re-runs
+                // with the fresh value (no stale-closure race).
+                applyFilters({ ...filters, limit: nextLimit });
               }}
               className="h-8 w-20 py-0 text-[12px]"
             >
@@ -229,7 +301,7 @@ export default function ClientSubmissionsPage() {
           items={rows}
           loading={loading}
           error={error}
-          onRetry={refresh}
+          onRetry={() => setReloadKey((k) => k + 1)}
           columns={SUBMISSIONS_COLUMNS}
           rowKey={(row) => row.submission_id}
           ariaLabel="Entregas del portafolio"

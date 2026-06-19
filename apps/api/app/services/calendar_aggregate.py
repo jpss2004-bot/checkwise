@@ -38,6 +38,12 @@ from app.core.compliance_catalog import (
 )
 from app.core.config import settings
 from app.models import Document
+from app.services.calendar_risk import (
+    REJECTED_OR_CORRECTION_STATUSES as _REJECTED_OR_CORRECTION_STATUSES,
+)
+from app.services.calendar_risk import (
+    calendar_item_risk as _calendar_item_risk,
+)
 
 
 @dataclass
@@ -121,9 +127,7 @@ def aggregate_client_calendar(
     deferred-import idiom the admin radar endpoint already uses.
     """
     from app.api.v1.client import (
-        _REJECTED_OR_CORRECTION_STATUSES,
         _SEMAPHORE_SORT_ORDER,
-        _calendar_item_risk,
         _client_suggested_action,
         _portfolio_slot_inputs,
         _scoped_workspaces,
@@ -132,7 +136,6 @@ def aggregate_client_calendar(
     )
     from app.api.v1.portal import (
         _calendar_deadline_iso,
-        _calendar_upload_href,
         _latest_reviewer_notes,
     )
 
@@ -200,15 +203,21 @@ def aggregate_client_calendar(
             suggested_action = _client_suggested_action(
                 risk_level, bool(current_submission_id)
             )
-            href = _calendar_upload_href(
-                year=year,
-                code=req.code,
-                period_key=req.period_key,
-                name=req.name,
-                institution=req.institution,
-                load_type=req.frequency,
-                v2_mode=bool(req.accepts_documents),
+            # Oversight deep-link — NOT the provider's upload URL. A hiring
+            # company can never upload on a provider's behalf, so ``client_href``
+            # must point at the vendor's expediente (pre-focused on this
+            # obligation's bucket), not at ``_calendar_upload_href`` (a provider
+            # surface the client can't use). Mirrors the frontend ``focusForItem``
+            # so the field is an honest single source of truth instead of a
+            # contract lie the FE has to ignore and recompute.
+            focus = (
+                "rejected"
+                if risk_level == "action_required"
+                else "missing"
+                if current_submission_id is None
+                else "due_soon"
             )
+            href = f"/client/vendors/{vendor.id}?focus={focus}#documentos"
             obligations.append(
                 CalendarObligation(
                     vendor_id=vendor.id,

@@ -147,6 +147,13 @@ type ErrorStateProps = {
   secondary?: ReactNode;
   className?: string;
   variant?: "network" | "default";
+  /**
+   * Visual severity. ``warning`` (default, amber) is kept for the
+   * recoverable/transient surfaces that already use it. ``error`` (red)
+   * is for hard load failures — a blank portfolio view a screen reader
+   * never hears about reads as a failure, not a warning (audit P0.5).
+   */
+  tone?: "warning" | "error";
 };
 
 export function ErrorState({
@@ -157,26 +164,40 @@ export function ErrorState({
   secondary,
   className,
   variant = "default",
+  tone = "warning",
 }: ErrorStateProps) {
   const Icon = variant === "network" ? WifiSlash : Warning;
+  const t =
+    tone === "error"
+      ? {
+          border: "var(--status-error-border)",
+          bg: "var(--status-error-bg)",
+          text: "var(--status-error-text)",
+        }
+      : {
+          border: "var(--status-warning-border)",
+          bg: "var(--status-warning-bg)",
+          text: "var(--status-warning-text)",
+        };
   return (
     <div
       role="alert"
-      className={cn(
-        "rounded-md border border-[color:var(--status-warning-border)] bg-[color:var(--status-warning-bg)] p-5",
-        className,
-      )}
+      className={cn("rounded-md border p-5", className)}
+      style={{ borderColor: t.border, backgroundColor: t.bg }}
     >
       <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
         <div className="flex items-start gap-3">
-          <div className="mt-0.5 flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-[color:var(--status-warning-text)] text-[color:var(--text-inverse)]">
+          <div
+            className="mt-0.5 flex h-9 w-9 shrink-0 items-center justify-center rounded-full text-[color:var(--text-inverse)]"
+            style={{ backgroundColor: t.text }}
+          >
             <Icon className="h-4 w-4" weight="fill" aria-hidden />
           </div>
           <div className="min-w-0 space-y-1">
-            <p className="text-sm font-semibold text-[color:var(--status-warning-text)]">
+            <p className="text-sm font-semibold" style={{ color: t.text }}>
               {title}
             </p>
-            <p className="text-sm text-[color:var(--status-warning-text)]">
+            <p className="text-sm" style={{ color: t.text }}>
               {description}
             </p>
           </div>

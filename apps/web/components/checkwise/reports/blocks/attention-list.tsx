@@ -1,6 +1,6 @@
 "use client";
 
-import { ListChecks } from "@phosphor-icons/react";
+import { ListChecks, WarningOctagon } from "@phosphor-icons/react";
 
 import { BlockIntro } from "@/components/checkwise/reports/block-intro";
 import { FreshnessLabel } from "@/components/checkwise/reports/freshness-label";
@@ -171,6 +171,20 @@ function formatDue(due: number | null): { label: string; tone: "red" | "yellow" 
   return { label: `en ${due} días`, tone: "gray" };
 }
 
+/**
+ * "Atraso" = behind schedule: an expired document, or any actionable item
+ * whose deadline has already passed. Carved into its own section so overdue
+ * obligations aren't buried among merely-upcoming ones — the dedicated
+ * late-documents view reviewers asked for (Portal Proveedor, 2ª revisión,
+ * Reportes #8). Data is unchanged; this is a pure render split.
+ */
+function isOverdue(item: AttentionItem): boolean {
+  return (
+    item.state === "expired" ||
+    (item.due_in_days !== null && item.due_in_days !== undefined && item.due_in_days < 0)
+  );
+}
+
 export const attentionListDefinition: Omit<
   BlockDefinition<AttentionListConfig, AttentionListData>,
   "Component"
@@ -232,11 +246,7 @@ export function AttentionListBlock({
       {groupByInstitution ? (
         <GroupedRows items={items} hideInstitutionChip interactive={interactive} />
       ) : (
-        <ul className="divide-y divide-[color:var(--border-subtle)] border-y border-[color:var(--border-subtle)]">
-          {items.map((item) => (
-            <AttentionRow key={item.id} item={item} interactive={interactive} />
-          ))}
-        </ul>
+        <OverdueSplitRows items={items} interactive={interactive} />
       )}
       <p className="text-[11px] text-[color:var(--text-tertiary)]">
         {items.length} de {data.total_before_filter} elementos
@@ -291,6 +301,57 @@ function GroupedRows({
           </ul>
         </div>
       ))}
+    </div>
+  );
+}
+
+function OverdueSplitRows({
+  items,
+  interactive = true,
+}: {
+  items: AttentionItem[];
+  interactive?: boolean;
+}) {
+  const overdue = items.filter(isOverdue);
+  // No late items → render the flat list unchanged (no extra heading).
+  if (overdue.length === 0) {
+    return (
+      <ul className="divide-y divide-[color:var(--border-subtle)] border-y border-[color:var(--border-subtle)]">
+        {items.map((item) => (
+          <AttentionRow key={item.id} item={item} interactive={interactive} />
+        ))}
+      </ul>
+    );
+  }
+  const current = items.filter((item) => !isOverdue(item));
+  return (
+    <div className="space-y-4">
+      <div className="space-y-1">
+        <h4 className="flex items-center gap-1.5 text-[11px] font-semibold uppercase tracking-[0.06em] text-[color:var(--status-error-text)]">
+          <WarningOctagon className="h-3.5 w-3.5" weight="bold" aria-hidden="true" />
+          Con atraso · {overdue.length}
+        </h4>
+        <p className="text-[11px] text-[color:var(--text-tertiary)]">
+          Vencidos o con la fecha límite ya pasada. Atiéndelos primero.
+        </p>
+        <ul className="divide-y divide-[color:var(--border-subtle)] border-y border-[color:var(--border-subtle)]">
+          {overdue.map((item) => (
+            <AttentionRow key={item.id} item={item} interactive={interactive} />
+          ))}
+        </ul>
+      </div>
+      {current.length > 0 ? (
+        <div className="space-y-1">
+          <h4 className="text-[11px] font-semibold uppercase tracking-[0.06em] text-[color:var(--text-secondary)]">
+            Por atender · {current.length}
+          </h4>
+          <ul className="divide-y divide-[color:var(--border-subtle)] border-y border-[color:var(--border-subtle)]">
+            {current.map((item) => (
+              <AttentionRow key={item.id} item={item} interactive={interactive} />
+            ))}
+          </ul>
+        </div>
+      ) : null}
     </div>
   );
 }

@@ -19,13 +19,13 @@ import {
 import {
   Donut,
   RadialGauge,
-  StackedBars,
   type ChartSegment,
 } from "@/components/checkwise/charts";
 import {
   EmptyState,
   Surface,
 } from "@/components/checkwise/dashboard/stat-card";
+import { ErrorState } from "@/components/checkwise/portal/state-surfaces";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 
@@ -43,6 +43,7 @@ import {
   type ClientNotificationItem,
   type ClientOverview,
   type ClientProfile,
+  type ClientRiskVendor,
   type ClientSubmissionItem,
 } from "@/lib/api/client";
 import { useUrlClientId } from "@/lib/workspace/use-url-client-id";
@@ -68,6 +69,9 @@ export default function ClientDashboardPage() {
   const [clientId, setClientId] = useState<string | null>(urlClientId);
   const [error, setError] = useState<string | null>(null);
   const [profile, setProfile] = useState<ClientProfile | null>(null);
+  // Bumped by the error surface's "Reintentar" to re-run the portfolio
+  // fetch without a full navigation.
+  const [reloadKey, setReloadKey] = useState(0);
 
   // Profile fetch is independent from overview so a late return on
   // the heavier overview query doesn't block the "termina tu alta"
@@ -136,7 +140,7 @@ export default function ClientDashboardPage() {
     return () => {
       cancelled = true;
     };
-  }, [clientId, me]);
+  }, [clientId, me, reloadKey]);
 
   return (
     <ClientShell
@@ -153,9 +157,12 @@ export default function ClientDashboardPage() {
       }
     >
       {error ? (
-        <div className="rounded-lg border border-[color:var(--status-warning-border)] bg-[color:var(--status-warning-bg)] p-4 text-sm text-[color:var(--status-warning-text)]">
-          {error}
-        </div>
+        <ErrorState
+          tone="error"
+          title="No pudimos cargar tu resumen"
+          description={error}
+          onRetry={() => setReloadKey((k) => k + 1)}
+        />
       ) : !overview ? (
         <DashboardSkeleton />
       ) : (
@@ -167,6 +174,7 @@ export default function ClientDashboardPage() {
           <ClientKpiStrip overview={overview} />
           <div className="cw-stagger grid gap-5 lg:grid-cols-3">
             <div className="space-y-5 lg:col-span-2">
+              <RiskWorklistCard vendors={overview.top_risk_vendors} />
               <SemaphoreDistribution overview={overview} />
               <RecentSubmissionsCard rows={submissions} />
             </div>
@@ -214,6 +222,14 @@ function ClientSwitcher({
 
 // ─── Hero (compliance + headline) ────────────────────────────────
 
+// Where the hero headline / risk count drills to. Red providers first,
+// then yellow; the vendors page reads ``?level=`` and auto-filters.
+function heroDrillHref(o: ClientOverview): string | null {
+  if (o.red_count > 0) return "/client/vendors?level=red";
+  if (o.yellow_count > 0) return "/client/vendors?level=yellow";
+  return null;
+}
+
 function ClientHero({ overview }: { overview: ClientOverview }) {
   const tone =
     overview.compliance_pct >= 85
@@ -221,28 +237,51 @@ function ClientHero({ overview }: { overview: ClientOverview }) {
       : overview.compliance_pct >= 60
         ? "warning"
         : "error";
+  const drillHref = heroDrillHref(overview);
+  const headline = summaryHeadline(overview);
   return (
     <section className="cw-fade-up rounded-lg border border-[color:var(--border-default)] bg-[color:var(--surface-raised)] p-5 shadow-xs md:p-6">
       <div className="grid gap-5 md:grid-cols-[auto,1fr] md:items-center md:gap-8">
-        <RadialGauge
-          value={overview.compliance_pct}
-          tone={tone}
-          size={140}
-          thickness={12}
-          label={`${Math.round(overview.compliance_pct)}%`}
-          caption="cumplimiento"
-        />
+        <div className="flex flex-col items-center gap-2">
+          <RadialGauge
+            value={overview.compliance_pct}
+            tone={tone}
+            size={140}
+            thickness={12}
+            label={`${Math.round(overview.compliance_pct)}%`}
+            caption="cumplimiento"
+          />
+          <ComplianceTrendChip delta={overview.compliance_trend_delta} />
+        </div>
         <div className="min-w-0 space-y-3">
           <p className="cw-eyebrow">
             {overview.client_name} · {overview.active_workspaces_total} workspace
             {overview.active_workspaces_total === 1 ? "" : "s"} activo
             {overview.active_workspaces_total === 1 ? "" : "s"}
           </p>
-          <p className="text-xl font-semibold leading-tight tracking-tight text-[color:var(--text-primary)]">
-            {summaryHeadline(overview)}
-          </p>
+          {drillHref ? (
+            <Link
+              href={drillHref}
+              className="group inline-flex items-center gap-2 rounded-sm text-xl font-semibold leading-tight tracking-tight text-[color:var(--text-primary)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[color:var(--border-focus)] focus-visible:ring-offset-2"
+            >
+              <span className="group-hover:underline">{headline}</span>
+              <ArrowRight
+                className="h-4 w-4 shrink-0 text-[color:var(--text-tertiary)] transition-transform group-hover:translate-x-0.5 group-hover:text-[color:var(--text-primary)]"
+                weight="bold"
+                aria-hidden="true"
+              />
+            </Link>
+          ) : (
+            <p className="text-xl font-semibold leading-tight tracking-tight text-[color:var(--text-primary)]">
+              {headline}
+            </p>
+          )}
           <p className="max-w-2xl text-[13px] leading-relaxed text-[color:var(--text-secondary)]">
             {summaryDescription(overview)}
+          </p>
+          <p className="text-[11px] text-[color:var(--text-tertiary)]">
+            Promedio de cumplimiento de tus {overview.vendors_total} proveedor
+            {overview.vendors_total === 1 ? "" : "es"} · meta 85%
           </p>
           {overview.last_activity_at ? (
             <p className="font-mono text-[11px] tabular-nums text-[color:var(--text-tertiary)]">
@@ -253,6 +292,37 @@ function ClientHero({ overview }: { overview: ClientOverview }) {
         </div>
       </div>
     </section>
+  );
+}
+
+// Month-over-month momentum (approval-rate points). Up = improving (teal),
+// down = error, flat/none = muted. Honest signal, clearly labelled.
+function ComplianceTrendChip({ delta }: { delta: number | null }) {
+  if (delta === null) {
+    return (
+      <span className="font-mono text-[10px] uppercase tracking-wide text-[color:var(--text-tertiary)]">
+        Sin tendencia aún
+      </span>
+    );
+  }
+  const up = delta > 0;
+  const flat = delta === 0;
+  const cls = flat
+    ? "text-[color:var(--text-tertiary)]"
+    : up
+      ? "text-[color:var(--status-success-text)]"
+      : "text-[color:var(--status-error-text)]";
+  const sign = up ? "▲" : flat ? "→" : "▼";
+  return (
+    <span
+      className={`inline-flex items-center gap-1 font-mono text-[11px] font-semibold tabular-nums ${cls}`}
+      title="Cambio en la tasa de aprobación respecto al mes anterior"
+    >
+      {sign} {Math.abs(delta)} pts
+      <span className="font-normal text-[color:var(--text-tertiary)]">
+        vs mes anterior
+      </span>
+    </span>
   );
 }
 
@@ -315,34 +385,40 @@ function OnboardingPromptBanner({ clientName }: { clientName: string }) {
 }
 
 function ClientKpiStrip({ overview }: { overview: ClientOverview }) {
+  // Ordered most-actionable-first: the two highest-liability buckets
+  // (lapsed, then rejected/correction) lead, and every risk-bearing tile
+  // drills into the surface where the client acts on it.
   const rows: {
     href?: string;
     icon: typeof Storefront;
     label: string;
     caption: string;
     value: number;
-    tone?: "default" | "warning" | "teal";
+    tone?: "default" | "warning" | "error" | "teal";
   }[] = [
     {
-      href: "/client/vendors",
-      icon: Storefront,
-      label: "Proveedores",
-      caption: `${overview.active_workspaces_total} workspaces activos.`,
-      value: overview.vendors_total,
+      href: "/client/calendar",
+      icon: WarningOctagon,
+      label: "Vencidos",
+      caption: "Obligaciones que ya pasaron su fecha límite.",
+      value: overview.overdue_total,
+      tone: overview.overdue_total > 0 ? "error" : "default",
     },
     {
+      href: "/client/submissions?status=rechazado",
+      icon: Warning,
+      label: "Rechazos / aclaraciones",
+      caption: "Documentos que requieren corrección o aclaración.",
+      value: overview.rejected_or_correction_total,
+      tone: overview.rejected_or_correction_total > 0 ? "error" : "default",
+    },
+    {
+      href: "/client/vendors?level=red",
       icon: Files,
       label: "Faltantes obligatorios",
       caption: "Documentos REPSE pendientes de carga.",
       value: overview.missing_required_total,
-      tone:
-        overview.missing_required_total > 0 ? "warning" : "default",
-    },
-    {
-      icon: HourglassHigh,
-      label: "En revisión",
-      caption: "Nuestro equipo legal está validando.",
-      value: overview.pending_reviews_total,
+      tone: overview.missing_required_total > 0 ? "warning" : "default",
     },
     {
       href: "/client/calendar",
@@ -350,8 +426,21 @@ function ClientKpiStrip({ overview }: { overview: ClientOverview }) {
       label: "Por vencer",
       caption: "Próximas obligaciones críticas (≤14 días).",
       value: overview.due_soon_total,
-      tone:
-        overview.due_soon_total > 0 ? "warning" : "default",
+      tone: overview.due_soon_total > 0 ? "warning" : "default",
+    },
+    {
+      href: "/client/submissions",
+      icon: HourglassHigh,
+      label: "En revisión",
+      caption: "Nuestro equipo legal está validando.",
+      value: overview.pending_reviews_total,
+    },
+    {
+      href: "/client/vendors",
+      icon: Storefront,
+      label: "Proveedores",
+      caption: `${overview.active_workspaces_total} workspaces activos.`,
+      value: overview.vendors_total,
     },
   ];
 
@@ -367,7 +456,9 @@ function ClientKpiStrip({ overview }: { overview: ClientOverview }) {
         {rows.map((row) => {
           const Icon = row.icon;
           const tone =
-            row.tone === "warning"
+            row.tone === "error"
+              ? "text-[color:var(--status-error-text)]"
+              : row.tone === "warning"
               ? "text-[color:var(--status-warning-text)]"
               : row.tone === "teal"
               ? "text-[color:var(--text-teal)]"
@@ -388,7 +479,7 @@ function ClientKpiStrip({ overview }: { overview: ClientOverview }) {
               <span
                 className={`font-mono text-lg font-semibold tabular-nums ${tone}`}
               >
-                {row.value === 0 ? "—" : row.value}
+                {row.value}
               </span>
               {row.href ? (
                 <ArrowRight
@@ -418,6 +509,88 @@ function ClientKpiStrip({ overview }: { overview: ClientOverview }) {
         })}
       </ul>
     </section>
+  );
+}
+
+// ─── Risk worklist ("Requieren tu atención") ─────────────────────
+//
+// The single highest-leverage panel: NAMES the at-risk providers
+// worst-first with their dominant problem and a one-click drill-in, so
+// the dashboard answers "which / what next", not just "how many".
+
+const RISK_DOT_TONE: Record<ClientRiskVendor["semaphore_level"], string> = {
+  red: "var(--status-error-text)",
+  yellow: "var(--status-warning-text)",
+  green: "var(--status-success-text)",
+};
+
+function RiskWorklistCard({ vendors }: { vendors: ClientRiskVendor[] }) {
+  if (vendors.length === 0) {
+    return (
+      <Surface title="Requieren tu atención" icon={CheckCircle}>
+        <div className="flex items-center gap-3 py-2 text-[13px] text-[color:var(--text-secondary)]">
+          <CheckCircle
+            className="h-5 w-5 shrink-0 text-[color:var(--status-success-text)]"
+            weight="fill"
+            aria-hidden
+          />
+          Ningún proveedor necesita acción ahora. Te avisaremos cuando algo
+          cambie.
+        </div>
+      </Surface>
+    );
+  }
+  return (
+    <Surface
+      title="Requieren tu atención"
+      icon={WarningOctagon}
+      actions={
+        <Link
+          href="/client/vendors?level=red"
+          className="inline-flex items-center gap-1 rounded-sm text-[12px] font-medium text-[color:var(--text-link)] hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[color:var(--border-focus)] focus-visible:ring-offset-2"
+        >
+          Ver todos
+          <ArrowRight className="h-3.5 w-3.5" weight="bold" aria-hidden />
+        </Link>
+      }
+      bodyClassName="p-0"
+    >
+      <ul className="divide-y divide-[color:var(--border-subtle)]">
+        {vendors.map((v) => (
+          <li key={v.vendor_id}>
+            <Link
+              href={`/client/vendors/${v.vendor_id}`}
+              className="group flex items-center gap-3 px-5 py-3 transition-colors hover:bg-[color:var(--surface-hover)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-[color:var(--border-focus)]/50"
+            >
+              <span
+                className="h-2.5 w-2.5 shrink-0 rounded-full"
+                style={{ backgroundColor: RISK_DOT_TONE[v.semaphore_level] }}
+                aria-hidden
+              />
+              <div className="min-w-0 flex-1">
+                <p className="truncate text-[13px] font-semibold text-[color:var(--text-primary)] group-hover:underline">
+                  {v.vendor_name}
+                </p>
+                <p
+                  className="truncate text-[12px]"
+                  style={{ color: RISK_DOT_TONE[v.semaphore_level] }}
+                >
+                  {v.top_reason}
+                </p>
+              </div>
+              <span className="font-mono text-[13px] font-semibold tabular-nums text-[color:var(--text-secondary)]">
+                {v.compliance_pct}%
+              </span>
+              <ArrowRight
+                className="h-4 w-4 shrink-0 text-[color:var(--text-tertiary)] transition-transform group-hover:translate-x-0.5 group-hover:text-[color:var(--text-primary)]"
+                weight="bold"
+                aria-hidden
+              />
+            </Link>
+          </li>
+        ))}
+      </ul>
+    </Surface>
   );
 }
 
@@ -467,13 +640,6 @@ function SemaphoreDistribution({ overview }: { overview: ClientOverview }) {
                 total={total}
               />
             ))}
-            <div className="mt-3 border-t border-[color:var(--border-subtle)] pt-3">
-              <StackedBars
-                segments={segments}
-                height={10}
-                showLegend={false}
-              />
-            </div>
           </div>
         </div>
       )}

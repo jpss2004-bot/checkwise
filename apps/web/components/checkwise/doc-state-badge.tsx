@@ -6,6 +6,7 @@ import {
   HourglassHigh,
   Tray,
   Warning,
+  WarningDiamond,
   XCircle,
   type Icon,
 } from "@phosphor-icons/react";
@@ -31,6 +32,7 @@ export const DOC_STATE_LABELS: Record<DocumentStateCode, string> = {
   approved: "Aprobado",
   rejected: "Requiere corrección",
   expired: "Vencido",
+  possible_mismatch: "Posible inconsistencia",
   needs_review: "Necesita aclaración",
 };
 
@@ -42,6 +44,7 @@ const DOC_STATE_ICON: Record<DocumentStateCode, Icon> = {
   approved: CheckCircle,
   rejected: XCircle,
   expired: Warning,
+  possible_mismatch: WarningDiamond,
   needs_review: FileMagnifyingGlass,
 };
 
@@ -63,6 +66,9 @@ const DOC_STATE_VARIANT: Record<
   approved: "doc-approved",
   rejected: "doc-rejected",
   expired: "doc-expired",
+  // Reuses the amber needs-review tone (no dedicated token); the distinct
+  // label "Posible inconsistencia" is what resolves the #4/#6 mismatch.
+  possible_mismatch: "doc-needs-review",
   needs_review: "doc-needs-review",
 };
 

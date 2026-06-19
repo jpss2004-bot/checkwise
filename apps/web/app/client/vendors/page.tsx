@@ -30,7 +30,9 @@ import {
   listClientVendors,
   type ClientVendorNextRenewal,
   type ClientVendorRow,
+  type ClientVendorSort,
 } from "@/lib/api/client";
+import { Select } from "@/components/ui/select";
 import {
   createReportFromPreset,
   ReportsApiError,
@@ -52,6 +54,23 @@ function parseSemaphoreLevel(raw: string | null): SemaphoreLevel | "" {
   return raw === "green" || raw === "yellow" || raw === "red" ? raw : "";
 }
 
+const SORT_OPTIONS: ReadonlyArray<{ value: ClientVendorSort; label: string }> = [
+  { value: "risk", label: "Riesgo (peor primero)" },
+  { value: "compliance_asc", label: "Cumplimiento ↑" },
+  { value: "compliance_desc", label: "Cumplimiento ↓" },
+  { value: "missing_desc", label: "Más pendientes" },
+  { value: "name", label: "Nombre (A–Z)" },
+  { value: "recent", label: "Actividad reciente" },
+];
+
+const SORT_VALUES = new Set<ClientVendorSort>(SORT_OPTIONS.map((o) => o.value));
+
+function parseSort(raw: string | null): ClientVendorSort {
+  return raw && SORT_VALUES.has(raw as ClientVendorSort)
+    ? (raw as ClientVendorSort)
+    : "risk";
+}
+
 export default function ClientVendorsPage() {
   const router = useRouter();
   const searchParams = useSearchParams();
@@ -66,15 +85,19 @@ export default function ClientVendorsPage() {
   const [level, setLevel] = useState<SemaphoreLevel | "">(() =>
     parseSemaphoreLevel(searchParams?.get("level") ?? null),
   );
+  const [sort, setSort] = useState<ClientVendorSort>(() =>
+    parseSort(searchParams?.get("sort") ?? null),
+  );
   const [unreadByVendor, setUnreadByVendor] = useState<Record<string, number>>({});
   const vendorsHref = useMemo(() => {
     const params = new URLSearchParams();
     if (urlClientId) params.set("client_id", urlClientId);
     if (search.trim()) params.set("q", search.trim());
     if (level) params.set("level", level);
+    if (sort !== "risk") params.set("sort", sort);
     const qs = params.toString();
     return `/client/vendors${qs ? `?${qs}` : ""}`;
-  }, [level, search, urlClientId]);
+  }, [level, search, sort, urlClientId]);
 
   useEffect(() => {
     router.replace(vendorsHref, { scroll: false });
@@ -90,6 +113,7 @@ export default function ClientVendorsPage() {
           ...scope,
           search: debouncedSearch || undefined,
           semaphore_level: level || undefined,
+          sort,
         }),
         listClientNotifications({ ...scope, unread_only: true, limit: 200 }),
       ]);
@@ -106,7 +130,7 @@ export default function ClientVendorsPage() {
     } finally {
       setLoading(false);
     }
-  }, [urlClientId, debouncedSearch, level]);
+  }, [urlClientId, debouncedSearch, level, sort]);
 
   // Auto-search: re-fetch when the client scope, the debounced query, or the
   // semáforo filter changes — no manual "Aplicar" click needed.
@@ -273,6 +297,26 @@ export default function ClientVendorsPage() {
                   </button>
                 ))}
               </div>
+            </div>
+            <div>
+              <label
+                htmlFor="vendor-sort"
+                className="block font-mono text-[10px] uppercase tracking-wide text-[color:var(--text-tertiary)]"
+              >
+                Ordenar por
+              </label>
+              <Select
+                id="vendor-sort"
+                value={sort}
+                onChange={(e) => setSort(parseSort(e.target.value))}
+                className="mt-1 w-[200px]"
+              >
+                {SORT_OPTIONS.map((opt) => (
+                  <option key={opt.value} value={opt.value}>
+                    {opt.label}
+                  </option>
+                ))}
+              </Select>
             </div>
           </div>
         </Surface>

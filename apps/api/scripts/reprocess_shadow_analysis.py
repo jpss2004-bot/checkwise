@@ -70,6 +70,24 @@ class PreflightError(RuntimeError):
     """A gate that would make the backfill silently no-op or unsafe."""
 
 
+def _download_with_retry(storage, storage_key: str, *, attempts: int = 4):  # noqa: ANN001
+    """Materialize a PDF from storage, retrying transient connectivity drops.
+
+    R2/S3 downloads over a long sequential run can hit transient "Could not
+    connect to the endpoint URL" failures; a doc that fails all attempts is
+    left eligible (no shadow row written) so a later run retries it.
+    """
+    last_exc: Exception | None = None
+    for attempt in range(attempts):
+        try:
+            return storage.open_for_read(storage_key)
+        except Exception as exc:  # noqa: BLE001 — retry transient storage errors
+            last_exc = exc
+            if attempt < attempts - 1:
+                time.sleep(2.0 * (attempt + 1))  # 2s, 4s, 6s backoff
+    raise last_exc  # type: ignore[misc]
+
+
 def _preflight(client_id: str) -> dict:
     """Assert every condition that would otherwise silently waste the run.
 
@@ -362,7 +380,7 @@ def main() -> int:
     for idx, it in enumerate(items, start=1):
         materialized_path = None
         try:
-            materialized_path = storage.open_for_read(it["storage_key"])
+            materialized_path = _download_with_retry(storage, it["storage_key"])
             # run_shadow_analysis opens its own session and never raises.
             run_shadow_analysis(pdf_path=str(materialized_path), **it["args"])
             done += 1

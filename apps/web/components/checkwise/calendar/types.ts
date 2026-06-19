@@ -1,6 +1,8 @@
 import type { CalendarAcceptedDocument, CalendarItem } from "@/lib/api/portal";
 import type { DocumentStateCode } from "@/lib/types";
 
+import type { CalendarRisk } from "./calendar-shared";
+
 export type CalendarInstitutionCode = "sat" | "imss" | "infonavit" | "stps_repse";
 
 export const CALENDAR_INSTITUTIONS: CalendarInstitutionCode[] = [
@@ -19,6 +21,12 @@ export type CalendarEntry = {
   required_document: string;
   deadline_iso: string;
   state: DocumentStateCode;
+  /** Wave 1 / A1 — server-computed urgency tier from the shared
+   *  ``calendar_item_risk`` classifier. ``state`` is the document status
+   *  (pending/approved/…); ``risk_level`` is the orthogonal severity axis
+   *  (overdue/due_soon/…) used for the drawer severity badge and, later,
+   *  urgency sorting. Null only when a stale backend omits the field. */
+  risk_level: CalendarRisk | null;
   suggested_action: string;
   frequency: CalendarItem["frequency"];
   /** Human label of the period this obligation *covers* (e.g. "IMSS
@@ -34,6 +42,9 @@ export type CalendarEntry = {
   filename: string | null;
   /** ISO timestamp of the current submission, if any. */
   submitted_at: string | null;
+  /** A4 — reviewer's reason on a bounced obligation (rejected /
+   *  needs-clarification / mismatch); null otherwise. */
+  reviewer_note: string | null;
   anatomy: string;
   where_to_obtain: string;
   common_errors: string[];
@@ -47,5 +58,6 @@ export type CalendarEntry = {
 export const URGENT_STATES: ReadonlySet<DocumentStateCode> = new Set([
   "rejected",
   "expired",
+  "possible_mismatch",
   "needs_review",
 ]);

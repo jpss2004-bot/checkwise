@@ -1,18 +1,18 @@
 "use client";
 
-import { useEffect, useLayoutEffect, useRef, useState, type RefObject } from "react";
+import { useEffect, type RefObject } from "react";
 import { createPortal } from "react-dom";
 
 import { DOC_STATE_LABELS } from "@/components/checkwise/doc-state-badge";
 import { MONTH_LABELS_ES } from "@/lib/api/portal";
 import type { DocumentStateCode } from "@/lib/types";
 
+import { riskRank } from "./calendar-shared";
 import type { CalendarEntry } from "./types";
+import { useAnchoredPopover } from "./use-anchored-popover";
 
 const MAX_VISIBLE = 6;
 const POPOVER_WIDTH = 300;
-const VIEWPORT_MARGIN = 8;
-const GAP = 6;
 
 const STATE_DOT: Record<DocumentStateCode, string> = {
   approved:     "bg-[color:var(--doc-approved-bg)]     ring-[color:var(--doc-approved-border)]",
@@ -20,6 +20,7 @@ const STATE_DOT: Record<DocumentStateCode, string> = {
   uploaded:     "bg-[color:var(--doc-uploaded-bg)]     ring-[color:var(--doc-uploaded-border)]",
   rejected:     "bg-[color:var(--doc-rejected-bg)]     ring-[color:var(--doc-rejected-border)]",
   expired:      "bg-[color:var(--doc-expired-bg)]      ring-[color:var(--doc-expired-border)]",
+  possible_mismatch: "bg-[color:var(--doc-needs-review-bg)] ring-[color:var(--doc-needs-review-border)]",
   needs_review: "bg-[color:var(--doc-needs-review-bg)] ring-[color:var(--doc-needs-review-border)]",
   pending:      "bg-[color:var(--doc-pending-bg)]      ring-[color:var(--doc-pending-border)]",
   empty:        "bg-[color:var(--doc-empty-bg)]        ring-[color:var(--doc-empty-border)]",
@@ -34,35 +35,6 @@ function formatDay(iso: string): string {
   } catch {
     return "";
   }
-}
-
-type Position = {
-  top: number;
-  left: number;
-  placement: "below" | "above";
-};
-
-function computePosition(
-  triggerRect: DOMRect,
-  popoverHeight: number,
-): Position {
-  let left = triggerRect.left + triggerRect.width / 2 - POPOVER_WIDTH / 2;
-  if (left < VIEWPORT_MARGIN) left = VIEWPORT_MARGIN;
-  if (left + POPOVER_WIDTH > window.innerWidth - VIEWPORT_MARGIN) {
-    left = window.innerWidth - POPOVER_WIDTH - VIEWPORT_MARGIN;
-  }
-
-  let top = triggerRect.bottom + GAP;
-  let placement: Position["placement"] = "below";
-  if (top + popoverHeight > window.innerHeight - VIEWPORT_MARGIN) {
-    const aboveTop = triggerRect.top - popoverHeight - GAP;
-    if (aboveTop >= VIEWPORT_MARGIN) {
-      top = aboveTop;
-      placement = "above";
-    }
-  }
-
-  return { top, left, placement };
 }
 
 export function CellPopover({
@@ -82,42 +54,57 @@ export function CellPopover({
   onEnter: () => void;
   onLeave: () => void;
 }) {
-  const popoverRef = useRef<HTMLDivElement>(null);
-  const [position, setPosition] = useState<Position | null>(null);
-  const [mounted, setMounted] = useState(false);
+  // Provider cell popover anchors centered on its trigger cell.
+  const estimatedHeight =
+    36 + Math.min(events.length, MAX_VISIBLE) * 32 + (events.length > MAX_VISIBLE ? 28 : 0);
+  const { mounted, position, popoverRef } = useAnchoredPopover({
+    triggerRef,
+    open,
+    width: POPOVER_WIDTH,
+    align: "center",
+    estimatedHeight,
+  });
 
-  useEffect(() => setMounted(true), []);
-
-  useLayoutEffect(() => {
-    if (!open || !triggerRef.current) {
-      setPosition(null);
-      return;
-    }
-    const triggerRect = triggerRef.current.getBoundingClientRect();
-    const estimatedHeight =
-      36 + Math.min(events.length, MAX_VISIBLE) * 32 + (events.length > MAX_VISIBLE ? 28 : 0);
-    setPosition(computePosition(triggerRect, estimatedHeight));
-  }, [open, triggerRef, events.length]);
-
+  // Touch/click dismissal. The popover opens on hover for mouse users, but
+  // a tapped-open popover (a multi-obligation cell on touch) has no
+  // mouseleave to close it. Dismiss on an outside pointer or Escape so the
+  // provider is never trapped in an open menu and can reach the grid again
+  // (Portal Proveedor, 2ª revisión, Calendario #2).
   useEffect(() => {
     if (!open) return;
-    const handleScroll = () => {
-      if (!triggerRef.current || !popoverRef.current) return;
-      const triggerRect = triggerRef.current.getBoundingClientRect();
-      setPosition(computePosition(triggerRect, popoverRef.current.offsetHeight));
+    const onPointerDown = (e: PointerEvent) => {
+      const target = e.target as Node | null;
+      if (!target) return;
+      if (popoverRef.current?.contains(target)) return;
+      if (triggerRef.current?.contains(target)) return;
+      onLeave();
     };
-    window.addEventListener("scroll", handleScroll, true);
-    window.addEventListener("resize", handleScroll);
+    const onKeyDown = (e: KeyboardEvent) => {
+      if (e.key === "Escape") onLeave();
+    };
+    document.addEventListener("pointerdown", onPointerDown, true);
+    document.addEventListener("keydown", onKeyDown);
     return () => {
-      window.removeEventListener("scroll", handleScroll, true);
-      window.removeEventListener("resize", handleScroll);
+      document.removeEventListener("pointerdown", onPointerDown, true);
+      document.removeEventListener("keydown", onKeyDown);
     };
-  }, [open, triggerRef]);
+  }, [open, onLeave, triggerRef, popoverRef]);
 
   if (!mounted || !open || !position) return null;
 
-  const visible = events.slice(0, MAX_VISIBLE);
-  const overflow = events.length - visible.length;
+  // A6 — most-urgent-first: order by the server risk tier (overdue → … →
+  // on_track), deadline as the tiebreak. So a busy month's overdue/rejected
+  // obligations lead instead of appearing in catalog order.
+  const ordered = [...events].sort(
+    (a, b) =>
+      riskRank(a.risk_level) - riskRank(b.risk_level) ||
+      a.deadline_iso.localeCompare(b.deadline_iso),
+  );
+  // Render every obligation — the container scrolls within its capped
+  // maxHeight. Previously this sliced to MAX_VISIBLE and showed a
+  // non-interactive "+N más" line, leaving obligations 7..N with no way to
+  // be opened (Portal Proveedor, 2ª revisión, Calendario #2).
+  const visible = ordered;
 
   return createPortal(
     <div
@@ -131,6 +118,8 @@ export function CellPopover({
         top: position.top,
         left: position.left,
         width: POPOVER_WIDTH,
+        maxHeight: position.maxHeight,
+        overflowY: "auto",
         zIndex: 50,
       }}
       className="rounded-lg border border-[color:var(--border-default)] bg-[color:var(--surface-overlay)] p-2 shadow-lg cw-fade-up"
@@ -191,11 +180,6 @@ export function CellPopover({
           );
         })}
       </ul>
-      {overflow > 0 && (
-        <p className="border-t border-[color:var(--border-subtle)] px-2 pb-1 pt-1.5 text-[11px] text-[color:var(--text-tertiary)]">
-          + {overflow} más en esta celda
-        </p>
-      )}
     </div>,
     document.body,
   );
