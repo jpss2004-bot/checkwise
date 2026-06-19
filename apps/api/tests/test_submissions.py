@@ -97,7 +97,7 @@ def test_create_submission_records_document_and_validations(api_client: TestClie
             "comments": "Carga de prueba",
             "initial_status": "pendiente_revision",
         },
-        files={"file": ("opinion.pdf", _pdf_bytes(), "application/pdf")},
+        files={"file": ("opinion.pdf", _rfc_text_pdf_bytes("ABC010203AB1"), "application/pdf")},
     )
 
     assert response.status_code == 202
@@ -368,3 +368,43 @@ def _pdf_bytes(password: str | None = None) -> bytes:
         writer.encrypt(password)
     writer.write(output)
     return output.getvalue()
+
+
+def _rfc_text_pdf_bytes(line: str) -> bytes:
+    """Single-page PDF whose text layer carries ``line`` (e.g. an RFC).
+
+    pypdf's writer cannot draw text, so we hand-assemble the file (same
+    technique as tests/test_workspace_submissions.py::_text_pdf_bytes).
+    Embedding the expected RFC lets the intake's RFC-alignment check pass,
+    so a clean upload derives PENDIENTE_REVISION rather than the
+    REQUIERE_ACLARACION a textless PDF now triggers (hardening 7705c35).
+    ``line`` must be ASCII without parentheses (PDF string literal).
+    """
+    stream = b"BT /F1 18 Tf 72 720 Td (" + line.encode("ascii") + b") Tj ET"
+    objects = [
+        b"<< /Type /Catalog /Pages 2 0 R >>",
+        b"<< /Type /Pages /Kids [3 0 R] /Count 1 >>",
+        b"<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] "
+        b"/Contents 4 0 R /Resources << /Font << /F1 5 0 R >> >> >>",
+        b"<< /Length "
+        + str(len(stream)).encode()
+        + b" >>\nstream\n"
+        + stream
+        + b"\nendstream",
+        b"<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>",
+    ]
+    out = bytearray(b"%PDF-1.4\n")
+    offsets: list[int] = []
+    for index, body in enumerate(objects, start=1):
+        offsets.append(len(out))
+        out += f"{index} 0 obj\n".encode() + body + b"\nendobj\n"
+    xref_pos = len(out)
+    out += b"xref\n0 6\n0000000000 65535 f \n"
+    for offset in offsets:
+        out += f"{offset:010d} 00000 n \n".encode()
+    out += (
+        b"trailer\n<< /Size 6 /Root 1 0 R >>\nstartxref\n"
+        + str(xref_pos).encode()
+        + b"\n%%EOF\n"
+    )
+    return bytes(out)
