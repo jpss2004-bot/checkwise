@@ -35,20 +35,27 @@ export function InstitutionRowHeader({
     ? "text-[color:var(--interactive-secondary)]"
     : "text-[color:var(--text-secondary)]";
 
+  // The institution column is a fixed 160px (table-fixed + <colgroup>). A long
+  // single-word label like "INFONAVIT" can't wrap and, laid out inline with an
+  // ``ml-auto`` progress chip, pushed the compliance bar PAST the column edge
+  // and over the first month cell ("la barra … se overlapea con el calendario").
+  // Stacking the chip+bar *below* the label removes the horizontal competition
+  // entirely, so neither can overflow regardless of label length; the label
+  // still truncates as a final safety net.
   return (
-    <div className="flex items-center gap-3">
-      <span className="flex items-center gap-2 text-[13px] font-semibold text-[color:var(--text-primary)]">
+    <div className="flex min-w-0 flex-col gap-1">
+      <span className="flex min-w-0 items-center gap-2 text-[13px] font-semibold text-[color:var(--text-primary)]">
         <IconComponent
-          className="h-4 w-4 text-[color:var(--text-brand)]"
+          className="h-4 w-4 shrink-0 text-[color:var(--text-brand)]"
           weight="duotone"
           aria-hidden="true"
         />
-        {label}
+        <span className="truncate">{label}</span>
       </span>
 
       {total > 0 && (
         <span
-          className="ml-auto flex shrink-0 items-center gap-1.5"
+          className="flex items-center gap-1.5"
           aria-label={`${done} de ${total} aprobadas (${pct}%)`}
         >
           <span
@@ -60,7 +67,7 @@ export function InstitutionRowHeader({
           </span>
           <span
             aria-hidden="true"
-            className="relative h-1 w-10 overflow-hidden rounded-full bg-[color:var(--surface-sunken)]"
+            className="relative h-1 w-10 max-w-full shrink-0 overflow-hidden rounded-full bg-[color:var(--surface-sunken)]"
           >
             <span
               className={"absolute inset-y-0 left-0 rounded-full " + barTone}

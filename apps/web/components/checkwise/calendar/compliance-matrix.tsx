@@ -250,12 +250,18 @@ function RowLabel({
   onSelectRow?: (rowId: string) => void;
 }) {
   const inner = (
-    <span className="flex items-center gap-2">
+    // ``min-w-0`` on this flex parent is load-bearing: without it the span
+    // keeps its auto (content-based) minimum width and never shrinks to the
+    // sticky name column, so the ``truncate`` on the name below has no
+    // constrained box to clip against and a long provider name overflows
+    // *across the grid cells*. ``min-w-0`` is needed at EVERY level of the
+    // nested flex chain (button → this span → text wrapper), not just the leaf.
+    <span className="flex min-w-0 items-center gap-2">
       <span
         aria-hidden="true"
         className={"h-2.5 w-2.5 shrink-0 rounded-full " + dotClass(row.semaphore_level)}
       />
-      <span className="min-w-0">
+      <span className="min-w-0 flex-1">
         <span className="block truncate text-[13px] font-medium text-[color:var(--text-primary)]">
           {row.name}
         </span>
