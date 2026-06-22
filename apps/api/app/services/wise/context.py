@@ -614,7 +614,9 @@ def _slot_to_snapshot(
             else None
         ),
         due_in_days=(
-            due_in_days_for_period(view.period_key, today)
+            due_in_days_for_period(
+                view.period_key, today, deadline_iso=view.deadline_iso
+            )
             if today is not None
             else None
         ),

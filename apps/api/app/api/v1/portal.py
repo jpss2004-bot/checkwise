@@ -123,6 +123,12 @@ from app.services.correction_request_service import (
     slack_payload_snapshot as correction_slack_payload_snapshot,
 )
 from app.services.dashboard_compute import compute_renewal_actions
+
+# Single source of truth lives in dashboard_compute; re-exported here so the
+# many portal/client call sites keep importing _due_in_days_for_period.
+from app.services.dashboard_compute import (
+    due_in_days_for_period as _due_in_days_for_period,
+)
 from app.services.evidence_slots import (
     SlotState,
     SlotView,
@@ -1119,22 +1125,6 @@ class LegalConsentResponse(BaseModel):
     workspace_id: str
     legal_consent_accepted_at: str
     legal_consent_version: str
-
-
-def _client_ip(request: Request) -> str | None:
-    """Best-effort client IP for the audit row.
-
-    Prefers the first hop in ``X-Forwarded-For`` (Render / Vercel set
-    this), falling back to ``request.client.host``. Returns ``None``
-    when nothing is available so the audit row carries an explicit
-    "unknown" rather than a misleading proxy address.
-    """
-    fwd = request.headers.get("x-forwarded-for")
-    if fwd:
-        first = fwd.split(",", 1)[0].strip()
-        if first:
-            return first
-    return request.client.host if request.client else None
 
 
 @router.post(
@@ -3096,11 +3086,6 @@ async def create_workspace_submission_batch(
             status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
             detail="La carga inicial debe comenzar en pendiente_revision.",
         )
-    if initial_status not in _VALID_DOCUMENT_STATUSES:
-        raise HTTPException(
-            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
-            detail="Estado inválido.",
-        )
     if load_type not in _VALID_LOAD_TYPES:
         raise HTTPException(
             status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
@@ -3748,7 +3733,7 @@ def _compute_suggested_actions(
     for view in calendar_slots:
         if not view.required or view.state is not SlotState.MISSING:
             continue
-        due_in = _due_in_days_for_period(view.period_key, today)
+        due_in = _due_in_days_for_period(view.period_key, today, deadline_iso=view.deadline_iso)
         if due_in is None or due_in < 0 or due_in > 14:
             continue
         actions.append(
@@ -3816,53 +3801,6 @@ def _action_body_for_state(view: SlotView) -> str:
     return ""
 
 
-def _due_in_days_for_period(period_key: str | None, today: date) -> int | None:
-    """Estimate days-to-deadline from a canonical period_key.
-
-    The catalog encodes deadlines as "due in month X of year Y" with a
-    conventional 17th-of-month cutoff (mirroring the legacy frontend
-    adapter). We can't recover the exact `due_month` from the slot
-    view, so we use the period_key's own month/year as a conservative
-    proxy: the document is due in the same period it covers, give or
-    take a few weeks. Returns None if the key isn't parseable.
-    """
-    if not period_key:
-        return None
-    try:
-        year = int(period_key[:4])
-    except ValueError:
-        return None
-    month: int | None = None
-    if "-M" in period_key:
-        try:
-            month = int(period_key.split("-M", 1)[1])
-        except ValueError:
-            month = None
-    elif "-B" in period_key:
-        try:
-            bm = int(period_key.split("-B", 1)[1])
-        except ValueError:
-            bm = None
-        if bm is not None:
-            month = bm * 2
-    elif "-Q" in period_key:
-        try:
-            q = int(period_key.split("-Q", 1)[1])
-        except ValueError:
-            q = None
-        if q is not None:
-            month = q * 4
-    elif period_key.endswith("-A"):
-        month = 12
-    if month is None or not 1 <= month <= 12:
-        return None
-    try:
-        deadline = date(year, month, 17)
-    except ValueError:
-        return None
-    return (deadline - today).days
-
-
 def _compute_attention_today(
     onboarding_slots: list[SlotView],
     calendar_slots: list[SlotView],
@@ -3887,7 +3825,9 @@ def _compute_attention_today(
                 title=view.requirement_name or view.requirement_code or "Obligación",
                 institution=view.institution or "—",
                 state=view.state.value,
-                due_in_days=_due_in_days_for_period(view.period_key, today),
+                due_in_days=_due_in_days_for_period(
+                    view.period_key, today, deadline_iso=view.deadline_iso
+                ),
                 href=href,
             )
         )
@@ -3899,7 +3839,7 @@ def _compute_attention_today(
             continue  # already added above
         if view.state in (SlotState.APPROVED, SlotState.EXCEPTION, SlotState.NOT_APPLICABLE):
             continue
-        due_in = _due_in_days_for_period(view.period_key, today)
+        due_in = _due_in_days_for_period(view.period_key, today, deadline_iso=view.deadline_iso)
         if due_in is None or due_in < 0 or due_in > 14:
             continue
         items.append(
@@ -3936,16 +3876,21 @@ def _compute_upcoming_deadlines(
             continue
         if view.state in _RESOLVED_SLOT_STATES:
             continue
-        due_in = _due_in_days_for_period(view.period_key, today)
+        due_in = _due_in_days_for_period(view.period_key, today, deadline_iso=view.deadline_iso)
         if due_in is None or due_in < 0:
             continue
-        # Parse the deadline's month for the response.
-        deadline_month = today.month
-        if view.period_key and "-M" in view.period_key:
+        # Parse the deadline's month for the response. Prefer the
+        # authoritative catalog deadline (MM of the stamped ISO date);
+        # fall back to the legacy period_key parse.
+        if view.deadline_iso:
+            deadline_month = int(view.deadline_iso[5:7])
+        elif view.period_key and "-M" in view.period_key:
             try:
                 deadline_month = int(view.period_key.split("-M", 1)[1])
             except ValueError:
                 deadline_month = today.month
+        else:
+            deadline_month = today.month
         rows.append(
             (
                 due_in,

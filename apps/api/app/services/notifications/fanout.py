@@ -66,6 +66,20 @@ from app.services.whatsapp_templates import (
 
 log = logging.getLogger("checkwise.notifications.fanout")
 
+# Reviewer-decision events whose in-app row + provider email are still
+# written by the legacy workflow (submission_workflow.apply_reviewer_decision
+# + email_provider_of_reviewer_decision). The active-mode fabric also runs
+# for them to own the WhatsApp leg + dispatch/idempotency audit, so it must
+# NOT re-write the in-app row or re-send the email while
+# settings.LEGACY_OWNS_DECISION_NOTIFICATIONS is True.
+_DECISION_EVENT_TYPES = frozenset(
+    {
+        "submission.approved",
+        "submission.rejected",
+        "submission.clarification_requested",
+    }
+)
+
 
 @dataclass(frozen=True)
 class _Rendered:
@@ -242,9 +256,18 @@ def _write_inapp_row(
     have no dedicated table — for them email is the primary surface.
     """
     event = envelope.definition
+    # Cutover: when the legacy workflow still owns the in-app surface for
+    # reviewer-decision events, skip the fabric row so the bell is not
+    # double-written (legacy ClientNotification/ProviderNotification +
+    # this fabric row). See settings.LEGACY_OWNS_DECISION_NOTIFICATIONS.
+    if (
+        settings.LEGACY_OWNS_DECISION_NOTIFICATIONS
+        and envelope.event_type in _DECISION_EVENT_TYPES
+    ):
+        return None
     title_default = (
         envelope.payload.get("title")
-        or rendered.body[:120] if rendered else event.description
+        or (rendered.body[:120] if rendered else event.description)
     )
     body_default = rendered.body if rendered else event.description
 
@@ -302,7 +325,18 @@ def _send_email_if_eligible(
     rendered: _Rendered | None,
     dispatch_row: NotificationDispatch,
 ) -> None:
-    _ = envelope  # reserved for future audit hooks
+    # Cutover: the legacy workflow already emails the provider for
+    # reviewer-decision events (email_provider_of_reviewer_decision).
+    # While legacy owns those events, skip the fabric email so a seeded
+    # decision template can't double-send. The WhatsApp leg below is
+    # unaffected — the fabric owns it.
+    if (
+        settings.LEGACY_OWNS_DECISION_NOTIFICATIONS
+        and envelope.event_type in _DECISION_EVENT_TYPES
+    ):
+        dispatch_row.email_status = "skipped"
+        dispatch_row.email_reason = "legacy_owns_email"
+        return
     if not decision.email:
         dispatch_row.email_status = "skipped"
         dispatch_row.email_reason = decision.email_skip_reason

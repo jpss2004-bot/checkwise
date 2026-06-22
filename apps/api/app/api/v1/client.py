@@ -354,7 +354,7 @@ def _vendor_compliance(
             continue
         if s.state in _RESOLVED_SLOT_STATES:
             continue
-        due_in = _due_in_days_for_period(s.period_key, today)
+        due_in = _due_in_days_for_period(s.period_key, today, deadline_iso=s.deadline_iso)
         if due_in is None:
             continue
         if due_in < 0:
@@ -1002,6 +1002,10 @@ class ClientCalendarMonth(BaseModel):
     pending_total: int
     rejected_or_correction_total: int
     missing_total: int
+    # Past-deadline, unresolved obligations (VENCIDO / lapsed). Defaulted so
+    # the field is optional-safe for any older consumer; the buckets now
+    # partition every obligation so they reconcile with ``due_total``.
+    overdue_total: int = 0
     due_soon_total: int
     items: list[ClientCalendarItem]
 
@@ -2407,7 +2411,7 @@ def _document_action_items_for_workspace(
         view = view_by_key.get((req.code, req.period_key))
         if view is None or not view.required:
             continue
-        due_in = _due_in_days_for_period(view.period_key, today)
+        due_in = _due_in_days_for_period(view.period_key, today, deadline_iso=view.deadline_iso)
         kind = _CLIENT_VENDOR_ACTIONABLE_STATES.get(view.state)
         if kind is None and due_in is not None and 0 <= due_in <= 14:
             if view.state not in _RESOLVED_SLOT_STATES:
@@ -3119,6 +3123,12 @@ def client_calendar(
     for month in range(1, 13):
         items = months.get(month, [])
         due_total = len(items)
+        # Buckets classify by raw status so "missing" (never uploaded,
+        # status PENDIENTE) stays distinct from "overdue" (uploaded then
+        # lapsed). VENCIDO previously matched NO bucket, so the sub-totals
+        # failed to sum to ``due_total`` and lapsed obligations vanished from
+        # the month summary — give it an explicit ``overdue_total`` so every
+        # status maps to exactly one bucket and the totals reconcile.
         approved_total = sum(
             1
             for i in items
@@ -3140,27 +3150,18 @@ def client_calendar(
             )
         )
         rejected_or_correction_total = sum(
-            1
-            for i in items
-            if i.status in _REJECTED_OR_CORRECTION_STATUSES
+            1 for i in items if i.status in _REJECTED_OR_CORRECTION_STATUSES
+        )
+        overdue_total = sum(
+            1 for i in items if i.status == DocumentStatus.VENCIDO.value
         )
         missing_total = sum(
-            1
-            for i in items
-            if i.status == DocumentStatus.PENDIENTE.value or i.status == "pendiente"
+            1 for i in items if i.status == DocumentStatus.PENDIENTE.value
         )
-        due_soon_total = sum(
-            1
-            for i in items
-            if (_due_in_days_for_period(i.period_key, today) or 9999) <= 14
-            and (_due_in_days_for_period(i.period_key, today) or -1) >= 0
-            and i.status
-            not in (
-                DocumentStatus.APROBADO.value,
-                DocumentStatus.EXCEPCION_LEGAL.value,
-                DocumentStatus.NO_APLICA.value,
-            )
-        )
+        # ``due_soon`` uses the already-computed risk tier (true catalog
+        # deadline), not raw status — it's an informational overlay, not a
+        # partition bucket.
+        due_soon_total = sum(1 for i in items if i.risk_level == "due_soon")
         response_months.append(
             ClientCalendarMonth(
                 month=month,
@@ -3171,6 +3172,7 @@ def client_calendar(
                 pending_total=pending_total,
                 rejected_or_correction_total=rejected_or_correction_total,
                 missing_total=missing_total,
+                overdue_total=overdue_total,
                 due_soon_total=due_soon_total,
                 items=items,
             )
@@ -3657,10 +3659,23 @@ def mark_client_notification_read(
     current: ClientUser,
     client_id: str | None = None,
 ) -> ClientNotificationItem:
-    target_id = _resolve_client_id(db, current, requested=client_id)
+    # Resolve scope from the NOTIFICATION ITSELF, not from a (possibly
+    # absent) ?client_id. A client_admin managing multiple clients must be
+    # able to mark read a notification belonging to any of their clients
+    # without first selecting one. Mirrors ``client_get_submission_document``.
     row = db.get(ClientNotification, notification_id)
-    if row is None or row.client_id != target_id:
+    if row is None:
         raise HTTPException(status.HTTP_404_NOT_FOUND, detail="Notificacion no encontrada.")
+    is_internal_admin = MembershipRole.INTERNAL_ADMIN.value in current.roles
+    if not is_internal_admin:
+        visible = _visible_client_ids_for_user(db, current.user.id)
+        if row.client_id not in visible:
+            # Same 404 shape as cross-tenant lookups — never confirm a
+            # notification exists in a client the caller cannot see.
+            raise HTTPException(
+                status.HTTP_404_NOT_FOUND, detail="Notificacion no encontrada."
+            )
+    target_id = row.client_id
     if row.read_at is None:
         row.read_at = datetime.now(UTC)
         # Only audit the first transition unread→read. Idempotent
@@ -3694,7 +3709,22 @@ def mark_all_client_notifications_read(
     current: ClientUser,
     client_id: str | None = None,
 ) -> ClientNotificationSummary:
+    # Resolve the scope. When ?client_id is explicit we honor it (and the
+    # guards in ``_resolve_client_id``). When it is omitted, a client_admin
+    # managing multiple clients should clear ALL of their clients' unread
+    # rows — not just the first — so we mark across every visible client id.
     target_id = _resolve_client_id(db, current, requested=client_id)
+    if client_id:
+        scope_ids = [target_id]
+    else:
+        is_internal_admin = MembershipRole.INTERNAL_ADMIN.value in current.roles
+        visible = _visible_client_ids_for_user(db, current.user.id)
+        # Internal admins without a default land here only via the
+        # ``_resolve_client_id`` 400 above, so ``visible`` is non-empty for
+        # the multi-client client_admin case we are fixing.
+        scope_ids = visible if visible else [target_id]
+        if is_internal_admin and not visible:
+            scope_ids = [target_id]
     now = datetime.now(UTC)
     # Capture the ids with a cheap id-only SELECT (no full-row ORM hydration),
     # then flip them all in a single UPDATE instead of loading every unread row
@@ -3704,7 +3734,7 @@ def mark_all_client_notifications_read(
     unread_ids = list(
         db.scalars(
             select(ClientNotification.id).where(
-                ClientNotification.client_id == target_id,
+                ClientNotification.client_id.in_(scope_ids),
                 ClientNotification.read_at.is_(None),
             )
         )
@@ -3729,6 +3759,7 @@ def mark_all_client_notifications_read(
             after={
                 "marked_count": len(unread_ids),
                 "notification_ids": unread_ids,
+                "scope_client_ids": scope_ids,
                 "read_at": now.isoformat(),
             },
         )

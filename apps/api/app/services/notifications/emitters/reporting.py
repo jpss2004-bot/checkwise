@@ -48,6 +48,7 @@ from app.core.compliance_catalog import (
     recurring_for_year,
 )
 from app.models import ProviderWorkspace, Submission, Vendor
+from app.services.calendar_risk import SATISFYING_STATUSES
 from app.services.notifications.catalog import get_event
 from app.services.notifications.dispatcher import DispatchMode, dispatch
 from app.services.notifications.emitters._helpers import (
@@ -248,17 +249,23 @@ def emit_reporting_for_workspace(
 def _index_submissions(
     db: Session, *, workspace: ProviderWorkspace
 ) -> dict[tuple[str, str], list[Submission]]:
-    """Index workspace submissions by ``(requirement_code, period_key)``.
+    """Index *satisfying* workspace submissions by ``(requirement_code, period_key)``.
 
     Same shape as :func:`app.services.evidence_slots.build_workspace_calendar_slots`
     so the suppression logic at the top of the emitter aligns with
     what the calendar UI shows. Submissions without both keys are
     skipped — they cannot suppress a calendar slot.
+
+    Only submissions in a SATISFYING status (aprobado / excepcion_legal /
+    no_aplica — the calendar's ``on_track`` set) suppress reminders. A
+    rejected, draft, or in-review upload does NOT silence the obligation:
+    the provider still has work to do, so the cadence must keep firing.
     """
     rows = db.scalars(
         select(Submission).where(
             Submission.client_id == workspace.client_id,
             Submission.vendor_id == workspace.vendor_id,
+            Submission.status.in_(SATISFYING_STATUSES),
         )
     ).all()
     by_slot: dict[tuple[str, str], list[Submission]] = {}

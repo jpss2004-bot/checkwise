@@ -135,6 +135,21 @@ class Settings(BaseSettings):
     # False, fanout preserves the SMS-first behavior shipped in Phase 7.
     WHATSAPP_NATIVE_TEMPLATES_ENABLED: bool = False
 
+    # Notification cutover gate for reviewer-DECISION events
+    # (submission.approved / rejected / clarification_requested). The
+    # legacy workflow (``submission_workflow.apply_reviewer_decision``)
+    # still writes the in-app ClientNotification + ProviderNotification
+    # AND sends the decision email for these events. The active-mode
+    # fabric (dispatcher → fanout) ALSO runs for them so it can own the
+    # WhatsApp leg + the dispatch/idempotency audit trail. While this
+    # flag is True (default), the fabric SKIPS the in-app row and the
+    # email for decision events so the legacy path stays the sole writer
+    # — preventing the duplicate bell rows / duplicate emails that would
+    # otherwise appear once the emit is committed. Flip to False only
+    # after the legacy ``notify_*`` / ``email_provider_of_reviewer_decision``
+    # calls are removed and the fabric owns the full decision surface.
+    LEGACY_OWNS_DECISION_NOTIFICATIONS: bool = True
+
     # SMS via Twilio (Phase 7 cutover). Used as the messaging
     # transport until Meta approves CheckWise's WhatsApp templates;
     # see :mod:`app.services.messaging_delivery` for the selection

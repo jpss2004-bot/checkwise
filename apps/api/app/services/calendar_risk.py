@@ -42,6 +42,12 @@ def worst_calendar_risk(risks: Iterable[str]) -> str:
             worst = r
     return worst
 
+
+def calendar_deadline_iso(year: int, due_month: int, due_day: int) -> str:
+    """Canonical REPSE deadline as an ISO date string (day-17 cutoff by
+    convention; the SAT annual row carries due_day=30 in the catalog)."""
+    return f"{year:04d}-{due_month:02d}-{due_day:02d}"
+
 # Statuses where the provider must re-do the document (the reviewer bounced it).
 # Mirrors the legacy tuple in ``client.py`` / ``admin.py``; kept here as the
 # canonical copy so the risk classifier and its callers read one definition.
@@ -49,6 +55,16 @@ REJECTED_OR_CORRECTION_STATUSES = (
     DocumentStatus.RECHAZADO.value,
     DocumentStatus.REQUIERE_ACLARACION.value,
     DocumentStatus.POSIBLE_MISMATCH.value,
+)
+
+# Statuses that "satisfy" an obligation — the slot is done and no reminder
+# should fire. These map to the ``on_track`` risk tier in
+# ``calendar_item_risk``; kept here as the canonical copy so the reporting
+# emitter's suppression set and the risk classifier never drift.
+SATISFYING_STATUSES = (
+    DocumentStatus.APROBADO.value,
+    DocumentStatus.EXCEPCION_LEGAL.value,
+    DocumentStatus.NO_APLICA.value,
 )
 
 
@@ -69,11 +85,7 @@ def calendar_item_risk(status: str, deadline_iso: str, today: date) -> str:
     ``due_soon_total`` convention so the calendar's surfaces never disagree by a
     few days.
     """
-    if status in (
-        DocumentStatus.APROBADO.value,
-        DocumentStatus.EXCEPCION_LEGAL.value,
-        DocumentStatus.NO_APLICA.value,
-    ):
+    if status in SATISFYING_STATUSES:
         return "on_track"
     try:
         days_until: int | None = (date.fromisoformat(deadline_iso) - today).days

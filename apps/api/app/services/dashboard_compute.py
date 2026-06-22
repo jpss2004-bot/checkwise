@@ -342,19 +342,29 @@ def client_vendor_focus_href(
 # ─── Due-in-days estimate ──────────────────────────────────────
 
 
-def due_in_days_for_period(period_key: str | None, today: date) -> int | None:
-    """Estimate days-to-deadline from a canonical ``period_key``.
+def due_in_days_for_period(
+    period_key: str | None, today: date, *, deadline_iso: str | None = None
+) -> int | None:
+    """Estimate days-to-deadline for a calendar obligation.
 
-    The catalog encodes deadlines as "due in month X of year Y" with a
-    conventional 17th-of-month cutoff. We can't recover the exact
-    ``due_month`` from the slot view, so we use the period_key's own
-    month/year as a conservative proxy: the document is due in the
-    same period it covers. Returns None if the key isn't parseable.
+    The authoritative deadline is the catalog's ``due_month`` /
+    ``due_day`` stamped onto the slot as ``deadline_iso`` — when present
+    it is preferred and used directly. The covered period (``period_key``)
+    differs from the deadline (monthly is due the *next* month;
+    bimestral/cuatrimestral/annual carry specific due months), so the
+    period_key reconstruction below is only a conservative FALLBACK for
+    legacy slots that don't carry a ``deadline_iso``.
 
-    Format support: ``YYYY-MNN`` (monthly), ``YYYY-BNN`` (bimestral —
-    pairs map to even months), ``YYYY-QNN`` (cuatrimestral — multiplied
-    by 4), and ``YYYY-A`` (annual → December).
+    Fallback format support: ``YYYY-MNN`` (monthly), ``YYYY-BNN``
+    (bimestral — pairs map to even months), ``YYYY-QNN`` (cuatrimestral —
+    multiplied by 4), and ``YYYY-A`` (annual → December). Returns None if
+    neither source is parseable.
     """
+    if deadline_iso:
+        try:
+            return (date.fromisoformat(deadline_iso) - today).days
+        except ValueError:
+            pass
     if not period_key:
         return None
     try:
@@ -438,7 +448,9 @@ def compute_attention_items(
                 ),
                 "institution": view.institution or "—",
                 "state": view.state.value,
-                "due_in_days": due_in_days_for_period(view.period_key, today),
+                "due_in_days": due_in_days_for_period(
+                    view.period_key, today, deadline_iso=view.deadline_iso
+                ),
                 "href": href,
                 "requirement_code": view.requirement_code,
                 "period_key": view.period_key,
@@ -457,7 +469,7 @@ def compute_attention_items(
             SlotState.NOT_APPLICABLE,
         ):
             continue
-        due_in = due_in_days_for_period(view.period_key, today)
+        due_in = due_in_days_for_period(view.period_key, today, deadline_iso=view.deadline_iso)
         if due_in is None or due_in < 0 or due_in > 14:
             continue
         items.append(
@@ -563,15 +575,20 @@ def compute_upcoming_deadlines(
             continue
         if view.state in RESOLVED_SLOT_STATES:
             continue
-        due_in = due_in_days_for_period(view.period_key, today)
+        due_in = due_in_days_for_period(view.period_key, today, deadline_iso=view.deadline_iso)
         if due_in is None or due_in < 0:
             continue
-        deadline_month = today.month
-        if view.period_key and "-M" in view.period_key:
+        # Prefer the authoritative catalog deadline's month (MM of the
+        # stamped ISO date); fall back to the legacy period_key parse.
+        if view.deadline_iso:
+            deadline_month = int(view.deadline_iso[5:7])
+        elif view.period_key and "-M" in view.period_key:
             try:
                 deadline_month = int(view.period_key.split("-M", 1)[1])
             except ValueError:
                 deadline_month = today.month
+        else:
+            deadline_month = today.month
         rows.append(
             (
                 due_in,
@@ -964,7 +981,7 @@ def compute_suggested_actions(
     for view in calendar_slots:
         if not view.required or view.state is not SlotState.MISSING:
             continue
-        due_in = due_in_days_for_period(view.period_key, today)
+        due_in = due_in_days_for_period(view.period_key, today, deadline_iso=view.deadline_iso)
         if due_in is None or due_in < 0 or due_in > 14:
             continue
         actions.append(

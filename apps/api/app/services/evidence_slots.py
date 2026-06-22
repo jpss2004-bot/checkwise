@@ -47,6 +47,7 @@ from app.core.compliance_catalog import (
 )
 from app.core.config import settings
 from app.models import Institution, ProviderWorkspace, Submission
+from app.services.calendar_risk import calendar_deadline_iso
 
 
 class SlotState(StrEnum):
@@ -121,6 +122,9 @@ class SlotView:
     # for back-compat with tests that built SlotView via positional
     # ordering before this field existed.
     load_type: str | None = None
+    # Authoritative catalog deadline (year + due_month + due_day) for
+    # recurring slots; None for onboarding slots (which have no deadline).
+    deadline_iso: str | None = None
 
 
 # ---------------------------------------------------------------------------
@@ -309,6 +313,7 @@ def _slot_view_from_candidates(
     requirement_name: str | None,
     institution: str | None,
     load_type: str | None = None,
+    deadline_iso: str | None = None,
     required: bool,
     candidates: list[Submission],
 ) -> SlotView:
@@ -324,6 +329,7 @@ def _slot_view_from_candidates(
         requirement_name=requirement_name,
         institution=institution,
         load_type=load_type,
+        deadline_iso=deadline_iso,
         required=required,
         current_submission_id=current.id if current is not None else None,
         current_status=current.status if current is not None else None,
@@ -482,12 +488,14 @@ def build_workspace_calendar_slots(
             requirement_code=req.code,
             period_key=req.period_key,
         )
+        deadline_iso = calendar_deadline_iso(year, req.due_month, req.due_day)
         views.append(
             _slot_view_from_candidates(
                 slot_key=slot_key,
                 requirement_name=req.name,
                 institution=req.institution,
                 load_type=req.frequency,
+                deadline_iso=deadline_iso,
                 required=True,
                 candidates=candidates,
             )
@@ -556,12 +564,14 @@ def _build_workspace_calendar_slots_v2(
         # logic is correct for both modes — a real "all" implementation
         # belongs alongside the first row that needs it so the
         # matching contract is informed by a concrete example.
+        deadline_iso = calendar_deadline_iso(year, req.due_month, req.due_day)
         views.append(
             _slot_view_from_candidates(
                 slot_key=slot_key,
                 requirement_name=req.name,
                 institution=req.institution,
                 load_type=req.frequency,
+                deadline_iso=deadline_iso,
                 required=True,
                 candidates=candidates,
             )

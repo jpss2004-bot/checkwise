@@ -1068,6 +1068,14 @@ def submit_decision(
             mode="active",
         )
         db.flush()
+        # Persist the fabric rows (NotificationDispatch idempotency claim,
+        # dispatch_attempted audit, WhatsApp audit). Without this the
+        # get_db teardown rolls them back — losing the audit trail and,
+        # worse, the idempotency claim so a retry re-sends. Mirrors
+        # auto_approval.py's emit→flush→commit. The in-app row + email are
+        # gated to the legacy path (LEGACY_OWNS_DECISION_NOTIFICATIONS), so
+        # committing here does not double-write the bell.
+        db.commit()
     except Exception:  # pragma: no cover — defensive during cutover
         logging.getLogger("checkwise.reviewer").exception(
             "notif_emit_failed event=submission.reviewer_decision submission=%s",

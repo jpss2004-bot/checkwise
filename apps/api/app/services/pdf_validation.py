@@ -19,6 +19,11 @@ class PdfInspectionResult:
     is_pdf: bool
     is_corrupt: bool = False
     is_encrypted: bool = False
+    # Provenance: True when the PDF declared encryption but decrypted
+    # cleanly with an empty password (owner-password-only restriction).
+    # Such files are readable, so ``is_encrypted`` stays False, but the
+    # flag preserves the fact for the audit trail.
+    had_owner_password: bool = False
     page_count: int | None = None
     text_sample: str = ""
     text_char_count: int = 0
@@ -60,7 +65,14 @@ def inspect_pdf(
             error=f"No fue posible leer la estructura PDF: {exc}",
         )
 
+    # A PDF can be "encrypted" yet open with an empty password (the
+    # common case: an owner password that restricts editing but not
+    # reading). Such files decrypt fine and read normally, so we must
+    # NOT flag them as encrypted downstream. We only treat a file as
+    # truly encrypted when the empty-password decrypt FAILS.
+    had_owner_password = False
     if reader.is_encrypted:
+        had_owner_password = True
         decrypted = False
         try:
             decrypted = reader.decrypt("") != 0
@@ -70,6 +82,7 @@ def inspect_pdf(
             return PdfInspectionResult(
                 is_pdf=True,
                 is_encrypted=True,
+                had_owner_password=True,
                 page_count=None,
                 error="El PDF está protegido con contraseña o cifrado.",
             )
@@ -86,7 +99,10 @@ def inspect_pdf(
         return PdfInspectionResult(
             is_pdf=True,
             is_corrupt=True,
-            is_encrypted=reader.is_encrypted,
+            # Reached only after a successful empty-password decrypt, so
+            # the file is readable: not encrypted from the caller's view.
+            is_encrypted=False,
+            had_owner_password=had_owner_password,
             error=f"No fue posible extraer páginas/texto del PDF: {exc}",
         )
 
@@ -98,7 +114,10 @@ def inspect_pdf(
     return PdfInspectionResult(
         is_pdf=True,
         is_corrupt=False,
-        is_encrypted=reader.is_encrypted,
+        # The file opened and yielded text — an empty-password decrypt
+        # (owner-password-only) counts as readable, NOT encrypted.
+        is_encrypted=False,
+        had_owner_password=had_owner_password,
         page_count=page_count,
         text_sample=text_sample[:max_text_chars],
         text_char_count=text_char_count,

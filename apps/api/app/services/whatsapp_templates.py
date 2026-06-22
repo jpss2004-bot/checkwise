@@ -47,12 +47,24 @@ _RENEWAL_SEVERITY_LABEL: dict[str, str] = {
 }
 
 # Reviewer action → display label for {{3}} in the decision template.
+#
+# This builder is fed by TWO callers with DIFFERENT key styles for the
+# same decision, so we map both:
+#   * submission_workflow → ``ReviewerAction.value``
+#     ('approve' / 'reject' / 'request_clarification' / 'mark_exception')
+#   * notifications.fanout → verification event-action values
+#     ('approved' / 'rejected' / 'needs_clarification')
+# Spanish wording matches email_templates._DECISION_HEADLINE/_DECISION_VERB.
 _DECISION_LABEL: dict[str, str] = {
+    # ReviewerAction values (submission_workflow path)
+    "approve": "Aprobado",
+    "reject": "Rechazado",
+    "request_clarification": "Requiere aclaración",
+    "mark_exception": "Excepción legal",
+    # Verification event-action values (fanout path)
     "approved": "Aprobado",
     "rejected": "Rechazado",
     "needs_clarification": "Requiere aclaración",
-    "needs_review": "En revisión",
-    "mismatch": "Posible inconsistencia",
 }
 
 

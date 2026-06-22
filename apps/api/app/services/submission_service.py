@@ -267,6 +267,12 @@ def status_from_inspection(
         return DocumentStatus.REQUIERE_ACLARACION
 
     confidence = document_signals.requirement_match_confidence or 0.0
+    # An ABSENT RFC (none detected) escalates to clarification. A concrete
+    # RFC *mismatch* is deliberately advisory: it caps requirement_match
+    # confidence (in document_intelligence) so the doc lands in human review
+    # without a provider-facing "wrong company" accusation that RFC OCR noise
+    # / homoclave variants could make wrongly. See
+    # test_document_intelligence_rfc::test_rfc_mismatch_caps_confidence_*.
     if (
         document_signals.expected_rfc
         and document_signals.rfc_alignment == RFC_ALIGNMENT_ABSENT
@@ -1530,6 +1536,9 @@ def finalize_multi_document_submission(
 
     documents_payload: list[DocumentBatchEntry] = []
     aggregated_event_types: list[str] = []
+    # Master-table paths for documents whose metadata export completed —
+    # used to fire one ``notify_metadata_ready`` after the loop.
+    metadata_master_paths: list[str | None] = []
     shadow_batch: list[tuple[str, str]] = []  # (document_id, pdf_path) for post-commit scheduling
     for (stored, pdf_inspection, document_signals, per_file_status), duplicate_found in zip(
         inspections, duplicate_flags, strict=True
@@ -1634,6 +1643,51 @@ def finalize_multi_document_submission(
             requirement_used_legacy=resolved_requirement.used_legacy,
             period_used_legacy=resolved_period.used_legacy,
         )
+
+        # Metadata XLSX / master row — mirrors the single-file
+        # ``finalize_intake_submission`` path so batch-uploaded documents
+        # are visible on /client/metadata. Each document uses ITS OWN
+        # inspection + classifier signals (not the batch's), reusing them
+        # so the export never re-opens the PDF or re-runs the classifier.
+        metadata_export = export_metadata_table_after_upload(
+            stored_file=stored,
+            client=client,
+            vendor=vendor,
+            contract=contract,
+            institution=institution,
+            resolved_requirement=resolved_requirement,
+            resolved_period=resolved_period,
+            document=document,
+            detected_document_type=document_signals.detected_document_type,
+            pdf_inspection=pdf_inspection,
+            document_signals=document_signals,
+        )
+        metadata_export_event = add_validation_event(
+            db,
+            submission_id=submission.id,
+            document_id=document.id,
+            event_type="metadata_table_exported",
+            rule_code="metadata_table_export",
+            result=metadata_export.status,
+            severity="info" if metadata_export.status == "completed" else "warning",
+            message=(
+                "Metadata XLSX generado automáticamente."
+                if metadata_export.status == "completed"
+                else "No se pudo generar el Metadata XLSX automáticamente."
+            ),
+            payload={
+                "document_type_code": metadata_export.document_type_code,
+                "output_path": metadata_export.output_path,
+                "latest_path": metadata_export.latest_path,
+                "master_path": metadata_export.master_path,
+                "reason": metadata_export.reason,
+            },
+            actor_type="system",
+        )
+        validation_events.append(metadata_export_event)
+        if metadata_export.status == "completed":
+            metadata_master_paths.append(metadata_export.master_path)
+
         aggregated_event_types.extend(event.event_type for event in validation_events)
 
         documents_payload.append(
@@ -1793,6 +1847,18 @@ def finalize_multi_document_submission(
         vendor=vendor,
         document_count=len(documents_payload),
     )
+
+    # Fire one metadata-ready notification for the batch when at least one
+    # document's export completed — all documents append to the same
+    # client-wide master, so a single notification (using the last
+    # completed master path) mirrors the single-file path's intent.
+    if metadata_master_paths:
+        notify_metadata_ready(
+            db,
+            submission=submission,
+            vendor=vendor,
+            master_path=metadata_master_paths[-1],
+        )
 
     db.commit()
 
