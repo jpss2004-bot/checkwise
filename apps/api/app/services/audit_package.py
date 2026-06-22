@@ -29,7 +29,6 @@ clear 413 guiding the user to narrow the filters.
 
 from __future__ import annotations
 
-import io
 import re
 import zipfile
 from collections.abc import Iterable, Iterator
@@ -107,6 +106,122 @@ _NO_BYTES_STATES: frozenset[str] = frozenset({
     DocumentStatus.VENCIDO.value,
     DocumentStatus.NO_APLICA.value,
 })
+
+# Streaming knobs. ``_STREAM_CHUNK_BYTES`` is the read size pulled from
+# the source object per loop; ``_DRAIN_THRESHOLD_BYTES`` is how much
+# compressed output we let the rolling buffer accumulate before draining
+# it to the wire mid-entry. Both keep peak memory bounded independent of
+# the 500 MB archive cap.
+_STREAM_CHUNK_BYTES = 1024 * 1024  # 1 MB
+_DRAIN_THRESHOLD_BYTES = 1024 * 1024  # 1 MB
+
+
+class _ZipStreamSink:
+    """Write-only, non-seekable sink that :class:`zipfile.ZipFile` writes
+    into so the archive can be drained incrementally.
+
+    Reporting ``seekable() == False`` forces ``ZipFile`` to emit data
+    descriptors and never seek back to patch local headers — which is
+    what lets us truncate (drain) the buffer mid-stream without
+    corrupting the archive. The composer calls :meth:`drain` after each
+    entry (and mid-entry past a threshold) to yield + clear the buffer,
+    so neither the whole ZIP nor any single file is held in RAM.
+    """
+
+    def __init__(self) -> None:
+        self._buf = bytearray()
+        self._offset = 0  # absolute bytes ever written to the logical stream
+
+    # -- file-like surface ZipFile relies on ----------------------------
+    def write(self, data: bytes) -> int:
+        self._buf += data
+        self._offset += len(data)
+        return len(data)
+
+    def writable(self) -> bool:
+        return True
+
+    def seekable(self) -> bool:
+        return False
+
+    def tell(self) -> int:
+        # ABSOLUTE offset in the logical output stream — NOT the current
+        # buffer length. ZipFile records this in the central directory for
+        # each entry; because we truncate the buffer on every drain, the
+        # buffer length would be wrong (it resets), so we keep a separate
+        # cumulative counter that only ever grows.
+        return self._offset
+
+    def flush(self) -> None:  # pragma: no cover - no-op
+        return None
+
+    # -- drain protocol -------------------------------------------------
+    @property
+    def pending(self) -> int:
+        return len(self._buf)
+
+    def drain(self) -> Iterator[bytes]:
+        """Yield the buffered bytes (if any) and clear the buffer."""
+        if self._buf:
+            out = bytes(self._buf)
+            self._buf.clear()
+            yield out
+
+
+# Arcname sanitization (Zip-Slip defence). The per-segment regex keeps
+# dots so legitimate filenames survive, but a WHOLE segment equal to
+# ``.``/``..`` (or dot-only) is a path-traversal primitive on naive
+# extractors, so it is collapsed to a safe placeholder. Leading slashes
+# and Windows drive separators are stripped too.
+_ARCNAME_SEGMENT_RE = re.compile(r"[^A-Za-z0-9._-]+")
+
+
+def _safe_arc_segment(value: str, *, fallback: str) -> str:
+    cleaned = _ARCNAME_SEGMENT_RE.sub("-", value.strip()).strip("-")
+    if cleaned in ("", ".", "..") or set(cleaned) <= {"."}:
+        return fallback
+    return cleaned
+
+
+def _safe_arcname(arcname: str) -> str:
+    """Sanitize a ZIP arcname so it cannot escape on extraction.
+
+    Splits on both ``/`` and ``\\``, drops empty/``.`` segments, replaces
+    any ``..``/dot-only segment with a safe placeholder, and rejoins with
+    forward slashes. Idempotent for already-clean arcnames (the composer
+    builds them from sanitized segments, so the common case is a no-op).
+    """
+    normalized = arcname.replace("\\", "/")
+    parts = [p for p in normalized.split("/") if p not in ("", ".")]
+    if not parts:
+        return "documento"
+    safe_parts: list[str] = []
+    last = len(parts) - 1
+    for i, part in enumerate(parts):
+        fallback = "documento" if i == last else "_"
+        safe_parts.append(_safe_arc_segment(part, fallback=fallback))
+    return "/".join(safe_parts) or "documento"
+
+
+def _render_missing_note(entries: list[AuditPackageEntry]) -> str:
+    """Compose the ``DOCUMENTOS_FALTANTES.txt`` body listing rows the
+    INDICE references but whose bytes could not be packaged."""
+    lines = [
+        "Documentos referenciados en el INDICE que no pudieron incluirse",
+        "(archivo no encontrado en almacenamiento al momento de la descarga):",
+        "",
+    ]
+    for e in entries:
+        lines.append(
+            f"- {e.vendor_name} · {e.institution_name} · {e.period_key} · "
+            f"{e.filename} (storage_key={e.storage_key})"
+        )
+    lines.append("")
+    lines.append(
+        "Si esperabas estos documentos, contacta a soporte para verificar "
+        "el almacenamiento."
+    )
+    return "\n".join(lines)
 
 
 @dataclass(frozen=True)
@@ -299,8 +414,10 @@ def stream_audit_package(
     client: Client,
     filters: AuditPackageFilters,
     manifest_pdf: bytes | None = None,
+    *,
+    entries: list[AuditPackageEntry] | None = None,
 ) -> Iterator[bytes]:
-    """Yield ZIP bytes for the audit package.
+    """Yield ZIP bytes for the audit package as a TRUE streaming generator.
 
     Raises ``AuditPackageTooLargeError`` BEFORE yielding any bytes if
     the resolved file count or total byte size exceeds either cap.
@@ -311,11 +428,34 @@ def stream_audit_package(
     and pass it through so the cover stays in sync with the entry
     set the streaming pass actually wrote.
 
+    ``entries`` — when the caller already resolved the entry list (for
+    the cap check + manifest), it passes it here so the generator does
+    NOT re-run the full ``build_entries`` DB scan. Omitting it keeps the
+    backward-compatible "build internally" behaviour.
+
+    Memory is bounded regardless of the (<=500 MB) archive size: the ZIP
+    is composed against a non-seekable rolling buffer that is drained and
+    yielded after every entry — and mid-entry once it exceeds ~1 MB — so
+    neither the whole archive nor any single source file is held in RAM.
+    Source files stream in fixed-size chunks via ``storage.open_stream``
+    (no per-entry /tmp temp copy).
+
     Identical-name collisions inside the same vendor/inst/period
     folder are disambiguated with a numeric suffix so the archive
     never silently drops a row.
+
+    Arcnames are sanitized (no ``..``/leading-slash/drive segments) so a
+    crafted filename cannot escape the extraction directory (Zip-Slip).
+
+    When a referenced storage object is missing, the row is skipped from
+    the ZIP body AND recorded in a ``DOCUMENTOS_FALTANTES.txt`` note at
+    the archive root so the INDICE and the archive contents stay
+    consistent for the auditor.
     """
-    entries = build_entries(db, client, filters)
+    # FIX 4 — reuse the caller's already-resolved entry list instead of
+    # re-running the full query set inside the generator.
+    if entries is None:
+        entries = build_entries(db, client, filters)
     file_count = len(entries)
     total_bytes = sum(e.size_bytes for e in entries)
     if file_count > MAX_FILES:
@@ -332,27 +472,49 @@ def stream_audit_package(
         )
 
     storage = get_storage_service()
-    buffer = io.BytesIO()
+    sink = _ZipStreamSink()
+    missing: list[AuditPackageEntry] = []
     with zipfile.ZipFile(
-        buffer, mode="w", compression=zipfile.ZIP_DEFLATED
+        sink, mode="w", compression=zipfile.ZIP_DEFLATED
     ) as zf:
         if manifest_pdf is not None:
-            zf.writestr("INDICE.pdf", manifest_pdf)
+            zf.writestr(_safe_arcname("INDICE.pdf"), manifest_pdf)
+            yield from sink.drain()
         for entry in entries:
+            wrote = False
             try:
-                src_path = storage.open_for_read(entry.storage_key)
+                with storage.open_stream(entry.storage_key) as src:
+                    with zf.open(_safe_arcname(entry.arcname), mode="w") as dst:
+                        while chunk := src.read(_STREAM_CHUNK_BYTES):
+                            dst.write(chunk)
+                            # Mid-entry drain keeps peak memory bounded even
+                            # for a single large file.
+                            if sink.pending >= _DRAIN_THRESHOLD_BYTES:
+                                yield from sink.drain()
+                    wrote = True
             except Exception:
-                # Storage helper raised; skip the row rather than blow
-                # up the whole archive. The manifest still lists the
-                # row so the auditor sees the gap; the audit log
-                # already records intent.
+                # Storage helper raised or the object is missing; skip the
+                # row rather than blow up the whole archive. We record it in
+                # the missing-files note below so the INDICE and the archive
+                # do not silently diverge (FIX 6).
+                wrote = False
+            if not wrote:
+                missing.append(entry)
                 continue
-            if not src_path.exists():
-                continue
-            with src_path.open("rb") as src:
-                zf.writestr(entry.arcname, src.read())
-    buffer.seek(0)
-    yield buffer.read()
+            # Flush each completed entry so bytes reach the wire promptly
+            # and the buffer never accumulates the whole archive.
+            yield from sink.drain()
+        # FIX 6 — emit a machine/human-readable note listing every row the
+        # INDICE references but whose bytes could not be packaged, so the
+        # index and contents agree and support can detect storage drift.
+        if missing:
+            zf.writestr(
+                _safe_arcname("DOCUMENTOS_FALTANTES.txt"),
+                _render_missing_note(missing).encode("utf-8"),
+            )
+            yield from sink.drain()
+    # Central directory written on ZipFile close.
+    yield from sink.drain()
 
 
 def build_entries(
@@ -526,6 +688,12 @@ def build_entries(
                 institution_name_for.get(institution_code) or institution_code
             )
             period = sub.period_key or "sin-periodo"
+            # Sanitize the period segment too — a crafted ``period_key``
+            # ('..') would otherwise land verbatim in the arcname. The
+            # final ``_safe_arcname`` at write time is the backstop, but
+            # cleaning here keeps the manifest/tree labels consistent with
+            # the bytes on disk.
+            period_segment = _safe_path_segment(period)
             safe_name = _safe_filename(
                 doc.original_filename or f"documento-{doc.id}.pdf"
             )
@@ -559,7 +727,7 @@ def build_entries(
                 institution_name = CORPORATE_INSTITUTION_NAME
                 base_arc = f"{vendor_slug}/{CORPORATE_FOLDER}/{safe_name}"
             else:
-                base_arc = f"{vendor_slug}/{institution_code}/{period}/{safe_name}"
+                base_arc = f"{vendor_slug}/{institution_code}/{period_segment}/{safe_name}"
             count = seen_arc.get(base_arc, 0)
             seen_arc[base_arc] = count + 1
             arcname = base_arc if count == 0 else _suffix_arcname(base_arc, count)
@@ -604,7 +772,11 @@ _SAFE_PATH_SEGMENT_RE = re.compile(r"[^A-Za-z0-9._-]+")
 
 def _safe_path_segment(value: str) -> str:
     cleaned = _SAFE_PATH_SEGMENT_RE.sub("-", value.strip()).strip("-")
-    return cleaned or "sin-nombre"
+    # Reject path-traversal / dot-only segments (Zip-Slip): a vendor name
+    # or period of exactly '..' must not survive into the arcname.
+    if cleaned in ("", ".", "..") or set(cleaned) <= {"."}:
+        return "sin-nombre"
+    return cleaned
 
 
 _SAFE_FILENAME_RE = re.compile(r"[^A-Za-z0-9._-]+")
@@ -612,7 +784,11 @@ _SAFE_FILENAME_RE = re.compile(r"[^A-Za-z0-9._-]+")
 
 def _safe_filename(name: str) -> str:
     cleaned = _SAFE_FILENAME_RE.sub("-", name.strip()).strip("-")
-    return cleaned or "documento"
+    # A filename of exactly '..'/'.' is a traversal primitive on naive
+    # extractors — collapse dot-only names to a safe placeholder.
+    if cleaned in ("", ".", "..") or set(cleaned) <= {"."}:
+        return "documento"
+    return cleaned
 
 
 def _suffix_arcname(base: str, idx: int) -> str:

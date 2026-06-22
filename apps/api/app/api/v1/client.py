@@ -4421,7 +4421,7 @@ def _stream_audit_package_zip(
 
     try:
         iterator = stream_audit_package(
-            db, client_row, filters, manifest_pdf=manifest_pdf
+            db, client_row, filters, manifest_pdf=manifest_pdf, entries=entries
         )
     except AuditPackageTooLargeError as exc:  # pragma: no cover — we
         # already pre-checked above, but keep the guard for race

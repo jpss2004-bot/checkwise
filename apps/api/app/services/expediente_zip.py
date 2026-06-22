@@ -27,7 +27,6 @@ partial-seed submissions.
 
 from __future__ import annotations
 
-import io
 import re
 import zipfile
 from collections.abc import Iterator
@@ -39,6 +38,13 @@ from sqlalchemy.orm import Session
 
 from app.constants.statuses import DocumentStatus
 from app.models import Document, Institution, ProviderWorkspace, Submission
+from app.services.audit_package import (
+    _DRAIN_THRESHOLD_BYTES,
+    _STREAM_CHUNK_BYTES,
+    _safe_arcname,
+    _safe_path_segment,
+    _ZipStreamSink,
+)
 from app.services.storage import get_storage_service
 
 MAX_FILES = 200
@@ -167,24 +173,39 @@ def stream_expediente_zip(
     db: Session,
     workspace: ProviderWorkspace,
     filters: ExpedienteFilters | None = None,
+    *,
+    entries: list[_ZipEntry] | None = None,
 ) -> Iterator[bytes]:
-    """Yield ZIP bytes for the workspace's expediente, in chunks.
+    """Yield ZIP bytes for the workspace's expediente as a TRUE streaming
+    generator (bounded memory).
 
-    Raises ``ExpedienteTooLargeError`` BEFORE yielding any bytes if
-    the workspace exceeds either cap. Each call materializes a fresh
-    in-memory ZIP buffer via ``zipfile.ZipFile``; FastAPI's
-    ``StreamingResponse`` consumes the iterator and writes the bytes
-    to the wire in order.
+    Raises ``ExpedienteTooLargeError`` BEFORE yielding any bytes if the
+    workspace exceeds either cap. The ZIP is composed against a
+    non-seekable rolling buffer drained and yielded after every entry —
+    and mid-entry past ~1 MB — so neither the whole archive nor any
+    single source file is held in RAM. Source bytes stream in fixed-size
+    chunks via ``storage.open_stream`` (no per-entry /tmp temp copy).
+    FastAPI's ``StreamingResponse`` consumes the iterator and writes the
+    bytes to the wire in order.
 
     Filename layout: ``<institution>/<period_key>/<safe_filename>``.
     Identical-name collisions across slots are disambiguated by
     appending an index suffix so the ZIP never silently drops a row.
+    Arcnames are sanitized (no ``..``/leading-slash/drive segments) so a
+    crafted filename cannot escape the extraction directory (Zip-Slip).
 
-    Slice 5C — ``filters`` scopes both the cap check and the
-    archive composition. ``None`` (or an empty ``ExpedienteFilters``)
-    behaves identically to the original full-pull semantics.
+    Missing storage objects are skipped from the body AND recorded in a
+    ``DOCUMENTOS_FALTANTES.txt`` note at the archive root so the listing
+    and the contents stay consistent.
+
+    Slice 5C — ``filters`` scopes both the cap check and the archive
+    composition. ``None`` (or an empty ``ExpedienteFilters``) behaves
+    identically to the original full-pull semantics. ``entries`` lets a
+    caller that already resolved the list pass it through so the
+    generator skips the duplicate ``_build_entries`` DB scan.
     """
-    entries = _build_entries(db, workspace, filters or _NO_FILTERS)
+    if entries is None:
+        entries = _build_entries(db, workspace, filters or _NO_FILTERS)
     file_count = len(entries)
     total_bytes = sum(e.size_bytes for e in entries)
     if file_count > MAX_FILES:
@@ -201,25 +222,57 @@ def stream_expediente_zip(
         )
 
     storage = get_storage_service()
-    buffer = io.BytesIO()
+    sink = _ZipStreamSink()
+    missing: list[_ZipEntry] = []
     with zipfile.ZipFile(
-        buffer, mode="w", compression=zipfile.ZIP_DEFLATED
+        sink, mode="w", compression=zipfile.ZIP_DEFLATED
     ) as zf:
         for entry in entries:
+            wrote = False
             try:
-                src_path = storage.open_for_read(entry.storage_key)
+                with storage.open_stream(entry.storage_key) as src:
+                    with zf.open(_safe_arcname(entry.arcname), mode="w") as dst:
+                        while chunk := src.read(_STREAM_CHUNK_BYTES):
+                            dst.write(chunk)
+                            if sink.pending >= _DRAIN_THRESHOLD_BYTES:
+                                yield from sink.drain()
+                    wrote = True
             except Exception:
-                # Storage helper raised; skip the row rather than
-                # blowing up the whole archive. Audit row already
-                # captured intent — the missing file is the bug to
-                # fix elsewhere.
+                # Storage helper raised or the object is missing; skip the
+                # row rather than blowing up the whole archive. Recorded in
+                # the missing-files note below so the listing and the
+                # contents do not silently diverge.
+                wrote = False
+            if not wrote:
+                missing.append(entry)
                 continue
-            if not src_path.exists():
-                continue
-            with src_path.open("rb") as src:
-                zf.writestr(entry.arcname, src.read())
-    buffer.seek(0)
-    yield buffer.read()
+            yield from sink.drain()
+        if missing:
+            zf.writestr(
+                _safe_arcname("DOCUMENTOS_FALTANTES.txt"),
+                _render_missing_note(missing).encode("utf-8"),
+            )
+            yield from sink.drain()
+    yield from sink.drain()
+
+
+def _render_missing_note(entries: list[_ZipEntry]) -> str:
+    """Body for the ``DOCUMENTOS_FALTANTES.txt`` note listing entries
+    whose bytes could not be packaged."""
+    lines = [
+        "Documentos que no pudieron incluirse en el expediente",
+        "(archivo no encontrado en almacenamiento al momento de la descarga):",
+        "",
+    ]
+    lines.extend(
+        f"- {e.arcname} (storage_key={e.storage_key})" for e in entries
+    )
+    lines.append("")
+    lines.append(
+        "Si esperabas estos documentos, contacta a soporte para verificar "
+        "el almacenamiento."
+    )
+    return "\n".join(lines)
 
 
 def _iter_workspace_documents(
@@ -281,10 +334,14 @@ def _build_entries(
     seen: dict[str, int] = {}
     entries: list[_ZipEntry] = []
     for sub, doc, size in _iter_workspace_documents(db, workspace, filters):
-        institution_code = (
-            sub.institution.code if sub.institution else None
-        ) or "otros"
-        period = sub.period_key or "sin-periodo"
+        institution_code = _safe_path_segment(
+            (sub.institution.code if sub.institution else None) or "otros"
+        )
+        # Sanitize the period segment too — a crafted ``period_key`` ('..')
+        # would otherwise land verbatim in the arcname. ``_safe_arcname``
+        # at write time is the backstop; cleaning here keeps the picker
+        # labels consistent with the bytes on disk.
+        period = _safe_path_segment(sub.period_key or "sin-periodo")
         safe = _safe_filename(doc.original_filename or f"documento-{doc.id}.pdf")
         base_arcname = f"{institution_code}/{period}/{safe}"
         # Disambiguate within the same folder when two slots happen
@@ -312,4 +369,8 @@ _SAFE_FILENAME_RE = re.compile(r"[^A-Za-z0-9._-]+")
 
 def _safe_filename(name: str) -> str:
     cleaned = _SAFE_FILENAME_RE.sub("-", name.strip()).strip("-")
-    return cleaned or "documento"
+    # A filename of exactly '..'/'.' is a traversal primitive on naive
+    # extractors — collapse dot-only names to a safe placeholder.
+    if cleaned in ("", ".", "..") or set(cleaned) <= {"."}:
+        return "documento"
+    return cleaned

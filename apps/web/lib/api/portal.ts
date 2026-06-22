@@ -11,6 +11,7 @@
  */
 
 import { readAdminSession } from "@/lib/session/admin";
+import { fetchWithTimeout, FetchTimeoutError } from "@/lib/api/fetch-timeout";
 import type { PersonaType, PortalSession } from "@/lib/session/portal";
 
 const API_BASE_URL =
@@ -19,6 +20,12 @@ const API_BASE_URL =
 // Default per-request timeout for JSON calls. A stalled API should
 // surface a clear error rather than spin forever (audit 2026-06-09).
 const REQUEST_TIMEOUT_MS = 30_000;
+
+// Ceiling for the PDF blob stream — it bypasses fetchJson, so without it a
+// stalled R2/PDF stream hangs the iframe/preview spinner forever (resilience
+// audit 2026-06-21). More generous than the JSON path since PDFs are larger;
+// matches the client portal's DOWNLOAD_TIMEOUT_MS convention.
+const DOWNLOAD_TIMEOUT_MS = 120_000;
 
 export type RequirementStatus =
   | "pendiente"
@@ -675,16 +682,28 @@ export async function fetchSubmissionDocumentBlob(
   if (session.access_token && session.access_token !== "cookie-managed") {
     headers.set("X-Workspace-Token", session.access_token);
   }
-  const response = await fetch(
-    submissionDocumentUrl(session, submissionId, {
-      download: opts.download,
-      proxy: true,
-    }),
-    {
-      headers,
-      credentials: "include",
-    },
-  );
+  let response: Response;
+  try {
+    response = await fetchWithTimeout(
+      submissionDocumentUrl(session, submissionId, {
+        download: opts.download,
+        proxy: true,
+      }),
+      {
+        headers,
+        credentials: "include",
+      },
+      DOWNLOAD_TIMEOUT_MS,
+    );
+  } catch (err) {
+    if (err instanceof FetchTimeoutError) {
+      throw new PortalApiError(
+        0,
+        "El documento tardó demasiado en cargar. Inténtalo de nuevo.",
+      );
+    }
+    throw err;
+  }
   if (!response.ok) {
     const detail = await response.text().catch(() => "");
     throw new PortalApiError(response.status, detail || response.statusText);

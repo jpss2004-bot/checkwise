@@ -5,6 +5,7 @@
  * the ``reviewer`` or ``internal_admin`` role.
  */
 
+import { fetchWithTimeout, FetchTimeoutError } from "@/lib/api/fetch-timeout";
 import type {
   RequirementStatus,
   RfcAlignment,
@@ -13,6 +14,11 @@ import type {
 
 const API_BASE_URL =
   process.env.NEXT_PUBLIC_API_BASE_URL ?? "http://127.0.0.1:8000";
+
+// Ceiling for the reviewer PDF blob stream — it bypasses the JSON helper, so
+// without it a stalled R2/PDF stream hangs the reviewer preview iframe forever
+// (resilience audit 2026-06-21). Mirrors the portal-side DOWNLOAD_TIMEOUT_MS.
+const DOWNLOAD_TIMEOUT_MS = 120_000;
 
 export class ReviewerApiError extends Error {
   status: number;
@@ -389,13 +395,25 @@ export async function fetchReviewerSubmissionDocumentBlob(
   headers.set("Authorization", `Bearer ${token}`);
   const params = new URLSearchParams({ proxy: "1" });
   if (options.download) params.set("download", "1");
-  const response = await fetch(
-    `${reviewerDocumentUrl(submissionId)}?${params.toString()}`,
-    {
-      headers,
-      credentials: "include",
-    },
-  );
+  let response: Response;
+  try {
+    response = await fetchWithTimeout(
+      `${reviewerDocumentUrl(submissionId)}?${params.toString()}`,
+      {
+        headers,
+        credentials: "include",
+      },
+      DOWNLOAD_TIMEOUT_MS,
+    );
+  } catch (err) {
+    if (err instanceof FetchTimeoutError) {
+      throw new ReviewerApiError(
+        0,
+        "El documento tardó demasiado en cargar. Inténtalo de nuevo.",
+      );
+    }
+    throw err;
+  }
   if (!response.ok) {
     const raw = await response.text().catch(() => "");
     let detail = raw;

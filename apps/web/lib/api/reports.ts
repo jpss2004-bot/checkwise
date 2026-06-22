@@ -10,6 +10,7 @@
  */
 
 import { readAdminSession } from "@/lib/session/admin";
+import { fetchWithTimeout, FetchTimeoutError } from "@/lib/api/fetch-timeout";
 import type {
   ReportAudience,
   ReportStatus,
@@ -39,6 +40,13 @@ const WRITE_TIMEOUT_MS = 30_000;
 // server-side hang on the buyer's marquee action rejects into the 408
 // handler instead of spinning the full-screen overlay forever.
 const GENERATE_TIMEOUT_MS = 180_000;
+
+// Ceiling for the export blob / inline-preview / presign streams. These
+// bypass fetchJson (they return bytes or a presigned URL, not JSON), so a
+// stalled R2/local-disk stream would hang the preview/download UI forever.
+// Generous (120s) since large PDFs legitimately take a while; matches the
+// DOWNLOAD_TIMEOUT_MS convention used by the client portal helpers.
+const BLOB_TIMEOUT_MS = 120_000;
 
 export class ReportsApiError extends Error {
   status: number;
@@ -567,10 +575,22 @@ async function getReportExportPresignedUrl(
   if (session?.access_token) {
     headers.Authorization = `Bearer ${session.access_token}`;
   }
-  const response = await fetch(
-    `${API_BASE_URL}/api/v1/reports/exports/${exportId}/download-url?disposition=${disposition}`,
-    { headers },
-  );
+  let response: Response;
+  try {
+    response = await fetchWithTimeout(
+      `${API_BASE_URL}/api/v1/reports/exports/${exportId}/download-url?disposition=${disposition}`,
+      { headers },
+      BLOB_TIMEOUT_MS,
+    );
+  } catch (err) {
+    if (err instanceof FetchTimeoutError) {
+      throw new ReportsApiError(
+        408,
+        "No pudimos preparar la descarga: el servidor tardó demasiado.",
+      );
+    }
+    throw err;
+  }
   if (!response.ok) {
     throw new ReportsApiError(
       response.status,
@@ -593,10 +613,22 @@ async function streamExportAsBlob(
   if (session?.access_token) {
     headers.Authorization = `Bearer ${session.access_token}`;
   }
-  const response = await fetch(
-    `${API_BASE_URL}/api/v1/reports/exports/${exportId}/download`,
-    { headers },
-  );
+  let response: Response;
+  try {
+    response = await fetchWithTimeout(
+      `${API_BASE_URL}/api/v1/reports/exports/${exportId}/download`,
+      { headers },
+      BLOB_TIMEOUT_MS,
+    );
+  } catch (err) {
+    if (err instanceof FetchTimeoutError) {
+      throw new ReportsApiError(
+        408,
+        "La descarga del export tardó demasiado. Inténtalo de nuevo.",
+      );
+    }
+    throw err;
+  }
   if (!response.ok) {
     throw new ReportsApiError(
       response.status,
@@ -699,10 +731,22 @@ export async function fetchReportExportObjectUrl(
   if (session?.access_token) {
     headers.Authorization = `Bearer ${session.access_token}`;
   }
-  const response = await fetch(
-    `${API_BASE_URL}/api/v1/reports/exports/${exportId}/download`,
-    { headers },
-  );
+  let response: Response;
+  try {
+    response = await fetchWithTimeout(
+      `${API_BASE_URL}/api/v1/reports/exports/${exportId}/download`,
+      { headers },
+      BLOB_TIMEOUT_MS,
+    );
+  } catch (err) {
+    if (err instanceof FetchTimeoutError) {
+      throw new ReportsApiError(
+        408,
+        "La vista previa tardó demasiado en abrir. Inténtalo de nuevo.",
+      );
+    }
+    throw err;
+  }
   if (!response.ok) {
     throw new ReportsApiError(
       response.status,

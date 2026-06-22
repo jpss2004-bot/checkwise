@@ -5,9 +5,16 @@
  */
 
 import { readAdminSession } from "@/lib/session/admin";
+import { fetchWithTimeout, FetchTimeoutError } from "@/lib/api/fetch-timeout";
 
 const API_BASE_URL =
   process.env.NEXT_PUBLIC_API_BASE_URL ?? "http://127.0.0.1:8000";
+
+// The omnibox fires on user input and the backend query joins submissions
+// across the whole tenant scope. Without a ceiling a server-side hang leaves
+// the result promise unsettled and the search UI spinning with no error
+// (resilience audit 2026-06-21). 15s sits in the audited 15-25s band.
+const SEARCH_TIMEOUT_MS = 15_000;
 
 export type SearchMatchType = "rfc" | "period" | "folio" | "name";
 
@@ -56,11 +63,22 @@ async function searchFetch(
   if (token) {
     headers.set("Authorization", `Bearer ${token}`);
   }
-  const response = await fetch(url, {
-    ...init,
-    headers,
-    credentials: "include",
-  });
+  let response: Response;
+  try {
+    response = await fetchWithTimeout(
+      url,
+      { ...init, headers, credentials: "include" },
+      SEARCH_TIMEOUT_MS,
+    );
+  } catch (err) {
+    if (err instanceof FetchTimeoutError) {
+      throw new SearchApiError(
+        0,
+        "La búsqueda tardó demasiado. Inténtalo de nuevo.",
+      );
+    }
+    throw err;
+  }
   if (!response.ok) {
     const detail = await response.text().catch(() => "");
     throw new SearchApiError(response.status, detail || response.statusText);

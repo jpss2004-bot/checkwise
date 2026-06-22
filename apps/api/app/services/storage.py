@@ -19,12 +19,16 @@ config drives the choice end-to-end.
 
 from __future__ import annotations
 
+import contextlib
 import hashlib
+import os
 import re
 import tempfile
+import uuid
+from collections.abc import Iterator
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Protocol
+from typing import BinaryIO, Protocol
 
 from fastapi import UploadFile
 from starlette.concurrency import run_in_threadpool
@@ -74,6 +78,26 @@ class StorageService(Protocol):
 
     def open_for_read(self, storage_key: str) -> Path:  # pragma: no cover - protocol stub
         """Return a local path the caller can read for the duration of the request."""
+        ...
+
+    def open_stream(
+        self, storage_key: str
+    ) -> contextlib.AbstractContextManager[BinaryIO]:  # pragma: no cover - protocol stub
+        """Open ``storage_key`` for reading as a chunk-streamable handle.
+
+        Returns a context manager that yields a binary file-like object
+        and guarantees cleanup on exit. Unlike :meth:`open_for_read`
+        (which materializes the whole object to a /tmp file the caller
+        must remember to unlink), this never leaves a temp file behind:
+
+        * ``LocalStorageService`` opens the durable on-disk file directly.
+        * ``S3StorageService`` streams the object body over the wire with
+          no intermediate temp copy at all.
+
+        Used by the ZIP composers (audit-package / expediente) so a large
+        download neither buffers a temp copy per entry nor leaks /tmp.
+        Always use it as ``with storage.open_stream(key) as fh: ...``.
+        """
         ...
 
     def list_keys(self, prefix: str) -> list[str]:  # pragma: no cover - protocol stub
@@ -134,22 +158,38 @@ async def _stream_to_temp(
     safe_name = _safe_filename(upload.filename)
     temp_dir = Path(tempfile.gettempdir()) / "checkwise-uploads"
     temp_dir.mkdir(parents=True, exist_ok=True)
-    temp_path = temp_dir / f"{hashlib.sha1(safe_name.encode()).hexdigest()}-{safe_name}"
+    # BUG FIX (2026-06-21) — the staging path used to be derived purely
+    # from the sanitized filename (``sha1(safe_name)-safe_name``), so two
+    # concurrent uploads of the same filename ('documento.pdf', 'CSF.pdf',
+    # seed/backfill paths) opened the SAME temp file and interleaved their
+    # chunked writes, corrupting the persisted bytes / size / sha256. A
+    # uuid4 component makes every in-flight upload own a unique staging
+    # path. ``safe_name`` is kept only for the human-readable suffix and the
+    # final content-addressed storage key — never as the uniqueness key.
+    unique = uuid.uuid4().hex
+    temp_path = temp_dir / f"{unique}-{safe_name}"
 
     sha256 = hashlib.sha256()
     size = 0
 
-    with temp_path.open("wb") as fh:
-        while chunk := await upload.read(1024 * 1024):
-            size += len(chunk)
-            if size > max_bytes:
-                temp_path.unlink(missing_ok=True)
-                raise UploadTooLargeError(
-                    f"El archivo excede el tamaño máximo permitido "
-                    f"({max_bytes // (1024 * 1024)} MB)."
-                )
-            sha256.update(chunk)
-            fh.write(chunk)
+    try:
+        with temp_path.open("wb") as fh:
+            while chunk := await upload.read(1024 * 1024):
+                size += len(chunk)
+                if size > max_bytes:
+                    temp_path.unlink(missing_ok=True)
+                    raise UploadTooLargeError(
+                        f"El archivo excede el tamaño máximo permitido "
+                        f"({max_bytes // (1024 * 1024)} MB)."
+                    )
+                sha256.update(chunk)
+                fh.write(chunk)
+    except BaseException:
+        # On any error after the file was created (including the size-cap
+        # raise above and unexpected IO errors) make sure the partial temp
+        # file is reclaimed rather than orphaned in /tmp.
+        temp_path.unlink(missing_ok=True)
+        raise
 
     return temp_path, safe_name, size, sha256.hexdigest()
 
@@ -199,6 +239,16 @@ class LocalStorageService:
 
     def open_for_read(self, storage_key: str) -> Path:
         return self.base_path / storage_key
+
+    @contextlib.contextmanager
+    def open_stream(self, storage_key: str) -> Iterator[BinaryIO]:
+        # Durable file on disk — open it directly. No temp copy, nothing
+        # to unlink. The context manager closes the handle on exit.
+        fh = (self.base_path / storage_key).open("rb")
+        try:
+            yield fh
+        finally:
+            fh.close()
 
     def list_keys(self, prefix: str) -> list[str]:
         root = self.base_path / prefix
@@ -340,20 +390,38 @@ class S3StorageService:
         """Materialize an object back to a local temp file and return its path.
 
         Used by retroactive operations (e.g. re-inspecting an older
-        document). Single-shot — callers should not hold onto the path
-        across requests.
+        document) that need a real ``Path`` for PDF inspection. Single-shot
+        — callers should not hold onto the path across requests.
+
+        WARNING — this leaves a temp file under ``/tmp/checkwise-downloads``
+        that the CALLER must unlink (the ZIP composers and proxy-download
+        path are responsible for cleanup; see ``open_stream`` for a
+        leak-free alternative that streams without a temp copy).
         """
         temp_dir = Path(tempfile.gettempdir()) / "checkwise-downloads"
         temp_dir.mkdir(parents=True, exist_ok=True)
         suffix = Path(storage_key).suffix or ".bin"
         fd, name = tempfile.mkstemp(prefix="cw-", suffix=suffix, dir=temp_dir)
         # Close the fd; boto3 will reopen by path.
-        import os
-
         os.close(fd)
         temp_path = Path(name)
         self._client.download_file(Bucket=self.bucket, Key=storage_key, Filename=str(temp_path))
         return temp_path
+
+    @contextlib.contextmanager
+    def open_stream(self, storage_key: str) -> Iterator[BinaryIO]:
+        # Stream the object body straight off the wire — no /tmp temp copy
+        # at all (the leak ``open_for_read`` left one per ZIP entry). The
+        # ``StreamingBody`` is a read()-able file-like; the ZIP composer
+        # reads it in fixed-size chunks. ``read_timeout`` on the client
+        # config bounds a stalled socket. We close the body on exit so the
+        # underlying connection is released back to the pool.
+        body = self._client.get_object(Bucket=self.bucket, Key=storage_key)["Body"]
+        try:
+            yield body
+        finally:
+            with contextlib.suppress(Exception):
+                body.close()
 
     def list_keys(self, prefix: str) -> list[str]:
         keys: list[str] = []
