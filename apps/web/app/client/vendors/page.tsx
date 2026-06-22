@@ -25,6 +25,7 @@ import { useDebouncedValue } from "@/lib/hooks/use-debounced-value";
 
 import { ClientShell } from "../_shell";
 import { VendorRef } from "@/components/checkwise/vendor-ref";
+import { Badge } from "@/components/ui/badge";
 import {
   listClientNotifications,
   listClientVendors,
@@ -142,14 +143,21 @@ export default function ClientVendorsPage() {
     refresh();
   }, [refresh]);
 
+  // Archived providers are presented as "fuera de los conteos": exclude them
+  // from the roll-up strip (they still render below, muted, for restore).
+  const activeRows = useMemo(
+    () => (rows ?? []).filter((r) => r.workspace_status !== "inactive"),
+    [rows],
+  );
+
   const counts = useMemo(() => {
     const c = { green: 0, yellow: 0, red: 0 };
-    for (const r of rows ?? []) c[r.semaphore_level] += 1;
+    for (const r of activeRows) c[r.semaphore_level] += 1;
     return c;
-  }, [rows]);
+  }, [activeRows]);
 
   const sums = useMemo(() => {
-    return (rows ?? []).reduce(
+    return activeRows.reduce(
       (acc, r) => {
         acc.missing += r.missing_required_count;
         acc.rejected += r.rejected_or_correction_count;
@@ -159,7 +167,7 @@ export default function ClientVendorsPage() {
       },
       { missing: 0, rejected: 0, pending: 0, dueSoon: 0 },
     );
-  }, [rows]);
+  }, [activeRows]);
 
   const [generatingVendorId, setGeneratingVendorId] = useState<string | null>(null);
 
@@ -402,6 +410,11 @@ function buildVendorColumns(
       <div className="min-w-0">
         <p className="font-medium text-[color:var(--text-primary)]">
           <VendorRef vendorId={row.vendor_id} vendorName={row.vendor_name} />
+          {row.workspace_status === "inactive" ? (
+            <Badge variant="secondary" className="ml-2 align-middle">
+              Archivado
+            </Badge>
+          ) : null}
         </p>
         <p className="font-mono text-[11px] tabular-nums text-[color:var(--text-tertiary)]">
           {row.vendor_rfc ?? "—"}
@@ -414,7 +427,19 @@ function buildVendorColumns(
     id: "semaphore",
     header: "Semáforo",
     width: "120px",
-    cell: (row) => <SemaphorePill level={row.semaphore_level} />,
+    // Archived providers carry stale compliance — show a neutral dash, not an
+    // alarming red, so the row reads as "out of the active view".
+    cell: (row) =>
+      row.workspace_status === "inactive" ? (
+        <span
+          className="text-[color:var(--text-tertiary)]"
+          title="Proveedor archivado"
+        >
+          —
+        </span>
+      ) : (
+        <SemaphorePill level={row.semaphore_level} />
+      ),
   },
   {
     id: "compliance",
@@ -518,8 +543,14 @@ function buildVendorColumns(
           size="sm"
           variant="default"
           onClick={() => onGenerateReport(row.vendor_id)}
-          disabled={generatingVendorId !== null}
-          title="Generar un reporte visual de este proveedor"
+          disabled={
+            generatingVendorId !== null || row.workspace_status === "inactive"
+          }
+          title={
+            row.workspace_status === "inactive"
+              ? "Proveedor archivado — restáuralo para generar un reporte"
+              : "Generar un reporte visual de este proveedor"
+          }
           className="inline-flex items-center gap-1"
         >
           {generatingVendorId === row.vendor_id ? (

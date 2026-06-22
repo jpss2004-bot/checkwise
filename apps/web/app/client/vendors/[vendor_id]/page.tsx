@@ -4,6 +4,8 @@ import { use, useCallback, useEffect, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import {
+  Archive,
+  ArrowCounterClockwise,
   ArrowLeft,
   ArrowRight,
   ChartBar,
@@ -39,8 +41,10 @@ import {
   ClientApiError,
   clientVendorExpedienteZipUrl,
   clientVendorMetadataDownloadUrl,
+  deactivateClientProvider,
   fetchClientSubmissionDocumentBlob,
   getClientVendorDetail,
+  reactivateClientProvider,
   type ClientVendorContractDoc,
   type ClientVendorDetail,
   type ClientVendorDocumentActionItem,
@@ -49,6 +53,7 @@ import {
   ErrorState,
   NotFoundState,
 } from "@/components/checkwise/portal/state-surfaces";
+import { apiErrorDetail } from "@/lib/api/error-detail";
 import { downloadAuthenticatedFile } from "@/lib/api/download";
 import { createReportFromPreset, ReportsApiError } from "@/lib/api/reports";
 import {
@@ -94,6 +99,8 @@ export default function ClientVendorDetailPage({ params }: PageProps) {
   const [downloadingMetadata, setDownloadingMetadata] = useState(false);
   const [vendorsReturnHref, setVendorsReturnHref] = useState("/client/vendors");
   const [focusKey, setFocusKey] = useState<string | null>(null);
+  const [archiving, setArchiving] = useState(false);
+  const [archiveError, setArchiveError] = useState<string | null>(null);
 
   const onDownloadExpediente = useCallback(async () => {
     if (downloadingZip) return;
@@ -202,6 +209,30 @@ export default function ClientVendorDetailPage({ params }: PageProps) {
     if (code) window.setTimeout(() => setFocusKey(null), 4000);
   }, []);
 
+  // Phase 3 — archive (soft-deactivate) / restore this provider. Reversible
+  // and audited; the toggle reflects the vendor's archival status.
+  const isArchived =
+    !!detail && String(detail.vendor.status ?? "active") === "inactive";
+
+  const onToggleArchive = useCallback(async () => {
+    setArchiveError(null);
+    setArchiving(true);
+    try {
+      if (isArchived) {
+        await reactivateClientProvider(vendor_id);
+      } else {
+        await deactivateClientProvider(vendor_id);
+      }
+      setReloadKey((k) => k + 1);
+    } catch (err) {
+      setArchiveError(
+        apiErrorDetail(err, "No se pudo actualizar el estado del proveedor."),
+      );
+    } finally {
+      setArchiving(false);
+    }
+  }, [isArchived, vendor_id]);
+
   return (
     <ClientShell
       title={
@@ -211,7 +242,9 @@ export default function ClientVendorDetailPage({ params }: PageProps) {
       }
       description={
         detail
-          ? `RFC ${String(detail.vendor.rfc ?? "—")} · ${detail.semaphore.label}`
+          ? `RFC ${String(detail.vendor.rfc ?? "—")} · ${detail.semaphore.label}${
+              isArchived ? " · Archivado" : ""
+            }`
           : "Cargando información del proveedor…"
       }
       actions={
@@ -229,8 +262,12 @@ export default function ClientVendorDetailPage({ params }: PageProps) {
             size="sm"
             variant="default"
             onClick={onGenerateReport}
-            disabled={generating}
-            title="Generar un reporte visual de este proveedor"
+            disabled={generating || isArchived}
+            title={
+              isArchived
+                ? "Restaura el proveedor para generar un reporte"
+                : "Generar un reporte visual de este proveedor"
+            }
           >
             {generating ? (
               <CircleNotch className="h-4 w-4 animate-spin" weight="bold" aria-hidden="true" />
@@ -279,6 +316,34 @@ export default function ClientVendorDetailPage({ params }: PageProps) {
             )}
             Descargar metadata
           </Button>
+          <Button
+            size="sm"
+            variant={isArchived ? "default" : "outline"}
+            onClick={onToggleArchive}
+            disabled={archiving || !detail}
+            title={
+              isArchived
+                ? "Restaurar este proveedor a tu portafolio activo"
+                : "Archivar este proveedor (reversible)"
+            }
+          >
+            {archiving ? (
+              <CircleNotch
+                className="h-4 w-4 animate-spin"
+                weight="bold"
+                aria-hidden="true"
+              />
+            ) : isArchived ? (
+              <ArrowCounterClockwise
+                className="h-4 w-4"
+                weight="bold"
+                aria-hidden="true"
+              />
+            ) : (
+              <Archive className="h-4 w-4" weight="bold" aria-hidden="true" />
+            )}
+            {isArchived ? "Restaurar proveedor" : "Archivar proveedor"}
+          </Button>
           <Button asChild size="sm" variant="outline">
             <Link href={vendorsReturnHref}>
               <ArrowLeft className="h-4 w-4" weight="bold" aria-hidden="true" />
@@ -320,6 +385,26 @@ export default function ClientVendorDetailPage({ params }: PageProps) {
         <DetailSkeleton />
       ) : (
         <div className="space-y-6">
+          {archiveError ? (
+            <div
+              role="alert"
+              className="flex items-center gap-2 rounded-lg border border-[color:var(--status-error-border)] bg-[color:var(--status-error-bg)] px-4 py-3 text-[13px] text-[color:var(--status-error-text)]"
+            >
+              <Warning className="h-4 w-4 shrink-0" weight="fill" aria-hidden="true" />
+              {archiveError}
+            </div>
+          ) : null}
+          {isArchived ? (
+            <div
+              role="status"
+              className="flex items-center gap-2 rounded-lg border border-[color:var(--border-subtle)] bg-[color:var(--surface-sunken)] px-4 py-3 text-[13px] text-[color:var(--text-secondary)]"
+            >
+              <Archive className="h-4 w-4 shrink-0" weight="bold" aria-hidden="true" />
+              Este proveedor está archivado: queda fuera de tu cumplimiento activo
+              y de los conteos. Su historial se conserva y puedes restaurarlo
+              cuando quieras.
+            </div>
+          ) : null}
           <VendorHero detail={detail} />
           <div className="grid gap-5 lg:grid-cols-3">
             <div className="space-y-5 lg:col-span-2">

@@ -1413,6 +1413,21 @@
    "notes": ""
   },
   {
+   "method": "POST",
+   "path": "/api/v1/client/vendors/{vendor_id}/deactivate",
+   "function": "client_deactivate_provider",
+   "router": "app.api.v1.client",
+   "file": "api/app/api/v1/client.py",
+   "lineno": 2886,
+   "gate": "client_admin_or_admin",
+   "tenant_rule": "scoped via _resolve_client_id_for_vendor() (vendor must belong to the caller client)",
+   "audit_rule": "logged (client.provider_deactivated)",
+   "rate_limit_rule": "none (auth-gated)",
+   "error_lang": "es",
+   "must_change_password_allowed": false,
+   "notes": "Soft-archive a provider (vendor + client-scoped workspaces -> inactive); reversible, idempotent."
+  },
+  {
    "method": "GET",
    "path": "/api/v1/client/vendors/{vendor_id}/expediente.zip",
    "function": "client_vendor_expediente_zip",
@@ -1441,6 +1456,21 @@
    "error_lang": "es",
    "must_change_password_allowed": false,
    "notes": "Per-vendor metadata Excel filtered from the client master."
+  },
+  {
+   "method": "POST",
+   "path": "/api/v1/client/vendors/{vendor_id}/reactivate",
+   "function": "client_reactivate_provider",
+   "router": "app.api.v1.client",
+   "file": "api/app/api/v1/client.py",
+   "lineno": 2915,
+   "gate": "client_admin_or_admin",
+   "tenant_rule": "scoped via _resolve_client_id_for_vendor() (vendor must belong to the caller client)",
+   "audit_rule": "logged (client.provider_reactivated)",
+   "rate_limit_rule": "none (auth-gated)",
+   "error_lang": "es",
+   "must_change_password_allowed": false,
+   "notes": "Restore an archived provider (-> active); reversible, idempotent."
   },
   {
    "method": "POST",

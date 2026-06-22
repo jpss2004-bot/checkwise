@@ -391,6 +391,13 @@ export function ClientShell({
               secondaryLinks={[
                 {
                   href: withClientId(
+                    "/client/configuracion/usuarios",
+                    urlClientId,
+                  ),
+                  label: "Usuarios y accesos",
+                },
+                {
+                  href: withClientId(
                     "/client/configuracion/notificaciones",
                     urlClientId,
                   ),

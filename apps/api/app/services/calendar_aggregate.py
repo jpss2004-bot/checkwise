@@ -139,7 +139,10 @@ def aggregate_client_calendar(
         _latest_reviewer_notes,
     )
 
-    workspaces = _scoped_workspaces(db, client_id)
+    # Active providers only — a soft-archived provider drops out of the
+    # forward calendar grid (client + admin), matching the dashboard and
+    # the admin radar (which already filters active vendors).
+    workspaces = _scoped_workspaces(db, client_id, active_only=True)
     if vendor_ids:
         wanted = {v for v in vendor_ids if v}
         workspaces = [w for w in workspaces if w.vendor_id in wanted]

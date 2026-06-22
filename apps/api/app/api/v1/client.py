@@ -301,14 +301,26 @@ def _resolve_client_id(
     )
 
 
-def _scoped_workspaces(db: Session, client_id: str) -> list[ProviderWorkspace]:
-    return list(
-        db.scalars(
-            select(ProviderWorkspace)
-            .where(ProviderWorkspace.client_id == client_id)
-            .order_by(ProviderWorkspace.created_at.desc())
-        )
+def _scoped_workspaces(
+    db: Session, client_id: str, *, active_only: bool = False
+) -> list[ProviderWorkspace]:
+    """Workspaces (providers) under a client.
+
+    ``active_only`` drops soft-archived providers (``status='inactive'``,
+    set by ``_set_provider_archival``). Active-compliance surfaces — the
+    dashboard pool and the calendar — pass it so an archived provider
+    truly leaves the live counts, matching what the UI promises. The
+    vendor *list* keeps the default (all) so archived rows stay visible
+    and restorable.
+    """
+    stmt = (
+        select(ProviderWorkspace)
+        .where(ProviderWorkspace.client_id == client_id)
+        .order_by(ProviderWorkspace.created_at.desc())
     )
+    if active_only:
+        stmt = stmt.where(ProviderWorkspace.status == "active")
+    return list(db.scalars(stmt))
 
 
 def _vendors_by_id(db: Session, vendor_ids: list[str]) -> dict[str, Vendor]:
@@ -1787,12 +1799,17 @@ def client_overview(
     today = today_mx()
     selected_year = year or today.year
 
-    workspaces = _scoped_workspaces(db, target_id)
+    # Active portfolio only: soft-archived providers must not weigh on the
+    # dashboard pool, semaphore tallies, exposure or risk list (they are
+    # presented as "fuera de los conteos" on the client surface).
+    workspaces = _scoped_workspaces(db, target_id, active_only=True)
     subs_by_vendor, institutions_by_id = _portfolio_slot_inputs(db, target_id)
     vendors_by_id = {
         v.id: v
         for v in db.scalars(
-            select(Vendor).where(Vendor.client_id == target_id)
+            select(Vendor).where(
+                Vendor.client_id == target_id, Vendor.status == "active"
+            )
         ).all()
     }
     vendors_total = len(vendors_by_id)
@@ -2794,6 +2811,151 @@ def client_add_provider(
         contact_email=contact_email,
         email_status=delivery.status,
         email_error=delivery.error,
+    )
+
+
+# ---------------------------------------------------------------------------
+# Phase 3 — client archives / restores a provider in their portfolio
+# ---------------------------------------------------------------------------
+
+
+class ClientProviderStatusResponse(BaseModel):
+    """Result of deactivate / reactivate. ``status`` is the vendor's new
+    archival state (``active`` | ``inactive``); ``changed`` is False when
+    the provider was already in the target state (idempotent no-op)."""
+
+    vendor_id: str
+    status: str
+    changed: bool
+
+
+def _set_provider_archival(
+    db: Session,
+    current: CurrentUser,
+    request: Request,
+    *,
+    vendor_id: str,
+    requested_client_id: str | None,
+    target_status: str,
+) -> ClientProviderStatusResponse:
+    """Flip a vendor + its client-scoped workspace(s) to ``target_status``.
+
+    Soft, reversible archival — never a delete. All history, documents
+    and audit rows survive; the provider's own portal access is untouched
+    (auth keys on ``User.status``, not the workspace), so a mis-archive
+    strands nobody. Idempotent: a no-op when already in ``target_status``.
+    """
+    target_id, vendor = _resolve_client_id_for_vendor(
+        db, current, vendor_id=vendor_id, requested=requested_client_id
+    )
+    # Archive/restore the vendor + its client-scoped workspace(s) in
+    # lock-step so the vendor list, compliance counts and calendar all
+    # move together.
+    workspaces = list(
+        db.scalars(
+            select(ProviderWorkspace).where(
+                ProviderWorkspace.vendor_id == vendor.id,
+                ProviderWorkspace.client_id == target_id,
+            )
+        )
+    )
+    # No-op only when the WHOLE provider already sits at the target. Keying
+    # the early return on the vendor alone would let a workspace created
+    # while the vendor was archived drift out of lock-step forever.
+    already_set = vendor.status == target_status and all(
+        ws.status == target_status for ws in workspaces
+    )
+    if already_set:
+        return ClientProviderStatusResponse(
+            vendor_id=vendor.id, status=target_status, changed=False
+        )
+
+    before_status = vendor.status
+    vendor.status = target_status
+    for ws in workspaces:
+        ws.status = target_status
+
+    actor_type = (
+        "internal_admin"
+        if MembershipRole.INTERNAL_ADMIN.value in current.roles
+        else "client_admin"
+    )
+    ua = request.headers.get("user-agent")
+    add_audit_event(
+        db,
+        action=(
+            "client.provider_deactivated"
+            if target_status == "inactive"
+            else "client.provider_reactivated"
+        ),
+        entity_type="vendor",
+        entity_id=vendor.id,
+        actor_type=actor_type,
+        actor_id=current.user.id,
+        ip_address=_client_ip(request),
+        user_agent=ua[:512] if ua else None,
+        before={"status": before_status},
+        after={
+            "status": target_status,
+            "client_id": target_id,
+            "workspace_ids": [w.id for w in workspaces],
+        },
+    )
+    db.commit()
+    return ClientProviderStatusResponse(
+        vendor_id=vendor.id, status=target_status, changed=True
+    )
+
+
+@router.post(
+    "/vendors/{vendor_id}/deactivate",
+    response_model=ClientProviderStatusResponse,
+    summary="Archive a provider in the client's portfolio (reversible)",
+)
+def client_deactivate_provider(
+    vendor_id: str,
+    db: DbSession,
+    current: ClientUser,
+    request: Request,
+    client_id: str | None = None,
+) -> ClientProviderStatusResponse:
+    """Soft-deactivate (archive) a provider from the caller's portfolio.
+
+    Drops the vendor + its workspace(s) out of the active compliance view
+    and counts without deleting anything; reversible via ``/reactivate``.
+    Any ``client_admin`` in the tenant may do this today (mirrors add-
+    provider); Phase 4 narrows it to the Approver role.
+    """
+    return _set_provider_archival(
+        db,
+        current,
+        request,
+        vendor_id=vendor_id,
+        requested_client_id=client_id,
+        target_status="inactive",
+    )
+
+
+@router.post(
+    "/vendors/{vendor_id}/reactivate",
+    response_model=ClientProviderStatusResponse,
+    summary="Restore a previously archived provider",
+)
+def client_reactivate_provider(
+    vendor_id: str,
+    db: DbSession,
+    current: ClientUser,
+    request: Request,
+    client_id: str | None = None,
+) -> ClientProviderStatusResponse:
+    """Reverse a ``/deactivate``: restore the provider to ``active``."""
+    return _set_provider_archival(
+        db,
+        current,
+        request,
+        vendor_id=vendor_id,
+        requested_client_id=client_id,
+        target_status="active",
     )
 
 

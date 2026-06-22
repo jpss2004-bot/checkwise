@@ -1,0 +1,410 @@
+"use client";
+
+/**
+ * Phase 2 — client seat management UI.
+ *
+ * First UI over the long-existing `/client/users` seat API (owner-gated
+ * server-side). The Primary Account Owner (`is_primary`) invites, disables,
+ * removes and resets secondary seats within the org's `seat_limit`;
+ * secondaries get a read-only roster. internal_admin support staff also see
+ * mutation affordances.
+ */
+
+import { useCallback, useEffect, useState, type FormEvent } from "react";
+import {
+  ArrowClockwise,
+  Key,
+  Trash,
+  UserPlus,
+  Users,
+  Warning,
+} from "@phosphor-icons/react";
+
+import { ClientShell } from "../../_shell";
+import { Surface } from "@/components/checkwise/dashboard/stat-card";
+import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
+import {
+  createClientUser,
+  listClientUsers,
+  removeClientUser,
+  resetClientUserPassword,
+  updateClientUserStatus,
+  type ClientUserItem,
+  type ClientUsersList,
+} from "@/lib/api/client";
+import { useUrlClientId } from "@/lib/workspace/use-url-client-id";
+import { apiErrorDetail as errorDetail } from "@/lib/api/error-detail";
+
+type TempCredential = {
+  email: string;
+  temp_password: string;
+  email_status: string;
+  reinstated?: boolean;
+};
+
+// A one-time credential reveal (create + reset both return a temp password).
+function CredentialNotice({
+  cred,
+  onDismiss,
+}: {
+  cred: TempCredential;
+  onDismiss: () => void;
+}) {
+  // Backend EmailDeliveryResult emits "sent" | "failed" | "skipped".
+  const emailed = cred.email_status === "sent";
+  return (
+    <div className="rounded-lg border border-[color:var(--status-warning-border)] bg-[color:var(--status-warning-bg)] p-3 text-[13px]">
+      <p className="font-medium text-[color:var(--status-warning-text)]">
+        Contraseña temporal para {cred.email}
+      </p>
+      <p className="mt-1 text-[color:var(--text-secondary)]">
+        Se muestra una sola vez. {emailed
+          ? "También la enviamos por correo."
+          : "El correo no se pudo enviar — compártela tú directamente."}{" "}
+        El usuario deberá cambiarla en su primer inicio de sesión.
+      </p>
+      <code className="mt-2 block select-all rounded-md border border-[color:var(--border-subtle)] bg-[color:var(--surface-raised)] px-3 py-2 font-mono text-sm text-[color:var(--text-primary)]">
+        {cred.temp_password}
+      </code>
+      <div className="mt-2 flex justify-end">
+        <Button variant="ghost" size="sm" onClick={onDismiss}>
+          Entendido
+        </Button>
+      </div>
+    </div>
+  );
+}
+
+function statusBadge(user: ClientUserItem) {
+  if (user.status !== "active") {
+    return <Badge variant="secondary">Desactivado</Badge>;
+  }
+  if (user.pending_first_login) {
+    return <Badge variant="warning">Pendiente de activación</Badge>;
+  }
+  return <Badge variant="success">Activo</Badge>;
+}
+
+export default function ClientSeatsPage() {
+  const urlClientId = useUrlClientId();
+  const clientParam = urlClientId ? { client_id: urlClientId } : undefined;
+
+  const [data, setData] = useState<ClientUsersList | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState<string | null>(null);
+
+  // Add-user form.
+  const [newName, setNewName] = useState("");
+  const [newEmail, setNewEmail] = useState("");
+  const [createBusy, setCreateBusy] = useState(false);
+  const [createError, setCreateError] = useState<string | null>(null);
+
+  // Per-row state.
+  const [busyUserId, setBusyUserId] = useState<string | null>(null);
+  const [rowError, setRowError] = useState<string | null>(null);
+  const [confirmRemoveId, setConfirmRemoveId] = useState<string | null>(null);
+
+  // One-time credential reveal (shared by create + reset).
+  const [credential, setCredential] = useState<TempCredential | null>(null);
+
+  const reload = useCallback(async () => {
+    setLoading(true);
+    setLoadError(null);
+    try {
+      setData(await listClientUsers(clientParam));
+    } catch (err) {
+      setLoadError(errorDetail(err));
+    } finally {
+      setLoading(false);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [urlClientId]);
+
+  useEffect(() => {
+    void reload();
+  }, [reload]);
+
+  const canManage = data?.can_manage ?? false;
+  const seatsAvailable = data?.seats_available ?? 0;
+
+  async function handleCreate(e: FormEvent) {
+    e.preventDefault();
+    setCreateError(null);
+    setCredential(null);
+    setCreateBusy(true);
+    try {
+      const res = await createClientUser(
+        { full_name: newName.trim(), email: newEmail.trim() },
+        clientParam,
+      );
+      setCredential({
+        email: res.email,
+        temp_password: res.temp_password,
+        email_status: res.email_status,
+        reinstated: res.reinstated,
+      });
+      setNewName("");
+      setNewEmail("");
+      await reload();
+    } catch (err) {
+      setCreateError(errorDetail(err));
+    } finally {
+      setCreateBusy(false);
+    }
+  }
+
+  async function runRowAction(userId: string, fn: () => Promise<void>) {
+    setRowError(null);
+    setBusyUserId(userId);
+    try {
+      await fn();
+    } catch (err) {
+      setRowError(errorDetail(err));
+    } finally {
+      setBusyUserId(null);
+    }
+  }
+
+  return (
+    <ClientShell
+      title="Usuarios y accesos"
+      description="Administra quién puede entrar al portal de tu empresa. Solo el titular de la cuenta puede agregar o quitar usuarios."
+    >
+      <div className="space-y-5">
+        {loadError ? (
+          <div
+            role="alert"
+            className="flex items-center gap-2 rounded-lg border border-[color:var(--status-error-border)] bg-[color:var(--status-error-bg)] px-4 py-3 text-[13px] text-[color:var(--status-error-text)]"
+          >
+            <Warning className="h-4 w-4 shrink-0" weight="fill" />
+            {loadError}
+          </div>
+        ) : null}
+
+        <Surface
+          title="Usuarios del portal"
+          icon={Users}
+          description={
+            data
+              ? `${data.seats_used} de ${data.seat_limit} lugares usados${
+                  seatsAvailable > 0
+                    ? ` · ${seatsAvailable} disponible${seatsAvailable === 1 ? "" : "s"}`
+                    : " · sin lugares libres"
+                }`
+              : undefined
+          }
+        >
+          {loading && !data ? (
+            <p className="text-[13px] text-[color:var(--text-secondary)]">Cargando…</p>
+          ) : data && data.users.length > 0 ? (
+            <ul className="divide-y divide-[color:var(--border-subtle)]">
+              {data.users.map((user) => {
+                const busy = busyUserId === user.user_id;
+                const isConfirming = confirmRemoveId === user.user_id;
+                return (
+                  <li
+                    key={user.user_id}
+                    className="flex flex-wrap items-center gap-x-3 gap-y-2 py-3"
+                  >
+                    <div className="min-w-0 flex-1">
+                      <div className="flex flex-wrap items-center gap-2">
+                        <span className="truncate text-sm font-medium text-[color:var(--text-primary)]">
+                          {user.full_name}
+                        </span>
+                        {user.is_primary ? (
+                          <Badge variant="brand">Titular</Badge>
+                        ) : (
+                          <Badge variant="outline">Usuario</Badge>
+                        )}
+                        {statusBadge(user)}
+                      </div>
+                      <span className="block truncate font-mono text-[11px] text-[color:var(--text-secondary)]">
+                        {user.email}
+                      </span>
+                    </div>
+
+                    {canManage && !user.is_primary ? (
+                      <div className="flex flex-wrap items-center gap-1.5">
+                        {user.status === "active" ? (
+                          <Button
+                            variant="outline"
+                            size="sm"
+                            disabled={busy}
+                            onClick={() =>
+                              runRowAction(user.user_id, async () => {
+                                await updateClientUserStatus(
+                                  user.user_id,
+                                  "disabled",
+                                  clientParam,
+                                );
+                                await reload();
+                              })
+                            }
+                          >
+                            Desactivar
+                          </Button>
+                        ) : (
+                          <Button
+                            variant="outline"
+                            size="sm"
+                            disabled={busy}
+                            onClick={() =>
+                              runRowAction(user.user_id, async () => {
+                                await updateClientUserStatus(
+                                  user.user_id,
+                                  "active",
+                                  clientParam,
+                                );
+                                await reload();
+                              })
+                            }
+                          >
+                            <ArrowClockwise className="h-3.5 w-3.5" weight="bold" />
+                            Reactivar
+                          </Button>
+                        )}
+                        {user.status === "active" ? (
+                          <Button
+                            variant="ghost"
+                            size="sm"
+                            disabled={busy}
+                            onClick={() =>
+                              runRowAction(user.user_id, async () => {
+                                const res = await resetClientUserPassword(
+                                  user.user_id,
+                                  clientParam,
+                                );
+                                setCreateError(null);
+                                setCredential({
+                                  email: res.email,
+                                  temp_password: res.temp_password,
+                                  email_status: res.email_status,
+                                });
+                              })
+                            }
+                          >
+                            <Key className="h-3.5 w-3.5" weight="bold" />
+                            Restablecer
+                          </Button>
+                        ) : null}
+                        {isConfirming ? (
+                          <span className="flex items-center gap-1.5">
+                            <Button
+                              variant="destructive"
+                              size="sm"
+                              disabled={busy}
+                              onClick={() =>
+                                runRowAction(user.user_id, async () => {
+                                  await removeClientUser(user.user_id, clientParam);
+                                  setConfirmRemoveId(null);
+                                  await reload();
+                                })
+                              }
+                            >
+                              Confirmar
+                            </Button>
+                            <Button
+                              variant="ghost"
+                              size="sm"
+                              disabled={busy}
+                              onClick={() => setConfirmRemoveId(null)}
+                            >
+                              Cancelar
+                            </Button>
+                          </span>
+                        ) : (
+                          <Button
+                            variant="ghost"
+                            size="sm"
+                            disabled={busy}
+                            aria-label={`Quitar a ${user.full_name}`}
+                            onClick={() => {
+                              setRowError(null);
+                              setConfirmRemoveId(user.user_id);
+                            }}
+                          >
+                            <Trash className="h-3.5 w-3.5" weight="bold" />
+                          </Button>
+                        )}
+                      </div>
+                    ) : null}
+                  </li>
+                );
+              })}
+            </ul>
+          ) : (
+            <p className="text-[13px] text-[color:var(--text-secondary)]">
+              No hay usuarios todavía.
+            </p>
+          )}
+
+          {rowError ? (
+            <p className="mt-3 text-[12px] text-[color:var(--status-error-text)]">
+              {rowError}
+            </p>
+          ) : null}
+        </Surface>
+
+        {credential ? (
+          <CredentialNotice cred={credential} onDismiss={() => setCredential(null)} />
+        ) : null}
+
+        {canManage ? (
+          <Surface title="Agregar usuario" icon={UserPlus}>
+            {seatsAvailable <= 0 ? (
+              <p className="text-[13px] text-[color:var(--text-secondary)]">
+                Has alcanzado el máximo de {data?.seat_limit} usuarios. Quita un
+                usuario para liberar un lugar.
+              </p>
+            ) : (
+              <form onSubmit={handleCreate} className="space-y-3">
+                <div className="grid gap-3 sm:grid-cols-2">
+                  <div className="space-y-1">
+                    <Label htmlFor="seat-name">Nombre completo</Label>
+                    <Input
+                      id="seat-name"
+                      value={newName}
+                      onChange={(e) => setNewName(e.target.value)}
+                      placeholder="Ana Martínez"
+                      required
+                      minLength={2}
+                    />
+                  </div>
+                  <div className="space-y-1">
+                    <Label htmlFor="seat-email">Correo</Label>
+                    <Input
+                      id="seat-email"
+                      type="email"
+                      value={newEmail}
+                      onChange={(e) => setNewEmail(e.target.value)}
+                      placeholder="ana@empresa.com"
+                      required
+                    />
+                  </div>
+                </div>
+                {createError ? (
+                  <p className="text-[12px] text-[color:var(--status-error-text)]">
+                    {createError}
+                  </p>
+                ) : null}
+                <div className="flex justify-end">
+                  <Button type="submit" size="sm" disabled={createBusy}>
+                    <UserPlus className="h-4 w-4" weight="bold" />
+                    {createBusy ? "Agregando…" : "Agregar usuario"}
+                  </Button>
+                </div>
+              </form>
+            )}
+          </Surface>
+        ) : data ? (
+          <p className="text-[12px] text-[color:var(--text-tertiary)]">
+            Solo el titular de la cuenta puede administrar los usuarios.
+          </p>
+        ) : null}
+      </div>
+    </ClientShell>
+  );
+}

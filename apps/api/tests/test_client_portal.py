@@ -2759,3 +2759,228 @@ def test_overview_trajectory_endpoint_shape(
             assert 0 <= p["compliance_pct"] <= 100
     else:
         assert body["points"] == []
+
+
+# ---------------------------------------------------------------------------
+# Phase 3 — provider soft-deactivate / reactivate
+# ---------------------------------------------------------------------------
+
+
+def _vendor_and_ws_status(db_factory, vendor_id: str, ws_id: str) -> tuple[str, str]:
+    db = db_factory()
+    try:
+        return db.get(Vendor, vendor_id).status, db.get(ProviderWorkspace, ws_id).status
+    finally:
+        db.close()
+
+
+def test_client_deactivate_then_reactivate_provider(
+    api_client: TestClient, db_factory
+) -> None:
+    client_id = _seed_client(db_factory, "Cliente Archiva")
+    vendor_id, ws_id = _seed_vendor_with_workspace(db_factory, client_id=client_id)
+    _, email, pw = _seed_user_with_role(
+        db_factory, role="client_admin", client_id=client_id, email_prefix="ca"
+    )
+    token = _login(api_client, email, pw)
+
+    # Deactivate — vendor + its workspace flip to inactive, change recorded.
+    resp = api_client.post(
+        f"/api/v1/client/vendors/{vendor_id}/deactivate", headers=_h(token)
+    )
+    assert resp.status_code == 200, resp.text
+    body = resp.json()
+    assert body == {"vendor_id": vendor_id, "status": "inactive", "changed": True}
+    assert _vendor_and_ws_status(db_factory, vendor_id, ws_id) == (
+        "inactive",
+        "inactive",
+    )
+
+    # Reactivate — back to active.
+    resp = api_client.post(
+        f"/api/v1/client/vendors/{vendor_id}/reactivate", headers=_h(token)
+    )
+    assert resp.status_code == 200, resp.text
+    assert resp.json() == {"vendor_id": vendor_id, "status": "active", "changed": True}
+    assert _vendor_and_ws_status(db_factory, vendor_id, ws_id) == ("active", "active")
+
+    # Both transitions left an attributed audit row.
+    db = db_factory()
+    try:
+        actions = set(
+            db.scalars(
+                select(AuditLog.action).where(AuditLog.entity_id == vendor_id)
+            )
+        )
+    finally:
+        db.close()
+    assert "client.provider_deactivated" in actions
+    assert "client.provider_reactivated" in actions
+
+
+def test_deactivate_provider_is_idempotent(
+    api_client: TestClient, db_factory
+) -> None:
+    client_id = _seed_client(db_factory, "Cliente Idem")
+    vendor_id, _ = _seed_vendor_with_workspace(db_factory, client_id=client_id)
+    _, email, pw = _seed_user_with_role(
+        db_factory, role="client_admin", client_id=client_id, email_prefix="ca"
+    )
+    token = _login(api_client, email, pw)
+
+    first = api_client.post(
+        f"/api/v1/client/vendors/{vendor_id}/deactivate", headers=_h(token)
+    )
+    assert first.json()["changed"] is True
+    # Second call is a no-op: changed=False and no second audit row.
+    second = api_client.post(
+        f"/api/v1/client/vendors/{vendor_id}/deactivate", headers=_h(token)
+    )
+    assert second.status_code == 200
+    assert second.json()["changed"] is False
+
+    db = db_factory()
+    try:
+        count = len(
+            list(
+                db.scalars(
+                    select(AuditLog.id).where(
+                        AuditLog.entity_id == vendor_id,
+                        AuditLog.action == "client.provider_deactivated",
+                    )
+                )
+            )
+        )
+    finally:
+        db.close()
+    assert count == 1
+
+
+def test_deactivate_rejects_foreign_vendor(
+    api_client: TestClient, db_factory
+) -> None:
+    """A client_admin cannot archive a vendor in another tenant (404, no
+    cross-tenant existence oracle)."""
+    client_a = _seed_client(db_factory, "Cliente A")
+    client_b = _seed_client(db_factory, "Cliente B")
+    foreign_vendor, _ = _seed_vendor_with_workspace(
+        db_factory, client_id=client_b, rfc="FOR260512XY9"
+    )
+    _, email, pw = _seed_user_with_role(
+        db_factory, role="client_admin", client_id=client_a, email_prefix="ca"
+    )
+    token = _login(api_client, email, pw)
+
+    resp = api_client.post(
+        f"/api/v1/client/vendors/{foreign_vendor}/deactivate", headers=_h(token)
+    )
+    assert resp.status_code == 404, resp.text
+    # The foreign vendor is untouched.
+    db = db_factory()
+    try:
+        assert db.get(Vendor, foreign_vendor).status == "active"
+    finally:
+        db.close()
+
+
+def test_deactivate_excludes_provider_from_overview_counts(
+    api_client: TestClient, db_factory
+) -> None:
+    """Archiving must remove the provider from the active dashboard counts —
+    the core promise of the feature ("fuera de los conteos")."""
+    client_id = _seed_client(db_factory, "Cliente Conteos")
+    vendor_id, _ = _seed_vendor_with_workspace(db_factory, client_id=client_id)
+    _, email, pw = _seed_user_with_role(
+        db_factory, role="client_admin", client_id=client_id, email_prefix="ca"
+    )
+    token = _login(api_client, email, pw)
+
+    before = api_client.get("/api/v1/client/overview", headers=_h(token)).json()
+    assert before["active_workspaces_total"] == 1
+    assert before["vendors_total"] == 1
+
+    api_client.post(
+        f"/api/v1/client/vendors/{vendor_id}/deactivate", headers=_h(token)
+    )
+
+    after = api_client.get("/api/v1/client/overview", headers=_h(token)).json()
+    assert after["active_workspaces_total"] == 0
+    assert after["vendors_total"] == 0
+
+
+def test_reactivate_is_idempotent(api_client: TestClient, db_factory) -> None:
+    client_id = _seed_client(db_factory, "Cliente ReIdem")
+    vendor_id, _ = _seed_vendor_with_workspace(db_factory, client_id=client_id)
+    _, email, pw = _seed_user_with_role(
+        db_factory, role="client_admin", client_id=client_id, email_prefix="ca"
+    )
+    token = _login(api_client, email, pw)
+
+    # Already active → reactivate is a no-op (changed=False, no audit row).
+    resp = api_client.post(
+        f"/api/v1/client/vendors/{vendor_id}/reactivate", headers=_h(token)
+    )
+    assert resp.status_code == 200
+    assert resp.json()["changed"] is False
+
+    db = db_factory()
+    try:
+        rows = list(
+            db.scalars(
+                select(AuditLog.id).where(
+                    AuditLog.entity_id == vendor_id,
+                    AuditLog.action == "client.provider_reactivated",
+                )
+            )
+        )
+    finally:
+        db.close()
+    assert rows == []
+
+
+def test_deactivate_archives_all_workspaces_and_reconciles_drift(
+    api_client: TestClient, db_factory
+) -> None:
+    """All client-scoped workspaces move in lock-step, and a workspace added
+    while the vendor is archived is reconciled on the next deactivate."""
+    client_id = _seed_client(db_factory, "Cliente Multi")
+    vendor_id, ws1 = _seed_vendor_with_workspace(db_factory, client_id=client_id)
+    _, email, pw = _seed_user_with_role(
+        db_factory, role="client_admin", client_id=client_id, email_prefix="ca"
+    )
+    token = _login(api_client, email, pw)
+
+    api_client.post(
+        f"/api/v1/client/vendors/{vendor_id}/deactivate", headers=_h(token)
+    )
+
+    # A new workspace appears on the already-archived vendor (active by default).
+    db = db_factory()
+    try:
+        stray = ProviderWorkspace(
+            client_id=client_id,
+            vendor_id=vendor_id,
+            persona_type="moral",
+            display_name="Filial nueva",
+            access_token="SECRET-STRAY-1",
+        )
+        db.add(stray)
+        db.commit()
+        ws2 = stray.id
+    finally:
+        db.close()
+
+    # Re-deactivate must NOT no-op (drift exists) — it reconciles the stray.
+    resp = api_client.post(
+        f"/api/v1/client/vendors/{vendor_id}/deactivate", headers=_h(token)
+    )
+    assert resp.status_code == 200
+    assert resp.json()["changed"] is True
+
+    db = db_factory()
+    try:
+        assert db.get(Vendor, vendor_id).status == "inactive"
+        assert db.get(ProviderWorkspace, ws1).status == "inactive"
+        assert db.get(ProviderWorkspace, ws2).status == "inactive"
+    finally:
+        db.close()

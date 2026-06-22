@@ -696,6 +696,146 @@ export async function getClientVendorDetail(
   );
 }
 
+// ---------------------------------------------------------------------------
+// Phase 3 — archive / restore a provider in the portfolio
+// ---------------------------------------------------------------------------
+
+export type ClientProviderStatusResponse = {
+  vendor_id: string;
+  // "active" | "inactive"
+  status: string;
+  // False when the provider was already in the target state (no-op).
+  changed: boolean;
+};
+
+export async function deactivateClientProvider(
+  vendor_id: string,
+  params?: { client_id?: string },
+): Promise<ClientProviderStatusResponse> {
+  return fetchJson<ClientProviderStatusResponse>(
+    `/api/v1/client/vendors/${vendor_id}/deactivate${qs(params)}`,
+    { method: "POST" },
+  );
+}
+
+export async function reactivateClientProvider(
+  vendor_id: string,
+  params?: { client_id?: string },
+): Promise<ClientProviderStatusResponse> {
+  return fetchJson<ClientProviderStatusResponse>(
+    `/api/v1/client/vendors/${vendor_id}/reactivate${qs(params)}`,
+    { method: "POST" },
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Phase 2 — client seat management (/client/users)
+//
+// The seat API has existed (owner-gated, server-side) since the
+// multi-user rollout; these wrappers + the /client/configuracion/usuarios
+// page are the first UI to reach it.
+// ---------------------------------------------------------------------------
+
+export type ClientUserItem = {
+  user_id: string;
+  email: string;
+  full_name: string;
+  is_primary: boolean;
+  // "active" | "disabled"
+  status: string;
+  // True while the seat hasn't completed first login (temp password).
+  pending_first_login: boolean;
+  last_login_at: string | null;
+  joined_at: string;
+};
+
+export type ClientUsersList = {
+  client_id: string;
+  organization_id: string;
+  seat_limit: number;
+  seats_used: number;
+  seats_available: number;
+  // Whether the requesting user may mutate seats (owner/internal).
+  can_manage: boolean;
+  users: ClientUserItem[];
+};
+
+export type CreateClientUserResponse = {
+  user_id: string;
+  email: string;
+  full_name: string;
+  // Plaintext, shown ONCE for the owner to relay.
+  temp_password: string;
+  login_url: string;
+  email_status: string;
+  email_error: string | null;
+  reinstated: boolean;
+  seats_used: number;
+  seat_limit: number;
+};
+
+export type ClientUserActionResponse = {
+  user_id: string;
+  status: string;
+  seats_used: number;
+  seat_limit: number;
+};
+
+export type ResetClientUserPasswordResponse = {
+  user_id: string;
+  email: string;
+  temp_password: string;
+  email_status: string;
+  email_error: string | null;
+};
+
+export async function listClientUsers(params?: {
+  client_id?: string;
+}): Promise<ClientUsersList> {
+  return fetchJson<ClientUsersList>(`/api/v1/client/users${qs(params)}`);
+}
+
+export async function createClientUser(
+  body: { full_name: string; email: string },
+  params?: { client_id?: string },
+): Promise<CreateClientUserResponse> {
+  return fetchJson<CreateClientUserResponse>(
+    `/api/v1/client/users${qs(params)}`,
+    { method: "POST", body: JSON.stringify(body) },
+  );
+}
+
+export async function updateClientUserStatus(
+  user_id: string,
+  status: "active" | "disabled",
+  params?: { client_id?: string },
+): Promise<ClientUserActionResponse> {
+  return fetchJson<ClientUserActionResponse>(
+    `/api/v1/client/users/${user_id}${qs(params)}`,
+    { method: "PATCH", body: JSON.stringify({ status }) },
+  );
+}
+
+export async function removeClientUser(
+  user_id: string,
+  params?: { client_id?: string },
+): Promise<ClientUserActionResponse> {
+  return fetchJson<ClientUserActionResponse>(
+    `/api/v1/client/users/${user_id}${qs(params)}`,
+    { method: "DELETE" },
+  );
+}
+
+export async function resetClientUserPassword(
+  user_id: string,
+  params?: { client_id?: string },
+): Promise<ResetClientUserPasswordResponse> {
+  return fetchJson<ResetClientUserPasswordResponse>(
+    `/api/v1/client/users/${user_id}/reset-password${qs(params)}`,
+    { method: "POST" },
+  );
+}
+
 export async function getClientCalendar(params?: {
   client_id?: string;
   year?: number;
