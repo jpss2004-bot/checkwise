@@ -27,6 +27,7 @@ from app.constants.plans import (
     ORG_STATUS_ACTIVE,
     VALID_ORG_STATUSES,
     Plan,
+    capabilities_for,
     coerce_plan,
     provider_limit_default,
 )
@@ -37,6 +38,7 @@ from app.models import Organization, Vendor
 __all__ = [
     "CapacityDecision",
     "active_provider_count",
+    "assert_capability",
     "assert_provider_capacity",
     "evaluate_provider_capacity",
     "is_org_blocked",
@@ -236,3 +238,21 @@ def set_org_status(db: Session, org: Organization, *, status: str) -> Organizati
     org.status = status
     db.flush()
     return org
+
+
+def assert_capability(db: Session, client_id: str, capability: str) -> None:
+    """403 unless the client's plan grants ``capability`` (a ``Capability``
+    value). Demo lacks ``export_audit_package`` + ``bulk_export``; a missing
+    Organization coerces to LEGACY (full), so legacy/orphan clients are never
+    gated. Structured ``detail`` so the client UI can branch on ``code``."""
+    org = org_for_client_optional(db, client_id)
+    plan = plan_for_org(org) if org is not None else Plan.LEGACY
+    if not capabilities_for(plan).get(capability, True):
+        raise HTTPException(
+            status.HTTP_403_FORBIDDEN,
+            detail={
+                "code": "plan_capability_required",
+                "capability": capability,
+                "message": "Esta funcionalidad requiere un plan de pago.",
+            },
+        )

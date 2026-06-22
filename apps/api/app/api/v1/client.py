@@ -74,7 +74,7 @@ from app.api.v1.portal import (
     _due_in_days_for_period,
     _empty_document_counts,
 )
-from app.constants.plans import PLAN_LABELS_ES, capabilities_for
+from app.constants.plans import PLAN_LABELS_ES, Capability, capabilities_for
 from app.constants.roles import MembershipRole
 from app.constants.statuses import DocumentStatus, VendorStatus
 from app.core.compliance_catalog import (
@@ -141,6 +141,7 @@ from app.services.reports.insights import (
 from app.services.search_service import SearchHit, search_submissions
 from app.services.subscription import (
     active_provider_count,
+    assert_capability,
     assert_provider_capacity,
     org_for_client,
     plan_for_org,
@@ -3233,6 +3234,8 @@ def client_vendor_expediente_zip(
         per_minute=settings.EXPORT_RATE_LIMIT_PER_MINUTE,
         per_hour=settings.EXPORT_RATE_LIMIT_PER_HOUR,
     )
+    # Demo plans cannot pull a multi-document expediente ZIP (Phase B gate).
+    assert_capability(db, target_id, Capability.BULK_EXPORT.value)
 
     workspace = db.scalar(
         select(ProviderWorkspace).where(
@@ -4236,6 +4239,7 @@ def download_client_metadata(
     client = db.get(Client, target_id)
     if client is None:
         raise HTTPException(status.HTTP_404_NOT_FOUND, detail="Cliente no encontrado.")
+    assert_capability(db, target_id, Capability.BULK_EXPORT.value)
     path = ensure_local_export(client_master_file_path(client))
     if not path.exists():
         raise HTTPException(
@@ -4267,6 +4271,7 @@ def download_client_vendor_metadata(
     target_id, vendor = _resolve_client_id_for_vendor(
         db, current, vendor_id=vendor_id, requested=client_id
     )
+    assert_capability(db, target_id, Capability.BULK_EXPORT.value)
     client = db.get(Client, target_id)
     if client is None:
         raise HTTPException(status.HTTP_404_NOT_FOUND, detail="Cliente no encontrado.")
@@ -4701,6 +4706,8 @@ def _stream_audit_package_zip(
         per_minute=settings.EXPORT_RATE_LIMIT_PER_MINUTE,
         per_hour=settings.EXPORT_RATE_LIMIT_PER_HOUR,
     )
+    # Demo plans cannot pull the full audit package (Phase B capability gate).
+    assert_capability(db, target_id, Capability.EXPORT_AUDIT_PACKAGE.value)
 
     filters = _build_audit_filters(
         period_from,
