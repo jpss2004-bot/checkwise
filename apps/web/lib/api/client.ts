@@ -678,13 +678,15 @@ export async function createClientProvider(
   body: ClientProviderCreateBody,
   params?: { client_id?: string },
 ): Promise<ClientProviderCreateResponse> {
-  return fetchJson<ClientProviderCreateResponse>(
+  const result = await fetchJson<ClientProviderCreateResponse>(
     `/api/v1/client/providers${qs(params)}`,
     {
       method: "POST",
       body: JSON.stringify(body),
     },
   );
+  invalidateClientPlan(params?.client_id);
+  return result;
 }
 
 export async function getClientVendorDetail(
@@ -712,19 +714,73 @@ export async function deactivateClientProvider(
   vendor_id: string,
   params?: { client_id?: string },
 ): Promise<ClientProviderStatusResponse> {
-  return fetchJson<ClientProviderStatusResponse>(
+  const result = await fetchJson<ClientProviderStatusResponse>(
     `/api/v1/client/vendors/${vendor_id}/deactivate${qs(params)}`,
     { method: "POST" },
   );
+  invalidateClientPlan(params?.client_id);
+  return result;
 }
 
 export async function reactivateClientProvider(
   vendor_id: string,
   params?: { client_id?: string },
 ): Promise<ClientProviderStatusResponse> {
-  return fetchJson<ClientProviderStatusResponse>(
+  const result = await fetchJson<ClientProviderStatusResponse>(
     `/api/v1/client/vendors/${vendor_id}/reactivate${qs(params)}`,
     { method: "POST" },
+  );
+  invalidateClientPlan(params?.client_id);
+  return result;
+}
+
+// ---------------------------------------------------------------------------
+// Phase A/B — subscription plan + provider-usage meter
+// ---------------------------------------------------------------------------
+
+export type ClientPlanCapabilities = {
+  export_audit_package: boolean;
+  bulk_export: boolean;
+  download_documents: boolean;
+};
+
+export type ClientPlan = {
+  client_id: string;
+  organization_id: string;
+  plan: string;
+  plan_label: string;
+  /** null ⇒ uncapped (legacy / enterprise). */
+  provider_limit: number | null;
+  providers_used: number;
+  /** null ⇒ uncapped. */
+  providers_available: number | null;
+  /** ISO; null ⇒ not a demo (no deadline). */
+  demo_expires_at: string | null;
+  capabilities: ClientPlanCapabilities;
+  /** Whether the caller may change the plan / manage seats (owner / internal). */
+  can_manage: boolean;
+};
+
+export const CLIENT_PLAN_KEY = "client:plan";
+
+/** The caller's subscription plan + provider usage. Deduped (15s TTL); the
+ *  provider add/archive/restore mutations invalidate it so the meter is fresh. */
+export async function getClientPlan(params?: {
+  client_id?: string;
+}): Promise<ClientPlan> {
+  const key = params?.client_id
+    ? `${CLIENT_PLAN_KEY}:${params.client_id}`
+    : CLIENT_PLAN_KEY;
+  return dedupeRead(
+    key,
+    () => fetchJson<ClientPlan>(`/api/v1/client/plan${qs(params)}`),
+    15_000,
+  );
+}
+
+export function invalidateClientPlan(client_id?: string): void {
+  invalidateRead(
+    client_id ? `${CLIENT_PLAN_KEY}:${client_id}` : CLIENT_PLAN_KEY,
   );
 }
 

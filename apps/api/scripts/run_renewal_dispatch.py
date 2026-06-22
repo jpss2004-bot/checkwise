@@ -48,6 +48,7 @@ from app.services.renewal_dispatch import (  # noqa: E402
     DispatchOutcome,
     dispatch_renewals_for_workspace,
 )
+from app.services.subscription import blocked_client_ids  # noqa: E402
 
 
 def _parse_today(raw: str | None) -> date:
@@ -93,10 +94,13 @@ def main() -> int:
 
     db = SessionLocal()
     try:
+        # Skip workspaces whose client org is frozen/expired (lapsed demos
+        # must not receive renewal notifications).
+        blocked = blocked_client_ids(db)
         stmt = select(ProviderWorkspace)
         if args.workspace_id:
             stmt = stmt.where(ProviderWorkspace.id == args.workspace_id)
-        workspaces = list(db.scalars(stmt))
+        workspaces = [w for w in db.scalars(stmt) if w.client_id not in blocked]
         vendors_by_id = {v.id: v for v in db.scalars(select(Vendor))}
 
         total_fired = 0

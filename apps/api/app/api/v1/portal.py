@@ -155,6 +155,7 @@ from app.services.submission_service import (
     get_or_create_institution,
     persist_intake_receipt,
 )
+from app.services.subscription import is_org_blocked, org_for_client_optional
 
 _MUTATING_METHODS: Final[frozenset[str]] = frozenset(
     {"POST", "PUT", "PATCH", "DELETE"}
@@ -716,6 +717,27 @@ def _resolve_workspace_via_jwt(
     return None
 
 
+def _assert_workspace_active(
+    db: Session, ws: ProviderWorkspace
+) -> ProviderWorkspace:
+    """Phase B3 — block portal access when the workspace itself is frozen OR
+    its client organization is frozen/expired. Applied on every auth path so a
+    frozen tenant's providers cannot transact. A legacy orphan client with no
+    Organization is treated as not-frozen."""
+    if ws.status == "frozen":
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Tu espacio está congelado. Contacta al soporte.",
+        )
+    org = org_for_client_optional(db, ws.client_id)
+    if org is not None and is_org_blocked(org):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Tu organización está congelada. Contacta al soporte.",
+        )
+    return ws
+
+
 def current_portal_workspace(
     request: Request,
     db: DbSession,
@@ -741,7 +763,7 @@ def current_portal_workspace(
     """
     via_jwt = _resolve_workspace_via_jwt(db, authorization, workspace_id=workspace_id)
     if via_jwt is not None:
-        return via_jwt
+        return _assert_workspace_active(db, via_jwt)
 
     cookie_ws, cookie_tok = _session_from_request(request, legacy_header=x_workspace_token)
 
@@ -763,7 +785,9 @@ def current_portal_workspace(
             detail="Sesión de portal requerida.",
         )
 
-    return _load_workspace(db, target_ws, cookie_tok)
+    return _assert_workspace_active(
+        db, _load_workspace(db, target_ws, cookie_tok)
+    )
 
 
 def _scope_from_path(workspace_id: str) -> str:

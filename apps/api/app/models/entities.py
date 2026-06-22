@@ -578,10 +578,81 @@ class Organization(TimestampMixin, Base):
     # The service-layer check treats NULL on a *client* org as the
     # default 3 defensively.
     seat_limit: Mapped[int | None] = mapped_column(Integer)
+    # Subscription tiering (migration 0056). ``plan`` is NULL on
+    # internal/vendor orgs and 'legacy' on grandfathered (pre-tiering)
+    # clients; the service layer coerces NULL/legacy to "uncapped, full".
+    # ``provider_limit`` NULL means "use the plans.py default for the
+    # tier"; an integer is a per-tenant override (custom/enterprise caps).
+    # ``demo_expires_at`` is populated by Phase B demo provisioning — the
+    # column lands now so Phase B is purely additive.
+    plan: Mapped[str | None] = mapped_column(String(20))
+    provider_limit: Mapped[int | None] = mapped_column(Integer)
+    demo_expires_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True)
+    )
     status: Mapped[str] = mapped_column(String(40), default="active", nullable=False)
 
     memberships: Mapped[list[Membership]] = relationship(
         back_populates="organization", cascade="all, delete-orphan"
+    )
+
+
+class OrganizationEntitlement(TimestampMixin, Base):
+    """Per-tenant override of a capability flag (Phase D, migration 0058).
+
+    The capability shim resolves a tenant's effective capabilities as the
+    tier default merged with these rows (``capabilities_for_org``), so a
+    grant/revoke takes effect with no call-site changes. ``expires_at`` lets a
+    grant lapse automatically; ``key`` is one of ``plans.VALID_ENTITLEMENT_KEYS``.
+    """
+
+    __tablename__ = "organization_entitlements"
+    __table_args__ = (
+        UniqueConstraint(
+            "organization_id", "key", name="uq_org_entitlements_org_key"
+        ),
+        Index("ix_org_entitlements_org", "organization_id"),
+    )
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=new_id)
+    organization_id: Mapped[str] = mapped_column(
+        ForeignKey("organizations.id", ondelete="CASCADE"), nullable=False
+    )
+    key: Mapped[str] = mapped_column(String(80), nullable=False)
+    enabled: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
+    expires_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    note: Mapped[str | None] = mapped_column(String(255))
+    # Not an FK so the granting admin can be removed without orphaning history.
+    granted_by_user_id: Mapped[str | None] = mapped_column(String(36))
+
+
+class BillingAccount(TimestampMixin, Base):
+    """Provider-agnostic billing seam for a client organization (Phase D).
+
+    One row per org. ``provider`` defaults to 'manual' (an internal admin
+    manages the plan by hand — the only wired path). The 'stripe' provider is
+    reserved for the stubbed adapter; the customer/subscription ids + status +
+    period end give a future webhook somewhere to mirror real subscription
+    state, which ``billing.apply_billing_state`` then maps onto the plan.
+    """
+
+    __tablename__ = "billing_accounts"
+    __table_args__ = (
+        UniqueConstraint("organization_id", name="uq_billing_accounts_org"),
+    )
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=new_id)
+    organization_id: Mapped[str] = mapped_column(
+        ForeignKey("organizations.id", ondelete="CASCADE"), nullable=False
+    )
+    provider: Mapped[str] = mapped_column(
+        String(40), nullable=False, default="manual"
+    )
+    customer_id: Mapped[str | None] = mapped_column(String(255))
+    subscription_id: Mapped[str | None] = mapped_column(String(255))
+    status: Mapped[str] = mapped_column(String(40), nullable=False, default="none")
+    current_period_end: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True)
     )
 
 
