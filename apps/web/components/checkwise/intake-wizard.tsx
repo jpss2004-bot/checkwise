@@ -600,6 +600,19 @@ export function IntakeWizard({
       if (form.period_code.trim().length < 4) {
         return "Captura el periodo que debe cubrir el documento.";
       }
+      // A native <select> with value="" visually shows the first option
+      // but keeps React state at "" until the user actively changes it, so
+      // a fresh mount without load_type/institution_code (dashboard link,
+      // demo flow, direct nav) would submit "" and the backend rejects it
+      // with a 422 only at the final step. Validate them here so the gap
+      // surfaces inline at step 0 (paired with the disabled placeholder
+      // option below).
+      if (!form.load_type.trim()) {
+        return "Selecciona el tipo de carga del documento.";
+      }
+      if (!form.institution_code.trim()) {
+        return "Selecciona la institución del documento.";
+      }
       // Session 3 self-audit fix (2026-05-21) — block advance in v2
       // alternatives mode until the provider picks a radio. Without
       // this guard, the form's empty ``requirement_name`` (cleared at
@@ -1240,6 +1253,9 @@ function ContextStep({
               value={form.load_type}
               onChange={(event) => updateField("load_type", event.target.value)}
             >
+              <option value="" disabled>
+                Selecciona…
+              </option>
               {loadTypes.map((option) => (
                 <option key={option.value} value={option.value}>
                   {option.label}
@@ -1257,6 +1273,9 @@ function ContextStep({
                 updateField("institution_code", event.target.value)
               }
             >
+              <option value="" disabled>
+                Selecciona…
+              </option>
               {institutions.map((option) => (
                 <option key={option.value} value={option.value}>
                   {option.label}

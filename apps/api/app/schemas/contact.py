@@ -29,16 +29,32 @@ class ContactRequestCreate(BaseModel):
     message: str = Field(min_length=1, max_length=5000)
     source: str = Field(default="landing", min_length=1, max_length=60)
 
-    @field_validator("name", "message", "company", "role", "source")
+    @field_validator("name", "message")
     @classmethod
-    def _strip(cls, value: str | None) -> str | None:
-        # Pydantic V2: ``str | None`` fields receive ``None`` and pass
-        # through unchanged; strings get stripped of leading/trailing
-        # whitespace before length validators run on the trimmed form.
+    def _strip_required(cls, value: str) -> str:
+        # Required fields: trim, and reject whitespace-only with a 422
+        # (returning None here would null a NOT NULL column → 500 on the
+        # public form). field_validator runs AFTER min_length, so the
+        # trimmed-empty case must be re-checked here.
+        trimmed = value.strip()
+        if not trimmed:
+            raise ValueError("must not be blank")
+        return trimmed
+
+    @field_validator("company", "role")
+    @classmethod
+    def _strip_optional(cls, value: str | None) -> str | None:
+        # Optional fields: whitespace-only collapses to None (column is
+        # nullable), the original intent.
         if value is None:
             return value
-        trimmed = value.strip()
-        return trimmed or None  # treat whitespace-only as None for optional fields
+        return value.strip() or None
+
+    @field_validator("source")
+    @classmethod
+    def _strip_source(cls, value: str) -> str:
+        # Required-with-default: fall back to the default rather than null.
+        return value.strip() or "landing"
 
     @field_validator("email")
     @classmethod
