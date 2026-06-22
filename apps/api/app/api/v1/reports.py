@@ -49,6 +49,7 @@ from app.core.rate_limit import (
     enforce_ai_heavy_rate_limit,
     enforce_export_rate_limit,
 )
+from app.core.time import utc_now
 from app.db.session import SessionLocal, get_db
 from app.models.entities import Report, ReportExport, ReportShare, ReportVersion
 from app.schemas.reports import (
@@ -1318,7 +1319,7 @@ def post_regenerate_block(
             "text": new_text,
             "model": llm.content_model,
             "prompt_hash": context.snapshot_hash,
-            "generated_at": datetime.utcnow().isoformat(),
+            "generated_at": utc_now().isoformat().replace("+00:00", "Z"),
             "source_snapshot_id": context.snapshot_id,
         },
     }
@@ -1441,7 +1442,7 @@ def post_refresh_report_data(
     except ReportPermissionError as exc:
         raise HTTPException(status.HTTP_403_FORBIDDEN, str(exc)) from exc
 
-    fetched_at = datetime.utcnow().isoformat() + "Z"
+    fetched_at = utc_now().isoformat().replace("+00:00", "Z")
     blocks_in = list(current_version.content_json.get("blocks") or [])
     blocks_out: list[dict] = []
     summary: list[RefreshedBlockSummary] = []

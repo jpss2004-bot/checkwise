@@ -82,6 +82,7 @@ from app.core.period_validation import (
     validate_period_key,
 )
 from app.core.rate_limit import enforce_ai_heavy_rate_limit
+from app.core.time import today_mx
 from app.db.session import get_db
 from app.models import (
     ClientNotification,
@@ -1622,7 +1623,7 @@ def get_workspace_calendar(
 
     # Omitted year means "the year we are in" — the previous hardcoded
     # 2026 default would have gone stale every January.
-    today = date.today()
+    today = today_mx()
     year = year or today.year
 
     slots = build_workspace_calendar_slots(db, workspace, year)
@@ -4181,7 +4182,7 @@ def get_workspace_dashboard(
 ) -> DashboardResponse:
     """Provider dashboard composed from the canonical evidence-slot service."""
     _ = workspace_id  # tenant guard already enforced by dependency
-    today = date.today()
+    today = today_mx()
     target_year = year or today.year
 
     onboarding_slots = build_workspace_onboarding_slots(db, workspace)

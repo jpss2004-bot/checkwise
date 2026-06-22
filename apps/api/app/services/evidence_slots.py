@@ -29,7 +29,7 @@ Out of scope here:
 from __future__ import annotations
 
 from dataclasses import dataclass
-from datetime import date, timedelta
+from datetime import UTC, date, timedelta
 from enum import StrEnum
 from typing import Literal
 
@@ -46,6 +46,7 @@ from app.core.compliance_catalog import (
     recurring_for_year_v2,
 )
 from app.core.config import settings
+from app.core.time import MEXICO_TZ
 from app.models import Institution, ProviderWorkspace, Submission
 from app.services.calendar_risk import calendar_deadline_iso
 
@@ -612,7 +613,14 @@ def renewal_anchor_date(submission: Submission | None) -> date | None:
         return None
     if submission.status != DocumentStatus.APROBADO.value:
         return None
-    return submission.updated_at.date()
+    # ``updated_at`` is stored tz-aware UTC (entities.utc_now). CheckWise is a
+    # Mexico product (UTC-6/-5): take the date in Mexico City local time so an
+    # approval late evening local (already "tomorrow" in UTC) anchors the
+    # renewal cycle on the day the reviewer actually approved, not a day later.
+    approved_at = submission.updated_at
+    if approved_at.tzinfo is None:
+        approved_at = approved_at.replace(tzinfo=UTC)
+    return approved_at.astimezone(MEXICO_TZ).date()
 
 
 def next_renewal_due_date(

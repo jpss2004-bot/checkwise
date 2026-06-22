@@ -18,13 +18,14 @@ fetchers, so the fetchers stay focused on data shape.
 from __future__ import annotations
 
 from collections.abc import Callable
-from datetime import date, datetime
+from datetime import date
 from typing import Any
 
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from app.constants.statuses import DocumentStatus
+from app.core.time import today_mx, utc_now
 from app.models.entities import (
     Submission,
     Vendor,
@@ -47,7 +48,7 @@ def _now_iso() -> str:
     Centralised so every fetcher's freshness stamp has the same shape;
     the per-block ``FreshnessLabel`` renderer reads this verbatim.
     """
-    return datetime.utcnow().isoformat() + "Z"
+    return utc_now().isoformat().replace("+00:00", "Z")
 
 
 def _action_links_for_vendor(
@@ -336,7 +337,6 @@ def fetch_vendor_risk_matrix(
     config: dict, scope: ReportScope, db: Session
 ) -> dict:
     """Cross-vendor portfolio view. Filters per config['filter']."""
-    from datetime import date as _date
     flt = config.get("filter") or {}
     missing_institution = flt.get("missing_institution")
     min_risk = flt.get("min_risk_score")
@@ -347,7 +347,7 @@ def fetch_vendor_risk_matrix(
     # Pull every vendor in scope.
     vendors = _vendors_in_scope(db, scope)
 
-    year = _date.today().year
+    year = today_mx().year
     # Batch-prefetch workspaces + submissions (+ institutions under V2) for the
     # whole scope in a fixed number of queries, instead of resolving a
     # workspace + scanning submissions per vendor inside the loop.
@@ -533,7 +533,7 @@ def _compute_compliance_history_6mo(
     rather than emitted as 0% so the line doesn't dive to the floor
     on quiet months.
     """
-    today = date.today()
+    today = today_mx()
     points: list[dict[str, Any]] = []
 
     # Walk back 6 months including the current one.
@@ -772,8 +772,6 @@ def fetch_compliance_by_institution(
           "fetched_at": "<iso>"
         }
     """
-    from datetime import date as _date
-
     from app.services.evidence_slots import (
         build_workspace_calendar_slots,
         build_workspace_onboarding_slots,
@@ -793,7 +791,7 @@ def fetch_compliance_by_institution(
     else:
         return None
 
-    year = _date.today().year
+    year = today_mx().year
     # Batch-prefetch workspaces + submissions (+ institutions under V2) for all
     # vendors in one fixed query set, then build each vendor's slots from the
     # in-memory map — instead of resolve_workspace + 2× submission scans per

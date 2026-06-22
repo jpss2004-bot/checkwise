@@ -79,6 +79,7 @@ from app.core.rate_limit import (
     enforce_export_rate_limit,
 )
 from app.core.text_search import accent_ci_contains
+from app.core.time import today_mx
 from app.db.session import get_db
 from app.models import (
     AuditLog,
@@ -784,7 +785,7 @@ def get_rollup(db: DbSession, current: AdminUser) -> AdminRollup:
     triage inbox counters.
     """
     _ = current
-    today = date.today()
+    today = today_mx()
     year = today.year
     now = datetime.now(UTC)
 
@@ -1000,7 +1001,7 @@ def get_client_compliance(
     client = db.get(Client, client_id)
     if client is None:
         raise HTTPException(status.HTTP_404_NOT_FOUND, detail="Cliente no encontrado.")
-    today = date.today()
+    today = today_mx()
     rows = _client_vendor_compliance_rows(db, client, today=today, year=today.year)
     vendor_rows = [
         AdminClientComplianceVendorRow(
@@ -3256,7 +3257,7 @@ def get_admin_calendar_radar(
     )
     from app.services.evidence_slots import build_workspace_calendar_slots
 
-    today = date.today()
+    today = today_mx()
     vstmt = select(Vendor.id, Vendor.client_id, Vendor.name).where(
         Vendor.status == "active"
     )
@@ -3375,7 +3376,7 @@ def get_admin_calendar(
     hardcoded fallback (mirrors the BL-T3 spirit on the frontend).
     """
     _ = current
-    target_year = year if year is not None else date.today().year
+    target_year = year if year is not None else today_mx().year
     # Session 2 (2026-05-21) — flag-aware. The admin-side "expected
     # rows per month" count drops dramatically under v2 (collapsed
     # alternatives). Operators reading this endpoint after the flag
@@ -3732,7 +3733,7 @@ def get_admin_calendar_grid(
     current-state risk).
     """
     _ = current
-    today = date.today()
+    today = today_mx()
     target_year = year or today.year
 
     # ---- Drill: one client's providers×months -------------------------
@@ -4012,7 +4013,7 @@ def get_admin_calendar_renewals(
     _ = current
     from app.services.dashboard_compute import compute_renewal_actions
 
-    today = date.today()
+    today = today_mx()
     horizon = today + timedelta(days=horizon_days)
 
     # --- Contract expiries (real end_date — cheap set-based query) -----

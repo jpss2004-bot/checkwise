@@ -32,6 +32,7 @@ import {
   listClientActivity,
   type ClientActivityItem,
 } from "@/lib/api/client";
+import { formatDateTime } from "@/lib/format/datetime";
 import { useUrlClientId } from "@/lib/workspace/use-url-client-id";
 
 /**
@@ -217,6 +218,18 @@ function pickIcon(row: ClientActivityItem): {
   };
 }
 
+/**
+ * Mexico-local `YYYY-MM-DD` key for an instant. `toISOString().slice(0,10)`
+ * buckets by the UTC day, so a late-evening MX event (e.g. 23:30 local =
+ * 05:30 next-day UTC) lands under the wrong day; `en-CA` + America/Mexico_City
+ * yields a stable ISO-shaped key on the user-perceived calendar day.
+ */
+function mxDayKey(occurredAt: string): string {
+  return new Date(occurredAt).toLocaleDateString("en-CA", {
+    timeZone: "America/Mexico_City",
+  });
+}
+
 function groupByDay(rows: ClientActivityItem[]): Array<{
   day: string;
   label: string;
@@ -224,15 +237,16 @@ function groupByDay(rows: ClientActivityItem[]): Array<{
 }> {
   const map = new Map<string, ClientActivityItem[]>();
   for (const row of rows) {
-    const date = new Date(row.occurred_at);
-    const day = date.toISOString().slice(0, 10);
+    const day = mxDayKey(row.occurred_at);
     const list = map.get(day) ?? [];
     list.push(row);
     map.set(day, list);
   }
   return [...map.entries()].map(([day, items]) => ({
     day,
-    label: new Date(day).toLocaleDateString("es-MX", {
+    // `day` is a bare YYYY-MM-DD; formatDateTime renders it as that exact
+    // calendar date (no UTC day shift), so heading and bucket key agree.
+    label: formatDateTime(day, {
       weekday: "long",
       day: "2-digit",
       month: "long",

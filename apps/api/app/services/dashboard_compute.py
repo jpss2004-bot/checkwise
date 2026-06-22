@@ -19,7 +19,7 @@ layer.
 
 from __future__ import annotations
 
-from datetime import date, datetime
+from datetime import date
 from typing import Literal
 from urllib.parse import quote
 
@@ -31,6 +31,7 @@ from app.core.compliance_catalog import (
     is_v2_recurring_code,
     normalize_persona_type,
 )
+from app.core.time import today_mx, utc_now
 from app.models.entities import ProviderWorkspace, Submission
 from app.services.evidence_slots import (
     SlotState,
@@ -246,7 +247,7 @@ def build_compliance_state_for_vendor(
             "persona_type": None,
         }
 
-    target_year = year or date.today().year
+    target_year = year or today_mx().year
     # Load this workspace's submissions ONCE and feed both slot builders the
     # same set, instead of letting each builder issue its own identical
     # `SELECT * FROM submissions WHERE client_id=? AND vendor_id=?` query.
@@ -531,7 +532,7 @@ def build_attention_items_for_vendor(
     No active workspace → empty items, ``workspace_id=None``.
     """
     workspace = resolve_workspace_for_vendor(db, vendor_id)
-    fetched_at = datetime.utcnow().isoformat() + "Z"
+    fetched_at = utc_now().isoformat().replace("+00:00", "Z")
     if workspace is None:
         return {
             "items": [],
@@ -539,7 +540,7 @@ def build_attention_items_for_vendor(
             "fetched_at": fetched_at,
         }
 
-    target_today = today or date.today()
+    target_today = today or today_mx()
     onboarding_slots = build_workspace_onboarding_slots(db, workspace)
     calendar_slots = build_workspace_calendar_slots(
         db, workspace, target_today.year
@@ -683,17 +684,17 @@ def build_upcoming_deadlines_for_vendor(
     ```
     """
     workspace = resolve_workspace_for_vendor(db, vendor_id)
-    fetched_at = datetime.utcnow().isoformat() + "Z"
+    fetched_at = utc_now().isoformat().replace("+00:00", "Z")
     if workspace is None:
         return {
             "items": [],
             "urgency_buckets": {b["key"]: 0 for b in URGENCY_BANDS},
             "workspace_id": None,
             "fetched_at": fetched_at,
-            "as_of": (today or date.today()).isoformat(),
+            "as_of": (today or today_mx()).isoformat(),
         }
 
-    target_today = today or date.today()
+    target_today = today or today_mx()
     calendar_slots = build_workspace_calendar_slots(
         db, workspace, target_today.year
     )
@@ -1051,16 +1052,16 @@ def build_suggested_actions_for_vendor(
     ```
     """
     workspace = resolve_workspace_for_vendor(db, vendor_id)
-    fetched_at = datetime.utcnow().isoformat() + "Z"
+    fetched_at = utc_now().isoformat().replace("+00:00", "Z")
     if workspace is None:
         return {
             "items": [],
             "workspace_id": None,
             "fetched_at": fetched_at,
-            "as_of": (today or date.today()).isoformat(),
+            "as_of": (today or today_mx()).isoformat(),
         }
 
-    target_today = today or date.today()
+    target_today = today or today_mx()
     # Load this workspace's submissions ONCE and feed both slot builders and
     # the renewal scan the same set — without this the two builders plus
     # compute_renewal_actions each re-query the identical

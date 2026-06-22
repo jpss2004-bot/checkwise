@@ -246,6 +246,7 @@ def run_shadow_analysis(
         result=final_result,
         tiers=tiers,
         image_result=image_result,
+        expected_provider_rfc=expected_provider_rfc,
     )
 
     # Phase 2 — after a deep run, queue a debounced expediente reassessment
@@ -828,6 +829,7 @@ def _persist_shadow_result(
     result: AnalysisResult,
     tiers: dict | None = None,
     image_result: ImageTamperResult | None = None,
+    expected_provider_rfc: str | None = None,
 ) -> None:
     """Write the AnalysisResult to ``document_inspections.shadow_*``.
 
@@ -853,7 +855,14 @@ def _persist_shadow_result(
     """
     db = SessionLocal()
     try:
-        inspection = db.get(DocumentInspection, _inspection_pk(db, document_id))
+        # One round-trip: ``DocumentInspection.document_id`` is UNIQUE NOT
+        # NULL, so a single scalar select replaces the prior pk-resolve +
+        # ``db.get`` pair (which issued two queries for one row).
+        inspection = db.scalar(
+            select(DocumentInspection).where(
+                DocumentInspection.document_id == document_id
+            )
+        )
         if inspection is None:
             logger.warning(
                 "Shadow analysis result has no inspection row to attach to; "
@@ -869,7 +878,12 @@ def _persist_shadow_result(
                 "detected_institution": result.signals.detected_institution,
                 "detected_document_type": result.signals.detected_document_type,
                 "detected_rfcs": list(result.signals.detected_rfcs or []),
+                # Prefer the value already on the inspection, then the RFC
+                # the caller already resolved (threaded in as a primitive),
+                # and only fall back to the 3-table Vendor⋈Submission⋈Document
+                # join as a last resort.
                 "expected_rfc": normalize_rfc(inspection.expected_rfc)
+                or normalize_rfc(expected_provider_rfc)
                 or _expected_rfc_for_document(db, document_id),
                 "detected_dates": list(result.signals.detected_dates or []),
                 "period_mentions": list(result.signals.period_mentions or []),
@@ -1021,20 +1035,4 @@ def _persist_shadow_failure(
         document_id=document_id,
         submission_id=submission_id,
         result=failure,
-    )
-
-
-def _inspection_pk(db, document_id: str) -> str | None:
-    """Resolve the DocumentInspection.id for a given Document.id.
-
-    DocumentInspection has ``document_id UNIQUE NOT NULL``, so this is
-    a single row lookup. We resolve the PK first so ``db.get`` is the
-    canonical single-row primary-key fetch (the alternative would be a
-    ``select().where().scalar()`` which still works but is less
-    explicit about the 1:1 expectation).
-    """
-    from sqlalchemy import select
-
-    return db.scalar(
-        select(DocumentInspection.id).where(DocumentInspection.document_id == document_id)
     )

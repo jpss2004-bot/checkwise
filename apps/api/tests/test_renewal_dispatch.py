@@ -18,7 +18,7 @@ SQLite in-memory + a small fixture set mirroring
 from __future__ import annotations
 
 from collections.abc import Callable, Generator
-from datetime import date, datetime, timedelta
+from datetime import UTC, date, datetime, timedelta
 
 import pytest
 from sqlalchemy import create_engine, select
@@ -177,6 +177,14 @@ def _seed_approved_submission(
     workflow service refreshes ``updated_at`` on transitions in
     production; here we set it directly to control the anchor date.
     """
+    # renewal_anchor_date now localizes updated_at to America/Mexico_City
+    # before taking .date() (Batch 8 tz-correctness fix). In production
+    # updated_at is tz-aware UTC and approvals don't land at midnight, so
+    # seed a tz-aware mid-day UTC stamp (12:00 UTC == 06:00 MX, same
+    # calendar day in both zones) — this keeps the intended anchor day
+    # while exercising the aware-datetime path.
+    if updated_at.tzinfo is None:
+        updated_at = updated_at.replace(hour=12, tzinfo=UTC)
     db = db_factory()
     try:
         req, version = _seed_requirement(
@@ -523,7 +531,10 @@ def test_dispatch_resets_on_new_approved_submission(
     # Cycle 2: provider re-uploads and gets approved today. The new
     # current_submission_for_slot returns the newer row (latest by
     # created_at when no supersedes link), so the anchor shifts.
-    anchor2_dt = datetime(2026, 6, 1)
+    # Mid-day UTC stamp so the MX-localized anchor stays on 2026-06-01
+    # (renewal_anchor_date now localizes to America/Mexico_City; a naive
+    # midnight value would roll back to the prior MX day).
+    anchor2_dt = datetime(2026, 6, 1, 12, 0, tzinfo=UTC)
     db = db_factory()
     try:
         req, version = _seed_requirement(

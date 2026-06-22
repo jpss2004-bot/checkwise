@@ -20,6 +20,7 @@ from datetime import UTC, date, datetime
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
+from app.core.time import today_mx
 from app.models import AdminCalendarSnapshot, Client
 from app.services.calendar_aggregate import aggregate_client_calendar
 from app.services.calendar_risk import worst_calendar_risk as _worst
@@ -160,7 +161,7 @@ def refresh_admin_calendar_snapshot_background(year: int) -> None:
 
         db = SessionLocal()
         try:
-            refresh_admin_calendar_snapshot(db, year=year, today=date.today())
+            refresh_admin_calendar_snapshot(db, year=year, today=today_mx())
         finally:
             db.close()
     except Exception:

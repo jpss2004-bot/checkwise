@@ -204,6 +204,9 @@ def _atomic_replace_via_temp(final_path: Path, writer: Callable[[Path], None]) -
         try:
             tmp_path.unlink()
         except OSError:
+            # Best-effort cleanup: on the success path os.replace already
+            # consumed the temp (unlink then raises FileNotFoundError), and a
+            # leftover temp is harmless — never mask the original error.
             pass
 
 

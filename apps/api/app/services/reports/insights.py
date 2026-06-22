@@ -21,6 +21,7 @@ from sqlalchemy.orm import Session
 
 from app.constants.reports import ReportAudience
 from app.constants.statuses import DocumentStatus
+from app.core.time import today_mx
 from app.models import (
     ProviderWorkspace,
     RenewalReminder,
@@ -322,7 +323,7 @@ def compute_client_insight(
     portfolio. Returns ``None`` when there's no client scope to reason about."""
     if scope.client_id is None:
         return None
-    today = today or date.today()
+    today = today or today_mx()
 
     from app.services.wise.client_context import build_client_context_cached
 
@@ -436,7 +437,7 @@ def compute_vendor_insight(
     their semáforo, what needs correction, and what's coming due."""
     if scope.vendor_id is None:
         return None
-    today = today or date.today()
+    today = today or today_mx()
 
     from app.services.dashboard_compute import (
         build_compliance_state_for_vendor,

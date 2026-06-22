@@ -25,10 +25,9 @@ Scope contract:
 
 from __future__ import annotations
 
-from datetime import datetime
-
 from sqlalchemy.orm import Session
 
+from app.core.time import utc_now
 from app.services.dashboard_compute import build_compliance_state_for_vendor
 from app.services.reports.context import ReportScope
 
@@ -55,7 +54,7 @@ def fetch_compliance_state(
     no user-configurable parameters in v1. Reserved for future
     options like ``year`` override on the calendar slot scan.
     """
-    fetched_at = datetime.utcnow().isoformat() + "Z"
+    fetched_at = utc_now().isoformat().replace("+00:00", "Z")
     if scope.vendor_id is None:
         return {
             "semaphore": {

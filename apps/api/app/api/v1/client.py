@@ -78,6 +78,7 @@ from app.core.http_utils import content_disposition_header
 from app.core.period_validation import MAX_YEAR, MIN_YEAR, validate_period_key
 from app.core.rate_limit import enforce_ai_heavy_rate_limit, enforce_export_rate_limit
 from app.core.text_search import normalize_for_search
+from app.core.time import today_mx
 from app.db.session import get_db
 from app.models import (
     Client,
@@ -1719,7 +1720,7 @@ def client_overview(
     target_client = db.get(Client, target_id)
     if target_client is None:
         raise HTTPException(status.HTTP_404_NOT_FOUND, detail="Cliente no encontrado.")
-    today = date.today()
+    today = today_mx()
     selected_year = year or today.year
 
     workspaces = _scoped_workspaces(db, target_id)
@@ -1961,7 +1962,7 @@ def client_overview_trajectory(
     target_id = _resolve_client_id(db, current, requested=client_id)
     if db.get(Client, target_id) is None:
         raise HTTPException(status.HTTP_404_NOT_FOUND, detail="Cliente no encontrado.")
-    today = date.today()
+    today = today_mx()
 
     # Trailing month-buckets, chronological.
     wanted: list[tuple[int, int]] = []
@@ -2102,7 +2103,7 @@ def client_vendors(
     offset: Annotated[int, Query(ge=0)] = 0,
 ) -> ClientVendorListResponse:
     target_id = _resolve_client_id(db, current, requested=client_id)
-    today = date.today()
+    today = today_mx()
     selected_year = today.year
 
     workspaces = _scoped_workspaces(db, target_id)
@@ -2757,7 +2758,7 @@ def client_vendor_detail(
             detail="Este proveedor no tiene un workspace registrado.",
         )
 
-    today = date.today()
+    today = today_mx()
     selected_year = year or today.year
     onboarding_slots = build_workspace_onboarding_slots(db, workspace)
     calendar_slots = build_workspace_calendar_slots(db, workspace, selected_year)
@@ -3107,7 +3108,7 @@ def client_calendar(
     landed.
     """
     target_id = _resolve_client_id(db, current, requested=client_id)
-    today = date.today()
+    today = today_mx()
     # Omitted year means "the year we are in", same as /overview. The
     # previous hardcoded 2026 default would have gone stale every
     # January.
