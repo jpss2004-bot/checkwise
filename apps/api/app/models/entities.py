@@ -597,6 +597,65 @@ class Organization(TimestampMixin, Base):
     )
 
 
+class OrganizationEntitlement(TimestampMixin, Base):
+    """Per-tenant override of a capability flag (Phase D, migration 0058).
+
+    The capability shim resolves a tenant's effective capabilities as the
+    tier default merged with these rows (``capabilities_for_org``), so a
+    grant/revoke takes effect with no call-site changes. ``expires_at`` lets a
+    grant lapse automatically; ``key`` is one of ``plans.VALID_ENTITLEMENT_KEYS``.
+    """
+
+    __tablename__ = "organization_entitlements"
+    __table_args__ = (
+        UniqueConstraint(
+            "organization_id", "key", name="uq_org_entitlements_org_key"
+        ),
+        Index("ix_org_entitlements_org", "organization_id"),
+    )
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=new_id)
+    organization_id: Mapped[str] = mapped_column(
+        ForeignKey("organizations.id", ondelete="CASCADE"), nullable=False
+    )
+    key: Mapped[str] = mapped_column(String(80), nullable=False)
+    enabled: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
+    expires_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    note: Mapped[str | None] = mapped_column(String(255))
+    # Not an FK so the granting admin can be removed without orphaning history.
+    granted_by_user_id: Mapped[str | None] = mapped_column(String(36))
+
+
+class BillingAccount(TimestampMixin, Base):
+    """Provider-agnostic billing seam for a client organization (Phase D).
+
+    One row per org. ``provider`` defaults to 'manual' (an internal admin
+    manages the plan by hand — the only wired path). The 'stripe' provider is
+    reserved for the stubbed adapter; the customer/subscription ids + status +
+    period end give a future webhook somewhere to mirror real subscription
+    state, which ``billing.apply_billing_state`` then maps onto the plan.
+    """
+
+    __tablename__ = "billing_accounts"
+    __table_args__ = (
+        UniqueConstraint("organization_id", name="uq_billing_accounts_org"),
+    )
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=new_id)
+    organization_id: Mapped[str] = mapped_column(
+        ForeignKey("organizations.id", ondelete="CASCADE"), nullable=False
+    )
+    provider: Mapped[str] = mapped_column(
+        String(40), nullable=False, default="manual"
+    )
+    customer_id: Mapped[str | None] = mapped_column(String(255))
+    subscription_id: Mapped[str | None] = mapped_column(String(255))
+    status: Mapped[str] = mapped_column(String(40), nullable=False, default="none")
+    current_period_end: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True)
+    )
+
+
 class User(TimestampMixin, Base):
     """Real user account. Email + bcrypt password hash + status.
 

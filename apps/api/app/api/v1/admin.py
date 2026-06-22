@@ -65,7 +65,7 @@ from app.api.v1.client import (
     _vendor_compliance,
 )
 from app.api.v1.reviewer import QUEUE_STATUSES
-from app.constants.plans import ORG_STATUS_FROZEN, Plan, capabilities_for
+from app.constants.plans import ORG_STATUS_FROZEN, Plan
 from app.constants.roles import MembershipRole
 from app.constants.statuses import DocumentStatus
 from app.core.compliance_catalog import (
@@ -84,6 +84,7 @@ from app.core.time import today_mx
 from app.db.session import get_db
 from app.models import (
     AuditLog,
+    BillingAccount,
     Client,
     ContactRequest,
     Contract,
@@ -92,6 +93,7 @@ from app.models import (
     Institution,
     Membership,
     Organization,
+    OrganizationEntitlement,
     PasswordHistory,
     Period,
     ProviderWorkspace,
@@ -106,6 +108,10 @@ from app.services.audit_log import add_audit_event
 from app.services.auth import (
     generate_temp_password,
     hash_password,
+)
+from app.services.billing import (
+    apply_billing_state,
+    get_or_create_billing_account,
 )
 from app.services.calendar_aggregate import aggregate_client_calendar
 from app.services.calendar_risk import (
@@ -122,12 +128,17 @@ from app.services.email_delivery import (
     send_transactional_email,
     send_welcome_with_temp_password_email,
 )
+from app.services.entitlements import (
+    grant_entitlement,
+    list_entitlements,
+    revoke_entitlement,
+)
 from app.services.metadata_store import ensure_local_export, mirror_enabled
 from app.services.search_service import SearchHit, search_submissions
 from app.services.subscription import (
+    capabilities_for_org,
     evaluate_provider_capacity,
     org_for_client_optional,
-    plan_for_org,
     set_org_status,
     set_plan,
     start_demo,
@@ -2706,7 +2717,7 @@ class OrganizationPlanUpdate(BaseModel):
     status: str | None = None
 
 
-def _org_plan_read(org: Organization) -> OrganizationPlanRead:
+def _org_plan_read(db: Session, org: Organization) -> OrganizationPlanRead:
     return OrganizationPlanRead(
         id=org.id,
         name=org.name,
@@ -2717,7 +2728,7 @@ def _org_plan_read(org: Organization) -> OrganizationPlanRead:
             org.demo_expires_at.isoformat() if org.demo_expires_at else None
         ),
         status=org.status,
-        capabilities=capabilities_for(plan_for_org(org)),
+        capabilities=capabilities_for_org(db, org),
     )
 
 
@@ -2775,7 +2786,7 @@ def admin_start_demo(
     )
     db.commit()
     db.refresh(org)
-    return _org_plan_read(org)
+    return _org_plan_read(db, org)
 
 
 @router.patch(
@@ -2839,7 +2850,204 @@ def admin_update_org_plan(
     )
     db.commit()
     db.refresh(org)
-    return _org_plan_read(org)
+    return _org_plan_read(db, org)
+
+
+# ---------------------------------------------------------------------------
+# Per-tenant entitlements + billing seam (Phase D)
+# ---------------------------------------------------------------------------
+
+
+class EntitlementRead(BaseModel):
+    key: str
+    enabled: bool
+    expires_at: str | None
+    note: str | None
+
+
+class EntitlementGrantBody(BaseModel):
+    enabled: bool = True
+    expires_at: datetime | None = None
+    note: str | None = Field(default=None, max_length=255)
+
+
+def _entitlement_read(e: OrganizationEntitlement) -> EntitlementRead:
+    return EntitlementRead(
+        key=e.key,
+        enabled=e.enabled,
+        expires_at=e.expires_at.isoformat() if e.expires_at else None,
+        note=e.note,
+    )
+
+
+@router.get(
+    "/organizations/{org_id}/entitlements",
+    response_model=list[EntitlementRead],
+    summary="List a client org's per-tenant entitlement overrides",
+)
+def admin_list_entitlements(
+    org_id: str, db: DbSession, current: AdminUser
+) -> list[EntitlementRead]:
+    org = _locked_client_org_or_404(db, org_id)
+    return [_entitlement_read(e) for e in list_entitlements(db, org.id)]
+
+
+@router.put(
+    "/organizations/{org_id}/entitlements/{key}",
+    response_model=EntitlementRead,
+    summary="Grant / override a capability for one client org",
+)
+def admin_grant_entitlement(
+    org_id: str,
+    key: str,
+    body: EntitlementGrantBody,
+    db: DbSession,
+    current: AdminUser,
+    request: Request,
+) -> EntitlementRead:
+    org = _locked_client_org_or_404(db, org_id)
+    row = grant_entitlement(
+        db,
+        org.id,
+        key=key,
+        enabled=body.enabled,
+        expires_at=body.expires_at,
+        note=body.note,
+        granted_by=current.user.id,
+    )
+    _audit_admin(
+        db,
+        actor=current,
+        action="admin.org.entitlement_granted",
+        entity_type="organization",
+        entity_id=org.id,
+        before=None,
+        after={"key": key, "enabled": body.enabled},
+        request=request,
+    )
+    db.commit()
+    db.refresh(row)
+    return _entitlement_read(row)
+
+
+@router.delete(
+    "/organizations/{org_id}/entitlements/{key}",
+    summary="Revoke a capability override (revert to the tier default)",
+)
+def admin_revoke_entitlement(
+    org_id: str,
+    key: str,
+    db: DbSession,
+    current: AdminUser,
+    request: Request,
+) -> dict:
+    org = _locked_client_org_or_404(db, org_id)
+    removed = revoke_entitlement(db, org.id, key=key)
+    if removed:
+        _audit_admin(
+            db,
+            actor=current,
+            action="admin.org.entitlement_revoked",
+            entity_type="organization",
+            entity_id=org.id,
+            before={"key": key},
+            after=None,
+            request=request,
+        )
+    db.commit()
+    return {"key": key, "removed": removed}
+
+
+class BillingRead(BaseModel):
+    organization_id: str
+    provider: str
+    customer_id: str | None
+    subscription_id: str | None
+    status: str
+    current_period_end: str | None
+
+
+class BillingUpdateBody(BaseModel):
+    provider: str | None = None
+    status: str | None = None
+    customer_id: str | None = None
+    subscription_id: str | None = None
+    current_period_end: datetime | None = None
+    plan: str | None = None
+
+
+def _billing_read(acct: BillingAccount) -> BillingRead:
+    return BillingRead(
+        organization_id=acct.organization_id,
+        provider=acct.provider,
+        customer_id=acct.customer_id,
+        subscription_id=acct.subscription_id,
+        status=acct.status,
+        current_period_end=(
+            acct.current_period_end.isoformat()
+            if acct.current_period_end
+            else None
+        ),
+    )
+
+
+@router.get(
+    "/organizations/{org_id}/billing",
+    response_model=BillingRead,
+    summary="Read a client org's billing account (provider + status)",
+)
+def admin_get_billing(
+    org_id: str, db: DbSession, current: AdminUser
+) -> BillingRead:
+    org = _locked_client_org_or_404(db, org_id)
+    return _billing_read(get_or_create_billing_account(db, org))
+
+
+@router.patch(
+    "/organizations/{org_id}/billing",
+    response_model=BillingRead,
+    summary="Update the billing seam (provider/status; optional plan move)",
+)
+def admin_update_billing(
+    org_id: str,
+    body: BillingUpdateBody,
+    db: DbSession,
+    current: AdminUser,
+    request: Request,
+) -> BillingRead:
+    org = _locked_client_org_or_404(db, org_id)
+    plan = None
+    if body.plan is not None:
+        try:
+            plan = Plan(body.plan)
+        except ValueError as exc:
+            raise HTTPException(
+                status.HTTP_400_BAD_REQUEST,
+                detail=f"Plan inválido: {body.plan!r}.",
+            ) from exc
+    acct = apply_billing_state(
+        db,
+        org,
+        provider=body.provider,
+        status_value=body.status,
+        customer_id=body.customer_id,
+        subscription_id=body.subscription_id,
+        current_period_end=body.current_period_end,
+        plan=plan,
+    )
+    _audit_admin(
+        db,
+        actor=current,
+        action="admin.org.billing_updated",
+        entity_type="organization",
+        entity_id=org.id,
+        before=None,
+        after={"provider": acct.provider, "status": acct.status, "plan": org.plan},
+        request=request,
+    )
+    db.commit()
+    db.refresh(acct)
+    return _billing_read(acct)
 
 
 # ---------------------------------------------------------------------------

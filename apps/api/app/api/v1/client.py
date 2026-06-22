@@ -74,7 +74,7 @@ from app.api.v1.portal import (
     _due_in_days_for_period,
     _empty_document_counts,
 )
-from app.constants.plans import PLAN_LABELS_ES, Capability, capabilities_for
+from app.constants.plans import PLAN_LABELS_ES, Capability
 from app.constants.roles import MembershipRole
 from app.constants.statuses import DocumentStatus, VendorStatus
 from app.core.compliance_catalog import (
@@ -143,6 +143,7 @@ from app.services.subscription import (
     active_provider_count,
     assert_capability,
     assert_provider_capacity,
+    capabilities_for_org,
     org_for_client,
     plan_for_org,
     provider_limit_for_org,
@@ -3087,7 +3088,7 @@ def client_plan(
         demo_expires_at=(
             org.demo_expires_at.isoformat() if org.demo_expires_at else None
         ),
-        capabilities=capabilities_for(plan),
+        capabilities=capabilities_for_org(db, org),
         can_manage=is_internal or holds_primary is not None,
     )
 

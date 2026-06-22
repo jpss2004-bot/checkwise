@@ -42,6 +42,7 @@ __all__ = [
     "assert_capability",
     "assert_provider_capacity",
     "blocked_client_ids",
+    "capabilities_for_org",
     "evaluate_provider_capacity",
     "freeze_expired_demos",
     "is_org_blocked",
@@ -280,14 +281,28 @@ def blocked_client_ids(db: Session) -> set[str]:
     }
 
 
+def capabilities_for_org(db: Session, org: Organization) -> dict[str, bool]:
+    """A tenant's EFFECTIVE capabilities (Phase D): the tier defaults merged
+    with active per-tenant entitlement overrides. This is the single read the
+    capability shim now uses, so granting/revoking an entitlement takes effect
+    with no call-site change."""
+    from app.services.entitlements import entitlement_overrides
+
+    caps = capabilities_for(plan_for_org(org))
+    caps.update(entitlement_overrides(db, org.id))
+    return caps
+
+
 def assert_capability(db: Session, client_id: str, capability: str) -> None:
-    """403 unless the client's plan grants ``capability`` (a ``Capability``
-    value). Demo lacks ``export_audit_package`` + ``bulk_export``; a missing
-    Organization coerces to LEGACY (full), so legacy/orphan clients are never
-    gated. Structured ``detail`` so the client UI can branch on ``code``."""
+    """403 unless the client's EFFECTIVE capabilities grant ``capability`` (a
+    ``Capability`` value). Demo lacks ``export_audit_package`` + ``bulk_export``
+    unless a per-tenant entitlement re-grants it; a missing Organization
+    coerces to LEGACY (full), so legacy/orphan clients are never gated.
+    Structured ``detail`` so the client UI can branch on ``code``."""
     org = org_for_client_optional(db, client_id)
-    plan = plan_for_org(org) if org is not None else Plan.LEGACY
-    if not capabilities_for(plan).get(capability, True):
+    if org is None:
+        return  # orphan legacy client — uncapped, full features
+    if not capabilities_for_org(db, org).get(capability, True):
         raise HTTPException(
             status.HTTP_403_FORBIDDEN,
             detail={

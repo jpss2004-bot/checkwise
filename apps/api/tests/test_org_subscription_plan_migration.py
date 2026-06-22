@@ -122,6 +122,26 @@ def test_plan_values_match_plan_enum():
     assert set(migration._PLAN_VALUES) == {p.value for p in Plan}
 
 
+def test_0058_tables_exist_under_create_all():
+    """Phase D model tables (organization_entitlements, billing_accounts) must
+    exist under ``Base.metadata.create_all`` — the schema every endpoint-test
+    fixture runs — so SQLite tests exercise the same shape as the migration."""
+    from app.db.base import Base
+    from app.models.entities import (  # noqa: F401 — register mappers
+        BillingAccount,
+        OrganizationEntitlement,
+    )
+
+    engine = create_engine(
+        "sqlite+pysqlite:///:memory:",
+        connect_args={"check_same_thread": False},
+        poolclass=StaticPool,
+    )
+    Base.metadata.create_all(engine)
+    tables = set(inspect(engine).get_table_names())
+    assert {"organization_entitlements", "billing_accounts"} <= tables
+
+
 def test_0057_status_values_match_constant():
     """Phase B migration 0057's hardcoded status CHECK values must match the
     live VALID_ORG_STATUSES constant (same drift discipline as 0056's plan

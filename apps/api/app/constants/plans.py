@@ -116,3 +116,38 @@ def provider_limit_default(plan: Plan) -> int | None:
 def capabilities_for(plan: Plan) -> dict[str, bool]:
     """A fresh copy of the tier's capability flags."""
     return dict(PLAN_CAPABILITIES[plan])
+
+
+# ---------------------------------------------------------------------------
+# Phase D — per-tenant entitlements + the provider-agnostic billing seam
+# ---------------------------------------------------------------------------
+
+# Keys an ``OrganizationEntitlement`` row may override. Today these are the
+# capability flags (a per-tenant grant/revoke layered over the tier default);
+# the set widens as new entitlements arrive — call sites never change because
+# they read the merged ``capabilities_for_org``.
+VALID_ENTITLEMENT_KEYS: frozenset[str] = frozenset(c.value for c in Capability)
+
+
+class BillingProviderName(StrEnum):
+    """Which billing backend owns a tenant's subscription. ``manual`` = an
+    internal admin manages the plan by hand (the only wired path today);
+    ``stripe`` is reserved for the stubbed adapter (Phase D ships the seam,
+    not a live Stripe integration)."""
+
+    MANUAL = "manual"
+    STRIPE = "stripe"
+
+
+class BillingStatus(StrEnum):
+    """Provider-agnostic subscription status mirrored onto ``billing_accounts``."""
+
+    NONE = "none"
+    TRIALING = "trialing"
+    ACTIVE = "active"
+    PAST_DUE = "past_due"
+    CANCELED = "canceled"
+
+
+VALID_BILLING_PROVIDERS: frozenset[str] = frozenset(p.value for p in BillingProviderName)
+VALID_BILLING_STATUSES: frozenset[str] = frozenset(s.value for s in BillingStatus)
