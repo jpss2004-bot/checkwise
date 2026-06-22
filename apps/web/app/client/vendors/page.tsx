@@ -39,6 +39,8 @@ import {
   ReportsApiError,
 } from "@/lib/api/reports";
 import { useUrlClientId } from "@/lib/workspace/use-url-client-id";
+import { useClientPlan } from "@/lib/plan/plan-context";
+import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { BUCKET_LABELS_ES, semaphoreLabel } from "@/lib/constants/statuses";
 import { withReturnTo } from "@/lib/navigation/return-to";
 
@@ -76,6 +78,7 @@ export default function ClientVendorsPage() {
   const router = useRouter();
   const searchParams = useSearchParams();
   const urlClientId = useUrlClientId();
+  const { plan } = useClientPlan();
   const [rows, setRows] = useState<ClientVendorRow[] | null>(null);
   // True portfolio size from the API (not rows.length), so the count never
   // under-reports when the response is capped (audit P2.10).
@@ -263,8 +266,35 @@ export default function ClientVendorsPage() {
             { label: semaphoreLabel("red"), value: counts.red.toString(), mono: true, tone: counts.red > 0 ? "warning" : "default" },
             { label: BUCKET_LABELS_ES.missing_required, value: sums.missing.toString(), mono: true, tone: sums.missing > 0 ? "warning" : "default" },
             { label: `${BUCKET_LABELS_ES.due_soon} ≤14 d`, value: sums.dueSoon.toString(), mono: true, tone: sums.dueSoon > 0 ? "warning" : "default" },
+            ...(plan
+              ? [
+                  {
+                    label: "Plan",
+                    value: `${plan.providers_used} / ${plan.provider_limit ?? "∞"}`,
+                    mono: true,
+                    tone: (plan.providers_available !== null &&
+                    plan.providers_available <= 0
+                      ? "warning"
+                      : "default") as "warning" | "default",
+                  },
+                ]
+              : []),
           ]}
         />
+
+        {plan &&
+        plan.provider_limit !== null &&
+        plan.providers_available !== null &&
+        plan.providers_available <= 0 &&
+        plan.can_manage ? (
+          <Alert variant="warning">
+            <AlertTitle>Límite de proveedores alcanzado</AlertTitle>
+            <AlertDescription>
+              Archiva los proveedores que no uses para liberar un espacio, o
+              mejora tu plan para añadir más.
+            </AlertDescription>
+          </Alert>
+        ) : null}
 
         {/* D4 — "Distribución de riesgo" StackedBars removed; the
             Dashboard donut + the MetadataStrip above already convey

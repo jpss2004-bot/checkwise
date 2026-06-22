@@ -28,6 +28,9 @@ import {
   type ClientVendorRow,
 } from "@/lib/api/client";
 import { useUrlClientId } from "@/lib/workspace/use-url-client-id";
+import { parseClientErrorCode } from "@/lib/api/error-detail";
+import { ProviderLimitModal } from "@/components/checkwise/plan/provider-limit-modal";
+import { ProviderRestoreModal } from "@/components/checkwise/plan/provider-restore-modal";
 
 /**
  * /client/onboarding
@@ -535,6 +538,11 @@ function AddProviderForm({
   const [contactPhone, setContactPhone] = useState("");
   const [submitting, setSubmitting] = useState(false);
   const [err, setErr] = useState<string | null>(null);
+  const [limitErr, setLimitErr] = useState<{
+    used: number | null;
+    limit: number | null;
+  } | null>(null);
+  const [restore, setRestore] = useState<{ vendor_id: string } | null>(null);
 
   async function handle(e: FormEvent) {
     e.preventDefault();
@@ -560,17 +568,21 @@ function AddProviderForm({
       setContactEmail("");
       setContactPhone("");
     } catch (error) {
-      setErr(
-        error instanceof Error
-          ? error.message
-          : "No pudimos agregar al proveedor.",
-      );
+      const parsed = parseClientErrorCode(error);
+      if (parsed.code === "provider_limit_reached") {
+        setLimitErr({ used: parsed.used ?? null, limit: parsed.limit ?? null });
+      } else if (parsed.code === "provider_archived" && parsed.vendor_id) {
+        setRestore({ vendor_id: parsed.vendor_id });
+      } else {
+        setErr(parsed.detail);
+      }
     } finally {
       setSubmitting(false);
     }
   }
 
   return (
+    <>
     <form onSubmit={handle} className="space-y-3 rounded-md border border-[color:var(--border-subtle)] bg-[color:var(--surface-page)] p-3">
       <div className="grid gap-3 sm:grid-cols-2">
         <div className="space-y-1">
@@ -654,5 +666,22 @@ function AddProviderForm({
         </Button>
       </div>
     </form>
+      <ProviderLimitModal
+        open={limitErr !== null}
+        used={limitErr?.used ?? null}
+        limit={limitErr?.limit ?? null}
+        onClose={() => setLimitErr(null)}
+      />
+      <ProviderRestoreModal
+        open={restore !== null}
+        vendorId={restore?.vendor_id ?? null}
+        clientId={urlClientId}
+        onClose={() => setRestore(null)}
+        onRestored={() => {
+          setRestore(null);
+          onCreated({ contact_email: "", email_status: "restored" });
+        }}
+      />
+    </>
   );
 }

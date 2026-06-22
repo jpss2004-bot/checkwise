@@ -54,6 +54,8 @@ import {
   NotFoundState,
 } from "@/components/checkwise/portal/state-surfaces";
 import { apiErrorDetail } from "@/lib/api/error-detail";
+import { useClientPlan } from "@/lib/plan/plan-context";
+import { PLAN_UPSELL_COPY } from "@/lib/constants/plan-states";
 import { downloadAuthenticatedFile } from "@/lib/api/download";
 import { createReportFromPreset, ReportsApiError } from "@/lib/api/reports";
 import {
@@ -94,6 +96,10 @@ export default function ClientVendorDetailPage({ params }: PageProps) {
   const [errorStatus, setErrorStatus] = useState<number | null>(null);
   const [reloadKey, setReloadKey] = useState(0);
   const router = useRouter();
+  const { plan } = useClientPlan();
+  // Default-allow while the plan loads so the export buttons never flash
+  // disabled before capabilities resolve (Phase C4).
+  const canBulk = plan?.capabilities.bulk_export !== false;
   const [generating, setGenerating] = useState(false);
   const [downloadingZip, setDownloadingZip] = useState(false);
   const [downloadingMetadata, setDownloadingMetadata] = useState(false);
@@ -280,8 +286,12 @@ export default function ClientVendorDetailPage({ params }: PageProps) {
             size="sm"
             variant="outline"
             onClick={onDownloadExpediente}
-            disabled={downloadingZip}
-            title="Descargar el expediente completo del proveedor"
+            disabled={downloadingZip || !canBulk}
+            title={
+              canBulk
+                ? "Descargar el expediente completo del proveedor"
+                : PLAN_UPSELL_COPY
+            }
           >
             {downloadingZip ? (
               <CircleNotch
@@ -302,8 +312,12 @@ export default function ClientVendorDetailPage({ params }: PageProps) {
             size="sm"
             variant="outline"
             onClick={onDownloadMetadata}
-            disabled={downloadingMetadata}
-            title="Descargar la metadata de este proveedor en Excel"
+            disabled={downloadingMetadata || !canBulk}
+            title={
+              canBulk
+                ? "Descargar la metadata de este proveedor en Excel"
+                : PLAN_UPSELL_COPY
+            }
           >
             {downloadingMetadata ? (
               <CircleNotch
