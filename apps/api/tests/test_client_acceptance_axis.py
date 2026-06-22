@@ -27,7 +27,7 @@ from sqlalchemy import create_engine, select
 from sqlalchemy.orm import Session, sessionmaker
 from sqlalchemy.pool import StaticPool
 
-from app.constants.statuses import ClientAcceptance, DocumentStatus
+from app.constants.statuses import ClientAcceptance, DocumentStatus, ReviewerAction
 from app.db.base import Base
 from app.db.session import get_db
 from app.main import app
@@ -48,7 +48,20 @@ from app.models import (
     entities,  # noqa: F401 — register mappers
 )
 from app.services.auth import hash_password
-from app.services.submission_workflow import apply_client_decision
+from app.services.submission_workflow import (
+    apply_client_decision,
+    apply_reviewer_decision,
+)
+
+
+def _set_auto_accept(db_factory, client_id: str, value: bool) -> None:
+    db = db_factory()
+    try:
+        client = db.get(Client, client_id)
+        client.auto_accept_valid = value
+        db.commit()
+    finally:
+        db.close()
 
 # ---------------------------------------------------------------------------
 # Fixtures + seeding
@@ -371,3 +384,136 @@ def test_endpoint_cross_tenant_is_404(api_client, db_factory) -> None:
         headers=_h(tok),
     )
     assert r.status_code == 404, r.text
+
+
+# ---------------------------------------------------------------------------
+# Bulk decision
+# ---------------------------------------------------------------------------
+
+
+def test_bulk_accept_partial_success(api_client, db_factory) -> None:
+    """A valid doc accepts; a non-valid one in the same batch fails the
+    override-reason rule and is reported — without aborting the rest."""
+    valid = _seed_world(db_factory, submission_status=DocumentStatus.APROBADO.value)
+    invalid = _seed_world(db_factory, submission_status=DocumentStatus.RECHAZADO.value)
+    # Re-point the invalid submission to the SAME client so it's in tenant.
+    db = db_factory()
+    bad = db.get(Submission, invalid["submission_id"])
+    bad.client_id = valid["client_id"]
+    db.commit()
+    db.close()
+
+    tok = _login(api_client, valid["approver_email"], valid["approver_pw"])
+    r = api_client.post(
+        "/api/v1/client/submissions/bulk-decision",
+        json={
+            "action": "accept",
+            "submission_ids": [valid["submission_id"], invalid["submission_id"]],
+        },
+        headers=_h(tok),
+    )
+    assert r.status_code == 200, r.text
+    body = r.json()
+    assert body["decided"] == [valid["submission_id"]]
+    assert body["decided_count"] == 1
+    assert body["failed_count"] == 1
+    assert body["failed"][0]["submission_id"] == invalid["submission_id"]
+
+
+def test_bulk_viewer_forbidden(api_client, db_factory) -> None:
+    ids = _seed_world(db_factory)
+    tok = _login(api_client, ids["viewer_email"], ids["viewer_pw"])
+    r = api_client.post(
+        "/api/v1/client/submissions/bulk-decision",
+        json={"action": "accept", "submission_ids": [ids["submission_id"]]},
+        headers=_h(tok),
+    )
+    assert r.status_code == 403, r.text
+
+
+# ---------------------------------------------------------------------------
+# Auto-accept-on-valid (reviewer-path hook)
+# ---------------------------------------------------------------------------
+
+
+def test_auto_accept_fires_when_opted_in(db_factory) -> None:
+    """A reviewer APPROVE on an opted-in client's submission folds in a system
+    ACCEPTED decision — atomically, in the same transaction."""
+    ids = _seed_world(
+        db_factory, submission_status=DocumentStatus.PENDIENTE_REVISION.value
+    )
+    _set_auto_accept(db_factory, ids["client_id"], True)
+    db = db_factory()
+    sub = db.get(Submission, ids["submission_id"])
+    apply_reviewer_decision(
+        db, submission=sub, action=ReviewerAction.APPROVE, reason=None,
+        reviewer_user_id="rev-1",
+    )
+    sub = db.get(Submission, ids["submission_id"])
+    assert sub.status == DocumentStatus.APROBADO.value
+    assert sub.client_acceptance == ClientAcceptance.ACCEPTED.value
+    # Recorded as a SYSTEM decision (no human approver).
+    assert sub.client_decided_by_user_id is None
+    ev = db.scalar(
+        select(ValidationEvent).where(
+            ValidationEvent.submission_id == sub.id,
+            ValidationEvent.event_type == "client_decision",
+            ValidationEvent.actor_type == "system",
+        )
+    )
+    assert ev is not None
+    db.close()
+
+
+def test_no_auto_accept_when_opted_out(db_factory) -> None:
+    ids = _seed_world(
+        db_factory, submission_status=DocumentStatus.PENDIENTE_REVISION.value
+    )
+    # auto_accept_valid defaults False — do not opt in.
+    db = db_factory()
+    sub = db.get(Submission, ids["submission_id"])
+    apply_reviewer_decision(
+        db, submission=sub, action=ReviewerAction.APPROVE, reason=None,
+        reviewer_user_id="rev-1",
+    )
+    sub = db.get(Submission, ids["submission_id"])
+    assert sub.status == DocumentStatus.APROBADO.value
+    assert sub.client_acceptance == ClientAcceptance.PENDING.value
+    db.close()
+
+
+# ---------------------------------------------------------------------------
+# Acceptance preferences
+# ---------------------------------------------------------------------------
+
+
+def test_prefs_viewer_reads_approver_toggles(api_client, db_factory) -> None:
+    ids = _seed_world(db_factory)
+    viewer_tok = _login(api_client, ids["viewer_email"], ids["viewer_pw"])
+    approver_tok = _login(api_client, ids["approver_email"], ids["approver_pw"])
+
+    # Viewer may READ the preference.
+    g = api_client.get("/api/v1/client/acceptance-preferences", headers=_h(viewer_tok))
+    assert g.status_code == 200, g.text
+    assert g.json()["auto_accept_valid"] is False
+
+    # Viewer may NOT toggle it.
+    v = api_client.patch(
+        "/api/v1/client/acceptance-preferences",
+        json={"auto_accept_valid": True},
+        headers=_h(viewer_tok),
+    )
+    assert v.status_code == 403, v.text
+
+    # Approver toggles it on; the read reflects it.
+    p = api_client.patch(
+        "/api/v1/client/acceptance-preferences",
+        json={"auto_accept_valid": True},
+        headers=_h(approver_tok),
+    )
+    assert p.status_code == 200, p.text
+    assert p.json()["auto_accept_valid"] is True
+    g2 = api_client.get(
+        "/api/v1/client/acceptance-preferences", headers=_h(approver_tok)
+    )
+    assert g2.json()["auto_accept_valid"] is True

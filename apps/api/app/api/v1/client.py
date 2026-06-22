@@ -3700,6 +3700,159 @@ def client_submission_decision(
     )
 
 
+class ClientBulkDecisionRequest(BaseModel):
+    """Apply one acceptance-axis action to many submissions at once.
+
+    The common case is "accept every compliance-valid doc for a vendor": the
+    frontend collects those submission ids and sends them here. Items that
+    would be an override without a shared ``reason`` fail individually and are
+    reported back — they do not abort the rest of the batch.
+    """
+
+    submission_ids: list[str] = Field(min_length=1, max_length=500)
+    action: Literal["accept", "reject", "reset"]
+    reason: str | None = Field(default=None, max_length=2000)
+
+
+class ClientBulkDecisionItemError(BaseModel):
+    submission_id: str
+    detail: str
+
+
+class ClientBulkDecisionResponse(BaseModel):
+    decided: list[str]
+    failed: list[ClientBulkDecisionItemError]
+    decided_count: int
+    failed_count: int
+
+
+@router.post(
+    "/submissions/bulk-decision",
+    response_model=ClientBulkDecisionResponse,
+    summary="Apply a client acceptance-axis decision to many submissions",
+)
+def client_bulk_submission_decision(
+    payload: ClientBulkDecisionRequest,
+    db: DbSession,
+    current: ClientApprover,
+) -> ClientBulkDecisionResponse:
+    """Bulk accept / reject / reset (Axis 2). Approver-only, tenant-scoped.
+
+    Partial success: each submission is decided independently (override-reason
+    violations, cross-tenant / missing ids surface per-item) and the whole
+    batch commits once at the end. De-dupes the id list while preserving order.
+    """
+    is_internal_admin = MembershipRole.INTERNAL_ADMIN.value in current.roles
+    visible = (
+        None if is_internal_admin else set(_visible_client_ids_for_user(db, current.user.id))
+    )
+
+    seen: set[str] = set()
+    decided: list[str] = []
+    failed: list[ClientBulkDecisionItemError] = []
+    for sub_id in payload.submission_ids:
+        if sub_id in seen:
+            continue
+        seen.add(sub_id)
+        submission = db.get(Submission, sub_id)
+        if submission is None or (
+            visible is not None and submission.client_id not in visible
+        ):
+            failed.append(
+                ClientBulkDecisionItemError(
+                    submission_id=sub_id, detail="Envío no encontrado."
+                )
+            )
+            continue
+        try:
+            apply_client_decision(
+                db,
+                submission=submission,
+                action=payload.action,
+                reason=payload.reason,
+                client_user_id=current.user.id,
+                commit=False,
+            )
+            decided.append(sub_id)
+        except HTTPException as exc:
+            failed.append(
+                ClientBulkDecisionItemError(
+                    submission_id=sub_id, detail=str(exc.detail)
+                )
+            )
+
+    db.commit()
+    return ClientBulkDecisionResponse(
+        decided=decided,
+        failed=failed,
+        decided_count=len(decided),
+        failed_count=len(failed),
+    )
+
+
+class ClientAcceptancePrefsResponse(BaseModel):
+    auto_accept_valid: bool
+
+
+class ClientAcceptancePrefsRequest(BaseModel):
+    auto_accept_valid: bool
+
+
+@router.get(
+    "/acceptance-preferences",
+    response_model=ClientAcceptancePrefsResponse,
+    summary="Read the client's acceptance-axis preferences",
+)
+def client_get_acceptance_prefs(
+    db: DbSession,
+    current: ClientUser,
+    client_id: str | None = Query(default=None),
+) -> ClientAcceptancePrefsResponse:
+    """Read-only — any client seat (Viewer included) may see the setting."""
+    resolved = _resolve_client_id(db, current, requested=client_id)
+    client = db.get(Client, resolved)
+    return ClientAcceptancePrefsResponse(
+        auto_accept_valid=bool(client and client.auto_accept_valid)
+    )
+
+
+@router.patch(
+    "/acceptance-preferences",
+    response_model=ClientAcceptancePrefsResponse,
+    summary="Toggle auto-accept-on-valid for the client",
+)
+def client_set_acceptance_prefs(
+    payload: ClientAcceptancePrefsRequest,
+    db: DbSession,
+    current: ClientApprover,
+    client_id: str | None = Query(default=None),
+) -> ClientAcceptancePrefsResponse:
+    """Approver-only. Turning this on does NOT retroactively accept the
+    existing backlog — it applies to validity decisions made from here on
+    (the reviewer-path hook). Bulk-accept covers catching up the backlog."""
+    resolved = _resolve_client_id(db, current, requested=client_id)
+    client = db.get(Client, resolved)
+    if client is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail="Cliente no encontrado."
+        )
+    before = client.auto_accept_valid
+    client.auto_accept_valid = payload.auto_accept_valid
+    if before != payload.auto_accept_valid:
+        add_audit_event(
+            db,
+            action="client.auto_accept_valid_changed",
+            entity_type="client",
+            entity_id=resolved,
+            actor_type="client_admin",
+            actor_id=current.user.id,
+            before={"auto_accept_valid": before},
+            after={"auto_accept_valid": payload.auto_accept_valid},
+        )
+    db.commit()
+    return ClientAcceptancePrefsResponse(auto_accept_valid=client.auto_accept_valid)
+
+
 # ---------------------------------------------------------------------------
 # /submissions
 # ---------------------------------------------------------------------------

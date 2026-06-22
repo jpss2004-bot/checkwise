@@ -55,7 +55,7 @@ from app.constants.statuses import (
     DocumentStatus,
     ReviewerAction,
 )
-from app.models import Document, DocumentStatusHistory, Submission
+from app.models import Client, Document, DocumentStatusHistory, Submission
 from app.models.entities import utc_now
 from app.services.audit_log import add_audit_event
 from app.services.client_notifications import notify_reviewer_decision
@@ -531,6 +531,12 @@ def _apply_decision_transition(
             "[submission_workflow] outbound whatsapp crashed; decision still committed"
         )
 
+    # Phase 5 — opt-in real-time auto-accept. If this validity decision left
+    # the submission compliance-valid AND the client opted in, fold a system
+    # ACCEPTED decision (Axis 2) into THIS transaction so the two verdicts
+    # land atomically. No-op for non-valid outcomes or opted-out clients.
+    maybe_auto_accept_on_valid(db, submission, commit=False)
+
     db.commit()
     db.refresh(submission)
 
@@ -601,14 +607,21 @@ def apply_client_decision(
     submission: Submission,
     action: str | ClientDecisionAction,
     reason: str | None,
-    client_user_id: str,
+    client_user_id: str | None,
+    commit: bool = True,
 ) -> ClientDecisionResult:
     """Record the CLIENT's business-acceptance verdict (Axis 2).
 
     Orthogonal to ``apply_reviewer_decision``: updates only the
     ``client_acceptance`` fields, appends a ``client_decision``
-    ValidationEvent + an AuditLog row, and commits. It NEVER touches
-    ``Submission.status`` or ``Document.status``.
+    ValidationEvent + an AuditLog row. It NEVER touches ``Submission.status``
+    or ``Document.status``.
+
+    ``client_user_id`` is the deciding Approver, or ``None`` for a system
+    auto-accept (the actor is recorded as ``system`` and no
+    ``client_decided_by_user_id`` is stored). ``commit=False`` lets a caller
+    batch many decisions (bulk endpoint) or fold an auto-accept into the
+    reviewer transaction; the caller then owns the commit.
 
     Override rule (locked design): a decision that contradicts CheckWise's
     validity verdict — accepting a non-valid doc, or rejecting a valid one —
@@ -639,6 +652,8 @@ def apply_client_decision(
             ),
         )
 
+    is_system = client_user_id is None
+    actor_type = "system" if is_system else "client"
     previous_acceptance = submission.client_acceptance
     decided_at = utc_now()
 
@@ -657,12 +672,13 @@ def apply_client_decision(
         result=action_enum.value,
         severity="info" if action_enum != ClientDecisionAction.REJECT else "warning",
         message=cleaned_reason,
-        actor_type="client",
+        actor_type=actor_type,
         payload={
             "from_acceptance": previous_acceptance,
             "to_acceptance": target_acceptance.value,
             "compliance_status": submission.status,
             "override": was_override,
+            "auto": is_system,
         },
     )
 
@@ -671,7 +687,7 @@ def apply_client_decision(
         action="submission.client_decision",
         entity_type="submission",
         entity_id=submission.id,
-        actor_type="client",
+        actor_type=actor_type,
         actor_id=client_user_id,
         before={"client_acceptance": previous_acceptance},
         after={"client_acceptance": target_acceptance.value},
@@ -679,12 +695,14 @@ def apply_client_decision(
             "action": action_enum.value,
             "reason": cleaned_reason,
             "override": was_override,
+            "auto": is_system,
             "compliance_status": submission.status,
         },
     )
 
-    db.commit()
-    db.refresh(submission)
+    if commit:
+        db.commit()
+        db.refresh(submission)
 
     return ClientDecisionResult(
         submission_id=submission.id,
@@ -693,6 +711,35 @@ def apply_client_decision(
         action=action_enum.value,
         reason=cleaned_reason,
         was_override=was_override,
-        client_user_id=client_user_id,
+        client_user_id=client_user_id or "system",
         decided_at=decided_at,
+    )
+
+
+def maybe_auto_accept_on_valid(
+    db: Session, submission: Submission, *, commit: bool = False
+) -> ClientDecisionResult | None:
+    """Auto-record a system ACCEPTED decision when a submission is
+    compliance-valid AND its client opted into auto-accept-on-valid.
+
+    No-op unless ALL hold: the submission's ``status`` is a pass state, the
+    submission is still PENDING on Axis 2 (never overrides an explicit client
+    decision), and ``Client.auto_accept_valid`` is on. Called from the
+    reviewer path with ``commit=False`` so the auto-accept joins the validity
+    transaction. Returns the decision result, or ``None`` when it didn't fire.
+    """
+    if submission.status not in _VALID_COMPLIANCE_STATES:
+        return None
+    if submission.client_acceptance != ClientAcceptance.PENDING.value:
+        return None
+    client = db.get(Client, submission.client_id)
+    if client is None or not getattr(client, "auto_accept_valid", False):
+        return None
+    return apply_client_decision(
+        db,
+        submission=submission,
+        action=ClientDecisionAction.ACCEPT,
+        reason="Aceptación automática (documento conforme).",
+        client_user_id=None,
+        commit=commit,
     )
