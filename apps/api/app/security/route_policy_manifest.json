@@ -123,6 +123,36 @@
    "notes": ""
   },
   {
+   "method": "POST",
+   "path": "/api/v1/admin/organizations/{org_id}/start-demo",
+   "function": "admin_start_demo",
+   "router": "app.api.v1.admin",
+   "file": "api/app/api/v1/admin.py",
+   "lineno": 2683,
+   "gate": "internal_admin",
+   "tenant_rule": "cross-tenant (internal_admin is global)",
+   "audit_rule": "logged (admin.org.demo_started)",
+   "rate_limit_rule": "none (auth-gated)",
+   "error_lang": "es",
+   "must_change_password_allowed": false,
+   "notes": "Phase B: provisions a 14-day demo on an existing client org."
+  },
+  {
+   "method": "PATCH",
+   "path": "/api/v1/admin/organizations/{org_id}",
+   "function": "admin_update_org_plan",
+   "router": "app.api.v1.admin",
+   "file": "api/app/api/v1/admin.py",
+   "lineno": 2683,
+   "gate": "internal_admin",
+   "tenant_rule": "cross-tenant (internal_admin is global)",
+   "audit_rule": "logged (admin.org.plan_updated)",
+   "rate_limit_rule": "none (auth-gated)",
+   "error_lang": "es",
+   "must_change_password_allowed": false,
+   "notes": "Phase B: upgrade/downgrade plan, set provider-limit override, reactivate frozen org."
+  },
+  {
    "method": "GET",
    "path": "/api/v1/admin/clients/{client_id}/compliance",
    "function": "get_client_compliance",

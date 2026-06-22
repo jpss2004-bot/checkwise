@@ -65,7 +65,7 @@ from app.api.v1.client import (
     _vendor_compliance,
 )
 from app.api.v1.reviewer import QUEUE_STATUSES
-from app.constants.plans import Plan
+from app.constants.plans import ORG_STATUS_FROZEN, Plan, capabilities_for
 from app.constants.roles import MembershipRole
 from app.constants.statuses import DocumentStatus
 from app.core.compliance_catalog import (
@@ -127,6 +127,10 @@ from app.services.search_service import SearchHit, search_submissions
 from app.services.subscription import (
     evaluate_provider_capacity,
     org_for_client_optional,
+    plan_for_org,
+    set_org_status,
+    set_plan,
+    start_demo,
 )
 
 router = APIRouter(prefix="/admin", tags=["admin"])
@@ -2678,6 +2682,164 @@ def update_client(
     db.commit()
     db.refresh(row)
     return _client_to_dict(row)
+
+
+# ---------------------------------------------------------------------------
+# Organizations — plan / demo lifecycle (Phase B)
+# ---------------------------------------------------------------------------
+
+
+class OrganizationPlanRead(BaseModel):
+    id: str
+    name: str
+    kind: str
+    plan: str | None
+    provider_limit: int | None
+    demo_expires_at: str | None
+    status: str
+    capabilities: dict[str, bool]
+
+
+class OrganizationPlanUpdate(BaseModel):
+    plan: str | None = None
+    provider_limit: int | None = None
+    status: str | None = None
+
+
+def _org_plan_read(org: Organization) -> OrganizationPlanRead:
+    return OrganizationPlanRead(
+        id=org.id,
+        name=org.name,
+        kind=org.kind,
+        plan=org.plan,
+        provider_limit=org.provider_limit,
+        demo_expires_at=(
+            org.demo_expires_at.isoformat() if org.demo_expires_at else None
+        ),
+        status=org.status,
+        capabilities=capabilities_for(plan_for_org(org)),
+    )
+
+
+def _org_audit_snapshot(org: Organization) -> dict:
+    return {
+        "plan": org.plan,
+        "provider_limit": org.provider_limit,
+        "demo_expires_at": (
+            org.demo_expires_at.isoformat() if org.demo_expires_at else None
+        ),
+        "status": org.status,
+    }
+
+
+def _locked_client_org_or_404(db: Session, org_id: str) -> Organization:
+    """Row-locked client Organization (FOR UPDATE) so plan/status mutations
+    are race-safe; 404 if missing, 400 if it isn't a client org."""
+    org = db.scalars(
+        select(Organization).where(Organization.id == org_id).with_for_update()
+    ).first()
+    if org is None:
+        raise HTTPException(
+            status.HTTP_404_NOT_FOUND, detail="Organización no encontrada."
+        )
+    if org.kind != "client":
+        raise HTTPException(
+            status.HTTP_400_BAD_REQUEST,
+            detail="Solo las organizaciones de cliente tienen plan.",
+        )
+    return org
+
+
+@router.post(
+    "/organizations/{org_id}/start-demo",
+    response_model=OrganizationPlanRead,
+    summary="Provision a 14-day demo on an existing client organization",
+)
+def admin_start_demo(
+    org_id: str, db: DbSession, current: AdminUser, request: Request
+) -> OrganizationPlanRead:
+    """Convert a client org to a fresh 14-day demo (plan='demo', deadline set,
+    provider cap = demo default 5, status active)."""
+    org = _locked_client_org_or_404(db, org_id)
+    before = _org_audit_snapshot(org)
+    start_demo(db, org)
+    _audit_admin(
+        db,
+        actor=current,
+        action="admin.org.demo_started",
+        entity_type="organization",
+        entity_id=org.id,
+        before=before,
+        after=_org_audit_snapshot(org),
+        request=request,
+    )
+    db.commit()
+    db.refresh(org)
+    return _org_plan_read(org)
+
+
+@router.patch(
+    "/organizations/{org_id}",
+    response_model=OrganizationPlanRead,
+    summary="Update a client org's plan / provider-limit / status",
+)
+def admin_update_org_plan(
+    org_id: str,
+    body: OrganizationPlanUpdate,
+    db: DbSession,
+    current: AdminUser,
+    request: Request,
+) -> OrganizationPlanRead:
+    """Upgrade/downgrade a plan, set a per-tenant provider-limit override, or
+    reactivate a frozen org (``status='active'``). Changing the plan always
+    clears any demo deadline. Setting ``status='frozen'`` is rejected —
+    freezing is the expiry cron's job, not a manual side-effect."""
+    org = _locked_client_org_or_404(db, org_id)
+    before = _org_audit_snapshot(org)
+    data = body.model_dump(exclude_unset=True)
+
+    if data.get("plan") is not None:
+        try:
+            new_plan = Plan(data["plan"])
+        except ValueError as exc:
+            raise HTTPException(
+                status.HTTP_400_BAD_REQUEST,
+                detail=f"Plan inválido: {data['plan']!r}.",
+            ) from exc
+        if new_plan is Plan.DEMO:
+            start_demo(db, org)
+        else:
+            set_plan(db, org, plan=new_plan)
+
+    if "provider_limit" in data:
+        # Explicit per-tenant override; null clears it to the tier default.
+        org.provider_limit = data["provider_limit"]
+
+    if data.get("status") is not None:
+        if data["status"] == ORG_STATUS_FROZEN:
+            raise HTTPException(
+                status.HTTP_400_BAD_REQUEST,
+                detail=(
+                    "El congelamiento es automático (expiración del demo). "
+                    "Para reactivar usa status='active'."
+                ),
+            )
+        set_org_status(db, org, status=data["status"])
+
+    db.flush()
+    _audit_admin(
+        db,
+        actor=current,
+        action="admin.org.plan_updated",
+        entity_type="organization",
+        entity_id=org.id,
+        before=before,
+        after=_org_audit_snapshot(org),
+        request=request,
+    )
+    db.commit()
+    db.refresh(org)
+    return _org_plan_read(org)
 
 
 # ---------------------------------------------------------------------------

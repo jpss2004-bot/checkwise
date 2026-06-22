@@ -16,13 +16,22 @@ path).
 from __future__ import annotations
 
 from dataclasses import dataclass
+from datetime import UTC, datetime, timedelta
 
 from fastapi import HTTPException, status
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
-from app.constants.plans import Plan, coerce_plan, provider_limit_default
+from app.constants.plans import (
+    DEMO_DURATION_DAYS,
+    ORG_STATUS_ACTIVE,
+    VALID_ORG_STATUSES,
+    Plan,
+    coerce_plan,
+    provider_limit_default,
+)
 from app.constants.statuses import VendorStatus
+from app.core.time import utc_now
 from app.models import Organization, Vendor
 
 __all__ = [
@@ -30,10 +39,14 @@ __all__ = [
     "active_provider_count",
     "assert_provider_capacity",
     "evaluate_provider_capacity",
+    "is_org_blocked",
     "org_for_client",
     "org_for_client_optional",
     "plan_for_org",
     "provider_limit_for_org",
+    "set_org_status",
+    "set_plan",
+    "start_demo",
 ]
 
 
@@ -155,3 +168,71 @@ def assert_provider_capacity(
             },
         )
     return decision
+
+
+# ---------------------------------------------------------------------------
+# Phase B — org status + demo lifecycle (provisioning, gates, crons)
+# ---------------------------------------------------------------------------
+
+
+def _as_utc(dt: datetime) -> datetime:
+    """Coerce a possibly-naive datetime to aware UTC. ``demo_expires_at`` is
+    stored timezone-aware on Postgres but can come back naive from SQLite
+    (tests); treat naive values as UTC so the comparison never raises."""
+    return dt if dt.tzinfo is not None else dt.replace(tzinfo=UTC)
+
+
+def is_org_blocked(org: Organization, *, now: datetime | None = None) -> bool:
+    """Whether the org should be blocked at the auth / portal gate.
+
+    Blocked iff its status is non-active, OR it is a demo whose deadline has
+    passed. This is the single source of truth shared by the login gate (B2)
+    and the portal freeze gate (B3) so the freeze rule is never duplicated.
+    A demo with ``demo_expires_at IS NULL`` is treated as non-expiring.
+    """
+    if org.status != ORG_STATUS_ACTIVE:
+        return True
+    if org.plan == Plan.DEMO.value and org.demo_expires_at is not None:
+        return _as_utc(org.demo_expires_at) <= (now or utc_now())
+    return False
+
+
+def start_demo(
+    db: Session, org: Organization, *, days: int = DEMO_DURATION_DAYS
+) -> Organization:
+    """Convert an org to a fresh demo: ``plan='demo'``, a ``days``-day deadline,
+    ``status='active'``, and the per-tenant override cleared so the demo tier
+    default (5) applies. The caller MUST hold a ``FOR UPDATE`` lock on ``org``.
+    """
+    org.plan = Plan.DEMO.value
+    org.demo_expires_at = utc_now() + timedelta(days=days)
+    org.provider_limit = None
+    org.status = ORG_STATUS_ACTIVE
+    db.flush()
+    return org
+
+
+def set_plan(db: Session, org: Organization, *, plan: Plan) -> Organization:
+    """Move the org to a non-demo ``plan``, ALWAYS clearing ``demo_expires_at``
+    (a leftover demo deadline on a paid plan would wrongly trip the gate). The
+    per-tenant ``provider_limit`` override is left untouched. The caller MUST
+    hold a ``FOR UPDATE`` lock on ``org``."""
+    org.plan = plan.value
+    org.demo_expires_at = None
+    db.flush()
+    return org
+
+
+def set_org_status(db: Session, org: Organization, *, status: str) -> Organization:
+    """Set ``org.status`` after validating it against ``VALID_ORG_STATUSES``.
+    The caller MUST hold a ``FOR UPDATE`` lock on ``org``."""
+    if status not in VALID_ORG_STATUSES:
+        from fastapi import status as http_status
+
+        raise HTTPException(
+            http_status.HTTP_400_BAD_REQUEST,
+            detail=f"Estado de organización inválido: {status!r}.",
+        )
+    org.status = status
+    db.flush()
+    return org

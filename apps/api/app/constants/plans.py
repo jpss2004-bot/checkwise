@@ -36,6 +36,23 @@ DEFAULT_PLAN = Plan.LEGACY
 # provisioning; Phase A only models the column.
 DEMO_DURATION_DAYS = 14
 
+# Phase B — a frozen demo becomes purge-eligible only after this grace
+# window (measured from when it was frozen), so an upgrade can still
+# restore everything in place during the window.
+DEMO_GRACE_PERIOD_DAYS = 30
+
+# ``organizations.status`` lifecycle (Phase B). ``active`` = normal;
+# ``frozen`` = trial ended / suspended (recoverable by upgrade); ``expired``
+# is a reserved terminal label set only by an admin. Both non-active states
+# block the auth/portal gates, so the single block predicate everywhere is
+# ``status != 'active'`` (see ``subscription.is_org_blocked``).
+ORG_STATUS_ACTIVE = "active"
+ORG_STATUS_FROZEN = "frozen"
+ORG_STATUS_EXPIRED = "expired"
+VALID_ORG_STATUSES: frozenset[str] = frozenset(
+    {ORG_STATUS_ACTIVE, ORG_STATUS_FROZEN, ORG_STATUS_EXPIRED}
+)
+
 
 # Default provider cap per tier. ``None`` = uncapped (no enforcement). An
 # explicit ``organizations.provider_limit`` overrides the value here.

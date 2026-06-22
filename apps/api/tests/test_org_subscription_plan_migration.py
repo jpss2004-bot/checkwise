@@ -120,3 +120,22 @@ def test_plan_values_match_plan_enum():
 
     migration = _load_migration()
     assert set(migration._PLAN_VALUES) == {p.value for p in Plan}
+
+
+def test_0057_status_values_match_constant():
+    """Phase B migration 0057's hardcoded status CHECK values must match the
+    live VALID_ORG_STATUSES constant (same drift discipline as 0056's plan
+    CHECK), so the Postgres CHECK never rejects a status the app may write."""
+    from app.constants.plans import VALID_ORG_STATUSES
+
+    path = (
+        pathlib.Path(__file__).resolve().parents[1]
+        / "alembic"
+        / "versions"
+        / "0057_org_status_check_and_demo_index.py"
+    )
+    spec = importlib.util.spec_from_file_location("m0057", path)
+    module = importlib.util.module_from_spec(spec)
+    assert spec.loader is not None
+    spec.loader.exec_module(module)
+    assert set(module._STATUS_VALUES) == set(VALID_ORG_STATUSES)
