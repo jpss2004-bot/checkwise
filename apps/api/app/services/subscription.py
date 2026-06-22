@@ -25,6 +25,7 @@ from sqlalchemy.orm import Session
 from app.constants.plans import (
     DEMO_DURATION_DAYS,
     ORG_STATUS_ACTIVE,
+    ORG_STATUS_FROZEN,
     VALID_ORG_STATUSES,
     Plan,
     capabilities_for,
@@ -40,7 +41,9 @@ __all__ = [
     "active_provider_count",
     "assert_capability",
     "assert_provider_capacity",
+    "blocked_client_ids",
     "evaluate_provider_capacity",
+    "freeze_expired_demos",
     "is_org_blocked",
     "org_for_client",
     "org_for_client_optional",
@@ -238,6 +241,43 @@ def set_org_status(db: Session, org: Organization, *, status: str) -> Organizati
     org.status = status
     db.flush()
     return org
+
+
+def freeze_expired_demos(
+    db: Session, *, now: datetime | None = None
+) -> list[Organization]:
+    """Flip every active demo org past its deadline to ``frozen`` and return
+    them (the caller audits + commits). Idempotent: already-frozen orgs aren't
+    matched, so a re-run is a no-op. Powered by the 0057 partial index."""
+    moment = now or utc_now()
+    orgs = list(
+        db.scalars(
+            select(Organization).where(
+                Organization.kind == "client",
+                Organization.plan == Plan.DEMO.value,
+                Organization.demo_expires_at.is_not(None),
+                Organization.demo_expires_at <= moment,
+                Organization.status == ORG_STATUS_ACTIVE,
+            )
+        )
+    )
+    for org in orgs:
+        org.status = ORG_STATUS_FROZEN
+    db.flush()
+    return orgs
+
+
+def blocked_client_ids(db: Session) -> set[str]:
+    """Client ids whose client org is frozen/expired — the renewal/reporting
+    crons use this to skip notifications to lapsed demos (reusing the same
+    ``is_org_blocked`` predicate the auth/portal gates enforce)."""
+    return {
+        org.client_id
+        for org in db.scalars(
+            select(Organization).where(Organization.kind == "client")
+        )
+        if org.client_id and is_org_blocked(org)
+    }
 
 
 def assert_capability(db: Session, client_id: str, capability: str) -> None:

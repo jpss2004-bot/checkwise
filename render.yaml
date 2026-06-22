@@ -517,3 +517,79 @@ services:
         sync: false
       - key: AUTH_JWT_SECRET
         sync: false
+
+  # ──────────────────────────────────────────────────────────────────
+  # Phase B — demo lifecycle crons
+  # ──────────────────────────────────────────────────────────────────
+  #
+  # Expiry freeze: flips demo orgs past their 14-day deadline to
+  # status='frozen' (reversible by an admin upgrade). Runs at 14:30 UTC,
+  # AFTER renewal (14:00) + reporting (14:05) so a freeze never races a
+  # same-day notification (those crons also skip frozen orgs).
+  - type: cron
+    name: checkwise-demo-expiry-freeze
+    runtime: python
+    plan: starter
+    rootDir: apps/api
+    branch: main
+    schedule: "30 14 * * *"
+    buildCommand: pip install -e . -c requirements.lock
+    command: python -m scripts.run_demo_expiry_freeze
+    envVars:
+      - key: CHECKWISE_ENV
+        value: production
+      - key: PYTHON_VERSION
+        value: "3.11"
+      - key: DATABASE_URL
+        fromService:
+          type: web
+          name: checkwise-api
+          envVarKey: DATABASE_URL
+
+  # Demo purge: IRREVERSIBLE hard-delete of demos frozen past the 30-day
+  # grace window (tenant data + R2 blobs). Ships as a SAFE NO-OP — the
+  # command has NO --apply and DEMO_PURGE_ENABLED=0, so it only LOGS
+  # candidates. To enable deletion: add --apply to the command AND set
+  # DEMO_PURGE_ENABLED=1 (snapshot the DB first).
+  - type: cron
+    name: checkwise-demo-purge
+    runtime: python
+    plan: starter
+    rootDir: apps/api
+    branch: main
+    schedule: "0 16 * * *"
+    buildCommand: pip install -e . -c requirements.lock
+    command: python -m scripts.run_demo_purge
+    envVars:
+      - key: CHECKWISE_ENV
+        value: production
+      - key: PYTHON_VERSION
+        value: "3.11"
+      - key: DEMO_PURGE_ENABLED
+        value: "0"
+      - key: DATABASE_URL
+        fromService:
+          type: web
+          name: checkwise-api
+          envVarKey: DATABASE_URL
+      - key: STORAGE_BACKEND
+        value: s3
+      - key: STORAGE_BUCKET
+        value: checkwise-prod
+      - key: AWS_REGION
+        value: auto
+      - key: AWS_S3_ENDPOINT
+        fromService:
+          type: web
+          name: checkwise-api
+          envVarKey: AWS_S3_ENDPOINT
+      - key: AWS_ACCESS_KEY_ID
+        fromService:
+          type: web
+          name: checkwise-api
+          envVarKey: AWS_ACCESS_KEY_ID
+      - key: AWS_SECRET_ACCESS_KEY
+        fromService:
+          type: web
+          name: checkwise-api
+          envVarKey: AWS_SECRET_ACCESS_KEY
