@@ -2831,6 +2831,23 @@ async def create_workspace_submission(
     """
     _ = workspace_id  # tenant guard already enforced by dependency
 
+    # DoS/abuse hardening: each accepted PDF runs an inline shadow-AI
+    # analysis, so an unthrottled upload loop is both a worker-pool and an
+    # Anthropic-cost lever (the per-org daily AI cap bounds total token
+    # spend, but not request churn). Throttle per workspace owner BEFORE
+    # the storage write. The key is never null — owner-less workspaces
+    # (token/cookie auth without an owner) fall back to a per-workspace
+    # bucket. Caps are generous so legitimate bulk onboarding isn't
+    # blocked. Caps are intentionally well above any realistic manual
+    # bulk-upload burst (cf. AI_HEAVY 15/min·120/hr for interactive LLM
+    # calls and EXPORT 10/min·60/hr for heavy ZIPs) so this only trips on
+    # automated abuse, not a busy provider clearing a backlog. Raises 429.
+    enforce_ai_heavy_rate_limit(
+        workspace.owner_user_id or f"workspace:{workspace.id}",
+        per_minute=60,
+        per_hour=600,
+    )
+
     assert_pdf_upload(file)
 
     # Stage 2.5 (BL-T7) — reject impossible periods at the wire. A
@@ -3052,6 +3069,19 @@ async def create_workspace_submission_batch(
     derivation) plus a per-document detail list.
     """
     _ = workspace_id  # tenant guard already enforced by dependency
+
+    # DoS/abuse hardening (mirrors the single-file path): the batch can
+    # carry up to MULTI_FILE_MAX_FILES PDFs, each running inline shadow-AI
+    # analysis, so throttle per workspace owner BEFORE any storage write.
+    # Never-null key (per-workspace fallback for owner-less workspaces);
+    # generous caps so legitimate multi-document entregas aren't blocked
+    # (same bucket + limits as the single-file path; one batch request
+    # counts once regardless of file count). Raises 429 on breach.
+    enforce_ai_heavy_rate_limit(
+        workspace.owner_user_id or f"workspace:{workspace.id}",
+        per_minute=60,
+        per_hour=600,
+    )
 
     if not settings.MULTI_FILE_UPLOAD_ENABLED:
         raise HTTPException(
@@ -4419,14 +4449,16 @@ def ask_wise_endpoint(
     # cap as the report-side AI endpoints because both burn Anthropic
     # tokens. Bucket key is the workspace owner so a runaway dock
     # client can't keep firing prompts past the per-minute / per-hour
-    # cap. ``workspace.owner_user_id`` is guaranteed non-null on any
-    # active workspace.
-    if workspace.owner_user_id:
-        enforce_ai_heavy_rate_limit(
-            workspace.owner_user_id,
-            per_minute=settings.AI_HEAVY_RATE_LIMIT_PER_MINUTE,
-            per_hour=settings.AI_HEAVY_RATE_LIMIT_PER_HOUR,
-        )
+    # cap. ``owner_user_id`` is nullable (token/cookie auth doesn't
+    # require an owner), so we ALWAYS enforce with a never-null key —
+    # owner-less workspaces fall back to a per-workspace bucket — instead
+    # of skipping the limiter when the column is null (which let an
+    # owner-less workspace call ask_wise() with no cap).
+    enforce_ai_heavy_rate_limit(
+        workspace.owner_user_id or f"workspace:{workspace.id}",
+        per_minute=settings.AI_HEAVY_RATE_LIMIT_PER_MINUTE,
+        per_hour=settings.AI_HEAVY_RATE_LIMIT_PER_HOUR,
+    )
 
     from app.services.wise.ai import (
         WiseCta,

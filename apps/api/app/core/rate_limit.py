@@ -291,16 +291,20 @@ _RATE_LIMITED_DETAIL = (
 def client_ip_from_request(request: Request) -> str:
     """Best-effort client IP for rate-limit bucketing.
 
-    Trusts the first hop of ``X-Forwarded-For`` because Render terminates
-    TLS in front of uvicorn. Falls back to ``X-Real-IP`` then to the
-    direct socket peer. Never authoritative for authorization — bucket
-    keys only.
+    Takes the RIGHTMOST ``X-Forwarded-For`` entry because Render
+    terminates TLS in front of uvicorn and *appends* the real peer to
+    any client-supplied chain — so the leftmost entry is attacker-
+    controlled (rotating it would mint a fresh bucket per request and
+    defeat every rate limit) while the rightmost is the IP Render saw.
+    With Render's single trusted proxy in front, that last hop is the
+    real client. Falls back to ``X-Real-IP`` then to the direct socket
+    peer. Never authoritative for authorization — bucket keys only.
     """
     xff = request.headers.get("x-forwarded-for")
     if xff:
-        first = xff.split(",")[0].strip()
-        if first:
-            return first
+        last = xff.split(",")[-1].strip()
+        if last:
+            return last
     real = request.headers.get("x-real-ip")
     if real:
         return real.strip()

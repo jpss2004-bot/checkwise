@@ -1085,20 +1085,35 @@ def _attempt_login(api_client: TestClient, email: str, password: str):
 def test_account_locks_after_threshold_failed_logins(
     api_client: TestClient, db_factory
 ) -> None:
-    _seed_user(db_factory, password="Correct horse battery 4")
+    # Enumeration-safety change (2026-06-21): the lockout is still enforced
+    # in the DB (locked_until is set, and even the correct password is
+    # refused during the cooldown), but login now returns the SAME generic
+    # 401 "Credenciales inválidas." for locked accounts as for unknown /
+    # bad-password ones — a distinct 429 lockout message was a 401-vs-429
+    # account-enumeration oracle (only an existing active account can lock).
+    # So we assert the lock is invisible at the HTTP layer (all 401) and
+    # verify the lock is real by checking locked_until in the DB.
+    user_id, _org, _pw = _seed_user(db_factory, password="Correct horse battery 4")
     # Four bad attempts stay generic 401…
     for _ in range(4):
         r = _attempt_login(api_client, "ada@legalshelf.mx", "nope")
         assert r.status_code == 401, r.text
-    # …the fifth trips the lock.
+    # …the fifth trips the lock — still a generic 401, no 429 / "bloqueada".
     fifth = _attempt_login(api_client, "ada@legalshelf.mx", "nope")
-    assert fifth.status_code == 429
-    assert "bloqueada" in fifth.json()["detail"].lower()
-    # Even the CORRECT password is refused during the cooldown.
+    assert fifth.status_code == 401
+    assert "bloqueada" not in fifth.json()["detail"].lower()
+    # The lock is real even though it isn't surfaced: locked_until is set.
+    db = db_factory()
+    try:
+        assert db.get(User, user_id).locked_until is not None
+    finally:
+        db.close()
+    # Even the CORRECT password is refused during the cooldown — and the
+    # refusal is the same generic 401 (no lockout oracle).
     correct = _attempt_login(
         api_client, "ada@legalshelf.mx", "Correct horse battery 4"
     )
-    assert correct.status_code == 429
+    assert correct.status_code == 401
 
 
 def test_expired_lock_allows_login(api_client: TestClient, db_factory) -> None:
@@ -1130,6 +1145,49 @@ def test_successful_login_resets_failed_count(
         assert db.get(User, user_id).failed_login_count == 0
     finally:
         db.close()
+
+
+# ---------------------------------------------------------------------------
+# FIX 3 — cross-IP per-email login rate cap (anti-spray)
+# ---------------------------------------------------------------------------
+
+
+def test_login_cross_ip_per_email_cap_trips(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Spraying ONE account from many (spoofed) source IPs must eventually
+    trip the cross-IP per-email bucket, even though no single (ip,email)
+    pair exceeds its tighter cap. Calls the limiter helper directly with
+    fake requests carrying rotating rightmost XFF hops so we exercise the
+    bucket logic without bcrypt / DB work."""
+    from fastapi import HTTPException
+
+    from app.api.v1.auth import _enforce_login_rate_limit
+    from app.core.config import settings as cfg
+    from app.core.rate_limit import login_limiter
+
+    login_limiter.reset()
+    limit = cfg.AUTH_LOGIN_RATE_LIMIT_PER_MINUTE  # default 10
+    email_cap = limit * 5  # cross-IP per-email cap
+
+    def _req_with_ip(ip: str):
+        class _Req:
+            headers = {"x-forwarded-for": ip}
+            client = None
+
+        return _Req()
+
+    # Each request uses a DISTINCT rightmost IP (so the per-(ip,email) and
+    # per-IP buckets never fill) but the SAME email — only the per-email
+    # bucket accumulates. The (email_cap+1)-th request trips.
+    for i in range(email_cap):
+        _enforce_login_rate_limit(
+            _req_with_ip(f"203.0.113.{i}"), "spray@legalshelf.mx"
+        )
+    with pytest.raises(HTTPException) as exc:
+        _enforce_login_rate_limit(
+            _req_with_ip(f"203.0.113.{email_cap}"), "spray@legalshelf.mx"
+        )
+    assert exc.value.status_code == 429
+    login_limiter.reset()
 
 
 # ---------------------------------------------------------------------------

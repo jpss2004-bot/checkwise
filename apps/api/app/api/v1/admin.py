@@ -73,7 +73,10 @@ from app.core.compliance_catalog import (
 )
 from app.core.config import settings
 from app.core.period_validation import MAX_YEAR, MIN_YEAR
-from app.core.rate_limit import client_ip_from_request
+from app.core.rate_limit import (
+    client_ip_from_request,
+    enforce_export_rate_limit,
+)
 from app.core.text_search import accent_ci_contains
 from app.db.session import get_db
 from app.models import (
@@ -167,6 +170,49 @@ def _assert_can_grant_role(actor: CurrentUser, role: str) -> None:
             detail=(
                 "Solo un internal_admin puede otorgar los roles "
                 "internal_admin o platform_admin."
+            ),
+        )
+
+
+def _assert_can_modify_target(
+    db: Session, actor: CurrentUser, target: User
+) -> None:
+    """ADMIN-1 (symmetric) — only a full ``internal_admin`` may run a
+    destructive user-lifecycle action against a *privileged* target.
+
+    The mirror image of :func:`_assert_can_grant_role`: that fences off
+    *granting* a privileged role, this fences off *reaching* an account
+    that already holds one. The destructive lifecycle endpoints (disable,
+    password reset, membership revoke, soft-delete) are gated by
+    ``PlatformUser``, so a future IT-only ``platform_admin`` could
+    otherwise disable / reset / delete an ``internal_admin`` and lock the
+    compliance team out of the surface ``AdminUser`` exists to fence off.
+
+    The target's roles are read the same way the directory builds them —
+    from active ``Membership`` rows (the canonical role store). When the
+    target carries ``internal_admin`` or ``platform_admin``, the actor
+    must hold ``internal_admin``; a pure ``platform_admin`` is refused
+    with 403. No-op for today's accounts (migration 0044 backfilled
+    ``internal_admin`` onto every operator); only bites the first IT-only
+    one.
+    """
+    target_roles = set(
+        db.scalars(
+            select(Membership.role).where(
+                Membership.user_id == target.id,
+                Membership.status == "active",
+            )
+        )
+    )
+    if (
+        target_roles & _PRIVILEGED_ROLES
+        and MembershipRole.INTERNAL_ADMIN.value not in actor.roles
+    ):
+        raise HTTPException(
+            status.HTTP_403_FORBIDDEN,
+            detail=(
+                "Solo un internal_admin puede modificar una cuenta con "
+                "rol internal_admin o platform_admin."
             ),
         )
 
@@ -1556,6 +1602,11 @@ def update_user_status(
             status.HTTP_409_CONFLICT,
             detail="No puedes desactivar tu propia cuenta.",
         )
+    # ADMIN-1 (symmetric): a pure platform_admin must not disable a
+    # privileged (internal_admin / platform_admin) account. Only fences
+    # the destructive DISABLE path — reactivation stays open.
+    if payload.status == "disabled":
+        _assert_can_modify_target(db, current, target)
 
     before_status = target.status
     target.status = payload.status
@@ -1613,6 +1664,9 @@ def reset_user_password(
             status.HTTP_409_CONFLICT,
             detail="Reactiva al usuario antes de restablecer su contraseña.",
         )
+    # ADMIN-1 (symmetric): a pure platform_admin must not seize a
+    # privileged account by minting (and reading back) its temp password.
+    _assert_can_modify_target(db, current, target)
 
     temp_password = generate_temp_password()
     # Record the hash being replaced (lazily, like client_users /
@@ -2098,6 +2152,11 @@ def revoke_user_membership(
     ``admin.user.membership_revoked``.
     """
     membership = _membership_for_user_or_404(db, user_id, membership_id)
+    # ADMIN-1 (symmetric): a pure platform_admin must not strip roles from
+    # a privileged (internal_admin / platform_admin) account.
+    target = db.get(User, user_id)
+    if target is not None:
+        _assert_can_modify_target(db, current, target)
     if membership.is_primary and membership.status == "active":
         raise HTTPException(
             status.HTTP_409_CONFLICT,
@@ -2353,6 +2412,9 @@ def delete_user(
         raise HTTPException(
             status.HTTP_409_CONFLICT, detail="La cuenta ya está eliminada."
         )
+    # ADMIN-1 (symmetric): a pure platform_admin must not soft-delete a
+    # privileged (internal_admin / platform_admin) account.
+    _assert_can_modify_target(db, current, target)
 
     active = db.scalars(
         select(Membership).where(
@@ -2691,7 +2753,47 @@ def update_workspace_admin(
     if "status" in data and data["status"] is not None:
         row.status = data["status"]
     if "owner_user_id" in data:
-        row.owner_user_id = data["owner_user_id"] or None
+        new_owner_id = data["owner_user_id"] or None
+        # ADMIN-2: owner_user_id is the /portal auth carrier — the portal
+        # gates a provider's document access on
+        # ``workspace.owner_user_id == current.user.id``. An arbitrary or
+        # typo'd id would silently grant provider access (or orphan the
+        # workspace), so a non-null reassignment must point at a real,
+        # live, genuine-provider account.
+        if new_owner_id is not None:
+            owner = db.get(User, new_owner_id)
+            if owner is None:
+                raise HTTPException(
+                    status.HTTP_404_NOT_FOUND,
+                    detail="El usuario propietario no existe.",
+                )
+            if owner.deleted_at is not None:
+                raise HTTPException(
+                    status.HTTP_400_BAD_REQUEST,
+                    detail="No puedes asignar una cuenta eliminada como propietaria.",
+                )
+            owner_roles = set(
+                db.scalars(
+                    select(Membership.role).where(
+                        Membership.user_id == owner.id,
+                        Membership.status == "active",
+                    )
+                )
+            )
+            privileged_owner_roles = {
+                MembershipRole.INTERNAL_ADMIN.value,
+                MembershipRole.PLATFORM_ADMIN.value,
+                MembershipRole.CLIENT_ADMIN.value,
+            }
+            if owner_roles & privileged_owner_roles:
+                raise HTTPException(
+                    status.HTTP_400_BAD_REQUEST,
+                    detail=(
+                        "El propietario del workspace debe ser una cuenta de "
+                        "proveedor, no un administrador interno o de cliente."
+                    ),
+                )
+        row.owner_user_id = new_owner_id
     if "display_name" in data:
         row.display_name = (data["display_name"] or "").strip() or None
     if "filial_name" in data:
@@ -5702,6 +5804,15 @@ def admin_vendor_expediente_zip(
         ExpedienteFilters,
         stream_expediente_zip,
         summarize_expediente,
+    )
+
+    # Heavy streaming export — throttle per user so the admin surface can't
+    # be used as a resource-exhaustion lever, matching the client/provider
+    # expediente paths.
+    enforce_export_rate_limit(
+        current.user.id,
+        per_minute=settings.EXPORT_RATE_LIMIT_PER_MINUTE,
+        per_hour=settings.EXPORT_RATE_LIMIT_PER_HOUR,
     )
 
     vendor = db.get(Vendor, vendor_id)

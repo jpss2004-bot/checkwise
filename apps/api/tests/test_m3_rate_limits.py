@@ -77,6 +77,58 @@ def _reset_limiters() -> Generator[None, None, None]:
     export_heavy_limiter.reset()
 
 
+# ─── X-Forwarded-For resolution (spoof-resistant bucketing) ─────
+
+
+def test_client_ip_takes_rightmost_xff_hop() -> None:
+    """Render APPENDS the real peer to any client-supplied XFF chain, so
+    the rightmost entry is the IP Render saw and the leftmost is
+    attacker-controlled. The resolver must take the rightmost hop;
+    otherwise rotating the leftmost value mints a fresh rate-limit bucket
+    per request and defeats every limit."""
+    from app.core.rate_limit import client_ip_from_request
+
+    class _Req:
+        # Attacker spoofs two fake hops; Render appends the real 198.51.100.9.
+        headers = {"x-forwarded-for": "1.2.3.4, 5.6.7.8, 198.51.100.9"}
+        client = None
+
+    assert client_ip_from_request(_Req()) == "198.51.100.9"
+
+
+def test_client_ip_rotating_leftmost_xff_shares_one_bucket() -> None:
+    """Two requests that differ only in the (spoofable) leftmost XFF
+    entries but share the real rightmost hop must resolve to the SAME IP,
+    so they share a rate-limit bucket."""
+    from app.core.rate_limit import client_ip_from_request
+
+    class _ReqA:
+        headers = {"x-forwarded-for": "9.9.9.9, 203.0.113.50"}
+        client = None
+
+    class _ReqB:
+        headers = {"x-forwarded-for": "8.8.8.8, 203.0.113.50"}
+        client = None
+
+    assert client_ip_from_request(_ReqA()) == client_ip_from_request(_ReqB())
+
+
+def test_client_ip_falls_back_to_real_ip_then_sentinel() -> None:
+    """No XFF → X-Real-IP; nothing at all → the 0.0.0.0 sentinel."""
+    from app.core.rate_limit import client_ip_from_request
+
+    class _RealIp:
+        headers = {"x-real-ip": "203.0.113.77"}
+        client = None
+
+    class _Nothing:
+        headers: dict[str, str] = {}
+        client = None
+
+    assert client_ip_from_request(_RealIp()) == "203.0.113.77"
+    assert client_ip_from_request(_Nothing()) == "0.0.0.0"
+
+
 # ─── Share-unlock brute-force limiter ───────────────────────────
 
 

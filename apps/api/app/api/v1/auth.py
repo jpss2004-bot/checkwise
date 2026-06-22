@@ -40,6 +40,7 @@ from sqlalchemy.orm import Session
 from app.core.common_passwords import is_common_password
 from app.core.config import settings
 from app.core.rate_limit import (
+    client_ip_from_request,
     forgot_password_limiter,
     hash_identifier,
     login_limiter,
@@ -329,25 +330,16 @@ def _as_utc(value: datetime) -> datetime:
     return value.astimezone(UTC)
 
 
-_LOCKOUT_DETAIL = "Cuenta bloqueada temporalmente por intentos fallidos."
-
-
 def _is_account_locked(user: User) -> bool:
     return user.locked_until is not None and _as_utc(user.locked_until) > utc_now()
 
 
-def _lockout_retry_minutes(user: User) -> int:
-    if user.locked_until is None:
-        return 0
-    remaining = _as_utc(user.locked_until) - utc_now()
-    return max(1, int(remaining.total_seconds() // 60) + 1)
-
-
-def _lockout_detail_for(user: User) -> str:
-    return (
-        f"{_LOCKOUT_DETAIL} Intenta de nuevo en "
-        f"~{_lockout_retry_minutes(user)} min."
-    )
+# NOTE: the lockout state is enforced (a locked account is rejected
+# pre-password) but never surfaced to the caller with a distinct message
+# or status — login returns the same generic 401 for locked, unknown, and
+# bad-password cases so the response can't be used to enumerate which
+# emails exist (a 401-vs-429 oracle). The retry-minutes / lockout-detail
+# formatters were therefore removed.
 
 
 def _register_failed_login(db: Session, user: User) -> None:
@@ -371,21 +363,12 @@ def _email_log_hash(email: str) -> str:
 
 
 def _client_ip(request: Request) -> str:
-    """Best-effort IP. Trusts the first hop of `X-Forwarded-For` because
-    Render terminates TLS in front of uvicorn. Falls back to the direct
-    socket peer. Used for rate-limit bucketing only — never authoritative
-    for authorization."""
-    xff = request.headers.get("x-forwarded-for")
-    if xff:
-        first = xff.split(",")[0].strip()
-        if first:
-            return first
-    real = request.headers.get("x-real-ip")
-    if real:
-        return real.strip()
-    if request.client and request.client.host:
-        return request.client.host
-    return "0.0.0.0"
+    """Best-effort IP for rate-limit bucketing only — never authoritative
+    for authorization. Thin wrapper over the canonical
+    :func:`client_ip_from_request` resolver (rightmost ``X-Forwarded-For``
+    hop behind Render's single trusted proxy → X-Real-IP → socket peer),
+    so the spoofable leftmost-XFF parsing lives in exactly one place."""
+    return client_ip_from_request(request)
 
 
 _RATE_LIMITED_DETAIL = (
@@ -428,13 +411,20 @@ def _enforce_login_rate_limit(request: Request, email: str) -> None:
     # Per-IP limit is more permissive (corporate NATs share IPs); the
     # per-(ip,email) pair gets the tighter cap.
     ok_ip = login_limiter.check(ip_bucket, limit=limit * 3, window_seconds=60)
-    ok_email = login_limiter.check(
+    ok_pair = login_limiter.check(
         f"login:ip-email:{hash_identifier(ip)}:{hash_identifier(email)}",
         limit=limit,
         window_seconds=60,
     )
-    _ = email_bucket  # reserved for a future cross-IP per-email cap
-    if not ok_ip or not ok_email:
+    # Cross-IP per-email cap: without it, an attacker who rotates the
+    # (now rightmost-pinned, but defense-in-depth) source IP could spray a
+    # single account past the per-(ip,email) bucket. A small multiple of
+    # the pair limit leaves headroom for one user legitimately hitting the
+    # form from a couple of devices/networks while still capping a spray.
+    ok_email = login_limiter.check(
+        email_bucket, limit=limit * 5, window_seconds=60
+    )
+    if not ok_ip or not ok_pair or not ok_email:
         raise HTTPException(
             status.HTTP_429_TOO_MANY_REQUESTS, detail=_RATE_LIMITED_DETAIL
         )
@@ -442,7 +432,18 @@ def _enforce_login_rate_limit(request: Request, email: str) -> None:
 
 def _enforce_forgot_password_rate_limit(request: Request, email: str) -> None:
     """Tight cap on /auth/forgot-password to avoid reset-link enumeration
-    + mail-bombing. Lower volume than login because resets are rarer."""
+    + mail-bombing. Lower volume than login because resets are rarer.
+
+    forgot-password has NO account lockout (unlike login), so rate
+    limiting is its only brute-force / abuse guard. Two buckets:
+
+    * ``ip_bucket`` (per-IP) bounds enumeration sweeps from one source.
+    * ``email_bucket`` (per-EMAIL, **cross-IP** — the key carries no IP
+      component) is the mailbomb guard: it caps how many reset emails a
+      single address can be sent per hour *regardless* of how many source
+      IPs the requests come from, so XFF rotation can't be used to flood a
+      known mailbox past the per-IP cap.
+    """
     limit = settings.AUTH_FORGOT_PASSWORD_RATE_LIMIT_PER_HOUR
     if limit <= 0:
         return
@@ -668,12 +669,16 @@ def login(
 
     # Account lockout — refuse a locked, active account before the
     # password check (so even the correct password is rejected during the
-    # cooldown). Only signalled for existing active accounts; unknown /
-    # disabled stay on the generic path below.
+    # cooldown). The DB lockout bookkeeping (locked_until / failed_login_count)
+    # is untouched; we just return the SAME generic 401 as the unknown-user
+    # / bad-password path instead of a distinct 429 lockout message. A
+    # 401-vs-429 split was an account-enumeration oracle: only existing
+    # active accounts could be locked, so the 429 confirmed the email
+    # exists. Run the dummy bcrypt first to keep timing comparable.
     if user is not None and user.status == "active" and _is_account_locked(user):
+        verify_password(payload.password, _DUMMY_HASH)
         raise HTTPException(
-            status.HTTP_429_TOO_MANY_REQUESTS,
-            detail=_lockout_detail_for(user),
+            status.HTTP_401_UNAUTHORIZED, detail="Credenciales inválidas."
         )
 
     # Generic 401 for both unknown-user and bad-password so the response
@@ -699,13 +704,14 @@ def login(
             user_agent=ua,
         )
         db.commit()
-        # Count the failure; if it trips the threshold, surface the lock.
+        # Count the failure; this may trip the lockout threshold and set
+        # ``locked_until`` in the DB. We deliberately do NOT surface the
+        # lock with a distinct 429 message — that would re-open the
+        # 401-vs-429 enumeration oracle (only an existing active account
+        # can be locked). The lockout bookkeeping still happens here and is
+        # enforced pre-password on the next attempt; the response stays the
+        # same generic 401 the unknown-user / bad-password path returns.
         _register_failed_login(db, user)
-        if _is_account_locked(user):
-            raise HTTPException(
-                status.HTTP_429_TOO_MANY_REQUESTS,
-                detail=_lockout_detail_for(user),
-            )
         raise HTTPException(status.HTTP_401_UNAUTHORIZED, detail="Credenciales inválidas.")
 
     # Successful auth — clear any accumulated failure / lock state.

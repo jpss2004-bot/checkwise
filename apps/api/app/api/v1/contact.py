@@ -26,6 +26,7 @@ from typing import Annotated
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Request, status
 from sqlalchemy.orm import Session
 
+from app.core.rate_limit import client_ip_from_request
 from app.db.session import get_db
 from app.schemas.contact import (
     BookingIntentCreate,
@@ -48,25 +49,20 @@ DbSession = Annotated[Session, Depends(get_db)]
 
 
 def _client_ip(request: Request) -> str | None:
-    """Resolve the client IP, preferring proxy headers where present.
+    """Resolve the client IP for rate-limit bucketing.
 
-    Render places its load balancer in front of the uvicorn process,
-    so ``request.client.host`` is the LB. We look at ``x-forwarded-for``
-    first (Render injects it), fall back to direct.
+    Delegates to the canonical :func:`client_ip_from_request` resolver,
+    which takes the RIGHTMOST ``X-Forwarded-For`` hop (Render appends the
+    real peer to any client-supplied chain, so the leftmost entry is
+    spoofable and the rightmost is what Render saw). Returns ``None`` only
+    when the IP is truly unresolvable (the resolver's ``0.0.0.0``
+    sentinel) so the caller's existing None-handling contract is
+    preserved.
     """
-    xff = request.headers.get("x-forwarded-for")
-    if xff:
-        # XFF is a comma-separated chain; the leftmost entry is the
-        # original client.
-        first = xff.split(",")[0].strip()
-        if first:
-            return first
-    real = request.headers.get("x-real-ip")
-    if real:
-        return real.strip()
-    if request.client and request.client.host:
-        return request.client.host
-    return None
+    ip = client_ip_from_request(request)
+    if not ip or ip == "0.0.0.0":
+        return None
+    return ip
 
 
 @router.post(
@@ -82,7 +78,12 @@ def post_contact_request(
     db: DbSession,
 ) -> ContactRequestPublicResponse:
     ip = _client_ip(request)
-    ip_h = hash_ip(ip)
+    # Defense in depth: when the IP is unresolvable, bucket every such
+    # request under a shared "unknown" key rather than letting it bypass
+    # the limiter (``record_and_check_rate(None)`` returns True). A flood
+    # of header-less requests then shares one budget instead of each
+    # getting a free pass.
+    ip_h = hash_ip(ip) or "unknown"
     user_agent_raw = request.headers.get("user-agent")
     user_agent = (user_agent_raw or "")[:512] or None
 
@@ -144,8 +145,11 @@ def post_booking_intent(
     bucket is namespaced so beacon traffic can't starve the real
     contact form's allowance.
     """
-    ip_h = hash_ip(_client_ip(request))
-    rate_key = f"booking:{ip_h}" if ip_h else None
+    # Unknown IPs share one "booking:unknown" bucket instead of bypassing
+    # the limiter (a None key returns True unconditionally), so a flood of
+    # header-less beacons can't relay unbounded Slack pings.
+    ip_h = hash_ip(_client_ip(request)) or "unknown"
+    rate_key = f"booking:{ip_h}"
     if record_and_check_rate(rate_key):
         user_agent = (request.headers.get("user-agent") or "")[:512] or None
         background.add_task(

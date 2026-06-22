@@ -134,6 +134,23 @@ def test_boot_guard_raises_on_placeholder_in_production() -> None:
         _validate_boot_security(s)
 
 
+def test_boot_guard_raises_on_short_secret_in_production() -> None:
+    """A non-placeholder but too-short secret (covers empty + weak) must
+    also refuse to boot in production — the placeholder check only catches
+    the exact committed string, so a blank or 1-char dashboard value would
+    otherwise sign every JWT with a brute-forceable key (FIX 2)."""
+    from app.core.config import (
+        InsecureBootError,
+        Settings,
+        _validate_boot_security,
+    )
+
+    for weak in ("", "x", "short-secret"):
+        s = Settings(CHECKWISE_ENV="production", AUTH_JWT_SECRET=weak)
+        with pytest.raises(InsecureBootError):
+            _validate_boot_security(s)
+
+
 def test_boot_guard_passes_with_real_secret_in_production() -> None:
     """A secret that isn't the in-code placeholder is allowed even in
     production — the guard intentionally trips on the *known* leaked

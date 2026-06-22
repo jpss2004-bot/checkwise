@@ -671,6 +671,18 @@ def _validate_boot_security(settings: Settings) -> None:
             "random string in the Render dashboard (openssl rand -hex 32) "
             "before redeploying."
         )
+    # The placeholder check above only catches the *exact* committed string.
+    # An empty or short secret (e.g. AUTH_JWT_SECRET set blank or to a
+    # 1-char value in the dashboard) would otherwise boot and sign every
+    # JWT with a trivially brute-forceable key. Enforce the documented
+    # 32-char minimum here so weak/empty secrets fail closed too.
+    if len(settings.AUTH_JWT_SECRET) < 32:
+        raise InsecureBootError(
+            "Refusing to start: AUTH_JWT_SECRET is too short (min 32 chars). "
+            "An empty or weak secret lets anyone forge JWTs. Set "
+            "AUTH_JWT_SECRET to a fresh 32+ char random string in the Render "
+            "dashboard (openssl rand -hex 32) before redeploying."
+        )
     # Soft warning — FRONTEND_BASE_URL is what every transactional
     # email CTA links to. A non-local deploy that still points at
     # localhost will send password-reset / reviewer-decision /

@@ -37,6 +37,7 @@ import urllib.request
 from dataclasses import dataclass
 
 from app.core.config import settings
+from app.services.whatsapp_templates import PHONE_OTP_TEMPLATE
 
 log = logging.getLogger("checkwise.whatsapp_delivery")
 
@@ -174,15 +175,39 @@ def send_whatsapp_template(
     }
 
     if settings.WHATSAPP_DRY_RUN:
+        # DRY_RUN is a dev/staging aid. If it's ever set on a non-local
+        # deploy, real outbound is silently disabled — log loudly so the
+        # misconfiguration is visible instead of users mysteriously never
+        # receiving messages (e.g. their phone-verification OTP).
+        if not settings.is_local_env:
+            log.warning(
+                "whatsapp.dry_run_in_non_local CHECKWISE_ENV=%s template=%s — "
+                "outbound WhatsApp is DISABLED (WHATSAPP_DRY_RUN=true). Unset "
+                "WHATSAPP_DRY_RUN to send real messages.",
+                settings.CHECKWISE_ENV,
+                template_name,
+            )
         # Logged at INFO so a dev tail can confirm what would have shipped
         # without the call ever reaching Meta. Useful while templates are
-        # in review.
-        log.info(
-            "whatsapp.dry_run template=%s to=%s components=%s",
-            template_name,
-            recipient,
-            json.dumps(components, ensure_ascii=False),
-        )
+        # in review. NEVER log the OTP template's components — that array
+        # carries the plaintext 6-digit verification code, which must not
+        # land in logs regardless of environment. Log a redacted summary
+        # for OTP; the full payload is fine for non-secret templates.
+        if template_name == PHONE_OTP_TEMPLATE:
+            log.info(
+                "whatsapp.dry_run template=%s to=%s components=<redacted "
+                "OTP, %d component(s)>",
+                template_name,
+                recipient,
+                len(components),
+            )
+        else:
+            log.info(
+                "whatsapp.dry_run template=%s to=%s components=%s",
+                template_name,
+                recipient,
+                json.dumps(components, ensure_ascii=False),
+            )
         return WhatsAppDeliveryResult(
             delivered=False,
             status="skipped_dry_run",

@@ -101,8 +101,13 @@ def whatsapp_provider_of_reviewer_decision(
         return _skipped("preference_excludes_whatsapp", user=user)
     if not whatsapp_configured():
         return _skipped("whatsapp_not_configured", user=user)
-    if not user.phone:
-        return _skipped("phone_missing", user=user)
+    # Only send to the VERIFIED E.164 number. ``phone_e164`` +
+    # ``phone_verified_at`` are set together by the OTP confirm flow; the
+    # legacy ``user.phone`` is self-asserted and unverified, so gating on
+    # it would let WhatsApp reach a number the user never proved they own
+    # (mirrors fanout._send_messaging_if_eligible's phone_e164 gate).
+    if not (user.phone_e164 and user.phone_verified_at):
+        return _skipped("phone_not_verified", user=user)
 
     vendor = db.get(Vendor, submission.vendor_id)
     requirement_name = (
@@ -116,7 +121,7 @@ def whatsapp_provider_of_reviewer_decision(
     )
 
     result = send_whatsapp_template(
-        to_phone=user.phone,
+        to_phone=user.phone_e164,
         template_name=DECISION_TEMPLATE,
         components=components,
     )
@@ -195,8 +200,9 @@ def _whatsapp_provider_renewal(
         return _skipped("preference_excludes_whatsapp", user=user)
     if not whatsapp_configured():
         return _skipped("whatsapp_not_configured", user=user)
-    if not user.phone:
-        return _skipped("phone_missing", user=user)
+    # Verified-number gate — see whatsapp_provider_of_reviewer_decision.
+    if not (user.phone_e164 and user.phone_verified_at):
+        return _skipped("phone_not_verified", user=user)
 
     components = build_renewal_threshold_components(
         vendor_name=vendor.name,
@@ -206,7 +212,7 @@ def _whatsapp_provider_renewal(
         severity=severity if severity in {"yellow", "red", "info"} else "info",
     )
     result = send_whatsapp_template(
-        to_phone=user.phone,
+        to_phone=user.phone_e164,
         template_name=RENEWAL_TEMPLATE,
         components=components,
     )
@@ -244,8 +250,9 @@ def _whatsapp_client_renewal(
         return _skipped("preference_excludes_whatsapp", user=user)
     if not whatsapp_configured():
         return _skipped("whatsapp_not_configured", user=user)
-    if not user.phone:
-        return _skipped("phone_missing", user=user)
+    # Verified-number gate — see whatsapp_provider_of_reviewer_decision.
+    if not (user.phone_e164 and user.phone_verified_at):
+        return _skipped("phone_not_verified", user=user)
 
     components = build_renewal_threshold_components(
         vendor_name=vendor.name,
@@ -255,7 +262,7 @@ def _whatsapp_client_renewal(
         severity=severity if severity in {"yellow", "red", "info"} else "info",
     )
     result = send_whatsapp_template(
-        to_phone=user.phone,
+        to_phone=user.phone_e164,
         template_name=RENEWAL_TEMPLATE,
         components=components,
     )
@@ -314,7 +321,9 @@ def _skipped(reason: str, *, user: User | None = None) -> WhatsAppDeliveryResult
         delivered=False,
         status=f"skipped_{reason}" if not reason.startswith("skipped_") else reason,
         error=reason,
-        recipient=user.phone if user else None,
+        # Surface the verified E.164 number (not the legacy unverified
+        # ``user.phone``) so the result reflects what would actually be sent.
+        recipient=user.phone_e164 if user else None,
     )
 
 
@@ -334,7 +343,9 @@ def _record_audit(
     metadata: dict = {
         "kind": kind,
         "recipient_user_id": recipient.id,
-        "recipient_phone_present": bool(recipient.phone),
+        # Whether a VERIFIED WhatsApp number was on file (the gate the
+        # send path actually uses), not the legacy unverified phone.
+        "recipient_phone_present": bool(recipient.phone_e164),
         "template": template_name,
         "status": result.status,
     }

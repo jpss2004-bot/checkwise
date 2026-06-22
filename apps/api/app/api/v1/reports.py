@@ -44,7 +44,11 @@ from app.constants.reports import (
     ReportVersionOrigin,
 )
 from app.core.config import settings
-from app.core.rate_limit import client_ip_from_request, enforce_ai_heavy_rate_limit
+from app.core.rate_limit import (
+    client_ip_from_request,
+    enforce_ai_heavy_rate_limit,
+    enforce_export_rate_limit,
+)
 from app.db.session import SessionLocal, get_db
 from app.models.entities import Report, ReportExport, ReportShare, ReportVersion
 from app.schemas.reports import (
@@ -1623,6 +1627,17 @@ def post_report_export(
     ``GET /reports/exports/{export_id}`` until ``status == "ready"``
     (or ``"failed"``) before requesting the download.
     """
+    # Throttle per user BEFORE scheduling the render. Each export spins a
+    # background HTML/PDF (Chromium) render task that holds a DB
+    # connection; without a cap an authenticated operator can queue
+    # unbounded concurrent renders as a resource-exhaustion lever. Mirrors
+    # the client/provider ZIP export paths' export bucket. Raises 429.
+    enforce_export_rate_limit(
+        current.user.id,
+        per_minute=settings.EXPORT_RATE_LIMIT_PER_MINUTE,
+        per_hour=settings.EXPORT_RATE_LIMIT_PER_HOUR,
+    )
+
     try:
         report, current_version = get_report(
             db, actor=_actor_from(current, db), report_id=report_id

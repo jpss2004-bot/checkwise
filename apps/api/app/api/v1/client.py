@@ -2591,6 +2591,20 @@ def client_add_provider(
         send_welcome_with_temp_password_email,
     )
 
+    # Throttle per caller BEFORE any DB write or outbound email/SMS. This
+    # endpoint provisions a User+Vendor+ProviderWorkspace and fires a
+    # welcome email + in-app/SMS invitation to a caller-supplied
+    # email/phone, so without a cap a single client_admin can mass-create
+    # accounts and mail-bomb/SMS-bomb arbitrary recipients. The export
+    # bucket is reused (segregated from AI cost) with the standard export
+    # caps — generous enough for legitimate onboarding bursts, tight
+    # enough to stop a flood. Raises 429 on breach.
+    enforce_export_rate_limit(
+        current.user.id,
+        per_minute=settings.EXPORT_RATE_LIMIT_PER_MINUTE,
+        per_hour=settings.EXPORT_RATE_LIMIT_PER_HOUR,
+    )
+
     target_id = _resolve_client_id(db, current, requested=client_id)
     contact_email = payload.contact_email.strip().lower()
     rfc_value = payload.vendor_rfc.strip().upper()

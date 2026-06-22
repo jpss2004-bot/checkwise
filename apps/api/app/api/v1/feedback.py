@@ -52,6 +52,7 @@ from sqlalchemy.orm import Session
 
 from app.api.v1.auth import CurrentUser, get_current_user
 from app.core.config import settings
+from app.core.rate_limit import client_ip_from_request
 from app.db.session import get_db
 from app.services.feedback_service import (
     PNG_MAGIC,
@@ -219,23 +220,19 @@ MAX_CONTACT_EMAIL_CHARS = 256
 
 
 def _client_ip(request: Request) -> str | None:
-    """Resolve the client IP, preferring proxy headers where present.
+    """Resolve the client IP for rate-limit bucketing.
 
-    Render places its load balancer in front of the uvicorn process,
-    so ``request.client.host`` is the LB. Mirrors the same helper in
-    ``contact.py``.
+    Delegates to the canonical :func:`client_ip_from_request` resolver
+    (rightmost ``X-Forwarded-For`` hop behind Render's single trusted
+    proxy — the leftmost entry is attacker-spoofable). Returns ``None``
+    only when truly unresolvable (the resolver's ``0.0.0.0`` sentinel) so
+    the caller's existing None-handling contract is preserved. Mirrors the
+    same helper in ``contact.py``.
     """
-    xff = request.headers.get("x-forwarded-for")
-    if xff:
-        first = xff.split(",")[0].strip()
-        if first:
-            return first
-    real = request.headers.get("x-real-ip")
-    if real:
-        return real.strip()
-    if request.client and request.client.host:
-        return request.client.host
-    return None
+    ip = client_ip_from_request(request)
+    if not ip or ip == "0.0.0.0":
+        return None
+    return ip
 
 
 @router.post(
@@ -277,7 +274,11 @@ async def post_public_feedback(
     ua = user_agent or (request.headers.get("user-agent") or "")[:512]
 
     ip = _client_ip(request)
-    ip_h = hash_ip(ip)
+    # Defense in depth: when the IP is unresolvable, bucket every such
+    # request under a shared "unknown" key rather than letting it bypass
+    # the limiter (``record_and_check_public_rate(None)`` returns True), so
+    # a flood of header-less reports shares one budget.
+    ip_h = hash_ip(ip) or "unknown"
 
     if not record_and_check_public_rate(ip_h):
         raise HTTPException(
