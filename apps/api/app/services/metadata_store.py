@@ -27,7 +27,10 @@ recovery source, not a second source of truth.
 
 from __future__ import annotations
 
+import contextlib
 import logging
+import shutil
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
 from app.core.config import settings
@@ -37,6 +40,11 @@ logger = logging.getLogger("checkwise.metadata_store")
 
 _PREFIX = "metadata_exports"
 _XLSX_MIME = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+# Bounded fan-out for the post-restart slot-workbook re-materialize. The S3
+# downloads are network-bound, so a small thread pool overlaps the round-trips
+# without flooding the connection pool. Sized to stay well under the boto3
+# client's default connection budget.
+_SYNC_DOWNLOAD_WORKERS = 8
 
 
 def mirror_enabled() -> bool:
@@ -117,9 +125,50 @@ rebuild_client_master_metadata_export` rglobs the local tree, so a
         logger.exception("[metadata_store] mirror listing failed for %s", prefix)
         return
     root = _export_root()
-    for key in keys:
-        if not key.endswith("latest_metadata.xlsx"):
-            continue
-        local = root / key[len(_PREFIX) + 1 :]
-        if not local.exists():
-            ensure_local_export(local)
+    # Only materialize slots the local disk is actually missing — a re-upload
+    # leaves the prior workbooks in place, so a warm rebuild downloads nothing.
+    # The expensive case is the FIRST rebuild after a deploy/restart on
+    # ephemeral disk, where every slot is absent; fan those downloads out across
+    # a bounded thread pool so the round-trips overlap instead of running
+    # strictly one-by-one inside the upload BackgroundTask.
+    pending = [
+        (key, root / key[len(_PREFIX) + 1 :])
+        for key in keys
+        if key.endswith("latest_metadata.xlsx")
+    ]
+    pending = [(key, local) for key, local in pending if not local.exists()]
+    if not pending:
+        return
+    if len(pending) == 1:
+        key, local = pending[0]
+        _download_to_path(key, local)
+        return
+    workers = min(_SYNC_DOWNLOAD_WORKERS, len(pending))
+    with ThreadPoolExecutor(max_workers=workers) as pool:
+        for key, local in pending:
+            pool.submit(_download_to_path, key, local)
+
+
+def _download_to_path(key: str, local: Path) -> None:
+    """Materialize one mirror object straight onto its local path.
+
+    Unlike :func:`ensure_local_export` this skips the second
+    ``read_bytes``/``write_bytes`` round (the temp file boto3 writes is moved
+    into place), so a multi-slot sync does one disk write per object rather
+    than a download + full re-read + re-write. Best-effort: a miss/failure
+    degrades to a local-only rebuild exactly as before.
+    """
+    try:
+        temp = Path(get_storage_service().open_for_read(key))
+    except Exception:  # noqa: BLE001 — a miss is an expected outcome here
+        logger.info("[metadata_store] no mirror copy for %s", key)
+        return
+    try:
+        local.parent.mkdir(parents=True, exist_ok=True)
+        # ``shutil.move`` falls back to copy+unlink across filesystems (the temp
+        # dir and export root may differ), so the temp file is never leaked.
+        shutil.move(str(temp), str(local))
+    except Exception:  # noqa: BLE001 — never block the rebuild on a copy hiccup
+        logger.exception("[metadata_store] failed to place mirror copy for %s", key)
+        with contextlib.suppress(Exception):
+            temp.unlink()

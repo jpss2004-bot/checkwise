@@ -95,6 +95,11 @@ class Vendor(TimestampMixin, Base):
         CheckConstraint(_PERSONA_TYPE_CHECK, name="ck_vendors_persona_type"),
         # Admin vendors roster: WHERE client_id = ? ORDER BY created_at DESC.
         Index("ix_vendors_client_created", "client_id", "created_at"),
+        # PERF (2026-06-21, migration 0055) — the admin renewals / radar lanes
+        # scan active vendors (WHERE status = 'active'); without an index that
+        # was a full table scan that grows with the vendor count. Mirrors
+        # migration 0055.
+        Index("ix_vendors_status", "status"),
     )
 
     id: Mapped[str] = mapped_column(String(36), primary_key=True, default=new_id)
@@ -143,6 +148,12 @@ class Contract(TimestampMixin, Base):
         # every provider upload and expediente analysis; without a composite
         # index that was a sequential scan per upload. Mirrors migration 0050.
         Index("ix_contracts_client_vendor", "client_id", "vendor_id"),
+        # PERF (2026-06-21, migration 0055) — the admin renewals lane filters
+        # WHERE status = 'active' AND end_date <= horizon ORDER BY end_date ASC.
+        # Without this neither the equality filter nor the sort had an index, so
+        # GET /admin/calendar/renewals sequential-scanned and sorted the whole
+        # contracts table on every load. Mirrors migration 0055.
+        Index("ix_contracts_status_end_date", "status", "end_date"),
     )
 
 
@@ -497,6 +508,15 @@ class ProviderWorkspace(TimestampMixin, Base):
         # (resolve_workspace_for_vendor, on nearly every compliance path)
         # cannot use the (client_id, vendor_id) composite below.
         Index("ix_provider_workspaces_vendor_id", "vendor_id"),
+        # MODEL/MIGRATION DRIFT FIX (2026-06-21) — migration 0003 created this
+        # (client_id, vendor_id) composite, but the model never declared it, so
+        # the SQLite test schema (built via create_all) lacked the leading
+        # client_id index that the hot client-portfolio filter
+        # (WHERE ProviderWorkspace.client_id = ?, used by _scoped_workspaces,
+        # _client_vendor_compliance_rows, audit_package, aggregate_client_calendar)
+        # relies on in production Postgres. Name + columns match migration 0003
+        # exactly so this declaration is a no-op against the existing prod index.
+        Index("ix_provider_workspaces_vendor", "client_id", "vendor_id"),
     )
 
     id: Mapped[str] = mapped_column(String(36), primary_key=True, default=new_id)

@@ -4,6 +4,7 @@ import logging
 import re
 import shutil
 import unicodedata
+from collections import OrderedDict
 from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
@@ -391,6 +392,52 @@ def _text_extraction_from_inspection(
     }
 
 
+# Process-local cache of parsed slot rows, keyed by the workbook's identity
+# (path + mtime_ns + size). The master rebuild reads every slot's
+# ``latest_metadata.xlsx`` on EACH provider upload; without a cache that is
+# O(N) unzip+XML-parse per upload, quadratic over a reporting cycle. A slot's
+# rows only change when its workbook is rewritten (new mtime/size), so a
+# re-upload busts exactly that one slot's entry and every other slot is served
+# from the cache. The master stays byte-identical to a cold full rebuild: the
+# same row dicts are concatenated in the same ``sorted(rglob(...))`` order and
+# handed to the same ``write_client_master_xlsx`` writer — the cache only
+# changes WHERE the rows come from, never WHAT they are or their order.
+_SLOT_ROWS_CACHE_MAX_ENTRIES = 2048
+_slot_rows_cache: OrderedDict[tuple[str, int, int], list[dict[str, str]]] = (
+    OrderedDict()
+)
+
+
+def _read_slot_rows_cached(workbook_path: Path) -> list[dict[str, str]]:
+    """Read a slot workbook's metadata rows, memoized on file identity.
+
+    Returns the SAME rows ``read_metadata_field_rows_from_xlsx`` would; the
+    cache is a pure read-through keyed by ``(path, mtime_ns, size)`` so a
+    rewrite of the slot file (intake/re-export overwrites it) invalidates the
+    entry automatically. Process-local and bounded by an LRU, so a long-lived
+    worker building masters for many clients can't grow it without bound.
+    """
+    try:
+        stat = workbook_path.stat()
+    except OSError:
+        # File vanished between rglob and stat — fall back to a direct read so
+        # the caller surfaces the same error it would have without the cache.
+        return read_metadata_field_rows_from_xlsx(workbook_path)
+    cache_key = (str(workbook_path), stat.st_mtime_ns, stat.st_size)
+    cached = _slot_rows_cache.get(cache_key)
+    if cached is not None:
+        _slot_rows_cache.move_to_end(cache_key)  # LRU bump
+        # Defensive copy: callers ``extend`` into a shared list and the cached
+        # value must stay an immutable snapshot of the parse.
+        return [dict(row) for row in cached]
+    rows = read_metadata_field_rows_from_xlsx(workbook_path)
+    _slot_rows_cache[cache_key] = [dict(row) for row in rows]
+    _slot_rows_cache.move_to_end(cache_key)
+    while len(_slot_rows_cache) > _SLOT_ROWS_CACHE_MAX_ENTRIES:
+        _slot_rows_cache.popitem(last=False)
+    return rows
+
+
 def rebuild_client_master_metadata_export(
     *, client_name: str, client_id: str
 ) -> Path | None:
@@ -398,6 +445,12 @@ def rebuild_client_master_metadata_export(
 
     The master intentionally reads only each slot's ``latest_metadata.xlsx``
     so it represents the current state rather than every historical upload.
+
+    Per-slot parses are memoized on file identity (see
+    ``_read_slot_rows_cached``), so the hot per-upload rebuild only re-parses
+    the single slot that just changed instead of unzip+XML-parsing every slot.
+    The aggregated rows — and therefore the written master — are byte-identical
+    to a cold full rebuild.
     """
     # Keyed on the immutable, unique ``client.id`` (suffixed onto the name
     # slug) so two clients whose names slugify identically never share a tree
@@ -415,7 +468,7 @@ def rebuild_client_master_metadata_export(
 
     rows: list[dict[str, str]] = []
     for workbook_path in sorted(client_root.rglob("latest_metadata.xlsx")):
-        rows.extend(read_metadata_field_rows_from_xlsx(workbook_path))
+        rows.extend(_read_slot_rows_cached(workbook_path))
     if not rows:
         return None
 
@@ -423,6 +476,18 @@ def rebuild_client_master_metadata_export(
     write_client_master_xlsx(rows, master_path, client_name=client_name)
     persist_export(master_path)
     return master_path
+
+
+def _bulk_by_id(db: Session, model: Any, ids: set[str]) -> dict[str, Any]:
+    """Fetch ``model`` rows for ``ids`` in one IN query, keyed by ``id``.
+
+    Used by the backfill to prefetch per-submission relations in bulk instead
+    of issuing a ``db.get`` per scanned row. Empty ``ids`` short-circuits with
+    no query.
+    """
+    if not ids:
+        return {}
+    return {obj.id: obj for obj in db.scalars(select(model).where(model.id.in_(ids)))}
 
 
 @dataclass
@@ -494,12 +559,44 @@ def backfill_metadata_exports(
     processed_slots: set[Path] = set()
     clients_touched: dict[str, str] = {}
 
-    for submission, document in db.execute(stmt).all():
+    # Prefetch every per-submission relation in bulk (one IN query per entity
+    # type) instead of 5-6 ``db.get``/scalar lookups per scanned row. ``db.get``
+    # already de-dups via the identity map, but the first touch of each distinct
+    # client/vendor/institution/requirement/contract was still a round-trip and
+    # the ``DocumentInspection`` scalar (keyed by a never-repeating document_id)
+    # was a true per-row query. Output is unchanged: the loop reads the same
+    # objects, just from in-memory maps.
+    scanned_rows = db.execute(stmt).all()
+    submissions = [submission for submission, _document in scanned_rows]
+    client_ids = {s.client_id for s in submissions if s.client_id}
+    vendor_ids = {s.vendor_id for s in submissions if s.vendor_id}
+    institution_ids = {s.institution_id for s in submissions if s.institution_id}
+    requirement_ids = {s.requirement_id for s in submissions if s.requirement_id}
+    contract_ids = {s.contract_id for s in submissions if s.contract_id}
+    document_ids = {document.id for _submission, document in scanned_rows if document.id}
+
+    clients_by_id = _bulk_by_id(db, Client, client_ids)
+    vendors_by_id = _bulk_by_id(db, Vendor, vendor_ids)
+    institutions_by_id = _bulk_by_id(db, InstitutionModel, institution_ids)
+    requirements_by_id = _bulk_by_id(db, Requirement, requirement_ids)
+    contracts_by_id = _bulk_by_id(db, Contract, contract_ids)
+    inspections_by_document_id: dict[str, DocumentInspection] = {}
+    if document_ids:
+        inspections_by_document_id = {
+            inspection.document_id: inspection
+            for inspection in db.scalars(
+                select(DocumentInspection).where(
+                    DocumentInspection.document_id.in_(document_ids)
+                )
+            )
+        }
+
+    for submission, document in scanned_rows:
         result.scanned += 1
-        client = db.get(Client, submission.client_id)
-        vendor = db.get(Vendor, submission.vendor_id)
-        institution = db.get(InstitutionModel, submission.institution_id)
-        requirement = db.get(Requirement, submission.requirement_id)
+        client = clients_by_id.get(submission.client_id)
+        vendor = vendors_by_id.get(submission.vendor_id)
+        institution = institutions_by_id.get(submission.institution_id)
+        requirement = requirements_by_id.get(submission.requirement_id)
         if (
             client is None
             or vendor is None
@@ -509,15 +606,11 @@ def backfill_metadata_exports(
             result.failed += 1
             continue
         contract = (
-            db.get(Contract, submission.contract_id)
+            contracts_by_id.get(submission.contract_id)
             if submission.contract_id
             else None
         )
-        inspection = db.scalar(
-            select(DocumentInspection).where(
-                DocumentInspection.document_id == document.id
-            )
-        )
+        inspection = inspections_by_document_id.get(document.id)
 
         document_type_code = resolve_metadata_document_type_code(
             requirement_code=submission.requirement_code,

@@ -211,27 +211,114 @@ _SLOT_SEVERITY: dict[str, int] = {
 }
 
 
+def _prefetch_vendor_slot_inputs(
+    db: Session, vendor_ids: list[str]
+) -> tuple[dict[str, Any], dict[str, list[Submission]], dict[str, str] | None]:
+    """Bulk-load every input the per-vendor slot builders need, in a fixed
+    number of queries regardless of vendor count — the canonical batch path
+    ``build_client_context`` uses (client_context.py:129-161), shared by
+    ``fetch_vendor_risk_matrix`` and ``fetch_compliance_by_institution`` so
+    neither fans out resolve_workspace + 2× _workspace_submissions (+ a full
+    institutions scan under V2) per vendor.
+
+    Returns ``(workspaces_by_vendor, submissions_by_vendor, institutions_by_id)``:
+
+    - ``workspaces_by_vendor`` — the active ``ProviderWorkspace`` per vendor,
+      selected lowest-id-first so it matches ``resolve_workspace_for_vendor``'s
+      deterministic "lowest active id wins" tie-break exactly.
+    - ``submissions_by_vendor`` — that vendor's submissions, one query for the
+      whole set, bucketed PER VENDOR but filtered to the resolved workspace's
+      ``(client_id, vendor_id)`` pair — the exact contract
+      ``_workspace_submissions`` enforces in its non-prefetch query. (A vendor
+      can be onboarded under more than one client; bucketing by vendor_id
+      alone would leak a sibling client's submissions into the slot builder.)
+    - ``institutions_by_id`` — institution-id → code map, built once when
+      ``RECURRING_CATALOG_V2`` is on (``None`` otherwise), so the V2 calendar
+      builder skips its per-call ``select(Institution)`` table scan.
+    """
+    from app.core.config import settings
+    from app.models.entities import Institution, ProviderWorkspace
+
+    workspaces_by_vendor: dict[str, Any] = {}
+    submissions_by_vendor: dict[str, list[Submission]] = {}
+    institutions_by_id: dict[str, str] | None = None
+    if not vendor_ids:
+        return workspaces_by_vendor, submissions_by_vendor, institutions_by_id
+
+    # Lowest-id-first so the FIRST workspace seen per vendor is the one
+    # resolve_workspace_for_vendor would have picked (lowest active id wins).
+    for ws in db.scalars(
+        select(ProviderWorkspace)
+        .where(
+            ProviderWorkspace.vendor_id.in_(vendor_ids),
+            ProviderWorkspace.status == "active",
+        )
+        .order_by(ProviderWorkspace.id)
+    ):
+        workspaces_by_vendor.setdefault(ws.vendor_id, ws)
+
+    # The (client_id, vendor_id) the per-vendor query would filter on, so the
+    # bucket holds EXACTLY that workspace's rows — never another client's.
+    client_for_vendor = {
+        vid: ws.client_id for vid, ws in workspaces_by_vendor.items()
+    }
+    for sub in db.scalars(
+        select(Submission).where(Submission.vendor_id.in_(vendor_ids))
+    ):
+        if client_for_vendor.get(sub.vendor_id) != sub.client_id:
+            continue
+        submissions_by_vendor.setdefault(sub.vendor_id, []).append(sub)
+
+    if settings.RECURRING_CATALOG_V2:
+        institutions_by_id = {
+            inst.id: inst.code for inst in db.scalars(select(Institution))
+        }
+    return workspaces_by_vendor, submissions_by_vendor, institutions_by_id
+
+
 def _institution_states_from_slots(
-    db: Session, vendor_id: str, year: int
+    db: Session,
+    vendor_id: str,
+    year: int,
+    *,
+    workspace: Any | None = None,
+    prefetched_submissions: list[Submission] | None = None,
+    institutions_by_id: dict[str, str] | None = None,
 ) -> dict[str, str]:
     """Worst SlotState per institution for one vendor, keyed by lowercase
     institution code. Uses the canonical evidence-slot views (the SAME
     source as compliance_state / compliance_by_institution) so the matrix
     cells populate and stay consistent — the previous
     `_latest_submission_for_institution` join returned nothing on tenants
-    whose obligations live in slots, leaving every cell empty ("—")."""
+    whose obligations live in slots, leaving every cell empty ("—").
+
+    Batch callers pass a pre-resolved ``workspace`` + ``prefetched_submissions``
+    + ``institutions_by_id`` (from :func:`_prefetch_vendor_slot_inputs`) so the
+    builders read in-memory instead of re-querying per vendor. With those
+    omitted the original per-vendor query path runs unchanged."""
     from app.services.dashboard_compute import resolve_workspace_for_vendor
     from app.services.evidence_slots import (
         build_workspace_calendar_slots,
         build_workspace_onboarding_slots,
     )
 
-    workspace = resolve_workspace_for_vendor(db, vendor_id)
+    # Batch callers pass prefetched_submissions (a list, even if empty) as the
+    # signal that workspace resolution is already authoritative — so a vendor
+    # the batch found no active workspace for is NOT re-queried here. The
+    # legacy single-vendor path (prefetched_submissions is None) still resolves.
+    if workspace is None and prefetched_submissions is None:
+        workspace = resolve_workspace_for_vendor(db, vendor_id)
     if workspace is None:
         return {}
     views = build_workspace_onboarding_slots(
-        db, workspace
-    ) + build_workspace_calendar_slots(db, workspace, year)
+        db, workspace, prefetched_submissions=prefetched_submissions
+    ) + build_workspace_calendar_slots(
+        db,
+        workspace,
+        year,
+        prefetched_submissions=prefetched_submissions,
+        institutions_by_id=institutions_by_id,
+    )
     worst: dict[str, str] = {}
     for view in views:
         inst = (view.institution or "").strip().lower()
@@ -261,12 +348,25 @@ def fetch_vendor_risk_matrix(
     vendors = _vendors_in_scope(db, scope)
 
     year = _date.today().year
+    # Batch-prefetch workspaces + submissions (+ institutions under V2) for the
+    # whole scope in a fixed number of queries, instead of resolving a
+    # workspace + scanning submissions per vendor inside the loop.
+    workspaces_by_vendor, submissions_by_vendor, institutions_by_id = (
+        _prefetch_vendor_slot_inputs(db, [v.id for v in vendors])
+    )
     rows: list[dict[str, Any]] = []
     for v in vendors:
         cells: dict[str, dict[str, Any]] = {}
         # Worst slot state per institution for this vendor (slot-based,
         # so cells populate consistently with the rest of the report).
-        inst_states = _institution_states_from_slots(db, v.id, year)
+        inst_states = _institution_states_from_slots(
+            db,
+            v.id,
+            year,
+            workspace=workspaces_by_vendor.get(v.id),
+            prefetched_submissions=submissions_by_vendor.get(v.id, []),
+            institutions_by_id=institutions_by_id,
+        )
         for col in columns:
             if col in ("risk_score", "last_event"):
                 continue
@@ -674,7 +774,6 @@ def fetch_compliance_by_institution(
     """
     from datetime import date as _date
 
-    from app.services.dashboard_compute import resolve_workspace_for_vendor
     from app.services.evidence_slots import (
         build_workspace_calendar_slots,
         build_workspace_onboarding_slots,
@@ -695,15 +794,29 @@ def fetch_compliance_by_institution(
         return None
 
     year = _date.today().year
+    # Batch-prefetch workspaces + submissions (+ institutions under V2) for all
+    # vendors in one fixed query set, then build each vendor's slots from the
+    # in-memory map — instead of resolve_workspace + 2× submission scans per
+    # vendor (the build_client_context pattern).
+    workspaces_by_vendor, submissions_by_vendor, institutions_by_id = (
+        _prefetch_vendor_slot_inputs(db, vendor_ids)
+    )
     # label -> {al_dia, en_proceso, en_riesgo}
     tallies: dict[str, dict[str, int]] = {}
     for vid in vendor_ids:
-        workspace = resolve_workspace_for_vendor(db, vid)
+        workspace = workspaces_by_vendor.get(vid)
         if workspace is None:
             continue
+        vendor_subs = submissions_by_vendor.get(vid, [])
         views = build_workspace_onboarding_slots(
-            db, workspace
-        ) + build_workspace_calendar_slots(db, workspace, year)
+            db, workspace, prefetched_submissions=vendor_subs
+        ) + build_workspace_calendar_slots(
+            db,
+            workspace,
+            year,
+            prefetched_submissions=vendor_subs,
+            institutions_by_id=institutions_by_id,
+        )
         for view in views:
             bucket = _SLOT_INSTITUTION_BUCKET.get(str(view.state))
             if bucket is None:  # not_applicable / unknown — no obligation

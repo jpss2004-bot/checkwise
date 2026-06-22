@@ -70,6 +70,18 @@ _PERIOD_RE = re.compile(
 # route free text to the name path (the common case) vs the folio path.
 _HAS_DIGIT_RE = re.compile(r"\d")
 
+# Minimum term length for the leading-wildcard substring (name/folio) path.
+# A 1-char ``%a%`` ILIKE cannot use any index and full-scans the entire
+# submissions join on every keystroke (the documented "feels frozen" hot path
+# and a cheap DoS lever for any authenticated admin/reviewer). 2 chars is the
+# floor where the pg_trgm GIN index (migration 0055) becomes usable, since a
+# trigram index needs at least a 3-gram to seed but degrades gracefully to a
+# bounded recheck for 2-char patterns. The exact-match RFC and period paths are
+# anchored and index-friendly, so they are NOT subject to this floor. Callers
+# that pass a 1-char substring query get an empty result (the endpoints already
+# render ``hits=[]`` as "no results"), matching the "type more" contract.
+MIN_SUBSTRING_TERM_LEN = 2
+
 QueryType = Literal["rfc", "period", "folio", "name"]
 
 
@@ -170,6 +182,15 @@ def search_submissions(
     qtype = detect_query_type(query)
     dialect = db.get_bind().dialect.name
     term = query.strip()
+
+    # Short-circuit the leading-wildcard substring path for too-short terms.
+    # ``name``/``folio`` both run ``%term%`` ILIKE, which cannot use a b-tree
+    # index; a 1-char term would sequential-scan the whole submissions join.
+    # The RFC/period paths are exact/anchored, so they are exempt. Returning
+    # an empty list matches the endpoints' existing "no results" contract and
+    # signals the UI to prompt for a longer query.
+    if qtype in ("name", "folio") and len(term) < MIN_SUBSTRING_TERM_LEN:
+        return []
 
     # Name queries dedupe to one row per vendor below, so over-fetch a
     # generous window first — otherwise a single chatty provider's recent

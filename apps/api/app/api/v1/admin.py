@@ -59,6 +59,7 @@ from sqlalchemy.orm import Session, selectinload
 
 from app.api.v1.auth import CurrentUser, require_any_role, require_role
 from app.api.v1.client import (
+    _institutions_code_map,
     _last_activity_timestamps_bulk,
     _portfolio_slot_inputs,
     _vendor_compliance,
@@ -659,6 +660,119 @@ def _client_vendor_compliance_rows(
     return rows
 
 
+def _rollup_client_vendor_rows_bulk(
+    db: Session,
+    clients: list[Client],
+    *,
+    today: date,
+    year: int,
+) -> dict[str, list[dict]]:
+    """Cross-client batch of ``_client_vendor_compliance_rows``.
+
+    ``_client_vendor_compliance_rows`` issues ~5 queries *per client*
+    (workspaces, vendors, ``_portfolio_slot_inputs`` submissions, two
+    ``_last_activity_timestamps_bulk`` aggregates) plus the rollup loop
+    historically ran a ``COUNT(Vendor)`` per client (a classic N+1). For
+    the ops-console ``/rollup`` — which scans every client and has no
+    snapshot/cache — that fan-out grows linearly and unbounded.
+
+    This collapses the whole scan into a constant number of queries by
+    prefetching workspaces, vendors, submissions and last-activity for
+    *all* clients at once, then driving the existing per-workspace
+    ``_vendor_compliance`` compute purely in memory. Output per client is
+    byte-for-byte identical to looping ``_client_vendor_compliance_rows``.
+
+    Returns ``rows_by_client_id``. (The per-client ``COUNT(Vendor)`` N+1
+    is gone entirely: the rollup now derives ``vendors_total`` from the
+    scored workspace rows for headline-denominator consistency, so no
+    separate vendor count query is needed.)
+    """
+    rows_by_client: dict[str, list[dict]] = {cl.id: [] for cl in clients}
+    if not clients:
+        return rows_by_client
+
+    client_ids = [cl.id for cl in clients]
+
+    # All workspaces for the scanned clients in one query, bucketed by
+    # client (preserving the per-client ``created_at desc`` order).
+    workspaces_by_client: dict[str, list[ProviderWorkspace]] = {
+        cid: [] for cid in client_ids
+    }
+    for ws in db.scalars(
+        select(ProviderWorkspace)
+        .where(ProviderWorkspace.client_id.in_(client_ids))
+        .order_by(ProviderWorkspace.created_at.desc())
+    ):
+        bucket = workspaces_by_client.get(ws.client_id)
+        if bucket is not None:
+            bucket.append(ws)
+
+    # All vendors for those clients in one query.
+    all_vendor_ids = [
+        ws.vendor_id for wss in workspaces_by_client.values() for ws in wss
+    ]
+    vendors_by_id: dict[str, Vendor] = {}
+    if all_vendor_ids:
+        vendors_by_id = {
+            v.id: v
+            for v in db.scalars(select(Vendor).where(Vendor.id.in_(all_vendor_ids)))
+        }
+
+    # All submissions for the scanned clients in one query, bucketed by
+    # (client_id, vendor_id) — the per-client ``_portfolio_slot_inputs``
+    # scan, hoisted out of the loop. ``institutions_by_id`` is the same
+    # process-cached global map for every client.
+    subs_by_client_vendor: dict[tuple[str, str], list[Submission]] = {}
+    for sub in db.scalars(
+        select(Submission).where(Submission.client_id.in_(client_ids))
+    ):
+        subs_by_client_vendor.setdefault((sub.client_id, sub.vendor_id), []).append(sub)
+    institutions_by_id: dict[str, str] | None = None
+    if settings.RECURRING_CATALOG_V2:
+        institutions_by_id = _institutions_code_map(db)
+
+    # Last submission / last reviewer decision for every vendor at once.
+    last_sub_map, last_review_map = _last_activity_timestamps_bulk(db, all_vendor_ids)
+
+    for cl in clients:
+        rows: list[dict] = []
+        for ws in workspaces_by_client.get(cl.id, []):
+            vendor = vendors_by_id.get(ws.vendor_id)
+            if vendor is None:
+                continue
+            summary = _vendor_compliance(
+                db,
+                ws,
+                today=today,
+                year=year,
+                prefetched_submissions=subs_by_client_vendor.get(
+                    (cl.id, ws.vendor_id), []
+                ),
+                institutions_by_id=institutions_by_id,
+            )
+            activity_candidates = [
+                _as_utc(ts)
+                for ts in (
+                    last_sub_map.get(vendor.id),
+                    last_review_map.get(vendor.id),
+                )
+                if ts is not None
+            ]
+            last_activity = max(activity_candidates) if activity_candidates else None
+            rows.append(
+                {
+                    "vendor": vendor,
+                    "workspace": ws,
+                    "summary": summary,
+                    "last_activity_at": (
+                        last_activity.isoformat() if last_activity else None
+                    ),
+                }
+            )
+        rows_by_client[cl.id] = rows
+    return rows_by_client
+
+
 @router.get("/rollup", response_model=AdminRollup)
 def get_rollup(db: DbSession, current: AdminUser) -> AdminRollup:
     """Everything the ops-console dashboard renders, in one call.
@@ -675,15 +789,19 @@ def get_rollup(db: DbSession, current: AdminUser) -> AdminRollup:
     now = datetime.now(UTC)
 
     # --- Per-client compliance rollup + at-risk vendor collection ----
+    # Both the per-client compliance rows and the vendor counts are
+    # prefetched in a constant number of queries (was ~6 queries per
+    # client: workspaces, vendors, submissions, two activity aggregates
+    # and a per-client ``COUNT(Vendor)`` N+1) so this scan stays cheap as
+    # the portfolio grows. All clients are still returned — no truncation.
     clients = list(db.scalars(select(Client).order_by(Client.created_at.desc())))
+    rows_by_client = _rollup_client_vendor_rows_bulk(
+        db, clients, today=today, year=year
+    )
     client_rows: list[RollupClientRow] = []
     risk_rows: list[RollupVendorAtRisk] = []
     for cl in clients:
-        vendor_rows = _client_vendor_compliance_rows(db, cl, today=today, year=year)
-        vendors_total = int(
-            db.scalar(select(func.count(Vendor.id)).where(Vendor.client_id == cl.id))
-            or 0
-        )
+        vendor_rows = rows_by_client.get(cl.id, [])
         green = yellow = red = 0
         missing_required_total = 0
         pending_reviews_total = 0
@@ -722,6 +840,14 @@ def get_rollup(db: DbSession, current: AdminUser) -> AdminRollup:
         # Same average ``client_overview`` uses: mean of per-vendor pct,
         # 100 when the client has no workspaces yet.
         compliance_pct = round(pct_sum / len(vendor_rows)) if vendor_rows else 100
+        # Headline denominator consistency: ``compliance_pct`` is the mean
+        # over the scored workspace rows and ``green/yellow/red`` sum to
+        # that same set, so ``vendors_total`` reports the scored-vendor
+        # count (== green+yellow+red) rather than a raw ``COUNT(Vendor)``.
+        # Otherwise a client with vendors that have no workspace yet shows
+        # a count larger than the colored chips and a % that doesn't cover
+        # it — three numbers describing different denominators in one row.
+        vendors_total = green + yellow + red
         client_rows.append(
             RollupClientRow(
                 client_id=cl.id,
@@ -2716,15 +2842,34 @@ def list_workspaces(
     current: AdminUser,
     client_id: str | None = None,
     vendor_id: str | None = None,
+    limit: Annotated[int, Query(ge=1, le=200)] = 50,
+    offset: Annotated[int, Query(ge=0)] = 0,
 ) -> dict:
+    """Paginated, optionally client/vendor-scoped workspace catalog.
+
+    ``total`` is the count under the current filters. Mirrors the other
+    admin list endpoints (``/clients`` / ``/vendors``) — replaces the old
+    return-everything shape that shipped the full workspace table and
+    degraded as the workspace count grew.
+    """
     _ = current
-    stmt = select(ProviderWorkspace).order_by(ProviderWorkspace.created_at.desc())
+    stmt = select(ProviderWorkspace)
+    count_stmt = select(func.count(ProviderWorkspace.id))
     if client_id:
         stmt = stmt.where(ProviderWorkspace.client_id == client_id)
+        count_stmt = count_stmt.where(ProviderWorkspace.client_id == client_id)
     if vendor_id:
         stmt = stmt.where(ProviderWorkspace.vendor_id == vendor_id)
-    rows = list(db.scalars(stmt))
-    return {"items": [_workspace_to_dict(r) for r in rows], "total": len(rows)}
+        count_stmt = count_stmt.where(ProviderWorkspace.vendor_id == vendor_id)
+    total = db.scalar(count_stmt) or 0
+    rows = list(
+        db.scalars(
+            stmt.order_by(ProviderWorkspace.created_at.desc())
+            .offset(offset)
+            .limit(limit)
+        )
+    )
+    return {"items": [_workspace_to_dict(r) for r in rows], "total": int(total)}
 
 
 @router.get("/workspaces/{workspace_id}")
@@ -3107,8 +3252,9 @@ def get_admin_calendar_radar(
     from app.services.dashboard_compute import (
         URGENCY_BANDS,
         bucket_upcoming_by_urgency,
-        build_upcoming_deadlines_for_vendor,
+        compute_upcoming_deadlines,
     )
+    from app.services.evidence_slots import build_workspace_calendar_slots
 
     today = date.today()
     vstmt = select(Vendor.id, Vendor.client_id, Vendor.name).where(
@@ -3117,18 +3263,58 @@ def get_admin_calendar_radar(
     if client_id:
         vstmt = vstmt.where(Vendor.client_id == client_id)
     vendor_rows = db.execute(vstmt.order_by(Vendor.name.asc())).all()
-    # Bound the per-vendor fan-out (each call resolves a workspace + computes
+    # Bound the per-vendor fan-out (each vendor needs a workspace + calendar
     # slots). At current portfolio scale this is comfortably under the cap; the
     # ``truncated`` flag tells the UI when some providers were skipped.
     truncated = len(vendor_rows) > _RADAR_VENDOR_SCAN_CAP
     scan_rows = vendor_rows[:_RADAR_VENDOR_SCAN_CAP]
 
+    # The per-vendor ``build_upcoming_deadlines_for_vendor`` issued one
+    # ``resolve_workspace_for_vendor`` query plus one ``build_workspace_
+    # calendar_slots`` submissions query per vendor (up to 300 × 2 round-trips).
+    # Prefetch the active workspaces and all in-scope submissions in two bulk
+    # queries, then drive the same slot/deadline compute in memory so the
+    # output is identical with O(1) queries instead of O(vendors).
+    scan_vendor_ids = [vid for vid, _vc, _vn in scan_rows]
+    workspace_by_vendor: dict[str, ProviderWorkspace] = {}
+    if scan_vendor_ids:
+        # Lowest-id active workspace wins per vendor (mirrors
+        # resolve_workspace_for_vendor's deterministic tie-break).
+        for ws in db.scalars(
+            select(ProviderWorkspace)
+            .where(
+                ProviderWorkspace.vendor_id.in_(scan_vendor_ids),
+                ProviderWorkspace.status == "active",
+            )
+            .order_by(ProviderWorkspace.id.desc())
+        ):
+            # desc() + overwrite => the lowest id is written last and wins.
+            workspace_by_vendor[ws.vendor_id] = ws
+
+    subs_by_vendor: dict[str, list[Submission]] = {}
+    if workspace_by_vendor:
+        scoped_client_ids = {ws.client_id for ws in workspace_by_vendor.values()}
+        for sub in db.scalars(
+            select(Submission).where(Submission.client_id.in_(scoped_client_ids))
+        ):
+            subs_by_vendor.setdefault(sub.vendor_id, []).append(sub)
+    institutions_by_id = (
+        _institutions_code_map(db) if settings.RECURRING_CATALOG_V2 else None
+    )
+
     merged: list[RadarDeadlineItem] = []
     for vid, vclient, vname in scan_rows:
-        payload = build_upcoming_deadlines_for_vendor(
-            db, vendor_id=vid, today=today, top=8
+        workspace = workspace_by_vendor.get(vid)
+        if workspace is None:
+            continue
+        calendar_slots = build_workspace_calendar_slots(
+            db,
+            workspace,
+            today.year,
+            prefetched_submissions=subs_by_vendor.get(vid, []),
+            institutions_by_id=institutions_by_id,
         )
-        for it in payload.get("items", []):
+        for it in compute_upcoming_deadlines(calendar_slots, today, top=8):
             inst = it.get("institution") or "—"
             if institution and inst != institution:
                 continue
@@ -3824,10 +4010,7 @@ def get_admin_calendar_renewals(
     """Date-precise renewals across the portfolio: contract expiries +
     credential renewals (CSF/REPSE/registro patronal), urgency-sorted."""
     _ = current
-    from app.services.dashboard_compute import (
-        compute_renewal_actions,
-        resolve_workspace_for_vendor,
-    )
+    from app.services.dashboard_compute import compute_renewal_actions
 
     today = date.today()
     horizon = today + timedelta(days=horizon_days)
@@ -3878,12 +4061,43 @@ def get_admin_calendar_renewals(
     scan = vrows[:_RENEWAL_VENDOR_SCAN_CAP]
     client_names = dict(db.execute(select(Client.id, Client.name)).all())
 
+    # Bulk-prefetch the active workspaces and the scoped submissions in two
+    # queries instead of one ``resolve_workspace_for_vendor`` query plus
+    # ``compute_renewal_actions``'s ~4 ``current_onboarding_submission_for_
+    # workspace`` queries per vendor (up to ~1500 round-trips at the cap).
+    # ``compute_renewal_actions`` resolves each requirement from the supplied
+    # in-memory set, so the output is unchanged.
+    scan_vendor_ids = [vid for vid, _vc, _vn in scan]
+    workspace_by_vendor: dict[str, ProviderWorkspace] = {}
+    if scan_vendor_ids:
+        # Lowest-id active workspace wins per vendor (mirrors
+        # resolve_workspace_for_vendor's deterministic tie-break).
+        for ws in db.scalars(
+            select(ProviderWorkspace)
+            .where(
+                ProviderWorkspace.vendor_id.in_(scan_vendor_ids),
+                ProviderWorkspace.status == "active",
+            )
+            .order_by(ProviderWorkspace.id.desc())
+        ):
+            workspace_by_vendor[ws.vendor_id] = ws
+
+    subs_by_vendor: dict[str, list[Submission]] = {}
+    if workspace_by_vendor:
+        scoped_client_ids = {ws.client_id for ws in workspace_by_vendor.values()}
+        for sub in db.scalars(
+            select(Submission).where(Submission.client_id.in_(scoped_client_ids))
+        ):
+            subs_by_vendor.setdefault(sub.vendor_id, []).append(sub)
+
     credentials: list[AdminRenewalCredential] = []
     for vid, vclient, vname in scan:
-        ws = resolve_workspace_for_vendor(db, vid)
+        ws = workspace_by_vendor.get(vid)
         if ws is None:
             continue
-        for act in compute_renewal_actions(db, ws, today):
+        for act in compute_renewal_actions(
+            db, ws, today, prefetched_submissions=subs_by_vendor.get(vid, [])
+        ):
             credentials.append(
                 AdminRenewalCredential(
                     client_id=vclient,

@@ -31,10 +31,11 @@ from app.core.compliance_catalog import (
     is_v2_recurring_code,
     normalize_persona_type,
 )
-from app.models.entities import ProviderWorkspace
+from app.models.entities import ProviderWorkspace, Submission
 from app.services.evidence_slots import (
     SlotState,
     SlotView,
+    _workspace_submissions,
     build_workspace_calendar_slots,
     build_workspace_onboarding_slots,
     current_onboarding_submission_for_workspace,
@@ -246,8 +247,16 @@ def build_compliance_state_for_vendor(
         }
 
     target_year = year or date.today().year
-    onboarding_slots = build_workspace_onboarding_slots(db, workspace)
-    calendar_slots = build_workspace_calendar_slots(db, workspace, target_year)
+    # Load this workspace's submissions ONCE and feed both slot builders the
+    # same set, instead of letting each builder issue its own identical
+    # `SELECT * FROM submissions WHERE client_id=? AND vendor_id=?` query.
+    workspace_subs = _workspace_submissions(db, workspace, None)
+    onboarding_slots = build_workspace_onboarding_slots(
+        db, workspace, prefetched_submissions=workspace_subs
+    )
+    calendar_slots = build_workspace_calendar_slots(
+        db, workspace, target_year, prefetched_submissions=workspace_subs
+    )
 
     counts = empty_document_counts()
     for view in onboarding_slots + calendar_slots:
@@ -745,6 +754,8 @@ def compute_renewal_actions(
     db: Session,
     workspace: ProviderWorkspace,
     today: date,
+    *,
+    prefetched_submissions: list[Submission] | None = None,
 ) -> list[dict]:
     """Phase 6D — renewal-driven action items for the dashboard rail.
 
@@ -769,6 +780,14 @@ def compute_renewal_actions(
     Read-only. The dispatcher writes notifications + reminders; this
     function only reads the same state the cron job derives its
     emit-set from, so the dashboard never lies about what was sent.
+
+    ``prefetched_submissions`` (the batch path) lets a caller supply this
+    workspace's submissions so each renewal requirement resolves from the
+    in-memory set instead of issuing one ``current_onboarding_submission_
+    for_workspace`` query per requirement (≈4 redundant SELECTs over the
+    identical ``(client_id, vendor_id)`` row set otherwise). Behaviour is
+    identical: the helper's prefetch branch runs the same supersession
+    selection (``_pick_current_submission``) against the in-memory list.
     """
     persona = normalize_persona_type(workspace.persona_type)
     overdue: list[tuple[int, dict]] = []
@@ -778,7 +797,10 @@ def compute_renewal_actions(
         if req.renewal_frequency_days is None:
             continue
         sub = current_onboarding_submission_for_workspace(
-            db, workspace=workspace, requirement_code=req.code
+            db,
+            workspace=workspace,
+            requirement_code=req.code,
+            prefetched_submissions=prefetched_submissions,
         )
         anchor = renewal_anchor_date(sub)
         due = next_renewal_due_date(
@@ -1039,12 +1061,21 @@ def build_suggested_actions_for_vendor(
         }
 
     target_today = today or date.today()
-    onboarding_slots = build_workspace_onboarding_slots(db, workspace)
+    # Load this workspace's submissions ONCE and feed both slot builders and
+    # the renewal scan the same set — without this the two builders plus
+    # compute_renewal_actions each re-query the identical
+    # `(client_id, vendor_id)` submission rows (≈6 redundant SELECTs).
+    workspace_subs = _workspace_submissions(db, workspace, None)
+    onboarding_slots = build_workspace_onboarding_slots(
+        db, workspace, prefetched_submissions=workspace_subs
+    )
     calendar_slots = build_workspace_calendar_slots(
-        db, workspace, target_today.year
+        db, workspace, target_today.year, prefetched_submissions=workspace_subs
     )
 
-    renewal_actions = compute_renewal_actions(db, workspace, target_today)
+    renewal_actions = compute_renewal_actions(
+        db, workspace, target_today, prefetched_submissions=workspace_subs
+    )
     items = compute_suggested_actions(
         onboarding_slots,
         calendar_slots,
