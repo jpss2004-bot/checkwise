@@ -39,16 +39,26 @@ it fails identically on `origin/main` in CI; (c) my code's entire effect is the 
 measured as 24==24 locally at every batch. This check has never been green because the repo
 FF-pushes straight to `main`, bypassing PR CI. All 4 CodeQL review threads addressed + resolved.
 
-## MERGE TO MAIN — ready, pending operator
-- FF is clean (`origin/main` still == branch base 28bb21d): `git push origin chore/system-audit-cleanup:main`.
-- This triggers the Render auto-deploy → `alembic upgrade head` → **migration 0055** (pg_trgm GIN +
-  btree, `CREATE INDEX CONCURRENTLY ... IF NOT EXISTS`, additive, safe downgrade).
-- **Take a Neon snapshot first** (the agent has no neonctl/Neon creds in this env). Confirm
-  `idle_in_transaction_session_timeout` is set (a prior CONCURRENTLY migration once stalled on a
-  leaked idle-in-tx connection).
-- **After deploy:** run `python -m scripts.migrate_metadata_export_paths --apply` (STORAGE_BACKEND=s3)
-  or existing metadata exports orphan under the old `<slug>/` paths (batch-3 re-keyed them to
-  `<slug>-<client_id>/`).
+## MERGED + LIVE ON PROD (2026-06-22)
+- FF-merged: `git push origin chore/system-audit-cleanup:main` (28bb21d..05c788f). PR #29 closed merged.
+- Neon snapshot taken first: `br-bold-silence-apnojc6m` (pre-system-audit-0055) on holy-sky-68868540
+  / checkwise-prod. (Neon was at its 10-branch limit; deleted the obsolete Jun-11 pre-0038 branch.)
+- **Migration 0055 — incident + hotfix:** the first deploy FAILED at
+  `CREATE INDEX CONCURRENTLY ... gin(f_unaccent(name) gin_trgm_ops)` →
+  `function unaccent(unknown, text) does not exist`. f_unaccent (migration 0052) had an *unqualified*
+  body (`unaccent('unaccent', $1)`) that resolves at query time but fails when PG inlines the
+  IMMUTABLE wrapper during an index build (the `'unaccent'::regdictionary` cast loses the runtime
+  search_path); 0055 is the first index ever built on f_unaccent. Render retains the old version on a
+  pre-deploy failure → **no outage**, prod stayed at 0054, no invalid index. **Fix (commit 05c788f):**
+  `CREATE OR REPLACE FUNCTION public.f_unaccent ... AS $$ SELECT public.unaccent('public.unaccent'::regdictionary, $1) $$`
+  (schema-qualified, search_path-independent, identical behavior) before the indexes; validated on the
+  Neon snapshot via rolled-back non-concurrent index builds. Re-deploy succeeded:
+  **alembic_version = 0055, all 5 indexes valid+ready, 0 invalid db-wide, API health 200.**
+  LESSON: any IMMUTABLE-function expression index must schema-qualify unaccent/dictionary calls.
+- **STILL PENDING (operator, needs prod R2 creds):** run
+  `python -m scripts.migrate_metadata_export_paths --apply` (STORAGE_BACKEND=s3) or existing metadata
+  exports orphan under the old `<slug>/` paths (batch-3 re-keyed to `<slug>-<client_id>/`). Non-urgent,
+  no data loss.
 
 ## DEFERRED (medium/low, reported by the implementing agents; safe to leave)
 - Password-reset JWT invalidation — needs a `User.tokens_valid_after` column + migration.
