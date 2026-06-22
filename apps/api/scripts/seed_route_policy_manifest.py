@@ -68,8 +68,10 @@ def _gate_for(method: str, path: str, deps: list[str]) -> str:
         return "platform_admin_or_admin"
     if "ReviewerDep" in dep_set:
         return "reviewer_or_admin"
-    if "ClientUser" in dep_set:
+    if "ClientApprover" in dep_set:
         return "client_admin_or_admin"
+    if "ClientUser" in dep_set:
+        return "client_read_or_admin"
     if "current_portal_workspace" in dep_set:
         return "provider_workspace"
     if "require_local_or_internal_admin" in dep_set:

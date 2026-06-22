@@ -63,6 +63,7 @@ _ALLOWED_GATES = frozenset(
         "internal_admin",
         "platform_admin_or_admin",
         "client_admin_or_admin",
+        "client_read_or_admin",
         "reviewer_or_admin",
         "provider_workspace",
         "authenticated_jwt",
@@ -301,8 +302,10 @@ def _expected_gate_from_deps(deps: set[str], path: str) -> str | None:
         return "platform_admin_or_admin"
     if "ReviewerDep" in deps:
         return "reviewer_or_admin"
-    if "ClientUser" in deps:
+    if "ClientApprover" in deps:
         return "client_admin_or_admin"
+    if "ClientUser" in deps:
+        return "client_read_or_admin"
     if "current_portal_workspace" in deps:
         return "provider_workspace"
     if "require_local_or_internal_admin" in deps:

@@ -163,6 +163,7 @@ export function ClientShell({
     }
     if (
       !current.roles.includes("client_admin") &&
+      !current.roles.includes("client_viewer") &&
       !current.roles.includes("internal_admin")
     ) {
       router.replace("/admin");

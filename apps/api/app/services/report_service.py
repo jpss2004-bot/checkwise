@@ -146,7 +146,9 @@ class ReportActor:
 # create / patch must intersect with these.
 #
 # Internal staff: all four audiences (they operate the platform).
-# client_admin: client_facing only (their own org).
+# client_admin (Approver) + client_viewer (Viewer): client_facing only
+#   (their own org). Read parity between the two client seats; the write
+#   split lives in writable_audiences() / can_write_report().
 # Anyone else (no recognised role): empty — default-deny.
 
 
@@ -159,7 +161,18 @@ def visible_audiences(actor: ReportActor) -> tuple[ReportAudience, ...]:
             ReportAudience.VENDOR_FACING,
             ReportAudience.EXTERNAL_SIGNED,
         )
-    if MembershipRole.CLIENT_ADMIN in actor.roles:
+    # Both client seat tiers READ the client-facing surface: client_admin
+    # (Approver) and client_viewer (Viewer, Phase 4). The Viewer is an
+    # oversight/export seat — it reads the same reports the Approver sees
+    # (it already pulls audit packages and metadata exports elsewhere) but
+    # never authors them. The read/write split is enforced by leaving
+    # client_viewer OUT of writable_audiences() and can_write_report();
+    # granting read here keeps the Viewer from being silently locked out
+    # of the report builder while staying read-only.
+    if (
+        MembershipRole.CLIENT_ADMIN in actor.roles
+        or MembershipRole.CLIENT_VIEWER in actor.roles
+    ):
         return (ReportAudience.CLIENT_FACING,)
     if actor.is_workspace_owner:
         # P1: role-less providers see only reports targeted at them.
@@ -172,9 +185,13 @@ def visible_audiences(actor: ReportActor) -> tuple[ReportAudience, ...]:
 def writable_audiences(actor: ReportActor) -> tuple[ReportAudience, ...]:
     """Audiences this actor is allowed to *create or patch into*.
 
-    Currently identical to visible_audiences. Kept separate so we can
-    diverge later (e.g. a client_admin can read external_signed reports
-    sent to them but can't author them).
+    Diverges from ``visible_audiences`` on the Phase 4 Viewer split:
+    ``client_viewer`` (Viewer) reads the client-facing surface but is
+    deliberately ABSENT here, so it can never author a report or change a
+    report's audience. Only the ``client_admin`` (Approver) tier writes
+    among client seats. Do not add ``client_viewer`` to this branch — the
+    read-only contract depends on it (and ``can_write_report`` below
+    enforces the same exclusion for non-audience mutations).
     """
     if actor.is_internal:
         return (
@@ -266,7 +283,18 @@ def _enforce_report_tenant_scope(
 def _user_can_write_in_org(
     db: Session, user_id: str, organization_id: str
 ) -> bool:
-    """Any active membership in the org grants write."""
+    """An active *write-capable* membership in the org grants write.
+
+    Phase 4 split the client seat into Approver (``client_admin``) and
+    read-only Viewer (``client_viewer``). A Viewer holds a real active
+    Membership row, so the previous "any active membership" rule would
+    have silently handed them report write access the moment
+    ``visible_audiences`` started letting them read a report — turning a
+    read grant into a write grant. Exclude ``client_viewer`` so the
+    Viewer stays read-only. A user who (anomalously) holds BOTH a
+    ``client_viewer`` and a ``client_admin`` row in the same org still
+    writes via the Approver row, which this filter keeps.
+    """
     stmt = (
         select(func.count())
         .select_from(Membership)
@@ -274,6 +302,7 @@ def _user_can_write_in_org(
             Membership.user_id == user_id,
             Membership.organization_id == organization_id,
             Membership.status == "active",
+            Membership.role != MembershipRole.CLIENT_VIEWER.value,
         )
     )
     return db.scalar(stmt) > 0

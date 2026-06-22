@@ -191,11 +191,15 @@ def _create(
     email: str,
     full_name: str = "Empleado Demo",
     client_id: str | None = None,
+    role: str | None = None,
 ):
     params = {"client_id": client_id} if client_id else {}
+    body: dict = {"full_name": full_name, "email": email}
+    if role is not None:
+        body["role"] = role
     return api_client.post(
         "/api/v1/client/users",
-        json={"full_name": full_name, "email": email},
+        json=body,
         params=params,
         headers=_h(token),
     )
@@ -655,3 +659,109 @@ def test_client_user_audit_captures_request_ip(db_factory, api_client):
         assert row.user_agent
     finally:
         db.close()
+
+
+# ---------------------------------------------------------------------------
+# Phase 4 — seat tiers (Approver vs Viewer)
+# ---------------------------------------------------------------------------
+
+
+def _roles_by_email(api_client, token) -> dict:
+    body = api_client.get("/api/v1/client/users", headers=_h(token)).json()
+    return {u["email"]: u["role"] for u in body["users"]}
+
+
+def test_new_seat_defaults_to_viewer(db_factory, api_client):
+    ctx = _seed_client_with_owner(db_factory)
+    owner_token = _login(api_client, ctx["owner_email"])
+
+    created = _create(api_client, owner_token, email="seat@checkwise.example")
+    assert created.status_code == 201, created.text
+    # Owner is the Approver; the new seat defaults to the least-privilege Viewer.
+    roles = _roles_by_email(api_client, owner_token)
+    assert roles[ctx["owner_email"]] == "client_admin"
+    assert roles["seat@checkwise.example"] == "client_viewer"
+
+
+def test_owner_can_create_approver_seat(db_factory, api_client):
+    ctx = _seed_client_with_owner(db_factory)
+    owner_token = _login(api_client, ctx["owner_email"])
+
+    created = _create(
+        api_client,
+        owner_token,
+        email="appr@checkwise.example",
+        role="client_admin",
+    )
+    assert created.status_code == 201, created.text
+    assert _roles_by_email(api_client, owner_token)["appr@checkwise.example"] == (
+        "client_admin"
+    )
+
+
+def test_owner_promotes_and_demotes_seat(db_factory, api_client):
+    ctx = _seed_client_with_owner(db_factory)
+    owner_token = _login(api_client, ctx["owner_email"])
+    created = _create(api_client, owner_token, email="promo@checkwise.example")
+    user_id = created.json()["user_id"]
+
+    promote = api_client.patch(
+        f"/api/v1/client/users/{user_id}/role",
+        json={"role": "client_admin"},
+        headers=_h(owner_token),
+    )
+    assert promote.status_code == 200, promote.text
+    assert promote.json()["role"] == "client_admin"
+    assert _roles_by_email(api_client, owner_token)[
+        "promo@checkwise.example"
+    ] == "client_admin"
+
+    demote = api_client.patch(
+        f"/api/v1/client/users/{user_id}/role",
+        json={"role": "client_viewer"},
+        headers=_h(owner_token),
+    )
+    assert demote.status_code == 200
+    assert _roles_by_email(api_client, owner_token)[
+        "promo@checkwise.example"
+    ] == "client_viewer"
+
+    db = db_factory()
+    try:
+        actions = set(
+            db.scalars(
+                select(AuditLog.action).where(AuditLog.entity_id == user_id)
+            )
+        )
+    finally:
+        db.close()
+    assert "client.user_role_changed" in actions
+
+
+def test_cannot_change_primary_owner_role(db_factory, api_client):
+    ctx = _seed_client_with_owner(db_factory)
+    owner_token = _login(api_client, ctx["owner_email"])
+
+    resp = api_client.patch(
+        f"/api/v1/client/users/{ctx['owner_id']}/role",
+        json={"role": "client_viewer"},
+        headers=_h(owner_token),
+    )
+    assert resp.status_code == 409, resp.text
+
+
+def test_secondary_cannot_change_roles(db_factory, api_client):
+    """Tier changes are owner-only (same _require_can_manage gate)."""
+    ctx = _seed_client_with_owner(db_factory)
+    owner_token = _login(api_client, ctx["owner_email"])
+    target = _create(api_client, owner_token, email="t@checkwise.example")
+    target_id = target.json()["user_id"]
+    sec = _seed_secondary(db_factory, ctx["org_id"])
+    sec_token = _login(api_client, sec["email"])
+
+    resp = api_client.patch(
+        f"/api/v1/client/users/{target_id}/role",
+        json={"role": "client_admin"},
+        headers=_h(sec_token),
+    )
+    assert resp.status_code == 403, resp.text

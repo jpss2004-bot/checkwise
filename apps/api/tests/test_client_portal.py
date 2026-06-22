@@ -154,8 +154,8 @@ def _seed_user_with_role(
         db.add(user)
         db.flush()
         if role is not None:
-            if role == "client_admin":
-                assert client_id is not None, "client_admin needs a client"
+            if role in ("client_admin", "client_viewer"):
+                assert client_id is not None, "client seats need a client"
                 org = Organization(
                     name=f"Org Client {seq}", kind="client", client_id=client_id
                 )
@@ -2984,3 +2984,83 @@ def test_deactivate_archives_all_workspaces_and_reconciles_drift(
         assert db.get(ProviderWorkspace, ws2).status == "inactive"
     finally:
         db.close()
+
+
+# ---------------------------------------------------------------------------
+# Phase 4 — Approver vs Viewer gate
+# ---------------------------------------------------------------------------
+
+
+def test_viewer_can_read_export_but_not_write(
+    api_client: TestClient, db_factory
+) -> None:
+    """A client_viewer sees the oversight surface (reads/exports) but is
+    blocked from every portfolio-mutating route (Approver-only)."""
+    client_id = _seed_client(db_factory, "Cliente Viewer")
+    vendor_id, _ = _seed_vendor_with_workspace(db_factory, client_id=client_id)
+    _, email, pw = _seed_user_with_role(
+        db_factory, role="client_viewer", client_id=client_id, email_prefix="viewer"
+    )
+    token = _login(api_client, email, pw)
+
+    # Reads / exports share the ClientUser gate → allowed for viewers.
+    assert (
+        api_client.get("/api/v1/client/overview", headers=_h(token)).status_code == 200
+    )
+    assert (
+        api_client.get("/api/v1/client/vendors", headers=_h(token)).status_code == 200
+    )
+    assert (
+        api_client.get(
+            "/api/v1/client/metadata/download", headers=_h(token)
+        ).status_code
+        != 403
+    )
+
+    # Portfolio writes (ClientApprover) → 403 for viewers.
+    add = api_client.post(
+        "/api/v1/client/providers",
+        json={
+            "vendor_name": "Nuevo Proveedor",
+            "vendor_rfc": "NUE260512AB1",
+            "persona_type": "moral",
+            "contact_name": "Contacto",
+            "contact_email": "nuevo@proveedor.test",
+        },
+        headers=_h(token),
+    )
+    assert add.status_code == 403, add.text
+    assert (
+        api_client.post(
+            f"/api/v1/client/vendors/{vendor_id}/deactivate", headers=_h(token)
+        ).status_code
+        == 403
+    )
+    assert (
+        api_client.patch(
+            "/api/v1/client/profile",
+            json={"responsible_name": "X"},
+            headers=_h(token),
+        ).status_code
+        == 403
+    )
+
+
+def test_approver_client_admin_can_still_write(
+    api_client: TestClient, db_factory
+) -> None:
+    """Grandfathering: an existing client_admin remains an Approver and keeps
+    write access (the gate widened for readers, it did not restrict admins)."""
+    client_id = _seed_client(db_factory, "Cliente Approver")
+    vendor_id, _ = _seed_vendor_with_workspace(db_factory, client_id=client_id)
+    _, email, pw = _seed_user_with_role(
+        db_factory, role="client_admin", client_id=client_id, email_prefix="appr"
+    )
+    token = _login(api_client, email, pw)
+
+    assert (
+        api_client.post(
+            f"/api/v1/client/vendors/{vendor_id}/deactivate", headers=_h(token)
+        ).status_code
+        == 200
+    )

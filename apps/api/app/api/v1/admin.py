@@ -2105,13 +2105,14 @@ _DEFAULT_CLIENT_SEAT_LIMIT: Final = 3
 # attaching ``internal_admin`` to a client tenant (or vice-versa).
 _ROLE_ORG_KIND: Final = {
     MembershipRole.CLIENT_ADMIN.value: "client",
+    MembershipRole.CLIENT_VIEWER.value: "client",
     MembershipRole.INTERNAL_ADMIN.value: "internal",
     MembershipRole.REVIEWER.value: "internal",
     MembershipRole.PLATFORM_ADMIN.value: "internal",
 }
 
 MembershipRoleLiteral = Literal[
-    "client_admin", "internal_admin", "reviewer", "platform_admin"
+    "client_admin", "client_viewer", "internal_admin", "reviewer", "platform_admin"
 ]
 
 
