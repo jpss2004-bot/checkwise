@@ -355,6 +355,39 @@ def _apply_decision_transition(
     and audit framing (action + metadata). Commits internally; the
     whole batch succeeds or rolls back as a unit.
     """
+    # TOCTOU guard (audit 2026-06-21, Batch 6): the caller validated
+    # ``submission.status`` against the terminal/source guard, then we
+    # mutate and commit — a check-then-act with no row lock. A human
+    # ``apply_reviewer_decision`` can run concurrently with the
+    # background shadow runner's ``apply_system_auto_approval`` on the
+    # SAME submission: both read a non-terminal status, both pass the
+    # guard, and the second commit overwrites the first's terminal
+    # status, leaving two terminal transitions for one row.
+    #
+    # Re-load the row ``with_for_update()`` and re-run the terminal/
+    # source guard INSIDE the lock. The second concurrent writer blocks
+    # on the row lock, then re-reads the now-terminal status and bails
+    # with the existing 409 — which the auto-approval engine already
+    # treats as a no-op ("transition_failed"). On SQLite ``with_for_update``
+    # is silently ignored (tests unaffected); the re-select + re-check is
+    # a harmless no-op there. Single-threaded behavior is unchanged.
+    locked = db.scalar(
+        select(Submission).where(Submission.id == submission.id).with_for_update()
+    )
+    if locked is None:
+        # The submission vanished between the caller's load and here
+        # (extremely unlikely). Treat it like a lost race rather than a
+        # 500 on a stale ORM object.
+        raise HTTPException(
+            status_code=http_status.HTTP_409_CONFLICT,
+            detail="La submission ya no existe; no se puede aplicar la decisión.",
+        )
+    # Re-bind to the locked row so the mutation below writes the row we
+    # hold the lock on (it is the same identity-mapped object in
+    # practice, but be explicit) and re-validate under the lock.
+    submission = locked
+    _validate_transition(submission, action_enum)
+
     cleaned_reason = reason
     cleaned_observations = observations
 

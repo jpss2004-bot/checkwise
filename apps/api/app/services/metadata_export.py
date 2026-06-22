@@ -1,9 +1,11 @@
 from __future__ import annotations
 
 import logging
+import os
 import re
 import shutil
 import unicodedata
+import uuid
 from collections import OrderedDict
 from collections.abc import Callable
 from dataclasses import dataclass
@@ -177,6 +179,34 @@ def export_metadata_table_after_upload(
     )
 
 
+def _atomic_replace_via_temp(final_path: Path, writer: Callable[[Path], None]) -> None:
+    """Write to a unique temp file in the same dir, then atomically rename.
+
+    Both ``latest_metadata.xlsx`` and ``client_master_metadata.xlsx`` live at
+    FIXED per-slot/per-client paths and can be rebuilt concurrently (intake
+    BackgroundTask + intake-reconcile cron + shadow re-export). A direct write
+    to the final path lets a reader observe a half-written zip (``BadZipFile``)
+    and lets two interleaved rebuilds produce a torn file. Writing to a temp
+    sibling and ``os.replace``-ing it onto the final name is atomic on POSIX, so
+    a reader always sees either the old or a complete new workbook — never a
+    partial one. The temp file lives in the SAME directory so the rename stays
+    on one filesystem (a cross-device ``os.replace`` would raise).
+    """
+    final_path.parent.mkdir(parents=True, exist_ok=True)
+    tmp_path = final_path.with_name(
+        f".{final_path.name}.{os.getpid()}.{uuid.uuid4().hex}.tmp"
+    )
+    try:
+        writer(tmp_path)
+        os.replace(tmp_path, final_path)
+    finally:
+        # If the writer raised before the rename, drop the orphaned temp file.
+        try:
+            tmp_path.unlink()
+        except OSError:
+            pass
+
+
 def _write_metadata_workbooks(
     *,
     stored_file: StoredFile,
@@ -222,7 +252,13 @@ def _write_metadata_workbooks(
             precomputed_text_extraction=precomputed_text_extraction,
             field_suggestions=field_suggestions,
         )
-        shutil.copyfile(output_path, latest_path)
+        # ``latest_path`` is a FIXED per-slot path that concurrent finalizers
+        # for the same slot can rewrite; copy via a temp sibling + atomic
+        # rename so a concurrent master rebuild / download never reads a
+        # half-copied zip.
+        _atomic_replace_via_temp(
+            latest_path, lambda dst: shutil.copyfile(output_path, dst)
+        )
         # Mirror both workbooks to durable storage BEFORE the master
         # rebuild — Render's disk is ephemeral, and the rebuild must be
         # able to recover the full slot set after a deploy.
@@ -473,7 +509,15 @@ def rebuild_client_master_metadata_export(
         return None
 
     master_path = client_root / "client_master_metadata.xlsx"
-    write_client_master_xlsx(rows, master_path, client_name=client_name)
+    # The master is a FIXED per-client path rebuilt by concurrent intake
+    # BackgroundTasks, the reconcile cron, and the shadow re-export. Write to a
+    # temp sibling then atomically rename so two interleaved rebuilds can't
+    # produce a torn workbook and ``/client/metadata/download`` never serves a
+    # half-written zip. The bytes are unchanged from a direct write.
+    _atomic_replace_via_temp(
+        master_path,
+        lambda dst: write_client_master_xlsx(rows, dst, client_name=client_name),
+    )
     persist_export(master_path)
     return master_path
 

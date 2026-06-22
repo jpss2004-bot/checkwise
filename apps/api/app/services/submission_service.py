@@ -15,6 +15,7 @@ from pathlib import Path
 
 from fastapi import BackgroundTasks, HTTPException, UploadFile, status
 from sqlalchemy import select
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from app.constants.institutions import INSTITUTION_LABELS, Institution
@@ -618,6 +619,54 @@ _INTAKE_HISTORY_REASON = {
     ),
 }
 
+# Friendly 409 surfaced when two near-simultaneous first-time uploads to
+# the same evidence slot both try to insert a *genesis* submission
+# (``supersedes_submission_id IS NULL``) and collide on the partial
+# unique index ``ux_submissions_active_slot`` (migration 0035). Without a
+# catch the loser's flush raises ``IntegrityError`` → unhandled 500 +
+# poisoned session. See ``_add_genesis_submission`` below.
+_DUPLICATE_SLOT_DETAIL = (
+    "Otra carga para este proveedor, requisito y periodo se registró al "
+    "mismo tiempo. Actualiza la página y, si ya aparece el documento, "
+    "envíalo como reemplazo."
+)
+
+
+def _add_genesis_submission(db: Session, submission: Submission) -> None:
+    """Insert a genesis submission, converting a slot-collision to a 409.
+
+    Concurrency hardening (audit 2026-06-21, Batch 6): the genesis insert
+    (``supersedes_submission_id IS NULL``) is guarded by the Postgres
+    partial unique index ``ux_submissions_active_slot`` — one active
+    genesis per ``(client_id, vendor_id, requirement_code,
+    coalesce(period_key, ''))``. Two concurrent first-time uploads to the
+    same slot both pass the wizard duplicate-check, both ``add`` a genesis
+    row, and the second ``flush`` raises ``IntegrityError``. We run the
+    insert in a ``SAVEPOINT`` so the failed flush rolls back only the
+    nested transaction (the outer transaction / session stays usable),
+    then re-raise as the existing-style 409 instead of a 500.
+
+    Non-genesis rows (``supersedes_submission_id`` set) are NOT covered by
+    the index, so they never collide here — the savepoint is a harmless
+    no-op for them. On SQLite the index is intentionally absent (see
+    ``entities.Submission``), so no ``IntegrityError`` is raised and the
+    savepoint commits cleanly: single-threaded and test behavior is
+    identical to the prior ``db.add``/``db.flush``.
+    """
+    try:
+        with db.begin_nested():
+            db.add(submission)
+            db.flush()
+    except IntegrityError as exc:
+        # Only the active-slot collision maps to a friendly 409; any other
+        # integrity failure is a genuine bug and should surface loudly.
+        if "ux_submissions_active_slot" not in str(exc.orig):
+            raise
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail=_DUPLICATE_SLOT_DETAIL,
+        ) from exc
+
 
 def finalize_intake_submission(
     db: Session,
@@ -746,8 +795,10 @@ def finalize_intake_submission(
                 supersedes_submission.id if supersedes_submission is not None else None
             ),
         )
-        db.add(submission)
-        db.flush()
+        # SAVEPOINT-guarded insert: a concurrent first-time upload to the
+        # same slot collides on ux_submissions_active_slot → friendly 409
+        # instead of a 500. No-op for non-genesis rows and on SQLite.
+        _add_genesis_submission(db, submission)
 
         document = Document(
             submission_id=submission.id,
@@ -1162,8 +1213,12 @@ def persist_intake_receipt(
             supersedes_submission.id if supersedes_submission is not None else None
         ),
     )
-    db.add(submission)
-    db.flush()
+    # SAVEPOINT-guarded insert (async receipt path). Two near-simultaneous
+    # first-time uploads to the same slot both persist a genesis RECIBIDO
+    # receipt; the loser collides on ux_submissions_active_slot and gets a
+    # friendly 409 instead of a 500 + poisoned session. Non-genesis
+    # (replacement) receipts are exempt from the index and pass through.
+    _add_genesis_submission(db, submission)
 
     document = Document(
         submission_id=submission.id,

@@ -2625,7 +2625,18 @@ def client_add_provider(
         must_change_password=True,
     )
     db.add(user)
-    db.flush()
+    # Concurrent invites with the same contact_email both clear the
+    # ``existing_user`` pre-check above, then the second flush hits the
+    # ``uq_users_email`` unique constraint. Catch that race and surface the
+    # same 409 the pre-check returns, mirroring the vendor-flush guard below.
+    try:
+        db.flush()
+    except IntegrityError as exc:
+        db.rollback()
+        raise HTTPException(
+            status.HTTP_409_CONFLICT,
+            detail="Ya existe una cuenta con ese correo de contacto.",
+        ) from exc
 
     vendor = Vendor(
         client_id=target_id,
