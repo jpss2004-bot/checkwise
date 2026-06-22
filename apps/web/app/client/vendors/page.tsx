@@ -41,6 +41,7 @@ import {
 import { useUrlClientId } from "@/lib/workspace/use-url-client-id";
 import { useClientPlan } from "@/lib/plan/plan-context";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
+import { useClientApprover } from "@/lib/session/client-tier";
 import { BUCKET_LABELS_ES, semaphoreLabel } from "@/lib/constants/statuses";
 import { withReturnTo } from "@/lib/navigation/return-to";
 
@@ -173,6 +174,10 @@ export default function ClientVendorsPage() {
   }, [activeRows]);
 
   const [generatingVendorId, setGeneratingVendorId] = useState<string | null>(null);
+  // Phase 4 — report generation POSTs a new report (Approver-only; the
+  // backend 403s a Viewer). Drop the per-row "Reporte" action for Viewers;
+  // the "Ver" drill stays (read).
+  const isApprover = useClientApprover();
 
   const onGenerateReport = useCallback(
     async (vendorId: string) => {
@@ -203,8 +208,9 @@ export default function ClientVendorsPage() {
         onGenerateReport,
         generatingVendorId,
         vendorsHref,
+        isApprover,
       ),
-    [unreadByVendor, onGenerateReport, generatingVendorId, vendorsHref],
+    [unreadByVendor, onGenerateReport, generatingVendorId, vendorsHref, isApprover],
   );
 
   return (
@@ -431,6 +437,7 @@ function buildVendorColumns(
   onGenerateReport: (vendorId: string) => void,
   generatingVendorId: string | null,
   returnToHref: string,
+  isApprover: boolean,
 ): DataTableColumn<ClientVendorRow>[] {
   return [
   {
@@ -569,27 +576,29 @@ function buildVendorColumns(
     align: "right",
     cell: (row) => (
       <div className="inline-flex items-center gap-2">
-        <Button
-          size="sm"
-          variant="default"
-          onClick={() => onGenerateReport(row.vendor_id)}
-          disabled={
-            generatingVendorId !== null || row.workspace_status === "inactive"
-          }
-          title={
-            row.workspace_status === "inactive"
-              ? "Proveedor archivado — restáuralo para generar un reporte"
-              : "Generar un reporte visual de este proveedor"
-          }
-          className="inline-flex items-center gap-1"
-        >
-          {generatingVendorId === row.vendor_id ? (
-            <CircleNotch className="h-3 w-3 animate-spin" weight="bold" aria-hidden="true" />
-          ) : (
-            <ChartBar className="h-3 w-3" weight="bold" aria-hidden="true" />
-          )}
-          Reporte
-        </Button>
+        {isApprover ? (
+          <Button
+            size="sm"
+            variant="default"
+            onClick={() => onGenerateReport(row.vendor_id)}
+            disabled={
+              generatingVendorId !== null || row.workspace_status === "inactive"
+            }
+            title={
+              row.workspace_status === "inactive"
+                ? "Proveedor archivado — restáuralo para generar un reporte"
+                : "Generar un reporte visual de este proveedor"
+            }
+            className="inline-flex items-center gap-1"
+          >
+            {generatingVendorId === row.vendor_id ? (
+              <CircleNotch className="h-3 w-3 animate-spin" weight="bold" aria-hidden="true" />
+            ) : (
+              <ChartBar className="h-3 w-3" weight="bold" aria-hidden="true" />
+            )}
+            Reporte
+          </Button>
+        ) : null}
         <Button asChild size="sm" variant="outline">
           <Link
             href={withReturnTo(`/client/vendors/${row.vendor_id}`, returnToHref)}

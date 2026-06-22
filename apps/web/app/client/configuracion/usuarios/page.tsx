@@ -26,13 +26,16 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { Select } from "@/components/ui/select";
 import {
   createClientUser,
   listClientUsers,
   removeClientUser,
   resetClientUserPassword,
+  updateClientUserRole,
   updateClientUserStatus,
   type ClientUserItem,
+  type ClientUserRole,
   type ClientUsersList,
 } from "@/lib/api/client";
 import { useUrlClientId } from "@/lib/workspace/use-url-client-id";
@@ -88,6 +91,23 @@ function statusBadge(user: ClientUserItem) {
   return <Badge variant="success">Activo</Badge>;
 }
 
+const TIER_LABEL: Record<ClientUserRole, string> = {
+  client_admin: "Aprobador",
+  client_viewer: "Visor",
+};
+
+// Tier badge for secondary seats. Brand = write-capable (Approver),
+// outline = read-only (Viewer) — same colour language as the row's
+// action affordances. The Primary Owner renders the "Titular" badge
+// instead (it's always an Approver).
+function tierBadge(role: ClientUserRole) {
+  return role === "client_admin" ? (
+    <Badge variant="brand">{TIER_LABEL.client_admin}</Badge>
+  ) : (
+    <Badge variant="outline">{TIER_LABEL.client_viewer}</Badge>
+  );
+}
+
 export default function ClientSeatsPage() {
   const urlClientId = useUrlClientId();
   const clientParam = urlClientId ? { client_id: urlClientId } : undefined;
@@ -99,6 +119,9 @@ export default function ClientSeatsPage() {
   // Add-user form.
   const [newName, setNewName] = useState("");
   const [newEmail, setNewEmail] = useState("");
+  // New seats default to the least-privilege Viewer (matches the backend
+  // default); the owner promotes to Approver here or later from the roster.
+  const [newRole, setNewRole] = useState<ClientUserRole>("client_viewer");
   const [createBusy, setCreateBusy] = useState(false);
   const [createError, setCreateError] = useState<string | null>(null);
 
@@ -137,7 +160,7 @@ export default function ClientSeatsPage() {
     setCreateBusy(true);
     try {
       const res = await createClientUser(
-        { full_name: newName.trim(), email: newEmail.trim() },
+        { full_name: newName.trim(), email: newEmail.trim(), role: newRole },
         clientParam,
       );
       setCredential({
@@ -148,6 +171,7 @@ export default function ClientSeatsPage() {
       });
       setNewName("");
       setNewEmail("");
+      setNewRole("client_viewer");
       await reload();
     } catch (err) {
       setCreateError(errorDetail(err));
@@ -217,7 +241,7 @@ export default function ClientSeatsPage() {
                         {user.is_primary ? (
                           <Badge variant="brand">Titular</Badge>
                         ) : (
-                          <Badge variant="outline">Usuario</Badge>
+                          tierBadge(user.role)
                         )}
                         {statusBadge(user)}
                       </div>
@@ -228,6 +252,25 @@ export default function ClientSeatsPage() {
 
                     {canManage && !user.is_primary ? (
                       <div className="flex flex-wrap items-center gap-1.5">
+                        <Select
+                          aria-label={`Nivel de acceso de ${user.full_name}`}
+                          className="h-8 w-auto py-0 text-[13px]"
+                          value={user.role}
+                          disabled={busy}
+                          onChange={(e) =>
+                            runRowAction(user.user_id, async () => {
+                              await updateClientUserRole(
+                                user.user_id,
+                                e.target.value as ClientUserRole,
+                                clientParam,
+                              );
+                              await reload();
+                            })
+                          }
+                        >
+                          <option value="client_admin">Aprobador</option>
+                          <option value="client_viewer">Visor</option>
+                        </Select>
                         {user.status === "active" ? (
                           <Button
                             variant="outline"
@@ -384,6 +427,24 @@ export default function ClientSeatsPage() {
                       required
                     />
                   </div>
+                </div>
+                <div className="space-y-1">
+                  <Label htmlFor="seat-role">Nivel de acceso</Label>
+                  <Select
+                    id="seat-role"
+                    value={newRole}
+                    onChange={(e) => setNewRole(e.target.value as ClientUserRole)}
+                  >
+                    <option value="client_viewer">Visor — consulta y exporta</option>
+                    <option value="client_admin">
+                      Aprobador — además administra el portafolio
+                    </option>
+                  </Select>
+                  <p className="text-[12px] text-[color:var(--text-tertiary)]">
+                    Un Visor ve todo y descarga evidencia; un Aprobador además
+                    agrega o archiva proveedores y edita el perfil. Puedes
+                    cambiarlo después.
+                  </p>
                 </div>
                 {createError ? (
                   <p className="text-[12px] text-[color:var(--status-error-text)]">

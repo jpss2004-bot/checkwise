@@ -58,6 +58,7 @@ import { useClientPlan } from "@/lib/plan/plan-context";
 import { PLAN_UPSELL_COPY } from "@/lib/constants/plan-states";
 import { downloadAuthenticatedFile } from "@/lib/api/download";
 import { createReportFromPreset, ReportsApiError } from "@/lib/api/reports";
+import { useClientApprover } from "@/lib/session/client-tier";
 import {
   bucketLabel,
   contractStatusLabel,
@@ -143,6 +144,12 @@ export default function ClientVendorDetailPage({ params }: PageProps) {
       setDownloadingMetadata(false);
     }
   }, [downloadingMetadata, vendor_id]);
+
+  // Phase 4 — Viewer seats are read + export only. Hide the portfolio-write
+  // affordances (archive/restore) and report *creation* (Generar reporte
+  // POSTs a new report, which the backend now 403s for Viewers). Exports —
+  // expediente + metadata — stay: Viewers keep all evidence pulls.
+  const isApprover = useClientApprover();
 
   const onGenerateReport = useCallback(async () => {
     if (generating) return;
@@ -264,24 +271,26 @@ export default function ClientVendorDetailPage({ params }: PageProps) {
               ``client.vendor_expediente_downloaded`` so the
               forensic trail distinguishes this from a provider
               self-pull. */}
-          <Button
-            size="sm"
-            variant="default"
-            onClick={onGenerateReport}
-            disabled={generating || isArchived}
-            title={
-              isArchived
-                ? "Restaura el proveedor para generar un reporte"
-                : "Generar un reporte visual de este proveedor"
-            }
-          >
-            {generating ? (
-              <CircleNotch className="h-4 w-4 animate-spin" weight="bold" aria-hidden="true" />
-            ) : (
-              <ChartBar className="h-4 w-4" weight="bold" aria-hidden="true" />
-            )}
-            Generar reporte
-          </Button>
+          {isApprover ? (
+            <Button
+              size="sm"
+              variant="default"
+              onClick={onGenerateReport}
+              disabled={generating || isArchived}
+              title={
+                isArchived
+                  ? "Restaura el proveedor para generar un reporte"
+                  : "Generar un reporte visual de este proveedor"
+              }
+            >
+              {generating ? (
+                <CircleNotch className="h-4 w-4 animate-spin" weight="bold" aria-hidden="true" />
+              ) : (
+                <ChartBar className="h-4 w-4" weight="bold" aria-hidden="true" />
+              )}
+              Generar reporte
+            </Button>
+          ) : null}
           <Button
             size="sm"
             variant="outline"
@@ -330,34 +339,36 @@ export default function ClientVendorDetailPage({ params }: PageProps) {
             )}
             Descargar metadata
           </Button>
-          <Button
-            size="sm"
-            variant={isArchived ? "default" : "outline"}
-            onClick={onToggleArchive}
-            disabled={archiving || !detail}
-            title={
-              isArchived
-                ? "Restaurar este proveedor a tu portafolio activo"
-                : "Archivar este proveedor (reversible)"
-            }
-          >
-            {archiving ? (
-              <CircleNotch
-                className="h-4 w-4 animate-spin"
-                weight="bold"
-                aria-hidden="true"
-              />
-            ) : isArchived ? (
-              <ArrowCounterClockwise
-                className="h-4 w-4"
-                weight="bold"
-                aria-hidden="true"
-              />
-            ) : (
-              <Archive className="h-4 w-4" weight="bold" aria-hidden="true" />
-            )}
-            {isArchived ? "Restaurar proveedor" : "Archivar proveedor"}
-          </Button>
+          {isApprover ? (
+            <Button
+              size="sm"
+              variant={isArchived ? "default" : "outline"}
+              onClick={onToggleArchive}
+              disabled={archiving || !detail}
+              title={
+                isArchived
+                  ? "Restaurar este proveedor a tu portafolio activo"
+                  : "Archivar este proveedor (reversible)"
+              }
+            >
+              {archiving ? (
+                <CircleNotch
+                  className="h-4 w-4 animate-spin"
+                  weight="bold"
+                  aria-hidden="true"
+                />
+              ) : isArchived ? (
+                <ArrowCounterClockwise
+                  className="h-4 w-4"
+                  weight="bold"
+                  aria-hidden="true"
+                />
+              ) : (
+                <Archive className="h-4 w-4" weight="bold" aria-hidden="true" />
+              )}
+              {isArchived ? "Restaurar proveedor" : "Archivar proveedor"}
+            </Button>
+          ) : null}
           <Button asChild size="sm" variant="outline">
             <Link href={vendorsReturnHref}>
               <ArrowLeft className="h-4 w-4" weight="bold" aria-hidden="true" />

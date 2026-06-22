@@ -792,11 +792,17 @@ export function invalidateClientPlan(client_id?: string): void {
 // page are the first UI to reach it.
 // ---------------------------------------------------------------------------
 
+export type ClientUserRole = "client_admin" | "client_viewer";
+
 export type ClientUserItem = {
   user_id: string;
   email: string;
   full_name: string;
   is_primary: boolean;
+  // Seat tier (Phase 4). "client_admin" = Approver (full write);
+  // "client_viewer" = Viewer (read + export only). The Primary Owner is
+  // always an Approver.
+  role: ClientUserRole;
   // "active" | "disabled"
   status: string;
   // True while the seat hasn't completed first login (temp password).
@@ -845,6 +851,11 @@ export type ResetClientUserPasswordResponse = {
   email_error: string | null;
 };
 
+export type ClientUserRoleResponse = {
+  user_id: string;
+  role: ClientUserRole;
+};
+
 export async function listClientUsers(params?: {
   client_id?: string;
 }): Promise<ClientUsersList> {
@@ -852,12 +863,25 @@ export async function listClientUsers(params?: {
 }
 
 export async function createClientUser(
-  body: { full_name: string; email: string },
+  // ``role`` defaults to the least-privilege Viewer server-side when
+  // omitted; the owner opts into an Approver explicitly.
+  body: { full_name: string; email: string; role?: ClientUserRole },
   params?: { client_id?: string },
 ): Promise<CreateClientUserResponse> {
   return fetchJson<CreateClientUserResponse>(
     `/api/v1/client/users${qs(params)}`,
     { method: "POST", body: JSON.stringify(body) },
+  );
+}
+
+export async function updateClientUserRole(
+  user_id: string,
+  role: ClientUserRole,
+  params?: { client_id?: string },
+): Promise<ClientUserRoleResponse> {
+  return fetchJson<ClientUserRoleResponse>(
+    `/api/v1/client/users/${user_id}/role${qs(params)}`,
+    { method: "PATCH", body: JSON.stringify({ role }) },
   );
 }
 

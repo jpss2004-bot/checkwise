@@ -31,6 +31,7 @@ import { useUrlClientId } from "@/lib/workspace/use-url-client-id";
 import { parseClientErrorCode } from "@/lib/api/error-detail";
 import { ProviderLimitModal } from "@/components/checkwise/plan/provider-limit-modal";
 import { ProviderRestoreModal } from "@/components/checkwise/plan/provider-restore-modal";
+import { useClientApprover } from "@/lib/session/client-tier";
 
 /**
  * /client/onboarding
@@ -68,6 +69,12 @@ export default function ClientOnboardingPage() {
   const [saving, setSaving] = useState(false);
   const [saveError, setSaveError] = useState<string | null>(null);
   const [justSaved, setJustSaved] = useState(false);
+
+  // Phase 4 — only an Approver (or internal support) may edit the company
+  // profile; the backend 403s a Viewer on PATCH /client/profile. Render the
+  // form read-only for Viewers (disabled fieldset + no Save) so the page
+  // stays informative without dangling a write they can't perform.
+  const isApprover = useClientApprover();
 
   // Initial load: prefill from the admin alta + any prior edits.
   useEffect(() => {
@@ -217,8 +224,20 @@ export default function ClientOnboardingPage() {
               </div>
             </Surface>
 
+            {!isApprover ? (
+              <div
+                role="note"
+                className="rounded-lg border border-[color:var(--border-subtle)] bg-[color:var(--surface-sunken)] px-4 py-3 text-[13px] text-[color:var(--text-secondary)]"
+              >
+                Tienes acceso de <strong>Visor</strong> (solo lectura). Puedes
+                consultar estos datos, pero para editarlos pide a un Aprobador
+                de tu empresa.
+              </div>
+            ) : null}
+
             <form onSubmit={handleSubmit}>
               <Surface title="Información operativa" icon={IdentificationCard}>
+                <fieldset disabled={!isApprover} className="contents">
                 <div className="grid gap-3 sm:grid-cols-2">
                   <div className="space-y-1">
                     <Label htmlFor="ob-responsible">
@@ -275,6 +294,7 @@ export default function ClientOnboardingPage() {
                     />
                   </div>
                 </div>
+                </fieldset>
                 {saveError ? (
                   <p className="mt-3 text-sm text-[color:var(--status-error-text)]">
                     {saveError}
@@ -322,39 +342,41 @@ export default function ClientOnboardingPage() {
               </Surface>
             ) : null}
 
-            <div className="flex items-center justify-end gap-3">
-              {justSaved ? (
-                <p
-                  className="inline-flex items-center gap-1.5 text-xs font-medium text-[color:var(--status-success-text)]"
-                  role="status"
-                >
-                  <CheckCircle className="h-4 w-4" weight="fill" aria-hidden="true" />
-                  Guardado
-                </p>
-              ) : null}
-              <Button
-                type="button"
-                loading={saving}
-                size="lg"
-                disabled={
-                  saving ||
-                  (isFirstTime &&
-                    (!termsAccepted ||
-                      !responsibleName.trim() ||
-                      !fiscalAddress.trim()))
-                }
-                onClick={(e) => handleSubmit(e as unknown as FormEvent)}
-              >
-                {isFirstTime ? "Activar mi portafolio" : "Guardar cambios"}
-                {!saving ? (
-                  <ArrowRight
-                    className="h-4 w-4"
-                    weight="bold"
-                    aria-hidden="true"
-                  />
+            {isApprover ? (
+              <div className="flex items-center justify-end gap-3">
+                {justSaved ? (
+                  <p
+                    className="inline-flex items-center gap-1.5 text-xs font-medium text-[color:var(--status-success-text)]"
+                    role="status"
+                  >
+                    <CheckCircle className="h-4 w-4" weight="fill" aria-hidden="true" />
+                    Guardado
+                  </p>
                 ) : null}
-              </Button>
-            </div>
+                <Button
+                  type="button"
+                  loading={saving}
+                  size="lg"
+                  disabled={
+                    saving ||
+                    (isFirstTime &&
+                      (!termsAccepted ||
+                        !responsibleName.trim() ||
+                        !fiscalAddress.trim()))
+                  }
+                  onClick={(e) => handleSubmit(e as unknown as FormEvent)}
+                >
+                  {isFirstTime ? "Activar mi portafolio" : "Guardar cambios"}
+                  {!saving ? (
+                    <ArrowRight
+                      className="h-4 w-4"
+                      weight="bold"
+                      aria-hidden="true"
+                    />
+                  ) : null}
+                </Button>
+              </div>
+            ) : null}
 
             {!isFirstTime ? <MyProvidersSection /> : null}
           </>
@@ -402,6 +424,10 @@ function ReadOnlyField({
 
 function MyProvidersSection() {
   const urlClientId = useUrlClientId();
+  // Phase 4 — adding a provider POSTs /client/providers (Approver-only;
+  // the backend 403s a Viewer). Hide the add affordance for Viewers; the
+  // roster below stays visible (read).
+  const isApprover = useClientApprover();
   const [providers, setProviders] = useState<ClientVendorRow[] | null>(null);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [showForm, setShowForm] = useState(false);
@@ -437,13 +463,15 @@ function MyProvidersSection() {
       icon={IdentificationCard}
       description="Agrega los proveedores REPSE que CheckWise va a monitorear por ti. Al agregar uno, le enviaremos automáticamente un correo con sus credenciales para que entre y empiece a subir documentos."
       actions={
-        <Button
-          type="button"
-          size="sm"
-          onClick={() => setShowForm((v) => !v)}
-        >
-          {showForm ? "Cancelar" : "Agregar proveedor"}
-        </Button>
+        isApprover ? (
+          <Button
+            type="button"
+            size="sm"
+            onClick={() => setShowForm((v) => !v)}
+          >
+            {showForm ? "Cancelar" : "Agregar proveedor"}
+          </Button>
+        ) : undefined
       }
     >
       {lastInviteEmail ? (
