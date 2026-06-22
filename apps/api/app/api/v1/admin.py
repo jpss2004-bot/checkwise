@@ -65,6 +65,7 @@ from app.api.v1.client import (
     _vendor_compliance,
 )
 from app.api.v1.reviewer import QUEUE_STATUSES
+from app.constants.plans import Plan
 from app.constants.roles import MembershipRole
 from app.constants.statuses import DocumentStatus
 from app.core.compliance_catalog import (
@@ -123,6 +124,10 @@ from app.services.email_delivery import (
 )
 from app.services.metadata_store import ensure_local_export, mirror_enabled
 from app.services.search_service import SearchHit, search_submissions
+from app.services.subscription import (
+    evaluate_provider_capacity,
+    org_for_client_optional,
+)
 
 router = APIRouter(prefix="/admin", tags=["admin"])
 DbSession = Annotated[Session, Depends(get_db)]
@@ -1286,6 +1291,10 @@ def provision_user(
             kind="client",
             client_id=client_row.id,
             seat_limit=3,
+            # New client orgs are uncapped 'legacy' until a tier is assigned
+            # (Phase B). Explicit (not NULL) so "every client org has a plan"
+            # holds and legacy status is visible in the DB.
+            plan=Plan.LEGACY.value,
             status="active",
         )
         db.add(org)
@@ -2755,6 +2764,16 @@ def create_vendor(payload: VendorCreate, db: DbSession, current: AdminUser) -> d
             status.HTTP_404_NOT_FOUND,
             detail="Cliente no encontrado; crea el cliente antes del proveedor.",
         )
+    # Internal admins may exceed a client's plan cap (migrations, support
+    # onboarding) — measure, never block, and flag any over-limit grant in
+    # the audit so a billing bypass is detectable. Orphan legacy clients
+    # with no Organization carry no plan, so there is nothing to enforce.
+    cap_org = org_for_client_optional(db, payload.client_id, for_update=True)
+    capacity = (
+        evaluate_provider_capacity(db, cap_org, is_internal=True)
+        if cap_org is not None
+        else None
+    )
     row = Vendor(
         client_id=payload.client_id,
         name=payload.name.strip(),
@@ -2782,6 +2801,15 @@ def create_vendor(payload: VendorCreate, db: DbSession, current: AdminUser) -> d
         entity_id=row.id,
         before=None,
         after=_vendor_to_dict(row),
+        extra_metadata=(
+            {
+                "provider_limit": capacity.limit,
+                "active_after": capacity.used + 1,
+                "over_limit_override": capacity.over_limit,
+            }
+            if capacity is not None
+            else None
+        ),
     )
     db.commit()
     db.refresh(row)

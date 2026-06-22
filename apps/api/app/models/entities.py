@@ -578,6 +578,18 @@ class Organization(TimestampMixin, Base):
     # The service-layer check treats NULL on a *client* org as the
     # default 3 defensively.
     seat_limit: Mapped[int | None] = mapped_column(Integer)
+    # Subscription tiering (migration 0056). ``plan`` is NULL on
+    # internal/vendor orgs and 'legacy' on grandfathered (pre-tiering)
+    # clients; the service layer coerces NULL/legacy to "uncapped, full".
+    # ``provider_limit`` NULL means "use the plans.py default for the
+    # tier"; an integer is a per-tenant override (custom/enterprise caps).
+    # ``demo_expires_at`` is populated by Phase B demo provisioning — the
+    # column lands now so Phase B is purely additive.
+    plan: Mapped[str | None] = mapped_column(String(20))
+    provider_limit: Mapped[int | None] = mapped_column(Integer)
+    demo_expires_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True)
+    )
     status: Mapped[str] = mapped_column(String(40), default="active", nullable=False)
 
     memberships: Mapped[list[Membership]] = relationship(

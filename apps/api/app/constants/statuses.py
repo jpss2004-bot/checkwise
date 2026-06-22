@@ -28,6 +28,19 @@ class DocumentStatus(StrEnum):
     EXCEPCION_LEGAL = "excepcion_legal"
 
 
+class VendorStatus(StrEnum):
+    """Archival state on ``vendors.status`` / ``provider_workspaces.status``.
+
+    ``ACTIVE`` providers count toward the plan's provider limit; ``ARCHIVED``
+    (the value the ``/deactivate`` endpoint writes) does not. Kept as a
+    StrEnum so the limit counter and the archive flow share one definition
+    instead of scattering the ``"active"`` / ``"inactive"`` literals.
+    """
+
+    ACTIVE = "active"
+    ARCHIVED = "inactive"
+
+
 class ReviewerAction(StrEnum):
     """Decision a reviewer can apply to a submission awaiting review."""
 

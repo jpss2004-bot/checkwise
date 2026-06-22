@@ -1264,6 +1264,21 @@
   },
   {
    "method": "GET",
+   "path": "/api/v1/client/plan",
+   "function": "client_plan",
+   "router": "app.api.v1.client",
+   "file": "api/app/api/v1/client.py",
+   "lineno": 3012,
+   "gate": "client_admin_or_admin",
+   "tenant_rule": "scoped via _resolve_client_id(); plan + active-provider count read from that client only",
+   "audit_rule": "not_logged (read-only)",
+   "rate_limit_rule": "none (auth-gated)",
+   "error_lang": "es",
+   "must_change_password_allowed": false,
+   "notes": "Phase A — subscription plan + provider-usage meter (provider-limits)."
+  },
+  {
+   "method": "GET",
    "path": "/api/v1/client/search",
    "function": "client_search",
    "router": "app.api.v1.client",

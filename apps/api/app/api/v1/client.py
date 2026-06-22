@@ -74,8 +74,9 @@ from app.api.v1.portal import (
     _due_in_days_for_period,
     _empty_document_counts,
 )
+from app.constants.plans import PLAN_LABELS_ES, capabilities_for
 from app.constants.roles import MembershipRole
-from app.constants.statuses import DocumentStatus
+from app.constants.statuses import DocumentStatus, VendorStatus
 from app.core.compliance_catalog import (
     catalog_metadata,
     expediente_for_persona,
@@ -138,6 +139,13 @@ from app.services.reports.insights import (
     approval_trend_points_by_vendor,
 )
 from app.services.search_service import SearchHit, search_submissions
+from app.services.subscription import (
+    active_provider_count,
+    assert_provider_capacity,
+    org_for_client,
+    plan_for_org,
+    provider_limit_for_org,
+)
 
 router = APIRouter(prefix="/client", tags=["client"])
 DbSession = Annotated[Session, Depends(get_db)]
@@ -2690,6 +2698,37 @@ def client_add_provider(
     target_id = _resolve_client_id(db, current, requested=client_id)
     contact_email = payload.contact_email.strip().lower()
     rfc_value = payload.vendor_rfc.strip().upper()
+    is_internal = MembershipRole.INTERNAL_ADMIN.value in current.roles
+
+    # Lock the org row BEFORE counting active providers so two concurrent
+    # adds cannot both observe the last free slot (the seat-cap discipline).
+    org = org_for_client(db, target_id, for_update=True)
+
+    # "Restore instead of re-create": a duplicate (client, RFC) that is
+    # ARCHIVED should route the client to reactivate, not hit an opaque 409.
+    archived_dupe = db.scalar(
+        select(Vendor).where(
+            Vendor.client_id == target_id,
+            Vendor.rfc == rfc_value,
+            Vendor.status == VendorStatus.ARCHIVED.value,
+        )
+    )
+    if archived_dupe is not None:
+        raise HTTPException(
+            status.HTTP_409_CONFLICT,
+            detail={
+                "code": "provider_archived",
+                "vendor_id": archived_dupe.id,
+                "message": (
+                    "Ya tienes un proveedor archivado con ese RFC. "
+                    "Reactívalo para volver a usarlo."
+                ),
+            },
+        )
+
+    # Hard cap for client self-service; internal_admin may exceed (audited
+    # via over_limit_override below).
+    capacity = assert_provider_capacity(db, org, is_internal=is_internal)
 
     existing_user = db.scalar(select(User).where(User.email == contact_email))
     if existing_user is not None:
@@ -2777,6 +2816,9 @@ def client_add_provider(
             "user_id": user.id,
             "user_email": contact_email,
             "email_delivery_status": delivery.status,
+            "provider_limit": capacity.limit,
+            "active_after": capacity.used + 1,
+            "over_limit_override": capacity.over_limit,
         },
     )
 
@@ -2870,6 +2912,17 @@ def _set_provider_archival(
             vendor_id=vendor.id, status=target_status, changed=False
         )
 
+    # Restoring re-consumes a slot — re-check the plan cap (a client at the
+    # limit cannot reactivate without first archiving another; internal_admin
+    # may exceed). Deactivation always frees a slot, so it is never gated.
+    reactivate_capacity = None
+    if target_status == VendorStatus.ACTIVE.value:
+        reactivate_internal = MembershipRole.INTERNAL_ADMIN.value in current.roles
+        reactivate_org = org_for_client(db, target_id, for_update=True)
+        reactivate_capacity = assert_provider_capacity(
+            db, reactivate_org, is_internal=reactivate_internal
+        )
+
     before_status = vendor.status
     vendor.status = target_status
     for ws in workspaces:
@@ -2900,6 +2953,18 @@ def _set_provider_archival(
             "client_id": target_id,
             "workspace_ids": [w.id for w in workspaces],
         },
+        # Reactivation re-consumes a slot; flag an internal_admin over-cap
+        # restore so a billing bypass is detectable — in event_metadata,
+        # uniform with the add / admin-create doors.
+        metadata=(
+            {
+                "provider_limit": reactivate_capacity.limit,
+                "active_after": reactivate_capacity.used + 1,
+                "over_limit_override": reactivate_capacity.over_limit,
+            }
+            if reactivate_capacity is not None
+            else None
+        ),
     )
     db.commit()
     return ClientProviderStatusResponse(
@@ -2956,6 +3021,73 @@ def client_reactivate_provider(
         vendor_id=vendor_id,
         requested_client_id=client_id,
         target_status="active",
+    )
+
+
+# ---------------------------------------------------------------------------
+# Phase A — subscription plan + provider-usage meter
+# ---------------------------------------------------------------------------
+
+
+class ClientPlanResponse(BaseModel):
+    """The caller's subscription plan, provider usage and capabilities —
+    powers the plan badge, the "X of Y providers" meter, the demo countdown
+    and (Phase B) export gating. ``provider_limit`` / ``providers_available``
+    are null when the plan is uncapped (legacy / enterprise)."""
+
+    client_id: str
+    organization_id: str
+    plan: str
+    plan_label: str
+    provider_limit: int | None
+    providers_used: int
+    providers_available: int | None
+    demo_expires_at: str | None
+    capabilities: dict[str, bool]
+    can_manage: bool
+    """Whether the requesting user may change the plan / manage seats
+    (primary owner or internal staff) — mirrors the seats surface."""
+
+
+@router.get(
+    "/plan",
+    response_model=ClientPlanResponse,
+    summary="The caller's subscription plan, provider usage and capabilities",
+)
+def client_plan(
+    db: DbSession,
+    current: ClientUser,
+    client_id: str | None = Query(default=None),
+) -> ClientPlanResponse:
+    """Read-only plan snapshot for the client portal. ``providers_used`` is
+    the active (non-archived) vendor count — exactly what the cap counts."""
+    cid = _resolve_client_id(db, current, requested=client_id)
+    org = org_for_client(db, cid)
+    plan = plan_for_org(org)
+    limit = provider_limit_for_org(org)
+    used = active_provider_count(db, cid)
+    is_internal = MembershipRole.INTERNAL_ADMIN.value in current.roles
+    holds_primary = db.scalar(
+        select(Membership.id).where(
+            Membership.organization_id == org.id,
+            Membership.user_id == current.user.id,
+            Membership.status == "active",
+            Membership.is_primary.is_(True),
+        )
+    )
+    return ClientPlanResponse(
+        client_id=cid,
+        organization_id=org.id,
+        plan=plan.value,
+        plan_label=PLAN_LABELS_ES[plan],
+        provider_limit=limit,
+        providers_used=used,
+        providers_available=None if limit is None else max(0, limit - used),
+        demo_expires_at=(
+            org.demo_expires_at.isoformat() if org.demo_expires_at else None
+        ),
+        capabilities=capabilities_for(plan),
+        can_manage=is_internal or holds_primary is not None,
     )
 
 
