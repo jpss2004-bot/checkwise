@@ -142,11 +142,28 @@ from app.services.search_service import SearchHit, search_submissions
 router = APIRouter(prefix="/client", tags=["client"])
 DbSession = Annotated[Session, Depends(get_db)]
 
-# ``client_admin`` is the primary role. ``internal_admin`` is allowed
-# because LegalShelf staff frequently need to debug a client's view
-# without minting a fake client account. Reviewer / provider sessions
-# get the standard 403.
+# Read / export gate (Phase 4). Every client seat — Approver
+# (``client_admin``) or Viewer (``client_viewer``) — plus internal support
+# (LegalShelf staff debugging a client view without a fake account) may READ
+# and EXPORT. Viewers are oversight users: they see everything and can pull
+# evidence, but the dependency below blocks them from the portfolio-mutating
+# routes (which use ``ClientApprover``). Reviewer / provider sessions get 403.
 ClientUser = Annotated[
+    CurrentUser,
+    Depends(
+        require_any_role(
+            MembershipRole.CLIENT_ADMIN,
+            MembershipRole.CLIENT_VIEWER,
+            MembershipRole.INTERNAL_ADMIN,
+        )
+    ),
+]
+
+# Write gate (Phase 4 — the "Approver" tier). Portfolio-changing routes
+# (add / archive providers, edit the company profile) require an Approver;
+# a ``client_viewer`` is 403'd here at the dependency layer, so the
+# restriction is explicit and visible in the route-policy manifest.
+ClientApprover = Annotated[
     CurrentUser,
     Depends(
         require_any_role(MembershipRole.CLIENT_ADMIN, MembershipRole.INTERNAL_ADMIN)
@@ -160,11 +177,13 @@ ClientUser = Annotated[
 
 
 def _visible_client_ids_for_user(db: Session, user_id: str) -> list[str]:
-    """Return the client ids reachable through ``client_admin`` memberships.
+    """Return the client ids reachable through this user's client seats.
 
-    Walks ``memberships -> organization -> client``. Filters out
-    inactive memberships and orgs without a ``client_id`` link
-    (e.g. ``kind='internal'`` orgs). Order is deterministic so the
+    Walks ``memberships -> organization -> client`` over BOTH client
+    seat tiers — ``client_admin`` (Approver) and ``client_viewer``
+    (Phase 4) — so a Viewer can resolve and read their own client.
+    Filters out inactive memberships and orgs without a ``client_id``
+    link (e.g. ``kind='internal'`` orgs). Order is deterministic so the
     "default" pick is stable across requests.
     """
     rows = list(
@@ -173,7 +192,12 @@ def _visible_client_ids_for_user(db: Session, user_id: str) -> list[str]:
             .join(Membership, Membership.organization_id == Organization.id)
             .where(
                 Membership.user_id == user_id,
-                Membership.role == MembershipRole.CLIENT_ADMIN.value,
+                Membership.role.in_(
+                    (
+                        MembershipRole.CLIENT_ADMIN.value,
+                        MembershipRole.CLIENT_VIEWER.value,
+                    )
+                ),
                 Membership.status == "active",
                 Organization.client_id.is_not(None),
             )
@@ -1337,7 +1361,7 @@ def client_profile(
 def update_client_profile(
     payload: ClientProfileUpdate,
     db: DbSession,
-    current: ClientUser,
+    current: ClientApprover,
     client_id: str | None = None,
 ) -> ClientProfile:
     """Update the editable onboarding fields on the active client.
@@ -2653,7 +2677,7 @@ class ClientProviderCreateResponse(BaseModel):
 def client_add_provider(
     payload: ClientProviderCreate,
     db: DbSession,
-    current: ClientUser,
+    current: ClientApprover,
     client_id: str | None = None,
 ) -> ClientProviderCreateResponse:
     """Create a new provider under the caller's client and invite them.
@@ -2915,7 +2939,7 @@ def _set_provider_archival(
 def client_deactivate_provider(
     vendor_id: str,
     db: DbSession,
-    current: ClientUser,
+    current: ClientApprover,
     request: Request,
     client_id: str | None = None,
 ) -> ClientProviderStatusResponse:
@@ -2944,7 +2968,7 @@ def client_deactivate_provider(
 def client_reactivate_provider(
     vendor_id: str,
     db: DbSession,
-    current: ClientUser,
+    current: ClientApprover,
     request: Request,
     client_id: str | None = None,
 ) -> ClientProviderStatusResponse:
