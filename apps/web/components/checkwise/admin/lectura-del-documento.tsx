@@ -248,10 +248,6 @@ function buildFactRows(
 
   const str = (v: unknown) => fmtValue(typeof v === "string" ? v : null);
   const list = (v: unknown) => fmtList(Array.isArray(v) ? (v as string[]) : null);
-  const conc = (v: unknown) => {
-    const dates = list(v);
-    return dates;
-  };
 
   return [
     row(
@@ -278,7 +274,7 @@ function buildFactRows(
             ...(secondary.period_mentions ?? []),
           ]
         : undefined,
-      conc,
+      list,
     ),
     row(
       "Institución emisora",

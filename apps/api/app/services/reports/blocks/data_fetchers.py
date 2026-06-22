@@ -26,7 +26,6 @@ from sqlalchemy.orm import Session
 
 from app.constants.statuses import DocumentStatus
 from app.models.entities import (
-    Institution,
     Submission,
     Vendor,
 )
@@ -311,8 +310,7 @@ def fetch_vendor_risk_matrix(
         rows.sort(key=lambda r: r["vendor_name"])
     rows = rows[:max_rows]
 
-    totals: dict[str, dict[str, int]] = {}
-    return {"rows": rows, "totals": totals, "fetched_at": _now_iso()}
+    return {"rows": rows, "fetched_at": _now_iso()}
 
 
 def _is_portfolio_audience(scope: ReportScope) -> bool:
@@ -833,54 +831,6 @@ def _vendors_in_scope(db: Session, scope: ReportScope) -> list[Vendor]:
         # which renders empty rather than cross-tenant.
         return []
     return list(db.scalars(stmt))
-
-
-def _latest_submission_for_institution(
-    db: Session, vendor_id: str, institution_code: str, period: str | None
-) -> Submission | None:
-    stmt = (
-        select(Submission)
-        .join(Institution, Submission.institution_id == Institution.id)
-        .where(Submission.vendor_id == vendor_id)
-        .where(Institution.code == institution_code)
-        .order_by(Submission.created_at.desc())
-        .limit(1)
-    )
-    if period:
-        stmt = stmt.where(Submission.period_key == period)
-    return db.scalar(stmt)
-
-
-def _doc_state_for(status: str) -> str:
-    """Map backend status enum to the document-state code the
-    vendor_risk_matrix block expects (frontend types)."""
-    return {
-        DocumentStatus.PENDIENTE.value: "pending",
-        DocumentStatus.RECIBIDO.value: "uploaded",
-        DocumentStatus.PENDIENTE_REVISION.value: "in_review",
-        DocumentStatus.PREVALIDADO.value: "in_review",
-        DocumentStatus.POSIBLE_MISMATCH.value: "needs_review",
-        DocumentStatus.APROBADO.value: "approved",
-        DocumentStatus.RECHAZADO.value: "rejected",
-        DocumentStatus.VENCIDO.value: "expired",
-        DocumentStatus.NO_APLICA.value: "approved",
-        DocumentStatus.REQUIERE_ACLARACION.value: "needs_review",
-        DocumentStatus.EXCEPCION_LEGAL.value: "approved",
-    }.get(status, "pending")
-
-
-def _age_days(s: Submission) -> int:
-    from datetime import UTC, datetime
-
-    if not s.created_at:
-        return 0
-    # SQLite drops timezone info on round-trip; coerce both sides to
-    # tz-aware to make the subtraction safe across Postgres + SQLite.
-    created = s.created_at
-    if created.tzinfo is None:
-        created = created.replace(tzinfo=UTC)
-    delta = datetime.now(UTC) - created
-    return max(0, delta.days)
 
 
 def _risk_score_for(cells: dict[str, dict], missing_institution: str | None) -> int:

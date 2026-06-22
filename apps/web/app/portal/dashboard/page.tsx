@@ -969,8 +969,6 @@ type ActivityWindow = {
   perDay: number[];
   /** Date label (e.g. ``"03/05"``) per slot in `perDay`. */
   dayLabels: string[];
-  /** Per-day count of uploads whose CURRENT status maps to attention. */
-  byBucketAttention: number[];
   /** Per-day count of uploads whose CURRENT status maps to in_review/uploaded. */
   byBucketReview: number[];
   /** Per-day count of uploads whose CURRENT status maps to approved. */
@@ -991,7 +989,6 @@ function derive14DayActivity(rows: DashboardRecentUpload[]): ActivityWindow {
   start.setDate(start.getDate() - (days - 1));
 
   const perDay = new Array<number>(days).fill(0);
-  const byBucketAttention = new Array<number>(days).fill(0);
   const byBucketReview = new Array<number>(days).fill(0);
   const byBucketApproved = new Array<number>(days).fill(0);
   const dayLabels: string[] = [];
@@ -1017,12 +1014,6 @@ function derive14DayActivity(rows: DashboardRecentUpload[]): ActivityWindow {
       byBucketApproved[diffDays] += 1;
     } else if (code === "in_review" || code === "uploaded") {
       byBucketReview[diffDays] += 1;
-    } else if (
-      code === "rejected" ||
-      code === "needs_review" ||
-      code === "expired"
-    ) {
-      byBucketAttention[diffDays] += 1;
     }
   }
 
@@ -1030,7 +1021,6 @@ function derive14DayActivity(rows: DashboardRecentUpload[]): ActivityWindow {
   return {
     perDay,
     dayLabels,
-    byBucketAttention,
     byBucketReview,
     byBucketApproved,
     total,

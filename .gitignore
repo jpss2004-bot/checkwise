@@ -88,6 +88,12 @@ apps/api/*.db-journal
 outputs/
 *.zip
 
+# macOS Finder duplicate artifacts ("client 2.py", "page 2.tsx", "tsconfig 2.json")
+# so a bulk `git add` can never commit Finder copies into the source tree.
+* [2-9].*
+* copy.*
+* copy
+
 # Local-only operator artefacts under docs/ (demo credentials, executive
 # evidence bundles, ad-hoc HTML reports). Tracked docs live alongside —
 # only the explicitly-named local artefacts are ignored.

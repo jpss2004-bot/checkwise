@@ -26,7 +26,7 @@ export const CALENDAR_MAX_YEAR = 2030;
  * guard below is load-bearing.
  */
 export function parseCalendarYear(raw: string | null): number {
-  const fallback = new Date().getFullYear() || 2026;
+  const fallback = new Date().getFullYear();
   if (raw === null || raw.trim() === "") return fallback;
   const parsed = Number(raw);
   if (!Number.isFinite(parsed)) return fallback;

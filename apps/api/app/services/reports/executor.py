@@ -196,11 +196,7 @@ def execute_plan(
     for block in plan.blocks:
         yield ("block_start", {"block_id": block.id, "type": block.type})
 
-        # Special-case ai_recommendation: it needs the upstream
-        # summaries we've collected so far.
         config = dict(block.config)
-        if block.type == "ai_recommendation":
-            config = {**config, "_runtime_upstream": upstream_summaries}
 
         try:
             data = fetch_for_block(

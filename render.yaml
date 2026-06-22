@@ -316,7 +316,7 @@ services:
     rootDir: apps/api
     branch: main
     schedule: "0 14 * * *"
-    buildCommand: pip install -e .
+    buildCommand: pip install -e . -c requirements.lock
     command: python -m scripts.run_renewal_dispatch
     envVars:
       - key: CHECKWISE_ENV
@@ -402,7 +402,7 @@ services:
     rootDir: apps/api
     branch: main
     schedule: "*/15 * * * *"
-    buildCommand: pip install -e .
+    buildCommand: pip install -e . -c requirements.lock
     command: python -m scripts.run_intake_reconcile
     envVars:
       - key: CHECKWISE_ENV
@@ -473,7 +473,7 @@ services:
     rootDir: apps/api
     branch: main
     schedule: "5 14 * * *"
-    buildCommand: pip install -e .
+    buildCommand: pip install -e . -c requirements.lock
     command: python -m scripts.run_reporting_dispatch
     envVars:
       - key: CHECKWISE_ENV

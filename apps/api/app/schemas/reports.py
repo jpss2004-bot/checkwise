@@ -16,9 +16,6 @@ from datetime import datetime
 from pydantic import BaseModel, Field
 
 from app.constants.reports import (
-    ConversationRole,
-    ExportFormat,
-    ExportStatus,
     ReportAudience,
     ReportStatus,
     ReportVersionOrigin,
@@ -137,49 +134,6 @@ class ReportList(BaseModel):
 class ReportVersionList(BaseModel):
     items: list[ReportVersionSummary]
     total: int
-
-
-# ─── Conversations / shares / exports (placeholder schemas) ──────
-#
-# Tables + models exist for these in Phase 3.1, but the endpoints
-# don't. The schemas are scaffolded here so the later sub-phases
-# don't have to think about wire shapes — they just fill in the
-# endpoint code.
-
-
-class ConversationTurnRead(BaseModel):
-    id: str
-    report_id: str
-    turn_number: int
-    role: ConversationRole
-    content_json: dict
-    attached_version_id: str | None
-    created_at: datetime
-
-
-class ReportShareRead(BaseModel):
-    id: str
-    report_id: str
-    version_id: str
-    audience: ReportAudience
-    watermark: str | None
-    expires_at: datetime | None
-    revoked_at: datetime | None
-    created_at: datetime
-    last_accessed_at: datetime | None
-    access_count: int
-
-
-class ReportExportRead(BaseModel):
-    id: str
-    report_id: str
-    version_id: str
-    format: ExportFormat
-    status: ExportStatus
-    bytes: int | None
-    requested_at: datetime
-    ready_at: datetime | None
-    error_text: str | None
 
 
 # ─── Presets (R1.0) ──────────────────────────────────────────────

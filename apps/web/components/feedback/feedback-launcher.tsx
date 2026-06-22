@@ -541,13 +541,7 @@ export function FeedbackLauncher({
               htmlFor="feedback-description"
               required
               trailing={
-                <span
-                  className={cn(
-                    charCount > MAX_DESCRIPTION
-                      ? "text-[color:var(--status-error-text)]"
-                      : undefined,
-                  )}
-                >
+                <span>
                   {charCount}/{MAX_DESCRIPTION}
                 </span>
               }

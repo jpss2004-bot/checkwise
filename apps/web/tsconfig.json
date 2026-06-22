@@ -32,8 +32,8 @@
     "**/*.ts",
     "**/*.tsx",
     ".next/types/**/*.ts",
-    "next-env.d.ts",
-    ".cw-next-4624abb356/types/**/*.ts"
+    ".cw-next-*/types/**/*.ts",
+    "next-env.d.ts"
   ],
   "exclude": [
     "node_modules"
