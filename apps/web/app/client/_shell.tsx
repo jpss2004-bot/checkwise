@@ -40,6 +40,11 @@ import {
   clearAdminSession,
   readAdminSession,
 } from "@/lib/session/admin";
+import { parseClientErrorCode } from "@/lib/api/error-detail";
+import { ClientPlanProvider } from "@/lib/plan/plan-context";
+import { PlanBadgeConnected } from "@/components/checkwise/plan/plan-badge";
+import { DemoCountdownConnected } from "@/components/checkwise/plan/demo-countdown";
+import { UpgradeWall } from "@/components/checkwise/plan/upgrade-wall";
 
 /**
  * ClientShell — premium-dense cliente corporativo console (V2.1).
@@ -145,6 +150,10 @@ export function ClientShell({
   const [consentErrorDetail, setConsentErrorDetail] = useState<string | null>(
     null,
   );
+  // Phase C3 — a frozen/expired demo client trips the backend trial gate
+  // (403 trial_expired) on /client/me; render the upgrade wall instead of
+  // bouncing them to /login like a normal auth-403.
+  const [trialExpired, setTrialExpired] = useState(false);
 
   useEffect(() => {
     const current = readAdminSession();
@@ -251,6 +260,17 @@ export function ClientShell({
       .catch((err: unknown) => {
         if (cancelled) return;
         const status = httpStatusOf(err);
+        // Phase C3 — a trial-expiry 403 is NOT an invalid token: show the
+        // upgrade wall (logout stays available) rather than clearing the
+        // session. The ``code`` field is the discriminator vs. an auth-403.
+        if (
+          status === 403 &&
+          parseClientErrorCode(err).code === "trial_expired"
+        ) {
+          setTrialExpired(true);
+          setConsentState("ok");
+          return;
+        }
         // A 401/403 means the stored token is invalid (rotated secret,
         // signature mismatch, or a session minted before this gate
         // shipped). readAdminSession() only checks *expiry*, so such a
@@ -325,6 +345,10 @@ export function ClientShell({
   // flashes for an un-consented client_admin mid-redirect.
   if (consentState !== "ok") return null;
 
+  // Phase C3 — frozen/expired demo: the upgrade wall (logout stays available)
+  // replaces the console until the client upgrades or logs out.
+  if (trialExpired) return <UpgradeWall onLogout={onLogout} />;
+
   // Transparency half of break-glass: when CheckWise-internal staff view
   // a client's portal (an internal_admin who is not themselves a
   // client_admin of this org), surface a banner so the access is never
@@ -336,6 +360,7 @@ export function ClientShell({
     !session.roles.includes("client_admin");
 
   return (
+    <ClientPlanProvider clientId={urlClientId}>
     <div
       data-density="dense"
       // ``wise-push-target``: at ≥1024px the open Wise drawer reserves
@@ -473,6 +498,8 @@ export function ClientShell({
         </div>
       ) : null}
 
+      <DemoCountdownConnected />
+
       {drawerOpen ? (
         <div
           role="dialog"
@@ -564,7 +591,10 @@ export function ClientShell({
           <header className="cw-fade-up space-y-3">
             <div className="flex flex-wrap items-end justify-between gap-3">
               <div className="min-w-0 space-y-1">
-                <p className="cw-eyebrow">Cliente · CheckWise</p>
+                <div className="flex items-center gap-2">
+                  <p className="cw-eyebrow">Cliente · CheckWise</p>
+                  <PlanBadgeConnected />
+                </div>
                 {title ? (
                   <h1 className="text-[26px] font-semibold leading-tight tracking-tight text-[color:var(--text-primary)]">
                     {title}
@@ -612,5 +642,6 @@ export function ClientShell({
         <ClientWiseDock />
       </Suspense>
     </div>
+    </ClientPlanProvider>
   );
 }

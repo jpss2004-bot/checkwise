@@ -108,6 +108,57 @@ export async function updateClient(
 }
 
 // ---------------------------------------------------------------------------
+// Organizations — plan / demo lifecycle (Phase B)
+// ---------------------------------------------------------------------------
+
+export type AdminOrgPlan = {
+  id: string;
+  name: string;
+  kind: string;
+  plan: string | null;
+  provider_limit: number | null;
+  demo_expires_at: string | null;
+  status: string;
+  capabilities: Record<string, boolean>;
+};
+
+export type AdminOrgUpdateBody = Partial<{
+  plan: string;
+  provider_limit: number | null;
+  status: string;
+}>;
+
+/** Provision a fresh 14-day demo on a client organization. */
+export async function startClientDemo(orgId: string): Promise<AdminOrgPlan> {
+  return fetchJson(`/api/v1/admin/organizations/${orgId}/start-demo`, {
+    method: "POST",
+  });
+}
+
+/** Upgrade/downgrade a plan, set a per-tenant provider-limit override, or
+ *  reactivate a frozen org (``status: 'active'``). */
+export async function updateClientOrg(
+  orgId: string,
+  body: AdminOrgUpdateBody,
+): Promise<AdminOrgPlan> {
+  return fetchJson(`/api/v1/admin/organizations/${orgId}`, {
+    method: "PATCH",
+    body: JSON.stringify(body),
+  });
+}
+
+/** Read a client's plan + usage (also yields ``organization_id`` for the
+ *  mutations above). Uses the client-plan endpoint with ``?client_id=`` —
+ *  authorized for ``internal_admin`` via the break-glass scope. */
+export async function getAdminClientPlan(
+  clientId: string,
+): Promise<import("./client").ClientPlan> {
+  return fetchJson(
+    `/api/v1/client/plan?client_id=${encodeURIComponent(clientId)}`,
+  );
+}
+
+// ---------------------------------------------------------------------------
 // Metadata rulebook catalog (P2-09) — operational documentation surface
 // ---------------------------------------------------------------------------
 
