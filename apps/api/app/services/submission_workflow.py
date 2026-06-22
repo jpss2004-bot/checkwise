@@ -47,8 +47,11 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.constants.statuses import (
+    CLIENT_DECISION_ACCEPTANCE,
     RESOLVED_STATUSES,
     REVIEWER_DECISION_STATUS,
+    ClientAcceptance,
+    ClientDecisionAction,
     DocumentStatus,
     ReviewerAction,
 )
@@ -541,4 +544,155 @@ def _apply_decision_transition(
         observations=cleaned_observations,
         reviewer_user_id=result_reviewer_user_id,
         decided_at=submission.updated_at,
+    )
+
+
+# ─── Axis 2 — client acceptance (Phase 5) ────────────────────────────
+#
+# A SECOND decision writer, deliberately separate from the reviewer path
+# above. It owns the ``client_acceptance`` fields ONLY. It never reads the
+# reviewer queue rules, never mutates ``Submission.status`` / ``Document``,
+# and never emits a reviewer event — the two axes are orthogonal. A unit
+# test pins that orthogonality so a future refactor can't entangle them.
+
+
+@dataclass(frozen=True)
+class ClientDecisionResult:
+    """Outcome of a successful client acceptance-axis decision."""
+
+    submission_id: str
+    previous_acceptance: str
+    new_acceptance: str
+    action: str
+    reason: str | None
+    was_override: bool
+    client_user_id: str
+    decided_at: datetime
+
+
+# Validity states CheckWise considers a "pass" on Axis 1. A client decision
+# that contradicts this (accept a non-pass, or reject a pass) is an
+# "override" and must carry a reason.
+_VALID_COMPLIANCE_STATES: frozenset[str] = frozenset(
+    {DocumentStatus.APROBADO.value, DocumentStatus.EXCEPCION_LEGAL.value}
+)
+
+
+def client_decision_is_override(
+    submission_status: str, acceptance: ClientAcceptance
+) -> bool:
+    """True iff this acceptance contradicts CheckWise's validity verdict.
+
+    - ACCEPT a submission that is NOT compliance-valid → override.
+    - REJECT a submission that IS compliance-valid → override.
+    - RESET / aligned decisions → not an override.
+    """
+    is_valid = submission_status in _VALID_COMPLIANCE_STATES
+    if acceptance == ClientAcceptance.ACCEPTED:
+        return not is_valid
+    if acceptance == ClientAcceptance.REJECTED:
+        return is_valid
+    return False
+
+
+def apply_client_decision(
+    db: Session,
+    *,
+    submission: Submission,
+    action: str | ClientDecisionAction,
+    reason: str | None,
+    client_user_id: str,
+) -> ClientDecisionResult:
+    """Record the CLIENT's business-acceptance verdict (Axis 2).
+
+    Orthogonal to ``apply_reviewer_decision``: updates only the
+    ``client_acceptance`` fields, appends a ``client_decision``
+    ValidationEvent + an AuditLog row, and commits. It NEVER touches
+    ``Submission.status`` or ``Document.status``.
+
+    Override rule (locked design): a decision that contradicts CheckWise's
+    validity verdict — accepting a non-valid doc, or rejecting a valid one —
+    requires a non-empty ``reason``; a 422 is raised otherwise. Enforced here
+    (not just at the route) so the bulk path inherits the same guard.
+    """
+    try:
+        action_enum = (
+            action
+            if isinstance(action, ClientDecisionAction)
+            else ClientDecisionAction(action)
+        )
+    except ValueError as exc:
+        raise HTTPException(
+            status_code=http_status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail=f"Acción de aceptación inválida: {action!r}.",
+        ) from exc
+
+    target_acceptance = CLIENT_DECISION_ACCEPTANCE[action_enum]
+    cleaned_reason = (reason or "").strip() or None
+    was_override = client_decision_is_override(submission.status, target_acceptance)
+    if was_override and not cleaned_reason:
+        raise HTTPException(
+            status_code=http_status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail=(
+                "Esta decisión difiere del dictamen de cumplimiento de "
+                "CheckWise; indica un motivo."
+            ),
+        )
+
+    previous_acceptance = submission.client_acceptance
+    decided_at = utc_now()
+
+    submission.client_acceptance = target_acceptance.value
+    submission.client_decided_by_user_id = client_user_id
+    submission.client_decided_at = decided_at
+    submission.client_decision_reason = cleaned_reason
+    # NOTE: ``submission.status`` (Axis 1) is intentionally untouched.
+
+    add_validation_event(
+        db,
+        submission_id=submission.id,
+        document_id=None,
+        event_type="client_decision",
+        rule_code="client_decision",
+        result=action_enum.value,
+        severity="info" if action_enum != ClientDecisionAction.REJECT else "warning",
+        message=cleaned_reason,
+        actor_type="client",
+        payload={
+            "from_acceptance": previous_acceptance,
+            "to_acceptance": target_acceptance.value,
+            "compliance_status": submission.status,
+            "override": was_override,
+        },
+    )
+
+    add_audit_event(
+        db,
+        action="submission.client_decision",
+        entity_type="submission",
+        entity_id=submission.id,
+        actor_type="client",
+        actor_id=client_user_id,
+        before={"client_acceptance": previous_acceptance},
+        after={"client_acceptance": target_acceptance.value},
+        metadata={
+            "action": action_enum.value,
+            "reason": cleaned_reason,
+            "override": was_override,
+            "compliance_status": submission.status,
+        },
+    )
+
+    db.commit()
+    db.refresh(submission)
+
+    return ClientDecisionResult(
+        submission_id=submission.id,
+        previous_acceptance=previous_acceptance,
+        new_acceptance=target_acceptance.value,
+        action=action_enum.value,
+        reason=cleaned_reason,
+        was_override=was_override,
+        client_user_id=client_user_id,
+        decided_at=decided_at,
     )

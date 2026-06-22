@@ -139,6 +139,7 @@ from app.services.reports.insights import (
     approval_trend_points_by_vendor,
 )
 from app.services.search_service import SearchHit, search_submissions
+from app.services.submission_workflow import apply_client_decision
 from app.services.subscription import (
     active_provider_count,
     assert_capability,
@@ -3616,6 +3617,86 @@ def client_calendar(
         year=year,
         months=response_months,
         providers=providers,
+    )
+
+
+# ---------------------------------------------------------------------------
+# /submissions — client acceptance axis (Phase 5)
+# ---------------------------------------------------------------------------
+
+
+class ClientDecisionRequest(BaseModel):
+    """Axis-2 decision a client Approver records on a submission.
+
+    ``reason`` is required when the decision overrides CheckWise's validity
+    verdict (accepting a non-valid doc, or rejecting a valid one) — enforced
+    server-side in ``apply_client_decision`` (422 on violation).
+    """
+
+    action: Literal["accept", "reject", "reset"]
+    reason: str | None = Field(default=None, max_length=2000)
+
+
+class ClientDecisionResponse(BaseModel):
+    submission_id: str
+    previous_acceptance: str
+    new_acceptance: str
+    action: str
+    reason: str | None
+    # True when the decision contradicted the compliance verdict.
+    override: bool
+    decided_at: datetime
+    decided_by_user_id: str
+
+
+@router.post(
+    "/submissions/{submission_id}/decision",
+    response_model=ClientDecisionResponse,
+    summary="Record the client's acceptance-axis decision on a submission",
+)
+def client_submission_decision(
+    submission_id: str,
+    payload: ClientDecisionRequest,
+    db: DbSession,
+    current: ClientApprover,
+) -> ClientDecisionResponse:
+    """Accept / reject (Axis 2) a submission as the client.
+
+    Approver-only — the ``ClientApprover`` dependency 403s a ``client_viewer``
+    at the gate (acceptance is a write). Tenant-scoped: the submission must
+    belong to a client the caller can see, else a uniform 404 (no cross-tenant
+    existence oracle). Orthogonal to the compliance verdict — never mutates
+    ``Submission.status``.
+    """
+    submission = db.get(Submission, submission_id)
+    if submission is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail="Envío no encontrado."
+        )
+    is_internal_admin = MembershipRole.INTERNAL_ADMIN.value in current.roles
+    if not is_internal_admin:
+        visible = _visible_client_ids_for_user(db, current.user.id)
+        if submission.client_id not in visible:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND, detail="Envío no encontrado."
+            )
+
+    result = apply_client_decision(
+        db,
+        submission=submission,
+        action=payload.action,
+        reason=payload.reason,
+        client_user_id=current.user.id,
+    )
+    return ClientDecisionResponse(
+        submission_id=result.submission_id,
+        previous_acceptance=result.previous_acceptance,
+        new_acceptance=result.new_acceptance,
+        action=result.action,
+        reason=result.reason,
+        override=result.was_override,
+        decided_at=result.decided_at,
+        decided_by_user_id=result.client_user_id,
     )
 
 

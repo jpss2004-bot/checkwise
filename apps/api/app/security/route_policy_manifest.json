@@ -2945,6 +2945,22 @@
    "must_change_password_allowed": false,
    "org_frozen_allowed": false,
    "notes": ""
+  },
+  {
+   "method": "POST",
+   "path": "/api/v1/client/submissions/{submission_id}/decision",
+   "function": "client_submission_decision",
+   "router": "app.api.v1.client",
+   "file": "api/app/api/v1/client.py",
+   "lineno": 3657,
+   "gate": "client_admin_or_admin",
+   "tenant_rule": "scoped via _visible_client_ids_for_user(); submission must belong to the caller's client (uniform 404)",
+   "audit_rule": "logged (submission.client_decision)",
+   "rate_limit_rule": "none (auth-gated)",
+   "error_lang": "es",
+   "must_change_password_allowed": false,
+   "org_frozen_allowed": false,
+   "notes": "Phase 5 — client acceptance axis (Axis 2); Approver-only, never mutates Submission.status."
   }
  ]
 }

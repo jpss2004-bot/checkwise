@@ -20,7 +20,7 @@ from sqlalchemy import (
 )
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
-from app.constants.statuses import DocumentStatus
+from app.constants.statuses import ClientAcceptance, DocumentStatus
 from app.db.base import Base
 
 
@@ -70,6 +70,13 @@ class Client(TimestampMixin, Base):
         DateTime(timezone=True)
     )
     status: Mapped[str] = mapped_column(String(40), default="active", nullable=False)
+    # Phase 5 — opt-in: when a submission becomes compliance-valid (APROBADO),
+    # auto-record a client ACCEPTED decision. A client preference (set in the
+    # portal), NOT an entitlement. Default off so acceptance stays an explicit
+    # act unless the client chooses to streamline it.
+    auto_accept_valid: Mapped[bool] = mapped_column(
+        Boolean, default=False, server_default=text("false"), nullable=False
+    )
 
     vendors: Mapped[list[Vendor]] = relationship(back_populates="client")
     contracts: Mapped[list[Contract]] = relationship(back_populates="client")
@@ -305,6 +312,27 @@ class Submission(TimestampMixin, Base):
     supersedes_submission_id: Mapped[str | None] = mapped_column(
         ForeignKey("submissions.id"), index=True
     )
+
+    # ─── Axis 2 — client acceptance (Phase 5) ──────────────────────
+    # The CLIENT's business-acceptance verdict, orthogonal to ``status``
+    # (Axis 1 = CheckWise compliance validity). Written ONLY by
+    # ``apply_client_decision``; the reviewer path never touches it, and it
+    # never overwrites ``status``. Defaults to PENDING for every submission.
+    client_acceptance: Mapped[str] = mapped_column(
+        String(20),
+        default=ClientAcceptance.PENDING.value,
+        server_default=ClientAcceptance.PENDING.value,
+        nullable=False,
+    )
+    # Actor + time of the LAST acceptance-axis decision (accept / reject /
+    # reset) — "decided", not "accepted", since the axis is two-sided.
+    client_decided_by_user_id: Mapped[str | None] = mapped_column(
+        ForeignKey("users.id")
+    )
+    client_decided_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True)
+    )
+    client_decision_reason: Mapped[str | None] = mapped_column(Text)
 
     client: Mapped[Client] = relationship(back_populates="submissions")
     vendor: Mapped[Vendor] = relationship(back_populates="submissions")

@@ -58,6 +58,48 @@ REVIEWER_DECISION_STATUS: dict[ReviewerAction, DocumentStatus] = {
 }
 
 
+# ─── Axis 2 — client acceptance (Phase 5) ───────────────────────────
+#
+# A SECOND, orthogonal approval axis. Axis 1 (``DocumentStatus`` above) is
+# CheckWise's compliance-validity verdict, written only by the reviewer via
+# ``apply_reviewer_decision``. Axis 2 is the CLIENT's business acceptance of
+# the same document — recorded independently, NEVER overwriting the validity
+# status. Stored on ``Submission.client_acceptance``; the sole writer is
+# ``apply_client_decision``.
+
+
+class ClientAcceptance(StrEnum):
+    """The client's business-acceptance state for a submission (Axis 2)."""
+
+    PENDING = "pending"
+    ACCEPTED = "accepted"
+    REJECTED = "rejected"
+
+
+class ClientDecisionAction(StrEnum):
+    """Action a client Approver applies on the acceptance axis."""
+
+    ACCEPT = "accept"
+    REJECT = "reject"
+    RESET = "reset"  # withdraw a prior decision → back to PENDING
+
+
+CLIENT_DECISION_ACCEPTANCE: dict[ClientDecisionAction, ClientAcceptance] = {
+    ClientDecisionAction.ACCEPT: ClientAcceptance.ACCEPTED,
+    ClientDecisionAction.REJECT: ClientAcceptance.REJECTED,
+    ClientDecisionAction.RESET: ClientAcceptance.PENDING,
+}
+
+# Spanish labels — mirror apps/web/lib/constants/statuses.ts. Phrased to
+# disambiguate from the validity-axis labels wherever both render together
+# (provider portal, reports, audit package).
+CLIENT_ACCEPTANCE_LABELS_ES: dict[ClientAcceptance, str] = {
+    ClientAcceptance.PENDING: "Pendiente de aceptación",
+    ClientAcceptance.ACCEPTED: "Aceptado por el cliente",
+    ClientAcceptance.REJECTED: "Rechazado por el cliente",
+}
+
+
 REVIEW_PENDING_STATUSES: tuple[DocumentStatus, ...] = (
     DocumentStatus.PENDIENTE_REVISION,
     DocumentStatus.POSIBLE_MISMATCH,
