@@ -27,6 +27,7 @@ import {
   type ClientComplianceVendorRow,
 } from "@/lib/api/admin";
 import { AdminPlanControls } from "@/components/checkwise/admin/plan-controls";
+import { AdminEntitlementsControls } from "@/components/checkwise/admin/entitlements-controls";
 import type { ClientPlan } from "@/lib/api/client";
 import { entityStatusLabel, entityStatusVariant } from "@/lib/constants/labels";
 import {
@@ -172,6 +173,11 @@ function AdminClientDetail({ clientId }: { clientId: string }) {
           />
 
           <AdminPlanControls
+            plan={plan}
+            onChanged={() => setReloadKey((k) => k + 1)}
+          />
+
+          <AdminEntitlementsControls
             plan={plan}
             onChanged={() => setReloadKey((k) => k + 1)}
           />

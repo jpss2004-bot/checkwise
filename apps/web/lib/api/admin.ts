@@ -158,6 +158,65 @@ export async function getAdminClientPlan(
   );
 }
 
+// Per-tenant entitlements + billing seam (Phase D).
+
+export type AdminEntitlement = {
+  key: string;
+  enabled: boolean;
+  expires_at: string | null;
+  note: string | null;
+};
+
+export async function listEntitlements(
+  orgId: string,
+): Promise<AdminEntitlement[]> {
+  return fetchJson(`/api/v1/admin/organizations/${orgId}/entitlements`);
+}
+
+export async function grantEntitlement(
+  orgId: string,
+  key: string,
+  body: { enabled: boolean; note?: string | null },
+): Promise<AdminEntitlement> {
+  return fetchJson(
+    `/api/v1/admin/organizations/${orgId}/entitlements/${encodeURIComponent(key)}`,
+    { method: "PUT", body: JSON.stringify(body) },
+  );
+}
+
+export async function revokeEntitlement(
+  orgId: string,
+  key: string,
+): Promise<{ key: string; removed: boolean }> {
+  return fetchJson(
+    `/api/v1/admin/organizations/${orgId}/entitlements/${encodeURIComponent(key)}`,
+    { method: "DELETE" },
+  );
+}
+
+export type AdminBilling = {
+  organization_id: string;
+  provider: string;
+  customer_id: string | null;
+  subscription_id: string | null;
+  status: string;
+  current_period_end: string | null;
+};
+
+export async function getBilling(orgId: string): Promise<AdminBilling> {
+  return fetchJson(`/api/v1/admin/organizations/${orgId}/billing`);
+}
+
+export async function updateBilling(
+  orgId: string,
+  body: Partial<{ provider: string; status: string; plan: string }>,
+): Promise<AdminBilling> {
+  return fetchJson(`/api/v1/admin/organizations/${orgId}/billing`, {
+    method: "PATCH",
+    body: JSON.stringify(body),
+  });
+}
+
 // ---------------------------------------------------------------------------
 // Metadata rulebook catalog (P2-09) — operational documentation surface
 // ---------------------------------------------------------------------------
