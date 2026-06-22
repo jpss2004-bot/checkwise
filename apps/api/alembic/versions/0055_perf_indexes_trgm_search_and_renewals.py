@@ -97,6 +97,24 @@ def upgrade() -> None:
     # block alongside the CONCURRENTLY builds — but it is idempotent and cheap,
     # so run it first in its own transaction.
     op.execute("CREATE EXTENSION IF NOT EXISTS pg_trgm")
+    op.execute("CREATE EXTENSION IF NOT EXISTS unaccent")
+
+    # f_unaccent (migration 0052) had an UNqualified body — `unaccent('unaccent',
+    # $1)`. That resolves fine at query time (search_path = "$user", public), but
+    # when Postgres INLINES this IMMUTABLE wrapper while building a CONCURRENTLY
+    # expression index, the `'unaccent'::regdictionary` cast is evaluated without
+    # the runtime search_path and fails:
+    #   function unaccent(unknown, text) does not exist
+    # (this is the first index built on f_unaccent; 0052 only used it in runtime
+    # ILIKE). Redefine the body fully schema-qualified so the inlined expression
+    # is search_path-independent. Same function identity — public.f_unaccent(text)
+    # — and identical results, so existing callers and the index↔query match are
+    # unchanged.
+    op.execute(
+        "CREATE OR REPLACE FUNCTION public.f_unaccent(text) "
+        "RETURNS text LANGUAGE sql IMMUTABLE PARALLEL SAFE STRICT AS "
+        "$$ SELECT public.unaccent('public.unaccent'::regdictionary, $1) $$"
+    )
 
     with op.get_context().autocommit_block():
         for name, table, using in _TRGM_INDEXES:
