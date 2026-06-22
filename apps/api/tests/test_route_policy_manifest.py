@@ -34,7 +34,10 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
-from app.api.v1.auth import _PASSWORD_GATE_ALLOWED_PATHS
+from app.api.v1.auth import (
+    _ORG_FROZEN_ALLOWED_PATHS,
+    _PASSWORD_GATE_ALLOWED_PATHS,
+)
 from scripts.introspect_routes import introspect
 
 _MANIFEST_PATH = (
@@ -236,6 +239,50 @@ def test_must_change_password_allowed_matches_runtime_allowlist() -> None:
         "Manifest `must_change_password_allowed=true` disagrees with "
         "`app.api.v1.auth._PASSWORD_GATE_ALLOWED_PATHS`. Reconcile both "
         "sides.\n"
+        f"  only in manifest: {only_in_manifest}\n"
+        f"  only in runtime : {only_in_runtime}"
+    )
+
+
+def test_every_entry_declares_org_frozen_allowed() -> None:
+    """Catches: a new route lands without classifying whether it is reachable
+    by a user whose client org is frozen/expired (Phase B login gate).
+
+    Default for new entries is ``false``; ``true`` only for the narrow surface
+    a frozen user must still reach (logout + identity + plan/upgrade)."""
+    manifest = _load_manifest()
+    bad: list[str] = []
+    for row in manifest["routes"]:
+        key = f"{row['method']:6} {row['path']}"
+        value = row.get("org_frozen_allowed")
+        if not isinstance(value, bool):
+            bad.append(
+                f"{key} | org_frozen_allowed must be a bool, got {value!r}"
+            )
+    assert not bad, (
+        "These manifest entries are missing the boolean field "
+        "`org_frozen_allowed`. Add it (default `false`).\n"
+        + "\n".join(f"  {x}" for x in bad)
+    )
+
+
+def test_org_frozen_allowed_matches_runtime_allowlist() -> None:
+    """Catches: the manifest's org-frozen allow-list drifts from the gate in
+    ``app.api.v1.auth._ORG_FROZEN_ALLOWED_PATHS``. The two must agree exactly,
+    so a missed upgrade/logout route can never strand a frozen user (or open a
+    hole). Bidirectional, exactly like the password-gate parity test."""
+    manifest = _load_manifest()
+    manifest_allowed = {
+        row["path"]
+        for row in manifest["routes"]
+        if row.get("org_frozen_allowed") is True
+    }
+    runtime_allowed = set(_ORG_FROZEN_ALLOWED_PATHS)
+    only_in_manifest = sorted(manifest_allowed - runtime_allowed)
+    only_in_runtime = sorted(runtime_allowed - manifest_allowed)
+    assert not only_in_manifest and not only_in_runtime, (
+        "Manifest `org_frozen_allowed=true` disagrees with "
+        "`app.api.v1.auth._ORG_FROZEN_ALLOWED_PATHS`. Reconcile both sides.\n"
         f"  only in manifest: {only_in_manifest}\n"
         f"  only in runtime : {only_in_runtime}"
     )
