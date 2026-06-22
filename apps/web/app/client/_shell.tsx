@@ -14,6 +14,7 @@ import {
   List,
   MagnifyingGlass,
   Package,
+  ShieldWarning,
   Storefront,
   X,
   type Icon,
@@ -324,6 +325,16 @@ export function ClientShell({
   // flashes for an un-consented client_admin mid-redirect.
   if (consentState !== "ok") return null;
 
+  // Transparency half of break-glass: when CheckWise-internal staff view
+  // a client's portal (an internal_admin who is not themselves a
+  // client_admin of this org), surface a banner so the access is never
+  // silent. The backend writes the forensic audit row
+  // (client.cross_tenant_access) in _resolve_client_id; this is its
+  // visible counterpart.
+  const isSupportSession =
+    session.roles.includes("internal_admin") &&
+    !session.roles.includes("client_admin");
+
   return (
     <div
       data-density="dense"
@@ -434,6 +445,26 @@ export function ClientShell({
           })}
         </nav>
       </header>
+
+      {isSupportSession ? (
+        <div
+          role="status"
+          className="border-b border-[color:var(--status-warning-border)] bg-[color:var(--status-warning-bg)] px-5 py-2"
+        >
+          <p className="mx-auto flex max-w-7xl items-center gap-2 text-[12px] font-medium text-[color:var(--status-warning-text)]">
+            <ShieldWarning
+              className="h-4 w-4 shrink-0"
+              weight="fill"
+              aria-hidden="true"
+            />
+            <span>
+              Acceso de soporte · estás viendo el portal de un cliente como
+              personal interno de CheckWise. Esta sesión queda registrada en
+              la bitácora{urlClientId ? ` (cliente ${urlClientId})` : ""}.
+            </span>
+          </p>
+        </div>
+      ) : null}
 
       {drawerOpen ? (
         <div

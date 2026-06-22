@@ -64,6 +64,8 @@ def _gate_for(method: str, path: str, deps: list[str]) -> str:
     dep_set = set(deps)
     if "AdminUser" in dep_set:
         return "internal_admin"
+    if "PlatformUser" in dep_set:
+        return "platform_admin_or_admin"
     if "ReviewerDep" in dep_set:
         return "reviewer_or_admin"
     if "ClientUser" in dep_set:

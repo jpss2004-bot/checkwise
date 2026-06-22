@@ -47,19 +47,26 @@ import {
 // see ``apps/web/app/platform/_shell.tsx``. ``UserMenu`` carries a
 // switcher so the same internal_admin can flip between the two
 // surfaces without leaving the page.
-const NAV: { href: string; label: string; icon: Icon }[] = [
-  { href: "/admin/dashboard", label: "Resumen", icon: Gauge },
-  { href: "/admin/clients", label: "Clientes", icon: IdentificationCard },
-  { href: "/admin/vendors", label: "Proveedores", icon: Storefront },
-  { href: "/admin/requirements", label: "Requisitos", icon: Books },
-  { href: "/admin/calendar", label: "Calendario", icon: CalendarBlank },
-  { href: "/admin/reviewer", label: "Bandeja", icon: ClipboardText },
-  { href: "/admin/reports", label: "Reportes", icon: ChartLineUp },
-  { href: "/admin/contact-requests", label: "Solicitudes", icon: EnvelopeSimple },
+//
+// ``roles`` lists who may actually load each page (mirrors the
+// backend dependency gate). A reviewer-only user lands in this shell
+// because /admin/reviewer is their surface, but every other page is
+// internal_admin-only (AdminUser) and would 403 them — so the nav is
+// filtered by role and never dangles a link the API rejects.
+const NAV: { href: string; label: string; icon: Icon; roles: string[] }[] = [
+  { href: "/admin/dashboard", label: "Resumen", icon: Gauge, roles: ["internal_admin"] },
+  { href: "/admin/clients", label: "Clientes", icon: IdentificationCard, roles: ["internal_admin"] },
+  { href: "/admin/vendors", label: "Proveedores", icon: Storefront, roles: ["internal_admin"] },
+  { href: "/admin/requirements", label: "Requisitos", icon: Books, roles: ["internal_admin"] },
+  { href: "/admin/calendar", label: "Calendario", icon: CalendarBlank, roles: ["internal_admin"] },
+  { href: "/admin/reviewer", label: "Bandeja", icon: ClipboardText, roles: ["internal_admin", "reviewer"] },
+  { href: "/admin/reports", label: "Reportes", icon: ChartLineUp, roles: ["internal_admin"] },
+  { href: "/admin/contact-requests", label: "Solicitudes", icon: EnvelopeSimple, roles: ["internal_admin"] },
   {
     href: "/admin/correction-requests",
     label: "Correcciones",
     icon: PencilSimple,
+    roles: ["internal_admin"],
   },
 ];
 
@@ -121,6 +128,13 @@ export function AdminShell({
 
   if (!ready || !session) return null;
 
+  // Show each nav link only to a role that can actually load the page,
+  // so a reviewer-only user sees Bandeja instead of a row of links the
+  // API would 403.
+  const visibleNav = NAV.filter((item) =>
+    item.roles.some((role) => session.roles.includes(role)),
+  );
+
   // The Plataforma console gates on ``platform_admin`` /
   // ``internal_admin`` (backend ``PlatformUser``). A reviewer reaches
   // this Operaciones shell but holds neither, so don't dangle a switch
@@ -179,7 +193,7 @@ export function AdminShell({
           aria-label="Operaciones admin"
           className="mx-auto hidden max-w-7xl gap-1 overflow-x-auto px-3 pb-2 lg:flex"
         >
-          {NAV.map((item) => {
+          {visibleNav.map((item) => {
             const isActive =
               pathname === item.href || pathname?.startsWith(item.href + "/");
             const IconComponent = item.icon;
@@ -224,7 +238,7 @@ export function AdminShell({
             className="relative ml-auto flex h-full w-72 max-w-[85vw] flex-col gap-1 border-l border-[color:var(--border-subtle)] bg-[color:var(--surface-raised)] p-4 shadow-lg"
           >
             <p className="cw-eyebrow mb-2">Navegación</p>
-            {NAV.map((item) => {
+            {visibleNav.map((item) => {
               const isActive =
                 pathname === item.href || pathname?.startsWith(item.href + "/");
               const IconComponent = item.icon;

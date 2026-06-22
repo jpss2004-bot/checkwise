@@ -518,6 +518,65 @@ def test_internal_admin_manages_any_tenant_via_client_id(db_factory, api_client)
     assert resp.status_code == 201, resp.text
 
 
+def test_internal_admin_cross_tenant_access_is_audited(db_factory, api_client):
+    """Break-glass: an internal_admin reaching a tenant they do NOT belong
+    to leaves a forensic ``client.cross_tenant_access`` row, deduplicated to
+    one per (actor, client) inside the window."""
+    ctx = _seed_client_with_owner(db_factory)
+    staff = _seed_internal_admin(db_factory)
+    token = _login(api_client, staff["email"])
+
+    # Two cross-tenant reads in the same window…
+    for _ in range(2):
+        resp = api_client.get(
+            "/api/v1/client/users",
+            params={"client_id": ctx["client_id"]},
+            headers=_h(token),
+        )
+        assert resp.status_code == 200, resp.text
+
+    db = db_factory()
+    try:
+        rows = list(
+            db.scalars(
+                select(AuditLog).where(
+                    AuditLog.action == "client.cross_tenant_access",
+                    AuditLog.entity_id == ctx["client_id"],
+                )
+            )
+        )
+    finally:
+        db.close()
+    # …collapse to a single row, attributed to the staff member.
+    assert len(rows) == 1, rows
+    assert rows[0].actor_id == staff["user_id"]
+    assert rows[0].actor_type == "internal_admin"
+    assert rows[0].entity_type == "client"
+
+
+def test_owner_access_is_not_flagged_as_cross_tenant(db_factory, api_client):
+    """A client_admin viewing their OWN tenant is not break-glass access —
+    no ``client.cross_tenant_access`` row is written."""
+    ctx = _seed_client_with_owner(db_factory)
+    owner_token = _login(api_client, ctx["owner_email"])
+
+    resp = api_client.get("/api/v1/client/users", headers=_h(owner_token))
+    assert resp.status_code == 200, resp.text
+
+    db = db_factory()
+    try:
+        flagged = list(
+            db.scalars(
+                select(AuditLog).where(
+                    AuditLog.action == "client.cross_tenant_access"
+                )
+            )
+        )
+    finally:
+        db.close()
+    assert flagged == []
+
+
 # ---------------------------------------------------------------------------
 # Audit trail
 # ---------------------------------------------------------------------------

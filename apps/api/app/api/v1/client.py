@@ -1,8 +1,8 @@
-"""Phase 8 — Client Portal read model.
+"""Phase 8 — Client Portal (read-mostly surface).
 
 Client-facing monitoring surface. ``client_admin`` users get
-read-only visibility into the vendors / workspaces / submissions
-that belong to their client organisation; ``internal_admin`` is
+visibility into the vendors / workspaces / submissions that
+belong to their client organisation; ``internal_admin`` is
 allowed too for support and debugging.
 
 Scope model:
@@ -14,7 +14,18 @@ A ``client_admin`` user is locked to the union of clients
 reachable through their memberships. An ``internal_admin`` user
 may inspect any client by passing ``?client_id=<X>`` (no
 implicit cross-tenant visibility for the default endpoint —
-they must pick a client). All endpoints are read-only.
+they must pick a client). Such cross-tenant ``internal_admin``
+access is treated as break-glass support and is audit-logged
+(``client.cross_tenant_access``) inside ``_resolve_client_id``.
+
+The surface is read-mostly, but NOT read-only: it carries a
+small, deliberately-scoped set of audited mutations — add a
+provider (``POST /providers``), edit the company profile
+(``PATCH /profile``), accept legal consent
+(``POST /legal-consent``), mark notifications read, generate a
+report from a preset, plus client seat management under
+``/client/users``. Evidence downloads (expediente / audit
+package / metadata) are likewise audit-logged.
 
 This router reuses the pure dashboard-composition helpers from
 ``app.api.v1.portal``. They take ``SlotView`` lists and produce
@@ -27,7 +38,7 @@ from __future__ import annotations
 
 import time
 from collections import defaultdict
-from datetime import UTC, date, datetime
+from datetime import UTC, date, datetime, timedelta
 from typing import TYPE_CHECKING, Annotated, Literal
 
 if TYPE_CHECKING:
@@ -81,6 +92,7 @@ from app.core.text_search import normalize_for_search
 from app.core.time import today_mx
 from app.db.session import get_db
 from app.models import (
+    AuditLog,
     Client,
     ClientNotification,
     Contract,
@@ -171,6 +183,54 @@ def _visible_client_ids_for_user(db: Session, user_id: str) -> list[str]:
     return [cid for cid in rows if cid]
 
 
+# Break-glass: collapse a support session of many cross-tenant reads to
+# one forensic access row per (admin, client) inside this window, rather
+# than flooding the audit log with a row per API call.
+_CROSS_TENANT_AUDIT_WINDOW = timedelta(minutes=30)
+
+
+def _audit_cross_tenant_access(db: Session, current: CurrentUser, client_id: str) -> None:
+    """Record that an ``internal_admin`` reached a client tenant they do
+    NOT belong to, via the client portal (break-glass support access).
+
+    Closes the "which staff member viewed which client, and when" gap:
+    before this, an internal admin browsing a client's portal left no
+    trail because the reads were unaudited. Deduplicated to one row per
+    (actor, client) per ``_CROSS_TENANT_AUDIT_WINDOW``. Committed here
+    because most callers are read endpoints whose session is otherwise
+    never committed (``get_db`` only closes).
+    """
+    window_start = datetime.now(UTC) - _CROSS_TENANT_AUDIT_WINDOW
+    already_logged = db.execute(
+        select(AuditLog.id)
+        .where(
+            AuditLog.actor_id == current.user.id,
+            AuditLog.action == "client.cross_tenant_access",
+            AuditLog.entity_id == client_id,
+            AuditLog.created_at >= window_start,
+        )
+        .limit(1)
+    ).first()
+    if already_logged is not None:
+        return
+    add_audit_event(
+        db,
+        action="client.cross_tenant_access",
+        entity_type="client",
+        entity_id=client_id,
+        actor_type="internal_admin",
+        actor_id=current.user.id,
+        metadata={
+            "admin_email": current.user.email,
+            "via": "client_portal_break_glass",
+            "dedup_window_minutes": int(
+                _CROSS_TENANT_AUDIT_WINDOW.total_seconds() // 60
+            ),
+        },
+    )
+    db.commit()
+
+
 def _resolve_client_id(
     db: Session,
     current: CurrentUser,
@@ -210,6 +270,10 @@ def _resolve_client_id(
                 raise HTTPException(
                     status.HTTP_404_NOT_FOUND, detail="Cliente no encontrado."
                 )
+            if requested not in visible:
+                # Internal admin reaching a tenant they don't belong to:
+                # break-glass support access — leave a forensic trail.
+                _audit_cross_tenant_access(db, current, requested)
             return requested
         if requested not in visible:
             # Same 404 shape whether the client row is missing or belongs to

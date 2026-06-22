@@ -119,6 +119,20 @@ def _reviewer_token(api_client: TestClient, db_factory) -> str:
     return _login(api_client, email, pw)
 
 
+def _platform_admin_token(api_client: TestClient, db_factory) -> str:
+    """A pure platform_admin — IT/control-plane role WITHOUT internal_admin.
+
+    Migration 0044 backfilled platform_admin onto every internal_admin, so
+    in production every operator holds both and the IT-vs-Ops split is
+    latent. This fixture mints the role in isolation so the boundary can be
+    exercised for real.
+    """
+    pw, email = _seed_user(
+        db_factory, email="plat@checkwise.test", role="platform_admin"
+    )
+    return _login(api_client, email, pw)
+
+
 def _seed_institution(db_factory, *, code: str = "sat") -> str:
     db = db_factory()
     try:
@@ -153,6 +167,43 @@ def test_overview_rejects_reviewer_only(
     token = _reviewer_token(api_client, db_factory)
     resp = api_client.get("/api/v1/admin/overview", headers=_h(token))
     assert resp.status_code == 403
+
+
+def test_overview_rejects_platform_admin_only(
+    api_client: TestClient, db_factory
+) -> None:
+    """The load-bearing half of the IT-vs-Ops split: a pure platform_admin
+    must NOT reach the compliance-ops surface.
+
+    /admin/overview is AdminUser-gated (require_role internal_admin). An
+    IT-only account can run the platform but cannot read cross-tenant
+    compliance data.
+    """
+    token = _platform_admin_token(api_client, db_factory)
+    resp = api_client.get("/api/v1/admin/overview", headers=_h(token))
+    assert resp.status_code == 403, resp.text
+
+
+def test_user_directory_accepts_platform_admin_only(
+    api_client: TestClient, db_factory
+) -> None:
+    """The other half: a pure platform_admin CAN reach the IT/user surface.
+
+    /admin/users is PlatformUser-gated (require_any_role internal_admin OR
+    platform_admin). Together with the 403 above this proves the boundary
+    is live, not merely declared in the manifest.
+    """
+    token = _platform_admin_token(api_client, db_factory)
+    resp = api_client.get("/api/v1/admin/users", headers=_h(token))
+    assert resp.status_code == 200, resp.text
+
+
+def test_audit_log_accepts_platform_admin_only(
+    api_client: TestClient, db_factory
+) -> None:
+    token = _platform_admin_token(api_client, db_factory)
+    resp = api_client.get("/api/v1/admin/audit-log", headers=_h(token))
+    assert resp.status_code == 200, resp.text
 
 
 def test_overview_accepts_internal_admin(

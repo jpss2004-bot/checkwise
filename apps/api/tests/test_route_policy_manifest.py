@@ -58,6 +58,7 @@ _TBD_PREFIX = "TBD —"
 _ALLOWED_GATES = frozenset(
     {
         "internal_admin",
+        "platform_admin_or_admin",
         "client_admin_or_admin",
         "reviewer_or_admin",
         "provider_workspace",
@@ -249,6 +250,8 @@ def _expected_gate_from_deps(deps: set[str], path: str) -> str | None:
     """
     if "AdminUser" in deps:
         return "internal_admin"
+    if "PlatformUser" in deps:
+        return "platform_admin_or_admin"
     if "ReviewerDep" in deps:
         return "reviewer_or_admin"
     if "ClientUser" in deps:
