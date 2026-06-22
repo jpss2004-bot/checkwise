@@ -325,7 +325,7 @@ def _r_attention(data: dict) -> str:
         lbl = _SLOT_LABEL.get(st, st)
         due = it.get("due_in_days")
         due_txt = (f"vence en {due} d" if isinstance(due, int) and due >= 0
-                   else f"vencido" if isinstance(due, int) else "")
+                   else "vencido" if isinstance(due, int) else "")
         rows.append(
             "<tr>"
             f'<td>{_e(str(it.get("institution","")).upper())}</td>'

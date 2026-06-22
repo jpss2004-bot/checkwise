@@ -125,7 +125,7 @@ def enrich_report_prose(
         # Apply findings prose — only when counts match (no add/drop).
         nf = data.get("findings")
         if isinstance(findings, list) and isinstance(nf, list) and len(nf) == len(findings):
-            for original, new in zip(findings, nf):
+            for original, new in zip(findings, nf, strict=True):
                 if not isinstance(new, dict):
                     continue
                 for k in ("title", "detail"):

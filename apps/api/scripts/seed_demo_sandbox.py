@@ -299,7 +299,7 @@ class SampleIndex:
     by_vendor: dict[str, list[dict]] = field(default_factory=dict)
 
     @classmethod
-    def load(cls, base: Path) -> "SampleIndex":
+    def load(cls, base: Path) -> SampleIndex:
         manifest_path = base / "manifest.json"
         if not manifest_path.is_file():
             raise SystemExit(
@@ -944,8 +944,8 @@ def _portfolio_deadlines_data(db, *, vendor_ids: dict[str, str]) -> dict:
     so the block surfaces the real cross-portfolio urgency incl. the renewal.
     The output shape matches what ``upcoming-deadlines.tsx`` consumes."""
     from app.services.dashboard_compute import (
-        build_upcoming_deadlines_for_vendor,
         bucket_upcoming_by_urgency,
+        build_upcoming_deadlines_for_vendor,
     )
 
     items: list[dict] = []
@@ -1436,7 +1436,7 @@ def main() -> None:
         print(f"  Login     {ADMIN_EMAIL} / {ADMIN_PASSWORD}   (client_admin)")
     print(f"  Seeded    {result['onboarding']} onboarding + {result['recurring']} recurring "
           f"submissions across {len(PROVIDERS)} providers; {result['blobs']} unique PDF blob(s).")
-    print(f"  Report    1 client-facing report pre-seeded → /client/reports")
+    print("  Report    1 client-facing report pre-seeded → /client/reports")
     print("")
     print("  Provider ladder:")
     for p in PROVIDERS:

@@ -54,14 +54,12 @@ from __future__ import annotations
 import argparse
 import hashlib
 import json
-import os
 import sys
 import uuid
 from dataclasses import dataclass
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 from io import BytesIO
 from pathlib import Path
-from typing import Iterable
 
 # Make ``app`` importable when running this script directly.
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
@@ -500,7 +498,7 @@ def emit_submission_block(s: Submission, *, sha256: str, size_bytes: int, dry_ru
     )
 
     # INSPECTION (FK lookups against catalog for detected_institution and detected_document_type)
-    detected_dates = json.dumps([(datetime.now(timezone.utc) - timedelta(days=s.days_ago)).date().isoformat()])
+    detected_dates = json.dumps([(datetime.now(UTC) - timedelta(days=s.days_ago)).date().isoformat()])
     detected_rfcs = json.dumps([provider.vendor_rfc])
     period_mentions = json.dumps([s.period_key] if s.period_key else [])
     lines.append(

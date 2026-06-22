@@ -11,13 +11,13 @@ from __future__ import annotations
 
 from app.constants.reports import ReportAudience
 from app.services.evidence_slots import SlotState
+from app.services.reports.block_catalog import KNOWN_BLOCK_TYPES, catalog_by_type
 from app.services.reports.blocks.ai_summaries import has_ai_summary
 from app.services.reports.blocks.data_fetchers import (
     _FETCHERS,
     _SLOT_INSTITUTION_BUCKET,
     fetch_compliance_by_institution,
 )
-from app.services.reports.block_catalog import KNOWN_BLOCK_TYPES, catalog_by_type
 from app.services.reports.context import ReportScope
 
 

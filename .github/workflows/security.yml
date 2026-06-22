@@ -69,18 +69,17 @@ jobs:
           pip install pip-audit==2.7.3
 
       - name: Audit
-        # ``--strict`` fails on any vulnerability — we want a loud
-        # alert here, not a silent JSON file. ``--local`` restricts
-        # the audit to packages installed in this venv (skipping the
-        # whole PyPI catalog). ``--skip-editable`` avoids the
-        # editable-distribution warning we get for ``checkwise-backend``
-        # itself; we audit deps, not the project under test.
+        # Audit the pinned lock directly (``-r requirements.lock``) — this
+        # is the exact dependency set every deploy installs (render.yaml
+        # uses ``-c requirements.lock``), and it sidesteps the
+        # ``--local``/editable enumeration that errors on the editable
+        # ``checkwise-backend`` itself. ``--strict`` fails on any
+        # vulnerability — a loud alert, not a silent JSON file.
         # ``--ignore-vuln`` slots exist if a specific advisory is
         # verified non-applicable.
         run: |
           pip-audit \
-            --local \
-            --skip-editable \
+            --requirement requirements.lock \
             --strict \
             --progress-spinner=off \
             --format=columns

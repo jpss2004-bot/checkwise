@@ -193,19 +193,22 @@ def send_whatsapp_template(
         # carries the plaintext 6-digit verification code, which must not
         # land in logs regardless of environment. Log a redacted summary
         # for OTP; the full payload is fine for non-secret templates.
+        # Scrub CR/LF from the recipient before logging so a crafted value
+        # can't forge log lines (CodeQL log-injection).
+        safe_to = str(recipient).replace("\r", " ").replace("\n", " ")
         if template_name == PHONE_OTP_TEMPLATE:
             log.info(
                 "whatsapp.dry_run template=%s to=%s components=<redacted "
                 "OTP, %d component(s)>",
                 template_name,
-                recipient,
+                safe_to,
                 len(components),
             )
         else:
             log.info(
                 "whatsapp.dry_run template=%s to=%s components=%s",
                 template_name,
-                recipient,
+                safe_to,
                 json.dumps(components, ensure_ascii=False),
             )
         return WhatsAppDeliveryResult(

@@ -50,7 +50,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 from sqlalchemy import select  # noqa: E402
 
 from app.core.config import settings  # noqa: E402
-from app.db.session import SessionLocal  # noqa: E402
+from app.db import session as db_session  # noqa: E402
 from app.models import Client  # noqa: E402
 from app.services.metadata_export import _client_dir_segment, _slug  # noqa: E402
 from app.services.metadata_store import _PREFIX, mirror_enabled  # noqa: E402
@@ -184,7 +184,7 @@ def migrate(
         log("(S3 mirror disabled — only the local filesystem tree is considered)")
     log("")
 
-    db = SessionLocal()
+    db = db_session.SessionLocal()
     try:
         stmt = select(Client).order_by(Client.created_at)
         if client_id:

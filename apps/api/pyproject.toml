@@ -98,6 +98,12 @@ select = ["E", "F", "I", "UP", "B"]
 # Operational scripts (one-off provisioning / seed tools): long lines
 # in log/print strings and policy-template literals are intentional.
 "scripts/*.py" = ["E501"]
-# Wise LLM system prompt: each rule is one paragraph by design so the
+# Wise LLM system prompts: each rule is one paragraph by design so the
 # model sees coherent guidance, not arbitrary line wraps.
 "app/services/wise/ai.py" = ["E501"]
+"app/services/wise/client_ai.py" = ["E501"]
+# Report renderers: long lines are inline HTML / layout-template literals,
+# not wrappable code. ``deterministic_layouts`` also imports after a
+# module-level logger/registry block by design (E402).
+"app/services/reports/print_render.py" = ["E501"]
+"app/services/reports/deterministic_layouts.py" = ["E501", "E402"]

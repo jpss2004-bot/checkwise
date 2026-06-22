@@ -26,6 +26,8 @@ import argparse
 from datetime import date
 
 import seed_demo_sandbox as S  # reuse all primitives
+from sqlalchemy import select
+
 from app.models import (  # noqa: E402
     Client,
     ClientNotification,
@@ -52,7 +54,6 @@ from app.models import (  # noqa: E402
     Vendor,
     WiseEvent,
 )
-from sqlalchemy import select
 
 # ── Pin the scenario clock to the real demo day ──────────────────────────────
 S.TODAY = date(2026, 6, 9)
@@ -157,7 +158,7 @@ VENDORS = [
     ("Laboratorio de Control de Calidad GeoControl, S.A. de C.V.",    "LCC160924ST0", "Q.F.B. Norma Salgado Reyes"),
 ]
 
-I, J, H, A, F = "invited", "just_starting", "halfway", "almost_done", "fully_compliant"
+I, J, H, A, F = "invited", "just_starting", "halfway", "almost_done", "fully_compliant"  # noqa: E741
 ORGS = [
     {"key": "dtp-mes0", "rfc": "DTP0240115M0", "email": f"dtp.m0@{DEMO_EMAIL_DOMAIN}",
      "label": "Mes 0", "admin_name": "Coordinación de Cumplimiento · DTP",
