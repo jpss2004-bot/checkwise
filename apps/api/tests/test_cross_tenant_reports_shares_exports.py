@@ -447,16 +447,17 @@ def test_cross_tenant_from_preset_returns_403(
 def test_cross_tenant_audit_package_zip_returns_403(
     api_client: TestClient, db_factory
 ) -> None:
-    """A client_admin in org B asking for org A's audit ZIP gets
-    403 from ``_resolve_client_id``. 200 would be a leak of every
-    approved document for that customer."""
+    """A client_admin in org B asking for org A's audit ZIP gets a
+    UNIFORM 404 from ``_resolve_client_id`` (identical whether the foreign
+    client exists or not — no cross-tenant existence oracle). 200 would be a
+    leak of every approved document for that customer."""
     seed = _seed_two_tenants(db_factory)
     tok_b = _login(api_client, seed["user_b_email"])
     resp = api_client.get(
         f"/api/v1/client/audit-package.zip?client_id={seed['client_a_id']}",
         headers=_h(tok_b),
     )
-    assert resp.status_code == 403
+    assert resp.status_code == 404
 
 
 def test_cross_tenant_audit_package_preview_returns_403(
@@ -468,7 +469,9 @@ def test_cross_tenant_audit_package_preview_returns_403(
         f"/api/v1/client/audit-package/preview?client_id={seed['client_a_id']}",
         headers=_h(tok_b),
     )
-    assert resp.status_code == 403
+    # Uniform 404 (was 403) — `_resolve_client_id` no longer distinguishes a
+    # missing foreign client from one in another tenant.
+    assert resp.status_code == 404
 
 
 # ─── Sanity: same probes from the OWNER must succeed ─────────────

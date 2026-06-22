@@ -39,9 +39,16 @@ _preview_cache: OrderedDict[
 
 
 def client_master_file_path(client: Client) -> Path:
+    # Re-key on the immutable, unique ``client.id`` (via the single canonical
+    # segment helper) so two clients whose names slugify identically never
+    # share a master and ``/client/metadata/download`` can't serve one
+    # tenant's workbook to another. Reusing ``_client_dir_segment`` keeps this
+    # path byte-for-byte aligned with the write side and the S3 mirror key.
+    from app.services.metadata_export import _client_dir_segment
+
     return (
         Path(settings.METADATA_EXPORT_PATH).expanduser().resolve()
-        / _export_slug(client.name)
+        / _client_dir_segment(client)
         / "client_master_metadata.xlsx"
     )
 
@@ -183,6 +190,14 @@ def filter_master_by_vendor(
     given, ``Periodo``) doesn't match, preserving the workbook structure and
     the "00 Guia" sheet. Returns the temp path, or ``None`` when the provider
     has no rows in the master.
+
+    KNOWN LIMITATION (deferred): matching is by the human ``Proveedor`` NAME
+    cell, but vendors are unique by ``(client_id, rfc)`` — two same-named
+    vendors in one client merge into this view. The clean fix is a vendor
+    key column (RFC) carried into the master by the export step (see
+    ``tools/export_pdf_metadata_table.py``) and filtered on here; that is a
+    cross-pipeline schema change and is left for a follow-up to avoid
+    destabilising the metadata-export tests.
     """
     from openpyxl import load_workbook
 

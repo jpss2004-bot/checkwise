@@ -1,23 +1,24 @@
-"""Defence-in-depth helpers for vendor-scoped block data fetchers.
+"""Defence-in-depth tenant guard for vendor-scoped report renders.
 
-Every block fetcher that reads vendor-scoped rows (P1.2+ provider
-blocks: ``compliance_state``, ``attention_list``,
-``upcoming_deadlines``, ``prioritized_actions``) must call
-``assert_workspace_scope`` before issuing any DB query. The check is
-redundant with the API-layer enforcement in
-``services.report_service.list_reports`` / ``get_report`` — that
-redundancy is the point.
+``assert_workspace_scope`` is the per-render tenant-isolation guard for
+vendor-facing reports. It runs ONCE in
+``services.reports.executor.execute_plan`` — before the per-block fetch
+loop — because every block in a single render shares the same
+``ReportScope``, so one check covers the whole document rather than
+repeating it inside each fetcher. The check is redundant with the
+API-layer enforcement in ``services.report_service.list_reports`` /
+``get_report`` (the enforced trust boundary); that redundancy is the
+point.
 
-Two reasons this lives in a separate module rather than inline in each
-fetcher:
+Two reasons this lives in a separate module rather than inline in the
+executor:
 
-1. **Reviewability.** A new block author cannot ship a fetcher
-   without importing from here. The import is a visible code-review
-   signal that the fetcher was thought about against the trust
-   boundary.
+1. **Reviewability.** The named import is a visible code-review signal
+   that the vendor-facing render path was thought about against the
+   trust boundary.
 2. **One place to evolve.** When the actor gains multi-workspace
-   visibility (a deferred follow-up), the rule changes in this
-   module; every block fetcher picks the fix up for free.
+   visibility (a deferred follow-up), the rule changes in this module
+   and every vendor-facing render picks the fix up for free.
 
 This module deliberately does NOT import from ``services.reports.context``
 to avoid an import cycle when block fetchers are wired into the

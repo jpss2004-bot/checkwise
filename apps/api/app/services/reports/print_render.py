@@ -432,9 +432,81 @@ def _block_html(block: dict) -> str:
         return ""
 
 
-def render_report_document_html(report: Report, version: ReportVersion) -> bytes:
+# ─── Audience redaction (defense-in-depth) ─────────────────────
+#
+# Mirrors executor._PII_FIELDS_PER_BLOCK / _REDACT_VENDOR_IDENTITY_AUDIENCES.
+# The executor already strips these paths before persisting a
+# ReportVersion, but the public share endpoint serves stored
+# content_json straight to an UNAUTHENTICATED caller — so the renderer
+# must not trust that the stored blocks were redacted. We re-strip
+# named-provider identity for the two audiences that may never receive
+# it: vendor_facing (a provider must not see sibling vendors) and
+# external_signed (public links stay conservative). internal_only /
+# client_facing pass through (staff see everything; a client owns its
+# own portfolio).
+_PII_FIELDS_PER_BLOCK: dict[str, tuple[str, ...]] = {
+    "vendor_risk_matrix": ("rows.*.vendor_name", "rows.*.vendor_rfc"),
+    "compliance_overview": ("by_vendor.*.vendor_name", "by_vendor.*.vendor_rfc"),
+}
+
+_REDACT_VENDOR_IDENTITY_AUDIENCES: frozenset[str] = frozenset(
+    {ReportAudience.VENDOR_FACING.value, ReportAudience.EXTERNAL_SIGNED.value}
+)
+
+
+def _redact_walk(node: Any, parts: list[str]) -> None:
+    if not parts:
+        return
+    head, *rest = parts
+    if head == "*":
+        if isinstance(node, list):
+            for item in node:
+                _redact_walk(item, rest)
+        return
+    if isinstance(node, dict):
+        if not rest:
+            if head in node:
+                node[head] = None
+            return
+        _redact_walk(node.get(head), rest)
+
+
+def _redact_block_for_audience(block: dict, audience: str | None) -> dict:
+    """Return a copy of ``block`` with vendor identity stripped from its
+    ``data`` for the two vendor/external audiences. Other audiences
+    (and an unknown/None audience, e.g. the authenticated PDF path)
+    pass through untouched."""
+    if audience not in _REDACT_VENDOR_IDENTITY_AUDIENCES:
+        return block
+    paths = _PII_FIELDS_PER_BLOCK.get(str(block.get("type")), ())
+    if not paths:
+        return block
+    import copy as _copy
+
+    safe = _copy.deepcopy(block)
+    data = safe.get("data")
+    if not isinstance(data, dict):
+        return safe
+    for path in paths:
+        _redact_walk(data, path.split("."))
+    return safe
+
+
+def render_report_document_html(
+    report: Report, version: ReportVersion, *, audience: str | None = None
+) -> bytes:
+    """Render the designed report document to self-contained HTML.
+
+    ``audience`` (defense-in-depth, FIX 3): when serving an
+    UNAUTHENTICATED public share, pass the share's audience so
+    vendor_facing / external_signed renders strip named-provider
+    identity from each block before rendering — even if the stored
+    ``content_json`` was somehow persisted with names. Defaults to
+    ``None`` (no extra redaction) for the authenticated internal PDF
+    export path, which is entitled to see names.
+    """
     content = version.content_json or {}
-    blocks = content.get("blocks") or []
+    blocks = [_redact_block_for_audience(b, audience) for b in (content.get("blocks") or [])]
     title = _e(report.title or "Reporte CheckWise")
     desc = _e(report.description or "")
     generated = utc_now().strftime("%d/%m/%Y %H:%M")

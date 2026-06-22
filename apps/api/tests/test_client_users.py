@@ -341,13 +341,15 @@ def test_cross_tenant_access_is_blocked(db_factory, api_client):
     sec_b = _seed_secondary(db_factory, ctx_b["org_id"])
     token_a = _login(api_client, ctx_a["owner_email"])
 
-    # Explicitly requesting the other tenant 403s at scope resolution.
+    # Explicitly requesting the other tenant 404s at scope resolution — the
+    # response is identical whether the foreign client exists or not, so it
+    # cannot be used as a cross-tenant existence oracle (`_resolve_client_id`).
     listed = api_client.get(
         "/api/v1/client/users",
         params={"client_id": ctx_b["client_id"]},
         headers=_h(token_a),
     )
-    assert listed.status_code == 403
+    assert listed.status_code == 404
 
     # Targeting another tenant's user inside one's own scope 404s.
     removed = api_client.delete(

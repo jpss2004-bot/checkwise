@@ -339,7 +339,10 @@ def test_client_admin_cannot_see_another_client(
     resp = api_client.get(
         f"/api/v1/client/overview?client_id={other_id}", headers=_h(token)
     )
-    assert resp.status_code == 403
+    # 404 (not 403): a non-internal_admin gets the same not-found response
+    # whether the foreign client exists or not, closing the cross-tenant
+    # existence oracle in `_resolve_client_id`.
+    assert resp.status_code == 404
 
 
 def test_internal_admin_can_inspect_with_explicit_client_id(
@@ -2434,8 +2437,10 @@ def test_client_admin_cannot_request_foreign_client_scope(api_client, db_factory
     token = _login(api_client, email, password)
 
     resp = api_client.get(f"{path}?client_id={client_b}", headers=_h(token))
-    # Requesting a client outside one's memberships is forbidden, not 404.
-    assert resp.status_code == 403, resp.text
+    # Requesting a client outside one's memberships returns a UNIFORM 404 —
+    # identical whether that client exists or not — so `_resolve_client_id`
+    # cannot be used as a cross-tenant existence oracle.
+    assert resp.status_code == 404, resp.text
 
 
 def test_client_admin_token_rejected_by_reviewer_decision(api_client, db_factory):

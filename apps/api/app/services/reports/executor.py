@@ -164,6 +164,17 @@ def execute_plan(
     """
     audience = context.scope.audience
 
+    # Defense-in-depth tenant guard (matches §7.4). Redundant with the
+    # API-layer RBAC in report_service.get_report / list_reports — that
+    # redundancy is the point. For vendor_facing scopes it asserts the
+    # caller owns the workspace whose vendor the report targets; it is a
+    # no-op for internal/client/external audiences and for internal staff,
+    # so it never affects portfolio renders. Runs once before the per-block
+    # loop because every block in a render shares the one scope.
+    from app.services.reports.blocks._safety import assert_workspace_scope
+
+    assert_workspace_scope(actor=actor, scope=context.scope)
+
     # PERF-1: build_client_context is the heaviest call in the pipeline and
     # several blocks need the same client's portfolio. Start a fresh
     # per-render memo so the first block that needs it computes it once and

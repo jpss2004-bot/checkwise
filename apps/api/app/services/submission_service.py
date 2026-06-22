@@ -677,7 +677,22 @@ def finalize_intake_submission(
     # the async portal path persists the Document (at ``recibido``) before
     # this finalize pass runs, so a document must never be flagged as a
     # duplicate of itself.
-    duplicate_query = select(Document).where(Document.sha256 == stored_file.sha256)
+    #
+    # Tenant isolation: the sha256 lookup is scoped to THIS client + vendor
+    # via the Document → Submission join. An unscoped global match would
+    # flag two unrelated tenants who upload the byte-identical public form
+    # as duplicates of each other (cross-tenant file-existence leak + a
+    # spurious review). A byte-identical re-upload only counts within the
+    # same tenant slot.
+    duplicate_query = (
+        select(Document)
+        .join(Submission, Submission.id == Document.submission_id)
+        .where(
+            Document.sha256 == stored_file.sha256,
+            Submission.client_id == client.id,
+            Submission.vendor_id == vendor.id,
+        )
+    )
     if existing_document is not None:
         duplicate_query = duplicate_query.where(Document.id != existing_document.id)
     duplicate = db.scalar(duplicate_query.limit(1))
@@ -1488,8 +1503,19 @@ def finalize_multi_document_submission(
     inspections: list[tuple[StoredFile, PdfInspectionResult, DocumentSignals, DocumentStatus]] = []
     duplicate_flags: list[bool] = []
     for stored in stored_files:
+        # Tenant isolation: scope the sha256 lookup to THIS client + vendor
+        # via the Document → Submission join so a byte-identical upload from
+        # an unrelated tenant never flags this batch as a duplicate (and
+        # vice-versa). See the single-file path for the full rationale.
         duplicate = db.scalar(
-            select(Document).where(Document.sha256 == stored.sha256).limit(1)
+            select(Document)
+            .join(Submission, Submission.id == Document.submission_id)
+            .where(
+                Document.sha256 == stored.sha256,
+                Submission.client_id == client.id,
+                Submission.vendor_id == vendor.id,
+            )
+            .limit(1)
         )
         pdf_inspection = inspect_pdf_with_ocr_fallback(stored.path)
         document_signals = analyze_document_text(

@@ -95,8 +95,13 @@ def ensure_local_export(path: Path) -> Path:
     return path
 
 
-def sync_client_latest_exports(client_slug: str) -> None:
+def sync_client_latest_exports(client_segment: str) -> None:
     """Materialize every ``latest_metadata.xlsx`` for one client.
+
+    ``client_segment`` is the canonical per-client path/key segment
+    (``<name-slug>-<client_id>``) produced by
+    :func:`app.services.metadata_export._client_dir_segment`; it MUST match the
+    write-side segment exactly or this lists the wrong mirror prefix.
 
     Called before :func:`app.services.metadata_export.\
 rebuild_client_master_metadata_export` rglobs the local tree, so a
@@ -105,7 +110,7 @@ rebuild_client_master_metadata_export` rglobs the local tree, so a
     """
     if not mirror_enabled():
         return
-    prefix = f"{_PREFIX}/{client_slug}/"
+    prefix = f"{_PREFIX}/{client_segment}/"
     try:
         keys = get_storage_service().list_keys(prefix)
     except Exception:  # noqa: BLE001 — degrade to local-only rebuild

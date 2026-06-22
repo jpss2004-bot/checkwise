@@ -196,7 +196,10 @@ export default function ClientNotificationsPage() {
 
   async function markOne(row: ClientNotificationItem) {
     if (row.read_at) return;
-    const updated = await markClientNotificationRead(row.id);
+    const updated = await markClientNotificationRead(
+      row.id,
+      urlClientId ? { client_id: urlClientId } : undefined,
+    );
     setRows((current) =>
       current?.map((item) => (item.id === updated.id ? updated : item)) ??
       current,
@@ -205,7 +208,9 @@ export default function ClientNotificationsPage() {
   }
 
   async function markAll() {
-    await markAllClientNotificationsRead();
+    await markAllClientNotificationsRead(
+      urlClientId ? { client_id: urlClientId } : undefined,
+    );
     setRows((current) =>
       current?.map((item) => ({
         ...item,

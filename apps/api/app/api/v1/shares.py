@@ -322,11 +322,20 @@ def get_share_info(
             status.HTTP_410_GONE, detail="Enlace no disponible."
         )
     report = db.get(Report, row.report_id)
+    # Don't leak the real report title before the password is supplied.
+    # A password-protected share withholds its title until the caller
+    # presents a valid unlock cookie for THIS token (the same cookie the
+    # render path trusts). The probe still reports has_password +
+    # expires_at so the frontend can render the password form.
+    has_password = row.password_hash is not None
+    unlocked = not has_password or _verify_unlock(
+        row.id, request.cookies.get(_cookie_name_for(token))
+    )
     return ShareInfo(
         audience=row.audience,
-        has_password=row.password_hash is not None,
+        has_password=has_password,
         expires_at=row.expires_at,
-        title=report.title if report else None,
+        title=(report.title if report else None) if unlocked else None,
     )
 
 
@@ -365,7 +374,12 @@ def post_share_unlock(
         max_age=COOKIE_TTL_SECONDS,
         httponly=True,
         samesite="lax",
-        secure=getattr(settings, "COOKIE_SECURE", False),
+        # ``cookie_secure`` is the real property (same one auth.py's login
+        # cookie uses — True for non-local env). The previous
+        # getattr(settings, "COOKIE_SECURE", False) referenced a name that
+        # doesn't exist, so the unlock cookie was minted WITHOUT Secure
+        # even in production.
+        secure=settings.cookie_secure,
         path="/api/v1/r/",
     )
     for k, v in NO_STORE.items():
@@ -409,7 +423,14 @@ def get_share(token: str, request: Request, db: DbSession) -> Response:
     # the same self-contained HTML the PDF renders — not the generic
     # key/value structural dump. A shared link should show the real
     # report, not a debug view.
-    html_bytes = render_report_document_html(report, version)
+    #
+    # Defense-in-depth: this endpoint is UNAUTHENTICATED, so pass the
+    # share's audience. For vendor_facing / external_signed shares the
+    # renderer strips named-provider identity from each block — even if
+    # the stored version was somehow persisted with names.
+    html_bytes = render_report_document_html(
+        report, version, audience=share.audience
+    )
     db.commit()
     return Response(
         content=html_bytes,

@@ -190,25 +190,32 @@ def _resolve_client_id(
     * Anyone else got rejected by the auth dependency already.
 
     Raises:
-        404 if ``requested`` does not exist.
-        403 if ``requested`` is not visible to this user.
+        404 if ``requested`` is not resolvable for this caller. For a
+            non-internal_admin this is a UNIFORM 404 whether the row is
+            missing OR lives in another tenant — returning 403 only when the
+            row exists elsewhere would be a cross-tenant existence oracle
+            (mirrors ``_resolve_client_id_for_vendor`` /
+            ``client_get_submission_document``). Only internal_admin, who may
+            address any client, gets the distinct missing-row 404.
         400 if no client can be resolved.
     """
     visible = _visible_client_ids_for_user(db, current.user.id)
     is_internal_admin = MembershipRole.INTERNAL_ADMIN.value in current.roles
 
     if requested:
-        target = db.get(Client, requested)
-        if target is None:
-            raise HTTPException(
-                status.HTTP_404_NOT_FOUND, detail="Cliente no encontrado."
-            )
         if is_internal_admin:
+            target = db.get(Client, requested)
+            if target is None:
+                raise HTTPException(
+                    status.HTTP_404_NOT_FOUND, detail="Cliente no encontrado."
+                )
             return requested
         if requested not in visible:
+            # Same 404 shape whether the client row is missing or belongs to
+            # another tenant — never confirm a client's existence to a caller
+            # who cannot see it.
             raise HTTPException(
-                status.HTTP_403_FORBIDDEN,
-                detail="No tienes acceso a este cliente.",
+                status.HTTP_404_NOT_FOUND, detail="Cliente no encontrado."
             )
         return requested
 

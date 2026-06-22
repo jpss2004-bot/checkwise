@@ -166,6 +166,7 @@ def export_metadata_table_after_upload(
     return _write_metadata_workbooks(
         stored_file=stored_file,
         client_name=client.name,
+        client_id=client.id,
         vendor_name=vendor.name,
         period_key=resolved_period.canonical_period_key,
         document_type_code=document_type_code,
@@ -179,6 +180,7 @@ def _write_metadata_workbooks(
     *,
     stored_file: StoredFile,
     client_name: str,
+    client_id: str,
     vendor_name: str,
     period_key: str | None,
     document_type_code: str,
@@ -195,6 +197,7 @@ def _write_metadata_workbooks(
     """
     output_dir = _export_directory(
         client_name=client_name,
+        client_id=client_id,
         vendor_name=vendor_name,
         period_key=period_key,
         document_type_code=document_type_code,
@@ -227,7 +230,9 @@ def _write_metadata_workbooks(
         # Bulk backfill rebuilds the master once per client at the end rather
         # than once per document (avoids O(n²) reads of the slot set).
         master_path = (
-            rebuild_client_master_metadata_export(client_name=client_name)
+            rebuild_client_master_metadata_export(
+                client_name=client_name, client_id=client_id
+            )
             if rebuild_master
             else None
         )
@@ -386,19 +391,25 @@ def _text_extraction_from_inspection(
     }
 
 
-def rebuild_client_master_metadata_export(*, client_name: str) -> Path | None:
+def rebuild_client_master_metadata_export(
+    *, client_name: str, client_id: str
+) -> Path | None:
     """Rebuild the current shareable master workbook for one client.
 
     The master intentionally reads only each slot's ``latest_metadata.xlsx``
     so it represents the current state rather than every historical upload.
     """
-    client_slug = _slug(client_name)
-    client_root = Path(settings.METADATA_EXPORT_PATH) / client_slug
+    # Keyed on the immutable, unique ``client.id`` (suffixed onto the name
+    # slug) so two clients whose names slugify identically never share a tree
+    # and the rebuild can never aggregate one tenant's slots into another's
+    # master (cross-tenant metadata leak).
+    client_segment = f"{_slug(client_name)}-{client_id}"
+    client_root = Path(settings.METADATA_EXPORT_PATH) / client_segment
     # Pull any per-slot workbooks the local disk lost (deploy/restart on
     # ephemeral storage) back from the mirror, otherwise this rebuild
     # would aggregate only the post-deploy uploads and overwrite the
     # previous, complete master with the impoverished result.
-    sync_client_latest_exports(client_slug)
+    sync_client_latest_exports(client_segment)
     if not client_root.exists():
         return None
 
@@ -523,6 +534,7 @@ def backfill_metadata_exports(
 
         slot_dir = _export_directory(
             client_name=client.name,
+            client_id=client.id,
             vendor_name=vendor.name,
             period_key=submission.period_key,
             document_type_code=document_type_code,
@@ -584,6 +596,7 @@ def backfill_metadata_exports(
         write_result = _write_metadata_workbooks(
             stored_file=stored_file,
             client_name=client.name,
+            client_id=client.id,
             vendor_name=vendor.name,
             period_key=submission.period_key,
             document_type_code=document_type_code,
@@ -600,8 +613,12 @@ def backfill_metadata_exports(
             emit(f"FAILED write {document.id}: {write_result.reason}")
 
     if not dry_run:
-        for client_name in sorted(set(clients_touched.values())):
-            rebuild_client_master_metadata_export(client_name=client_name)
+        for client_id, client_name in sorted(
+            clients_touched.items(), key=lambda item: item[1]
+        ):
+            rebuild_client_master_metadata_export(
+                client_name=client_name, client_id=client_id
+            )
             result.clients_rebuilt += 1
 
     return result
@@ -707,16 +724,33 @@ def _metadata_context(
     }
 
 
+def _client_dir_segment(client: Client) -> str:
+    """Canonical per-client path/key segment for the export tree.
+
+    Client.name has NO DB uniqueness (only ``rfc`` is unique), so keying the
+    export tree on the slug alone let two clients whose names slugify the same
+    share ``metadata_exports/<slug>/...`` — the master rebuild then aggregated
+    both tenants into one workbook the download served cross-tenant. Suffixing
+    the immutable, unique ``client.id`` isolates them. This is the ONE place
+    the segment is defined; ``_export_directory``,
+    ``rebuild_client_master_metadata_export``, ``client_master_file_path`` and
+    the S3 mirror all reuse it so the local path and the durable key never
+    drift.
+    """
+    return f"{_slug(client.name)}-{client.id}"
+
+
 def _export_directory(
     *,
     client_name: str,
+    client_id: str,
     vendor_name: str,
     period_key: str | None,
     document_type_code: str,
 ) -> Path:
     return (
         Path(settings.METADATA_EXPORT_PATH)
-        / _slug(client_name)
+        / f"{_slug(client_name)}-{client_id}"
         / _slug(vendor_name)
         / _slug(period_key or "alta-inicial")
         / _slug(document_type_code)

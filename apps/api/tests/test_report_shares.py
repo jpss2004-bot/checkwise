@@ -611,7 +611,11 @@ def test_info_endpoint_returns_metadata_only(api_client, db_factory) -> None:
     info = resp.json()
     assert info["audience"] == seed["report_audience"]
     assert info["has_password"] is True
-    assert info["title"] == seed["report_title"]
+    # A password-protected share withholds its real title until the
+    # password is supplied — returning it here leaked the report name to
+    # anyone holding the link before they could open it. The probe still
+    # exposes has_password + expires_at so the frontend renders the form.
+    assert info["title"] is None
     # No body, no token.
     assert "body" not in info
     assert "token" not in info

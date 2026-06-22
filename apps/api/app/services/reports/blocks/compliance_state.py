@@ -13,8 +13,10 @@ Scope contract:
   computes the payload from its onboarding + calendar slots.
 - ``audience == internal_only`` / ``client_facing`` with a vendor_id
   set → the block also renders (internal staff and client admins can
-  see a provider's pulse on a vendor-scoped report). The scope check
-  is performed by ``assert_workspace_scope`` first.
+  see a provider's pulse on a vendor-scoped report). The vendor-facing
+  scope check is performed once by ``assert_workspace_scope`` in
+  ``executor.execute_plan`` before any block fetch runs; the API layer
+  remains the enforced tenant boundary.
 - Missing vendor_id → empty payload. The dispatcher tolerates ``None``
   vendor_ids today because not every audience requires one; the
   fetcher returns the empty shape rather than raising so the canvas
