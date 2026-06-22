@@ -391,6 +391,28 @@ def _upload_screenshot(
 # ─── Block Kit formatters ───────────────────────────────────────
 
 
+def _mrkdwn_escape(value: str) -> str:
+    """Escape Slack mrkdwn control characters in user-supplied text.
+
+    Slack requires `&`, `<`, `>` to be HTML-escaped inside mrkdwn; doing
+    so prevents a submitter from forging `<url|text>` links or injecting
+    fake markup into the internal feedback channel. Backticks are also
+    neutralized so console-log payloads cannot break out of a code fence.
+    """
+    return (
+        (value or "")
+        .replace("&", "&amp;")
+        .replace("<", "&lt;")
+        .replace(">", "&gt;")
+        .replace("`", "ʼ")
+    )
+
+
+def _is_safe_http_url(value: str) -> bool:
+    """True only for http(s) URLs (used to gate the rendered 'Open page' link)."""
+    return value.startswith("https://") or value.startswith("http://")
+
+
 def _fallback_text(s: dict) -> str:
     label = "🐛 Bug" if s.get("type") == "bug" else "💡 Improvement"
     if s.get("is_public"):
@@ -409,17 +431,18 @@ def _format_blocks(s: dict) -> list[dict]:
     description = (s.get("description") or "").strip()
     if len(description) > 2800:
         description = description[:2800].rstrip() + "…"
+    description = _mrkdwn_escape(description)
 
-    url = s.get("url") or "#"
-    user_agent = (s.get("user_agent") or "")[:120]
+    raw_url = (s.get("url") or "#").strip()
+    user_agent = _mrkdwn_escape((s.get("user_agent") or "")[:120])
 
     # Authenticated submissions show user identity + roles. Public
     # submissions instead show contact email (optional) and the
     # peppered IP-hash fingerprint so the same anonymous reporter can
     # be clustered across multiple reports without leaking PII.
     if is_public:
-        contact_email = s.get("contact_email") or "—"
-        ip_hash = s.get("ip_hash") or "—"
+        contact_email = _mrkdwn_escape(s.get("contact_email") or "—")
+        ip_hash = _mrkdwn_escape(s.get("ip_hash") or "—")
         identity_fields = [
             {"type": "mrkdwn", "text": f"*Email (opcional)*\n{contact_email}"},
             {"type": "mrkdwn", "text": f"*IP hash*\n`{ip_hash}`"},
@@ -452,7 +475,14 @@ def _format_blocks(s: dict) -> list[dict]:
         {
             "type": "context",
             "elements": [
-                {"type": "mrkdwn", "text": f"<{url}|Open page> · {user_agent or '—'}"},
+                {
+                    "type": "mrkdwn",
+                    "text": (
+                        f"<{raw_url}|Open page> · {user_agent or '—'}"
+                        if _is_safe_http_url(raw_url)
+                        else f"{_mrkdwn_escape(raw_url)} · {user_agent or '—'}"
+                    ),
+                },
             ],
         },
     ]
@@ -461,6 +491,8 @@ def _format_blocks(s: dict) -> list[dict]:
     if console_logs:
         if len(console_logs) > 2800:
             console_logs = console_logs[:2800].rstrip() + "\n…"
+        # Neutralize backticks so attacker logs can't break out of the fence.
+        console_logs = console_logs.replace("`", "ʼ")
         blocks.append(
             {
                 "type": "section",

@@ -33,6 +33,22 @@ export class DownloadError extends Error {
   }
 }
 
+/**
+ * Extract a filename from a ``Content-Disposition`` header value.
+ *
+ * Tightened to anchor on the token/quoted-string and stop at ``;`` so an
+ * unquoted or RFC5987 header like
+ * ``attachment; filename=a.zip; filename*=UTF-8''a%20final.zip`` no longer
+ * greedily captures everything after ``filename=`` to end-of-line.
+ * Returns ``undefined`` when no filename token is present.
+ */
+export function parseContentDispositionFilename(
+  disposition: string,
+): string | undefined {
+  const match = /filename\*?=(?:UTF-8''|")?([^";]+)"?/i.exec(disposition);
+  return match?.[1];
+}
+
 /** Trigger a browser save dialog for an in-memory Blob. */
 export function saveBlob(blob: Blob, filename: string): void {
   const url = URL.createObjectURL(blob);
@@ -95,7 +111,6 @@ export async function downloadAuthenticatedFile(
     throw new DownloadError(response.status, detail || response.statusText);
   }
   const disp = response.headers.get("Content-Disposition") || "";
-  const match = /filename="?([^"]+)"?/i.exec(disp);
-  const filename = match?.[1] ?? fallbackFilename;
+  const filename = parseContentDispositionFilename(disp) ?? fallbackFilename;
   saveBlob(await response.blob(), filename);
 }

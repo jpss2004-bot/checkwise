@@ -242,7 +242,14 @@ async function fetchJson<T>(
       signal: init.signal ?? controller?.signal,
     });
   } catch (err) {
-    if (controller?.signal.aborted) {
+    // Surface aborts (timeout OR a caller-supplied signal) as a typed
+    // PortalApiError so callers branching on `err instanceof PortalApiError`
+    // handle them consistently instead of seeing a raw AbortError DOMException.
+    if (
+      controller?.signal.aborted ||
+      init.signal?.aborted ||
+      (err instanceof DOMException && err.name === "AbortError")
+    ) {
       throw new PortalApiError(
         0,
         "La solicitud tardó demasiado. Revisa tu conexión e inténtalo de nuevo.",
@@ -789,7 +796,12 @@ export type DashboardActionType =
   | "upcoming"
   // P1-c (2026-05-20): EXPIRED required slots emit "regularize"
   // so the provider sees the missed obligation in their action list.
-  | "regularize";
+  | "regularize"
+  // Phase 6D (2026-05-23): renewal-bearing onboarding requirements
+  // emit "renewal" when within 30 days of due / overdue. Must match the
+  // backend DashboardSuggestedAction Literal (portal.py) so the CTA label
+  // resolves instead of falling back to the generic "Abrir".
+  | "renewal";
 
 export type DashboardOnboardingSummary = {
   total_required: number;

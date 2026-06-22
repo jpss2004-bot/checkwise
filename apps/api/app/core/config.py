@@ -702,6 +702,24 @@ def _validate_boot_security(settings: Settings) -> None:
             settings.CHECKWISE_ENV,
         )
 
+    # CORS-1 — soft warning: an empty CORS allowlist on a non-local deploy
+    # makes CORSMiddleware emit no Access-Control-Allow-Origin, so every
+    # credentialed cross-site request from the Vercel frontend is blocked
+    # (silent, total breakage). It also empties allowed_csrf_origins when
+    # FRONTEND_BASE_URL is likewise blank, rejecting every cookie-authed
+    # mutation. CORS_ORIGINS is sync:false in render.yaml, so a first-deploy
+    # operator who forgets to paste the origin gets no signal today. Log-only
+    # (an empty allowlist can be a deliberate, harsh production choice).
+    if not settings.cors_origins_list:
+        logging.getLogger("checkwise.config").warning(
+            "CORS_ORIGINS is empty on a non-local deploy (CHECKWISE_ENV=%s). "
+            "The API will send no Access-Control-Allow-Origin and the browser "
+            "will block every credentialed request from the frontend. Set "
+            "CORS_ORIGINS to the frontend origin(s) (e.g. https://app.checkwise.mx) "
+            "in the Render dashboard.",
+            settings.CHECKWISE_ENV,
+        )
+
     # INFRA-2 — soft warning: the in-memory rate limiter keeps its
     # sliding-window counters per process. On a single uvicorn worker
     # (today's prod) that's correct, but the moment the worker/instance

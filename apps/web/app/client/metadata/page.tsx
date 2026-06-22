@@ -28,6 +28,7 @@ export default function ClientMetadataPage() {
   const [query, setQuery] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [downloading, setDownloading] = useState(false);
+  const [downloadError, setDownloadError] = useState<string | null>(null);
 
   useEffect(() => {
     let cancelled = false;
@@ -67,6 +68,7 @@ export default function ClientMetadataPage() {
   async function downloadWorkbook() {
     if (!data?.master_available) return;
     setDownloading(true);
+    setDownloadError(null);
     try {
       const blob = await downloadClientMetadata(
         urlClientId ? { client_id: urlClientId } : undefined,
@@ -79,6 +81,12 @@ export default function ClientMetadataPage() {
       anchor.click();
       anchor.remove();
       URL.revokeObjectURL(href);
+    } catch (err: unknown) {
+      setDownloadError(
+        err instanceof Error
+          ? err.message
+          : "No pudimos descargar el Excel. Intenta de nuevo.",
+      );
     } finally {
       setDownloading(false);
     }
@@ -113,6 +121,15 @@ export default function ClientMetadataPage() {
         </Surface>
       ) : (
         <div className="space-y-5">
+          {downloadError ? (
+            <div
+              role="alert"
+              className="rounded-md bg-[color:var(--status-error-bg)] px-3 py-2 text-xs text-[color:var(--status-error-text)]"
+            >
+              {downloadError}
+            </div>
+          ) : null}
+
           <MetadataStrip
             items={[
               { label: "Cliente", value: data.client_name },
@@ -144,15 +161,15 @@ function MetadataTable({ documents }: { documents: ClientMetadataDocument[] }) {
         <table className="w-full min-w-[1100px] text-left text-xs">
           <thead className="border-b border-[color:var(--border-subtle)] bg-[color:var(--surface-sunken)] font-mono uppercase tracking-wide text-[color:var(--text-tertiary)]">
             <tr>
-              <th className="px-3 py-2">Proveedor</th>
-              <th className="px-3 py-2">Periodo</th>
-              <th className="px-3 py-2">Documento</th>
-              <th className="px-3 py-2">Tipo</th>
-              <th className="px-3 py-2">Institucion</th>
-              <th className="px-3 py-2">Fecha</th>
-              <th className="px-3 py-2">Participantes</th>
-              <th className="px-3 py-2">Descripcion</th>
-              <th className="px-3 py-2">Etiquetas</th>
+              <th scope="col" className="px-3 py-2">Proveedor</th>
+              <th scope="col" className="px-3 py-2">Periodo</th>
+              <th scope="col" className="px-3 py-2">Documento</th>
+              <th scope="col" className="px-3 py-2">Tipo</th>
+              <th scope="col" className="px-3 py-2">Institucion</th>
+              <th scope="col" className="px-3 py-2">Fecha</th>
+              <th scope="col" className="px-3 py-2">Participantes</th>
+              <th scope="col" className="px-3 py-2">Descripcion</th>
+              <th scope="col" className="px-3 py-2">Etiquetas</th>
             </tr>
           </thead>
           {/* Windowed <tbody>: the metadata master can hold hundreds–thousands

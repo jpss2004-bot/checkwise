@@ -62,7 +62,7 @@ export default function SeguridadPage() {
           La plataforma corre en tres capas, cada una administrada por un
           proveedor especializado con disponibilidad de nivel empresarial:
         </p>
-        <ul>
+        <ul className="list-disc space-y-2 pl-6">
           <li>
             <strong>Frontend:</strong> desplegado en Vercel con red de borde
             global (CDN), HTTPS forzado en todos los dominios y sin secretos de
@@ -102,7 +102,7 @@ export default function SeguridadPage() {
           con rol insuficiente — no existe escalación silenciosa de privilegios.
         </p>
         <p>Los roles de la plataforma son:</p>
-        <ul>
+        <ul className="list-disc space-y-2 pl-6">
           <li>
             <strong>Cliente admin:</strong> ve y gestiona solo los proveedores
             de su organización.
@@ -144,7 +144,7 @@ export default function SeguridadPage() {
       </ArticleSection>
 
       <ArticleSection id="operaciones" heading="Operaciones de seguridad">
-        <ul>
+        <ul className="list-disc space-y-2 pl-6">
           <li>
             Las dependencias de frontend y backend se monitorean con Dependabot;
             las actualizaciones de seguridad se aplican en el ciclo de

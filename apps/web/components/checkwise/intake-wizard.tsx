@@ -1055,7 +1055,15 @@ export function IntakeWizard({
                 onClick={() => {
                   setResult(null);
                   setBatchFeedback([]);
-                  setFile(null);
+                  // selectFile(null) revokes the preview blob URL and clears
+                  // file/filePreviewUrl/duplicateCheck/fileError so the next
+                  // upload starts clean (was: a bare setFile(null) that leaked
+                  // the blob URL and left the stale duplicate warning).
+                  selectFile(null);
+                  setAdditionalFiles([]);
+                  setAdditionalFilesError(null);
+                  setReplaceAck(false);
+                  setError(null);
                   setStep(0);
                 }}
                 className="active:scale-[0.98]"

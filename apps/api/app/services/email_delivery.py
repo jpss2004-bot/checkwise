@@ -373,10 +373,17 @@ def send_transactional_email(
             delivered=False, status="skipped", error="smtp_not_configured"
         )
 
+    # Strip CR/LF from header values: EmailMessage's default policy raises
+    # ValueError on an embedded linefeed, which would escape this function and
+    # break the documented "never raises" contract. Stripping also closes the
+    # header-injection vector for values built from vendor/requirement names.
+    safe_subject = (subject or "").replace("\r", " ").replace("\n", " ")
+    safe_to = (to_email or "").replace("\r", "").replace("\n", "")
+
     message = EmailMessage()
-    message["Subject"] = subject
+    message["Subject"] = safe_subject
     message["From"] = _sender()
-    message["To"] = to_email
+    message["To"] = safe_to
     message.set_content(body)
     if html_body:
         message.add_alternative(html_body, subtype="html")

@@ -134,6 +134,11 @@ export function WiseDock({
   const [feedbackByMessage, setFeedbackByMessage] = React.useState<
     Record<string, "up" | "down">
   >({});
+  // Tracks which messages already fired a feedback event so the
+  // side-effecting POST runs exactly once, OUTSIDE the state updater
+  // (state updaters must be pure; StrictMode + concurrent rendering can
+  // otherwise double-fire the analytics call).
+  const feedbackFiredRef = React.useRef<Set<string>>(new Set());
   const scrollRef = React.useRef<HTMLDivElement | null>(null);
 
   // Page context: derived live from the URL so the dock knows what
@@ -336,15 +341,16 @@ export function WiseDock({
   // fire-and-forget like every other dock event.
   const submitFeedback = React.useCallback(
     (messageId: string, rating: "up" | "down") => {
-      setFeedbackByMessage((prev) => {
-        if (prev[messageId]) return prev;
-        void postWiseEvent(session, "wise.feedback", {
-          audience,
-          message_id: messageId,
-          rating,
-          route: pageContext.route,
-        });
-        return { ...prev, [messageId]: rating };
+      if (feedbackFiredRef.current.has(messageId)) return;
+      feedbackFiredRef.current.add(messageId);
+      setFeedbackByMessage((prev) =>
+        prev[messageId] ? prev : { ...prev, [messageId]: rating },
+      );
+      void postWiseEvent(session, "wise.feedback", {
+        audience,
+        message_id: messageId,
+        rating,
+        route: pageContext.route,
       });
     },
     [audience, pageContext.route, session],
@@ -825,6 +831,7 @@ const ACTION_CTA_LABEL_LOCAL: Record<
   complete_onboarding: "Subir documento",
   upcoming: "Subir documento",
   regularize: "Regularizar",
+  renewal: "Renovar",
 };
 
 function ctaLabelForAction(

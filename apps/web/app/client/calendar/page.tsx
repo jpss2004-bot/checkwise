@@ -83,6 +83,7 @@ export default function ClientCalendarPage() {
   const [selected, setSelected] = useState<Selected>(null);
   const [vendorsList, setVendorsList] =
     useState<ClientVendorListResponse | null>(null);
+  const [reloadKey, setReloadKey] = useState(0);
 
   const calendarHref = useMemo(() => {
     const params = new URLSearchParams();
@@ -132,7 +133,7 @@ export default function ClientCalendarPage() {
     return () => {
       cancelled = true;
     };
-  }, [year, vendorFilter, urlClientId]);
+  }, [year, vendorFilter, urlClientId, reloadKey]);
 
   function toggleVendor(id: string) {
     setVendorFilter((prev) =>
@@ -325,7 +326,7 @@ export default function ClientCalendarPage() {
         <ErrorState
           title="No pudimos cargar el calendario"
           description={error}
-          onRetry={() => setYear((y) => y)}
+          onRetry={() => setReloadKey((k) => k + 1)}
         />
       ) : !data ? (
         <CalendarSkeleton />

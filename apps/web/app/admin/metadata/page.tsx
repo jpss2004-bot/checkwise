@@ -247,10 +247,10 @@ export default function AdminMetadataPage() {
                     <table className="min-w-full">
                       <thead>
                         <tr className="border-b border-[color:var(--border-subtle)]">
-                          <th className="cw-eyebrow py-1.5 pr-3 text-left">Campo</th>
-                          <th className="cw-eyebrow py-1.5 pr-3 text-left">Nivel</th>
-                          <th className="cw-eyebrow py-1.5 pr-3 text-left">Fuente</th>
-                          <th className="cw-eyebrow py-1.5 text-left">Validación</th>
+                          <th scope="col" className="cw-eyebrow py-1.5 pr-3 text-left">Campo</th>
+                          <th scope="col" className="cw-eyebrow py-1.5 pr-3 text-left">Nivel</th>
+                          <th scope="col" className="cw-eyebrow py-1.5 pr-3 text-left">Fuente</th>
+                          <th scope="col" className="cw-eyebrow py-1.5 text-left">Validación</th>
                         </tr>
                       </thead>
                       <tbody>

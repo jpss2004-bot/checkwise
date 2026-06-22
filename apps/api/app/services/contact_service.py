@@ -29,6 +29,7 @@ import json
 import logging
 import time
 import urllib.error
+import urllib.parse
 import urllib.request
 from collections import deque
 from datetime import datetime
@@ -140,6 +141,40 @@ def create_contact_request(
 # ─── Slack delivery (background) ─────────────────────────────────
 
 
+# Operator-configured Slack webhooks always live on these hosts. We
+# constrain the destination before issuing the request so a
+# misconfigured / less-trusted SLACK_CONTACT_WEBHOOK_URL cannot turn the
+# background task into an SSRF/exfil sink (urlopen honors file://, etc.).
+_ALLOWED_SLACK_HOSTS = frozenset({"hooks.slack.com", "slack.com"})
+
+
+def _mrkdwn_escape(value: str) -> str:
+    """Escape Slack mrkdwn control characters in user-supplied contact text."""
+    return (
+        (value or "")
+        .replace("&", "&amp;")
+        .replace("<", "&lt;")
+        .replace(">", "&gt;")
+        .replace("`", "ʼ")
+    )
+
+
+def _validated_slack_webhook(url: str) -> str | None:
+    """Return ``url`` only if it is https on an allowlisted Slack host.
+
+    Returns ``None`` (caller skips delivery) for any other scheme/host so
+    a misconfigured webhook can't be used to reach an internal target.
+    """
+    try:
+        parsed = urllib.parse.urlsplit(url)
+    except ValueError:
+        return None
+    host = (parsed.hostname or "").lower()
+    if parsed.scheme != "https" or host not in _ALLOWED_SLACK_HOSTS:
+        return None
+    return url
+
+
 def deliver_to_slack(row_id: str, payload_snapshot: dict) -> None:
     """Best-effort POST to the configured Slack webhook.
 
@@ -150,9 +185,16 @@ def deliver_to_slack(row_id: str, payload_snapshot: dict) -> None:
     message snippet, source) captured at request time. We avoid
     re-querying the DB from the background task.
     """
-    url = (settings.SLACK_CONTACT_WEBHOOK_URL or "").strip()
-    if not url:
+    raw_url = (settings.SLACK_CONTACT_WEBHOOK_URL or "").strip()
+    if not raw_url:
         logger.debug("contact: slack webhook not configured; skip")
+        return
+    url = _validated_slack_webhook(raw_url)
+    if url is None:
+        logger.warning(
+            "contact: slack webhook host not allowlisted; skip delivery for row=%s",
+            row_id,
+        )
         return
 
     blocks = _format_slack_blocks(row_id=row_id, payload=payload_snapshot)
@@ -193,14 +235,15 @@ def _format_slack_fallback_text(p: dict) -> str:
 
 
 def _format_slack_blocks(*, row_id: str, payload: dict) -> list[dict]:
-    name = payload.get("name", "")
-    email = payload.get("email", "")
-    company = payload.get("company") or "—"
-    role = payload.get("role") or "—"
-    source = payload.get("source") or "landing"
+    name = _mrkdwn_escape(payload.get("name", ""))
+    email = _mrkdwn_escape(payload.get("email", ""))
+    company = _mrkdwn_escape(payload.get("company") or "—")
+    role = _mrkdwn_escape(payload.get("role") or "—")
+    source = _mrkdwn_escape(payload.get("source") or "landing")
     message = (payload.get("message") or "").strip()
     if len(message) > 800:
         message = message[:800].rstrip() + "…"
+    message = _mrkdwn_escape(message)
     return [
         {
             "type": "header",
@@ -231,14 +274,22 @@ def deliver_booking_intent_to_slack(*, source: str, user_agent: str | None) -> N
     this beacon just gives the team an early intent signal. Same
     webhook, same never-raise contract as ``deliver_to_slack``.
     """
-    url = (settings.SLACK_CONTACT_WEBHOOK_URL or "").strip()
-    if not url:
+    raw_url = (settings.SLACK_CONTACT_WEBHOOK_URL or "").strip()
+    if not raw_url:
         logger.debug("contact: slack webhook not configured; skip booking intent")
+        return
+    url = _validated_slack_webhook(raw_url)
+    if url is None:
+        logger.warning(
+            "contact: slack webhook host not allowlisted; skip booking-intent delivery"
+        )
         return
 
     ua = (user_agent or "").strip()
     if len(ua) > 200:
         ua = ua[:200].rstrip() + "…"
+    safe_source = _mrkdwn_escape(source)
+    safe_ua = _mrkdwn_escape(ua)
     blocks = [
         {
             "type": "section",
@@ -246,7 +297,7 @@ def deliver_booking_intent_to_slack(*, source: str, user_agent: str | None) -> N
                 "type": "mrkdwn",
                 "text": (
                     ":calendar: *Alguien abrió el agendador de demo (30 min)*\n"
-                    f"Origen: `{source}` · Navegador: {ua or '_desconocido_'}\n"
+                    f"Origen: `{safe_source}` · Navegador: {safe_ua or '_desconocido_'}\n"
                     "_La confirmación llega por Google Calendar si concreta la cita._"
                 ),
             },

@@ -330,6 +330,7 @@ const ACTION_CTA_LABEL: Record<DashboardSuggestedAction["type"], string> = {
   complete_onboarding: "Subir documento",
   upcoming: "Subir documento",
   regularize: "Regularizar",
+  renewal: "Renovar",
 };
 
 function ctaLabelFor(action: DashboardSuggestedAction): string {

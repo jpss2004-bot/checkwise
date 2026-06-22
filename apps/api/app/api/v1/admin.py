@@ -4233,6 +4233,13 @@ def update_contact_request_status(
         raise HTTPException(
             status.HTTP_404_NOT_FOUND, detail="Solicitud no encontrada."
         )
+    # Guarded transition: if the row is already at the requested status
+    # (e.g. a duplicate click or a concurrent resolver that committed
+    # first), treat it as an idempotent no-op — don't write a redundant
+    # audit row. The second of two identical concurrent requests re-reads
+    # the committed state in its own transaction and lands here.
+    if row.status == payload.status:
+        return _contact_to_dict(row)
     # ``mode="json"`` so datetime fields land as ISO strings — required
     # because the audit_log.before/after columns store as JSON.
     before = _contact_to_dict(row).model_dump(mode="json")
@@ -4899,6 +4906,13 @@ def update_feedback_report_status(
         raise HTTPException(
             status.HTTP_404_NOT_FOUND, detail="Reporte no encontrado."
         )
+    # Guarded transition: a duplicate request (same status, no new note) is
+    # an idempotent no-op so two concurrent resolvers don't each re-stamp
+    # triaged_by / re-audit. The second request re-reads the committed
+    # status in its own transaction and short-circuits here. A note-only
+    # update (status unchanged but a note supplied) is still allowed through.
+    if row.status == payload.status and payload.resolution_note is None:
+        return _feedback_to_dict(row, include_screenshot_url=True)
     before = _feedback_to_dict(row).model_dump(mode="json")
     row.status = payload.status
     if payload.resolution_note is not None:

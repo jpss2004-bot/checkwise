@@ -206,6 +206,7 @@ function MetadataDocumentTable({
               ].map((header) => (
                 <th
                   key={header}
+                  scope="col"
                   className="px-3 py-2 text-[11px] font-semibold uppercase tracking-wide text-[color:var(--text-secondary)]"
                 >
                   {header}

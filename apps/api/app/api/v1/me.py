@@ -319,6 +319,31 @@ def _enforce_phone_verify_rate(user_id: str) -> None:
         )
 
 
+def _enforce_phone_confirm_rate(user_id: str) -> None:
+    """Per-request cap on OTP *confirm* attempts.
+
+    The confirm handler otherwise relies solely on the per-code OTP
+    attempt counter; a per-user request limiter bounds rapid code-guessing
+    across rows (a fresh /phone/verify mints a new code+counter). Uses a
+    confirm-scoped bucket so it doesn't share budget with the send path.
+    """
+    user_h = hash_identifier(user_id)
+    ok_min = phone_verify_limiter.check(
+        f"phone:confirm-min:{user_h}",
+        limit=_PHONE_VERIFY_PER_MINUTE,
+        window_seconds=60,
+    )
+    ok_hour = phone_verify_limiter.check(
+        f"phone:confirm-hour:{user_h}",
+        limit=_PHONE_VERIFY_PER_HOUR,
+        window_seconds=3600,
+    )
+    if not ok_min or not ok_hour:
+        raise HTTPException(
+            status.HTTP_429_TOO_MANY_REQUESTS, detail=_RATE_LIMITED_DETAIL
+        )
+
+
 @router.post("/phone/verify", response_model=PhoneVerifyResponse)
 def request_phone_verification(
     payload: PhoneVerifyRequest,
@@ -415,6 +440,8 @@ def confirm_phone_verification(
         raise HTTPException(
             status.HTTP_404_NOT_FOUND, detail="Usuario no encontrado."
         )
+
+    _enforce_phone_confirm_rate(user.id)
 
     normalized = normalize_phone_e164(payload.phone)
     if normalized is None:

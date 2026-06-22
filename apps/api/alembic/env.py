@@ -43,6 +43,9 @@ def run_migrations_offline() -> None:
         target_metadata=target_metadata,
         literal_binds=True,
         dialect_opts={"paramstyle": "named"},
+        # Each migration gets its own transaction so a mid-chain failure
+        # rolls back only the failing revision (see run_migrations_online).
+        transaction_per_migration=True,
     )
 
     with context.begin_transaction():
@@ -58,7 +61,22 @@ def run_migrations_online() -> None:
 
     with connectable.connect() as connection:
         _ensure_wide_version_table(connection)
-        context.configure(connection=connection, target_metadata=target_metadata)
+        context.configure(
+            connection=connection,
+            target_metadata=target_metadata,
+            # Wrap EACH migration in its own transaction instead of the whole
+            # pending set in one. ~10 migrations (0034/0035/0046/0048/0049/
+            # 0050/0051/0053/0055) enter an op.get_context().autocommit_block()
+            # for CONCURRENTLY index builds; entering that block commits all
+            # *preceding* pending revisions in the run. With one big
+            # transaction, a later failure left the earlier DDL committed while
+            # alembic_version may not have advanced — an inconsistent state
+            # needing a manual `alembic stamp`. Per-migration scoping bounds the
+            # autocommit-block commit to a single revision, so a failure rolls
+            # back only that file. This is Alembic's recommended pairing with
+            # autocommit_block and does not change how those blocks behave.
+            transaction_per_migration=True,
+        )
 
         with context.begin_transaction():
             context.run_migrations()

@@ -25,6 +25,7 @@ from app.core.compliance_catalog import (
     recurring_for_year_v2,
 )
 from app.core.config import settings
+from app.core.period_validation import MAX_YEAR, MIN_YEAR
 
 router = APIRouter(prefix="/compliance", tags=["compliance"])
 
@@ -32,7 +33,7 @@ PersonaQuery = Literal["moral", "fisica"]
 
 
 @router.get("/catalog")
-def get_catalog(year: int = Query(default=2026, ge=2020, le=2099)) -> dict:
+def get_catalog(year: int = Query(default=2026, ge=MIN_YEAR, le=MAX_YEAR)) -> dict:
     """Full catalog: metadata + onboarding (both persona types) + calendar."""
     return {
         "metadata": catalog_metadata(),
@@ -60,7 +61,7 @@ def get_onboarding(persona_type: PersonaQuery = "moral") -> dict:
 
 @router.get("/calendar")
 def get_calendar(
-    year: int = Query(default=2026, ge=2020, le=2099),
+    year: int = Query(default=2026, ge=MIN_YEAR, le=MAX_YEAR),
     persona_type: PersonaQuery = "moral",
 ) -> dict:
     """Recurring REPSE calendar grouped by month and institution."""

@@ -4296,12 +4296,17 @@ def record_wise_event(
     # caller has access via the dependency, and the owner is the
     # canonical anchor for per-vendor analytics rollups.
     user_id: str | None = None
-    try:
-        claims = _claims_from_header(request)
-        if claims is not None:
-            user_id = claims.get("sub")
-    except Exception:
-        user_id = None
+    authorization = request.headers.get("authorization")
+    if authorization:
+        try:
+            # _claims_from_header takes the raw Authorization header and
+            # returns a TokenClaims dataclass; the subject is claims.user_id
+            # (there is no .get()). Passing the Request / calling .get('sub')
+            # made this branch raise and silently fall through to the owner.
+            claims = _claims_from_header(authorization)
+            user_id = claims.user_id
+        except Exception:
+            user_id = None
     if user_id is None:
         user_id = workspace.owner_user_id
 

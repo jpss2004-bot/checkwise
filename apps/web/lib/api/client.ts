@@ -10,6 +10,7 @@
 
 import { readAdminSession } from "@/lib/session/admin";
 import { dedupeRead, invalidateRead } from "@/lib/api/request-cache";
+import { parseContentDispositionFilename } from "@/lib/api/download";
 
 const API_BASE_URL =
   process.env.NEXT_PUBLIC_API_BASE_URL ?? "http://127.0.0.1:8000";
@@ -53,7 +54,14 @@ async function fetchJson<T>(path: string, init: RequestInit = {}): Promise<T> {
       signal: init.signal ?? controller?.signal,
     });
   } catch (err) {
-    if (controller?.signal.aborted) {
+    // Surface aborts (timeout OR a caller-supplied signal) as a typed
+    // ClientApiError so callers branching on `err instanceof ClientApiError`
+    // handle them consistently instead of seeing a raw AbortError DOMException.
+    if (
+      controller?.signal.aborted ||
+      init.signal?.aborted ||
+      (err instanceof DOMException && err.name === "AbortError")
+    ) {
       throw new ClientApiError(
         0,
         "La solicitud tardó demasiado. Revisa tu conexión e inténtalo de nuevo.",
@@ -1188,8 +1196,7 @@ export async function downloadClientAuditPackageZipPost(
   // Parse a filename hint from Content-Disposition when present so
   // the user gets the same auditoria-<rfc>-<date>.zip naming.
   const disp = response.headers.get("Content-Disposition") || "";
-  const match = /filename="?([^"]+)"?/i.exec(disp);
-  const filename = match?.[1] ?? "auditoria.zip";
+  const filename = parseContentDispositionFilename(disp) ?? "auditoria.zip";
   const blob = await response.blob();
   return { blob, filename };
 }

@@ -462,6 +462,30 @@ def _enforce_forgot_password_rate_limit(request: Request, email: str) -> None:
         )
 
 
+def _enforce_reset_preview_rate_limit(request: Request) -> None:
+    """Modest per-IP cap on /auth/reset-password/preview.
+
+    The preview is a token-validity oracle (valid vs invalid/expired/used
+    tokens are deliberately indistinguishable in copy, but a 200-vs-400
+    response still leaks validity). Without a rate limit an attacker can
+    brute-probe reset tokens from one source. Reuse the forgot-password
+    limiter, keyed by IP only (the token is in the query, not the bucket).
+    """
+    limit = settings.AUTH_FORGOT_PASSWORD_RATE_LIMIT_PER_HOUR
+    if limit <= 0:
+        return
+    ip = _client_ip(request)
+    ip_bucket = f"reset-preview:ip:{hash_identifier(ip)}"
+    # Allow a generous multiple of the forgot-password cap: a legit user
+    # may reload the reset page a few times, but this still bounds sweeps.
+    if not forgot_password_limiter.check(
+        ip_bucket, limit=limit * 6, window_seconds=3600
+    ):
+        raise HTTPException(
+            status.HTTP_429_TOO_MANY_REQUESTS, detail=_RATE_LIMITED_DETAIL
+        )
+
+
 _SAFE_METHODS = frozenset({"GET", "HEAD", "OPTIONS"})
 
 
@@ -911,6 +935,7 @@ def forgot_password(
 def reset_password_preview(
     token: str,
     db: DbSession,
+    request: Request,
 ) -> ResetPasswordPreviewResponse:
     """Audit-finding #5 — return the recipient email tied to a reset
     token so ``/reset-password`` can show which account the form is
@@ -923,6 +948,7 @@ def reset_password_preview(
     from "token expired" — for an attacker probing tokens, all three
     look identical.
     """
+    _enforce_reset_preview_rate_limit(request)
     token_hash = hash_password_reset_token(token)
     reset_token = db.execute(
         select(PasswordResetToken).where(PasswordResetToken.token_hash == token_hash)

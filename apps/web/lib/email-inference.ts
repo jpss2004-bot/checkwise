@@ -70,7 +70,19 @@ function inferCompanyFromDomain(domain: string): string {
   // "constructoraabc.com.mx" → "constructoraabc"
   // "checkwise.legalshelf.com" → "checkwise legalshelf"
   // Drop the public TLD and known second-level country suffixes.
-  const COUNTRY_TLD = new Set(["com", "co", "ne", "or", "ed", "ac", "gov"]);
+  // "gob" is the Mexican government second-level label (.gob.mx) — the
+  // product's market — so it must be dropped like "gov" or an email such
+  // as contacto@empresa.gob.mx would infer "Empresa Gob" instead of "Empresa".
+  const COUNTRY_TLD = new Set([
+    "com",
+    "co",
+    "ne",
+    "or",
+    "ed",
+    "ac",
+    "gov",
+    "gob",
+  ]);
   const parts = domain.toLowerCase().split(".");
   if (parts.length < 2) return "";
 

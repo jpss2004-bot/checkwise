@@ -125,12 +125,22 @@ function welcomeMessage(args: {
   if (audience === "net_new") {
     const firstStep = pickFirstOnboardingStep(onboarding);
     const remaining = onboarding?.summary.total_required ?? null;
+    // Only the obligations BEYOND the first step "unlock" — guard the 0
+    // case (total_required === 1 ⇒ "desbloquea 0 obligaciones más") and
+    // pluralize the singular ("1 obligación más").
+    const unlockCount = remaining !== null ? remaining - 1 : 0;
+    const unlockClause =
+      unlockCount >= 1
+        ? ` — desbloquea ${unlockCount} ${
+            unlockCount === 1 ? "obligación" : "obligaciones"
+          } más de tu expediente inicial`
+        : "";
     return {
       id: "wise-welcome-net-new",
       tone: "brand",
       body:
         firstStep && remaining
-          ? `Hola ${vendorName}. Aún no subes documentos. Empieza con tu ${firstStep.name} — desbloquea ${remaining - 1} obligaciones más de tu expediente inicial.`
+          ? `Hola ${vendorName}. Aún no subes documentos. Empieza con tu ${firstStep.name}${unlockClause}.`
           : `Hola ${vendorName}. Aún no subes documentos. Vamos paso a paso: el checklist de abajo tiene las cargas que necesitas para arrancar tu cumplimiento.`,
       ctaLabel: firstStep ? "Subir documento" : undefined,
       // Carry both the canonical code AND the human name so the
@@ -233,6 +243,7 @@ const ACTION_CTA_LABEL: Record<DashboardSuggestedAction["type"], string> = {
   complete_onboarding: "Subir documento",
   upcoming: "Subir documento",
   regularize: "Regularizar",
+  renewal: "Renovar",
 };
 
 function ctaLabelFor(action: DashboardSuggestedAction): string {

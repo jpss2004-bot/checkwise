@@ -135,6 +135,7 @@ export default function ClientNotificationsPage() {
   // Polite live-region message so screen readers hear mark-as-read results
   // (WCAG 4.1.3, audit P3.16).
   const [liveMsg, setLiveMsg] = useState("");
+  const [actionError, setActionError] = useState<string | null>(null);
 
   useEffect(() => {
     let cancelled = false;
@@ -196,28 +197,48 @@ export default function ClientNotificationsPage() {
 
   async function markOne(row: ClientNotificationItem) {
     if (row.read_at) return;
-    const updated = await markClientNotificationRead(
-      row.id,
-      urlClientId ? { client_id: urlClientId } : undefined,
-    );
-    setRows((current) =>
-      current?.map((item) => (item.id === updated.id ? updated : item)) ??
-      current,
-    );
-    setLiveMsg("Notificación marcada como leída.");
+    setActionError(null);
+    try {
+      const updated = await markClientNotificationRead(
+        row.id,
+        urlClientId ? { client_id: urlClientId } : undefined,
+      );
+      setRows((current) =>
+        current?.map((item) => (item.id === updated.id ? updated : item)) ??
+        current,
+      );
+      setLiveMsg("Notificación marcada como leída.");
+    } catch (err: unknown) {
+      const msg =
+        err instanceof Error
+          ? err.message
+          : "No pudimos marcar la notificación como leída. Intenta de nuevo.";
+      setActionError(msg);
+      setLiveMsg(msg);
+    }
   }
 
   async function markAll() {
-    await markAllClientNotificationsRead(
-      urlClientId ? { client_id: urlClientId } : undefined,
-    );
-    setRows((current) =>
-      current?.map((item) => ({
-        ...item,
-        read_at: item.read_at ?? new Date().toISOString(),
-      })) ?? current,
-    );
-    setLiveMsg("Todas las notificaciones se marcaron como leídas.");
+    setActionError(null);
+    try {
+      await markAllClientNotificationsRead(
+        urlClientId ? { client_id: urlClientId } : undefined,
+      );
+      setRows((current) =>
+        current?.map((item) => ({
+          ...item,
+          read_at: item.read_at ?? new Date().toISOString(),
+        })) ?? current,
+      );
+      setLiveMsg("Todas las notificaciones se marcaron como leídas.");
+    } catch (err: unknown) {
+      const msg =
+        err instanceof Error
+          ? err.message
+          : "No pudimos marcar las notificaciones como leídas. Intenta de nuevo.";
+      setActionError(msg);
+      setLiveMsg(msg);
+    }
   }
 
   return (
@@ -268,6 +289,14 @@ export default function ClientNotificationsPage() {
         <NotificationsSkeleton />
       ) : (
         <div className="flex flex-col gap-4">
+          {actionError ? (
+            <div
+              role="alert"
+              className="rounded-md bg-[color:var(--status-error-bg)] px-3 py-2 text-xs text-[color:var(--status-error-text)]"
+            >
+              {actionError}
+            </div>
+          ) : null}
           <TabBar active={tab} onSelect={setTab} counts={counts} />
           {categoryChips.length > 1 ? (
             <CategoryChipRow

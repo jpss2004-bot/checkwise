@@ -11,6 +11,7 @@
 
 import { readAdminSession } from "@/lib/session/admin";
 import { fetchWithTimeout, FetchTimeoutError } from "@/lib/api/fetch-timeout";
+import { saveBlob } from "@/lib/api/download";
 import type {
   ReportAudience,
   ReportStatus,
@@ -636,14 +637,10 @@ async function streamExportAsBlob(
     );
   }
   const blob = await response.blob();
-  const url = URL.createObjectURL(blob);
-  const a = document.createElement("a");
-  a.href = url;
-  a.download = filename;
-  document.body.appendChild(a);
-  a.click();
-  document.body.removeChild(a);
-  setTimeout(() => URL.revokeObjectURL(url), 1000);
+  // Reuse the shared saveBlob helper so the object URL is revoked on the
+  // Safari-safe 60s delay (a 1s delay could abort an in-progress save of a
+  // large PDF/HTML export on Safari).
+  saveBlob(blob, filename);
 }
 
 /**

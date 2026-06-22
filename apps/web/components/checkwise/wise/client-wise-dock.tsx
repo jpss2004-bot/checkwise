@@ -126,6 +126,11 @@ export function ClientWiseDock({ className }: ClientWiseDockProps) {
   const [feedbackByMessage, setFeedbackByMessage] = React.useState<
     Record<string, "up" | "down">
   >({});
+  // Tracks which messages already fired a feedback event so the
+  // side-effecting POST runs exactly once, OUTSIDE the state updater
+  // (state updaters must be pure; StrictMode + concurrent rendering can
+  // otherwise double-fire the analytics call).
+  const feedbackFiredRef = React.useRef<Set<string>>(new Set());
   const scrollRef = React.useRef<HTMLDivElement | null>(null);
   const pageContext = useDerivedClientPageContext();
   const clientId = useClientIdFromUrl();
@@ -212,15 +217,16 @@ export function ClientWiseDock({ className }: ClientWiseDockProps) {
   // migration 0041 lands; until then the endpoint logs it.
   const submitFeedback = React.useCallback(
     (messageId: string, rating: "up" | "down") => {
-      setFeedbackByMessage((prev) => {
-        if (prev[messageId]) return prev;
-        void postClientWiseEvent(
-          "wise.feedback",
-          { message_id: messageId, rating, route: pageContext.route },
-          { client_id: clientId },
-        );
-        return { ...prev, [messageId]: rating };
-      });
+      if (feedbackFiredRef.current.has(messageId)) return;
+      feedbackFiredRef.current.add(messageId);
+      setFeedbackByMessage((prev) =>
+        prev[messageId] ? prev : { ...prev, [messageId]: rating },
+      );
+      void postClientWiseEvent(
+        "wise.feedback",
+        { message_id: messageId, rating, route: pageContext.route },
+        { client_id: clientId },
+      );
     },
     [clientId, pageContext.route],
   );
