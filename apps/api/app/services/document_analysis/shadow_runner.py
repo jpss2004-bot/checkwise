@@ -37,6 +37,7 @@ Design properties (load-bearing):
 
 from __future__ import annotations
 
+import asyncio
 import logging
 import random
 from pathlib import Path
@@ -674,6 +675,281 @@ def run_shadow_analysis(
         document_id=document_id,
         pdf_path=pdf_path,
         field_suggestions=final_result.field_suggestions,
+    )
+
+
+# ---------------------------------------------------------------------------
+# A3 — async runner (AsyncAnthropic). Same orchestration as
+# ``run_shadow_analysis`` but the LLM tiers are AWAITED (the 30–90s wait yields
+# the event loop) and every synchronous DB / CPU helper is offloaded to a
+# worker thread so the loop is never blocked. Identical side-effects, fail-open,
+# and audit trail — only the transport differs. Selected at the call sites by
+# ``DOCUMENT_ANALYSIS_ASYNC_PROVIDER_ENABLED``.
+# ---------------------------------------------------------------------------
+
+
+async def run_shadow_analysis_async(
+    *,
+    document_id: str,
+    submission_id: str,
+    pdf_path: str,
+    requirement_code: str | None,
+    requirement_name: str,
+    institution_code: str,
+    period_code: str,
+    org_id: str | None,
+    requirement_risk_level: str | None = None,
+    expected_provider_rfc: str | None = None,
+    expected_provider_name: str | None = None,
+    expected_client_name: str | None = None,
+    expected_client_rfc: str | None = None,
+) -> None:
+    """Async twin of :func:`run_shadow_analysis` (A3). See module section above."""
+    try:
+        provider = build_document_analysis_provider(tier="triage")
+    except Exception:  # noqa: BLE001 — provider construction must never crash the worker
+        logger.exception("Failed to build document-analysis provider; skipping shadow run.")
+        return
+    if provider is None:
+        return
+
+    allowlist = _pilot_allowlist()
+    if allowlist and (org_id is None or org_id not in allowlist):
+        return
+
+    # A1 — triage-skip (decision + persistence are DB-bound → off the loop).
+    sampled_for_monitoring = False
+    if settings.DOCUMENT_ANALYSIS_TRIAGE_SKIP_ENABLED:
+        skip = await asyncio.to_thread(
+            _triage_skip_decision,
+            document_id,
+            requirement_risk_level=requirement_risk_level,
+        )
+        if skip.eligible:
+            if _triage_skip_sampled():
+                sampled_for_monitoring = True
+            elif await asyncio.to_thread(
+                _persist_triage_skip,
+                document_id=document_id,
+                submission_id=submission_id,
+                snapshot=skip.snapshot,
+            ):
+                logger.info(
+                    "Triage skipped (heuristic clean+aligned, non-high-stakes); "
+                    "org_id=%s document_id=%s confidence=%s",
+                    org_id,
+                    document_id,
+                    skip.snapshot.get("heuristic_confidence"),
+                )
+                return
+            else:
+                logger.warning(
+                    "Triage-skip marker did not persist; running triage instead. "
+                    "document_id=%s",
+                    document_id,
+                )
+
+    if not await asyncio.to_thread(check_org_daily_quota, org_id):
+        await asyncio.to_thread(
+            _persist_shadow_failure,
+            document_id=document_id,
+            submission_id=submission_id,
+            provider_id=provider.provider_id,
+            error="daily_cap_exceeded",
+        )
+        logger.info(
+            "Shadow analysis skipped — daily cap reached for org_id=%s, document_id=%s",
+            org_id,
+            document_id,
+        )
+        return
+
+    triage_result = await _analyze_safely_async(
+        provider,
+        pdf_path=pdf_path,
+        requirement_code=requirement_code,
+        requirement_name=requirement_name,
+        institution_code=institution_code,
+        period_code=period_code,
+        org_id=org_id,
+        expected_provider_rfc=expected_provider_rfc,
+        expected_provider_name=expected_provider_name,
+        expected_client_name=expected_client_name,
+        expected_client_rfc=expected_client_rfc,
+    )
+
+    final_result = triage_result
+    tiers: dict | None = None
+    image_result: ImageTamperResult | None = None
+
+    current_risk, is_probably_scanned = await asyncio.to_thread(
+        _inspection_trigger_context, document_id
+    )
+    triggers = _escalation_triggers(
+        triage_result,
+        requirement_risk_level=requirement_risk_level,
+        current_authenticity_risk=current_risk,
+        org_id=org_id,
+    )
+    if triggers:
+        tiers = {"triage": _tier_meta(triage_result), "escalation": None}
+        metadata_field_schema = _metadata_field_schema_for(
+            requirement_code=requirement_code,
+            requirement_name=requirement_name,
+            institution_code=institution_code,
+        )
+        escalation_result = await _run_escalation_async(
+            triggers=triggers,
+            pdf_path=pdf_path,
+            requirement_code=requirement_code,
+            requirement_name=requirement_name,
+            institution_code=institution_code,
+            period_code=period_code,
+            org_id=org_id,
+            document_id=document_id,
+            expected_provider_rfc=expected_provider_rfc,
+            expected_provider_name=expected_provider_name,
+            expected_client_name=expected_client_name,
+            expected_client_rfc=expected_client_rfc,
+            metadata_field_schema=metadata_field_schema,
+        )
+        if isinstance(escalation_result, AnalysisResult):
+            tiers["escalation"] = {**_tier_meta(escalation_result), "triggers": triggers}
+            if escalation_result.error is None:
+                final_result = escalation_result
+        else:
+            tiers["escalation"] = {**escalation_result, "triggers": triggers}
+
+        image_result, image_forensics_meta = await asyncio.to_thread(
+            _run_image_forensics,
+            pdf_path=pdf_path,
+            is_probably_scanned=is_probably_scanned,
+            document_id=document_id,
+        )
+        tiers["image_forensics"] = image_forensics_meta
+
+    await asyncio.to_thread(
+        _persist_shadow_result,
+        document_id=document_id,
+        submission_id=submission_id,
+        result=final_result,
+        tiers=tiers,
+        image_result=image_result,
+        expected_provider_rfc=expected_provider_rfc,
+    )
+
+    if sampled_for_monitoring:
+        await asyncio.to_thread(
+            _record_triage_skip_sample,
+            submission_id=submission_id,
+            document_id=document_id,
+            triage_result=triage_result,
+        )
+
+    await asyncio.to_thread(
+        _maybe_trigger_expediente,
+        submission_id=submission_id,
+        org_id=org_id,
+        escalated=bool(triggers),
+    )
+
+    await asyncio.to_thread(
+        _maybe_enrich_metadata,
+        document_id=document_id,
+        pdf_path=pdf_path,
+        field_suggestions=final_result.field_suggestions,
+    )
+
+
+async def _analyze_safely_async(
+    provider,  # noqa: ANN001 — DocumentAnalysisProvider protocol
+    *,
+    pdf_path: str,
+    requirement_code: str | None,
+    requirement_name: str,
+    institution_code: str,
+    period_code: str,
+    org_id: str | None,
+    expected_provider_rfc: str | None = None,
+    expected_provider_name: str | None = None,
+    expected_client_name: str | None = None,
+    expected_client_rfc: str | None = None,
+    metadata_field_schema: list[dict] | None = None,
+) -> AnalysisResult:
+    """Await ``provider.analyze_async`` with defence-in-depth exception capture."""
+    try:
+        return await provider.analyze_async(
+            pdf_path=Path(pdf_path),
+            requirement_code=requirement_code,
+            requirement_name=requirement_name,
+            institution_code=institution_code,
+            period_code=period_code,
+            org_id=org_id,
+            expected_provider_rfc=expected_provider_rfc,
+            expected_provider_name=expected_provider_name,
+            expected_client_name=expected_client_name,
+            expected_client_rfc=expected_client_rfc,
+            metadata_field_schema=metadata_field_schema,
+        )
+    except Exception as exc:  # noqa: BLE001 — provider should not raise, but defence in depth
+        logger.exception("Async document-analysis provider raised; persisting as provider_error.")
+        return AnalysisResult(
+            provider_id=getattr(provider, "provider_id", "unknown"),
+            prompt_version=None,
+            latency_ms=0,
+            signals=None,
+            error=f"provider_error:{type(exc).__name__}",
+        )
+
+
+async def _run_escalation_async(
+    *,
+    triggers: list[str],
+    pdf_path: str,
+    requirement_code: str | None,
+    requirement_name: str,
+    institution_code: str,
+    period_code: str,
+    org_id: str | None,
+    document_id: str,
+    expected_provider_rfc: str | None = None,
+    expected_provider_name: str | None = None,
+    expected_client_name: str | None = None,
+    expected_client_rfc: str | None = None,
+    metadata_field_schema: list[dict] | None = None,
+) -> AnalysisResult | dict:
+    """Async twin of :func:`_run_escalation`. Never raises."""
+    if not await asyncio.to_thread(check_org_escalation_daily_quota, org_id):
+        logger.info(
+            "Escalation tier skipped — daily escalation cap reached for "
+            "org_id=%s, document_id=%s (triggers=%s)",
+            org_id,
+            document_id,
+            triggers,
+        )
+        return {"skipped": "daily_cap_exceeded"}
+
+    try:
+        escalation_provider = build_document_analysis_provider(tier="escalation")
+    except Exception:  # noqa: BLE001 — never crash the worker
+        logger.exception("Failed to build escalation provider; keeping triage result.")
+        return {"skipped": "provider_unavailable"}
+    if escalation_provider is None:
+        return {"skipped": "provider_unavailable"}
+
+    return await _analyze_safely_async(
+        escalation_provider,
+        pdf_path=pdf_path,
+        requirement_code=requirement_code,
+        requirement_name=requirement_name,
+        institution_code=institution_code,
+        period_code=period_code,
+        org_id=org_id,
+        expected_provider_rfc=expected_provider_rfc,
+        expected_provider_name=expected_provider_name,
+        expected_client_name=expected_client_name,
+        expected_client_rfc=expected_client_rfc,
+        metadata_field_schema=metadata_field_schema,
     )
 
 

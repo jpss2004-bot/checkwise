@@ -15,12 +15,13 @@ forced-empty key as a precondition.
 
 from __future__ import annotations
 
+import asyncio
 import json
 from datetime import UTC
 from io import BytesIO
 from pathlib import Path
 from typing import Any
-from unittest.mock import MagicMock, patch
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 from pypdf import PdfWriter
@@ -3150,3 +3151,406 @@ class TestConcurrencyBreaker:
         )
         assert r2.error == "breaker_open"
         create.assert_not_called()
+
+
+# ---------------------------------------------------------------------------
+# A3 — async provider path (DOCUMENT_ANALYSIS_ASYNC_PROVIDER_ENABLED)
+# ---------------------------------------------------------------------------
+
+
+def _async_provider(provider_id, result):
+    p = MagicMock()
+    p.provider_id = provider_id
+    p.analyze_async = AsyncMock(return_value=result)
+    return p
+
+
+def _async_tiered_factory(triage, escalation):
+    def build(tier: str = "triage"):
+        return triage if tier == "triage" else escalation
+
+    return build
+
+
+class TestAsyncBreakerGuard:
+    @pytest.fixture(autouse=True)
+    def _reset_breaker(self):
+        from app.services.document_analysis.concurrency_breaker import (
+            anthropic_concurrency_breaker,
+        )
+
+        anthropic_concurrency_breaker.reset()
+        yield
+        anthropic_concurrency_breaker.reset()
+
+    def test_async_guard_breaker_open(self, monkeypatch):
+        from app.services.document_analysis.concurrency_breaker import (
+            BreakerOpenError,
+        )
+        from app.services.document_analysis.concurrency_breaker import (
+            anthropic_concurrency_breaker as b,
+        )
+
+        _enable_breaker(monkeypatch, threshold=1, cooldown=60.0)
+        try:
+            with b.guard():
+                raise _Boom()
+        except _Boom:
+            pass
+        assert b._is_open() is True
+
+        async def go():
+            async with b.async_guard():
+                raise AssertionError("body must not run while breaker is open")
+
+        with pytest.raises(BreakerOpenError):
+            asyncio.run(go())
+
+    def test_async_guard_concurrency_exhausted(self, monkeypatch):
+        from app.services.document_analysis.concurrency_breaker import (
+            ConcurrencyExhaustedError,
+        )
+        from app.services.document_analysis.concurrency_breaker import (
+            anthropic_concurrency_breaker as b,
+        )
+
+        _enable_breaker(monkeypatch, max_concurrent=1, acquire_timeout=0.0)
+        sem = b._get_semaphore()
+        sem.acquire()
+
+        async def go():
+            async with b.async_guard():
+                pass
+
+        try:
+            with pytest.raises(ConcurrencyExhaustedError):
+                asyncio.run(go())
+        finally:
+            sem.release()
+
+    def test_async_guard_records_failure_and_opens(self, monkeypatch):
+        from app.services.document_analysis.concurrency_breaker import (
+            anthropic_concurrency_breaker as b,
+        )
+
+        _enable_breaker(monkeypatch, threshold=1, cooldown=60.0)
+
+        async def go():
+            async with b.async_guard():
+                raise _Boom()
+
+        try:
+            asyncio.run(go())
+        except _Boom:
+            pass
+        assert b._is_open() is True
+
+    def test_async_guard_disabled_passthrough(self, monkeypatch):
+        from app.services.document_analysis.concurrency_breaker import (
+            anthropic_concurrency_breaker as b,
+        )
+
+        monkeypatch.setattr(
+            settings, "ANTHROPIC_CONCURRENCY_BREAKER_ENABLED", False
+        )
+        ran = []
+
+        async def go():
+            async with b.async_guard():
+                ran.append(1)
+
+        asyncio.run(go())
+        assert ran == [1]
+        assert b._semaphore is None
+
+    def test_async_guard_cancellation_does_not_leak_permit(self, monkeypatch):
+        from app.services.document_analysis.concurrency_breaker import (
+            anthropic_concurrency_breaker as b,
+        )
+
+        _enable_breaker(monkeypatch, max_concurrent=1, acquire_timeout=10.0)
+        sem = b._get_semaphore()
+        sem.acquire()  # saturate: 0 permits free, so the guard must poll-wait
+
+        async def waiter():
+            async with b.async_guard():
+                pass
+
+        async def driver():
+            task = asyncio.ensure_future(waiter())
+            await asyncio.sleep(0.12)  # let it poll a couple of times
+            task.cancel()
+            try:
+                await task
+            except asyncio.CancelledError:
+                pass
+
+        asyncio.run(driver())
+        # The cancelled waiter never held a permit (non-blocking poll, no orphan
+        # thread). Releasing the saturating permit leaves EXACTLY one free.
+        sem.release()
+        assert sem.acquire(blocking=False) is True
+        assert sem.acquire(blocking=False) is False
+        sem.release()
+
+
+class TestAnalyzeAsync:
+    @pytest.fixture(autouse=True)
+    def _reset_breaker(self):
+        from app.services.document_analysis.concurrency_breaker import (
+            anthropic_concurrency_breaker,
+        )
+
+        anthropic_concurrency_breaker.reset()
+        yield
+        anthropic_concurrency_breaker.reset()
+
+    def _provider(self, monkeypatch, async_client):
+        monkeypatch.setattr(settings, "ANTHROPIC_API_KEY", "sk-test")
+        provider = AnthropicDocumentAnalysisProvider(api_key="sk-test")
+        # The async client's httpx pool must be closed after every call.
+        async_client.close = AsyncMock()
+        provider._async_client = async_client
+        return provider
+
+    def test_happy_path_awaits_async_client(self, monkeypatch, tmp_path):
+        client = MagicMock()
+        client.with_options.return_value.messages.create = AsyncMock(
+            return_value=_mock_anthropic_response()
+        )
+        provider = self._provider(monkeypatch, client)
+        result = asyncio.run(
+            provider.analyze_async(
+                pdf_path=_blank_pdf_path(tmp_path),
+                requirement_code="REC-SAT-CSF-2026",
+                requirement_name="CSF",
+                institution_code="sat",
+                period_code="2026-01",
+            )
+        )
+        assert result.error is None
+        assert result.signals.detected_institution == "sat"
+        client.with_options.return_value.messages.create.assert_awaited_once()
+        # The httpx pool is closed (no per-run connection-pool leak) and the
+        # cached handle is dropped.
+        client.close.assert_awaited_once()
+        assert provider._async_client is None
+
+    def test_async_client_closed_even_on_error(self, monkeypatch, tmp_path):
+        client = MagicMock()
+        client.with_options.return_value.messages.create = AsyncMock(
+            side_effect=RuntimeError("boom")
+        )
+        provider = self._provider(monkeypatch, client)
+        result = asyncio.run(
+            provider.analyze_async(
+                pdf_path=_blank_pdf_path(tmp_path),
+                requirement_code="REC-SAT-CSF-2026",
+                requirement_name="CSF",
+                institution_code="sat",
+                period_code="2026-01",
+            )
+        )
+        assert result.error.startswith("provider_error")
+        client.close.assert_awaited_once()
+
+    def test_error_path_returns_failure(self, monkeypatch, tmp_path):
+        client = MagicMock()
+        client.with_options.return_value.messages.create = AsyncMock(
+            side_effect=RuntimeError("boom")
+        )
+        provider = self._provider(monkeypatch, client)
+        result = asyncio.run(
+            provider.analyze_async(
+                pdf_path=_blank_pdf_path(tmp_path),
+                requirement_code="REC-SAT-CSF-2026",
+                requirement_name="CSF",
+                institution_code="sat",
+                period_code="2026-01",
+            )
+        )
+        assert result.signals is None
+        assert result.error.startswith("provider_error")
+
+    def test_preflight_failure_skips_call(self, monkeypatch, tmp_path):
+        client = MagicMock()
+        client.with_options.return_value.messages.create = AsyncMock()
+        provider = self._provider(monkeypatch, client)
+        result = asyncio.run(
+            provider.analyze_async(
+                pdf_path=tmp_path / "missing.pdf",
+                requirement_code="REC-SAT-CSF-2026",
+                requirement_name="CSF",
+                institution_code="sat",
+                period_code="2026-01",
+            )
+        )
+        assert result.error == "unsupported_size_or_type"
+        client.with_options.return_value.messages.create.assert_not_awaited()
+
+
+class TestAsyncShadowRunner(_ShadowDbSetupMixin):
+    def _inspection(self):
+        from app.db.session import SessionLocal
+        from app.models import DocumentInspection
+
+        db = SessionLocal()
+        try:
+            return db.query(DocumentInspection).first()
+        finally:
+            db.close()
+
+    def test_async_runner_persists_shadow_columns(
+        self, monkeypatch, tmp_path, db_setup
+    ):
+        from app.services.document_analysis.shadow_runner import (
+            run_shadow_analysis_async,
+        )
+
+        result = _tier_result(
+            provider_id="anthropic:claude-haiku-4-5",
+            confidence=0.9,
+            authenticity=_CLEAN_AUTH,
+        )
+        triage = _async_provider("anthropic:claude-haiku-4-5", result)
+        with patch(
+            "app.services.document_analysis.shadow_runner.build_document_analysis_provider",
+            side_effect=_async_tiered_factory(triage, None),
+        ):
+            asyncio.run(
+                run_shadow_analysis_async(
+                    document_id=db_setup["document_id"],
+                    submission_id=db_setup["submission_id"],
+                    pdf_path=str(_blank_pdf_path(tmp_path)),
+                    requirement_code="REC-SAT-CSF-2026",
+                    requirement_name="CSF",
+                    institution_code="sat",
+                    period_code="2026-01",
+                    org_id="cli-1",
+                )
+            )
+
+        triage.analyze_async.assert_awaited_once()
+        insp = self._inspection()
+        assert insp.shadow_provider_id == "anthropic:claude-haiku-4-5"
+        assert insp.shadow_completed_at is not None
+        assert insp.shadow_error is None
+
+    def test_async_runner_honours_triage_skip(self, monkeypatch, tmp_path, db_setup):
+        from app.services.document_analysis.shadow_runner import (
+            run_shadow_analysis_async,
+        )
+
+        _enable_triage_skip(monkeypatch, sampling_rate=0.0)
+        # Put the inspection into the clean+aligned eligible state.
+        from app.db.session import SessionLocal
+        from app.models import DocumentInspection
+
+        db = SessionLocal()
+        try:
+            insp = db.query(DocumentInspection).first()
+            for key, value in TestTriageSkipDecision._CLEAN.items():
+                setattr(insp, key, value)
+            db.commit()
+        finally:
+            db.close()
+
+        triage = _async_provider(
+            "anthropic:claude-haiku-4-5",
+            _tier_result(provider_id="anthropic:claude-haiku-4-5"),
+        )
+        with patch(
+            "app.services.document_analysis.shadow_runner.build_document_analysis_provider",
+            side_effect=_async_tiered_factory(triage, None),
+        ):
+            asyncio.run(
+                run_shadow_analysis_async(
+                    document_id=db_setup["document_id"],
+                    submission_id=db_setup["submission_id"],
+                    pdf_path=str(_blank_pdf_path(tmp_path)),
+                    requirement_code="REC-SAT-CSF-2026",
+                    requirement_name="CSF",
+                    institution_code="sat",
+                    period_code="2026-01",
+                    org_id="cli-1",
+                )
+            )
+
+        triage.analyze_async.assert_not_awaited()
+        insp = self._inspection()
+        assert insp.shadow_provider_id is None
+        assert insp.shadow_signals["_triage_skip"]["reason"] == "heuristic_clean_aligned"
+
+
+class TestAsyncDispatch:
+    def test_shadow_runner_selector(self, monkeypatch):
+        from app.services import submission_service as ss
+
+        monkeypatch.setattr(
+            settings, "DOCUMENT_ANALYSIS_ASYNC_PROVIDER_ENABLED", True
+        )
+        assert ss._shadow_runner_for_background() is ss.run_shadow_analysis_async
+        monkeypatch.setattr(
+            settings, "DOCUMENT_ANALYSIS_ASYNC_PROVIDER_ENABLED", False
+        )
+        assert ss._shadow_runner_for_background() is ss.run_shadow_analysis
+
+    def test_finalize_async_awaits_shadow_then_cleans_up(self, monkeypatch):
+        from app.services import submission_service as ss
+
+        fake_args = {
+            "document_id": "d",
+            "submission_id": "s",
+            "pdf_path": "/tmp/x.pdf",
+            "requirement_code": None,
+            "requirement_name": "r",
+            "institution_code": "i",
+            "period_code": "p",
+            "org_id": "o",
+        }
+        monkeypatch.setattr(
+            ss,
+            "finalize_intake_submission_background",
+            lambda **kw: (fake_args, Path("/tmp/x.pdf")),
+        )
+        awaited = []
+
+        async def fake_runner(**kw):
+            awaited.append(kw)
+
+        monkeypatch.setattr(ss, "run_shadow_analysis_async", fake_runner)
+        cleaned = []
+        monkeypatch.setattr(
+            ss, "_cleanup_materialized_temp", lambda p: cleaned.append(p)
+        )
+        asyncio.run(
+            ss.finalize_intake_submission_background_async(
+                submission_id="s", storage_key="k", intake_source="x"
+            )
+        )
+        assert awaited == [fake_args]
+        assert cleaned == [Path("/tmp/x.pdf")]
+
+    def test_finalize_async_noop_when_core_returns_none(self, monkeypatch):
+        from app.services import submission_service as ss
+
+        monkeypatch.setattr(
+            ss, "finalize_intake_submission_background", lambda **kw: None
+        )
+        awaited = []
+
+        async def fake_runner(**kw):
+            awaited.append(kw)
+
+        monkeypatch.setattr(ss, "run_shadow_analysis_async", fake_runner)
+        cleaned = []
+        monkeypatch.setattr(
+            ss, "_cleanup_materialized_temp", lambda p: cleaned.append(p)
+        )
+        asyncio.run(
+            ss.finalize_intake_submission_background_async(
+                submission_id="s", storage_key="k", intake_source="x"
+            )
+        )
+        assert awaited == []
+        assert cleaned == []

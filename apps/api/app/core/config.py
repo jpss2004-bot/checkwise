@@ -438,6 +438,17 @@ class Settings(BaseSettings):
     ANTHROPIC_BREAKER_FAILURE_THRESHOLD: int = 5
     ANTHROPIC_BREAKER_COOLDOWN_SECONDS: float = 30.0
 
+    # A3 — async provider path. The shadow runner is a FastAPI BackgroundTask;
+    # the sync Anthropic client blocks a Starlette threadpool thread for the
+    # full 30–90s LLM wait, so a burst of uploads starves the bounded threadpool
+    # and the whole web dyno "feels frozen". OFF by default = the sync path runs
+    # exactly as before. When ON, the runner awaits an AsyncAnthropic client so
+    # the long LLM wait yields the event loop, and the surrounding sync DB work
+    # is offloaded to a worker thread — the thread is freed during the wait
+    # rather than pinned. Pure transport change: identical AnalysisResult, no
+    # verdict/status change, fail-open preserved.
+    DOCUMENT_ANALYSIS_ASYNC_PROVIDER_ENABLED: bool = False
+
     # Phase 0 (comprehension) — the escalation/deep tier reasons about the
     # document instead of single-pass extracting it: adaptive thinking +
     # ``effort=high`` + structured outputs need more room and time than the

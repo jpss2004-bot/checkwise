@@ -51,6 +51,7 @@ Design properties (load-bearing):
 
 from __future__ import annotations
 
+import asyncio
 import logging
 import threading
 import time
@@ -58,6 +59,12 @@ import time
 from app.core.config import settings
 
 logger = logging.getLogger(__name__)
+
+# How often the async guard polls for a free slot. Non-blocking polling (rather
+# than a blocking off-thread acquire) keeps the acquire cancellation-safe: there
+# is never a worker thread left blocked on the semaphore that could acquire a
+# permit AFTER the awaiting task was cancelled and strand it.
+_ASYNC_ACQUIRE_POLL_SECONDS = 0.05
 
 
 class BreakerOpenError(Exception):
@@ -139,10 +146,46 @@ class AnthropicConcurrencyBreaker:
                     cooldown,
                 )
 
-    # -- the guard ------------------------------------------------------
+    # -- admission / outcome (shared by the sync + async guards) --------
+
+    def _check_open_and_get_semaphore(self) -> tuple[threading.BoundedSemaphore, float]:
+        """Raise BreakerOpenError if open; else return (semaphore, acquire_timeout).
+
+        Does NOT acquire the slot — the sync guard acquires inline, the async
+        guard offloads the (possibly blocking) acquire to a worker thread.
+        """
+        if self._is_open():
+            raise BreakerOpenError("anthropic circuit breaker is open")
+        semaphore = self._get_semaphore()
+        timeout = float(settings.ANTHROPIC_CONCURRENCY_ACQUIRE_TIMEOUT_SECONDS or 0.0)
+        return semaphore, timeout
+
+    def _exhausted_error(self, timeout: float) -> ConcurrencyExhaustedError:
+        return ConcurrencyExhaustedError(
+            "no anthropic concurrency slot free within "
+            f"{timeout:.1f}s (max={self._semaphore_size})"
+        )
+
+    def _record_outcome(self, exc_type, exc, is_failure) -> None:  # noqa: ANN001
+        """Record success/failure for a completed (active) guarded call.
+
+        A clean exit is a success. Only an ``Exception`` (not a bare
+        ``BaseException`` cancellation/shutdown) that the ``is_failure``
+        predicate classifies as upstream-health moves the failure counter; a
+        predicate-NEUTRAL error (e.g. a deterministic 4xx) leaves it untouched
+        so a self-inflicted bad request can't open the breaker.
+        """
+        if exc_type is None:
+            self._record_success()
+        elif issubclass(exc_type, Exception) and (
+            is_failure is None or is_failure(exc)
+        ):
+            self._record_failure()
+
+    # -- the guards -----------------------------------------------------
 
     def guard(self, *, is_failure=None) -> _BreakerGuard:  # noqa: ANN001
-        """Context manager wrapping ONE provider call. See module docstring.
+        """Sync context manager wrapping ONE provider call.
 
         ``is_failure`` is an optional ``Callable[[BaseException], bool]`` the
         caller supplies to classify a wrapped-call exception: return ``True`` for
@@ -153,9 +196,20 @@ class AnthropicConcurrencyBreaker:
         """
         return _BreakerGuard(self, is_failure)
 
+    def async_guard(self, *, is_failure=None) -> _AsyncBreakerGuard:  # noqa: ANN001
+        """Async counterpart of :meth:`guard` for the A3 AsyncAnthropic path.
+
+        Identical admission/accounting semantics, but the (possibly blocking)
+        semaphore acquire is offloaded to a worker thread so the event loop is
+        not blocked while waiting for a slot. The same process-global threading
+        semaphore + breaker state are shared with the sync path, so the ceiling
+        is unified across both.
+        """
+        return _AsyncBreakerGuard(self, is_failure)
+
 
 class _BreakerGuard:
-    """Single-use context manager: admit, run, record outcome, release."""
+    """Single-use SYNC context manager: admit, run, record outcome, release."""
 
     __slots__ = ("_breaker", "_acquired", "_active", "_is_failure")
 
@@ -176,21 +230,13 @@ class _BreakerGuard:
         if not self._active:
             return self  # pass-through; inactive guard
 
-        breaker = self._breaker
-        if breaker._is_open():
-            raise BreakerOpenError("anthropic circuit breaker is open")
-
-        semaphore = breaker._get_semaphore()
-        timeout = float(settings.ANTHROPIC_CONCURRENCY_ACQUIRE_TIMEOUT_SECONDS or 0.0)
+        semaphore, timeout = self._breaker._check_open_and_get_semaphore()
         if timeout > 0.0:
             acquired = semaphore.acquire(timeout=timeout)
         else:
             acquired = semaphore.acquire(blocking=False)
         if not acquired:
-            raise ConcurrencyExhaustedError(
-                "no anthropic concurrency slot free within "
-                f"{timeout:.1f}s (max={breaker._semaphore_size})"
-            )
+            raise self._breaker._exhausted_error(timeout)
         self._acquired = semaphore
         return self
 
@@ -204,18 +250,62 @@ class _BreakerGuard:
             self._acquired = None
         if not self._active:
             return False
-        if exc_type is None:
-            self._breaker._record_success()
-        elif issubclass(exc_type, Exception) and (
-            self._is_failure is None or self._is_failure(exc)
-        ):
-            # A genuine upstream-call Exception the predicate counts. A
-            # non-Exception BaseException (cancellation/shutdown) or a
-            # predicate-NEUTRAL error (e.g. a deterministic 4xx) leaves the
-            # consecutive-failure counter untouched — neither success nor
-            # failure — so a self-inflicted bad request can't open the breaker.
-            self._breaker._record_failure()
+        self._breaker._record_outcome(exc_type, exc, self._is_failure)
         return False  # never suppress the wrapped exception
+
+
+class _AsyncBreakerGuard:
+    """Single-use ASYNC context manager (mirror of _BreakerGuard).
+
+    The breaker state methods only hold the lock for microseconds, so they are
+    called directly; only the slot acquire — which can block for the acquire
+    timeout — is offloaded to a thread so the event loop stays free.
+    """
+
+    __slots__ = ("_breaker", "_acquired", "_active", "_is_failure")
+
+    def __init__(
+        self,
+        breaker: AnthropicConcurrencyBreaker,
+        is_failure=None,  # noqa: ANN001 — Callable[[BaseException], bool] | None
+    ) -> None:
+        self._breaker = breaker
+        self._acquired: threading.BoundedSemaphore | None = None
+        self._active = False
+        self._is_failure = is_failure
+
+    async def __aenter__(self) -> _AsyncBreakerGuard:
+        self._active = bool(settings.ANTHROPIC_CONCURRENCY_BREAKER_ENABLED)
+        if not self._active:
+            return self
+
+        semaphore, timeout = self._breaker._check_open_and_get_semaphore()
+        # Non-blocking poll, not a blocking off-thread acquire: no worker thread
+        # is ever left blocked on the semaphore, so cancelling the awaiting task
+        # can never strand (leak) a permit, and the loop is never blocked.
+        # ``acquire(blocking=False)`` returning True and setting ``_acquired``
+        # are synchronous with no await between them, so a cancellation cannot
+        # interleave there either.
+        loop = asyncio.get_running_loop()
+        deadline = (loop.time() + timeout) if timeout > 0.0 else None
+        while True:
+            if semaphore.acquire(blocking=False):
+                self._acquired = semaphore
+                return self
+            if deadline is None or loop.time() >= deadline:
+                raise self._breaker._exhausted_error(timeout)
+            await asyncio.sleep(
+                min(_ASYNC_ACQUIRE_POLL_SECONDS, deadline - loop.time())
+            )
+
+    async def __aexit__(self, exc_type, exc, tb) -> bool:  # noqa: ANN001
+        if self._acquired is not None:
+            self._acquired.release()
+            self._acquired = None
+        if not self._active:
+            return False
+        self._breaker._record_outcome(exc_type, exc, self._is_failure)
+        return False
 
 
 # Process-global singleton. Each worker process gets its own ceiling/breaker.

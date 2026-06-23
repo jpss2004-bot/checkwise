@@ -39,6 +39,7 @@ Architecture notes (load-bearing — please read before editing):
 
 from __future__ import annotations
 
+import asyncio
 import base64
 import copy
 import json
@@ -500,6 +501,10 @@ class AnthropicDocumentAnalysisProvider:
             ) from exc
 
         self._client = Anthropic(api_key=key)
+        # A3 — the AsyncAnthropic client is built lazily on first async use so
+        # the sync path pays nothing for it. Same key/model.
+        self._api_key = key
+        self._async_client = None
         self._model = (model or settings.DOCUMENT_ANALYSIS_MODEL or "claude-sonnet-4-6").strip()
         self._deep_authenticity = bool(deep_authenticity)
         self._timeout = float(settings.DOCUMENT_ANALYSIS_TIMEOUT_SECONDS or 30.0)
@@ -529,6 +534,140 @@ class AnthropicDocumentAnalysisProvider:
         expected_client_rfc: str | None = None,
         metadata_field_schema: list[dict] | None = None,
     ) -> AnalysisResult:
+        prepared = self._prepare_request(
+            pdf_path=pdf_path,
+            requirement_code=requirement_code,
+            requirement_name=requirement_name,
+            institution_code=institution_code,
+            period_code=period_code,
+            org_id=org_id,
+            expected_provider_rfc=expected_provider_rfc,
+            expected_provider_name=expected_provider_name,
+            expected_client_name=expected_client_name,
+            expected_client_rfc=expected_client_rfc,
+            metadata_field_schema=metadata_field_schema,
+        )
+        if isinstance(prepared, AnalysisResult):
+            return prepared  # preflight / read failure
+        request_kwargs, timeout, prompt, start = prepared
+
+        try:
+            # A2 — bound concurrent in-flight calls + fast-fail on a broken
+            # upstream. Default-off: when disabled the guard is a pure
+            # pass-through and this is byte-for-byte the prior call. The
+            # predicate keeps deterministic 4xx errors from opening the breaker.
+            with anthropic_concurrency_breaker.guard(
+                is_failure=self._is_breaker_failure
+            ):
+                response = self._client.with_options(timeout=timeout).messages.create(
+                    **request_kwargs
+                )
+        except Exception as exc:  # noqa: BLE001 — categorise everything as a known failure
+            return self._failure(prompt, start, self._categorise_exception(exc))
+
+        return self._finalize_response(response, prompt, start)
+
+    async def analyze_async(
+        self,
+        *,
+        pdf_path: Path,
+        requirement_code: str | None,
+        requirement_name: str,
+        institution_code: str,
+        period_code: str,
+        org_id: str | None = None,
+        expected_provider_rfc: str | None = None,
+        expected_provider_name: str | None = None,
+        expected_client_name: str | None = None,
+        expected_client_rfc: str | None = None,
+        metadata_field_schema: list[dict] | None = None,
+    ) -> AnalysisResult:
+        """Async twin of :meth:`analyze` (A3).
+
+        Identical inputs/outputs and identical failure handling; the only
+        difference is the LLM call is awaited on an ``AsyncAnthropic`` client so
+        the 30–90s wait yields the event loop instead of pinning a threadpool
+        thread, and the blocking request prep (PDF read + base64) is offloaded
+        to a worker thread. Never raises — every error path returns an
+        ``AnalysisResult`` exactly like the sync method.
+        """
+        # PDF read + base64 + prompt building is blocking I/O/CPU → off the loop.
+        prepared = await asyncio.to_thread(
+            self._prepare_request,
+            pdf_path=pdf_path,
+            requirement_code=requirement_code,
+            requirement_name=requirement_name,
+            institution_code=institution_code,
+            period_code=period_code,
+            org_id=org_id,
+            expected_provider_rfc=expected_provider_rfc,
+            expected_provider_name=expected_provider_name,
+            expected_client_name=expected_client_name,
+            expected_client_rfc=expected_client_rfc,
+            metadata_field_schema=metadata_field_schema,
+        )
+        if isinstance(prepared, AnalysisResult):
+            return prepared
+        request_kwargs, timeout, prompt, start = prepared
+
+        # Build the client up front so the ``finally`` can always close its
+        # httpx connection pool — the AsyncAnthropic ``__del__`` only schedules
+        # an aclose on a live loop (fire-and-forget) and is unreliable, so a
+        # per-run client would otherwise leak sockets/FDs under sustained load.
+        client = self._get_async_client()
+        try:
+            try:
+                async with anthropic_concurrency_breaker.async_guard(
+                    is_failure=self._is_breaker_failure
+                ):
+                    response = await client.with_options(
+                        timeout=timeout
+                    ).messages.create(**request_kwargs)
+            except Exception as exc:  # noqa: BLE001 — categorise everything as a known failure
+                return self._failure(prompt, start, self._categorise_exception(exc))
+            return self._finalize_response(response, prompt, start)
+        finally:
+            await self._aclose_async_client()
+
+    def _get_async_client(self):  # noqa: ANN202 — anthropic.AsyncAnthropic
+        if self._async_client is None:
+            from anthropic import AsyncAnthropic
+
+            self._async_client = AsyncAnthropic(api_key=self._api_key)
+        return self._async_client
+
+    async def _aclose_async_client(self) -> None:
+        """Close the AsyncAnthropic httpx pool deterministically (best-effort)."""
+        client = self._async_client
+        self._async_client = None
+        if client is None:
+            return
+        try:
+            await client.close()
+        except Exception:  # noqa: BLE001 — teardown must never raise into the worker
+            logger.exception("Failed closing AsyncAnthropic client.")
+
+    def _prepare_request(
+        self,
+        *,
+        pdf_path: Path,
+        requirement_code: str | None,
+        requirement_name: str,
+        institution_code: str,
+        period_code: str,
+        org_id: str | None = None,
+        expected_provider_rfc: str | None = None,
+        expected_provider_name: str | None = None,
+        expected_client_name: str | None = None,
+        expected_client_rfc: str | None = None,
+        metadata_field_schema: list[dict] | None = None,
+    ):  # noqa: ANN202 — tuple[dict, float, PromptBundle, float] | AnalysisResult
+        """Build the Messages-API request (shared by sync + async analyze).
+
+        Returns ``(request_kwargs, timeout, prompt, start)`` on success, or an
+        ``AnalysisResult`` failure when the preflight/read fails. Pure + sync
+        (the async path runs it in a worker thread).
+        """
         _ = org_id  # already enforced by the spend limiter upstream
         # Field suggestions only make sense on the deep tier (structured
         # output + reasoning). The triage tier ignores the schema.
@@ -632,20 +771,12 @@ class AnthropicDocumentAnalysisProvider:
             )
             timeout = self._timeout
 
-        try:
-            # A2 — bound concurrent in-flight calls + fast-fail on a broken
-            # upstream. Default-off: when disabled the guard is a pure
-            # pass-through and this is byte-for-byte the prior call. The
-            # predicate keeps deterministic 4xx errors from opening the breaker.
-            with anthropic_concurrency_breaker.guard(
-                is_failure=self._is_breaker_failure
-            ):
-                response = self._client.with_options(timeout=timeout).messages.create(
-                    **request_kwargs
-                )
-        except Exception as exc:  # noqa: BLE001 — categorise everything as a known failure
-            return self._failure(prompt, start, self._categorise_exception(exc))
+        return request_kwargs, timeout, prompt, start
 
+    def _finalize_response(
+        self, response: Any, prompt: PromptBundle, start: float
+    ) -> AnalysisResult:
+        """Parse a Messages-API response into an AnalysisResult (shared)."""
         comprehension: dict | None = None
         field_suggestions: list[dict] | None = None
         if self._deep_authenticity:

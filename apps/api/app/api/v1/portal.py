@@ -151,6 +151,7 @@ from app.services.submission_service import (
     assert_pdf_upload,
     finalize_intake_submission,
     finalize_intake_submission_background,
+    finalize_intake_submission_background_async,
     finalize_multi_document_submission,
     get_or_create_institution,
     persist_intake_receipt,
@@ -2993,8 +2994,16 @@ async def create_workspace_submission(
     # once the response is flushed (and is re-run by the reconcile cron if
     # this worker dies mid-flight), so a scheduling concern is never
     # masked as a storage failure.
+    # A3 — when the async provider is enabled, schedule the async finalize
+    # sibling so the heavy sync work runs in a worker thread and the 30–90s
+    # LLM wait yields the event loop instead of pinning a threadpool thread.
+    _finalize_background = (
+        finalize_intake_submission_background_async
+        if settings.DOCUMENT_ANALYSIS_ASYNC_PROVIDER_ENABLED
+        else finalize_intake_submission_background
+    )
     background_tasks.add_task(
-        finalize_intake_submission_background,
+        _finalize_background,
         submission_id=receipt.submission_id,
         storage_key=receipt.storage_key,
         intake_source=INTAKE_SOURCE_WORKSPACE_PORTAL,
