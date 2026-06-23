@@ -59,6 +59,7 @@ from app.services.email_delivery import (
     send_owner_reset_temp_password_email,
     send_welcome_with_temp_password_email,
 )
+from app.services.subscription import org_for_client
 
 router = APIRouter(prefix="/client/users", tags=["client-users"])
 
@@ -101,26 +102,11 @@ def _org_for_client(
 ) -> Organization:
     """The ``kind='client'`` organization bridging to this Client row.
 
-    Provisioning creates exactly one; ``order_by(created_at)`` keeps
-    the pick deterministic should a legacy tenant ever hold two.
+    Thin alias over the canonical resolver in the subscription service so
+    the seats surface and the provider-limit surface share one
+    implementation (404s when absent; provisioning creates exactly one).
     """
-    stmt = (
-        select(Organization)
-        .where(
-            Organization.kind == "client",
-            Organization.client_id == client_id,
-        )
-        .order_by(Organization.created_at.asc())
-    )
-    if for_update:
-        stmt = stmt.with_for_update()
-    org = db.scalars(stmt).first()
-    if org is None:
-        raise HTTPException(
-            status.HTTP_404_NOT_FOUND,
-            detail="Este cliente no tiene una organización de usuarios.",
-        )
-    return org
+    return org_for_client(db, client_id, for_update=for_update)
 
 
 def _holds_approver_seat(

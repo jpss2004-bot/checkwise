@@ -325,6 +325,10 @@ export type ClientVendorDetail = {
     submitted_at: string;
     supersedes_submission_id: string | null;
     superseded_by_submission_id: string | null;
+    // Axis 2 — client acceptance (Phase 5).
+    client_acceptance?: string;
+    client_decided_at?: string | null;
+    client_decision_reason?: string | null;
   }>;
   recent_reviewer_notes: Array<{
     submission_id: string;
@@ -489,6 +493,11 @@ export type ClientSubmissionItem = {
   reviewer_note: string | null;
   supersedes_submission_id: string | null;
   superseded_by_submission_id: string | null;
+  /** Axis 2 — the client's business-acceptance verdict ("pending" |
+   *  "accepted" | "rejected"), orthogonal to ``status``. */
+  client_acceptance?: string;
+  client_decided_at?: string | null;
+  client_decision_reason?: string | null;
 };
 
 export type ClientSubmissionsResponse = {
@@ -678,13 +687,15 @@ export async function createClientProvider(
   body: ClientProviderCreateBody,
   params?: { client_id?: string },
 ): Promise<ClientProviderCreateResponse> {
-  return fetchJson<ClientProviderCreateResponse>(
+  const result = await fetchJson<ClientProviderCreateResponse>(
     `/api/v1/client/providers${qs(params)}`,
     {
       method: "POST",
       body: JSON.stringify(body),
     },
   );
+  invalidateClientPlan(params?.client_id);
+  return result;
 }
 
 export async function getClientVendorDetail(
@@ -712,19 +723,73 @@ export async function deactivateClientProvider(
   vendor_id: string,
   params?: { client_id?: string },
 ): Promise<ClientProviderStatusResponse> {
-  return fetchJson<ClientProviderStatusResponse>(
+  const result = await fetchJson<ClientProviderStatusResponse>(
     `/api/v1/client/vendors/${vendor_id}/deactivate${qs(params)}`,
     { method: "POST" },
   );
+  invalidateClientPlan(params?.client_id);
+  return result;
 }
 
 export async function reactivateClientProvider(
   vendor_id: string,
   params?: { client_id?: string },
 ): Promise<ClientProviderStatusResponse> {
-  return fetchJson<ClientProviderStatusResponse>(
+  const result = await fetchJson<ClientProviderStatusResponse>(
     `/api/v1/client/vendors/${vendor_id}/reactivate${qs(params)}`,
     { method: "POST" },
+  );
+  invalidateClientPlan(params?.client_id);
+  return result;
+}
+
+// ---------------------------------------------------------------------------
+// Phase A/B — subscription plan + provider-usage meter
+// ---------------------------------------------------------------------------
+
+export type ClientPlanCapabilities = {
+  export_audit_package: boolean;
+  bulk_export: boolean;
+  download_documents: boolean;
+};
+
+export type ClientPlan = {
+  client_id: string;
+  organization_id: string;
+  plan: string;
+  plan_label: string;
+  /** null ⇒ uncapped (legacy / enterprise). */
+  provider_limit: number | null;
+  providers_used: number;
+  /** null ⇒ uncapped. */
+  providers_available: number | null;
+  /** ISO; null ⇒ not a demo (no deadline). */
+  demo_expires_at: string | null;
+  capabilities: ClientPlanCapabilities;
+  /** Whether the caller may change the plan / manage seats (owner / internal). */
+  can_manage: boolean;
+};
+
+export const CLIENT_PLAN_KEY = "client:plan";
+
+/** The caller's subscription plan + provider usage. Deduped (15s TTL); the
+ *  provider add/archive/restore mutations invalidate it so the meter is fresh. */
+export async function getClientPlan(params?: {
+  client_id?: string;
+}): Promise<ClientPlan> {
+  const key = params?.client_id
+    ? `${CLIENT_PLAN_KEY}:${params.client_id}`
+    : CLIENT_PLAN_KEY;
+  return dedupeRead(
+    key,
+    () => fetchJson<ClientPlan>(`/api/v1/client/plan${qs(params)}`),
+    15_000,
+  );
+}
+
+export function invalidateClientPlan(client_id?: string): void {
+  invalidateRead(
+    client_id ? `${CLIENT_PLAN_KEY}:${client_id}` : CLIENT_PLAN_KEY,
   );
 }
 
@@ -736,13 +801,17 @@ export async function reactivateClientProvider(
 // page are the first UI to reach it.
 // ---------------------------------------------------------------------------
 
+export type ClientUserRole = "client_admin" | "client_viewer";
+
 export type ClientUserItem = {
   user_id: string;
   email: string;
   full_name: string;
   is_primary: boolean;
-  // "client_admin" (Approver — full write) | "client_viewer" (read+export).
-  role: string;
+  // Seat tier (Phase 4). "client_admin" = Approver (full write);
+  // "client_viewer" = Viewer (read + export only). The Primary Owner is
+  // always an Approver.
+  role: ClientUserRole;
   // "active" | "disabled"
   status: string;
   // True while the seat hasn't completed first login (temp password).
@@ -793,6 +862,11 @@ export type ResetClientUserPasswordResponse = {
   email_error: string | null;
 };
 
+export type ClientUserRoleResponse = {
+  user_id: string;
+  role: ClientUserRole;
+};
+
 export async function listClientUsers(params?: {
   client_id?: string;
 }): Promise<ClientUsersList> {
@@ -805,13 +879,24 @@ export async function createClientUser(
     email: string;
     // Seat tier. Omit for the default read-only Viewer; an Approver may
     // pass "client_admin" to create another Approver.
-    role?: "client_admin" | "client_viewer";
+    role?: ClientUserRole;
   },
   params?: { client_id?: string },
 ): Promise<CreateClientUserResponse> {
   return fetchJson<CreateClientUserResponse>(
     `/api/v1/client/users${qs(params)}`,
     { method: "POST", body: JSON.stringify(body) },
+  );
+}
+
+export async function updateClientUserRole(
+  user_id: string,
+  role: ClientUserRole,
+  params?: { client_id?: string },
+): Promise<ClientUserRoleResponse> {
+  return fetchJson<ClientUserRoleResponse>(
+    `/api/v1/client/users/${user_id}/role${qs(params)}`,
+    { method: "PATCH", body: JSON.stringify({ role }) },
   );
 }
 
@@ -846,22 +931,6 @@ export async function resetClientUserPassword(
   );
 }
 
-export type ClientUserRoleResponse = { user_id: string; role: string };
-
-/** Change a seat's access tier. Both promotion to "client_admin" (Approver)
- *  and demotion to "client_viewer" are open to any Approver of the org (or
- *  CheckWise staff), enforced server-side. */
-export async function updateClientUserRole(
-  user_id: string,
-  role: "client_admin" | "client_viewer",
-  params?: { client_id?: string },
-): Promise<ClientUserRoleResponse> {
-  return fetchJson<ClientUserRoleResponse>(
-    `/api/v1/client/users/${user_id}/role${qs(params)}`,
-    { method: "PATCH", body: JSON.stringify({ role }) },
-  );
-}
-
 export async function getClientCalendar(params?: {
   client_id?: string;
   year?: number;
@@ -891,10 +960,82 @@ export async function listClientSubmissions(params?: {
    *  lowercase code (``sat`` / ``imss`` / ``infonavit`` / ``stps_repse``
    *  / ``interno_cliente``). Unknown codes return an empty list. */
   institution?: string;
+  /** Phase 5 / Axis 2 — filter by acceptance state
+   *  ("pending" | "accepted" | "rejected"). */
+  client_acceptance?: string;
   limit?: number;
 }): Promise<ClientSubmissionsResponse> {
   return fetchJson<ClientSubmissionsResponse>(
     `/api/v1/client/submissions${qs(params)}`,
+  );
+}
+
+// ── Phase 5 — client acceptance axis (Axis 2) ──────────────────────────────
+
+export type ClientDecisionAction = "accept" | "reject" | "reset";
+
+/** Shape of POST /client/submissions/{id}/decision — NOT a Submission.
+ *  ``new_acceptance`` is what the row's ``client_acceptance`` becomes. */
+export type ClientDecisionResponse = {
+  submission_id: string;
+  previous_acceptance: string;
+  new_acceptance: string;
+  action: string;
+  reason: string | null;
+  override: boolean;
+  decided_at: string;
+  decided_by_user_id: string;
+};
+
+export async function decideClientSubmission(
+  submissionId: string,
+  body: { action: ClientDecisionAction; reason?: string | null },
+  params?: { client_id?: string },
+): Promise<ClientDecisionResponse> {
+  return fetchJson<ClientDecisionResponse>(
+    `/api/v1/client/submissions/${submissionId}/decision${qs(params)}`,
+    { method: "POST", body: JSON.stringify(body) },
+  );
+}
+
+export type ClientBulkDecisionResponse = {
+  decided: string[];
+  failed: Array<{ submission_id: string; detail: string }>;
+  decided_count: number;
+  failed_count: number;
+};
+
+export async function bulkDecideClientSubmissions(
+  body: {
+    submission_ids: string[];
+    action: ClientDecisionAction;
+    reason?: string | null;
+  },
+  params?: { client_id?: string },
+): Promise<ClientBulkDecisionResponse> {
+  return fetchJson<ClientBulkDecisionResponse>(
+    `/api/v1/client/submissions/bulk-decision${qs(params)}`,
+    { method: "POST", body: JSON.stringify(body) },
+  );
+}
+
+export type ClientAcceptancePrefs = { auto_accept_valid: boolean };
+
+export async function getClientAcceptancePrefs(params?: {
+  client_id?: string;
+}): Promise<ClientAcceptancePrefs> {
+  return fetchJson<ClientAcceptancePrefs>(
+    `/api/v1/client/acceptance-preferences${qs(params)}`,
+  );
+}
+
+export async function updateClientAcceptancePrefs(
+  body: ClientAcceptancePrefs,
+  params?: { client_id?: string },
+): Promise<ClientAcceptancePrefs> {
+  return fetchJson<ClientAcceptancePrefs>(
+    `/api/v1/client/acceptance-preferences${qs(params)}`,
+    { method: "PATCH", body: JSON.stringify(body) },
   );
 }
 

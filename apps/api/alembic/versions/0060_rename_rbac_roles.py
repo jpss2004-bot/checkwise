@@ -27,10 +27,12 @@ and historical ``audit_log.actor_type``.
 Postgres-only (tests build the schema via ``create_all`` and seed roles
 directly, so they never run this migration).
 
-MIGRATION-NUMBER NOTE: on branch ``feat/role-model-phase-1`` the alembic head
-is ``0055``. The unmerged provider-limits stack (PR #32) already reserves
-0056/0057/0058 — if that merges first, renumber this revision after it and
-add an alembic merge revision. Snapshot Neon before running on prod.
+MIGRATION-NUMBER NOTE: rechained after merging ``main`` (PR #32's
+0056/0057/0058 + ``0059_client_acceptance_axis`` are now the head). This
+revision is ``0060`` with ``down_revision = 0059_client_acceptance_axis`` —
+a single linear head, no merge revision needed. The rename is lossy on
+downgrade (three staff slugs collapse into one); snapshot Neon before
+running on prod.
 """
 
 from __future__ import annotations
@@ -38,8 +40,8 @@ from __future__ import annotations
 from alembic import op
 from sqlalchemy import text
 
-revision = "0056_rename_rbac_roles"
-down_revision = "0055_perf_indexes_trgm_search_and_renewals"
+revision = "0060_rename_rbac_roles"
+down_revision = "0059_client_acceptance_axis"
 branch_labels = None
 depends_on = None
 

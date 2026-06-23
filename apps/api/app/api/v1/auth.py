@@ -46,7 +46,13 @@ from app.core.rate_limit import (
     login_limiter,
 )
 from app.db.session import get_db
-from app.models import Membership, PasswordHistory, PasswordResetToken, User
+from app.models import (
+    Membership,
+    Organization,
+    PasswordHistory,
+    PasswordResetToken,
+    User,
+)
 from app.models.entities import utc_now
 from app.services.audit_log import add_audit_event
 from app.services.auth import (
@@ -62,6 +68,7 @@ from app.services.auth import (
     verify_password,
 )
 from app.services.email_delivery import send_password_reset_email
+from app.services.subscription import is_org_blocked
 
 router = APIRouter(prefix="/auth", tags=["auth"])
 DbSession = Annotated[Session, Depends(get_db)]
@@ -391,6 +398,32 @@ _PASSWORD_GATE_ALLOWED_PATHS = frozenset(
     }
 )
 
+# Phase B — org-frozen gate (B2). A user whose ONLY active client org(s) are
+# frozen/expired may still read their identity, log out, and read their plan /
+# upgrade surface, but nothing else. Mirrors the password-gate allow-list and
+# is cross-referenced with ``org_frozen_allowed`` in the route policy manifest;
+# the manifest parity test fails CI if this list and the manifest drift. Add
+# every new client upgrade/billing route here in the same PR that adds it.
+_ORG_FROZEN_ALLOWED_PATHS = frozenset(
+    {
+        "/api/v1/auth/me",
+        "/api/v1/auth/logout",
+        "/api/v1/client/plan",
+    }
+)
+_ORG_FROZEN_DETAIL = {
+    "code": "trial_expired",
+    "message": "Tu plan ha expirado. Mejora tu plan para continuar.",
+}
+# Internal staff are never trial-gated (they aren't on a client plan, and reach
+# client data via audited break-glass, not membership). Role-model redesign:
+# the staff slugs are now ``platform_admin`` / ``operations_admin``; the retired
+# ``internal_admin`` / ``reviewer`` are kept for the transition window (old
+# JWTs / pre-migration rows) and drop out once the rename sweep completes.
+_ORG_FROZEN_EXEMPT_ROLES = frozenset(
+    {"platform_admin", "operations_admin", "internal_admin", "reviewer"}
+)
+
 
 _PASSWORD_RESET_REQUIRED_DETAIL = (
     "Debes establecer una nueva contraseña antes de continuar."
@@ -575,6 +608,31 @@ def get_current_user(
             status.HTTP_403_FORBIDDEN,
             detail=_PASSWORD_RESET_REQUIRED_DETAIL,
         )
+
+    # Phase B gate: if EVERY active client org the user belongs to is frozen /
+    # expired, block everything except the narrow upgrade/logout surface. Read
+    # fresh from the DB (status + demo_expires_at are mutable; never trust the
+    # token), and require ALL client memberships to be blocked so internal
+    # staff attached to one frozen client are never locked out. Orthogonal to
+    # the user-level 401 above (user is 'active'; the ORG is frozen).
+    if (
+        not (_ORG_FROZEN_EXEMPT_ROLES & set(claims.roles))
+        and request.url.path not in _ORG_FROZEN_ALLOWED_PATHS
+    ):
+        client_orgs = db.scalars(
+            select(Organization)
+            .join(Membership, Membership.organization_id == Organization.id)
+            .where(
+                Membership.user_id == user.id,
+                Membership.status == "active",
+                Organization.kind == "client",
+            )
+        ).all()
+        if client_orgs and all(is_org_blocked(o) for o in client_orgs):
+            raise HTTPException(
+                status.HTTP_403_FORBIDDEN,
+                detail=_ORG_FROZEN_DETAIL,
+            )
 
     return CurrentUser(
         user=UserOut(

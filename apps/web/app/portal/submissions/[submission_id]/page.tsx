@@ -39,7 +39,14 @@ import {
   type SubmissionPreviousAttempt,
   type SubmissionSuggestedAction,
 } from "@/lib/api/portal";
-import { DocumentStatus, statusExplainer, statusLabel } from "@/lib/constants/statuses";
+import {
+  DocumentStatus,
+  clientAcceptanceLabel,
+  clientAcceptanceVariant,
+  statusExplainer,
+  statusLabel,
+} from "@/lib/constants/statuses";
+import { Badge } from "@/components/ui/badge";
 import { cadenceLabel } from "@/lib/constants/labels";
 import { GroupedValidationSummary } from "@/components/checkwise/portal/grouped-validation-summary";
 import type { ValidationSignal } from "@/components/checkwise/validation-summary";
@@ -313,6 +320,14 @@ function StatusHero({
           </div>
           <div className="min-w-0">
             <RequirementStatusBadge status={detail.status} />
+            {detail.client_acceptance &&
+            detail.client_acceptance !== "pending" ? (
+              <span className="ml-2 inline-block align-middle">
+                <Badge variant={clientAcceptanceVariant(detail.client_acceptance)}>
+                  {clientAcceptanceLabel(detail.client_acceptance)}
+                </Badge>
+              </span>
+            ) : null}
             {detail.status === DocumentStatus.RECIBIDO ? (
               <p className="mt-2 inline-flex items-center gap-1.5 text-xs font-medium text-[color:var(--text-secondary)]">
                 <CircleNotch

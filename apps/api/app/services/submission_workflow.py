@@ -47,12 +47,15 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.constants.statuses import (
+    CLIENT_DECISION_ACCEPTANCE,
     RESOLVED_STATUSES,
     REVIEWER_DECISION_STATUS,
+    ClientAcceptance,
+    ClientDecisionAction,
     DocumentStatus,
     ReviewerAction,
 )
-from app.models import Document, DocumentStatusHistory, Submission
+from app.models import Client, Document, DocumentStatusHistory, Submission
 from app.models.entities import utc_now
 from app.services.audit_log import add_audit_event
 from app.services.client_notifications import notify_reviewer_decision
@@ -528,6 +531,12 @@ def _apply_decision_transition(
             "[submission_workflow] outbound whatsapp crashed; decision still committed"
         )
 
+    # Phase 5 — opt-in real-time auto-accept. If this validity decision left
+    # the submission compliance-valid AND the client opted in, fold a system
+    # ACCEPTED decision (Axis 2) into THIS transaction so the two verdicts
+    # land atomically. No-op for non-valid outcomes or opted-out clients.
+    maybe_auto_accept_on_valid(db, submission, commit=False)
+
     db.commit()
     db.refresh(submission)
 
@@ -541,4 +550,196 @@ def _apply_decision_transition(
         observations=cleaned_observations,
         reviewer_user_id=result_reviewer_user_id,
         decided_at=submission.updated_at,
+    )
+
+
+# ─── Axis 2 — client acceptance (Phase 5) ────────────────────────────
+#
+# A SECOND decision writer, deliberately separate from the reviewer path
+# above. It owns the ``client_acceptance`` fields ONLY. It never reads the
+# reviewer queue rules, never mutates ``Submission.status`` / ``Document``,
+# and never emits a reviewer event — the two axes are orthogonal. A unit
+# test pins that orthogonality so a future refactor can't entangle them.
+
+
+@dataclass(frozen=True)
+class ClientDecisionResult:
+    """Outcome of a successful client acceptance-axis decision."""
+
+    submission_id: str
+    previous_acceptance: str
+    new_acceptance: str
+    action: str
+    reason: str | None
+    was_override: bool
+    client_user_id: str
+    decided_at: datetime
+
+
+# Validity states CheckWise considers a "pass" on Axis 1. A client decision
+# that contradicts this (accept a non-pass, or reject a pass) is an
+# "override" and must carry a reason.
+_VALID_COMPLIANCE_STATES: frozenset[str] = frozenset(
+    {DocumentStatus.APROBADO.value, DocumentStatus.EXCEPCION_LEGAL.value}
+)
+
+
+def client_decision_is_override(
+    submission_status: str, acceptance: ClientAcceptance
+) -> bool:
+    """True iff this acceptance contradicts CheckWise's validity verdict.
+
+    - ACCEPT a submission that is NOT compliance-valid → override.
+    - REJECT a submission that IS compliance-valid → override.
+    - RESET / aligned decisions → not an override.
+    """
+    is_valid = submission_status in _VALID_COMPLIANCE_STATES
+    if acceptance == ClientAcceptance.ACCEPTED:
+        return not is_valid
+    if acceptance == ClientAcceptance.REJECTED:
+        return is_valid
+    return False
+
+
+def apply_client_decision(
+    db: Session,
+    *,
+    submission: Submission,
+    action: str | ClientDecisionAction,
+    reason: str | None,
+    client_user_id: str | None,
+    commit: bool = True,
+) -> ClientDecisionResult:
+    """Record the CLIENT's business-acceptance verdict (Axis 2).
+
+    Orthogonal to ``apply_reviewer_decision``: updates only the
+    ``client_acceptance`` fields, appends a ``client_decision``
+    ValidationEvent + an AuditLog row. It NEVER touches ``Submission.status``
+    or ``Document.status``.
+
+    ``client_user_id`` is the deciding Approver, or ``None`` for a system
+    auto-accept (the actor is recorded as ``system`` and no
+    ``client_decided_by_user_id`` is stored). ``commit=False`` lets a caller
+    batch many decisions (bulk endpoint) or fold an auto-accept into the
+    reviewer transaction; the caller then owns the commit.
+
+    Override rule (locked design): a decision that contradicts CheckWise's
+    validity verdict — accepting a non-valid doc, or rejecting a valid one —
+    requires a non-empty ``reason``; a 422 is raised otherwise. Enforced here
+    (not just at the route) so the bulk path inherits the same guard.
+    """
+    try:
+        action_enum = (
+            action
+            if isinstance(action, ClientDecisionAction)
+            else ClientDecisionAction(action)
+        )
+    except ValueError as exc:
+        raise HTTPException(
+            status_code=http_status.HTTP_422_UNPROCESSABLE_CONTENT,
+            detail=f"Acción de aceptación inválida: {action!r}.",
+        ) from exc
+
+    target_acceptance = CLIENT_DECISION_ACCEPTANCE[action_enum]
+    cleaned_reason = (reason or "").strip() or None
+    was_override = client_decision_is_override(submission.status, target_acceptance)
+    if was_override and not cleaned_reason:
+        raise HTTPException(
+            status_code=http_status.HTTP_422_UNPROCESSABLE_CONTENT,
+            detail=(
+                "Esta decisión difiere del dictamen de cumplimiento de "
+                "CheckWise; indica un motivo."
+            ),
+        )
+
+    is_system = client_user_id is None
+    actor_type = "system" if is_system else "client"
+    previous_acceptance = submission.client_acceptance
+    decided_at = utc_now()
+
+    submission.client_acceptance = target_acceptance.value
+    submission.client_decided_by_user_id = client_user_id
+    submission.client_decided_at = decided_at
+    submission.client_decision_reason = cleaned_reason
+    # NOTE: ``submission.status`` (Axis 1) is intentionally untouched.
+
+    add_validation_event(
+        db,
+        submission_id=submission.id,
+        document_id=None,
+        event_type="client_decision",
+        rule_code="client_decision",
+        result=action_enum.value,
+        severity="info" if action_enum != ClientDecisionAction.REJECT else "warning",
+        message=cleaned_reason,
+        actor_type=actor_type,
+        payload={
+            "from_acceptance": previous_acceptance,
+            "to_acceptance": target_acceptance.value,
+            "compliance_status": submission.status,
+            "override": was_override,
+            "auto": is_system,
+        },
+    )
+
+    add_audit_event(
+        db,
+        action="submission.client_decision",
+        entity_type="submission",
+        entity_id=submission.id,
+        actor_type=actor_type,
+        actor_id=client_user_id,
+        before={"client_acceptance": previous_acceptance},
+        after={"client_acceptance": target_acceptance.value},
+        metadata={
+            "action": action_enum.value,
+            "reason": cleaned_reason,
+            "override": was_override,
+            "auto": is_system,
+            "compliance_status": submission.status,
+        },
+    )
+
+    if commit:
+        db.commit()
+        db.refresh(submission)
+
+    return ClientDecisionResult(
+        submission_id=submission.id,
+        previous_acceptance=previous_acceptance,
+        new_acceptance=target_acceptance.value,
+        action=action_enum.value,
+        reason=cleaned_reason,
+        was_override=was_override,
+        client_user_id=client_user_id or "system",
+        decided_at=decided_at,
+    )
+
+
+def maybe_auto_accept_on_valid(
+    db: Session, submission: Submission, *, commit: bool = False
+) -> ClientDecisionResult | None:
+    """Auto-record a system ACCEPTED decision when a submission is
+    compliance-valid AND its client opted into auto-accept-on-valid.
+
+    No-op unless ALL hold: the submission's ``status`` is a pass state, the
+    submission is still PENDING on Axis 2 (never overrides an explicit client
+    decision), and ``Client.auto_accept_valid`` is on. Called from the
+    reviewer path with ``commit=False`` so the auto-accept joins the validity
+    transaction. Returns the decision result, or ``None`` when it didn't fire.
+    """
+    if submission.status not in _VALID_COMPLIANCE_STATES:
+        return None
+    if submission.client_acceptance != ClientAcceptance.PENDING.value:
+        return None
+    client = db.get(Client, submission.client_id)
+    if client is None or not getattr(client, "auto_accept_valid", False):
+        return None
+    return apply_client_decision(
+        db,
+        submission=submission,
+        action=ClientDecisionAction.ACCEPT,
+        reason="Aceptación automática (documento conforme).",
+        client_user_id=None,
+        commit=commit,
     )

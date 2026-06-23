@@ -343,6 +343,13 @@ class AuditPackageEntry:
     # and round-trip the user's selection back into
     # ``AuditPackageFilters.submission_ids``.
     submission_id: str = ""
+    # Phase 5 / Axis 2 — the client's business-acceptance verdict, included
+    # in the audit trail alongside the compliance status (Axis 1). Acceptance
+    # NEVER gates inclusion — the auditor sees the full compliance record
+    # regardless of whether the client has accepted it.
+    client_acceptance: str = "pending"
+    client_decided_at_iso: str | None = None
+    client_decision_reason: str | None = None
 
 
 class AuditPackageSummary(NamedTuple):
@@ -754,6 +761,13 @@ def build_entries(
                         sub.created_at.isoformat() if sub.created_at else None
                     ),
                     submission_id=sub.id,
+                    client_acceptance=sub.client_acceptance,
+                    client_decided_at_iso=(
+                        sub.client_decided_at.isoformat()
+                        if sub.client_decided_at
+                        else None
+                    ),
+                    client_decision_reason=sub.client_decision_reason,
                 )
             )
     return entries

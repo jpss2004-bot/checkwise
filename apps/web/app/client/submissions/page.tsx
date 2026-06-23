@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import {
   ArrowsClockwise,
@@ -21,12 +21,15 @@ import { ClientShell } from "../_shell";
 import { VendorRef } from "@/components/checkwise/vendor-ref";
 import { PeriodPicker } from "@/components/checkwise/period-picker";
 import {
+  bulkDecideClientSubmissions,
   fetchClientSubmissionDocumentBlob,
   listClientSubmissions,
   listClientVendors,
   type ClientSubmissionItem,
   type ClientVendorRow,
 } from "@/lib/api/client";
+import { useClientApprover } from "@/lib/session/client-tier";
+import { ClientAcceptanceControl } from "@/components/checkwise/client/acceptance-control";
 import { INSTITUTION_LABELS } from "@/lib/api/portal";
 import {
   bucketLabel,
@@ -81,6 +84,8 @@ type SubmissionFilters = {
   status: string;
   institution: string;
   period_key: string;
+  // Axis 2 — "pending" | "accepted" | "rejected" | "" (all).
+  client_acceptance: string;
   limit: number;
 };
 
@@ -100,6 +105,7 @@ function readFiltersFromUrl(
     status: sp?.get("status") ?? "",
     institution: sp?.get("institution") ?? "",
     period_key: sp?.get("period_key") ?? sp?.get("period") ?? "",
+    client_acceptance: sp?.get("client_acceptance") ?? "",
     limit,
   };
 }
@@ -160,6 +166,7 @@ export default function ClientSubmissionsPage() {
       status: next.status || undefined,
       institution: next.institution || undefined,
       period_key: next.period_key || undefined,
+      client_acceptance: next.client_acceptance || undefined,
       limit: next.limit,
     })
       .then((data) => {
@@ -194,6 +201,8 @@ export default function ClientSubmissionsPage() {
       if (next.status) params.set("status", next.status);
       if (next.institution) params.set("institution", next.institution);
       if (next.period_key) params.set("period_key", next.period_key);
+      if (next.client_acceptance)
+        params.set("client_acceptance", next.client_acceptance);
       if (next.limit !== DEFAULT_LIMIT) params.set("limit", String(next.limit));
       const query = params.toString();
       router.replace(
@@ -216,7 +225,11 @@ export default function ClientSubmissionsPage() {
   // or calendar deep-link drops the user into a pre-filtered (and sometimes
   // empty) view.
   const hasActiveFilters = Boolean(
-    filters.vendor_id || filters.status || filters.institution || filters.period_key,
+    filters.vendor_id ||
+      filters.status ||
+      filters.institution ||
+      filters.period_key ||
+      filters.client_acceptance,
   );
 
   const clearFilters = useCallback(() => {
@@ -225,9 +238,85 @@ export default function ClientSubmissionsPage() {
       status: "",
       institution: "",
       period_key: "",
+      client_acceptance: "",
       limit: filters.limit,
     });
   }, [applyFilters, filters.limit]);
+
+  // Append the Axis-2 acceptance column. Built here (not in the static base)
+  // so the per-row control can refresh the list after a decision lands.
+  const columns = useMemo<DataTableColumn<ClientSubmissionItem>[]>(
+    () => [
+      ...SUBMISSIONS_COLUMNS,
+      {
+        id: "client_acceptance",
+        header: "Aceptación",
+        cell: (row) => (
+          <ClientAcceptanceControl
+            submissionId={row.submission_id}
+            acceptance={row.client_acceptance ?? "pending"}
+            complianceStatus={row.status}
+            clientId={clientId || undefined}
+            onDecided={(next) =>
+              setRows((prev) =>
+                prev?.map((r) =>
+                  r.submission_id === row.submission_id
+                    ? { ...r, client_acceptance: next }
+                    : r,
+                ) ?? prev,
+              )
+            }
+          />
+        ),
+      },
+    ],
+    [clientId],
+  );
+
+  // Bulk-accept (Approver-only): the compliance-valid + still-pending rows in
+  // the current view. The headline "accept everything CheckWise approved"
+  // catch-up flow; pair it with the ?client_acceptance=pending filter.
+  const isApprover = useClientApprover();
+  const [bulkBusy, setBulkBusy] = useState(false);
+  const [bulkMsg, setBulkMsg] = useState<string | null>(null);
+  const validPendingIds = useMemo(
+    () =>
+      (rows ?? [])
+        .filter(
+          (r) =>
+            (r.client_acceptance ?? "pending") === "pending" &&
+            (r.status === "aprobado" || r.status === "excepcion_legal"),
+        )
+        .map((r) => r.submission_id),
+    [rows],
+  );
+
+  async function acceptAllValidPending() {
+    if (validPendingIds.length === 0) return;
+    setBulkBusy(true);
+    setBulkMsg(null);
+    try {
+      const res = await bulkDecideClientSubmissions(
+        { action: "accept", submission_ids: validPendingIds },
+        clientId ? { client_id: clientId } : undefined,
+      );
+      const accepted = new Set(res.decided);
+      setRows((prev) =>
+        prev?.map((r) =>
+          accepted.has(r.submission_id)
+            ? { ...r, client_acceptance: "accepted" }
+            : r,
+        ) ?? prev,
+      );
+      setBulkMsg(
+        `Aceptaste ${res.decided_count} entrega${res.decided_count === 1 ? "" : "s"}.`,
+      );
+    } catch (e) {
+      setBulkMsg(e instanceof Error ? e.message : "No se pudo aceptar en lote.");
+    } finally {
+      setBulkBusy(false);
+    }
+  }
 
   return (
     <ClientShell
@@ -294,6 +383,19 @@ export default function ClientSubmissionsPage() {
                 }
               />
             </FilterField>
+            <FilterField label="Aceptación">
+              <Select
+                value={filters.client_acceptance}
+                onChange={(e) =>
+                  setFilters({ ...filters, client_acceptance: e.target.value })
+                }
+              >
+                <option value="">Todas</option>
+                <option value="pending">Pendiente de aceptación</option>
+                <option value="accepted">Aceptado por el cliente</option>
+                <option value="rejected">Rechazado por el cliente</option>
+              </Select>
+            </FilterField>
             <div className="flex flex-wrap items-center gap-2 sm:col-span-2 lg:col-span-4">
               <Button type="submit" size="sm" loading={loading}>
                 <MagnifyingGlass className="h-3.5 w-3.5" weight="bold" aria-hidden="true" />
@@ -349,12 +451,34 @@ export default function ClientSubmissionsPage() {
 
         <StatusLegend />
 
+        {isApprover && (validPendingIds.length > 0 || bulkMsg) ? (
+          <div className="flex flex-wrap items-center gap-2">
+            {validPendingIds.length > 0 ? (
+              <Button
+                size="sm"
+                variant="outline"
+                loading={bulkBusy}
+                onClick={() => void acceptAllValidPending()}
+              >
+                Aceptar {validPendingIds.length} válida
+                {validPendingIds.length === 1 ? "" : "s"} pendiente
+                {validPendingIds.length === 1 ? "" : "s"}
+              </Button>
+            ) : null}
+            {bulkMsg ? (
+              <span className="text-[12px] text-[color:var(--text-secondary)]">
+                {bulkMsg}
+              </span>
+            ) : null}
+          </div>
+        ) : null}
+
         <DataTable<ClientSubmissionItem>
           items={rows}
           loading={loading}
           error={error}
           onRetry={() => setReloadKey((k) => k + 1)}
-          columns={SUBMISSIONS_COLUMNS}
+          columns={columns}
           rowKey={(row) => row.submission_id}
           mobileCards
           ariaLabel="Entregas del portafolio"
