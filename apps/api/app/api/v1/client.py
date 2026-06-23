@@ -3686,12 +3686,16 @@ def client_submission_decision(
             status_code=status.HTTP_404_NOT_FOUND, detail="Envío no encontrado."
         )
     is_internal_admin = MembershipRole.INTERNAL_ADMIN.value in current.roles
-    if not is_internal_admin:
-        visible = _visible_client_ids_for_user(db, current.user.id)
-        if submission.client_id not in visible:
+    visible = _visible_client_ids_for_user(db, current.user.id)
+    if submission.client_id not in visible:
+        if not is_internal_admin:
             raise HTTPException(
                 status_code=status.HTTP_404_NOT_FOUND, detail="Envío no encontrado."
             )
+        # internal_admin break-glass: a state-changing write on a tenant they
+        # don't belong to leaves the same forensic trail as every other
+        # cross-tenant client write.
+        _audit_cross_tenant_access(db, current, submission.client_id)
 
     result = apply_client_decision(
         db,
@@ -3755,9 +3759,7 @@ def client_bulk_submission_decision(
     batch commits once at the end. De-dupes the id list while preserving order.
     """
     is_internal_admin = MembershipRole.INTERNAL_ADMIN.value in current.roles
-    visible = (
-        None if is_internal_admin else set(_visible_client_ids_for_user(db, current.user.id))
-    )
+    visible = set(_visible_client_ids_for_user(db, current.user.id))
 
     seen: set[str] = set()
     decided: list[str] = []
@@ -3767,15 +3769,24 @@ def client_bulk_submission_decision(
             continue
         seen.add(sub_id)
         submission = db.get(Submission, sub_id)
-        if submission is None or (
-            visible is not None and submission.client_id not in visible
-        ):
+        if submission is None:
             failed.append(
                 ClientBulkDecisionItemError(
                     submission_id=sub_id, detail="Envío no encontrado."
                 )
             )
             continue
+        if submission.client_id not in visible:
+            if not is_internal_admin:
+                failed.append(
+                    ClientBulkDecisionItemError(
+                        submission_id=sub_id, detail="Envío no encontrado."
+                    )
+                )
+                continue
+            # internal_admin break-glass — dedup'd to one row per (admin,
+            # client) per 30-min window, so per-item calls are safe.
+            _audit_cross_tenant_access(db, current, submission.client_id)
         try:
             apply_client_decision(
                 db,

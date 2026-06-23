@@ -83,6 +83,8 @@ export function ClientAcceptanceControl({
     if (!isValid) {
       setPendingReject(false);
       setPendingAcceptOverride(true);
+      setError(null);
+      setReason("");
       return;
     }
     void decide("accept");
@@ -123,6 +125,8 @@ export function ClientAcceptanceControl({
             onClick={() => {
               setPendingAcceptOverride(false);
               setPendingReject(true);
+              setError(null);
+              setReason("");
             }}
           >
             Rechazar

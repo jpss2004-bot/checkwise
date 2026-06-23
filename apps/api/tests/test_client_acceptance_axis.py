@@ -63,6 +63,40 @@ def _set_auto_accept(db_factory, client_id: str, value: bool) -> None:
     finally:
         db.close()
 
+
+_INT_COUNTER = 0
+
+
+def _seed_internal(db_factory, *, role: str) -> tuple[str, str]:
+    """An internal-staff user (reviewer / internal_admin) in a fresh internal
+    org — NOT a member of any client tenant. Returns (email, password)."""
+    global _INT_COUNTER
+    _INT_COUNTER += 1
+    n = _INT_COUNTER
+    db = db_factory()
+    try:
+        user = User(
+            email=f"{role}{n}@staff.mx",
+            password_hash=hash_password("Internal Pass 1"),
+            full_name="Staff",
+            status="active",
+            must_change_password=False,
+        )
+        db.add(user)
+        db.flush()
+        org = Organization(name=f"LegalShelf {n}", kind="internal")
+        db.add(org)
+        db.flush()
+        db.add(
+            Membership(
+                user_id=user.id, organization_id=org.id, role=role, status="active"
+            )
+        )
+        db.commit()
+        return user.email, "Internal Pass 1"
+    finally:
+        db.close()
+
 # ---------------------------------------------------------------------------
 # Fixtures + seeding
 # ---------------------------------------------------------------------------
@@ -549,3 +583,281 @@ def test_prefs_viewer_reads_approver_toggles(api_client, db_factory) -> None:
         "/api/v1/client/acceptance-preferences", headers=_h(approver_tok)
     )
     assert g2.json()["auto_accept_valid"] is True
+
+
+# ---------------------------------------------------------------------------
+# Provider / reviewer reason-exposure asymmetry (the core tenant-leak guard)
+# ---------------------------------------------------------------------------
+
+
+def test_provider_detail_model_never_exposes_reason() -> None:
+    """LOCKED invariant: the provider portal exposes verdict + timestamp but
+    NEVER client_decision_reason. Pinned structurally so a future 'add the
+    reason for symmetry' refactor fails CI instead of leaking it."""
+    from app.api.v1.portal import SubmissionDetailResponse
+
+    fields = SubmissionDetailResponse.model_fields
+    assert "client_acceptance" in fields
+    assert "client_decided_at" in fields
+    assert "client_decision_reason" not in fields
+
+
+def test_reviewer_detail_includes_reason(api_client, db_factory) -> None:
+    """Mirror image: internal staff DO see the reason (to reconcile overrides)."""
+    ids = _seed_world(db_factory, submission_status=DocumentStatus.APROBADO.value)
+    atok = _login(api_client, ids["approver_email"], ids["approver_pw"])
+    api_client.post(
+        f"/api/v1/client/submissions/{ids['submission_id']}/decision",
+        json={"action": "reject", "reason": "No cumple nuestro estándar"},
+        headers=_h(atok),
+    )
+    remail, rpw = _seed_internal(db_factory, role="reviewer")
+    rtok = _login(api_client, remail, rpw)
+    r = api_client.get(
+        f"/api/v1/reviewer/submissions/{ids['submission_id']}", headers=_h(rtok)
+    )
+    assert r.status_code == 200, r.text
+    body = r.json()
+    assert body["client_acceptance"] == "rejected"
+    assert body["client_decision_reason"] == "No cumple nuestro estándar"
+
+
+def test_internal_admin_cross_tenant_decision_writes_break_glass(
+    api_client, db_factory
+) -> None:
+    """An internal_admin deciding on a tenant they don't belong to leaves a
+    client.cross_tenant_access break-glass audit row."""
+    ids = _seed_world(db_factory, submission_status=DocumentStatus.APROBADO.value)
+    iemail, ipw = _seed_internal(db_factory, role="internal_admin")
+    itok = _login(api_client, iemail, ipw)
+    r = api_client.post(
+        f"/api/v1/client/submissions/{ids['submission_id']}/decision",
+        json={"action": "accept"},
+        headers=_h(itok),
+    )
+    assert r.status_code == 200, r.text
+    db = db_factory()
+    bg = db.scalar(
+        select(AuditLog).where(
+            AuditLog.action == "client.cross_tenant_access",
+            AuditLog.entity_id == ids["client_id"],
+        )
+    )
+    assert bg is not None
+    db.close()
+
+
+# ---------------------------------------------------------------------------
+# Bulk edge cases
+# ---------------------------------------------------------------------------
+
+
+def test_bulk_dedupes_repeated_id(api_client, db_factory) -> None:
+    ids = _seed_world(db_factory, submission_status=DocumentStatus.APROBADO.value)
+    tok = _login(api_client, ids["approver_email"], ids["approver_pw"])
+    r = api_client.post(
+        "/api/v1/client/submissions/bulk-decision",
+        json={
+            "action": "accept",
+            "submission_ids": [ids["submission_id"], ids["submission_id"]],
+        },
+        headers=_h(tok),
+    )
+    assert r.status_code == 200, r.text
+    assert r.json()["decided"] == [ids["submission_id"]]
+    assert r.json()["decided_count"] == 1
+    # Exactly one client_decision trail row was written.
+    db = db_factory()
+    n_events = len(
+        list(
+            db.scalars(
+                select(ValidationEvent).where(
+                    ValidationEvent.submission_id == ids["submission_id"],
+                    ValidationEvent.event_type == "client_decision",
+                )
+            )
+        )
+    )
+    assert n_events == 1
+    db.close()
+
+
+def test_bulk_override_with_shared_reason_succeeds(api_client, db_factory) -> None:
+    """Rejecting two VALID docs (overrides) with one shared reason succeeds for
+    both and persists the reason on each."""
+    a = _seed_world(db_factory, submission_status=DocumentStatus.APROBADO.value)
+    b = _seed_world(db_factory, submission_status=DocumentStatus.APROBADO.value)
+    db = db_factory()
+    db.get(Submission, b["submission_id"]).client_id = a["client_id"]
+    db.commit()
+    db.close()
+    tok = _login(api_client, a["approver_email"], a["approver_pw"])
+    r = api_client.post(
+        "/api/v1/client/submissions/bulk-decision",
+        json={
+            "action": "reject",
+            "submission_ids": [a["submission_id"], b["submission_id"]],
+            "reason": "Decisión interna",
+        },
+        headers=_h(tok),
+    )
+    assert r.status_code == 200, r.text
+    assert r.json()["decided_count"] == 2
+    assert r.json()["failed_count"] == 0
+    db = db_factory()
+    for sid in (a["submission_id"], b["submission_id"]):
+        sub = db.get(Submission, sid)
+        assert sub.client_acceptance == ClientAcceptance.REJECTED.value
+        assert sub.client_decision_reason == "Decisión interna"
+    db.close()
+
+
+def test_bulk_cross_tenant_item_lands_in_failed(api_client, db_factory) -> None:
+    a = _seed_world(db_factory, submission_status=DocumentStatus.APROBADO.value)
+    b = _seed_world(db_factory, submission_status=DocumentStatus.APROBADO.value)
+    tok = _login(api_client, a["approver_email"], a["approver_pw"])
+    r = api_client.post(
+        "/api/v1/client/submissions/bulk-decision",
+        json={
+            "action": "accept",
+            "submission_ids": [a["submission_id"], b["submission_id"]],
+        },
+        headers=_h(tok),
+    )
+    assert r.status_code == 200, r.text
+    body = r.json()
+    assert body["decided"] == [a["submission_id"]]
+    assert any(f["submission_id"] == b["submission_id"] for f in body["failed"])
+    # The cross-tenant submission was never decided.
+    db = db_factory()
+    assert (
+        db.get(Submission, b["submission_id"]).client_acceptance
+        == ClientAcceptance.PENDING.value
+    )
+    db.close()
+
+
+# ---------------------------------------------------------------------------
+# Auto-accept guards
+# ---------------------------------------------------------------------------
+
+
+def test_auto_accept_skips_on_reject(db_factory) -> None:
+    """A reviewer REJECT on an opted-in client must NOT auto-accept (the
+    resulting status is not a valid state)."""
+    ids = _seed_world(
+        db_factory, submission_status=DocumentStatus.PENDIENTE_REVISION.value
+    )
+    _set_auto_accept(db_factory, ids["client_id"], True)
+    db = db_factory()
+    sub = db.get(Submission, ids["submission_id"])
+    apply_reviewer_decision(
+        db, submission=sub, action=ReviewerAction.REJECT, reason="No sirve",
+        reviewer_user_id="rev-1",
+    )
+    sub = db.get(Submission, ids["submission_id"])
+    assert sub.status == DocumentStatus.RECHAZADO.value
+    assert sub.client_acceptance == ClientAcceptance.PENDING.value
+    db.close()
+
+
+def test_auto_accept_never_overrides_explicit_decision(db_factory) -> None:
+    """If a human already REJECTED, a later opted-in reviewer APPROVE must not
+    flip the verdict to system-accepted."""
+    ids = _seed_world(
+        db_factory, submission_status=DocumentStatus.PENDIENTE_REVISION.value
+    )
+    _set_auto_accept(db_factory, ids["client_id"], True)
+    db = db_factory()
+    sub = db.get(Submission, ids["submission_id"])
+    # Human rejects first (override of a non-yet-valid doc → reason needed).
+    apply_client_decision(
+        db, submission=sub, action="reject", reason="motivo",
+        client_user_id=ids["approver_id"],
+    )
+    # Now a reviewer approves; auto-accept must NOT overwrite the human verdict.
+    apply_reviewer_decision(
+        db, submission=sub, action=ReviewerAction.APPROVE, reason=None,
+        reviewer_user_id="rev-1",
+    )
+    sub = db.get(Submission, ids["submission_id"])
+    assert sub.status == DocumentStatus.APROBADO.value
+    assert sub.client_acceptance == ClientAcceptance.REJECTED.value
+    assert sub.client_decided_by_user_id == ids["approver_id"]
+    db.close()
+
+
+def test_auto_accept_fires_on_exception_legal(db_factory) -> None:
+    ids = _seed_world(
+        db_factory, submission_status=DocumentStatus.PENDIENTE_REVISION.value
+    )
+    _set_auto_accept(db_factory, ids["client_id"], True)
+    db = db_factory()
+    sub = db.get(Submission, ids["submission_id"])
+    apply_reviewer_decision(
+        db, submission=sub, action=ReviewerAction.MARK_EXCEPTION, reason="nota",
+        reviewer_user_id="rev-1",
+    )
+    sub = db.get(Submission, ids["submission_id"])
+    assert sub.status == DocumentStatus.EXCEPCION_LEGAL.value
+    assert sub.client_acceptance == ClientAcceptance.ACCEPTED.value
+    db.close()
+
+
+# ---------------------------------------------------------------------------
+# Forensic payload + prefs audit
+# ---------------------------------------------------------------------------
+
+
+def test_override_event_payload_flags(db_factory) -> None:
+    ids = _seed_world(db_factory, submission_status=DocumentStatus.APROBADO.value)
+    db = db_factory()
+    sub = db.get(Submission, ids["submission_id"])
+    apply_client_decision(
+        db, submission=sub, action="reject", reason="motivo",
+        client_user_id=ids["approver_id"],
+    )
+    ev = db.scalar(
+        select(ValidationEvent).where(
+            ValidationEvent.submission_id == sub.id,
+            ValidationEvent.event_type == "client_decision",
+        )
+    )
+    assert ev.payload["override"] is True
+    assert ev.payload["auto"] is False
+    db.close()
+
+
+def test_prefs_toggle_audits_once_and_noop_skips(api_client, db_factory) -> None:
+    ids = _seed_world(db_factory)
+    tok = _login(api_client, ids["approver_email"], ids["approver_pw"])
+
+    def _audit_count() -> int:
+        db = db_factory()
+        try:
+            return len(
+                list(
+                    db.scalars(
+                        select(AuditLog).where(
+                            AuditLog.action == "client.auto_accept_valid_changed"
+                        )
+                    )
+                )
+            )
+        finally:
+            db.close()
+
+    # Real toggle writes exactly one row.
+    api_client.patch(
+        "/api/v1/client/acceptance-preferences",
+        json={"auto_accept_valid": True},
+        headers=_h(tok),
+    )
+    assert _audit_count() == 1
+    # Redundant PATCH (no change) writes no new row.
+    api_client.patch(
+        "/api/v1/client/acceptance-preferences",
+        json={"auto_accept_valid": True},
+        headers=_h(tok),
+    )
+    assert _audit_count() == 1

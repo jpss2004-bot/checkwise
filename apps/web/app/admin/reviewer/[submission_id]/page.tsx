@@ -54,8 +54,11 @@ import {
   type VerificationQrCode,
 } from "@/lib/api/reviewer";
 import { personaLabel } from "@/lib/constants/labels";
+import { formatDateTime } from "@/lib/format/datetime";
 import {
   DocumentStatus,
+  clientAcceptanceLabel,
+  clientAcceptanceVariant,
   statusLabel,
   statusVariant,
 } from "@/lib/constants/statuses";
@@ -638,6 +641,36 @@ function VerdictCard({ detail }: { detail: ReviewerSubmissionDetail }) {
         </p>
       </CardHeader>
       <CardContent className="space-y-4">
+        {detail.client_acceptance &&
+        detail.client_acceptance !== "pending" ? (
+          <div className="rounded-md border border-[color:var(--border-subtle)] bg-[color:var(--surface-page)] p-4">
+            <p className="text-xs font-medium uppercase tracking-wide text-[color:var(--text-tertiary)]">
+              Decisión del cliente · aceptación
+            </p>
+            <div className="mt-1.5 flex flex-wrap items-center gap-2">
+              <Badge variant={clientAcceptanceVariant(detail.client_acceptance)}>
+                {clientAcceptanceLabel(detail.client_acceptance)}
+              </Badge>
+              {detail.client_decided_at ? (
+                <span className="text-xs text-[color:var(--text-tertiary)]">
+                  {formatDateTime(detail.client_decided_at, {
+                    dateStyle: "medium",
+                    timeStyle: "short",
+                  })}
+                </span>
+              ) : null}
+            </div>
+            {detail.client_decision_reason ? (
+              <p className="mt-2 text-sm text-[color:var(--text-secondary)]">
+                <span className="font-medium">Motivo:</span>{" "}
+                {detail.client_decision_reason}
+              </p>
+            ) : null}
+            <p className="mt-2 text-[11px] text-[color:var(--text-tertiary)]">
+              Independiente del dictamen de cumplimiento de CheckWise.
+            </p>
+          </div>
+        ) : null}
         <div className="grid gap-3 sm:grid-cols-2">
           {/* Coincidencia — is this the document we expected? */}
           <div className="rounded-md border border-[color:var(--border-subtle)] bg-[color:var(--surface-page)] p-4">

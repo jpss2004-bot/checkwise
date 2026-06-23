@@ -636,7 +636,7 @@ def apply_client_decision(
         )
     except ValueError as exc:
         raise HTTPException(
-            status_code=http_status.HTTP_422_UNPROCESSABLE_ENTITY,
+            status_code=http_status.HTTP_422_UNPROCESSABLE_CONTENT,
             detail=f"Acción de aceptación inválida: {action!r}.",
         ) from exc
 
@@ -645,7 +645,7 @@ def apply_client_decision(
     was_override = client_decision_is_override(submission.status, target_acceptance)
     if was_override and not cleaned_reason:
         raise HTTPException(
-            status_code=http_status.HTTP_422_UNPROCESSABLE_ENTITY,
+            status_code=http_status.HTTP_422_UNPROCESSABLE_CONTENT,
             detail=(
                 "Esta decisión difiere del dictamen de cumplimiento de "
                 "CheckWise; indica un motivo."

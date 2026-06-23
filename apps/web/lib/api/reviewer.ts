@@ -295,6 +295,10 @@ export type ReviewerSubmissionDetail = SubmissionDetail & {
   verification: VerificationBlock | null;
   prevalidation_evidence: PrevalidationEvidence | null;
   approval_suggestion: ApprovalSuggestion | null;
+  /** Phase 5 / Axis 2 — internal staff (unlike the provider) DO see the
+   *  client's decision reason, to reconcile their compliance verdict against
+   *  a client override. */
+  client_decision_reason?: string | null;
 };
 
 export async function getReviewerSubmission(
