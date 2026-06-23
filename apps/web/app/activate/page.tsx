@@ -165,11 +165,12 @@ function ActivateInner() {
         // there sets ``onboarding_completed_at`` and bounces them to
         // the dashboard; subsequent visits to /activate (e.g., forced
         // password rotation later) land on the dashboard directly.
-        const dest = stored.roles.includes("internal_admin")
-          ? "/admin/dashboard"
-          : stored.roles.includes("reviewer")
-            ? "/admin/reviewer"
-            : stored.roles.includes("client_admin")
+        const dest =
+          stored.roles.includes("operations_admin") ||
+          stored.roles.includes("platform_admin")
+            ? "/admin/dashboard"
+            : stored.roles.includes("client_admin") ||
+                stored.roles.includes("client_viewer")
               ? "/client/onboarding"
               : "/portal/entra-a-tu-espacio";
         setTimeout(() => router.replace(dest), 1200);

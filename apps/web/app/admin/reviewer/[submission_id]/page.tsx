@@ -64,7 +64,7 @@ type PageProps = {
   params: Promise<{ submission_id: string }>;
 };
 
-const REVIEWER_ROLES = ["reviewer", "internal_admin"] as const;
+const REVIEWER_ROLES = ["platform_admin", "operations_admin"] as const;
 const REVIEWER_RETURN_PREFIXES = [
   "/admin/reviewer",
   "/admin/vendors",

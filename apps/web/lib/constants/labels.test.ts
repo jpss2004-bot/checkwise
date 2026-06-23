@@ -13,9 +13,10 @@ import {
 
 describe("roleLabel", () => {
   it("maps known membership roles to Spanish", () => {
-    expect(roleLabel("internal_admin")).toBe("Administrador interno");
-    expect(roleLabel("reviewer")).toBe("Revisor");
-    expect(roleLabel("client_admin")).toBe("Administrador de cliente");
+    expect(roleLabel("operations_admin")).toBe("Administrador de operaciones");
+    expect(roleLabel("platform_admin")).toBe("Equipo CheckWise");
+    expect(roleLabel("client_admin")).toBe("Administrador del cliente");
+    expect(roleLabel("client_viewer")).toBe("Solo lectura");
   });
 
   it("humanises unknown role codes instead of leaking raw snake_case", () => {
@@ -23,8 +24,8 @@ describe("roleLabel", () => {
   });
 
   it("joins a list of roles", () => {
-    expect(roleLabels(["internal_admin", "reviewer"])).toBe(
-      "Administrador interno, Revisor",
+    expect(roleLabels(["operations_admin", "platform_admin"])).toBe(
+      "Administrador de operaciones, Equipo CheckWise",
     );
   });
 });

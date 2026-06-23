@@ -19,7 +19,7 @@ import {
 const LEGAL_CONSENT_EXEMPT_PATHS = new Set([
   "/portal/entra-a-tu-espacio",
 ]);
-const INTERNAL_ROLES = new Set(["internal_admin", "reviewer"]);
+const INTERNAL_ROLES = new Set(["platform_admin", "operations_admin"]);
 
 function isInternalStaff(): boolean {
   const admin = readAdminSession();

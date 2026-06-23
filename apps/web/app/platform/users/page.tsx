@@ -58,9 +58,10 @@ const PAGE_LIMIT = 50;
 type StatusFilter = "" | "active" | "disabled";
 
 const ROLE_OPTIONS = [
-  "internal_admin",
-  "reviewer",
+  "operations_admin",
+  "platform_admin",
   "client_admin",
+  "client_viewer",
   "provider",
 ] as const;
 

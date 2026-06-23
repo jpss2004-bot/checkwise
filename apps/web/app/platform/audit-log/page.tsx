@@ -67,9 +67,9 @@ const ENTITY_TYPE_SEEDS = [
 ];
 
 const ACTOR_TYPES = [
-  "internal_admin",
+  "operations_admin",
+  "platform_admin",
   "client_admin",
-  "reviewer",
   "provider",
   "system",
 ];

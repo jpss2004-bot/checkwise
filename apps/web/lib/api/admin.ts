@@ -562,12 +562,13 @@ export async function updateUserIdentity(
   });
 }
 
-/** A grantable membership role and the org kind it belongs in (Phase 4). */
+/** A grantable membership role and the org kind it belongs in.
+ *  Role-model redesign: client_admin (client) + platform_admin /
+ *  operations_admin (internal staff). */
 export type MembershipRoleCode =
   | "client_admin"
-  | "internal_admin"
-  | "reviewer"
-  | "platform_admin";
+  | "platform_admin"
+  | "operations_admin";
 
 export type AdminMembershipResponse = {
   user_id: string;

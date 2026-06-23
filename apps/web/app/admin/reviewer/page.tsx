@@ -58,7 +58,7 @@ import {
   type QueueItem,
 } from "@/lib/api/reviewer";
 
-const REVIEWER_ROLES = ["reviewer", "internal_admin"] as const;
+const REVIEWER_ROLES = ["platform_admin", "operations_admin"] as const;
 
 // Audit fix 2026-06-10 — the queue used to cap at the backend's default
 // 50 rows with no hint that more existed. We now request the backend
