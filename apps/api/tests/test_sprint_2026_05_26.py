@@ -1035,7 +1035,7 @@ def test_admin_users_provisions_client_with_temp_password(
     flips ``must_change_password`` so the recipient is forced through
     ``/activate`` on first login, and wires up the
     Client+Organization+Membership stack."""
-    email, pw = _seed_user(db_factory, role="internal_admin", email_prefix="adm")
+    email, pw = _seed_user(db_factory, role="operations_admin", email_prefix="adm")
     token = _login(api_client, email, pw)
 
     resp = api_client.post(
@@ -1112,7 +1112,7 @@ def test_admin_users_provisions_provider_with_workspace(
     requested parent client. No Membership/Organization for providers
     — the existing portal cookie path is the auth carrier inside
     /portal."""
-    email, pw = _seed_user(db_factory, role="internal_admin", email_prefix="adm")
+    email, pw = _seed_user(db_factory, role="operations_admin", email_prefix="adm")
     token = _login(api_client, email, pw)
     parent_client_id = _seed_client(db_factory, "Parent Client")
 
@@ -1180,7 +1180,7 @@ def test_admin_users_provisions_internal_admin(
     User stack and binds an internal_admin Membership on the shared
     internal organisation — no Client/Vendor. Re-running reuses the
     same internal org rather than creating a duplicate."""
-    email, pw = _seed_user(db_factory, role="internal_admin", email_prefix="adm")
+    email, pw = _seed_user(db_factory, role="operations_admin", email_prefix="adm")
     token = _login(api_client, email, pw)
 
     resp = api_client.post(
@@ -1219,7 +1219,10 @@ def test_admin_users_provisions_internal_admin(
             select(Membership).where(Membership.user_id == user.id)
         )
         assert membership is not None
-        assert membership.role == "internal_admin"
+        # Role-model redesign: provisioning role="admin" mints a
+        # platform_admin (CheckWise review team); the superadmin
+        # (operations_admin) is migration-granted, not provisioned here.
+        assert membership.role == "platform_admin"
         assert membership.organization_id == org.id
 
         audit = db.scalar(
@@ -1249,7 +1252,7 @@ def test_admin_users_provisions_internal_admin(
 def test_admin_users_provider_requires_parent_client(
     api_client: TestClient, db_factory
 ) -> None:
-    email, pw = _seed_user(db_factory, role="internal_admin", email_prefix="adm")
+    email, pw = _seed_user(db_factory, role="operations_admin", email_prefix="adm")
     token = _login(api_client, email, pw)
     resp = api_client.post(
         "/api/v1/admin/users",
@@ -1268,7 +1271,7 @@ def test_admin_users_provider_requires_parent_client(
 def test_admin_users_rejects_duplicate_email(
     api_client: TestClient, db_factory
 ) -> None:
-    email, pw = _seed_user(db_factory, role="internal_admin", email_prefix="adm")
+    email, pw = _seed_user(db_factory, role="operations_admin", email_prefix="adm")
     token = _login(api_client, email, pw)
     payload = {
         "full_name": "Persona Uno",
@@ -1412,7 +1415,7 @@ def test_internal_admin_can_load_vendor_detail_without_client_id_param(
         db_factory, client_id=client_id
     )
     email, pw = _seed_user(
-        db_factory, role="internal_admin", email_prefix="adm"
+        db_factory, role="operations_admin", email_prefix="adm"
     )
     token = _login(api_client, email, pw)
 
@@ -1473,7 +1476,7 @@ def test_reviewer_queue_surfaces_vendor_id_and_client_id(
         status_value=DocumentStatus.PENDIENTE_REVISION.value,
     )
     email, pw = _seed_user(
-        db_factory, role="internal_admin", email_prefix="rev-adm"
+        db_factory, role="operations_admin", email_prefix="rev-adm"
     )
     token = _login(api_client, email, pw)
 

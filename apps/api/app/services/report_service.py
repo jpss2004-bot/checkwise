@@ -45,7 +45,7 @@ from app.constants.reports import (
     ReportStatus,
     ReportVersionOrigin,
 )
-from app.constants.roles import MembershipRole
+from app.constants.roles import STAFF_ROLES, MembershipRole
 from app.models.entities import (
     Membership,
     Organization,
@@ -109,15 +109,12 @@ class ReportActor:
 
     @property
     def is_internal(self) -> bool:
-        """True for internal staff: internal_admin OR reviewer.
+        """True for CheckWise staff: the review team (platform_admin) or
+        the superadmin (operations_admin).
 
-        Internal staff cross-organization access matches the existing
-        admin/reviewer endpoints.
+        Staff cross-organization access matches the admin/review endpoints.
         """
-        return (
-            MembershipRole.INTERNAL_ADMIN in self.roles
-            or MembershipRole.REVIEWER in self.roles
-        )
+        return bool(STAFF_ROLES & {str(r) for r in self.roles})
 
     @property
     def is_workspace_owner(self) -> bool:

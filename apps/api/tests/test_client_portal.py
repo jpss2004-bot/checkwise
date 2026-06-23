@@ -291,13 +291,16 @@ def test_client_overview_unauthenticated_returns_401(api_client: TestClient) -> 
     assert resp.status_code == 401
 
 
-def test_client_overview_rejects_reviewer_only(
+def test_client_overview_allows_staff_cross_tenant(
     api_client: TestClient, db_factory
 ) -> None:
-    _, email, pw = _seed_user_with_role(db_factory, role="reviewer", email_prefix="rev")
+    """Role-model redesign: CheckWise staff (platform_admin) have audited
+    cross-tenant break-glass read access to the client portal, so the gate
+    no longer denies them (a missing client_id is a 400, never a 403)."""
+    _, email, pw = _seed_user_with_role(db_factory, role="platform_admin", email_prefix="rev")
     token = _login(api_client, email, pw)
     resp = api_client.get("/api/v1/client/overview", headers=_h(token))
-    assert resp.status_code == 403
+    assert resp.status_code != 403, resp.text
 
 
 def test_client_overview_rejects_user_with_no_role(
@@ -351,7 +354,7 @@ def test_internal_admin_can_inspect_with_explicit_client_id(
     client_id = _seed_client(db_factory, "Cliente Inspeccionado")
     _seed_vendor_with_workspace(db_factory, client_id=client_id)
     _, email, pw = _seed_user_with_role(
-        db_factory, role="internal_admin", email_prefix="adm"
+        db_factory, role="operations_admin", email_prefix="adm"
     )
     token = _login(api_client, email, pw)
     # Without client_id and without a client_admin membership, expect a 400.
@@ -1346,7 +1349,7 @@ def test_admin_vendor_expediente_zip_returns_documents(
     assert ws_id  # quiet F841
 
     _, email, pw = _seed_user_with_role(
-        db_factory, role="internal_admin", email_prefix="adm"
+        db_factory, role="operations_admin", email_prefix="adm"
     )
     token = _login(api_client, email, pw)
 
@@ -1377,7 +1380,10 @@ def test_admin_vendor_expediente_zip_denies_non_admin(
     client_id = _seed_client(db_factory)
     vendor_id, _ = _seed_vendor_with_workspace(db_factory, client_id=client_id)
 
-    for role, prefix in (("reviewer", "rev"), ("client_admin", "ca")):
+    # platform_admin is now CheckWise staff (admin-side), so it is NOT a
+    # "non-admin" here; only a client-side role (client_admin) must be
+    # denied this admin/cross-tenant endpoint.
+    for role, prefix in (("client_admin", "ca"),):
         kwargs: dict = {"role": role, "email_prefix": prefix}
         if role == "client_admin":
             kwargs["client_id"] = client_id
@@ -1403,7 +1409,7 @@ def test_admin_vendor_expediente_zip_writes_audit(
     vendor_id, ws_id = _seed_vendor_with_workspace(db_factory, client_id=client_id)
     _seed_submission_for_workspace(api_client, db_factory, ws_id)
     _, email, pw = _seed_user_with_role(
-        db_factory, role="internal_admin", email_prefix="adm"
+        db_factory, role="operations_admin", email_prefix="adm"
     )
     token = _login(api_client, email, pw)
 
@@ -1422,7 +1428,7 @@ def test_admin_vendor_expediente_zip_writes_audit(
         )
         assert len(events) == 1
         event = events[0]
-        assert event.actor_type == "internal_admin"
+        assert event.actor_type == "operations_admin"
         meta = event.event_metadata or {}
         assert meta.get("scope") == "admin_vendor"
         assert meta.get("vendor_id") == vendor_id
@@ -1437,7 +1443,7 @@ def test_admin_vendor_expediente_zip_404_for_unknown_vendor(
     api_client: TestClient, db_factory
 ) -> None:
     _, email, pw = _seed_user_with_role(
-        db_factory, role="internal_admin", email_prefix="adm"
+        db_factory, role="operations_admin", email_prefix="adm"
     )
     token = _login(api_client, email, pw)
     resp = api_client.get(
@@ -1471,7 +1477,7 @@ def test_admin_vendor_expediente_zip_404_when_no_workspace(
         db.close()
 
     _, email, pw = _seed_user_with_role(
-        db_factory, role="internal_admin", email_prefix="adm"
+        db_factory, role="operations_admin", email_prefix="adm"
     )
     token = _login(api_client, email, pw)
     resp = api_client.get(
@@ -1786,16 +1792,18 @@ def test_client_audit_package_denies_non_client_admin(
     resp = api_client.get("/api/v1/client/audit-package.zip")
     assert resp.status_code == 401
 
-    # Reviewer (wrong role) → 403 from /client/* guard.
+    # CheckWise staff (platform_admin) now have audited cross-tenant
+    # break-glass read, so the /client/* guard allows them past auth
+    # (missing client_id → 400, never a 403 gate denial).
     _, email, pw = _seed_user_with_role(
-        db_factory, role="reviewer", email_prefix="rev"
+        db_factory, role="platform_admin", email_prefix="rev"
     )
     token = _login(api_client, email, pw)
     resp = api_client.get(
         "/api/v1/client/audit-package.zip",
         headers=_h(token),
     )
-    assert resp.status_code == 403
+    assert resp.status_code != 403
 
 
 def test_client_audit_package_preview_filters_by_institution(
@@ -2026,15 +2034,17 @@ def test_client_profile_denies_non_client_admin(
     resp = api_client.get("/api/v1/client/profile")
     assert resp.status_code == 401
 
+    # CheckWise staff (platform_admin) have cross-tenant break-glass read,
+    # so the guard allows them past auth (missing client_id → 400, not 403).
     _, email, pw = _seed_user_with_role(
-        db_factory, role="reviewer", email_prefix="rev"
+        db_factory, role="platform_admin", email_prefix="rev"
     )
     token = _login(api_client, email, pw)
     resp = api_client.get(
         "/api/v1/client/profile",
         headers=_h(token),
     )
-    assert resp.status_code == 403
+    assert resp.status_code != 403
 
 
 # ---------------------------------------------------------------------------

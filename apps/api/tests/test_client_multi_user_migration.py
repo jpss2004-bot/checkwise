@@ -123,7 +123,7 @@ def test_backfill_promotes_oldest_active_client_admin_per_org():
         # Internal org — untouched even though the role string matches
         # nothing; also guard a stray client_admin row on it.
         _org(conn, "org-i", "internal")
-        _member(conn, "i-admin", "org-i", role="internal_admin")
+        _member(conn, "i-admin", "org-i", role="operations_admin")
         _member(conn, "i-stray", "org-i", role="client_admin")
 
     with engine.begin() as conn:

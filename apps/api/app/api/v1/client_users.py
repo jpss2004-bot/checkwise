@@ -47,7 +47,7 @@ from sqlalchemy.orm import Session
 
 from app.api.v1.auth import CurrentUser
 from app.api.v1.client import ClientUser, DbSession, _resolve_client_id
-from app.constants.roles import MembershipRole
+from app.constants.roles import STAFF_ROLES, MembershipRole
 from app.core.config import settings
 from app.core.rate_limit import client_ip_from_request
 from app.models import Client, Membership, Organization, PasswordHistory, User
@@ -81,11 +81,17 @@ def _request_ctx(request: Request) -> dict:
 
 
 def _is_internal(current: CurrentUser) -> bool:
-    return MembershipRole.INTERNAL_ADMIN.value in current.roles
+    """True for CheckWise staff (review team or superadmin) — they get
+    cross-tenant support access to client seat management."""
+    return bool(STAFF_ROLES & set(current.roles))
 
 
 def _actor_type(current: CurrentUser) -> str:
-    return "internal_admin" if _is_internal(current) else "client_admin"
+    if MembershipRole.OPERATIONS_ADMIN.value in current.roles:
+        return MembershipRole.OPERATIONS_ADMIN.value
+    if MembershipRole.PLATFORM_ADMIN.value in current.roles:
+        return MembershipRole.PLATFORM_ADMIN.value
+    return MembershipRole.CLIENT_ADMIN.value
 
 
 def _org_for_client(

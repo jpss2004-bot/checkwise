@@ -162,7 +162,7 @@ def _seed_internal_admin(db_factory) -> dict:
             Membership(
                 user_id=user.id,
                 organization_id=org.id,
-                role="internal_admin",
+                role="operations_admin",
                 status="active",
             )
         )
@@ -554,7 +554,7 @@ def test_internal_admin_cross_tenant_access_is_audited(db_factory, api_client):
     # …collapse to a single row, attributed to the staff member.
     assert len(rows) == 1, rows
     assert rows[0].actor_id == staff["user_id"]
-    assert rows[0].actor_type == "internal_admin"
+    assert rows[0].actor_type == "operations_admin"
     assert rows[0].entity_type == "client"
 
 

@@ -154,7 +154,7 @@ def test_safety_cross_tenant_plan_blocked_at_endpoint(
     pw_a, email_a, _ = _seed(db_factory, email="a@safety.test", role="client_admin", org_kind="client", org_name="Cliente A")
     pw_b, email_b, org_b = _seed(db_factory, email="b@safety.test", role="client_admin", org_kind="client", org_name="Cliente B")
     pw_admin, email_admin, _ = _seed(
-        db_factory, email="admin@safety.test", role="internal_admin", org_name="Staff"
+        db_factory, email="admin@safety.test", role="operations_admin", org_name="Staff"
     )
 
     admin_token = _login(api_client, email_admin, pw_admin)
@@ -224,13 +224,13 @@ def test_safety_user_prompt_cannot_override_audience(db_factory) -> None:
     plan's audience. The audience comes from the report row + the
     Context Assembler, never from prompt content."""
     pw, email, org_id = _seed(
-        db_factory, email="inj@safety.test", role="internal_admin"
+        db_factory, email="inj@safety.test", role="operations_admin"
     )
 
     actor = ReportActor(
         user_id="injection-test",
         organization_ids=(org_id,),
-        roles=("internal_admin",),
+        roles=("operations_admin",),
     )
     scope = ReportScope(
         organization_id=org_id,
@@ -262,10 +262,10 @@ def test_safety_user_prompt_data_is_delimited(db_factory) -> None:
     """The user prompt lands inside <user_request> delimiters in the
     actual message we send. Indirect test: we record what the mock
     received and assert the delimiters are present."""
-    pw, email, org_id = _seed(db_factory, email="d@safety.test", role="internal_admin")
+    pw, email, org_id = _seed(db_factory, email="d@safety.test", role="operations_admin")
 
     actor = ReportActor(
-        user_id="x", organization_ids=(org_id,), roles=("internal_admin",)
+        user_id="x", organization_ids=(org_id,), roles=("operations_admin",)
     )
     scope = ReportScope(organization_id=org_id, audience=ReportAudience.INTERNAL_ONLY)
 
@@ -307,10 +307,10 @@ def test_safety_unknown_block_type_dropped(db_factory) -> None:
     """If the model fabricates a block type, the planner drops it
     silently. The plan must not contain it. Falls back to the safety-
     net plan if every emitted block was bogus."""
-    pw, email, org_id = _seed(db_factory, email="u@safety.test", role="internal_admin")
+    pw, email, org_id = _seed(db_factory, email="u@safety.test", role="operations_admin")
 
     actor = ReportActor(
-        user_id="x", organization_ids=(org_id,), roles=("internal_admin",)
+        user_id="x", organization_ids=(org_id,), roles=("operations_admin",)
     )
     scope = ReportScope(organization_id=org_id, audience=ReportAudience.INTERNAL_ONLY)
 
@@ -349,10 +349,10 @@ def test_safety_invalid_block_config_dropped(db_factory) -> None:
     """If the model emits a known block with config that fails the
     catalog's JSON Schema, the planner drops it. Same safety-net
     fallback behavior."""
-    pw, email, org_id = _seed(db_factory, email="b@safety.test", role="internal_admin")
+    pw, email, org_id = _seed(db_factory, email="b@safety.test", role="operations_admin")
 
     actor = ReportActor(
-        user_id="x", organization_ids=(org_id,), roles=("internal_admin",)
+        user_id="x", organization_ids=(org_id,), roles=("operations_admin",)
     )
     scope = ReportScope(organization_id=org_id, audience=ReportAudience.INTERNAL_ONLY)
 
@@ -399,7 +399,7 @@ def test_safety_invalid_block_config_dropped(db_factory) -> None:
 def test_safety_pii_stripped_for_client_facing(db_factory) -> None:
     """A client_facing scope summary must not carry the vendor name
     (PII) in the snapshot data_json. internal_only keeps it."""
-    pw, email, org_id = _seed(db_factory, email="r@safety.test", role="internal_admin")
+    pw, email, org_id = _seed(db_factory, email="r@safety.test", role="operations_admin")
 
     # Seed a real client + vendor for label lookups to be meaningful.
     db = db_factory()
@@ -415,7 +415,7 @@ def test_safety_pii_stripped_for_client_facing(db_factory) -> None:
         db.close()
 
     actor = ReportActor(
-        user_id="x", organization_ids=(org_id,), roles=("internal_admin",)
+        user_id="x", organization_ids=(org_id,), roles=("operations_admin",)
     )
 
     # internal_only: label present.
@@ -470,10 +470,10 @@ def test_safety_snapshot_hash_stable_for_same_input(db_factory) -> None:
     """The snapshot data_hash is a stable function of the payload —
     same scope + same data → same hash. Lets us cache plans + detect
     drift between regenerations."""
-    pw, email, org_id = _seed(db_factory, email="h@safety.test", role="internal_admin")
+    pw, email, org_id = _seed(db_factory, email="h@safety.test", role="operations_admin")
 
     actor = ReportActor(
-        user_id="x", organization_ids=(org_id,), roles=("internal_admin",)
+        user_id="x", organization_ids=(org_id,), roles=("operations_admin",)
     )
     scope = ReportScope(organization_id=org_id, audience=ReportAudience.INTERNAL_ONLY)
 

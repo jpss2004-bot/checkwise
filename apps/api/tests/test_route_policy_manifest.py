@@ -57,14 +57,14 @@ _TBD_PREFIX = "TBD —"
 # Canonical set of permitted ``gate`` values. Reject typos.
 _ALLOWED_GATES = frozenset(
     {
-        "internal_admin",
-        "platform_admin_or_admin",
-        "client_admin_or_admin",
-        "client_read_or_admin",
-        "reviewer_or_admin",
+        # Role-model redesign vocabulary.
+        "platform_admin_or_ops",  # CheckWise staff: review team + superadmin
+        "operations_admin",  # superadmin-only (user/role mgmt, feedback)
+        "client_admin_or_staff",  # client Approver + staff (write)
+        "client_read_or_staff",  # client read/export + staff
+        "local_or_staff",
         "provider_workspace",
         "authenticated_jwt",
-        "local_or_internal_admin",
         "public_health",
         "public_catalog",
         "public_with_rate_limit",
@@ -250,19 +250,19 @@ def _expected_gate_from_deps(deps: set[str], path: str) -> str | None:
     the manifest).
     """
     if "AdminUser" in deps:
-        return "internal_admin"
+        return "platform_admin_or_ops"
     if "PlatformUser" in deps:
-        return "platform_admin_or_admin"
+        return "operations_admin"
     if "ReviewerDep" in deps:
-        return "reviewer_or_admin"
+        return "platform_admin_or_ops"
     if "ClientApprover" in deps:
-        return "client_admin_or_admin"
+        return "client_admin_or_staff"
     if "ClientUser" in deps:
-        return "client_read_or_admin"
+        return "client_read_or_staff"
     if "current_portal_workspace" in deps:
         return "provider_workspace"
     if "require_local_or_internal_admin" in deps:
-        return "local_or_internal_admin"
+        return "local_or_staff"
     if {"get_current_user", "CurrentUser"} & deps:
         return "authenticated_jwt"
     if path.startswith("/api/v1/health"):

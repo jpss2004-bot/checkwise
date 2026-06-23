@@ -119,7 +119,7 @@ def _seed_minimal_report(
             Membership(
                 user_id=user.id,
                 organization_id=org.id,
-                role="internal_admin",
+                role="operations_admin",
                 status="active",
             )
         )

@@ -75,7 +75,7 @@ def _seed_user(
     full_name: str = "Ada Legal",
     org_name: str = "LegalShelf",
     org_kind: str = "internal",
-    role: str = "internal_admin",
+    role: str = "operations_admin",
     status: str = "active",
 ) -> tuple[str, str, str]:
     """Inserts an Organization + User + Membership. Returns
@@ -122,12 +122,12 @@ def test_hash_and_verify_password_roundtrip() -> None:
 
 def test_issue_and_decode_token_carries_roles_and_orgs() -> None:
     token = issue_access_token(
-        user_id="u1", email="x@y.mx", roles=["internal_admin"], orgs=["o1"]
+        user_id="u1", email="x@y.mx", roles=["operations_admin"], orgs=["o1"]
     )
     claims = decode_access_token(token)
     assert claims.user_id == "u1"
     assert claims.email == "x@y.mx"
-    assert claims.roles == ("internal_admin",)
+    assert claims.roles == ("operations_admin",)
     assert claims.orgs == ("o1",)
     assert claims.expires_at > claims.issued_at
 
@@ -168,7 +168,7 @@ def test_login_happy_path(api_client: TestClient, db_factory) -> None:
     assert payload["access_token"]
     assert payload["token_type"] == "Bearer"
     assert payload["user"]["email"] == "ada@legalshelf.mx"
-    assert payload["roles"] == ["internal_admin"]
+    assert payload["roles"] == ["operations_admin"]
     assert len(payload["organization_ids"]) == 1
 
 
@@ -243,7 +243,7 @@ def test_me_returns_current_user(api_client: TestClient, db_factory) -> None:
     assert response.status_code == 200, response.text
     payload = response.json()
     assert payload["user"]["email"] == "ada@legalshelf.mx"
-    assert payload["roles"] == ["internal_admin"]
+    assert payload["roles"] == ["operations_admin"]
     assert payload["organization_ids"] == [org_id]
 
 
@@ -272,9 +272,9 @@ def test_me_non_bearer_scheme_returns_401(api_client: TestClient) -> None:
 # ---------------------------------------------------------------------------
 
 
-_AdminDep = Annotated[CurrentUser, Depends(require_role("internal_admin"))]
-_ReviewerDep = Annotated[CurrentUser, Depends(require_role("reviewer"))]
-_OrgAdminDep = Annotated[CurrentUser, Depends(require_org_role("internal_admin"))]
+_AdminDep = Annotated[CurrentUser, Depends(require_role("operations_admin"))]
+_ReviewerDep = Annotated[CurrentUser, Depends(require_role("platform_admin"))]
+_OrgAdminDep = Annotated[CurrentUser, Depends(require_org_role("operations_admin"))]
 
 
 def _build_rbac_app(db_factory) -> TestClient:

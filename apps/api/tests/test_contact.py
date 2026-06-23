@@ -319,7 +319,7 @@ def _seed_admin_user(db_factory) -> str:
             Membership(
                 user_id=user.id,
                 organization_id=org.id,
-                role=MembershipRole.INTERNAL_ADMIN.value,
+                role=MembershipRole.OPERATIONS_ADMIN.value,
                 status="active",
             )
         )
@@ -327,7 +327,7 @@ def _seed_admin_user(db_factory) -> str:
         token = issue_access_token(
             user_id=user.id,
             email=user.email,
-            roles=[MembershipRole.INTERNAL_ADMIN.value],
+            roles=[MembershipRole.OPERATIONS_ADMIN.value],
             orgs=[org.id],
         )
     return token

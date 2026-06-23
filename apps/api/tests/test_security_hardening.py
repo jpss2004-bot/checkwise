@@ -147,7 +147,7 @@ def test_legacy_submissions_internal_admin_allowed_in_production(
         membership = Membership(
             user_id=user.id,
             organization_id=org.id,
-            role="internal_admin",
+            role="operations_admin",
             status="active",
         )
         db.add(membership)
@@ -155,7 +155,7 @@ def test_legacy_submissions_internal_admin_allowed_in_production(
         token = issue_access_token(
             user_id=user.id,
             email=user.email,
-            roles=["internal_admin"],
+            roles=["operations_admin"],
             orgs=[org.id],
         )
     finally:

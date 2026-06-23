@@ -58,7 +58,7 @@ _ADMIN_DAILY_QUEUE = ReportPreset(
         "vencimientos próximos y tiempo medio de revisión."
     ),
     audience=ReportAudience.INTERNAL_ONLY,
-    required_roles=(MembershipRole.INTERNAL_ADMIN, MembershipRole.REVIEWER),
+    required_roles=(MembershipRole.PLATFORM_ADMIN, MembershipRole.OPERATIONS_ADMIN),
     recommended_prompt=(
         "Genera un reporte operativo del día con: un resumen ejecutivo del "
         "estado de la bandeja, un KPI strip con documentos en revisión, "
@@ -76,7 +76,7 @@ _ADMIN_HIGH_RISK_VENDORS = ReportPreset(
         "y obligaciones SAT / IMSS / INFONAVIT / STPS-REPSE en riesgo."
     ),
     audience=ReportAudience.INTERNAL_ONLY,
-    required_roles=(MembershipRole.INTERNAL_ADMIN, MembershipRole.REVIEWER),
+    required_roles=(MembershipRole.PLATFORM_ADMIN, MembershipRole.OPERATIONS_ADMIN),
     recommended_prompt=(
         "Genera un reporte de proveedores en riesgo: empieza con un resumen "
         "ejecutivo enfocado en riesgo, incluye un KPI strip con número total "
@@ -96,7 +96,7 @@ _ADMIN_MONTHLY_OPERATIONAL = ReportPreset(
         "evolución, proveedores en riesgo y recomendaciones."
     ),
     audience=ReportAudience.INTERNAL_ONLY,
-    required_roles=(MembershipRole.INTERNAL_ADMIN, MembershipRole.REVIEWER),
+    required_roles=(MembershipRole.PLATFORM_ADMIN, MembershipRole.OPERATIONS_ADMIN),
     recommended_prompt=(
         "Genera un reporte mensual operativo de cumplimiento. Si el "
         "reporte está acotado a un cliente, ABRE con un bloque "
@@ -128,7 +128,11 @@ _CLIENT_MONTHLY_EXECUTIVE = ReportPreset(
         "dirección."
     ),
     audience=ReportAudience.CLIENT_FACING,
-    required_roles=(MembershipRole.CLIENT_ADMIN, MembershipRole.INTERNAL_ADMIN),
+    required_roles=(
+        MembershipRole.CLIENT_ADMIN,
+        MembershipRole.PLATFORM_ADMIN,
+        MembershipRole.OPERATIONS_ADMIN,
+    ),
     recommended_prompt=(
         # M4/M5 (2026-06-02) — Reportes redesign. Be EXTREMELY
         # explicit: enumerate the blocks the cliente surface needs
@@ -189,7 +193,11 @@ _CLIENT_VENDOR_RISK_MATRIX = ReportPreset(
         "de riesgo y obligaciones SAT / IMSS / INFONAVIT / STPS-REPSE."
     ),
     audience=ReportAudience.CLIENT_FACING,
-    required_roles=(MembershipRole.CLIENT_ADMIN, MembershipRole.INTERNAL_ADMIN),
+    required_roles=(
+        MembershipRole.CLIENT_ADMIN,
+        MembershipRole.PLATFORM_ADMIN,
+        MembershipRole.OPERATIONS_ADMIN,
+    ),
     recommended_prompt=(
         "Genera una matriz de riesgo de proveedores del portafolio: "
         "un resumen ejecutivo enfocado en riesgo, un KPI strip con "
@@ -210,7 +218,11 @@ _CLIENT_MISSING_EVIDENCE = ReportPreset(
         "proveedor y obligación."
     ),
     audience=ReportAudience.CLIENT_FACING,
-    required_roles=(MembershipRole.CLIENT_ADMIN, MembershipRole.INTERNAL_ADMIN),
+    required_roles=(
+        MembershipRole.CLIENT_ADMIN,
+        MembershipRole.PLATFORM_ADMIN,
+        MembershipRole.OPERATIONS_ADMIN,
+    ),
     recommended_prompt=(
         "Genera un reporte de documentos faltantes del portafolio: "
         "resumen ejecutivo enfocado en expediente, KPI strip con "
@@ -233,7 +245,11 @@ _CLIENT_VENDOR_DETAIL = ReportPreset(
         "vencimientos."
     ),
     audience=ReportAudience.CLIENT_FACING,
-    required_roles=(MembershipRole.CLIENT_ADMIN, MembershipRole.INTERNAL_ADMIN),
+    required_roles=(
+        MembershipRole.CLIENT_ADMIN,
+        MembershipRole.PLATFORM_ADMIN,
+        MembershipRole.OPERATIONS_ADMIN,
+    ),
     recommended_prompt=(
         "Genera un reporte VISUAL enfocado en UN solo proveedor (el "
         "vendor_id del alcance). Empieza con un bloque compliance_state "

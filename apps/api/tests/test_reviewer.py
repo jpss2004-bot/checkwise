@@ -282,7 +282,7 @@ def test_queue_denies_user_without_reviewer_or_admin(
 
 
 def test_queue_accepts_reviewer_role(api_client: TestClient, db_factory) -> None:
-    _seed_user(db_factory, email="rev@x.mx", role="reviewer")
+    _seed_user(db_factory, email="rev@x.mx", role="platform_admin")
     token = _login(api_client, "rev@x.mx", "Hunter2 Correct horse")
     response = api_client.get(
         "/api/v1/reviewer/queue", headers={"Authorization": f"Bearer {token}"}
@@ -291,7 +291,7 @@ def test_queue_accepts_reviewer_role(api_client: TestClient, db_factory) -> None
 
 
 def test_queue_accepts_internal_admin_role(api_client: TestClient, db_factory) -> None:
-    _seed_user(db_factory, email="adm@x.mx", role="internal_admin")
+    _seed_user(db_factory, email="adm@x.mx", role="operations_admin")
     token = _login(api_client, "adm@x.mx", "Hunter2 Correct horse")
     response = api_client.get(
         "/api/v1/reviewer/queue", headers={"Authorization": f"Bearer {token}"}
@@ -307,7 +307,7 @@ def test_queue_accepts_internal_admin_role(api_client: TestClient, db_factory) -
 def test_queue_returns_only_review_states(
     api_client: TestClient, db_factory
 ) -> None:
-    _seed_user(db_factory, email="rev@x.mx", role="reviewer")
+    _seed_user(db_factory, email="rev@x.mx", role="platform_admin")
     token = _login(api_client, "rev@x.mx", "Hunter2 Correct horse")
 
     in_queue_id = _seed_submission(db_factory, status_="pendiente_revision")
@@ -335,7 +335,7 @@ def test_queue_returns_only_review_states(
 
 
 def test_queue_orders_oldest_first(api_client: TestClient, db_factory) -> None:
-    _seed_user(db_factory, email="rev@x.mx", role="reviewer")
+    _seed_user(db_factory, email="rev@x.mx", role="platform_admin")
     token = _login(api_client, "rev@x.mx", "Hunter2 Correct horse")
     newer = _seed_submission(db_factory, age_hours=1, period_key="2026-M01")
     older = _seed_submission(db_factory, age_hours=48, period_key="2026-M02")
@@ -351,7 +351,7 @@ def test_queue_orders_oldest_first(api_client: TestClient, db_factory) -> None:
 
 
 def test_queue_filter_by_status(api_client: TestClient, db_factory) -> None:
-    _seed_user(db_factory, email="rev@x.mx", role="reviewer")
+    _seed_user(db_factory, email="rev@x.mx", role="platform_admin")
     token = _login(api_client, "rev@x.mx", "Hunter2 Correct horse")
     _seed_submission(db_factory, status_="pendiente_revision", period_key="2026-M01")
     mismatch_id = _seed_submission(
@@ -371,7 +371,7 @@ def test_queue_filter_by_mismatch_only(api_client: TestClient, db_factory) -> No
     """``mismatch_only=true`` narrows to rows whose inspection flagged a
     non-empty mismatch reason, and the ``total`` reflects only those rows —
     the tab is a real server filter, not a client-side pass over loaded rows."""
-    _seed_user(db_factory, email="rev@x.mx", role="reviewer")
+    _seed_user(db_factory, email="rev@x.mx", role="platform_admin")
     token = _login(api_client, "rev@x.mx", "Hunter2 Correct horse")
     flagged_id = _seed_submission(
         db_factory,
@@ -395,7 +395,7 @@ def test_queue_filter_by_mismatch_only(api_client: TestClient, db_factory) -> No
 
 
 def test_queue_filter_by_institution(api_client: TestClient, db_factory) -> None:
-    _seed_user(db_factory, email="rev@x.mx", role="reviewer")
+    _seed_user(db_factory, email="rev@x.mx", role="platform_admin")
     token = _login(api_client, "rev@x.mx", "Hunter2 Correct horse")
     sat_id = _seed_submission(
         db_factory, institution_code="sat", period_key="2026-M01"
@@ -414,7 +414,7 @@ def test_queue_filter_by_institution(api_client: TestClient, db_factory) -> None
 
 
 def test_queue_filters_by_client_and_vendor(api_client: TestClient, db_factory) -> None:
-    _seed_user(db_factory, email="rev@x.mx", role="reviewer")
+    _seed_user(db_factory, email="rev@x.mx", role="platform_admin")
     token = _login(api_client, "rev@x.mx", "Hunter2 Correct horse")
     first_id = _seed_submission(db_factory, period_key="2026-M01")
     second_id = _seed_submission(db_factory, period_key="2026-M02")
@@ -448,7 +448,7 @@ def test_queue_filters_by_client_and_vendor(api_client: TestClient, db_factory) 
 def test_queue_facets_are_scoped_to_actionable_rows(
     api_client: TestClient, db_factory
 ) -> None:
-    _seed_user(db_factory, email="rev@x.mx", role="reviewer")
+    _seed_user(db_factory, email="rev@x.mx", role="platform_admin")
     token = _login(api_client, "rev@x.mx", "Hunter2 Correct horse")
     actionable_id = _seed_submission(db_factory, period_key="2026-M01")
     terminal_id = _seed_submission(
@@ -488,7 +488,7 @@ def test_queue_facets_client_scoped_includes_idle_providers(
     including one with no queue item — sourced from the Vendor↔Client link,
     not just providers that happen to have an actionable submission. Without a
     client selected the list stays actionable-scoped (bounded)."""
-    _seed_user(db_factory, email="rev@x.mx", role="reviewer")
+    _seed_user(db_factory, email="rev@x.mx", role="platform_admin")
     token = _login(api_client, "rev@x.mx", "Hunter2 Correct horse")
     actionable_id = _seed_submission(db_factory, period_key="2026-M01")
 
@@ -549,7 +549,7 @@ _SAMPLE_FORENSICS = {"producer": "Canva", "eof_count": 1, "has_javascript": Fals
 
 
 def test_queue_exposes_authenticity_risk(api_client: TestClient, db_factory) -> None:
-    _seed_user(db_factory, email="rev@x.mx", role="reviewer")
+    _seed_user(db_factory, email="rev@x.mx", role="platform_admin")
     token = _login(api_client, "rev@x.mx", "Hunter2 Correct horse")
     flagged_id = _seed_submission(
         db_factory, period_key="2026-M01", authenticity_risk="high_risk"
@@ -567,7 +567,7 @@ def test_queue_exposes_authenticity_risk(api_client: TestClient, db_factory) -> 
 
 
 def test_queue_filters_by_risk(api_client: TestClient, db_factory) -> None:
-    _seed_user(db_factory, email="rev@x.mx", role="reviewer")
+    _seed_user(db_factory, email="rev@x.mx", role="platform_admin")
     token = _login(api_client, "rev@x.mx", "Hunter2 Correct horse")
     _seed_submission(db_factory, period_key="2026-M01", authenticity_risk="clean")
     risky_id = _seed_submission(
@@ -589,7 +589,7 @@ def test_queue_filters_by_risk(api_client: TestClient, db_factory) -> None:
 def test_queue_exposes_and_filters_by_rfc_alignment(
     api_client: TestClient, db_factory
 ) -> None:
-    _seed_user(db_factory, email="rev@x.mx", role="reviewer")
+    _seed_user(db_factory, email="rev@x.mx", role="platform_admin")
     token = _login(api_client, "rev@x.mx", "Hunter2 Correct horse")
     _seed_submission(db_factory, period_key="2026-M01", rfc_alignment="match")
     mismatch_id = _seed_submission(
@@ -614,7 +614,7 @@ def test_queue_exposes_and_filters_by_rfc_alignment(
 def test_queue_rejects_unknown_risk_value(
     api_client: TestClient, db_factory
 ) -> None:
-    _seed_user(db_factory, email="rev@x.mx", role="reviewer")
+    _seed_user(db_factory, email="rev@x.mx", role="platform_admin")
     token = _login(api_client, "rev@x.mx", "Hunter2 Correct horse")
     response = api_client.get(
         "/api/v1/reviewer/queue",
@@ -627,7 +627,7 @@ def test_queue_rejects_unknown_risk_value(
 def test_detail_includes_authenticity_block(
     api_client: TestClient, db_factory
 ) -> None:
-    _seed_user(db_factory, email="rev@x.mx", role="reviewer")
+    _seed_user(db_factory, email="rev@x.mx", role="platform_admin")
     token = _login(api_client, "rev@x.mx", "Hunter2 Correct horse")
     submission_id = _seed_submission(
         db_factory,
@@ -652,7 +652,7 @@ def test_detail_includes_authenticity_block(
 def test_detail_authenticity_unanalyzed_for_legacy_rows(
     api_client: TestClient, db_factory
 ) -> None:
-    _seed_user(db_factory, email="rev@x.mx", role="reviewer")
+    _seed_user(db_factory, email="rev@x.mx", role="platform_admin")
     token = _login(api_client, "rev@x.mx", "Hunter2 Correct horse")
     submission_id = _seed_submission(db_factory)  # no inspection row at all
     response = api_client.get(
@@ -690,7 +690,7 @@ _SAMPLE_VERIFICATION = {
 def test_detail_includes_verification_block(
     api_client: TestClient, db_factory
 ) -> None:
-    _seed_user(db_factory, email="rev@x.mx", role="reviewer")
+    _seed_user(db_factory, email="rev@x.mx", role="platform_admin")
     token = _login(api_client, "rev@x.mx", "Hunter2 Correct horse")
     submission_id = _seed_submission(
         db_factory,
@@ -714,7 +714,7 @@ def test_detail_includes_verification_block(
 def test_detail_verification_empty_for_legacy_rows(
     api_client: TestClient, db_factory
 ) -> None:
-    _seed_user(db_factory, email="rev@x.mx", role="reviewer")
+    _seed_user(db_factory, email="rev@x.mx", role="platform_admin")
     token = _login(api_client, "rev@x.mx", "Hunter2 Correct horse")
     # Inspection row predating Phase B: authenticity present, NULL
     # verification column.
@@ -734,7 +734,7 @@ def test_detail_verification_empty_for_legacy_rows(
 def test_detail_verification_absent_inspection_row(
     api_client: TestClient, db_factory
 ) -> None:
-    _seed_user(db_factory, email="rev@x.mx", role="reviewer")
+    _seed_user(db_factory, email="rev@x.mx", role="platform_admin")
     token = _login(api_client, "rev@x.mx", "Hunter2 Correct horse")
     submission_id = _seed_submission(db_factory)  # no inspection row at all
     response = api_client.get(
@@ -755,7 +755,7 @@ def test_detail_verification_absent_inspection_row(
 
 
 def test_detail_returns_submission(api_client: TestClient, db_factory) -> None:
-    _seed_user(db_factory, email="rev@x.mx", role="reviewer")
+    _seed_user(db_factory, email="rev@x.mx", role="platform_admin")
     token = _login(api_client, "rev@x.mx", "Hunter2 Correct horse")
     submission_id = _seed_submission(db_factory)
     response = api_client.get(
@@ -772,7 +772,7 @@ def test_detail_returns_submission(api_client: TestClient, db_factory) -> None:
 def test_detail_404_for_unknown_submission(
     api_client: TestClient, db_factory
 ) -> None:
-    _seed_user(db_factory, email="rev@x.mx", role="reviewer")
+    _seed_user(db_factory, email="rev@x.mx", role="platform_admin")
     token = _login(api_client, "rev@x.mx", "Hunter2 Correct horse")
     response = api_client.get(
         "/api/v1/reviewer/submissions/does-not-exist",
@@ -798,7 +798,7 @@ def test_detail_404_for_unknown_submission(
 def test_decision_transitions_status(
     api_client: TestClient, db_factory, action: str, expected_status: str
 ) -> None:
-    user_id, _, password = _seed_user(db_factory, email="rev@x.mx", role="reviewer")
+    user_id, _, password = _seed_user(db_factory, email="rev@x.mx", role="platform_admin")
     token = _login(api_client, "rev@x.mx", password)
     submission_id = _seed_submission(db_factory)
     body = {"action": action}
@@ -841,7 +841,7 @@ def test_decision_transitions_status(
                 ValidationEvent.event_type == "reviewer_decision",
             )
         ).all()
-        assert any(e.result == action and e.actor_type == "reviewer" for e in events)
+        assert any(e.result == action and e.actor_type == "platform_admin" for e in events)
     finally:
         db.close()
 
@@ -853,7 +853,7 @@ def test_decision_transitions_status(
 def test_decision_requires_reason_for_non_approve(
     api_client: TestClient, db_factory, action: str
 ) -> None:
-    _seed_user(db_factory, email="rev@x.mx", role="reviewer")
+    _seed_user(db_factory, email="rev@x.mx", role="platform_admin")
     token = _login(api_client, "rev@x.mx", "Hunter2 Correct horse")
     submission_id = _seed_submission(db_factory)
     response = api_client.post(
@@ -874,7 +874,7 @@ def test_decision_requires_reason_for_non_approve(
 def test_decision_approve_does_not_require_reason(
     api_client: TestClient, db_factory
 ) -> None:
-    _seed_user(db_factory, email="rev@x.mx", role="reviewer")
+    _seed_user(db_factory, email="rev@x.mx", role="platform_admin")
     token = _login(api_client, "rev@x.mx", "Hunter2 Correct horse")
     submission_id = _seed_submission(db_factory)
     response = api_client.post(
@@ -888,7 +888,7 @@ def test_decision_approve_does_not_require_reason(
 def test_decision_409_when_already_resolved(
     api_client: TestClient, db_factory
 ) -> None:
-    _seed_user(db_factory, email="rev@x.mx", role="reviewer")
+    _seed_user(db_factory, email="rev@x.mx", role="platform_admin")
     token = _login(api_client, "rev@x.mx", "Hunter2 Correct horse")
     submission_id = _seed_submission(db_factory, status_="aprobado")
     response = api_client.post(
@@ -902,7 +902,7 @@ def test_decision_409_when_already_resolved(
 def test_decision_404_for_unknown_submission(
     api_client: TestClient, db_factory
 ) -> None:
-    _seed_user(db_factory, email="rev@x.mx", role="reviewer")
+    _seed_user(db_factory, email="rev@x.mx", role="platform_admin")
     token = _login(api_client, "rev@x.mx", "Hunter2 Correct horse")
     response = api_client.post(
         "/api/v1/reviewer/submissions/does-not-exist/decision",
@@ -946,7 +946,7 @@ def test_document_endpoint_requires_reviewer_role(
 def test_document_endpoint_404_for_unknown_submission(
     api_client: TestClient, db_factory
 ) -> None:
-    _seed_user(db_factory, email="rev@x.mx", role="reviewer")
+    _seed_user(db_factory, email="rev@x.mx", role="platform_admin")
     token = _login(api_client, "rev@x.mx", "Hunter2 Correct horse")
     response = api_client.get(
         "/api/v1/reviewer/submissions/no-such-thing/document",
@@ -960,7 +960,7 @@ def test_document_endpoint_404_when_storage_missing(
 ) -> None:
     """The seed fixture writes a local:// storage key with no backing
     file; the endpoint should degrade to 404 instead of crashing."""
-    _seed_user(db_factory, email="rev@x.mx", role="reviewer")
+    _seed_user(db_factory, email="rev@x.mx", role="platform_admin")
     token = _login(api_client, "rev@x.mx", "Hunter2 Correct horse")
     submission_id = _seed_submission(db_factory)
     response = api_client.get(
@@ -975,7 +975,7 @@ def test_document_endpoint_streams_non_ascii_filename(
 ) -> None:
     """Accented PDF names must not break preview/download headers."""
     monkeypatch.setattr(settings, "LOCAL_STORAGE_PATH", str(tmp_path))
-    _seed_user(db_factory, email="rev@x.mx", role="reviewer")
+    _seed_user(db_factory, email="rev@x.mx", role="platform_admin")
     token = _login(api_client, "rev@x.mx", "Hunter2 Correct horse")
     submission_id = _seed_submission(db_factory)
     storage_key = "documents/demo/liquidacion.pdf"
@@ -1018,7 +1018,7 @@ def test_queue_total_reflects_all_matching_rows_and_sets_cursor(
 ) -> None:
     """``total`` is the real filtered count (not len(items)) and
     ``next_cursor`` is populated when more rows remain past ``limit``."""
-    _seed_user(db_factory, email="rev@x.mx", role="reviewer")
+    _seed_user(db_factory, email="rev@x.mx", role="platform_admin")
     token = _login(api_client, "rev@x.mx", "Hunter2 Correct horse")
     oldest = _seed_submission(db_factory, age_hours=30, period_key="2026-M01")
     middle = _seed_submission(db_factory, age_hours=20, period_key="2026-M02")
@@ -1041,7 +1041,7 @@ def test_queue_total_reflects_all_matching_rows_and_sets_cursor(
 def test_queue_cursor_walks_disjoint_pages_in_fifo_order(
     api_client: TestClient, db_factory
 ) -> None:
-    _seed_user(db_factory, email="rev@x.mx", role="reviewer")
+    _seed_user(db_factory, email="rev@x.mx", role="platform_admin")
     token = _login(api_client, "rev@x.mx", "Hunter2 Correct horse")
     expected_fifo = [
         _seed_submission(db_factory, age_hours=50, period_key="2026-M01"),
@@ -1080,7 +1080,7 @@ def test_queue_cursor_walks_disjoint_pages_in_fifo_order(
 
 
 def test_queue_rejects_garbage_cursor(api_client: TestClient, db_factory) -> None:
-    _seed_user(db_factory, email="rev@x.mx", role="reviewer")
+    _seed_user(db_factory, email="rev@x.mx", role="platform_admin")
     token = _login(api_client, "rev@x.mx", "Hunter2 Correct horse")
     response = api_client.get(
         "/api/v1/reviewer/queue",
@@ -1100,7 +1100,7 @@ def test_detail_includes_vendor_block_with_expected_rfc(
 ) -> None:
     from app.models import ProviderWorkspace
 
-    _seed_user(db_factory, email="rev@x.mx", role="reviewer")
+    _seed_user(db_factory, email="rev@x.mx", role="platform_admin")
     token = _login(api_client, "rev@x.mx", "Hunter2 Correct horse")
     submission_id = _seed_submission(db_factory)
 
@@ -1147,7 +1147,7 @@ def test_detail_includes_prevalidation_evidence(
 ) -> None:
     from app.services.submission_service import PREVALIDATION_EVIDENCE_METADATA_KEY
 
-    _seed_user(db_factory, email="rev-evidence@x.mx", role="reviewer")
+    _seed_user(db_factory, email="rev-evidence@x.mx", role="platform_admin")
     token = _login(api_client, "rev-evidence@x.mx", "Hunter2 Correct horse")
     submission_id = _seed_submission(db_factory, rfc_alignment="match")
 
@@ -1210,7 +1210,7 @@ def test_detail_includes_prevalidation_evidence(
 def test_decision_returns_next_pending_submission_id(
     api_client: TestClient, db_factory
 ) -> None:
-    _seed_user(db_factory, email="rev@x.mx", role="reviewer")
+    _seed_user(db_factory, email="rev@x.mx", role="platform_admin")
     token = _login(api_client, "rev@x.mx", "Hunter2 Correct horse")
     older = _seed_submission(db_factory, age_hours=48, period_key="2026-M01")
     newer = _seed_submission(db_factory, age_hours=2, period_key="2026-M02")

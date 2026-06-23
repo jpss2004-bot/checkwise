@@ -87,7 +87,7 @@ def _seed_admin(db_factory):
             Membership(
                 user_id=u.id,
                 organization_id=org.id,
-                role="internal_admin",
+                role="operations_admin",
                 status="active",
             )
         )

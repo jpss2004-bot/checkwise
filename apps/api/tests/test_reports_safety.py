@@ -48,7 +48,7 @@ def _internal_actor() -> ReportActor:
     return ReportActor(
         user_id="user-2",
         organization_ids=("internal-org",),
-        roles=("internal_admin",),
+        roles=("operations_admin",),
     )
 
 

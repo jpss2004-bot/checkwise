@@ -63,19 +63,19 @@ _DEFAULT_POLICY_FIELDS: dict[str, str] = {
 def _gate_for(method: str, path: str, deps: list[str]) -> str:
     dep_set = set(deps)
     if "AdminUser" in dep_set:
-        return "internal_admin"
+        return "platform_admin_or_ops"
     if "PlatformUser" in dep_set:
-        return "platform_admin_or_admin"
+        return "operations_admin"
     if "ReviewerDep" in dep_set:
-        return "reviewer_or_admin"
+        return "platform_admin_or_ops"
     if "ClientApprover" in dep_set:
-        return "client_admin_or_admin"
+        return "client_admin_or_staff"
     if "ClientUser" in dep_set:
-        return "client_read_or_admin"
+        return "client_read_or_staff"
     if "current_portal_workspace" in dep_set:
         return "provider_workspace"
     if "require_local_or_internal_admin" in dep_set:
-        return "local_or_internal_admin"
+        return "local_or_staff"
     if {"CurrentUser", "get_current_user"} & dep_set:
         return "authenticated_jwt"
     if path.startswith("/api/v1/health"):
@@ -100,9 +100,9 @@ def _gate_for(method: str, path: str, deps: list[str]) -> str:
             return "public_with_rate_limit"
         return "authenticated_jwt"
     if path == "/api/v1/submissions":
-        return "local_or_internal_admin"
+        return "local_or_staff"
     if path == "/api/v1/metadata-dry-run/pdf":
-        return "local_or_internal_admin"
+        return "local_or_staff"
     if path == "/api/v1/feedback":
         return "authenticated_jwt"
     return "UNKNOWN"
