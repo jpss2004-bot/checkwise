@@ -469,6 +469,15 @@ class Settings(BaseSettings):
     AUTO_APPROVE_UNLOCKED_REQUIREMENT_CODES: str = ""
     AUTO_APPROVE_MIN_CONFIDENCE: float = 0.97
 
+    # Cross-tenant recycled-document detection (first consumer of the
+    # document_folios index). OFF by default. When ON, intake flags — as an
+    # advisory MEDIUM authenticity reason — a SAT/IMSS document whose CFDI
+    # fiscal UUID already appears under a DIFFERENT client (a strong
+    # recycled-document signal: the UUID is unique per invoice and survives a
+    # re-export where the file sha256 does not). Count-only (never exposes
+    # which/whose tenants); never blocks intake or changes the document status.
+    CROSS_TENANT_RECYCLED_DETECTION_ENABLED: bool = False
+
     # env_file anchors to the apps/api root for the same reason the
     # storage paths do (audit 2026-06-12): a CWD-relative ".env" meant a
     # server launched from the repo root silently ran with default

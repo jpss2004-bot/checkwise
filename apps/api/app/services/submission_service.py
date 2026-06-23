@@ -49,7 +49,10 @@ from app.services.client_notifications import (
     notify_provider_uploaded,
 )
 from app.services.document_analysis.shadow_runner import run_shadow_analysis
-from app.services.document_folios import persist_document_folios
+from app.services.document_folios import (
+    apply_cross_tenant_reason,
+    persist_document_folios,
+)
 from app.services.document_forensics import (
     analyze_pdf_forensics,
     rollup_authenticity_risk,
@@ -824,6 +827,19 @@ def finalize_intake_submission(
             detected_institution=document_signals.detected_institution,
             extracted_text=pdf_inspection.text_sample,
         )
+    )
+
+    # Phase 3 — cross-tenant recycled-document detection (first consumer of the
+    # document_folios index). Advisory + fail-open: merges a MEDIUM authenticity
+    # reason when this document's CFDI UUID already exists under another client;
+    # never blocks intake or changes the user-visible status.
+    authenticity_risk, risk_reasons = apply_cross_tenant_reason(
+        db,
+        client_id=client.id,
+        verification=verification_payload,
+        detected_institution=document_signals.detected_institution,
+        authenticity_risk=authenticity_risk,
+        risk_reasons=risk_reasons,
     )
 
     inspection = DocumentInspection(
@@ -1669,6 +1685,17 @@ def finalize_multi_document_submission(
                 detected_institution=document_signals.detected_institution,
                 extracted_text=pdf_inspection.text_sample,
             )
+        )
+
+        # Phase 3 — cross-tenant recycled-document detection (advisory,
+        # fail-open; see the single-file path).
+        authenticity_risk, risk_reasons = apply_cross_tenant_reason(
+            db,
+            client_id=client.id,
+            verification=verification_payload,
+            detected_institution=document_signals.detected_institution,
+            authenticity_risk=authenticity_risk,
+            risk_reasons=risk_reasons,
         )
 
         inspection_row = DocumentInspection(

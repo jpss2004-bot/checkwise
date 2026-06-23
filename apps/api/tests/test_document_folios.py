@@ -7,7 +7,7 @@ import importlib.util
 from pathlib import Path
 
 import pytest
-from sqlalchemy import create_engine, select
+from sqlalchemy import create_engine, select, text
 from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import StaticPool
 
@@ -24,7 +24,12 @@ from app.models import (
     Submission,
     Vendor,
 )
-from app.services.document_folios import folio_pairs, persist_document_folios
+from app.services.document_folios import (
+    apply_cross_tenant_reason,
+    cross_tenant_folio_reason,
+    folio_pairs,
+    persist_document_folios,
+)
 from scripts.backfill_document_folios import run as run_backfill
 
 VERIF = {
@@ -276,6 +281,210 @@ def test_backfill_multi_batch_visits_every_row(db_factory) -> None:
     assert (scanned, docs_new, added) == (7, 7, 7)  # nothing skipped or repeated
     for i, doc_id in enumerate(doc_ids):
         assert _folios(db_factory, doc_id) == [("cfdi_uuid", f"U-{i}")]
+
+
+# --- cross-tenant recycled-document detection ---
+
+
+_CFDI = {"folios": [{"kind": "cfdi_uuid", "value": "UUID-XYZ"}], "qr_codes": []}
+
+
+def _enable_cross_tenant(monkeypatch) -> None:
+    from app.core.config import settings
+
+    monkeypatch.setattr(settings, "CROSS_TENANT_RECYCLED_DETECTION_ENABLED", True)
+
+
+def _index_folio_under_new_client(db_factory, *, value: str = "UUID-XYZ") -> str:
+    """Create a doc under a fresh client and index its cfdi_uuid folio. Returns
+    that client's id."""
+    doc_id, client_id, vendor_id, period_id = _seed_document(db_factory)
+    db = db_factory()
+    try:
+        persist_document_folios(
+            db,
+            document_id=doc_id,
+            client_id=client_id,
+            vendor_id=vendor_id,
+            period_id=period_id,
+            verification={"folios": [{"kind": "cfdi_uuid", "value": value}]},
+        )
+        db.commit()
+    finally:
+        db.close()
+    return client_id
+
+
+def _reason(db_factory, **kwargs):
+    db = db_factory()
+    try:
+        return cross_tenant_folio_reason(db, **kwargs)
+    finally:
+        db.close()
+
+
+def test_cross_tenant_flags_other_clients_uuid(db_factory, monkeypatch) -> None:
+    _enable_cross_tenant(monkeypatch)
+    _index_folio_under_new_client(db_factory, value="UUID-XYZ")
+    reason = _reason(
+        db_factory, client_id="me", verification=_CFDI, detected_institution="sat"
+    )
+    assert reason is not None
+    assert reason.code == "cross_tenant_reuse"
+    assert reason.severity == "medium"
+    assert "1 otro" in reason.detail_es  # count-only, no tenant identity
+
+
+def test_cross_tenant_off_by_default(db_factory) -> None:
+    _index_folio_under_new_client(db_factory)
+    assert (
+        _reason(
+            db_factory, client_id="me", verification=_CFDI, detected_institution="sat"
+        )
+        is None
+    )
+
+
+def test_cross_tenant_only_sat_imss(db_factory, monkeypatch) -> None:
+    _enable_cross_tenant(monkeypatch)
+    _index_folio_under_new_client(db_factory)
+    assert (
+        _reason(
+            db_factory,
+            client_id="me",
+            verification=_CFDI,
+            detected_institution="infonavit",
+        )
+        is None
+    )
+
+
+def test_cross_tenant_ignores_same_client(db_factory, monkeypatch) -> None:
+    _enable_cross_tenant(monkeypatch)
+    owner = _index_folio_under_new_client(db_factory, value="UUID-SAME")
+    # Querying AS the owning client → its own folio is excluded → no self-flag.
+    assert (
+        _reason(
+            db_factory,
+            client_id=owner,
+            verification={"folios": [{"kind": "cfdi_uuid", "value": "UUID-SAME"}]},
+            detected_institution="sat",
+        )
+        is None
+    )
+
+
+def test_cross_tenant_needs_a_cfdi_uuid(db_factory, monkeypatch) -> None:
+    _enable_cross_tenant(monkeypatch)
+    _index_folio_under_new_client(db_factory)
+    # Only an opinion folio (no fiscal UUID) → no cross-tenant check.
+    assert (
+        _reason(
+            db_factory,
+            client_id="me",
+            verification={"folios": [{"kind": "sat_opinion_folio", "value": "F1"}]},
+            detected_institution="sat",
+        )
+        is None
+    )
+
+
+def test_cross_tenant_counts_distinct_clients(db_factory, monkeypatch) -> None:
+    _enable_cross_tenant(monkeypatch)
+    _index_folio_under_new_client(db_factory, value="UUID-XYZ")
+    _index_folio_under_new_client(db_factory, value="UUID-XYZ")  # 2nd other client
+    reason = _reason(
+        db_factory, client_id="me", verification=_CFDI, detected_institution="sat"
+    )
+    assert reason is not None and "2 otro" in reason.detail_es
+
+
+def test_apply_elevates_clean_to_suspicious(db_factory, monkeypatch) -> None:
+    _enable_cross_tenant(monkeypatch)
+    _index_folio_under_new_client(db_factory)
+    db = db_factory()
+    try:
+        risk, reasons = apply_cross_tenant_reason(
+            db,
+            client_id="me",
+            verification=_CFDI,
+            detected_institution="sat",
+            authenticity_risk="clean",
+            risk_reasons=[],
+        )
+    finally:
+        db.close()
+    assert risk == "suspicious"
+    assert any(r["code"] == "cross_tenant_reuse" for r in reasons)
+
+
+def test_apply_does_not_downgrade_high_risk(db_factory, monkeypatch) -> None:
+    _enable_cross_tenant(monkeypatch)
+    _index_folio_under_new_client(db_factory)
+    db = db_factory()
+    try:
+        risk, reasons = apply_cross_tenant_reason(
+            db,
+            client_id="me",
+            verification=_CFDI,
+            detected_institution="sat",
+            authenticity_risk="high_risk",
+            risk_reasons=[{"code": "f", "severity": "high", "detail_es": "x"}],
+        )
+    finally:
+        db.close()
+    assert risk == "high_risk"  # a medium reason never downgrades
+    assert reasons[0]["severity"] == "high"  # stays severity-sorted
+
+
+def test_apply_unchanged_without_collision(db_factory, monkeypatch) -> None:
+    _enable_cross_tenant(monkeypatch)  # enabled, but nothing indexed → no match
+    db = db_factory()
+    try:
+        risk, reasons = apply_cross_tenant_reason(
+            db,
+            client_id="me",
+            verification=_CFDI,
+            detected_institution="sat",
+            authenticity_risk="clean",
+            risk_reasons=[],
+        )
+    finally:
+        db.close()
+    assert risk == "clean" and reasons == []
+
+
+def test_apply_cross_tenant_failopen_recovers_session(db_factory, monkeypatch) -> None:
+    """A DB error in the cross-tenant read must NOT poison the intake
+    transaction: the SAVEPOINT rolls back to a usable session so the
+    surrounding commit still succeeds (true fail-open)."""
+    from app.services import document_folios as df
+
+    _enable_cross_tenant(monkeypatch)  # reach the savepoint-guarded read path
+
+    def _boom(db, **_kwargs):
+        # A real failed statement — this is what poisons the session if it
+        # isn't SAVEPOINT-isolated.
+        db.execute(text("SELECT * FROM table_that_does_not_exist"))
+
+    monkeypatch.setattr(df, "cross_tenant_folio_reason", _boom)
+
+    db = db_factory()
+    try:
+        db.add(Client(name="Pending", rfc="PEND260101AB"[:13]))  # intake in flight
+        risk, reasons = apply_cross_tenant_reason(
+            db,
+            client_id="me",
+            verification=_CFDI,
+            detected_institution="sat",
+            authenticity_risk="clean",
+            risk_reasons=[],
+        )
+        assert (risk, reasons) == ("clean", [])  # unchanged — failed open
+        db.commit()  # MUST succeed: the session was not left poisoned
+        assert db.scalar(select(Client).where(Client.name == "Pending")) is not None
+    finally:
+        db.close()
 
 
 # --- migration sanity ---
