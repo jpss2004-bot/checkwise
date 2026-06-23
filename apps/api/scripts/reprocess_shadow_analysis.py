@@ -148,6 +148,14 @@ def _preflight(client_id: str) -> dict:
 
     facts["STORAGE_BACKEND"] = (settings.STORAGE_BACKEND or "local").strip().lower()
     facts["EXPEDIENTE_ENABLED"] = bool(settings.DOCUMENT_ANALYSIS_EXPEDIENTE_ENABLED)
+    # A1 triage-skip — when ON, run_shadow_analysis re-skips heuristically
+    # clean+aligned, never-analyzed docs in-process instead of calling the AI,
+    # so a backfill silently produces 0 real triage calls on that subset (and
+    # re-emits a skip event). Surfaced (not a hard block: errored rows — which
+    # have shadow_completed_at set — are NOT skip-eligible and still reprocess).
+    facts["DOCUMENT_ANALYSIS_TRIAGE_SKIP_ENABLED"] = bool(
+        settings.DOCUMENT_ANALYSIS_TRIAGE_SKIP_ENABLED
+    )
     return facts
 
 
@@ -310,6 +318,17 @@ def main() -> int:
     print("\nResolved config:")
     for key, value in facts.items():
         print(f"  {key:38} = {value}")
+
+    if facts.get("DOCUMENT_ANALYSIS_TRIAGE_SKIP_ENABLED"):
+        print(
+            "\n  WARNING: DOCUMENT_ANALYSIS_TRIAGE_SKIP_ENABLED is ON.\n"
+            "  Heuristically clean+aligned, never-analyzed docs will be RE-SKIPPED\n"
+            "  in-process (no real AI call; another 'shadow_analysis_skipped' event)\n"
+            "  — the 'Triage calls (Haiku)' estimate below OVERSTATES real calls on\n"
+            "  that subset. To force a real AI backfill on skip-eligible docs,\n"
+            "  disable the flag for the backfill window (errored rows reprocess\n"
+            "  regardless)."
+        )
 
     # --- Enumerate (one short read transaction) ---------------------------
     db = SessionLocal()

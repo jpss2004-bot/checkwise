@@ -38,6 +38,7 @@ Design properties (load-bearing):
 from __future__ import annotations
 
 import logging
+import random
 from pathlib import Path
 
 from sqlalchemy import select
@@ -54,6 +55,7 @@ from app.services.document_analysis.spend_limiter import (
     check_org_escalation_daily_quota,
 )
 from app.services.document_forensics import (
+    RISK_CLEAN,
     RISK_HIGH,
     RISK_SUSPICIOUS,
     SEVERITY_HIGH,
@@ -68,7 +70,12 @@ from app.services.document_image_forensics import (
     ImageTamperResult,
     analyze_image_tampering,
 )
-from app.services.document_intelligence import compute_rfc_alignment, normalize_rfc
+from app.services.document_intelligence import (
+    RFC_ALIGNMENT_MATCH,
+    RFC_ALIGNMENT_NO_EXPECTED,
+    compute_rfc_alignment,
+    normalize_rfc,
+)
 from app.services.validation_events import add_validation_event
 
 logger = logging.getLogger(__name__)
@@ -85,6 +92,33 @@ _HIGH_STAKES_RISK_LEVELS = {"alto", "critico", "crítico"}
 # escalation trigger (the cheap model is unsure the document even
 # matches the requirement).
 _TRIAGE_CONFIDENCE_ESCALATION_THRESHOLD = 0.5
+
+# A1 — RFC-alignment verdicts that permit a triage-skip: a positive match,
+# or no provider RFC was expected at all. ``absent`` (RFC expected but not
+# found), ``mismatch`` and ``homoclave_mismatch`` always keep the triage.
+_TRIAGE_SKIP_RFC_ALIGNMENTS = {RFC_ALIGNMENT_MATCH, RFC_ALIGNMENT_NO_EXPECTED}
+
+
+class _TriageSkipDecision:
+    """Whether the always-on triage may be skipped for this document.
+
+    ``eligible`` is True only when the deterministic intake verdict is
+    unambiguously clean + aligned + clean-forensics on a non-high-stakes
+    requirement (see ``_triage_skip_decision``). ``snapshot`` carries the
+    deterministic facts the decision rested on, persisted on the skip
+    marker + the sampling event for audit. The class is intentionally
+    tiny (not a frozen dataclass) so the fail-safe path can return a
+    not-eligible sentinel without constructing a snapshot.
+    """
+
+    __slots__ = ("eligible", "snapshot")
+
+    def __init__(self, eligible: bool, snapshot: dict | None = None) -> None:
+        self.eligible = eligible
+        self.snapshot = snapshot or {}
+
+
+_TRIAGE_SKIP_NOT_ELIGIBLE = _TriageSkipDecision(False)
 
 
 def _pilot_allowlist() -> set[str]:
@@ -108,6 +142,320 @@ def _always_escalate_orgs() -> set[str]:
     if not raw:
         return set()
     return {chunk.strip() for chunk in raw.split(",") if chunk.strip()}
+
+
+# ---------------------------------------------------------------------------
+# A1 — triage-skip
+# ---------------------------------------------------------------------------
+
+
+def _triage_skip_sampled() -> bool:
+    """True when an eligible doc should be analyzed ANYWAY (monitoring sample).
+
+    The sampling rate is the fraction of skip-eligible documents kept on the
+    normal path. ``0`` → never sample (skip every eligible doc); ``>=1`` →
+    always sample (never skip — an effective dry-run). In between, a uniform
+    draw decides. ``random.random()`` (not ``Math.random``) keeps this
+    seedable/patchable from tests.
+    """
+    rate = float(settings.DOCUMENT_ANALYSIS_TRIAGE_SKIP_SAMPLING_RATE or 0.0)
+    if rate <= 0.0:
+        return False
+    if rate >= 1.0:
+        return True
+    return random.random() < rate
+
+
+def _triage_skip_decision(
+    document_id: str,
+    *,
+    requirement_risk_level: str | None,
+) -> _TriageSkipDecision:
+    """Decide whether the always-on triage may be skipped for this document.
+
+    Reads the committed ``DocumentInspection`` and returns ``eligible=True``
+    ONLY for the unambiguous case: a never-yet-analyzed, non-high-stakes
+    requirement whose deterministic intake verdict is clean
+    (``authenticity_risk == "clean"`` with no medium/high risk reasons),
+    born-digital with a real text layer, structurally sound, RFC-aligned (or no
+    RFC expected), with no requirement mismatch and a heuristic match confidence
+    at/above the configured floor.
+
+    What the skip TRADES AWAY (be honest — this is the accepted, sampled
+    tradeoff, not a no-op): the cheap triage is an INDEPENDENT content-level
+    second opinion. On the eligible set the two deterministic escalation
+    triggers (``deterministic_risk``, ``requirement_risk_level``) cannot fire,
+    but the two AI-derived triggers (``llm_flags`` from the model's
+    authenticity judgment, ``low_match_confidence`` from its own match score)
+    CAN — a heuristically clean+aligned doc may still be a content forgery the
+    container-level forensics miss but the model would flag. Skipping forgoes
+    that AI-initiated deep pass and the advisory ``suspicious`` shadow verdict
+    it would have produced. The deterministic user-visible status, risk_reasons
+    and auto-approval inputs are unaffected; the
+    ``DOCUMENT_ANALYSIS_TRIAGE_SKIP_SAMPLING_RATE`` monitor exists precisely to
+    size how often the model would have disagreed before widening the skip.
+    The ``period_alignment == no_expected`` (non-periodic requirement) axis is
+    one such un-gated case relying on the sample.
+
+    Fail-safe by construction: a missing row or ANY read error returns
+    not-eligible, so uncertainty always falls through to running the triage —
+    the skip never fires on doubt.
+    """
+    # High-stakes (alto/crítico) requirements always keep the triage AND its
+    # downstream escalation — skipping triage here would also suppress the
+    # deep pass (escalation triggers are computed from the triage result).
+    if (requirement_risk_level or "").strip().lower() in _HIGH_STAKES_RISK_LEVELS:
+        return _TRIAGE_SKIP_NOT_ELIGIBLE
+
+    min_confidence = float(settings.DOCUMENT_ANALYSIS_TRIAGE_SKIP_MIN_CONFIDENCE or 0.0)
+
+    db = SessionLocal()
+    try:
+        inspection = db.scalar(
+            select(DocumentInspection).where(
+                DocumentInspection.document_id == document_id
+            )
+        )
+        if inspection is None:
+            return _TRIAGE_SKIP_NOT_ELIGIBLE
+
+        # Idempotency — never DOWNGRADE a document that already has a completed
+        # shadow run (real or a prior skip marker that stamped completion) to a
+        # fresh skip. A skip leaves shadow_completed_at NULL, so a non-null
+        # value means a real analysis already landed; a re-invocation (reprocess
+        # / retry) must keep that result, not clobber it with a skip marker.
+        if inspection.shadow_completed_at is not None:
+            return _TRIAGE_SKIP_NOT_ELIGIBLE
+
+        # Structural soundness — never skip the AI on a corrupt/encrypted/
+        # non-PDF doc, or one whose intake inspection itself errored.
+        if (
+            not inspection.is_pdf
+            or inspection.is_corrupt
+            or inspection.is_encrypted
+            or inspection.inspection_error is not None
+        ):
+            return _TRIAGE_SKIP_NOT_ELIGIBLE
+
+        # Born-digital with a real text layer only. On a scanned document the
+        # heuristic ran on (possibly empty) OCR text, and the AI's native PDF
+        # read is the ONLY trustworthy opinion — never skip it there.
+        if not inspection.has_text or inspection.is_probably_scanned:
+            return _TRIAGE_SKIP_NOT_ELIGIBLE
+
+        # Forensics must be explicitly clean. NULL ("not analyzed") and any
+        # suspicious/high verdict keep the triage.
+        if inspection.authenticity_risk != RISK_CLEAN:
+            return _TRIAGE_SKIP_NOT_ELIGIBLE
+        risk_reasons = [
+            r for r in (inspection.risk_reasons or []) if isinstance(r, dict)
+        ]
+        if any(
+            r.get("severity") in (SEVERITY_MEDIUM, SEVERITY_HIGH)
+            for r in risk_reasons
+        ):
+            return _TRIAGE_SKIP_NOT_ELIGIBLE
+
+        # Requirement alignment — no detected mismatch, RFC matched (or none
+        # expected), and a confident heuristic match. The intake confidence is
+        # already capped by every misalignment, so the floor double-guards.
+        if inspection.mismatch_reason is not None:
+            return _TRIAGE_SKIP_NOT_ELIGIBLE
+        if inspection.rfc_alignment not in _TRIAGE_SKIP_RFC_ALIGNMENTS:
+            return _TRIAGE_SKIP_NOT_ELIGIBLE
+        confidence = inspection.requirement_match_confidence
+        if confidence is None or float(confidence) < min_confidence:
+            return _TRIAGE_SKIP_NOT_ELIGIBLE
+
+        return _TriageSkipDecision(
+            True,
+            {
+                "reason": "heuristic_clean_aligned",
+                "heuristic_confidence": float(confidence),
+                "min_confidence": min_confidence,
+                "authenticity_risk": inspection.authenticity_risk,
+                "rfc_alignment": inspection.rfc_alignment,
+                "requirement_risk_level": requirement_risk_level,
+                "sampling_rate": float(
+                    settings.DOCUMENT_ANALYSIS_TRIAGE_SKIP_SAMPLING_RATE or 0.0
+                ),
+            },
+        )
+    except Exception:  # noqa: BLE001 — any read failure → run the triage (safe default)
+        logger.exception(
+            "Triage-skip decision read failed; running triage. document_id=%s",
+            document_id,
+        )
+        return _TRIAGE_SKIP_NOT_ELIGIBLE
+    finally:
+        db.close()
+
+
+def _persist_triage_skip(
+    *,
+    document_id: str,
+    submission_id: str,
+    snapshot: dict,
+) -> bool:
+    """Record a deliberate triage skip on the inspection + audit timeline.
+
+    Records the skip ONLY as a ``shadow_signals['_triage_skip']`` annotation
+    (merged so any pre-existing keys survive) plus a ``shadow_analysis_skipped``
+    ValidationEvent. It deliberately leaves ``shadow_provider_id``,
+    ``shadow_completed_at``, ``shadow_confidence`` and ``shadow_error`` UNTOUCHED
+    (NULL on a never-analyzed row), because:
+
+    * A ``provider_id="triage_skipped"`` + ``error=NULL`` marker is
+      byte-indistinguishable from a clean completion to the resume filter in
+      ``reprocess_shadow_analysis.py`` (``provider_id IS NULL OR error NOT NULL``)
+      and to the reviewer card — it would hide skipped docs from a real backfill
+      forever. Leaving the columns NULL keeps the skip reversible: turn the flag
+      off and reprocess, and the doc still gets a real AI pass.
+    * ``shadow_completed_at IS NULL`` correctly reads as "no AI verdict yet"
+      (the AI genuinely never ran), so no reader mistakes a skip for an analysis.
+
+    The deterministic verdict columns are never touched (no authenticity/forensics
+    merge) and auto-approval is never invoked — the skip is purely a spend
+    optimisation on the advisory pass. Returns ``True`` when the marker committed,
+    ``False`` on any failure so the caller can fall through to running the triage
+    (a persistence failure must not silently lose the document). Never raises.
+    """
+    db = SessionLocal()
+    try:
+        inspection = db.scalar(
+            select(DocumentInspection).where(
+                DocumentInspection.document_id == document_id
+            )
+        )
+        if inspection is None:
+            logger.warning(
+                "Triage skip has no inspection row to mark; document_id=%s",
+                document_id,
+            )
+            return False
+
+        # Merge, never replace — preserve any prior shadow signal keys
+        # (defence-in-depth; the decision guard already refuses to skip a row
+        # that already carries a completed real run).
+        signals = dict(inspection.shadow_signals or {})
+        signals["_triage_skip"] = snapshot
+        inspection.shadow_signals = signals
+
+        add_validation_event(
+            db,
+            submission_id=submission_id,
+            document_id=document_id,
+            event_type="shadow_analysis_skipped",
+            rule_code="shadow_document_analysis",
+            result="pass",
+            severity="info",
+            message="Análisis IA en sombra omitido (heurística limpia y alineada).",
+            confidence=snapshot.get("heuristic_confidence"),
+            payload=snapshot,
+            actor_type="system",
+        )
+        db.commit()
+        return True
+    except Exception:  # noqa: BLE001 — never let a background failure crash the worker
+        logger.exception(
+            "Failed to persist triage-skip marker; document_id=%s", document_id
+        )
+        db.rollback()
+        return False
+    finally:
+        db.close()
+
+
+def _record_triage_skip_sample(
+    *,
+    submission_id: str,
+    document_id: str,
+    triage_result: AnalysisResult,
+) -> None:
+    """Record heuristic-vs-AI agreement for a sampled (kept) skip-eligible doc.
+
+    Emits a ``triage_skip_sample`` ValidationEvent classifying the AI's TRIAGE
+    opinion against the heuristic's clean verdict into three distinct buckets so
+    the agreement metric an operator uses to size false-skip risk is not poisoned:
+
+    * ``ai_unavailable`` — the provider errored (timeout / outage / malformed).
+      This is NOT a substantive disagreement; ``agreed`` is ``None`` and it is
+      kept out of the agree/disagree tally.
+    * disagreement — the AI raised an authenticity concern (``ai_flagged``) OR
+      reported a low requirement-match confidence below the SAME escalation
+      threshold the normal path uses (``low_match_confidence``, <0.5). Both are
+      signals the normal path would have ESCALATED on — i.e. exactly the
+      false-skip cases this sample exists to detect.
+    * agreement — no error, no concern, confident match.
+
+    Pure telemetry: it never changes the stored verdict. Never raises.
+    """
+    db = SessionLocal()
+    try:
+        authenticity = triage_result.authenticity or {}
+        ai_flagged = bool(
+            authenticity.get("concerns") or authenticity.get("looks_fabricated")
+        )
+        ai_confidence = (
+            triage_result.signals.requirement_match_confidence
+            if triage_result.signals is not None
+            else None
+        )
+        ai_unavailable = triage_result.error is not None
+        # Mirror the normal escalation path: a sub-0.5 AI match confidence is a
+        # real disagreement (the model is unsure the doc matches at all), not
+        # silent agreement.
+        ai_low_match = (
+            ai_confidence is not None
+            and ai_confidence < _TRIAGE_CONFIDENCE_ESCALATION_THRESHOLD
+        )
+        if ai_unavailable:
+            agreed = None
+            result = "warning"
+            message = (
+                "Muestreo de omisión de triage: la IA no estuvo disponible "
+                "(sin opinión)."
+            )
+        else:
+            agreed = not ai_flagged and not ai_low_match
+            result = "pass" if agreed else "warning"
+            message = (
+                "Muestreo de omisión de triage: la IA coincidió con la "
+                "heurística limpia."
+                if agreed
+                else "Muestreo de omisión de triage: la IA difirió de la "
+                "heurística limpia."
+            )
+        add_validation_event(
+            db,
+            submission_id=submission_id,
+            document_id=document_id,
+            event_type="triage_skip_sample",
+            rule_code="shadow_document_analysis",
+            result=result,
+            severity="info",
+            message=message,
+            confidence=ai_confidence,
+            payload={
+                "agreed": agreed,
+                "ai_unavailable": ai_unavailable,
+                "ai_flagged": ai_flagged,
+                "ai_low_match": ai_low_match,
+                "ai_confidence": ai_confidence,
+                "match_threshold": _TRIAGE_CONFIDENCE_ESCALATION_THRESHOLD,
+                "ai_error": triage_result.error,
+                "provider_id": triage_result.provider_id,
+            },
+            actor_type="system",
+        )
+        db.commit()
+    except Exception:  # noqa: BLE001 — telemetry must never crash the worker
+        logger.exception(
+            "Failed to record triage-skip sample; document_id=%s", document_id
+        )
+        db.rollback()
+    finally:
+        db.close()
 
 
 def run_shadow_analysis(
@@ -160,6 +508,45 @@ def run_shadow_analysis(
     allowlist = _pilot_allowlist()
     if allowlist and (org_id is None or org_id not in allowlist):
         return
+
+    # A1 — triage-skip. When the deterministic intake verdict is already
+    # confidently clean + aligned + clean-forensics on a non-high-stakes
+    # requirement, the independent Haiku second opinion is the least likely
+    # to change anything (it forgoes the AI's advisory escalation/elevation —
+    # an accepted, sampled tradeoff; see ``_triage_skip_decision``). Evaluated
+    # BEFORE the daily-cap check so a skip neither spends the Anthropic call
+    # nor consumes the org's daily slot. ``sampled_for_monitoring`` keeps a
+    # configured fraction of eligible docs on the normal path so heuristic-vs-AI
+    # agreement is measured.
+    sampled_for_monitoring = False
+    if settings.DOCUMENT_ANALYSIS_TRIAGE_SKIP_ENABLED:
+        skip = _triage_skip_decision(
+            document_id, requirement_risk_level=requirement_risk_level
+        )
+        if skip.eligible:
+            if _triage_skip_sampled():
+                sampled_for_monitoring = True
+            elif _persist_triage_skip(
+                document_id=document_id,
+                submission_id=submission_id,
+                snapshot=skip.snapshot,
+            ):
+                logger.info(
+                    "Triage skipped (heuristic clean+aligned, non-high-stakes); "
+                    "org_id=%s document_id=%s confidence=%s",
+                    org_id,
+                    document_id,
+                    skip.snapshot.get("heuristic_confidence"),
+                )
+                return
+            else:
+                # The skip marker failed to persist — fall through to running
+                # the triage rather than silently losing the document's pass.
+                logger.warning(
+                    "Triage-skip marker did not persist; running triage instead. "
+                    "document_id=%s",
+                    document_id,
+                )
 
     if not check_org_daily_quota(org_id):
         _persist_shadow_failure(
@@ -258,6 +645,18 @@ def run_shadow_analysis(
         image_result=image_result,
         expected_provider_rfc=expected_provider_rfc,
     )
+
+    # A1 — this upload was skip-ELIGIBLE but kept on the normal path by the
+    # monitoring sample. Record how the AI's TRIAGE opinion compared with the
+    # heuristic's clean verdict so an operator can size the false-skip risk
+    # before widening the skip. Uses ``triage_result`` (the opinion that
+    # would have been skipped), never the escalation-superseded ``final``.
+    if sampled_for_monitoring:
+        _record_triage_skip_sample(
+            submission_id=submission_id,
+            document_id=document_id,
+            triage_result=triage_result,
+        )
 
     # Phase 2 — after a deep run, queue a debounced expediente reassessment
     # for this provider+period. ``triggers`` non-empty means the deep tier

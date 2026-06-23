@@ -16,6 +16,7 @@ forced-empty key as a precondition.
 from __future__ import annotations
 
 import json
+from datetime import UTC
 from io import BytesIO
 from pathlib import Path
 from typing import Any
@@ -2273,3 +2274,523 @@ def test_escalation_gate_on_ignores_non_high_stakes(monkeypatch) -> None:
         org_id="o",
     )
     assert triggers == []  # medium never escalates on risk level
+
+
+# ---------------------------------------------------------------------------
+# A1 — triage-skip (DOCUMENT_ANALYSIS_TRIAGE_SKIP_ENABLED)
+# ---------------------------------------------------------------------------
+
+
+def _enable_triage_skip(monkeypatch, *, sampling_rate=0.0, min_confidence=0.85):
+    monkeypatch.setattr(settings, "DOCUMENT_ANALYSIS_TRIAGE_SKIP_ENABLED", True)
+    monkeypatch.setattr(
+        settings, "DOCUMENT_ANALYSIS_TRIAGE_SKIP_SAMPLING_RATE", sampling_rate
+    )
+    monkeypatch.setattr(
+        settings, "DOCUMENT_ANALYSIS_TRIAGE_SKIP_MIN_CONFIDENCE", min_confidence
+    )
+
+
+class TestTriageSkipSampling:
+    """``_triage_skip_sampled`` — the monitoring-sample draw."""
+
+    def test_rate_zero_never_samples(self, monkeypatch):
+        from app.services.document_analysis.shadow_runner import _triage_skip_sampled
+
+        monkeypatch.setattr(
+            settings, "DOCUMENT_ANALYSIS_TRIAGE_SKIP_SAMPLING_RATE", 0.0
+        )
+        assert _triage_skip_sampled() is False
+
+    def test_rate_one_always_samples(self, monkeypatch):
+        from app.services.document_analysis.shadow_runner import _triage_skip_sampled
+
+        monkeypatch.setattr(
+            settings, "DOCUMENT_ANALYSIS_TRIAGE_SKIP_SAMPLING_RATE", 1.0
+        )
+        assert _triage_skip_sampled() is True
+
+    def test_rate_mid_uses_uniform_draw(self, monkeypatch):
+        from app.services.document_analysis import shadow_runner
+
+        monkeypatch.setattr(
+            settings, "DOCUMENT_ANALYSIS_TRIAGE_SKIP_SAMPLING_RATE", 0.5
+        )
+        monkeypatch.setattr(shadow_runner.random, "random", lambda: 0.4)
+        assert shadow_runner._triage_skip_sampled() is True
+        monkeypatch.setattr(shadow_runner.random, "random", lambda: 0.6)
+        assert shadow_runner._triage_skip_sampled() is False
+
+
+class TestTriageSkipDecision(_ShadowDbSetupMixin):
+    """``_triage_skip_decision`` — the eligibility predicate."""
+
+    _CLEAN = dict(
+        is_pdf=True,
+        is_corrupt=False,
+        is_encrypted=False,
+        inspection_error=None,
+        has_text=True,
+        is_probably_scanned=False,
+        authenticity_risk="clean",
+        risk_reasons=None,
+        mismatch_reason=None,
+        rfc_alignment="match",
+        requirement_match_confidence=0.9,
+    )
+
+    def _set_inspection(self, **fields):
+        from app.db.session import SessionLocal
+        from app.models import DocumentInspection
+
+        db = SessionLocal()
+        try:
+            insp = db.query(DocumentInspection).first()
+            for key, value in fields.items():
+                setattr(insp, key, value)
+            db.commit()
+        finally:
+            db.close()
+
+    def _decide(self, db_setup, *, requirement_risk_level=None):
+        from app.services.document_analysis.shadow_runner import (
+            _triage_skip_decision,
+        )
+
+        return _triage_skip_decision(
+            db_setup["document_id"],
+            requirement_risk_level=requirement_risk_level,
+        )
+
+    def test_clean_aligned_born_digital_is_eligible(self, monkeypatch, db_setup):
+        _enable_triage_skip(monkeypatch)
+        self._set_inspection(**self._CLEAN)
+        decision = self._decide(db_setup)
+        assert decision.eligible is True
+        assert decision.snapshot["reason"] == "heuristic_clean_aligned"
+        assert decision.snapshot["heuristic_confidence"] == pytest.approx(0.9)
+
+    def test_already_completed_run_never_eligible(self, monkeypatch, db_setup):
+        # Idempotency guard: a doc that already has a completed shadow run is
+        # never downgraded to a skip (no clobber of real audit data).
+        from datetime import datetime
+
+        _enable_triage_skip(monkeypatch)
+        self._set_inspection(
+            **{
+                **self._CLEAN,
+                "shadow_completed_at": datetime(2026, 1, 1, tzinfo=UTC),
+            }
+        )
+        assert self._decide(db_setup).eligible is False
+
+    def test_high_stakes_requirement_never_eligible(self, monkeypatch, db_setup):
+        _enable_triage_skip(monkeypatch)
+        self._set_inspection(**self._CLEAN)
+        for level in ("alto", "critico", "crítico", "ALTO"):
+            assert self._decide(db_setup, requirement_risk_level=level).eligible is False
+        # ...but a non-high-stakes level still qualifies.
+        assert self._decide(db_setup, requirement_risk_level="medium").eligible is True
+
+    def test_authenticity_not_clean_blocks(self, monkeypatch, db_setup):
+        _enable_triage_skip(monkeypatch)
+        for risk in ("suspicious", "high_risk", None):
+            self._set_inspection(**{**self._CLEAN, "authenticity_risk": risk})
+            assert self._decide(db_setup).eligible is False
+
+    def test_medium_risk_reason_blocks(self, monkeypatch, db_setup):
+        _enable_triage_skip(monkeypatch)
+        self._set_inspection(
+            **{
+                **self._CLEAN,
+                "risk_reasons": [
+                    {"code": "x", "severity": "medium", "detail_es": "y"}
+                ],
+            }
+        )
+        assert self._decide(db_setup).eligible is False
+
+    def test_low_confidence_blocks(self, monkeypatch, db_setup):
+        _enable_triage_skip(monkeypatch)
+        self._set_inspection(**{**self._CLEAN, "requirement_match_confidence": 0.84})
+        assert self._decide(db_setup).eligible is False
+        self._set_inspection(**{**self._CLEAN, "requirement_match_confidence": None})
+        assert self._decide(db_setup).eligible is False
+
+    def test_rfc_alignment_blocks(self, monkeypatch, db_setup):
+        _enable_triage_skip(monkeypatch)
+        for alignment in ("mismatch", "homoclave_mismatch", "absent"):
+            self._set_inspection(**{**self._CLEAN, "rfc_alignment": alignment})
+            assert self._decide(db_setup).eligible is False
+        # ``no_expected`` (no provider RFC to match) is allowed.
+        self._set_inspection(**{**self._CLEAN, "rfc_alignment": "no_expected"})
+        assert self._decide(db_setup).eligible is True
+
+    def test_scanned_or_no_text_blocks(self, monkeypatch, db_setup):
+        _enable_triage_skip(monkeypatch)
+        self._set_inspection(**{**self._CLEAN, "is_probably_scanned": True})
+        assert self._decide(db_setup).eligible is False
+        self._set_inspection(**{**self._CLEAN, "has_text": False})
+        assert self._decide(db_setup).eligible is False
+
+    def test_mismatch_reason_blocks(self, monkeypatch, db_setup):
+        _enable_triage_skip(monkeypatch)
+        self._set_inspection(**{**self._CLEAN, "mismatch_reason": "tipo no coincide"})
+        assert self._decide(db_setup).eligible is False
+
+    def test_structural_problems_block(self, monkeypatch, db_setup):
+        _enable_triage_skip(monkeypatch)
+        for field in ("is_corrupt", "is_encrypted"):
+            self._set_inspection(**{**self._CLEAN, field: True})
+            assert self._decide(db_setup).eligible is False
+        self._set_inspection(**{**self._CLEAN, "is_pdf": False})
+        assert self._decide(db_setup).eligible is False
+        self._set_inspection(**{**self._CLEAN, "inspection_error": "boom"})
+        assert self._decide(db_setup).eligible is False
+
+    def test_missing_inspection_is_fail_safe(self, monkeypatch, db_setup):
+        _enable_triage_skip(monkeypatch)
+        from app.services.document_analysis.shadow_runner import (
+            _triage_skip_decision,
+        )
+
+        assert _triage_skip_decision("does-not-exist", requirement_risk_level=None).eligible is False
+
+
+class TestTriageSkipRunner(_ShadowDbSetupMixin):
+    """``run_shadow_analysis`` end-to-end with triage-skip on/off."""
+
+    _CLEAN = TestTriageSkipDecision._CLEAN
+
+    def _set_clean(self):
+        from app.db.session import SessionLocal
+        from app.models import DocumentInspection
+
+        db = SessionLocal()
+        try:
+            insp = db.query(DocumentInspection).first()
+            for key, value in self._CLEAN.items():
+                setattr(insp, key, value)
+            db.commit()
+        finally:
+            db.close()
+
+    def _inspection(self):
+        from app.db.session import SessionLocal
+        from app.models import DocumentInspection
+
+        db = SessionLocal()
+        try:
+            return db.query(DocumentInspection).first()
+        finally:
+            db.close()
+
+    def _events(self, event_type):
+        from app.db.session import SessionLocal
+        from app.models import ValidationEvent
+
+        db = SessionLocal()
+        try:
+            return [
+                e
+                for e in db.query(ValidationEvent).all()
+                if e.event_type == event_type
+            ]
+        finally:
+            db.close()
+
+    def _run(self, db_setup, tmp_path, *, requirement_risk_level=None):
+        from app.services.document_analysis.shadow_runner import run_shadow_analysis
+
+        run_shadow_analysis(
+            document_id=db_setup["document_id"],
+            submission_id=db_setup["submission_id"],
+            pdf_path=str(_blank_pdf_path(tmp_path)),
+            requirement_code="REC-SAT-CSF-2026",
+            requirement_name="CSF",
+            institution_code="sat",
+            period_code="2026-01",
+            org_id="cli-1",
+            requirement_risk_level=requirement_risk_level,
+        )
+
+    def test_flag_off_runs_triage(self, monkeypatch, tmp_path, db_setup):
+        # Skip disabled (default) → triage runs even on a clean+aligned doc.
+        self._set_clean()
+        triage = _triage_provider(
+            _tier_result(
+                provider_id="anthropic:claude-haiku-4-5",
+                confidence=0.9,
+                authenticity=_CLEAN_AUTH,
+            )
+        )
+        with patch(
+            "app.services.document_analysis.shadow_runner.build_document_analysis_provider",
+            side_effect=_tiered_factory(triage, None),
+        ):
+            self._run(db_setup, tmp_path)
+
+        triage.analyze.assert_called_once()
+        assert self._inspection().shadow_provider_id == "anthropic:claude-haiku-4-5"
+        assert self._events("shadow_analysis_skipped") == []
+
+    def test_skip_eligible_does_not_call_provider(
+        self, monkeypatch, tmp_path, db_setup
+    ):
+        _enable_triage_skip(monkeypatch, sampling_rate=0.0)
+        self._set_clean()
+        triage = _triage_provider(
+            _tier_result(provider_id="anthropic:claude-haiku-4-5")
+        )
+        with patch(
+            "app.services.document_analysis.shadow_runner.build_document_analysis_provider",
+            side_effect=_tiered_factory(triage, None),
+        ):
+            self._run(db_setup, tmp_path)
+
+        triage.analyze.assert_not_called()
+        insp = self._inspection()
+        # No shadow_* completion columns are stamped → the doc stays
+        # reprocess-eligible and never poses as a completed clean run.
+        assert insp.shadow_provider_id is None
+        assert insp.shadow_completed_at is None
+        assert insp.shadow_error is None
+        assert insp.shadow_confidence is None
+        # The skip is recorded only via the signals annotation + the event.
+        assert insp.shadow_signals["_triage_skip"]["reason"] == "heuristic_clean_aligned"
+        # Deterministic verdict untouched.
+        assert insp.authenticity_risk == "clean"
+        skipped = self._events("shadow_analysis_skipped")
+        assert len(skipped) == 1
+        assert skipped[0].result == "pass"
+        # No completed event — the AI never ran.
+        assert self._events("shadow_analysis_completed") == []
+
+    def test_skip_preserves_prior_real_shadow_run(
+        self, monkeypatch, tmp_path, db_setup
+    ):
+        # Idempotency: a re-invocation must NOT downgrade an already-completed
+        # real shadow run to a skip (which would clobber the audit blob + KPI).
+        _enable_triage_skip(monkeypatch, sampling_rate=0.0)
+        self._set_clean()
+        from datetime import datetime
+
+        from app.db.session import SessionLocal
+        from app.models import DocumentInspection
+
+        db = SessionLocal()
+        try:
+            insp = db.query(DocumentInspection).first()
+            insp.shadow_provider_id = "anthropic:claude-sonnet-4-6"
+            insp.shadow_completed_at = datetime(2026, 1, 1, tzinfo=UTC)
+            insp.shadow_signals = {"comprehension": {"verdict": "ok"}}
+            db.commit()
+        finally:
+            db.close()
+
+        triage = _triage_provider(
+            _tier_result(provider_id="anthropic:claude-haiku-4-5", authenticity=_CLEAN_AUTH)
+        )
+        escalation = _escalation_provider(
+            _tier_result(provider_id="anthropic:claude-sonnet-4-6")
+        )
+        with patch(
+            "app.services.document_analysis.shadow_runner.build_document_analysis_provider",
+            side_effect=_tiered_factory(triage, escalation),
+        ):
+            self._run(db_setup, tmp_path)
+
+        # Not skipped — the doc already had a completed run, so triage re-ran
+        # the normal path instead of being downgraded to a skip marker.
+        triage.analyze.assert_called_once()
+        assert self._events("shadow_analysis_skipped") == []
+        assert self._inspection().shadow_provider_id == "anthropic:claude-haiku-4-5"
+
+    def test_skip_falls_through_when_persist_fails(
+        self, monkeypatch, tmp_path, db_setup
+    ):
+        # A persistence failure on the skip marker must fall through to running
+        # the triage, never silently lose the document's pass.
+        _enable_triage_skip(monkeypatch, sampling_rate=0.0)
+        self._set_clean()
+        monkeypatch.setattr(
+            "app.services.document_analysis.shadow_runner._persist_triage_skip",
+            lambda **kwargs: False,
+        )
+        triage = _triage_provider(
+            _tier_result(provider_id="anthropic:claude-haiku-4-5", authenticity=_CLEAN_AUTH)
+        )
+        with patch(
+            "app.services.document_analysis.shadow_runner.build_document_analysis_provider",
+            side_effect=_tiered_factory(triage, None),
+        ):
+            self._run(db_setup, tmp_path)
+
+        triage.analyze.assert_called_once()
+        assert self._inspection().shadow_provider_id == "anthropic:claude-haiku-4-5"
+
+    def test_skip_does_not_trigger_auto_approval(
+        self, monkeypatch, tmp_path, db_setup
+    ):
+        _enable_triage_skip(monkeypatch, sampling_rate=0.0)
+        self._set_clean()
+        triage = _triage_provider(
+            _tier_result(provider_id="anthropic:claude-haiku-4-5")
+        )
+        approve = MagicMock()
+        monkeypatch.setattr(
+            "app.services.auto_approval.maybe_auto_approve", approve
+        )
+        with patch(
+            "app.services.document_analysis.shadow_runner.build_document_analysis_provider",
+            side_effect=_tiered_factory(triage, None),
+        ):
+            self._run(db_setup, tmp_path)
+
+        approve.assert_not_called()
+
+    def test_ineligible_doc_runs_triage_and_auto_approves(
+        self, monkeypatch, tmp_path, db_setup
+    ):
+        # Contrast: a NON-eligible doc (suspicious) keeps the normal path,
+        # which DOES reach the auto-approval hook.
+        _enable_triage_skip(monkeypatch, sampling_rate=0.0)
+        self._set_clean()
+        from app.db.session import SessionLocal
+        from app.models import DocumentInspection
+
+        db = SessionLocal()
+        try:
+            db.query(DocumentInspection).first().authenticity_risk = "suspicious"
+            db.commit()
+        finally:
+            db.close()
+        triage = _triage_provider(
+            _tier_result(provider_id="anthropic:claude-haiku-4-5", authenticity=_CLEAN_AUTH)
+        )
+        escalation = _escalation_provider(
+            _tier_result(provider_id="anthropic:claude-sonnet-4-6")
+        )
+        approve = MagicMock()
+        monkeypatch.setattr(
+            "app.services.auto_approval.maybe_auto_approve", approve
+        )
+        with patch(
+            "app.services.document_analysis.shadow_runner.build_document_analysis_provider",
+            side_effect=_tiered_factory(triage, escalation),
+        ):
+            self._run(db_setup, tmp_path)
+
+        triage.analyze.assert_called_once()
+        approve.assert_called_once()
+        assert self._events("shadow_analysis_skipped") == []
+
+    def test_sampled_runs_triage_and_records_agreement(
+        self, monkeypatch, tmp_path, db_setup
+    ):
+        # sampling_rate=1.0 → always sample → never skip, but record agreement.
+        _enable_triage_skip(monkeypatch, sampling_rate=1.0)
+        self._set_clean()
+        triage = _triage_provider(
+            _tier_result(
+                provider_id="anthropic:claude-haiku-4-5",
+                confidence=0.9,
+                authenticity=_CLEAN_AUTH,
+            )
+        )
+        with patch(
+            "app.services.document_analysis.shadow_runner.build_document_analysis_provider",
+            side_effect=_tiered_factory(triage, None),
+        ):
+            self._run(db_setup, tmp_path)
+
+        triage.analyze.assert_called_once()
+        assert self._inspection().shadow_provider_id == "anthropic:claude-haiku-4-5"
+        assert self._events("shadow_analysis_skipped") == []
+        sample = self._events("triage_skip_sample")
+        assert len(sample) == 1
+        assert sample[0].result == "pass"
+        assert sample[0].payload["agreed"] is True
+
+    def test_sampled_records_disagreement(self, monkeypatch, tmp_path, db_setup):
+        _enable_triage_skip(monkeypatch, sampling_rate=1.0)
+        self._set_clean()
+        flagged_auth = {"concerns": [{"concern": "sello dudoso", "severity": "medium"}]}
+        triage = _triage_provider(
+            _tier_result(
+                provider_id="anthropic:claude-haiku-4-5",
+                confidence=0.9,
+                authenticity=flagged_auth,
+            )
+        )
+        escalation = _escalation_provider(
+            _tier_result(provider_id="anthropic:claude-sonnet-4-6")
+        )
+        with patch(
+            "app.services.document_analysis.shadow_runner.build_document_analysis_provider",
+            side_effect=_tiered_factory(triage, escalation),
+        ):
+            self._run(db_setup, tmp_path)
+
+        sample = self._events("triage_skip_sample")
+        assert len(sample) == 1
+        assert sample[0].result == "warning"
+        assert sample[0].payload["agreed"] is False
+        assert sample[0].payload["ai_flagged"] is True
+
+    def test_sampled_low_ai_match_is_disagreement(
+        self, monkeypatch, tmp_path, db_setup
+    ):
+        # AI says "doesn't match the requirement" (conf < 0.5) with no
+        # authenticity concern → counts as DISAGREEMENT (the normal path would
+        # have escalated on low_match_confidence), not silent agreement.
+        _enable_triage_skip(monkeypatch, sampling_rate=1.0)
+        self._set_clean()
+        triage = _triage_provider(
+            _tier_result(
+                provider_id="anthropic:claude-haiku-4-5",
+                confidence=0.2,
+                authenticity=_CLEAN_AUTH,
+            )
+        )
+        escalation = _escalation_provider(
+            _tier_result(provider_id="anthropic:claude-sonnet-4-6")
+        )
+        with patch(
+            "app.services.document_analysis.shadow_runner.build_document_analysis_provider",
+            side_effect=_tiered_factory(triage, escalation),
+        ):
+            self._run(db_setup, tmp_path)
+
+        sample = self._events("triage_skip_sample")
+        assert len(sample) == 1
+        assert sample[0].result == "warning"
+        assert sample[0].payload["agreed"] is False
+        assert sample[0].payload["ai_low_match"] is True
+        assert sample[0].payload["ai_flagged"] is False
+
+    def test_sampled_provider_error_is_unavailable_not_disagreement(
+        self, monkeypatch, tmp_path, db_setup
+    ):
+        # A provider outage must NOT be recorded as substantive disagreement —
+        # it lands in its own ai_unavailable bucket with agreed=None.
+        _enable_triage_skip(monkeypatch, sampling_rate=1.0)
+        self._set_clean()
+        triage = _triage_provider(
+            _tier_result(
+                provider_id="anthropic:claude-haiku-4-5",
+                error="timeout",
+                with_signals=False,
+            )
+        )
+        with patch(
+            "app.services.document_analysis.shadow_runner.build_document_analysis_provider",
+            side_effect=_tiered_factory(triage, None),
+        ):
+            self._run(db_setup, tmp_path)
+
+        sample = self._events("triage_skip_sample")
+        assert len(sample) == 1
+        assert sample[0].payload["ai_unavailable"] is True
+        assert sample[0].payload["agreed"] is None
+        assert sample[0].payload["ai_flagged"] is False

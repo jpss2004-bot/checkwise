@@ -393,6 +393,33 @@ class Settings(BaseSettings):
     # bypassing the gate — for cohorts the business wants deep on every doc.
     DOCUMENT_ANALYSIS_ALWAYS_ESCALATE_ORG_IDS: str = ""
 
+    # A1 — triage-skip. The always-on cheap triage (Haiku) is an INDEPENDENT
+    # second opinion, not a redundant re-extraction. When the deterministic
+    # intake signal is already confidently clean + aligned + clean-forensics on
+    # a NON-high-stakes requirement, that second opinion is the least likely to
+    # change anything — so OFF by default, but when an operator opts in the
+    # runner skips it (saving the Haiku call + the daily-cap slot). The skip
+    # genuinely FORGOES the model's advisory escalation/elevation (a container-
+    # clean doc the model might still flag as a content forgery no longer draws
+    # the deep pass or the advisory ``suspicious`` shadow verdict) — that is the
+    # accepted tradeoff, NOT a no-op. Skips never touch the deterministic
+    # verdict, never trigger auto-approval, and leave the row reprocess-eligible
+    # (no shadow_* completion columns are stamped). A sampled fraction is
+    # analyzed ANYWAY so heuristic-vs-AI agreement can be measured before
+    # widening the skip.
+    DOCUMENT_ANALYSIS_TRIAGE_SKIP_ENABLED: bool = False
+    # Heuristic requirement-match confidence floor to qualify for a skip. The
+    # intake confidence is CAPPED by every misalignment (identity ≤0.49/0.65,
+    # rfc-absent/period ≤0.69, type/institution ≤0.35/0.45), so a high floor
+    # already implies aligned + no mismatch.
+    DOCUMENT_ANALYSIS_TRIAGE_SKIP_MIN_CONFIDENCE: float = 0.85
+    # Fraction (0..1) of skip-ELIGIBLE documents that are analyzed ANYWAY so the
+    # heuristic's skip decision can be validated against the AI (recorded as a
+    # ``triage_skip_sample`` ValidationEvent). 0.05 = monitor ~5%. 0.0 = skip
+    # every eligible doc (no monitoring); 1.0 = never skip, always analyze +
+    # always record agreement (an effective dry-run of the skip predicate).
+    DOCUMENT_ANALYSIS_TRIAGE_SKIP_SAMPLING_RATE: float = 0.05
+
     # Phase 0 (comprehension) — the escalation/deep tier reasons about the
     # document instead of single-pass extracting it: adaptive thinking +
     # ``effort=high`` + structured outputs need more room and time than the
