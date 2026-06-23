@@ -451,18 +451,20 @@ export default function ClientSubmissionsPage() {
 
         <StatusLegend />
 
-        {isApprover && validPendingIds.length > 0 ? (
+        {isApprover && (validPendingIds.length > 0 || bulkMsg) ? (
           <div className="flex flex-wrap items-center gap-2">
-            <Button
-              size="sm"
-              variant="outline"
-              loading={bulkBusy}
-              onClick={() => void acceptAllValidPending()}
-            >
-              Aceptar {validPendingIds.length} válida
-              {validPendingIds.length === 1 ? "" : "s"} pendiente
-              {validPendingIds.length === 1 ? "" : "s"}
-            </Button>
+            {validPendingIds.length > 0 ? (
+              <Button
+                size="sm"
+                variant="outline"
+                loading={bulkBusy}
+                onClick={() => void acceptAllValidPending()}
+              >
+                Aceptar {validPendingIds.length} válida
+                {validPendingIds.length === 1 ? "" : "s"} pendiente
+                {validPendingIds.length === 1 ? "" : "s"}
+              </Button>
+            ) : null}
             {bulkMsg ? (
               <span className="text-[12px] text-[color:var(--text-secondary)]">
                 {bulkMsg}
