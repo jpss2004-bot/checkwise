@@ -1203,3 +1203,31 @@ def get_submission_document(
         # FILE GAP-6 — sensitive evidence bytes: never cache.
         headers={"Cache-Control": "no-store, private"},
     )
+
+
+@router.post("/documents/{document_id}/verify-folio")
+def verify_document_folio_endpoint(
+    document_id: str,
+    db: DbSession,
+    current: ReviewerDep,
+    force_refresh: bool = False,
+) -> dict:
+    """B1 — reviewer-triggered live SAT CFDI folio verification.
+
+    Asks SAT whether the document's CFDI fiscal UUID is vigente / cancelado /
+    no_existe (cached in ``folio_verifications``), elevating the document's
+    authenticity verdict with a HIGH ``folio_not_found_at_sat`` reason when SAT
+    reports it cancelled or non-existent. NEVER intake-blocking; fail-open
+    (``not_verifiable`` never downgrades a verdict to clean). Returns
+    ``{"verified": false, "status": "disabled"}`` when
+    ``SAT_CFDI_VERIFICATION_ENABLED`` is off. ``force_refresh`` bypasses the
+    cache TTL.
+    """
+    _ = current  # RBAC enforced by ReviewerDep
+    if db.get(Document, document_id) is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail="Documento no encontrado."
+        )
+    from app.services.folio_verification import verify_document_folio
+
+    return verify_document_folio(db, document_id, force_refresh=force_refresh)

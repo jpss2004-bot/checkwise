@@ -510,6 +510,53 @@ class DocumentFolio(Base):
     )
 
 
+class FolioVerification(Base):
+    """B1 — cache of a live SAT CFDI ``consulta`` verdict (the moat).
+
+    Keyed by the triple the SAT consulta actually depends on:
+    ``(cfdi_uuid, emisor_rfc, receptor_rfc)`` — the same UUID with a different
+    emisor/receptor is a different query. A reviewer-triggered worker
+    (``services.folio_verification``) populates this; intake NEVER touches it.
+
+    ``status`` is one of ``vigente`` | ``cancelado`` | ``no_existe`` |
+    ``not_verifiable``. ``not_verifiable`` is the fail-open verdict (stub mode,
+    a transport error, or missing inputs) — it is cached too, so a doomed query
+    is not retried on every reviewer click, but it never elevates the document's
+    authenticity verdict. ``source`` records which client produced it (``stub``
+    vs ``sat_cfdi_live``) for audit. ``raw`` keeps the provider's response.
+    ``last_document_id`` is the most recent document that triggered the check —
+    audit only; the cache row is shared across every document carrying the UUID.
+
+    The RFC columns are NOT NULL and normalized to ``""`` when unresolved so the
+    unique key is deterministic (Postgres treats NULLs as distinct, which would
+    silently defeat the cache).
+    """
+
+    __tablename__ = "folio_verifications"
+    __table_args__ = (
+        # The unique constraint's implicit index already serves the cache's
+        # 3-column equality lookup, so no separate index is declared.
+        UniqueConstraint(
+            "cfdi_uuid",
+            "emisor_rfc",
+            "receptor_rfc",
+            name="uq_folio_verifications_key",
+        ),
+    )
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=new_id)
+    cfdi_uuid: Mapped[str] = mapped_column(String(120), nullable=False)
+    emisor_rfc: Mapped[str] = mapped_column(String(13), nullable=False, default="")
+    receptor_rfc: Mapped[str] = mapped_column(String(13), nullable=False, default="")
+    status: Mapped[str] = mapped_column(String(20), nullable=False)
+    source: Mapped[str] = mapped_column(String(30), nullable=False)
+    raw: Mapped[dict | None] = mapped_column(JSON)
+    last_document_id: Mapped[str | None] = mapped_column(ForeignKey("documents.id"))
+    checked_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=utc_now, nullable=False
+    )
+
+
 class DocumentStatusHistory(Base):
     __tablename__ = "document_status_history"
 
