@@ -463,6 +463,53 @@ class DocumentInspection(TimestampMixin, Base):
     document: Mapped[Document] = relationship(back_populates="inspection")
 
 
+class DocumentFolio(Base):
+    """Indexed projection of the folio / fiscal-UUID anchors the Phase-B
+    verification extractor already pulls from each document (stored today only
+    inside ``DocumentInspection.verification["folios"]`` JSON).
+
+    Promoting them out of the JSON blob into an indexed table turns folio-keyed
+    lookups — cross-tenant recycled-document detection, cross-period reuse, and
+    a live-SAT verification cache — into single indexed reads instead of full
+    JSON scans. This row is write-only for now (populated at intake + by a
+    backfill); the consumers are later phases.
+
+    ``cfdi_uuid`` is the strong, format-stable fingerprint — it survives a
+    re-export where the file sha256 does not; the pragmatic ``*_opinion_folio``
+    regex matches are advisory. ``value`` is deliberately NOT globally unique:
+    the same value recurring across documents/tenants IS the signal downstream
+    consumers look for. The uniqueness is only per (document, kind, value), so
+    intake + backfill are idempotent. ``client_id`` / ``vendor_id`` /
+    ``period_id`` are denormalized from the document's submission so the
+    cross-tenant / cross-period scans don't re-join through submissions.
+    """
+
+    __tablename__ = "document_folios"
+    __table_args__ = (
+        # Hot lookup: "who else carries this folio/UUID?" Non-unique by design.
+        Index("ix_document_folios_kind_value", "kind", "value"),
+        # Tenant-scoped scans (e.g. one vendor's folios across periods).
+        Index("ix_document_folios_vendor", "vendor_id"),
+        # Idempotent population/backfill — one row per (document, kind, value).
+        UniqueConstraint(
+            "document_id", "kind", "value", name="uq_document_folios_doc_kind_value"
+        ),
+    )
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=new_id)
+    document_id: Mapped[str] = mapped_column(ForeignKey("documents.id"), nullable=False)
+    client_id: Mapped[str] = mapped_column(ForeignKey("clients.id"), nullable=False)
+    vendor_id: Mapped[str] = mapped_column(ForeignKey("vendors.id"), nullable=False)
+    period_id: Mapped[str | None] = mapped_column(ForeignKey("periods.id"))
+    # ``cfdi_uuid`` | ``sat_opinion_folio`` | ``imss_opinion_folio`` (the
+    # ``FOLIO_PATTERNS`` kinds). Stored verbatim — no kind is special-cased here.
+    kind: Mapped[str] = mapped_column(String(40), nullable=False)
+    value: Mapped[str] = mapped_column(String(120), nullable=False)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=utc_now, nullable=False
+    )
+
+
 class DocumentStatusHistory(Base):
     __tablename__ = "document_status_history"
 
