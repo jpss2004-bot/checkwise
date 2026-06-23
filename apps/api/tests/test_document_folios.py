@@ -25,7 +25,9 @@ from app.models import (
     Vendor,
 )
 from app.services.document_folios import (
+    apply_cross_period_reason,
     apply_cross_tenant_reason,
+    cross_period_folio_reason,
     cross_tenant_folio_reason,
     folio_pairs,
     persist_document_folios,
@@ -485,6 +487,135 @@ def test_apply_cross_tenant_failopen_recovers_session(db_factory, monkeypatch) -
         assert db.scalar(select(Client).where(Client.name == "Pending")) is not None
     finally:
         db.close()
+
+
+# --- cross-period folio-reuse detection ---
+
+
+_CFDI1 = {"folios": [{"kind": "cfdi_uuid", "value": "U-1"}], "qr_codes": []}
+
+
+def _enable_cross_period(monkeypatch) -> None:
+    from app.core.config import settings
+
+    monkeypatch.setattr(settings, "CROSS_PERIOD_REUSE_DETECTION_ENABLED", True)
+
+
+def _index_cfdi_for_vendor(db_factory, *, value: str = "U-1") -> tuple[str, str]:
+    """Seed a doc and index its cfdi_uuid. Returns (vendor_id, period_id)."""
+    doc_id, client_id, vendor_id, period_id = _seed_document(db_factory)
+    db = db_factory()
+    try:
+        persist_document_folios(
+            db,
+            document_id=doc_id,
+            client_id=client_id,
+            vendor_id=vendor_id,
+            period_id=period_id,
+            verification={"folios": [{"kind": "cfdi_uuid", "value": value}]},
+        )
+        db.commit()
+    finally:
+        db.close()
+    return vendor_id, period_id
+
+
+def _period_reason(db_factory, **kwargs):
+    db = db_factory()
+    try:
+        return cross_period_folio_reason(db, **kwargs)
+    finally:
+        db.close()
+
+
+def test_cross_period_flags_reuse_same_vendor_other_period(
+    db_factory, monkeypatch
+) -> None:
+    _enable_cross_period(monkeypatch)
+    vendor_id, _period_id = _index_cfdi_for_vendor(db_factory, value="U-1")
+    reason = _period_reason(
+        db_factory, vendor_id=vendor_id, period_id="other-period", verification=_CFDI1
+    )
+    assert reason is not None
+    assert reason.code == "cross_period_folio_reuse"
+    assert reason.severity == "high"
+    assert "1 periodo" in reason.detail_es
+
+
+def test_cross_period_off_by_default(db_factory) -> None:
+    vendor_id, _ = _index_cfdi_for_vendor(db_factory)
+    assert (
+        _period_reason(
+            db_factory, vendor_id=vendor_id, period_id="other", verification=_CFDI1
+        )
+        is None
+    )
+
+
+def test_cross_period_ignores_same_period(db_factory, monkeypatch) -> None:
+    _enable_cross_period(monkeypatch)
+    vendor_id, period_id = _index_cfdi_for_vendor(db_factory, value="U-SAME")
+    # Same period as the indexed folio (re-upload / replacement) → no self-flag.
+    assert (
+        _period_reason(
+            db_factory,
+            vendor_id=vendor_id,
+            period_id=period_id,
+            verification={"folios": [{"kind": "cfdi_uuid", "value": "U-SAME"}]},
+        )
+        is None
+    )
+
+
+def test_cross_period_ignores_other_vendor(db_factory, monkeypatch) -> None:
+    _enable_cross_period(monkeypatch)
+    _index_cfdi_for_vendor(db_factory, value="U-1")
+    # A DIFFERENT vendor reusing the UUID is the cross-tenant case, not this one.
+    assert (
+        _period_reason(
+            db_factory, vendor_id="other-vendor", period_id="p", verification=_CFDI1
+        )
+        is None
+    )
+
+
+def test_cross_period_needs_period_and_cfdi(db_factory, monkeypatch) -> None:
+    _enable_cross_period(monkeypatch)
+    vendor_id, _ = _index_cfdi_for_vendor(db_factory)
+    assert (
+        _period_reason(
+            db_factory, vendor_id=vendor_id, period_id=None, verification=_CFDI1
+        )
+        is None
+    )
+    assert (
+        _period_reason(
+            db_factory,
+            vendor_id=vendor_id,
+            period_id="p",
+            verification={"folios": [{"kind": "sat_opinion_folio", "value": "F"}]},
+        )
+        is None
+    )
+
+
+def test_apply_cross_period_elevates_to_high(db_factory, monkeypatch) -> None:
+    _enable_cross_period(monkeypatch)
+    vendor_id, _ = _index_cfdi_for_vendor(db_factory, value="U-1")
+    db = db_factory()
+    try:
+        risk, reasons = apply_cross_period_reason(
+            db,
+            vendor_id=vendor_id,
+            period_id="other",
+            verification=_CFDI1,
+            authenticity_risk="clean",
+            risk_reasons=[],
+        )
+    finally:
+        db.close()
+    assert risk == "high_risk"
+    assert any(r["code"] == "cross_period_folio_reuse" for r in reasons)
 
 
 # --- migration sanity ---

@@ -50,6 +50,7 @@ from app.services.client_notifications import (
 )
 from app.services.document_analysis.shadow_runner import run_shadow_analysis
 from app.services.document_folios import (
+    apply_cross_period_reason,
     apply_cross_tenant_reason,
     persist_document_folios,
 )
@@ -838,6 +839,17 @@ def finalize_intake_submission(
         client_id=client.id,
         verification=verification_payload,
         detected_institution=document_signals.detected_institution,
+        authenticity_risk=authenticity_risk,
+        risk_reasons=risk_reasons,
+    )
+
+    # Cross-period folio-reuse detection (advisory HIGH, fail-open): the same
+    # provider's CFDI UUID reused in a different period.
+    authenticity_risk, risk_reasons = apply_cross_period_reason(
+        db,
+        vendor_id=vendor.id,
+        period_id=resolved_period.period.id,
+        verification=verification_payload,
         authenticity_risk=authenticity_risk,
         risk_reasons=risk_reasons,
     )
@@ -1694,6 +1706,15 @@ def finalize_multi_document_submission(
             client_id=client.id,
             verification=verification_payload,
             detected_institution=document_signals.detected_institution,
+            authenticity_risk=authenticity_risk,
+            risk_reasons=risk_reasons,
+        )
+        # Cross-period folio-reuse detection (advisory HIGH, fail-open).
+        authenticity_risk, risk_reasons = apply_cross_period_reason(
+            db,
+            vendor_id=vendor.id,
+            period_id=resolved_period.period.id,
+            verification=verification_payload,
             authenticity_risk=authenticity_risk,
             risk_reasons=risk_reasons,
         )

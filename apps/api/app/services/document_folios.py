@@ -158,6 +158,35 @@ def cross_tenant_folio_reason(
     )
 
 
+def _merge_authenticity_reason(
+    authenticity_risk: str | None,
+    risk_reasons: list | None,
+    reason: RiskReason,
+) -> tuple[str | None, list | None]:
+    """Append ``reason`` to the (severity-sorted) reasons and INCREMENTALLY
+    elevate the existing verdict for it: a HIGH reason → ``high_risk``; a MEDIUM
+    reason lifts a clean/NULL verdict to ``suspicious`` (never downgrades a high
+    verdict); an INFO reason leaves the verdict untouched.
+
+    For the current callers (cross-tenant = MEDIUM, cross-period = HIGH) this is
+    identical to a from-scratch ``rollup_authenticity_risk`` over the merged set.
+    It deliberately differs only for an INFO reason on a NULL verdict: it KEEPS
+    ``None`` rather than rolling up to ``clean``. ``None`` is intake's distinct
+    "not analyzed" state (forensics + verification both fail-open), which rollup
+    cannot express — and an advisory info-level note must not fabricate a
+    ``clean`` verdict that would, e.g., make a never-analyzed document
+    auto-approvable. Non-elevating reasons therefore never upgrade NULL."""
+    merged = [*(risk_reasons or []), reason.as_dict()]
+    merged.sort(key=lambda r: severity_rank(str(r.get("severity", ""))))
+    if reason.severity == SEVERITY_HIGH:
+        new_risk: str | None = RISK_HIGH
+    elif reason.severity == SEVERITY_MEDIUM:
+        new_risk = RISK_HIGH if authenticity_risk == RISK_HIGH else RISK_SUSPICIOUS
+    else:  # info — never elevates
+        new_risk = authenticity_risk
+    return new_risk, merged
+
+
 def apply_cross_tenant_reason(
     db: Session,
     *,
@@ -201,10 +230,86 @@ def apply_cross_tenant_reason(
         return authenticity_risk, risk_reasons
     if reason is None:
         return authenticity_risk, risk_reasons
-    merged = [*(risk_reasons or []), reason.as_dict()]
-    merged.sort(key=lambda r: severity_rank(str(r.get("severity", ""))))
-    if reason.severity == SEVERITY_HIGH:
-        new_risk: str | None = RISK_HIGH
-    else:  # medium
-        new_risk = RISK_HIGH if authenticity_risk == RISK_HIGH else RISK_SUSPICIOUS
-    return new_risk, merged
+    return _merge_authenticity_reason(authenticity_risk, risk_reasons, reason)
+
+
+def cross_period_folio_reason(
+    db: Session,
+    *,
+    vendor_id: str,
+    period_id: str | None,
+    verification: dict[str, Any] | None,
+) -> RiskReason | None:
+    """Advisory HIGH authenticity reason when this document's CFDI fiscal UUID
+    was already submitted by the SAME provider in a DIFFERENT period. A CFDI is
+    a single dated invoice with a unique UUID — it cannot legitimately satisfy
+    two distinct compliance periods, so reuse across periods is a strong
+    self-recycling signal (stronger than the cross-tenant case: it's the
+    provider reusing their own document).
+
+    Returns ``None`` when the feature is off, the document has no period, it
+    carries no CFDI UUID, or no other period of this vendor shares one. Scoped to
+    ``vendor_id`` + ``period_id != current`` so a same-period re-upload /
+    replacement never self-flags, and the current document's own (not-yet-
+    persisted, or current-period) folios are excluded. Count-only.
+    """
+    if not settings.CROSS_PERIOD_REUSE_DETECTION_ENABLED:
+        return None
+    if not period_id:
+        return None
+    cfdi_values = [value for kind, value in folio_pairs(verification) if kind == "cfdi_uuid"]
+    if not cfdi_values:
+        return None
+    other_periods = (
+        db.scalar(
+            select(func.count(func.distinct(DocumentFolio.period_id))).where(
+                DocumentFolio.kind == "cfdi_uuid",
+                DocumentFolio.value.in_(cfdi_values),
+                DocumentFolio.vendor_id == vendor_id,
+                DocumentFolio.period_id.is_not(None),
+                DocumentFolio.period_id != period_id,
+            )
+        )
+        or 0
+    )
+    if other_periods <= 0:
+        return None
+    return RiskReason(
+        code="cross_period_folio_reuse",
+        severity=SEVERITY_HIGH,
+        detail_es=(
+            f"Folio fiscal reutilizado en {other_periods} periodo(s) distinto(s) "
+            "del mismo proveedor — un comprobante no debe repetirse entre periodos."
+        ),
+    )
+
+
+def apply_cross_period_reason(
+    db: Session,
+    *,
+    vendor_id: str,
+    period_id: str | None,
+    verification: dict[str, Any] | None,
+    authenticity_risk: str | None,
+    risk_reasons: list | None,
+) -> tuple[str | None, list | None]:
+    """Merge the cross-period folio-reuse reason (if any) into the intake
+    authenticity verdict. Same FAIL-OPEN + SAVEPOINT + flag-off-short-circuit
+    contract as ``apply_cross_tenant_reason``; a HIGH reason lifts the verdict to
+    ``high_risk``. Advisory — never changes the user-visible status."""
+    if not settings.CROSS_PERIOD_REUSE_DETECTION_ENABLED:
+        return authenticity_risk, risk_reasons
+    try:
+        with db.begin_nested():
+            reason = cross_period_folio_reason(
+                db,
+                vendor_id=vendor_id,
+                period_id=period_id,
+                verification=verification,
+            )
+    except Exception:  # noqa: BLE001 — advisory cross-period check never blocks intake
+        logger.exception("cross-period folio check failed (non-fatal)")
+        return authenticity_risk, risk_reasons
+    if reason is None:
+        return authenticity_risk, risk_reasons
+    return _merge_authenticity_reason(authenticity_risk, risk_reasons, reason)

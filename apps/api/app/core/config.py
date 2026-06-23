@@ -478,6 +478,14 @@ class Settings(BaseSettings):
     # which/whose tenants); never blocks intake or changes the document status.
     CROSS_TENANT_RECYCLED_DETECTION_ENABLED: bool = False
 
+    # Cross-period folio-reuse detection (also a document_folios consumer). OFF
+    # by default. When ON, intake flags — as an advisory HIGH authenticity
+    # reason — a document whose CFDI fiscal UUID was already submitted by the
+    # SAME provider in a DIFFERENT period (an invoice can't satisfy two periods,
+    # so reuse across periods is a strong self-recycling signal). Count-only;
+    # never blocks intake or changes the document status.
+    CROSS_PERIOD_REUSE_DETECTION_ENABLED: bool = False
+
     # env_file anchors to the apps/api root for the same reason the
     # storage paths do (audit 2026-06-12): a CWD-relative ".env" meant a
     # server launched from the repo root silently ran with default
