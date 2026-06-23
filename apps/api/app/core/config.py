@@ -420,6 +420,24 @@ class Settings(BaseSettings):
     # always record agreement (an effective dry-run of the skip predicate).
     DOCUMENT_ANALYSIS_TRIAGE_SKIP_SAMPLING_RATE: float = 0.05
 
+    # A2 — global Anthropic concurrency ceiling + circuit breaker. The per-org
+    # daily caps never see the REAL per-worker constraint: how many 30–90s LLM
+    # calls are in flight on this process at once, and whether the upstream is
+    # already failing. OFF by default (``..._ENABLED=False`` → the provider call
+    # is byte-for-byte unwrapped). When ON, a process-global bounded semaphore
+    # admits at most ``ANTHROPIC_MAX_CONCURRENT_REQUESTS`` concurrent
+    # ``messages.create`` calls (others wait up to ``..._ACQUIRE_TIMEOUT_SECONDS``
+    # then fast-fail as ``shadow_error="concurrency_exhausted"``), and a breaker
+    # opens after ``..._FAILURE_THRESHOLD`` CONSECUTIVE call failures, fast-
+    # failing every call as ``breaker_open`` for ``..._COOLDOWN_SECONDS`` so a
+    # broken upstream is not hammered. Fail-open: every fast-fail is just a
+    # shadow_error (advisory) — the deterministic verdict/status never changes.
+    ANTHROPIC_CONCURRENCY_BREAKER_ENABLED: bool = False
+    ANTHROPIC_MAX_CONCURRENT_REQUESTS: int = 4
+    ANTHROPIC_CONCURRENCY_ACQUIRE_TIMEOUT_SECONDS: float = 30.0
+    ANTHROPIC_BREAKER_FAILURE_THRESHOLD: int = 5
+    ANTHROPIC_BREAKER_COOLDOWN_SECONDS: float = 30.0
+
     # Phase 0 (comprehension) — the escalation/deep tier reasons about the
     # document instead of single-pass extracting it: adaptive thinking +
     # ``effort=high`` + structured outputs need more room and time than the

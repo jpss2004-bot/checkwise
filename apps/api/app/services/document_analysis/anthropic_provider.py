@@ -52,6 +52,11 @@ from app.services.document_analysis.base import (
     AnalysisResult,
     ProviderUnavailableError,
 )
+from app.services.document_analysis.concurrency_breaker import (
+    BreakerOpenError,
+    ConcurrencyExhaustedError,
+    anthropic_concurrency_breaker,
+)
 from app.services.document_analysis.prompt_registry import (
     PromptBundle,
     get_comprehension_prompt_for_requirement,
@@ -628,9 +633,16 @@ class AnthropicDocumentAnalysisProvider:
             timeout = self._timeout
 
         try:
-            response = self._client.with_options(timeout=timeout).messages.create(
-                **request_kwargs
-            )
+            # A2 — bound concurrent in-flight calls + fast-fail on a broken
+            # upstream. Default-off: when disabled the guard is a pure
+            # pass-through and this is byte-for-byte the prior call. The
+            # predicate keeps deterministic 4xx errors from opening the breaker.
+            with anthropic_concurrency_breaker.guard(
+                is_failure=self._is_breaker_failure
+            ):
+                response = self._client.with_options(timeout=timeout).messages.create(
+                    **request_kwargs
+                )
         except Exception as exc:  # noqa: BLE001 — categorise everything as a known failure
             return self._failure(prompt, start, self._categorise_exception(exc))
 
@@ -1056,8 +1068,32 @@ class AnthropicDocumentAnalysisProvider:
             "confidence": confidence,
         }
 
+    @staticmethod
+    def _is_breaker_failure(exc: BaseException) -> bool:
+        """Whether a ``messages.create`` exception is an UPSTREAM-HEALTH signal.
+
+        Only retriable upstream problems should move the A2 circuit breaker:
+        timeouts, connection errors, 5xx, and 429 rate limits. A deterministic
+        client-side 4xx (bad request / auth / unprocessable schema) is
+        self-inflicted — counting it would let a recurring 400 (e.g. an invalid
+        structured-output schema) open the breaker and suppress unrelated shadow
+        analysis, masking the real, fixable error. Anthropic SDK errors expose
+        ``status_code``; timeout/connection errors have none → treated as a
+        health failure.
+        """
+        status = getattr(exc, "status_code", None)
+        if isinstance(status, int) and 400 <= status < 500 and status != 429:
+            return False  # deterministic client error → breaker-neutral
+        return True
+
     def _categorise_exception(self, exc: BaseException) -> str:
         """Map an SDK exception to one of the public ``error`` codes."""
+        # A2 — local backpressure guards fast-fail with their own codes so an
+        # operator can tell "we shed this load" apart from a real upstream error.
+        if isinstance(exc, BreakerOpenError):
+            return "breaker_open"
+        if isinstance(exc, ConcurrencyExhaustedError):
+            return "concurrency_exhausted"
         name = type(exc).__name__
         # APITimeoutError, anthropic.APIConnectionError subclasses, etc.
         if "Timeout" in name or "Connect" in name:

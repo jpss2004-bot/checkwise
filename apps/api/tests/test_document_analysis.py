@@ -2794,3 +2794,359 @@ class TestTriageSkipRunner(_ShadowDbSetupMixin):
         assert sample[0].payload["ai_unavailable"] is True
         assert sample[0].payload["agreed"] is None
         assert sample[0].payload["ai_flagged"] is False
+
+
+# ---------------------------------------------------------------------------
+# A2 — Anthropic concurrency ceiling + circuit breaker
+# ---------------------------------------------------------------------------
+
+
+def _enable_breaker(
+    monkeypatch,
+    *,
+    max_concurrent=4,
+    acquire_timeout=0.0,
+    threshold=3,
+    cooldown=30.0,
+):
+    monkeypatch.setattr(settings, "ANTHROPIC_CONCURRENCY_BREAKER_ENABLED", True)
+    monkeypatch.setattr(settings, "ANTHROPIC_MAX_CONCURRENT_REQUESTS", max_concurrent)
+    monkeypatch.setattr(
+        settings, "ANTHROPIC_CONCURRENCY_ACQUIRE_TIMEOUT_SECONDS", acquire_timeout
+    )
+    monkeypatch.setattr(settings, "ANTHROPIC_BREAKER_FAILURE_THRESHOLD", threshold)
+    monkeypatch.setattr(settings, "ANTHROPIC_BREAKER_COOLDOWN_SECONDS", cooldown)
+
+
+class _Boom(Exception):
+    pass
+
+
+class TestConcurrencyBreaker:
+    @pytest.fixture(autouse=True)
+    def _reset_breaker(self):
+        from app.services.document_analysis.concurrency_breaker import (
+            anthropic_concurrency_breaker,
+        )
+
+        anthropic_concurrency_breaker.reset()
+        yield
+        anthropic_concurrency_breaker.reset()
+
+    def test_disabled_is_passthrough(self, monkeypatch):
+        from app.services.document_analysis.concurrency_breaker import (
+            anthropic_concurrency_breaker as b,
+        )
+
+        monkeypatch.setattr(settings, "ANTHROPIC_CONCURRENCY_BREAKER_ENABLED", False)
+        # Many "failures" while disabled never open the breaker or build a sem.
+        for _ in range(10):
+            try:
+                with b.guard():
+                    raise _Boom()
+            except _Boom:
+                pass
+        assert b._is_open() is False
+        assert b._semaphore is None
+
+    def test_semaphore_fast_fails_when_full(self, monkeypatch):
+        from app.services.document_analysis.concurrency_breaker import (
+            ConcurrencyExhaustedError,
+        )
+        from app.services.document_analysis.concurrency_breaker import (
+            anthropic_concurrency_breaker as b,
+        )
+
+        _enable_breaker(monkeypatch, max_concurrent=1, acquire_timeout=0.0)
+        held = b.guard()
+        held.__enter__()  # occupy the only slot
+        try:
+            with pytest.raises(ConcurrencyExhaustedError):
+                with b.guard():
+                    pass
+        finally:
+            held.__exit__(None, None, None)
+        # After release the slot is free again.
+        with b.guard():
+            pass
+
+    def test_breaker_opens_after_consecutive_failures(self, monkeypatch):
+        from app.services.document_analysis.concurrency_breaker import (
+            BreakerOpenError,
+        )
+        from app.services.document_analysis.concurrency_breaker import (
+            anthropic_concurrency_breaker as b,
+        )
+
+        _enable_breaker(monkeypatch, max_concurrent=4, threshold=3, cooldown=60.0)
+        for _ in range(3):
+            try:
+                with b.guard():
+                    raise _Boom()
+            except _Boom:
+                pass
+        assert b._is_open() is True
+        with pytest.raises(BreakerOpenError):
+            with b.guard():
+                raise AssertionError("body must not run while breaker is open")
+
+    def test_success_resets_failure_count(self, monkeypatch):
+        from app.services.document_analysis.concurrency_breaker import (
+            anthropic_concurrency_breaker as b,
+        )
+
+        _enable_breaker(monkeypatch, threshold=3, cooldown=60.0)
+        for _ in range(2):
+            try:
+                with b.guard():
+                    raise _Boom()
+            except _Boom:
+                pass
+        with b.guard():
+            pass  # success → reset
+        for _ in range(2):
+            try:
+                with b.guard():
+                    raise _Boom()
+            except _Boom:
+                pass
+        # Only 2 consecutive after the reset — below the threshold of 3.
+        assert b._is_open() is False
+
+    def test_concurrency_exhaustion_is_not_a_breaker_failure(self, monkeypatch):
+        from app.services.document_analysis.concurrency_breaker import (
+            ConcurrencyExhaustedError,
+        )
+        from app.services.document_analysis.concurrency_breaker import (
+            anthropic_concurrency_breaker as b,
+        )
+
+        _enable_breaker(
+            monkeypatch, max_concurrent=1, acquire_timeout=0.0, threshold=2
+        )
+        held = b.guard()
+        held.__enter__()
+        try:
+            for _ in range(5):
+                with pytest.raises(ConcurrencyExhaustedError):
+                    with b.guard():
+                        pass
+        finally:
+            held.__exit__(None, None, None)
+        # Local backpressure never moves the upstream-failure counter.
+        assert b._is_open() is False
+
+    def test_cooldown_half_open_allows_trial(self, monkeypatch):
+        from app.services.document_analysis import concurrency_breaker as mod
+
+        b = mod.anthropic_concurrency_breaker
+        _enable_breaker(monkeypatch, threshold=1, cooldown=30.0)
+        clock = {"t": 1000.0}
+        monkeypatch.setattr(mod.time, "monotonic", lambda: clock["t"])
+        try:
+            with b.guard():
+                raise _Boom()
+        except _Boom:
+            pass
+        assert b._is_open() is True
+        clock["t"] += 31.0  # advance past the cooldown window
+        assert b._is_open() is False  # half-open
+        with b.guard():
+            pass  # trial call admitted
+
+    # -- integration through the provider --------------------------------
+
+    def test_provider_returns_breaker_open(self, monkeypatch, tmp_path):
+        client = MagicMock()
+        client.with_options.return_value.messages.create.side_effect = _Boom()
+        provider = _build_provider_with_mock_client(monkeypatch, client)
+        _enable_breaker(monkeypatch, threshold=1, cooldown=60.0)
+
+        r1 = provider.analyze(
+            pdf_path=_blank_pdf_path(tmp_path),
+            requirement_code="REC-SAT-CSF-2026",
+            requirement_name="CSF",
+            institution_code="sat",
+            period_code="2026-01",
+        )
+        assert r1.error.startswith("provider_error")
+
+        create = client.with_options.return_value.messages.create
+        create.reset_mock()
+        r2 = provider.analyze(
+            pdf_path=_blank_pdf_path(tmp_path),
+            requirement_code="REC-SAT-CSF-2026",
+            requirement_name="CSF",
+            institution_code="sat",
+            period_code="2026-01",
+        )
+        assert r2.error == "breaker_open"
+        create.assert_not_called()  # short-circuited, no upstream call
+
+    def test_provider_returns_concurrency_exhausted(self, monkeypatch, tmp_path):
+        from app.services.document_analysis.concurrency_breaker import (
+            anthropic_concurrency_breaker as b,
+        )
+
+        client = MagicMock()
+        client.with_options.return_value.messages.create.return_value = (
+            _mock_anthropic_response()
+        )
+        provider = _build_provider_with_mock_client(monkeypatch, client)
+        _enable_breaker(monkeypatch, max_concurrent=1, acquire_timeout=0.0)
+
+        sem = b._get_semaphore()
+        sem.acquire()  # occupy the only slot from "another request"
+        try:
+            result = provider.analyze(
+                pdf_path=_blank_pdf_path(tmp_path),
+                requirement_code="REC-SAT-CSF-2026",
+                requirement_name="CSF",
+                institution_code="sat",
+                period_code="2026-01",
+            )
+        finally:
+            sem.release()
+        assert result.error == "concurrency_exhausted"
+        client.with_options.return_value.messages.create.assert_not_called()
+
+    def test_provider_passthrough_when_disabled(self, monkeypatch, tmp_path):
+        from app.services.document_analysis.concurrency_breaker import (
+            anthropic_concurrency_breaker as b,
+        )
+
+        monkeypatch.setattr(
+            settings, "ANTHROPIC_CONCURRENCY_BREAKER_ENABLED", False
+        )
+        client = MagicMock()
+        client.with_options.return_value.messages.create.side_effect = _Boom()
+        provider = _build_provider_with_mock_client(monkeypatch, client)
+        result = provider.analyze(
+            pdf_path=_blank_pdf_path(tmp_path),
+            requirement_code="REC-SAT-CSF-2026",
+            requirement_name="CSF",
+            institution_code="sat",
+            period_code="2026-01",
+        )
+        # Categorised normally; breaker untouched (no sem, not open).
+        assert result.error.startswith("provider_error")
+        assert b._is_open() is False
+        assert b._semaphore is None
+
+    # -- review fixes: failure-accounting discrimination -----------------
+
+    def test_predicate_neutral_error_does_not_count(self, monkeypatch):
+        from app.services.document_analysis.concurrency_breaker import (
+            anthropic_concurrency_breaker as b,
+        )
+
+        _enable_breaker(monkeypatch, threshold=1, cooldown=60.0)
+        for _ in range(3):
+            try:
+                with b.guard(is_failure=lambda exc: False):
+                    raise _Boom()
+            except _Boom:
+                pass
+        # A predicate-neutral error never moves the breaker.
+        assert b._is_open() is False
+        assert b._consecutive_failures == 0
+
+    def test_base_exception_is_breaker_neutral(self, monkeypatch):
+        from app.services.document_analysis.concurrency_breaker import (
+            anthropic_concurrency_breaker as b,
+        )
+
+        class _BaseBoom(BaseException):
+            pass
+
+        _enable_breaker(monkeypatch, threshold=1, cooldown=60.0)
+        try:
+            with b.guard():
+                raise _BaseBoom()
+        except _BaseBoom:
+            pass
+        # Cancellation/shutdown-class unwinds never move the failure counter.
+        assert b._consecutive_failures == 0
+        assert b._is_open() is False
+
+    def test_enabled_snapshot_off_to_on_does_not_record(self, monkeypatch):
+        from app.services.document_analysis.concurrency_breaker import (
+            anthropic_concurrency_breaker as b,
+        )
+
+        monkeypatch.setattr(
+            settings, "ANTHROPIC_CONCURRENCY_BREAKER_ENABLED", False
+        )
+        guard = b.guard()
+        guard.__enter__()  # snapshots _active=False (pass-through)
+        # Operator flips the flag ON mid-call.
+        monkeypatch.setattr(
+            settings, "ANTHROPIC_CONCURRENCY_BREAKER_ENABLED", True
+        )
+        guard.__exit__(_Boom, _Boom(), None)
+        # The call never participated in admission → it must not record.
+        assert b._consecutive_failures == 0
+        assert b._is_open() is False
+
+    def test_provider_4xx_does_not_open_breaker(self, monkeypatch, tmp_path):
+        from app.services.document_analysis.concurrency_breaker import (
+            anthropic_concurrency_breaker as b,
+        )
+
+        class _BadRequest(Exception):
+            status_code = 400
+
+        client = MagicMock()
+        client.with_options.return_value.messages.create.side_effect = _BadRequest()
+        provider = _build_provider_with_mock_client(monkeypatch, client)
+        _enable_breaker(monkeypatch, threshold=1, cooldown=60.0)
+
+        create = client.with_options.return_value.messages.create
+        for _ in range(3):
+            result = provider.analyze(
+                pdf_path=_blank_pdf_path(tmp_path),
+                requirement_code="REC-SAT-CSF-2026",
+                requirement_name="CSF",
+                institution_code="sat",
+                period_code="2026-01",
+            )
+            # The real, fixable error stays visible — not masked as breaker_open.
+            assert result.error == "provider_error:_BadRequest"
+        # A deterministic 4xx never opens the breaker; every call still tried.
+        assert b._is_open() is False
+        assert create.call_count == 3
+
+    def test_provider_5xx_opens_breaker(self, monkeypatch, tmp_path):
+        from app.services.document_analysis.concurrency_breaker import (
+            anthropic_concurrency_breaker as b,
+        )
+
+        class _ServerError(Exception):
+            status_code = 503
+
+        client = MagicMock()
+        client.with_options.return_value.messages.create.side_effect = _ServerError()
+        provider = _build_provider_with_mock_client(monkeypatch, client)
+        _enable_breaker(monkeypatch, threshold=1, cooldown=60.0)
+
+        r1 = provider.analyze(
+            pdf_path=_blank_pdf_path(tmp_path),
+            requirement_code="REC-SAT-CSF-2026",
+            requirement_name="CSF",
+            institution_code="sat",
+            period_code="2026-01",
+        )
+        assert r1.error == "provider_error:_ServerError"
+        # 5xx IS an upstream-health signal → breaker opens; next call fast-fails.
+        assert b._is_open() is True
+        create = client.with_options.return_value.messages.create
+        create.reset_mock()
+        r2 = provider.analyze(
+            pdf_path=_blank_pdf_path(tmp_path),
+            requirement_code="REC-SAT-CSF-2026",
+            requirement_name="CSF",
+            institution_code="sat",
+            period_code="2026-01",
+        )
+        assert r2.error == "breaker_open"
+        create.assert_not_called()
