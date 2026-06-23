@@ -325,6 +325,10 @@ export type ClientVendorDetail = {
     submitted_at: string;
     supersedes_submission_id: string | null;
     superseded_by_submission_id: string | null;
+    // Axis 2 — client acceptance (Phase 5).
+    client_acceptance?: string;
+    client_decided_at?: string | null;
+    client_decision_reason?: string | null;
   }>;
   recent_reviewer_notes: Array<{
     submission_id: string;
@@ -489,6 +493,11 @@ export type ClientSubmissionItem = {
   reviewer_note: string | null;
   supersedes_submission_id: string | null;
   superseded_by_submission_id: string | null;
+  /** Axis 2 — the client's business-acceptance verdict ("pending" |
+   *  "accepted" | "rejected"), orthogonal to ``status``. */
+  client_acceptance?: string;
+  client_decided_at?: string | null;
+  client_decision_reason?: string | null;
 };
 
 export type ClientSubmissionsResponse = {
@@ -945,10 +954,82 @@ export async function listClientSubmissions(params?: {
    *  lowercase code (``sat`` / ``imss`` / ``infonavit`` / ``stps_repse``
    *  / ``interno_cliente``). Unknown codes return an empty list. */
   institution?: string;
+  /** Phase 5 / Axis 2 — filter by acceptance state
+   *  ("pending" | "accepted" | "rejected"). */
+  client_acceptance?: string;
   limit?: number;
 }): Promise<ClientSubmissionsResponse> {
   return fetchJson<ClientSubmissionsResponse>(
     `/api/v1/client/submissions${qs(params)}`,
+  );
+}
+
+// ── Phase 5 — client acceptance axis (Axis 2) ──────────────────────────────
+
+export type ClientDecisionAction = "accept" | "reject" | "reset";
+
+/** Shape of POST /client/submissions/{id}/decision — NOT a Submission.
+ *  ``new_acceptance`` is what the row's ``client_acceptance`` becomes. */
+export type ClientDecisionResponse = {
+  submission_id: string;
+  previous_acceptance: string;
+  new_acceptance: string;
+  action: string;
+  reason: string | null;
+  override: boolean;
+  decided_at: string;
+  decided_by_user_id: string;
+};
+
+export async function decideClientSubmission(
+  submissionId: string,
+  body: { action: ClientDecisionAction; reason?: string | null },
+  params?: { client_id?: string },
+): Promise<ClientDecisionResponse> {
+  return fetchJson<ClientDecisionResponse>(
+    `/api/v1/client/submissions/${submissionId}/decision${qs(params)}`,
+    { method: "POST", body: JSON.stringify(body) },
+  );
+}
+
+export type ClientBulkDecisionResponse = {
+  decided: string[];
+  failed: Array<{ submission_id: string; detail: string }>;
+  decided_count: number;
+  failed_count: number;
+};
+
+export async function bulkDecideClientSubmissions(
+  body: {
+    submission_ids: string[];
+    action: ClientDecisionAction;
+    reason?: string | null;
+  },
+  params?: { client_id?: string },
+): Promise<ClientBulkDecisionResponse> {
+  return fetchJson<ClientBulkDecisionResponse>(
+    `/api/v1/client/submissions/bulk-decision${qs(params)}`,
+    { method: "POST", body: JSON.stringify(body) },
+  );
+}
+
+export type ClientAcceptancePrefs = { auto_accept_valid: boolean };
+
+export async function getClientAcceptancePrefs(params?: {
+  client_id?: string;
+}): Promise<ClientAcceptancePrefs> {
+  return fetchJson<ClientAcceptancePrefs>(
+    `/api/v1/client/acceptance-preferences${qs(params)}`,
+  );
+}
+
+export async function updateClientAcceptancePrefs(
+  body: ClientAcceptancePrefs,
+  params?: { client_id?: string },
+): Promise<ClientAcceptancePrefs> {
+  return fetchJson<ClientAcceptancePrefs>(
+    `/api/v1/client/acceptance-preferences${qs(params)}`,
+    { method: "PATCH", body: JSON.stringify(body) },
   );
 }
 

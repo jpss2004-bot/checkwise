@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import {
   ArrowsClockwise,
@@ -27,6 +27,7 @@ import {
   type ClientSubmissionItem,
   type ClientVendorRow,
 } from "@/lib/api/client";
+import { ClientAcceptanceControl } from "@/components/checkwise/client/acceptance-control";
 import { INSTITUTION_LABELS } from "@/lib/api/portal";
 import {
   bucketLabel,
@@ -229,6 +230,28 @@ export default function ClientSubmissionsPage() {
     });
   }, [applyFilters, filters.limit]);
 
+  // Append the Axis-2 acceptance column. Built here (not in the static base)
+  // so the per-row control can refresh the list after a decision lands.
+  const columns = useMemo<DataTableColumn<ClientSubmissionItem>[]>(
+    () => [
+      ...SUBMISSIONS_COLUMNS,
+      {
+        id: "client_acceptance",
+        header: "Aceptación",
+        cell: (row) => (
+          <ClientAcceptanceControl
+            submissionId={row.submission_id}
+            acceptance={row.client_acceptance ?? "pending"}
+            complianceStatus={row.status}
+            clientId={clientId || undefined}
+            onDecided={() => setReloadKey((k) => k + 1)}
+          />
+        ),
+      },
+    ],
+    [clientId],
+  );
+
   return (
     <ClientShell
       title="Entregas"
@@ -354,7 +377,7 @@ export default function ClientSubmissionsPage() {
           loading={loading}
           error={error}
           onRetry={() => setReloadKey((k) => k + 1)}
-          columns={SUBMISSIONS_COLUMNS}
+          columns={columns}
           rowKey={(row) => row.submission_id}
           mobileCards
           ariaLabel="Entregas del portafolio"

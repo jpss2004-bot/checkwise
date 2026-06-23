@@ -424,6 +424,13 @@ export function ClientShell({
                 },
                 {
                   href: withClientId(
+                    "/client/configuracion/aceptacion",
+                    urlClientId,
+                  ),
+                  label: "Aceptación de documentos",
+                },
+                {
+                  href: withClientId(
                     "/client/configuracion/notificaciones",
                     urlClientId,
                   ),

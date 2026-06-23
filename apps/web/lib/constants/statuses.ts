@@ -193,6 +193,45 @@ export function statusExplainerClient(status: string): string | null {
 }
 
 // ===========================================================================
+// Axis 2 — client acceptance (Phase 5). Mirrors the backend
+// ``ClientAcceptance`` StrEnum + ``CLIENT_ACCEPTANCE_LABELS_ES``. This is the
+// CLIENT's business-acceptance verdict, ORTHOGONAL to ``DocumentStatus``
+// (Axis 1 = CheckWise compliance validity). It never feeds the semaphore,
+// compliance %, or slot state — it renders as its own badge.
+// ===========================================================================
+
+export const ClientAcceptance = {
+  PENDING: "pending",
+  ACCEPTED: "accepted",
+  REJECTED: "rejected",
+} as const;
+
+export type ClientAcceptanceCode =
+  (typeof ClientAcceptance)[keyof typeof ClientAcceptance];
+
+export const CLIENT_ACCEPTANCE_LABELS_ES: Record<ClientAcceptanceCode, string> = {
+  [ClientAcceptance.PENDING]: "Pendiente de aceptación",
+  [ClientAcceptance.ACCEPTED]: "Aceptado por el cliente",
+  [ClientAcceptance.REJECTED]: "Rechazado por el cliente",
+};
+
+export const CLIENT_ACCEPTANCE_VARIANT: Record<ClientAcceptanceCode, StatusVariant> = {
+  [ClientAcceptance.PENDING]: "secondary",
+  [ClientAcceptance.ACCEPTED]: "success",
+  [ClientAcceptance.REJECTED]: "destructive",
+};
+
+export function clientAcceptanceLabel(acceptance: string): string {
+  return (
+    CLIENT_ACCEPTANCE_LABELS_ES[acceptance as ClientAcceptanceCode] ?? acceptance
+  );
+}
+
+export function clientAcceptanceVariant(acceptance: string): StatusVariant {
+  return CLIENT_ACCEPTANCE_VARIANT[acceptance as ClientAcceptanceCode] ?? "secondary";
+}
+
+// ===========================================================================
 // Canonical vocabulary unification (2026-06-10).
 //
 // Before this, the client portal carried FIVE parallel status vocabularies
