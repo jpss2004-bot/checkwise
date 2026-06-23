@@ -163,6 +163,38 @@ def _active_seats(db: Session, org_id: str) -> int:
     )
 
 
+def _active_viewer_seats(db: Session, org_id: str) -> int:
+    """Active ``client_viewer`` seats — the only tier subject to the cap.
+    ``client_admin`` (Approver) seats are CheckWise-granted and uncapped."""
+    return int(
+        db.scalar(
+            select(func.count())
+            .select_from(Membership)
+            .where(
+                Membership.organization_id == org_id,
+                Membership.role == MembershipRole.CLIENT_VIEWER.value,
+                Membership.status == "active",
+            )
+        )
+        or 0
+    )
+
+
+def _can_add_viewer(db: Session, current: CurrentUser, org: Organization) -> bool:
+    """A Viewer seat may be added by ANY active seat holder (Approver or
+    Viewer) of the org — self-serve — or by CheckWise staff."""
+    if _is_internal(current):
+        return True
+    holds_seat = db.scalar(
+        select(Membership.id).where(
+            Membership.organization_id == org.id,
+            Membership.user_id == current.user.id,
+            Membership.status == "active",
+        )
+    )
+    return holds_seat is not None
+
+
 def _active_membership_or_404(
     db: Session, org_id: str, user_id: str
 ) -> Membership:
@@ -252,10 +284,18 @@ class ClientUsersList(BaseModel):
     client_id: str
     organization_id: str
     seat_limit: int
+    """Maximum number of ``client_viewer`` seats. ``client_admin`` seats are
+    CheckWise-granted and NOT counted against this cap."""
     seats_used: int
+    """Active ``client_viewer`` seats (against ``seat_limit``)."""
     seats_available: int
     can_manage: bool
-    """Whether the requesting user may mutate seats (owner/internal)."""
+    """Whether the requesting user may fully manage seats — disable, reset,
+    change tier (the Primary Owner or CheckWise staff)."""
+    can_add_viewer: bool
+    """Whether the requesting user may add a read-only Viewer seat — any
+    active seat holder (Approver or Viewer) or CheckWise staff, while a
+    Viewer slot is free."""
     users: list[ClientUserItem]
 
 
@@ -342,17 +382,27 @@ def list_client_users(
         .order_by(Membership.is_primary.desc(), Membership.created_at.asc())
     ).all()
 
-    can_manage = _is_internal(current) or any(
+    is_staff = _is_internal(current)
+    holds_seat = any(m.user_id == current.user.id for m, _ in rows)
+    is_primary = any(
         m.user_id == current.user.id and m.is_primary for m, _ in rows
     )
+    # Full management (disable / reset / change tier) — owner or staff.
+    can_manage = is_staff or is_primary
+    # Adding a read-only Viewer is self-serve for any active seat holder.
+    can_add_viewer = is_staff or holds_seat
     limit = _seat_limit(org)
+    viewers_used = sum(
+        1 for m, _ in rows if m.role == MembershipRole.CLIENT_VIEWER.value
+    )
     return ClientUsersList(
         client_id=cid,
         organization_id=org.id,
         seat_limit=limit,
-        seats_used=len(rows),
-        seats_available=max(0, limit - len(rows)),
+        seats_used=viewers_used,
+        seats_available=max(0, limit - viewers_used),
         can_manage=can_manage,
+        can_add_viewer=can_add_viewer,
         users=[
             ClientUserItem(
                 user_id=u.id,
@@ -389,7 +439,25 @@ def create_client_user(
     # Lock the org row BEFORE counting seats so two concurrent creates
     # cannot both observe a free slot.
     org = _org_for_client(db, cid, for_update=True)
-    _require_can_manage(db, current, org)
+
+    # Seat-tier rules:
+    #   * client_admin (Approver) — granted ONLY by CheckWise staff.
+    #   * client_viewer — self-serve by any active seat holder, capped.
+    if payload.role == MembershipRole.CLIENT_ADMIN.value:
+        if not _is_internal(current):
+            raise HTTPException(
+                status.HTTP_403_FORBIDDEN,
+                detail=(
+                    "Solo el equipo de CheckWise puede agregar un "
+                    "Administrador del cliente. Tú puedes agregar perfiles "
+                    "de Solo lectura."
+                ),
+            )
+    elif not _can_add_viewer(db, current, org):
+        raise HTTPException(
+            status.HTTP_403_FORBIDDEN,
+            detail="No perteneces a esta organización.",
+        )
 
     full_name = payload.full_name.strip()
     email = payload.email.strip().lower()
@@ -433,15 +501,19 @@ def create_client_user(
                 detail="Ya existe una cuenta con ese correo.",
             )
 
-    seats_used = _active_seats(db, org.id)
-    if seats_used >= limit:
-        raise HTTPException(
-            status.HTTP_409_CONFLICT,
-            detail=(
-                f"Tu plan permite un máximo de {limit} usuarios. "
-                "Elimina un usuario para liberar un lugar."
-            ),
-        )
+    # The cap applies to Viewer seats only; Approver seats are uncapped
+    # (CheckWise-granted). Reinstating a row that is already an Approver
+    # never consumes a Viewer slot.
+    if payload.role == MembershipRole.CLIENT_VIEWER.value:
+        viewers_used = _active_viewer_seats(db, org.id)
+        if viewers_used >= limit:
+            raise HTTPException(
+                status.HTTP_409_CONFLICT,
+                detail=(
+                    f"Tu plan permite un máximo de {limit} perfiles de Solo "
+                    "lectura. Elimina uno para liberar un lugar."
+                ),
+            )
 
     temp_password = generate_temp_password()
     if reinstate_user is not None and reinstate_membership is not None:
@@ -486,6 +558,11 @@ def create_client_user(
         organization_name=client_row.name if client_row else None,
     )
 
+    # Viewer-seat count AFTER this create (Approver seats are uncapped, so
+    # creating one leaves this unchanged).
+    db.flush()
+    seats_used = _active_viewer_seats(db, org.id)
+
     add_audit_event(
         db,
         action="client.user_created",
@@ -499,7 +576,8 @@ def create_client_user(
             "organization_id": org.id,
             "user_email": user.email,
             "reinstated": reinstate_user is not None,
-            "seats_used": seats_used + 1,
+            "role": payload.role,
+            "seats_used": seats_used,
             "seat_limit": limit,
             "email_delivery_status": delivery.status,
         },
@@ -536,7 +614,7 @@ def create_client_user(
         email_status=delivery.status,
         email_error=delivery.error,
         reinstated=reinstate_user is not None,
-        seats_used=seats_used + 1,
+        seats_used=seats_used,
         seat_limit=limit,
     )
 
@@ -600,7 +678,7 @@ def update_client_user(
     return ClientUserActionResponse(
         user_id=user_id,
         status=payload.status,
-        seats_used=_active_seats(db, org.id),
+        seats_used=_active_viewer_seats(db, org.id),
         seat_limit=_seat_limit(org),
     )
 
@@ -651,7 +729,7 @@ def remove_client_user(
     return ClientUserActionResponse(
         user_id=user_id,
         status="removed",
-        seats_used=_active_seats(db, org.id),
+        seats_used=_active_viewer_seats(db, org.id),
         seat_limit=_seat_limit(org),
     )
 
@@ -737,7 +815,11 @@ def update_client_user_role(
     client_id: str | None = Query(default=None),
 ) -> ClientUserRoleResponse:
     """Promote a seat to ``client_admin`` (Approver) or demote it to
-    ``client_viewer`` (read + export only). Owner-only (plus internal_admin).
+    ``client_viewer`` (read + export only).
+
+    Demotion is owner-or-staff (``_require_can_manage``). PROMOTION to the
+    Approver tier is reserved for CheckWise staff — clients self-serve only
+    Viewer seats, so the org owner cannot mint a second Approver.
 
     The Primary Owner is always an Approver and cannot be demoted here. A
     promoted/demoted user's JWT still carries the old role until they
@@ -747,6 +829,17 @@ def update_client_user_role(
     cid = _resolve_client_id(db, current, requested=client_id)
     org = _org_for_client(db, cid)
     _require_can_manage(db, current, org)
+
+    if payload.role == MembershipRole.CLIENT_ADMIN.value and not _is_internal(
+        current
+    ):
+        raise HTTPException(
+            status.HTTP_403_FORBIDDEN,
+            detail=(
+                "Solo el equipo de CheckWise puede promover a un usuario a "
+                "Administrador del cliente."
+            ),
+        )
 
     membership = _active_membership_or_404(db, org.id, user_id)
     _reject_primary_target(membership)

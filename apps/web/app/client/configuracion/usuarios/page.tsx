@@ -31,12 +31,14 @@ import {
   listClientUsers,
   removeClientUser,
   resetClientUserPassword,
+  updateClientUserRole,
   updateClientUserStatus,
   type ClientUserItem,
   type ClientUsersList,
 } from "@/lib/api/client";
 import { useUrlClientId } from "@/lib/workspace/use-url-client-id";
 import { apiErrorDetail as errorDetail } from "@/lib/api/error-detail";
+import { readAdminSession } from "@/lib/session/admin";
 
 type TempCredential = {
   email: string;
@@ -128,7 +130,16 @@ export default function ClientSeatsPage() {
   }, [reload]);
 
   const canManage = data?.can_manage ?? false;
+  const canAddViewer = data?.can_add_viewer ?? false;
   const seatsAvailable = data?.seats_available ?? 0;
+  // Only CheckWise staff (review team / superadmin) may grant the Approver
+  // tier — clients self-serve only read-only Viewer seats.
+  const isStaff = (() => {
+    const roles = readAdminSession()?.roles ?? [];
+    return (
+      roles.includes("platform_admin") || roles.includes("operations_admin")
+    );
+  })();
 
   async function handleCreate(e: FormEvent) {
     e.preventDefault();
@@ -171,7 +182,7 @@ export default function ClientSeatsPage() {
   return (
     <ClientShell
       title="Usuarios y accesos"
-      description="Administra quién puede entrar al portal de tu empresa. Solo el titular de la cuenta puede agregar o quitar usuarios."
+      description="Administra quién puede entrar al portal de tu empresa. Cualquier usuario puede agregar perfiles de Solo lectura (hasta el límite); el equipo de CheckWise otorga el acceso de Aprobador."
     >
       <div className="space-y-5">
         {loadError ? (
@@ -189,7 +200,7 @@ export default function ClientSeatsPage() {
           icon={Users}
           description={
             data
-              ? `${data.seats_used} de ${data.seat_limit} lugares usados${
+              ? `${data.seats_used} de ${data.seat_limit} perfiles de Solo lectura${
                   seatsAvailable > 0
                     ? ` · ${seatsAvailable} disponible${seatsAvailable === 1 ? "" : "s"}`
                     : " · sin lugares libres"
@@ -216,8 +227,10 @@ export default function ClientSeatsPage() {
                         </span>
                         {user.is_primary ? (
                           <Badge variant="brand">Titular</Badge>
+                        ) : user.role === "client_admin" ? (
+                          <Badge variant="info">Aprobador</Badge>
                         ) : (
-                          <Badge variant="outline">Usuario</Badge>
+                          <Badge variant="outline">Solo lectura</Badge>
                         )}
                         {statusBadge(user)}
                       </div>
@@ -228,6 +241,49 @@ export default function ClientSeatsPage() {
 
                     {canManage && !user.is_primary ? (
                       <div className="flex flex-wrap items-center gap-1.5">
+                        {/* Tier toggle. Promotion to Approver is CheckWise-
+                            staff only; demotion to Viewer is owner-or-staff. */}
+                        {user.status === "active" &&
+                        isStaff &&
+                        user.role === "client_viewer" ? (
+                          <Button
+                            variant="outline"
+                            size="sm"
+                            disabled={busy}
+                            onClick={() =>
+                              runRowAction(user.user_id, async () => {
+                                await updateClientUserRole(
+                                  user.user_id,
+                                  "client_admin",
+                                  clientParam,
+                                );
+                                await reload();
+                              })
+                            }
+                          >
+                            Hacer Aprobador
+                          </Button>
+                        ) : null}
+                        {user.status === "active" &&
+                        user.role === "client_admin" ? (
+                          <Button
+                            variant="ghost"
+                            size="sm"
+                            disabled={busy}
+                            onClick={() =>
+                              runRowAction(user.user_id, async () => {
+                                await updateClientUserRole(
+                                  user.user_id,
+                                  "client_viewer",
+                                  clientParam,
+                                );
+                                await reload();
+                              })
+                            }
+                          >
+                            Hacer Solo lectura
+                          </Button>
+                        ) : null}
                         {user.status === "active" ? (
                           <Button
                             variant="outline"
@@ -352,15 +408,20 @@ export default function ClientSeatsPage() {
           <CredentialNotice cred={credential} onDismiss={() => setCredential(null)} />
         ) : null}
 
-        {canManage ? (
-          <Surface title="Agregar usuario" icon={UserPlus}>
+        {canAddViewer ? (
+          <Surface title="Agregar usuario de Solo lectura" icon={UserPlus}>
             {seatsAvailable <= 0 ? (
               <p className="text-[13px] text-[color:var(--text-secondary)]">
-                Has alcanzado el máximo de {data?.seat_limit} usuarios. Quita un
-                usuario para liberar un lugar.
+                Has alcanzado el máximo de {data?.seat_limit} perfiles de Solo
+                lectura. Quita uno para liberar un lugar.
               </p>
             ) : (
               <form onSubmit={handleCreate} className="space-y-3">
+                <p className="text-[12px] text-[color:var(--text-secondary)]">
+                  Los usuarios nuevos son de <strong>Solo lectura</strong>: ven
+                  todo el portafolio pero no modifican nada. Para dar acceso de
+                  Aprobador, pídelo al equipo de CheckWise.
+                </p>
                 <div className="grid gap-3 sm:grid-cols-2">
                   <div className="space-y-1">
                     <Label htmlFor="seat-name">Nombre completo</Label>

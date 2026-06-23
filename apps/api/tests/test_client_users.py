@@ -131,7 +131,9 @@ def _seed_secondary(db_factory, org_id: str) -> dict:
             Membership(
                 user_id=user.id,
                 organization_id=org_id,
-                role="client_admin",
+                # Representative secondary in the redesigned model: a
+                # read-only Viewer seat (self-serve, capped).
+                role="client_viewer",
                 is_primary=False,
                 status="active",
             )
@@ -218,9 +220,12 @@ def test_owner_lists_users_with_seat_counters(db_factory, api_client):
     assert resp.status_code == 200, resp.text
     body = resp.json()
     assert body["seat_limit"] == 3
-    assert body["seats_used"] == 1
-    assert body["seats_available"] == 2
+    # The owner is an Approver (client_admin) and does NOT consume a Viewer
+    # seat — so 0 of 3 Viewer slots are used.
+    assert body["seats_used"] == 0
+    assert body["seats_available"] == 3
     assert body["can_manage"] is True
+    assert body["can_add_viewer"] is True
     assert len(body["users"]) == 1
     assert body["users"][0]["is_primary"] is True
     assert body["users"][0]["email"] == ctx["owner_email"]
@@ -245,7 +250,8 @@ def test_owner_creates_secondary_who_can_log_in(db_factory, api_client):
     resp = _create(api_client, token, email="empleado@checkwise.example")
     assert resp.status_code == 201, resp.text
     body = resp.json()
-    assert body["seats_used"] == 2
+    # One Viewer seat now used (the owner Approver is uncapped/uncounted).
+    assert body["seats_used"] == 1
     assert body["reinstated"] is False
     temp = body["temp_password"]
 
@@ -263,20 +269,22 @@ def test_owner_creates_secondary_who_can_log_in(db_factory, api_client):
 
     # Both users appear in the owner's list.
     listed = api_client.get("/api/v1/client/users", headers=_h(token)).json()
-    assert listed["seats_used"] == 2
+    assert listed["seats_used"] == 1
     pending = [u for u in listed["users"] if not u["is_primary"]]
     assert pending[0]["pending_first_login"] is True
 
 
-def test_seat_cap_blocks_a_fourth_user(db_factory, api_client):
+def test_seat_cap_blocks_a_fourth_viewer(db_factory, api_client):
     ctx = _seed_client_with_owner(db_factory)
     token = _login(api_client, ctx["owner_email"])
 
+    # The cap is 3 VIEWER seats (the owner Approver is separate/uncapped).
     assert _create(api_client, token, email="a@checkwise.example").status_code == 201
     assert _create(api_client, token, email="b@checkwise.example").status_code == 201
-    third = _create(api_client, token, email="c@checkwise.example")
-    assert third.status_code == 409
-    assert "máximo" in third.json()["detail"]
+    assert _create(api_client, token, email="c@checkwise.example").status_code == 201
+    fourth = _create(api_client, token, email="d@checkwise.example")
+    assert fourth.status_code == 409
+    assert "máximo" in fourth.json()["detail"]
 
 
 def test_duplicate_email_conflicts(db_factory, api_client):
@@ -307,11 +315,15 @@ def test_secondary_cannot_manage_seats(db_factory, api_client):
 
     listed = api_client.get("/api/v1/client/users", headers=_h(token))
     assert listed.status_code == 200
+    # A non-primary secondary cannot fully manage seats…
     assert listed.json()["can_manage"] is False
+    # …but CAN self-serve add a read-only Viewer.
+    assert listed.json()["can_add_viewer"] is True
 
     create = _create(api_client, token, email="x@checkwise.example")
-    assert create.status_code == 403
+    assert create.status_code == 201, create.text
 
+    # It still cannot disable/remove other seats (owner/staff only).
     remove = api_client.delete(
         f"/api/v1/client/users/{ctx['owner_id']}", headers=_h(token)
     )
@@ -379,8 +391,8 @@ def test_disable_locks_out_and_reactivate_restores(db_factory, api_client):
         headers=_h(owner_token),
     )
     assert resp.status_code == 200
-    # Seat stays occupied while disabled.
-    assert resp.json()["seats_used"] == 2
+    # Seat stays occupied while disabled (the Viewer membership stays active).
+    assert resp.json()["seats_used"] == 1
 
     login = api_client.post(
         "/api/v1/auth/login",
@@ -429,7 +441,8 @@ def test_remove_frees_seat_and_same_email_reinstates(db_factory, api_client):
         f"/api/v1/client/users/{sec['user_id']}", headers=_h(owner_token)
     )
     assert resp.status_code == 200
-    assert resp.json()["seats_used"] == 1
+    # The removed Viewer frees its seat (0 active Viewers remain).
+    assert resp.json()["seats_used"] == 0
 
     # Removed user loses access immediately (membership gone, user disabled).
     assert (
@@ -666,8 +679,11 @@ def test_client_user_audit_captures_request_ip(db_factory, api_client):
 # ---------------------------------------------------------------------------
 
 
-def _roles_by_email(api_client, token) -> dict:
-    body = api_client.get("/api/v1/client/users", headers=_h(token)).json()
+def _roles_by_email(api_client, token, client_id: str | None = None) -> dict:
+    params = {"client_id": client_id} if client_id else {}
+    body = api_client.get(
+        "/api/v1/client/users", params=params, headers=_h(token)
+    ).json()
     return {u["email"]: u["role"] for u in body["users"]}
 
 
@@ -683,39 +699,64 @@ def test_new_seat_defaults_to_viewer(db_factory, api_client):
     assert roles["seat@checkwise.example"] == "client_viewer"
 
 
-def test_owner_can_create_approver_seat(db_factory, api_client):
+def test_only_checkwise_creates_approver_seat(db_factory, api_client):
     ctx = _seed_client_with_owner(db_factory)
     owner_token = _login(api_client, ctx["owner_email"])
 
-    created = _create(
+    # The org owner (a client, not CheckWise) cannot mint a second Approver —
+    # clients self-serve only Viewer seats.
+    blocked = _create(
         api_client,
         owner_token,
         email="appr@checkwise.example",
         role="client_admin",
     )
-    assert created.status_code == 201, created.text
-    assert _roles_by_email(api_client, owner_token)["appr@checkwise.example"] == (
-        "client_admin"
+    assert blocked.status_code == 403, blocked.text
+
+    # CheckWise staff CAN grant the Approver tier (cross-tenant).
+    staff = _seed_internal_admin(db_factory)
+    staff_token = _login(api_client, staff["email"])
+    created = _create(
+        api_client,
+        staff_token,
+        email="appr@checkwise.example",
+        role="client_admin",
+        client_id=ctx["client_id"],
     )
+    assert created.status_code == 201, created.text
+    assert _roles_by_email(
+        api_client, staff_token, client_id=ctx["client_id"]
+    )["appr@checkwise.example"] == "client_admin"
 
 
-def test_owner_promotes_and_demotes_seat(db_factory, api_client):
+def test_promote_is_checkwise_only_demote_is_owner(db_factory, api_client):
     ctx = _seed_client_with_owner(db_factory)
     owner_token = _login(api_client, ctx["owner_email"])
     created = _create(api_client, owner_token, email="promo@checkwise.example")
     user_id = created.json()["user_id"]
 
-    promote = api_client.patch(
+    # The owner cannot promote a Viewer to Approver — only CheckWise grants
+    # the Approver tier.
+    owner_promote = api_client.patch(
         f"/api/v1/client/users/{user_id}/role",
         json={"role": "client_admin"},
         headers=_h(owner_token),
     )
+    assert owner_promote.status_code == 403, owner_promote.text
+
+    # CheckWise staff promotes it.
+    staff = _seed_internal_admin(db_factory)
+    staff_token = _login(api_client, staff["email"])
+    promote = api_client.patch(
+        f"/api/v1/client/users/{user_id}/role",
+        json={"role": "client_admin"},
+        params={"client_id": ctx["client_id"]},
+        headers=_h(staff_token),
+    )
     assert promote.status_code == 200, promote.text
     assert promote.json()["role"] == "client_admin"
-    assert _roles_by_email(api_client, owner_token)[
-        "promo@checkwise.example"
-    ] == "client_admin"
 
+    # The owner CAN demote back to Viewer (reducing privilege is owner-allowed).
     demote = api_client.patch(
         f"/api/v1/client/users/{user_id}/role",
         json={"role": "client_viewer"},
