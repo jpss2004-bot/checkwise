@@ -2403,6 +2403,12 @@ def promote_user_membership(
         current_primary.is_primary = False
         demoted_id = current_primary.id
         db.flush()  # clear the old primary before setting the new one
+    # The Primary Owner is always an Approver — the client seat model's
+    # lockout protection (client_users._reject_primary_target +
+    # _holds_approver_seat) relies on this. Force it here, the only route
+    # that can transfer primary ownership, so a Viewer can never become a
+    # primary that no longer counts as a manager.
+    membership.role = MembershipRole.CLIENT_ADMIN.value
     membership.is_primary = True
     db.flush()
 

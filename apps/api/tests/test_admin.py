@@ -2268,6 +2268,55 @@ def test_promote_membership_transfers_primary(
     assert owner_primary is False
 
 
+def test_promote_viewer_to_primary_forces_approver(
+    api_client: TestClient, db_factory
+) -> None:
+    """Making a membership the Primary Owner forces it to the Approver
+    (client_admin) tier — the client seat model's lockout protection relies
+    on 'the Primary Owner is always an Approver'."""
+    token = _admin_token(api_client, db_factory)
+    owner = _provision_client(
+        api_client, token, email="vp-owner@cli.com", client_name="ViewerPrimary SA"
+    )
+    org_id = _detail(api_client, token, owner)["memberships"][0]["organization_id"]
+
+    # Seed a read-only Viewer membership directly (the grant API only issues
+    # Approver/staff roles, so a Viewer can only arise via the seat path).
+    db = db_factory()
+    try:
+        viewer = User(
+            email="vp-viewer@cli.com",
+            password_hash=hash_password("ViewerPrimary!2026"),
+            full_name="Viewer Primary",
+            status="active",
+        )
+        db.add(viewer)
+        db.flush()
+        viewer_membership = Membership(
+            user_id=viewer.id,
+            organization_id=org_id,
+            role="client_viewer",
+            is_primary=False,
+            status="active",
+        )
+        db.add(viewer_membership)
+        db.commit()
+        viewer_id = viewer.id
+        membership_id = viewer_membership.id
+    finally:
+        db.close()
+
+    promoted = api_client.patch(
+        f"/api/v1/admin/users/{viewer_id}/memberships/{membership_id}",
+        json={"is_primary": True},
+        headers=_h(token),
+    )
+    assert promoted.status_code == 200, promoted.text
+    assert promoted.json()["is_primary"] is True
+    # Forced to Approver so the org always retains at least one manager.
+    assert promoted.json()["role"] == "client_admin"
+
+
 def test_membership_404_on_foreign_membership(
     api_client: TestClient, db_factory
 ) -> None:

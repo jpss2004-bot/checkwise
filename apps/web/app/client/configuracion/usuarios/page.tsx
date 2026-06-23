@@ -1,13 +1,13 @@
 "use client";
 
 /**
- * Phase 2 — client seat management UI.
+ * Client seat management UI.
  *
- * First UI over the long-existing `/client/users` seat API (owner-gated
- * server-side). The Primary Account Owner (`is_primary`) invites, disables,
- * removes and resets secondary seats within the org's `seat_limit`;
- * secondaries get a read-only roster. internal_admin support staff also see
- * mutation affordances.
+ * UI over the `/client/users` seat API. Any Approver (`client_admin`) of the
+ * org — and CheckWise support staff — creates, disables, removes, resets and
+ * re-tiers seats within the org's `seat_limit`; read-only Viewers get a
+ * roster without mutation affordances. The tier split is enforced
+ * server-side; hiding controls here is a UX nicety, not the boundary.
  */
 
 import { useCallback, useEffect, useState, type FormEvent } from "react";
@@ -26,6 +26,7 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { Select } from "@/components/ui/select";
 import {
   createClientUser,
   listClientUsers,
@@ -38,7 +39,6 @@ import {
 } from "@/lib/api/client";
 import { useUrlClientId } from "@/lib/workspace/use-url-client-id";
 import { apiErrorDetail as errorDetail } from "@/lib/api/error-detail";
-import { readAdminSession } from "@/lib/session/admin";
 
 type TempCredential = {
   email: string;
@@ -101,6 +101,9 @@ export default function ClientSeatsPage() {
   // Add-user form.
   const [newName, setNewName] = useState("");
   const [newEmail, setNewEmail] = useState("");
+  const [newRole, setNewRole] = useState<"client_admin" | "client_viewer">(
+    "client_viewer",
+  );
   const [createBusy, setCreateBusy] = useState(false);
   const [createError, setCreateError] = useState<string | null>(null);
 
@@ -130,16 +133,7 @@ export default function ClientSeatsPage() {
   }, [reload]);
 
   const canManage = data?.can_manage ?? false;
-  const canAddViewer = data?.can_add_viewer ?? false;
   const seatsAvailable = data?.seats_available ?? 0;
-  // Only CheckWise staff (review team / superadmin) may grant the Approver
-  // tier — clients self-serve only read-only Viewer seats.
-  const isStaff = (() => {
-    const roles = readAdminSession()?.roles ?? [];
-    return (
-      roles.includes("platform_admin") || roles.includes("operations_admin")
-    );
-  })();
 
   async function handleCreate(e: FormEvent) {
     e.preventDefault();
@@ -148,7 +142,7 @@ export default function ClientSeatsPage() {
     setCreateBusy(true);
     try {
       const res = await createClientUser(
-        { full_name: newName.trim(), email: newEmail.trim() },
+        { full_name: newName.trim(), email: newEmail.trim(), role: newRole },
         clientParam,
       );
       setCredential({
@@ -159,6 +153,7 @@ export default function ClientSeatsPage() {
       });
       setNewName("");
       setNewEmail("");
+      setNewRole("client_viewer");
       await reload();
     } catch (err) {
       setCreateError(errorDetail(err));
@@ -182,7 +177,7 @@ export default function ClientSeatsPage() {
   return (
     <ClientShell
       title="Usuarios y accesos"
-      description="Administra quién puede entrar al portal de tu empresa. Cualquier usuario puede agregar perfiles de Solo lectura (hasta el límite); el equipo de CheckWise otorga el acceso de Aprobador."
+      description="Administra quién puede entrar al portal de tu empresa. Un Aprobador agrega usuarios (Aprobadores o de Solo lectura) hasta el límite de tu plan; los perfiles de Solo lectura solo consultan."
     >
       <div className="space-y-5">
         {loadError ? (
@@ -200,7 +195,7 @@ export default function ClientSeatsPage() {
           icon={Users}
           description={
             data
-              ? `${data.seats_used} de ${data.seat_limit} perfiles de Solo lectura${
+              ? `${data.seats_used} de ${data.seat_limit} usuarios${
                   seatsAvailable > 0
                     ? ` · ${seatsAvailable} disponible${seatsAvailable === 1 ? "" : "s"}`
                     : " · sin lugares libres"
@@ -241,10 +236,9 @@ export default function ClientSeatsPage() {
 
                     {canManage && !user.is_primary ? (
                       <div className="flex flex-wrap items-center gap-1.5">
-                        {/* Tier toggle. Promotion to Approver is CheckWise-
-                            staff only; demotion to Viewer is owner-or-staff. */}
+                        {/* Tier toggle. An Approver (or staff) can promote a
+                            Viewer to Approver and demote an Approver back. */}
                         {user.status === "active" &&
-                        isStaff &&
                         user.role === "client_viewer" ? (
                           <Button
                             variant="outline"
@@ -408,19 +402,19 @@ export default function ClientSeatsPage() {
           <CredentialNotice cred={credential} onDismiss={() => setCredential(null)} />
         ) : null}
 
-        {canAddViewer ? (
-          <Surface title="Agregar usuario de Solo lectura" icon={UserPlus}>
+        {canManage ? (
+          <Surface title="Agregar usuario" icon={UserPlus}>
             {seatsAvailable <= 0 ? (
               <p className="text-[13px] text-[color:var(--text-secondary)]">
-                Has alcanzado el máximo de {data?.seat_limit} perfiles de Solo
-                lectura. Quita uno para liberar un lugar.
+                Has alcanzado el máximo de {data?.seat_limit} usuarios. Quita
+                uno para liberar un lugar.
               </p>
             ) : (
               <form onSubmit={handleCreate} className="space-y-3">
                 <p className="text-[12px] text-[color:var(--text-secondary)]">
-                  Los usuarios nuevos son de <strong>Solo lectura</strong>: ven
-                  todo el portafolio pero no modifican nada. Para dar acceso de
-                  Aprobador, pídelo al equipo de CheckWise.
+                  Elige el nivel de acceso. Un <strong>Aprobador</strong>{" "}
+                  administra el portafolio, los proveedores y al equipo; un
+                  perfil de <strong>Solo lectura</strong> únicamente consulta.
                 </p>
                 <div className="grid gap-3 sm:grid-cols-2">
                   <div className="space-y-1">
@@ -445,6 +439,25 @@ export default function ClientSeatsPage() {
                       required
                     />
                   </div>
+                  <div className="space-y-1 sm:col-span-2">
+                    <Label htmlFor="seat-role">Nivel de acceso</Label>
+                    <Select
+                      id="seat-role"
+                      value={newRole}
+                      onChange={(e) =>
+                        setNewRole(
+                          e.target.value as "client_admin" | "client_viewer",
+                        )
+                      }
+                    >
+                      <option value="client_viewer">
+                        Solo lectura — solo consulta
+                      </option>
+                      <option value="client_admin">
+                        Aprobador — administra el portafolio y al equipo
+                      </option>
+                    </Select>
+                  </div>
                 </div>
                 {createError ? (
                   <p className="text-[12px] text-[color:var(--status-error-text)]">
@@ -462,7 +475,8 @@ export default function ClientSeatsPage() {
           </Surface>
         ) : data ? (
           <p className="text-[12px] text-[color:var(--text-tertiary)]">
-            Solo el titular de la cuenta puede administrar los usuarios.
+            Tu acceso es de Solo lectura. Solo un Aprobador puede administrar
+            los usuarios.
           </p>
         ) : null}
       </div>

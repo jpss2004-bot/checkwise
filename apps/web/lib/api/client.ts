@@ -754,15 +754,13 @@ export type ClientUserItem = {
 export type ClientUsersList = {
   client_id: string;
   organization_id: string;
-  // Cap on read-only Viewer seats (Approver seats are CheckWise-granted,
-  // separate, and uncapped).
+  // Cap on total seats of any tier (the Primary Owner included).
   seat_limit: number;
   seats_used: number;
   seats_available: number;
-  // Full seat management (disable / reset / change tier) — owner or staff.
+  // Seat management (create / disable / reset / remove / change tier).
+  // True for any Approver of the org or CheckWise staff; false for Viewers.
   can_manage: boolean;
-  // Add a read-only Viewer — any active seat holder while a slot is free.
-  can_add_viewer: boolean;
   users: ClientUserItem[];
 };
 
@@ -802,7 +800,13 @@ export async function listClientUsers(params?: {
 }
 
 export async function createClientUser(
-  body: { full_name: string; email: string },
+  body: {
+    full_name: string;
+    email: string;
+    // Seat tier. Omit for the default read-only Viewer; an Approver may
+    // pass "client_admin" to create another Approver.
+    role?: "client_admin" | "client_viewer";
+  },
   params?: { client_id?: string },
 ): Promise<CreateClientUserResponse> {
   return fetchJson<CreateClientUserResponse>(
@@ -844,9 +848,9 @@ export async function resetClientUserPassword(
 
 export type ClientUserRoleResponse = { user_id: string; role: string };
 
-/** Change a seat's access tier. Promotion to ``client_admin`` (Approver)
- *  is CheckWise-staff-only server-side; demotion to ``client_viewer`` is
- *  owner-or-staff. */
+/** Change a seat's access tier. Both promotion to "client_admin" (Approver)
+ *  and demotion to "client_viewer" are open to any Approver of the org (or
+ *  CheckWise staff), enforced server-side. */
 export async function updateClientUserRole(
   user_id: string,
   role: "client_admin" | "client_viewer",

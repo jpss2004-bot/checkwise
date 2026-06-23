@@ -28,6 +28,7 @@ import {
   type ClientVendorRow,
 } from "@/lib/api/client";
 import { useUrlClientId } from "@/lib/workspace/use-url-client-id";
+import { useClientApprover } from "@/lib/session/client-tier";
 
 /**
  * /client/onboarding
@@ -399,6 +400,9 @@ function ReadOnlyField({
 
 function MyProvidersSection() {
   const urlClientId = useUrlClientId();
+  // Adding a provider is a portfolio write — Approvers (client_admin) and
+  // CheckWise staff only. Read-only Viewers see the roster without the form.
+  const isApprover = useClientApprover();
   const [providers, setProviders] = useState<ClientVendorRow[] | null>(null);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [showForm, setShowForm] = useState(false);
@@ -434,13 +438,15 @@ function MyProvidersSection() {
       icon={IdentificationCard}
       description="Agrega los proveedores REPSE que CheckWise va a monitorear por ti. Al agregar uno, le enviaremos automáticamente un correo con sus credenciales para que entre y empiece a subir documentos."
       actions={
-        <Button
-          type="button"
-          size="sm"
-          onClick={() => setShowForm((v) => !v)}
-        >
-          {showForm ? "Cancelar" : "Agregar proveedor"}
-        </Button>
+        isApprover ? (
+          <Button
+            type="button"
+            size="sm"
+            onClick={() => setShowForm((v) => !v)}
+          >
+            {showForm ? "Cancelar" : "Agregar proveedor"}
+          </Button>
+        ) : null
       }
     >
       {lastInviteEmail ? (
@@ -458,7 +464,7 @@ function MyProvidersSection() {
         </div>
       ) : null}
 
-      {showForm ? (
+      {showForm && isApprover ? (
         <AddProviderForm
           onCreated={(result) => {
             setShowForm(false);
