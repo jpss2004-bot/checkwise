@@ -234,6 +234,27 @@ class Settings(BaseSettings):
     # ``SessionLocal``.
     INTAKE_ASYNC_FINALIZE: bool = True
 
+    # B2 — durable intake queue. The async-finalize path schedules the heavy
+    # back-half as an in-process FastAPI BackgroundTask, which is lost if the web
+    # dyno restarts mid-flight (the reconcile cron is the only backstop). When
+    # ``INTAKE_QUEUE_CONSUMER_ENABLED`` is on, the upload endpoint instead
+    # ENQUEUES a durable ``intake_queue`` row (committed with the receipt) and a
+    # separate worker process consuming the queue runs the ALREADY-idempotent
+    # ``finalize_intake_submission_background`` — so finalize/shadow/metadata move
+    # off the web tier entirely and survive a restart. OFF by default → the
+    # in-process BackgroundTask path is unchanged. PROVISIONING the worker service
+    # (e.g. a Render worker running ``scripts/run_intake_queue_consumer.py``) is
+    # the operator/infra step. Pairs with the Redis fail-closed boot guard to make
+    # multi-worker scaling safe.
+    INTAKE_QUEUE_CONSUMER_ENABLED: bool = False
+    # A claimed job whose worker died is reclaimed after this many minutes
+    # (visibility timeout) so a crash never strands a job ``claimed`` forever.
+    INTAKE_QUEUE_CLAIM_TIMEOUT_MINUTES: int = 15
+    # Give up (status ``failed``) after this many finalize attempts.
+    INTAKE_QUEUE_MAX_ATTEMPTS: int = 5
+    # How many jobs one consumer poll claims at once.
+    INTAKE_QUEUE_BATCH_SIZE: int = 10
+
     # Catalog v2 (2026-05-20) — collapsed recurring catalog feature flag.
     # When True, ``recurring_for_year_v2`` is the authoritative
     # generator: each (institution, period) pair becomes ONE
