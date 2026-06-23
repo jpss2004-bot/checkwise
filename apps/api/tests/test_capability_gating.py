@@ -210,3 +210,122 @@ def test_demo_can_still_preview_metadata(db_factory, api_client):
     resp = api_client.get("/api/v1/client/metadata", headers=_h(token))
     # The read-only preview stays open for demo plans.
     assert resp.status_code == 200, resp.text
+
+
+# --- download_documents capability (per-tenant lever, default granted) ----
+
+
+def test_download_documents_granted_by_default_then_revocable(session):
+    """``download_documents`` is True on every tier (demo included), so it only
+    bites when an admin revokes it for a tenant via an entitlement row."""
+    from app.services import entitlements as ent
+
+    client = _client_with_plan(session, "demo")
+    org = (
+        session.query(Organization)
+        .filter(Organization.client_id == client.id)
+        .one()
+    )
+    # Default: demo CAN download individual documents.
+    sub.assert_capability(session, client.id, Capability.DOWNLOAD_DOCUMENTS.value)
+    # Admin revokes the capability for this tenant → now 403.
+    ent.grant_entitlement(
+        session, org.id, key=Capability.DOWNLOAD_DOCUMENTS.value, enabled=False
+    )
+    with pytest.raises(HTTPException) as exc:
+        sub.assert_capability(
+            session, client.id, Capability.DOWNLOAD_DOCUMENTS.value
+        )
+    assert exc.value.status_code == 403
+    assert exc.value.detail["code"] == "plan_capability_required"
+
+
+def _seed_submission_document(db_factory, *, client_id: str, vendor_id: str) -> str:
+    """Minimal submission + document for the per-document download route."""
+    from sqlalchemy import select as _select
+
+    from app.models import (
+        Document,
+        Institution,
+        Period,
+        Requirement,
+        RequirementVersion,
+        Submission,
+    )
+
+    seq = next(_seq)
+    db = db_factory()
+    try:
+        inst = db.scalar(_select(Institution).where(Institution.code == "sat"))
+        if inst is None:
+            inst = Institution(code="sat", name="SAT")
+            db.add(inst)
+            db.flush()
+        req = Requirement(
+            code=f"cap:dl:{seq}", name=f"Req {seq}", institution_id=inst.id,
+            load_type="mensual", frequency="mensual", risk_level="medium",
+            current_version=1,
+        )
+        db.add(req)
+        db.flush()
+        rv = RequirementVersion(requirement_id=req.id, version=1)
+        db.add(rv)
+        db.flush()
+        period = Period(
+            code=f"2026-DL{seq}", year=2026, period_type="mensual",
+            period_key=f"2026-DL{seq}",
+        )
+        db.add(period)
+        db.flush()
+        s = Submission(
+            client_id=client_id, vendor_id=vendor_id, institution_id=inst.id,
+            requirement_id=req.id, requirement_version_id=rv.id, period_id=period.id,
+            status="aprobado", load_type="mensual", requirement_code=f"cap:dl:{seq}",
+            period_key=f"2026-DL{seq}",
+        )
+        db.add(s)
+        db.flush()
+        db.add(
+            Document(
+                submission_id=s.id, storage_key=f"local://dl/{s.id}.pdf",
+                original_filename=f"dl-{seq}.pdf", mime_type="application/pdf",
+                size_bytes=1024, sha256="d" * 64, status="aprobado",
+            )
+        )
+        db.commit()
+        return s.id
+    finally:
+        db.close()
+
+
+def test_revoked_tenant_cannot_download_document(db_factory, api_client):
+    """Wiring test: with download_documents revoked, the per-document DOWNLOAD
+    (?download=1) is capability-403'd — making the admin toggle real."""
+    from app.services import entitlements as ent
+
+    ctx = _seed(db_factory, plan="standard")
+    sid = _seed_submission_document(
+        db_factory, client_id=ctx["client_id"], vendor_id=ctx["vendor_id"]
+    )
+    db = db_factory()
+    org = (
+        db.query(Organization)
+        .filter(Organization.client_id == ctx["client_id"])
+        .one()
+    )
+    ent.grant_entitlement(
+        db, org.id, key=Capability.DOWNLOAD_DOCUMENTS.value, enabled=False
+    )
+    db.commit()
+    db.close()
+
+    token = _login(api_client, ctx["owner_email"])
+    dl = api_client.get(
+        f"/api/v1/client/submissions/{sid}/document?download=1", headers=_h(token)
+    )
+    assert _is_capability_403(dl), dl.text
+    # Inline preview (no ?download) is NOT capability-gated — it stays open.
+    preview = api_client.get(
+        f"/api/v1/client/submissions/{sid}/document", headers=_h(token)
+    )
+    assert not _is_capability_403(preview), preview.text

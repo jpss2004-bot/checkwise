@@ -3411,6 +3411,15 @@ def client_get_submission_document(
     )
 
     if download:
+        # Phase D — the download (attachment) action is gated by the
+        # ``download_documents`` capability. It defaults granted on EVERY tier
+        # (demo included), so this only bites when an admin explicitly REVOKES
+        # it for a tenant via the entitlement table — making the admin toggle
+        # honest instead of a no-op. Inline preview (``download=False``) stays
+        # open; the capability names the download/save action specifically.
+        assert_capability(
+            db, submission.client_id, Capability.DOWNLOAD_DOCUMENTS.value
+        )
         add_audit_event(
             db,
             action="client.document_downloaded",
