@@ -2152,3 +2152,124 @@ class TestComprehensionFieldSuggestionGating:
         assert captured["suggestions"] == [
             {"field_key": "main_date", "value": "ok", "confidence": 0.9}
         ]
+
+
+# ---------------------------------------------------------------------------
+# High-stakes escalation gate (DOCUMENT_ANALYSIS_GATE_HIGH_STAKES_ESCALATION)
+# ---------------------------------------------------------------------------
+
+
+def _hs_triage(confidence: float | None = 0.9, authenticity: dict | None = None):
+    return _tier_result(
+        provider_id="anthropic:claude-haiku-4-5",
+        confidence=confidence,
+        authenticity=authenticity,
+    )
+
+
+def _gate_on(monkeypatch) -> None:
+    from app.core.config import settings
+
+    monkeypatch.setattr(
+        settings, "DOCUMENT_ANALYSIS_GATE_HIGH_STAKES_ESCALATION", True
+    )
+
+
+def test_escalation_gate_off_high_stakes_always_escalates() -> None:
+    from app.services.document_analysis.shadow_runner import _escalation_triggers
+
+    triggers = _escalation_triggers(
+        _hs_triage(confidence=0.95),
+        requirement_risk_level="alto",
+        current_authenticity_risk=None,
+        org_id="o",
+    )
+    assert "requirement_risk_level" in triggers  # default behavior unchanged
+
+
+def test_escalation_gate_on_skips_clean_confident_high_stakes(monkeypatch) -> None:
+    from app.services.document_analysis.shadow_runner import _escalation_triggers
+
+    _gate_on(monkeypatch)
+    triggers = _escalation_triggers(
+        _hs_triage(confidence=0.95),
+        requirement_risk_level="critico",
+        current_authenticity_risk=None,
+        org_id="o",
+    )
+    assert triggers == []  # clean + confident + gated → no escalation
+
+
+def test_escalation_gate_on_escalates_mid_confidence(monkeypatch) -> None:
+    from app.services.document_analysis.shadow_runner import _escalation_triggers
+
+    _gate_on(monkeypatch)
+    # 0.6 is above the base 0.5 bar (so low_match_confidence does NOT fire) but
+    # below the stricter 0.85 high-stakes bar.
+    triggers = _escalation_triggers(
+        _hs_triage(confidence=0.6),
+        requirement_risk_level="alto",
+        current_authenticity_risk=None,
+        org_id="o",
+    )
+    assert "high_stakes_low_confidence" in triggers
+    assert "low_match_confidence" not in triggers
+
+
+def test_escalation_gate_on_escalates_when_no_confidence(monkeypatch) -> None:
+    from app.services.document_analysis.shadow_runner import _escalation_triggers
+
+    _gate_on(monkeypatch)
+    triggers = _escalation_triggers(
+        _hs_triage(confidence=None),
+        requirement_risk_level="alto",
+        current_authenticity_risk=None,
+        org_id="o",
+    )
+    assert "high_stakes_low_confidence" in triggers
+
+
+def test_escalation_gate_on_keeps_per_doc_signal(monkeypatch) -> None:
+    from app.services.document_analysis.shadow_runner import _escalation_triggers
+
+    _gate_on(monkeypatch)
+    # Clean + confident triage, but intake forensics already flagged the doc →
+    # escalation still happens via deterministic_risk, just not via risk_level.
+    triggers = _escalation_triggers(
+        _hs_triage(confidence=0.95),
+        requirement_risk_level="alto",
+        current_authenticity_risk="suspicious",
+        org_id="o",
+    )
+    assert "deterministic_risk" in triggers
+    assert "requirement_risk_level" not in triggers
+
+
+def test_escalation_gate_on_org_override(monkeypatch) -> None:
+    from app.core.config import settings
+    from app.services.document_analysis.shadow_runner import _escalation_triggers
+
+    _gate_on(monkeypatch)
+    monkeypatch.setattr(
+        settings, "DOCUMENT_ANALYSIS_ALWAYS_ESCALATE_ORG_IDS", " vip-org "
+    )
+    triggers = _escalation_triggers(
+        _hs_triage(confidence=0.95),
+        requirement_risk_level="alto",
+        current_authenticity_risk=None,
+        org_id="vip-org",
+    )
+    assert "requirement_risk_level" in triggers  # cohort exempt from the gate
+
+
+def test_escalation_gate_on_ignores_non_high_stakes(monkeypatch) -> None:
+    from app.services.document_analysis.shadow_runner import _escalation_triggers
+
+    _gate_on(monkeypatch)
+    triggers = _escalation_triggers(
+        _hs_triage(confidence=0.95),
+        requirement_risk_level="medium",
+        current_authenticity_risk=None,
+        org_id="o",
+    )
+    assert triggers == []  # medium never escalates on risk level

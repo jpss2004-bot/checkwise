@@ -101,6 +101,15 @@ def _pilot_allowlist() -> set[str]:
     return {chunk.strip() for chunk in raw.split(",") if chunk.strip()}
 
 
+def _always_escalate_orgs() -> set[str]:
+    """Org ids exempt from the high-stakes escalation gate (CSV; whitespace +
+    blanks tolerated). Empty = no exemptions."""
+    raw = (settings.DOCUMENT_ANALYSIS_ALWAYS_ESCALATE_ORG_IDS or "").strip()
+    if not raw:
+        return set()
+    return {chunk.strip() for chunk in raw.split(",") if chunk.strip()}
+
+
 def run_shadow_analysis(
     *,
     document_id: str,
@@ -189,6 +198,7 @@ def run_shadow_analysis(
         triage_result,
         requirement_risk_level=requirement_risk_level,
         current_authenticity_risk=current_risk,
+        org_id=org_id,
     )
     if triggers:
         tiers = {"triage": _tier_meta(triage_result), "escalation": None}
@@ -452,6 +462,7 @@ def _escalation_triggers(
     *,
     requirement_risk_level: str | None,
     current_authenticity_risk: str | None,
+    org_id: str | None = None,
 ) -> list[str]:
     """Return the list of fired escalation triggers (empty = no escalation).
 
@@ -464,8 +475,12 @@ def _escalation_triggers(
     * ``deterministic_risk`` — the inspection row's current
       ``authenticity_risk`` (Phase A forensics + Phase B verification,
       written at intake) is already suspicious/high_risk.
-    * ``requirement_risk_level`` — the requirement is alto/critico, so
-      every upload gets the deeper pass (bounded by the escalation cap).
+    * ``requirement_risk_level`` — the requirement is alto/critico. By default
+      every such upload gets the deeper pass; with
+      ``DOCUMENT_ANALYSIS_GATE_HIGH_STAKES_ESCALATION`` on it fires only when
+      triage is unsure (``high_stakes_low_confidence``) or another trigger
+      fired, so a clean+confident triage on a recurring high-stakes doc is
+      spared. ``DOCUMENT_ANALYSIS_ALWAYS_ESCALATE_ORG_IDS`` exempts a cohort.
     """
     triggers: list[str] = []
 
@@ -485,7 +500,43 @@ def _escalation_triggers(
         triggers.append("deterministic_risk")
 
     if (requirement_risk_level or "").strip().lower() in _HIGH_STAKES_RISK_LEVELS:
-        triggers.append("requirement_risk_level")
+        # ``triggers`` so far = per-document signals (llm flags / low confidence /
+        # deterministic risk). The high-stakes requirement adds a deep pass on
+        # EVERY upload unless the gate is on (and the org isn't exempt).
+        per_doc_signal = bool(triggers)
+        always = bool(org_id) and org_id in _always_escalate_orgs()
+        if not settings.DOCUMENT_ANALYSIS_GATE_HIGH_STAKES_ESCALATION or always:
+            triggers.append("requirement_risk_level")
+            if not per_doc_signal:
+                # Telemetry (gate OFF): this deep pass is driven ONLY by
+                # risk_level on an otherwise clean+confident triage — it would be
+                # skipped if the gate were on. Log so operators size the saving.
+                logger.info(
+                    "shadow escalation (risk_level-only): would skip if gated; "
+                    "org_id=%s risk_level=%s confidence=%s",
+                    org_id,
+                    requirement_risk_level,
+                    confidence,
+                )
+        else:
+            # Gated: escalate alto/crítico only when triage is genuinely unsure
+            # (no confidence, or below the stricter high-stakes bar). A per-doc
+            # signal already added its own trigger above, so escalation still
+            # happens for those.
+            if (
+                confidence is None
+                or confidence
+                < settings.DOCUMENT_ANALYSIS_HIGH_STAKES_ESCALATION_CONFIDENCE
+            ):
+                triggers.append("high_stakes_low_confidence")
+            elif not per_doc_signal:
+                logger.info(
+                    "shadow escalation skipped (gated high-stakes, clean+confident "
+                    "triage): org_id=%s risk_level=%s confidence=%s",
+                    org_id,
+                    requirement_risk_level,
+                    confidence,
+                )
 
     return triggers
 

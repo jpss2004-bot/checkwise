@@ -379,6 +379,20 @@ class Settings(BaseSettings):
     # Exhaustion skips the escalation gracefully (triage result stands).
     DOCUMENT_ANALYSIS_ESCALATION_DAILY_CAP_PER_ORG: int = 50
 
+    # High-stakes (alto/crítico) escalation gate. OFF by default = current
+    # behavior: every alto/crítico upload gets the deep escalation pass. When ON,
+    # alto/crítico escalates ONLY when triage is actually unsure (no confidence,
+    # or confidence below ``..._HIGH_STAKES_ESCALATION_CONFIDENCE``) or a
+    # per-document signal already fired (LLM flags / intake forensics risk) — a
+    # clean, confident triage on a recurring high-stakes doc no longer burns a
+    # Sonnet call + the escalation cap. Even when OFF the runner LOGS every
+    # risk-level-only escalation so an operator can size the saving first.
+    DOCUMENT_ANALYSIS_GATE_HIGH_STAKES_ESCALATION: bool = False
+    DOCUMENT_ANALYSIS_HIGH_STAKES_ESCALATION_CONFIDENCE: float = 0.85
+    # CSV of org (client) ids that ALWAYS get the deep pass on alto/crítico,
+    # bypassing the gate — for cohorts the business wants deep on every doc.
+    DOCUMENT_ANALYSIS_ALWAYS_ESCALATE_ORG_IDS: str = ""
+
     # Phase 0 (comprehension) — the escalation/deep tier reasons about the
     # document instead of single-pass extracting it: adaptive thinking +
     # ``effort=high`` + structured outputs need more room and time than the
