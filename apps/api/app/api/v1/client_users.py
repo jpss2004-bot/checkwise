@@ -231,6 +231,9 @@ class ClientUserItem(BaseModel):
     email: str
     full_name: str
     is_primary: bool
+    role: str
+    """``client_admin`` (Approver — full write) | ``client_viewer`` (read +
+    export only). The Primary Owner is always a ``client_admin``."""
     status: str
     """``active`` | ``disabled`` — mirror of ``User.status``."""
     pending_first_login: bool
@@ -253,6 +256,18 @@ class ClientUsersList(BaseModel):
 class CreateClientUserPayload(BaseModel):
     full_name: str = Field(min_length=2, max_length=255)
     email: EmailStr
+    # Phase 4 — seat tier. Defaults to the least-privilege Viewer; the owner
+    # promotes to client_admin (Approver) explicitly.
+    role: Literal["client_admin", "client_viewer"] = "client_viewer"
+
+
+class UpdateClientUserRolePayload(BaseModel):
+    role: Literal["client_admin", "client_viewer"]
+
+
+class ClientUserRoleResponse(BaseModel):
+    user_id: str
+    role: str
 
 
 class CreateClientUserResponse(BaseModel):
@@ -338,6 +353,7 @@ def list_client_users(
                 email=u.email,
                 full_name=u.full_name,
                 is_primary=m.is_primary,
+                role=m.role,
                 status=u.status,
                 pending_first_login=u.must_change_password,
                 last_login_at=(
@@ -431,6 +447,7 @@ def create_client_user(
         user.must_change_password = True
         reinstate_membership.status = "active"
         reinstate_membership.is_primary = False
+        reinstate_membership.role = payload.role
     else:
         user = User(
             email=email,
@@ -445,7 +462,7 @@ def create_client_user(
             Membership(
                 user_id=user.id,
                 organization_id=org.id,
-                role=MembershipRole.CLIENT_ADMIN.value,
+                role=payload.role,
                 is_primary=False,
                 status="active",
             )
@@ -698,3 +715,54 @@ def reset_client_user_password(
         email_status=delivery.status,
         email_error=delivery.error,
     )
+
+
+@router.patch(
+    "/{user_id}/role",
+    response_model=ClientUserRoleResponse,
+    summary="Change a seat's access tier (Approver / Viewer)",
+)
+def update_client_user_role(
+    user_id: str,
+    payload: UpdateClientUserRolePayload,
+    db: DbSession,
+    current: ClientUser,
+    request: Request,
+    client_id: str | None = Query(default=None),
+) -> ClientUserRoleResponse:
+    """Promote a seat to ``client_admin`` (Approver) or demote it to
+    ``client_viewer`` (read + export only). Owner-only (plus internal_admin).
+
+    The Primary Owner is always an Approver and cannot be demoted here. A
+    promoted/demoted user's JWT still carries the old role until they
+    re-login (claims are minted at login), so the new tier takes effect on
+    their next sign-in — same staleness as every other role change.
+    """
+    cid = _resolve_client_id(db, current, requested=client_id)
+    org = _org_for_client(db, cid)
+    _require_can_manage(db, current, org)
+
+    membership = _active_membership_or_404(db, org.id, user_id)
+    _reject_primary_target(membership)
+
+    before_role = membership.role
+    if before_role != payload.role:
+        membership.role = payload.role
+        add_audit_event(
+            db,
+            action="client.user_role_changed",
+            entity_type="user",
+            entity_id=user_id,
+            actor_type=_actor_type(current),
+            actor_id=current.user.id,
+            **_request_ctx(request),
+            before={"role": before_role},
+            after={
+                "role": payload.role,
+                "client_id": cid,
+                "organization_id": org.id,
+            },
+        )
+        db.commit()
+
+    return ClientUserRoleResponse(user_id=user_id, role=payload.role)
