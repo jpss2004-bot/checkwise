@@ -76,7 +76,7 @@ from app.api.v1.portal import (
 )
 from app.constants.plans import PLAN_LABELS_ES, Capability
 from app.constants.roles import MembershipRole
-from app.constants.statuses import DocumentStatus, VendorStatus
+from app.constants.statuses import ClientAcceptance, DocumentStatus, VendorStatus
 from app.core.compliance_catalog import (
     catalog_metadata,
     expediente_for_persona,
@@ -954,6 +954,12 @@ class ClientSubmissionItem(BaseModel):
     reviewer_note: str | None
     supersedes_submission_id: str | None
     superseded_by_submission_id: str | None
+    # Phase 5 / Axis 2 — the client's business-acceptance verdict, orthogonal
+    # to ``status`` (Axis 1). ``client_decided_at`` is the decision time;
+    # ``client_decision_reason`` is populated for override decisions.
+    client_acceptance: str = ClientAcceptance.PENDING.value
+    client_decided_at: datetime | None = None
+    client_decision_reason: str | None = None
 
 
 class ClientSubmissionsResponse(BaseModel):
@@ -2409,6 +2415,12 @@ def _recent_submissions_for_workspace(
                 "submitted_at": sub.created_at.isoformat(),
                 "supersedes_submission_id": sub.supersedes_submission_id,
                 "superseded_by_submission_id": replacement_by_sub.get(sub.id),
+                # Phase 5 / Axis 2 — client-acceptance verdict (orthogonal to status).
+                "client_acceptance": sub.client_acceptance,
+                "client_decided_at": (
+                    sub.client_decided_at.isoformat() if sub.client_decided_at else None
+                ),
+                "client_decision_reason": sub.client_decision_reason,
             }
         )
     return out
@@ -3872,6 +3884,11 @@ def client_submissions(
     # codes return an empty result set rather than 400 so a future
     # catalog addition can ship before this code is updated.
     institution: str | None = None,
+    # Phase 5 / Axis 2 — filter by the client-acceptance state
+    # (``pending`` | ``accepted`` | ``rejected``). Powers the "what needs my
+    # acceptance" worklist + the bulk-accept flow. Unknown values force an
+    # empty result rather than 400 (mirrors the institution filter).
+    client_acceptance: Annotated[str | None, Query(alias="client_acceptance")] = None,
     limit: Annotated[int, Query(ge=1, le=500)] = 100,
     offset: Annotated[int, Query(ge=0)] = 0,
 ) -> ClientSubmissionsResponse:
@@ -3921,6 +3938,15 @@ def client_submissions(
             filters.append(Submission.id == "__nonexistent__")
         else:
             filters.append(Submission.institution_id == inst_id)
+    if client_acceptance:
+        # Validate against the enum; an unknown value force-empties rather
+        # than silently equality-matching a typo (which would read as "none
+        # pending"). Uses the (client_id, client_acceptance) index from 0059.
+        valid_acceptance = {a.value for a in ClientAcceptance}
+        if client_acceptance not in valid_acceptance:
+            filters.append(Submission.id == "__nonexistent__")
+        else:
+            filters.append(Submission.client_acceptance == client_acceptance)
 
     # True total for the filtered set so the client can page (perf audit P1-2),
     # rather than inferring it from a silently-capped page length.
@@ -4018,6 +4044,9 @@ def client_submissions(
                 reviewer_note=note,
                 supersedes_submission_id=sub.supersedes_submission_id,
                 superseded_by_submission_id=replacement_by_sub.get(sub.id),
+                client_acceptance=sub.client_acceptance,
+                client_decided_at=sub.client_decided_at,
+                client_decision_reason=sub.client_decision_reason,
             )
         )
     return ClientSubmissionsResponse(

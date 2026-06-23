@@ -465,6 +465,10 @@ def compute_attention_items(
                 "requirement_code": view.requirement_code,
                 "period_key": view.period_key,
                 "current_submission_id": view.current_submission_id,
+                # Axis 2 — additive; never affects ``state`` / ordering above.
+                "client_acceptance": view.client_acceptance,
+                "client_decided_at_iso": view.client_decided_at_iso,
+                "client_decision_reason": view.client_decision_reason,
             }
         )
 
@@ -495,6 +499,10 @@ def compute_attention_items(
                 "requirement_code": view.requirement_code,
                 "period_key": view.period_key,
                 "current_submission_id": view.current_submission_id,
+                # Axis 2 — additive; never affects ``state`` / ordering above.
+                "client_acceptance": view.client_acceptance,
+                "client_decided_at_iso": view.client_decided_at_iso,
+                "client_decision_reason": view.client_decision_reason,
             }
         )
 

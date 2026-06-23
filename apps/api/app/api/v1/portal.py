@@ -1922,6 +1922,14 @@ class SubmissionDetailResponse(BaseModel):
     # "latest reviewer note" stays canonical.
     reviewer_note: str | None = None
     can_cancel: bool = False
+    # Phase 5 / Axis 2 — the CLIENT's business-acceptance verdict, shown
+    # read-only to the provider for transparency (the provider never sets it).
+    # Orthogonal to ``status`` (Axis 1 = CheckWise compliance validity).
+    # Deliberately exposes only the verdict + timestamp, NOT
+    # ``client_decision_reason`` — that reason can carry client-internal
+    # rationale and must not cross the tenant boundary to the provider.
+    client_acceptance: str = "pending"
+    client_decided_at: str | None = None
 
 
 # Statuses that mean "you, the provider, must act now."
@@ -2164,6 +2172,12 @@ def get_workspace_submission(
         suggested_action=_suggested_action(submission.status),  # type: ignore[arg-type]
         reviewer_note=_latest_reviewer_note(db, submission.id),
         can_cancel=_submission_can_be_cancelled(db, submission),
+        client_acceptance=submission.client_acceptance,
+        client_decided_at=(
+            submission.client_decided_at.isoformat()
+            if submission.client_decided_at
+            else None
+        ),
     )
 
 

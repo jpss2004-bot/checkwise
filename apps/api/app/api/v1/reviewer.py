@@ -749,6 +749,17 @@ def get_submission(
         "supersedes_submission_id": submission.supersedes_submission_id,
         "superseded_by_submission_id": superseded_by_id,
         "suggested_action": _suggested_action(submission.status),
+        # Phase 5 / Axis 2 — the CLIENT's business-acceptance verdict, shown to
+        # internal staff so they can reconcile their compliance verdict (Axis 1)
+        # against a client override. Staff see the full decision INCLUDING the
+        # reason (they are internal; the provider portal deliberately omits it).
+        "client_acceptance": submission.client_acceptance,
+        "client_decided_at": (
+            submission.client_decided_at.isoformat()
+            if submission.client_decided_at
+            else None
+        ),
+        "client_decision_reason": submission.client_decision_reason,
         # Phase A — document-revalidation authenticity block. Reviewer-
         # facing only (the provider portal never exposes it). ``analyzed``
         # is False for legacy rows or when the forensics pass failed open

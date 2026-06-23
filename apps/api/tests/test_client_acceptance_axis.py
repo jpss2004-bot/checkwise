@@ -372,6 +372,38 @@ def test_endpoint_override_without_reason_is_422(api_client, db_factory) -> None
     assert r.status_code == 422, r.text
 
 
+def test_decision_surfaces_in_submissions_list(api_client, db_factory) -> None:
+    """Read-exposure: after an Approver accepts, GET /client/submissions
+    reflects client_acceptance on the row (Axis 2 visible alongside Axis 1)."""
+    ids = _seed_world(db_factory, submission_status=DocumentStatus.APROBADO.value)
+    tok = _login(api_client, ids["approver_email"], ids["approver_pw"])
+    api_client.post(
+        f"/api/v1/client/submissions/{ids['submission_id']}/decision",
+        json={"action": "accept"},
+        headers=_h(tok),
+    )
+    lst = api_client.get("/api/v1/client/submissions", headers=_h(tok))
+    assert lst.status_code == 200, lst.text
+    row = next(
+        r for r in lst.json()["items"] if r["submission_id"] == ids["submission_id"]
+    )
+    assert row["client_acceptance"] == ClientAcceptance.ACCEPTED.value
+    assert row["status"] == DocumentStatus.APROBADO.value  # Axis 1 unchanged
+
+    # The ?client_acceptance= filter narrows to the accepted row.
+    filtered = api_client.get(
+        "/api/v1/client/submissions?client_acceptance=accepted", headers=_h(tok)
+    )
+    assert filtered.status_code == 200
+    assert all(
+        r["client_acceptance"] == "accepted" for r in filtered.json()["items"]
+    )
+    none_pending = api_client.get(
+        "/api/v1/client/submissions?client_acceptance=rejected", headers=_h(tok)
+    )
+    assert none_pending.json()["items"] == []
+
+
 def test_endpoint_cross_tenant_is_404(api_client, db_factory) -> None:
     """An Approver of client A cannot decide on client B's submission — uniform
     404 (never confirm a cross-tenant submission exists)."""
