@@ -46,7 +46,9 @@ def db_factory():
     return sessionmaker(autocommit=False, autoflush=False, bind=engine)
 
 
-def _seed(db_factory, *, cfdi_uuid: str | None = "UUID-ABC", authenticity_risk=None):
+def _seed(
+    db_factory, *, cfdi_uuid: str | None = "UUID-ABC", authenticity_risk=None, verification=None
+):
     global _SEED
     _SEED += 1
     n = _SEED
@@ -110,7 +112,12 @@ def _seed(db_factory, *, cfdi_uuid: str | None = "UUID-ABC", authenticity_risk=N
         db.add(doc)
         db.flush()
         db.add(
-            DocumentInspection(document_id=doc.id, is_pdf=True, authenticity_risk=authenticity_risk)
+            DocumentInspection(
+                document_id=doc.id,
+                is_pdf=True,
+                authenticity_risk=authenticity_risk,
+                verification=verification,
+            )
         )
         if cfdi_uuid:
             db.add(
@@ -300,6 +307,75 @@ def test_build_expresion_omits_total_when_absent():
 def test_fmt_total_strips_separators():
     assert _fmt_total(" 1,234.56 ") == "1234.56"
     assert _fmt_total(None) == ""
+
+
+# -- QR-sourced expresion (total wiring) ------------------------------------
+
+
+_SAT_QR_URL = (
+    "https://verificacfd.facturaelectronica.sat.gob.mx/default.aspx"
+    "?id={uuid}&re={re}&rr={rr}&tt={tt}&fe=AbCdEf12"
+)
+
+
+def _qr_verification(uuid="UUID-ABC", re="EMI010101AA1", rr="REC020202BB2", tt="1234.56"):
+    return {
+        "qr_codes": [
+            {"content": _SAT_QR_URL.format(uuid=uuid, re=re, rr=rr, tt=tt), "is_url": True}
+        ]
+    }
+
+
+def test_sat_qr_params_extracts_expresion():
+    # match is case-insensitive on the UUID
+    qr = fv._sat_qr_params(_qr_verification(), "uuid-abc")
+    assert qr == {"re": "EMI010101AA1", "rr": "REC020202BB2", "tt": "1234.56"}
+
+
+def test_sat_qr_params_none_when_uuid_mismatch():
+    assert fv._sat_qr_params(_qr_verification(uuid="OTHER"), "UUID-ABC") is None
+
+
+def test_sat_qr_params_none_without_usable_qr():
+    assert fv._sat_qr_params(None, "UUID-ABC") is None
+    assert fv._sat_qr_params({"qr_codes": []}, "UUID-ABC") is None
+    # a QR with the right id but no re/rr (not a CFDI verification QR) is ignored
+    assert (
+        fv._sat_qr_params({"qr_codes": [{"content": "https://x.mx/?id=UUID-ABC"}]}, "UUID-ABC")
+        is None
+    )
+
+
+def test_gather_inputs_prefers_qr_expresion(db_factory):
+    doc_id = _seed(
+        db_factory,
+        cfdi_uuid="UUID-ABC",
+        verification=_qr_verification(
+            uuid="UUID-ABC", re="QRE940101AAA", rr="QRR950202BBB", tt="9999.99"
+        ),
+    )
+    db = db_factory()
+    try:
+        inputs = fv._gather_inputs(db, doc_id)
+    finally:
+        db.close()
+    assert inputs.cfdi_uuid == "UUID-ABC"
+    assert inputs.emisor_rfc == "QRE940101AAA"
+    assert inputs.receptor_rfc == "QRR950202BBB"
+    assert inputs.total == "9999.99"
+
+
+def test_gather_inputs_falls_back_without_qr(db_factory):
+    doc_id = _seed(db_factory, cfdi_uuid="UUID-ABC", verification=None)
+    db = db_factory()
+    try:
+        inputs = fv._gather_inputs(db, doc_id)
+    finally:
+        db.close()
+    assert inputs.cfdi_uuid == "UUID-ABC"
+    assert inputs.total is None
+    # falls back to the vendor/client RFCs (normalized, non-empty)
+    assert inputs.emisor_rfc and inputs.receptor_rfc
 
 
 # -- worker -----------------------------------------------------------------
