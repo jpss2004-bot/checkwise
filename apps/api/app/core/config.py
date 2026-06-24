@@ -500,6 +500,19 @@ class Settings(BaseSettings):
     # uploaded document.
     DOCUMENT_ANALYSIS_EXPEDIENTE_DEBOUNCE_HOURS: int = 6
 
+    # B3 — expediente-first batching. On a BUNDLED period submission (one
+    # submission with several documents) each document's deep escalation is its
+    # own Sonnet call. When this is on (AND the expediente feature is on, so the
+    # deep analysis is NOT lost — it moves to the bundle pass), the per-document
+    # deep escalation is SKIPPED in favour of the single cross-document
+    # expediente pass that already runs per (client, vendor, period). OFF by
+    # default → every document still gets its own per-doc escalation. It never
+    # defers when the expediente feature is off (that would drop deep analysis),
+    # so the per-doc shadow flow is never regressed. Triage + the local image
+    # forensics still run per document; only the per-doc deep LLM pass is
+    # coalesced.
+    DOCUMENT_ANALYSIS_BATCH_ESCALATION_ENABLED: bool = False
+
     # Phase 3 — pilot-cohort allowlist. CSV of ``client.id`` values
     # that are allowed to receive shadow analysis. Empty string (the
     # default) disables the gate, so every org is in scope. When set,

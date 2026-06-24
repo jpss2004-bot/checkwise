@@ -3554,3 +3554,222 @@ class TestAsyncDispatch:
         )
         assert awaited == []
         assert cleaned == []
+
+
+# ---------------------------------------------------------------------------
+# B3 — expediente-first batching (DOCUMENT_ANALYSIS_BATCH_ESCALATION_ENABLED)
+# ---------------------------------------------------------------------------
+
+
+class TestBatchEscalation(_ShadowDbSetupMixin):
+    def _enable(self, monkeypatch, *, batch=True, expediente=True, debounce=6):
+        monkeypatch.setattr(
+            settings, "DOCUMENT_ANALYSIS_BATCH_ESCALATION_ENABLED", batch
+        )
+        monkeypatch.setattr(settings, "DOCUMENT_ANALYSIS_EXPEDIENTE_ENABLED", expediente)
+        monkeypatch.setattr(
+            settings, "DOCUMENT_ANALYSIS_EXPEDIENTE_DEBOUNCE_HOURS", debounce
+        )
+
+    def _seed_recent_assessment(self, db_setup):
+        from app.db.session import SessionLocal
+        from app.models import ExpedienteAssessment
+
+        db = SessionLocal()
+        try:
+            db.add(
+                ExpedienteAssessment(
+                    client_id="cli-1",
+                    vendor_id="ven-1",
+                    period_id="per-1",
+                    error=None,
+                )
+            )
+            db.commit()
+        finally:
+            db.close()
+
+    def _add_sibling_doc(self, submission_id):
+        from app.db.session import SessionLocal
+        from app.models import Document
+
+        db = SessionLocal()
+        try:
+            db.add(
+                Document(
+                    submission_id=submission_id,
+                    storage_key="local/test2.pdf",
+                    original_filename="test2.pdf",
+                    size_bytes=1024,
+                    sha256="beefdead",
+                    status="pendiente_revision",
+                )
+            )
+            db.commit()
+        finally:
+            db.close()
+
+    def _decide(self, submission_id):
+        from app.services.document_analysis.shadow_runner import (
+            _should_batch_escalation,
+        )
+
+        return _should_batch_escalation(submission_id)
+
+    def _inspection(self):
+        from app.db.session import SessionLocal
+        from app.models import DocumentInspection
+
+        db = SessionLocal()
+        try:
+            return db.query(DocumentInspection).first()
+        finally:
+            db.close()
+
+    # -- predicate ------------------------------------------------------
+
+    def test_predicate_flag_off(self, monkeypatch, db_setup):
+        self._enable(monkeypatch, batch=False)
+        self._add_sibling_doc(db_setup["submission_id"])
+        assert self._decide(db_setup["submission_id"]) is False
+
+    def test_predicate_requires_expediente(self, monkeypatch, db_setup):
+        # Never defer the deep pass when there is no expediente to catch it.
+        self._enable(monkeypatch, batch=True, expediente=False)
+        self._add_sibling_doc(db_setup["submission_id"])
+        assert self._decide(db_setup["submission_id"]) is False
+
+    def test_predicate_single_doc_not_a_bundle(self, monkeypatch, db_setup):
+        self._enable(monkeypatch)
+        assert self._decide(db_setup["submission_id"]) is False  # only 1 document
+
+    def test_predicate_bundle(self, monkeypatch, db_setup):
+        self._enable(monkeypatch)
+        self._add_sibling_doc(db_setup["submission_id"])
+        assert self._decide(db_setup["submission_id"]) is True
+
+    def test_predicate_debounce_disabled_falls_back(self, monkeypatch, db_setup):
+        # Without a debounce window batching would fan out one expediente per
+        # doc → don't batch.
+        self._enable(monkeypatch, debounce=0)
+        self._add_sibling_doc(db_setup["submission_id"])
+        assert self._decide(db_setup["submission_id"]) is False
+
+    def test_predicate_recently_assessed_falls_back(self, monkeypatch, db_setup):
+        # The load-bearing safety guard: a recent expediente assessment means the
+        # after-deep-run trigger would be DEBOUNCED, so deferring would lose the
+        # deep pass → don't defer, run the per-doc escalation.
+        self._enable(monkeypatch)
+        self._add_sibling_doc(db_setup["submission_id"])
+        self._seed_recent_assessment(db_setup)
+        assert self._decide(db_setup["submission_id"]) is False
+
+    # -- integration ----------------------------------------------------
+
+    def _run(self, db_setup, tmp_path, triage, escalation):
+        from app.services.document_analysis.shadow_runner import run_shadow_analysis
+
+        with patch(
+            "app.services.document_analysis.shadow_runner.build_document_analysis_provider",
+            side_effect=_tiered_factory(triage, escalation),
+        ):
+            run_shadow_analysis(
+                document_id=db_setup["document_id"],
+                submission_id=db_setup["submission_id"],
+                pdf_path=str(_blank_pdf_path(tmp_path)),
+                requirement_code="REC-SAT-CSF-2026",
+                requirement_name="CSF",
+                institution_code="sat",
+                period_code="2026-01",
+                org_id="cli-1",
+            )
+
+    def _flagged_triage(self):
+        return _triage_provider(
+            _tier_result(
+                provider_id="anthropic:claude-haiku-4-5",
+                authenticity={"concerns": [{"concern": "sello", "severity": "medium"}]},
+            )
+        )
+
+    def test_bundle_skips_per_doc_escalation_and_triggers_expediente(
+        self, monkeypatch, tmp_path, db_setup
+    ):
+        self._enable(monkeypatch)
+        self._add_sibling_doc(db_setup["submission_id"])
+        exped = MagicMock()
+        monkeypatch.setattr(
+            "app.services.document_analysis.shadow_runner.run_expediente_assessment",
+            exped,
+        )
+        triage = self._flagged_triage()
+        escalation = _escalation_provider(
+            _tier_result(provider_id="anthropic:claude-sonnet-4-6")
+        )
+        self._run(db_setup, tmp_path, triage, escalation)
+
+        # Per-doc deep pass skipped; the single expediente pass is triggered.
+        escalation.analyze.assert_not_called()
+        exped.assert_called_once()
+        tiers = self._inspection().shadow_signals["_tiers"]
+        assert tiers["escalation"]["skipped"] == "batched_to_expediente"
+
+    def test_single_doc_still_runs_per_doc_escalation(
+        self, monkeypatch, tmp_path, db_setup
+    ):
+        # Batch flag on, but a single-doc submission is NOT a bundle → the
+        # per-doc escalation runs exactly as before (no regression).
+        self._enable(monkeypatch)
+        monkeypatch.setattr(
+            "app.services.document_analysis.shadow_runner.run_expediente_assessment",
+            MagicMock(),
+        )
+        triage = self._flagged_triage()
+        escalation = _escalation_provider(
+            _tier_result(provider_id="anthropic:claude-sonnet-4-6", authenticity=_CLEAN_AUTH)
+        )
+        self._run(db_setup, tmp_path, triage, escalation)
+
+        escalation.analyze.assert_called_once()
+        tiers = self._inspection().shadow_signals["_tiers"]
+        assert "skipped" not in tiers["escalation"]
+
+    def test_flag_off_bundle_runs_per_doc_escalation(
+        self, monkeypatch, tmp_path, db_setup
+    ):
+        # Default-OFF: a bundle still escalates per-document (unchanged).
+        self._enable(monkeypatch, batch=False)
+        self._add_sibling_doc(db_setup["submission_id"])
+        monkeypatch.setattr(
+            "app.services.document_analysis.shadow_runner.run_expediente_assessment",
+            MagicMock(),
+        )
+        triage = self._flagged_triage()
+        escalation = _escalation_provider(
+            _tier_result(provider_id="anthropic:claude-sonnet-4-6", authenticity=_CLEAN_AUTH)
+        )
+        self._run(db_setup, tmp_path, triage, escalation)
+        escalation.analyze.assert_called_once()
+
+    def test_bundle_with_recent_assessment_runs_per_doc(
+        self, monkeypatch, tmp_path, db_setup
+    ):
+        # The deep-analysis-loss guard, end to end: a bundle whose expediente
+        # would be DEBOUNCED must NOT defer — the per-doc escalation runs so the
+        # document is never left with only triage.
+        self._enable(monkeypatch)
+        self._add_sibling_doc(db_setup["submission_id"])
+        self._seed_recent_assessment(db_setup)
+        monkeypatch.setattr(
+            "app.services.document_analysis.shadow_runner.run_expediente_assessment",
+            MagicMock(),
+        )
+        triage = self._flagged_triage()
+        escalation = _escalation_provider(
+            _tier_result(provider_id="anthropic:claude-sonnet-4-6", authenticity=_CLEAN_AUTH)
+        )
+        self._run(db_setup, tmp_path, triage, escalation)
+        # Fell back to the per-doc deep pass (no silent loss).
+        escalation.analyze.assert_called_once()
+        tiers = self._inspection().shadow_signals["_tiers"]
+        assert "skipped" not in tiers["escalation"]

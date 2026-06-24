@@ -42,14 +42,17 @@ import logging
 import random
 from pathlib import Path
 
-from sqlalchemy import select
+from sqlalchemy import func, select
 
 from app.core.config import settings
 from app.db.session import SessionLocal
 from app.models import Document, DocumentInspection, Submission, Vendor
 from app.models.entities import utc_now
 from app.services.document_analysis.base import AnalysisResult
-from app.services.document_analysis.expediente import run_expediente_assessment
+from app.services.document_analysis.expediente import (
+    recently_assessed,
+    run_expediente_assessment,
+)
 from app.services.document_analysis.factory import build_document_analysis_provider
 from app.services.document_analysis.spend_limiter import (
     check_org_daily_quota,
@@ -590,39 +593,48 @@ def run_shadow_analysis(
     )
     if triggers:
         tiers = {"triage": _tier_meta(triage_result), "escalation": None}
-        # Phase 3 — when the comprehension→metadata feature is unlocked for
-        # this requirement, hand the deep tier the metadata field schema so
-        # it also proposes values for the ``ai_assisted`` cells. None
-        # otherwise → the deep call is byte-for-byte unchanged.
-        metadata_field_schema = _metadata_field_schema_for(
-            requirement_code=requirement_code,
-            requirement_name=requirement_name,
-            institution_code=institution_code,
-        )
-        escalation_result = _run_escalation(
-            triggers=triggers,
-            pdf_path=pdf_path,
-            requirement_code=requirement_code,
-            requirement_name=requirement_name,
-            institution_code=institution_code,
-            period_code=period_code,
-            org_id=org_id,
-            document_id=document_id,
-            expected_provider_rfc=expected_provider_rfc,
-            expected_provider_name=expected_provider_name,
-            expected_client_name=expected_client_name,
-            expected_client_rfc=expected_client_rfc,
-            metadata_field_schema=metadata_field_schema,
-        )
-        if isinstance(escalation_result, AnalysisResult):
-            tiers["escalation"] = {**_tier_meta(escalation_result), "triggers": triggers}
-            if escalation_result.error is None:
-                # Escalation supersedes triage for the stored columns.
-                final_result = escalation_result
+        if _should_batch_escalation(submission_id):
+            # B3 — bundle: coalesce the per-doc deep pass into the single
+            # cross-document expediente pass triggered below. Skip the per-doc
+            # Sonnet call; the triage result stands for this doc's columns.
+            tiers["escalation"] = {
+                "skipped": "batched_to_expediente",
+                "triggers": triggers,
+            }
         else:
-            # ``escalation_result`` is a skip-marker dict (cap reached /
-            # provider unavailable). The triage result stands.
-            tiers["escalation"] = {**escalation_result, "triggers": triggers}
+            # Phase 3 — when the comprehension→metadata feature is unlocked for
+            # this requirement, hand the deep tier the metadata field schema so
+            # it also proposes values for the ``ai_assisted`` cells. None
+            # otherwise → the deep call is byte-for-byte unchanged.
+            metadata_field_schema = _metadata_field_schema_for(
+                requirement_code=requirement_code,
+                requirement_name=requirement_name,
+                institution_code=institution_code,
+            )
+            escalation_result = _run_escalation(
+                triggers=triggers,
+                pdf_path=pdf_path,
+                requirement_code=requirement_code,
+                requirement_name=requirement_name,
+                institution_code=institution_code,
+                period_code=period_code,
+                org_id=org_id,
+                document_id=document_id,
+                expected_provider_rfc=expected_provider_rfc,
+                expected_provider_name=expected_provider_name,
+                expected_client_name=expected_client_name,
+                expected_client_rfc=expected_client_rfc,
+                metadata_field_schema=metadata_field_schema,
+            )
+            if isinstance(escalation_result, AnalysisResult):
+                tiers["escalation"] = {**_tier_meta(escalation_result), "triggers": triggers}
+                if escalation_result.error is None:
+                    # Escalation supersedes triage for the stored columns.
+                    final_result = escalation_result
+            else:
+                # ``escalation_result`` is a skip-marker dict (cap reached /
+                # provider unavailable). The triage result stands.
+                tiers["escalation"] = {**escalation_result, "triggers": triggers}
 
         # Phase D — pixel-level tamper forensics. Pure-local (no LLM
         # spend), but CPU-heavy and false-positive-prone, so it rides
@@ -630,7 +642,7 @@ def run_shadow_analysis(
         # pass — and only on scanned documents (born-digital PDFs have
         # no scan raster to inspect). Independent of the escalation
         # provider outcome: a cap-skip or provider error never blocks
-        # the local checks.
+        # the local checks. Still runs per-document under batching.
         image_result, image_forensics_meta = _run_image_forensics(
             pdf_path=pdf_path,
             is_probably_scanned=is_probably_scanned,
@@ -793,32 +805,40 @@ async def run_shadow_analysis_async(
     )
     if triggers:
         tiers = {"triage": _tier_meta(triage_result), "escalation": None}
-        metadata_field_schema = _metadata_field_schema_for(
-            requirement_code=requirement_code,
-            requirement_name=requirement_name,
-            institution_code=institution_code,
-        )
-        escalation_result = await _run_escalation_async(
-            triggers=triggers,
-            pdf_path=pdf_path,
-            requirement_code=requirement_code,
-            requirement_name=requirement_name,
-            institution_code=institution_code,
-            period_code=period_code,
-            org_id=org_id,
-            document_id=document_id,
-            expected_provider_rfc=expected_provider_rfc,
-            expected_provider_name=expected_provider_name,
-            expected_client_name=expected_client_name,
-            expected_client_rfc=expected_client_rfc,
-            metadata_field_schema=metadata_field_schema,
-        )
-        if isinstance(escalation_result, AnalysisResult):
-            tiers["escalation"] = {**_tier_meta(escalation_result), "triggers": triggers}
-            if escalation_result.error is None:
-                final_result = escalation_result
+        if await asyncio.to_thread(_should_batch_escalation, submission_id):
+            # B3 — bundle: coalesce the per-doc deep pass into the single
+            # cross-document expediente pass triggered below.
+            tiers["escalation"] = {
+                "skipped": "batched_to_expediente",
+                "triggers": triggers,
+            }
         else:
-            tiers["escalation"] = {**escalation_result, "triggers": triggers}
+            metadata_field_schema = _metadata_field_schema_for(
+                requirement_code=requirement_code,
+                requirement_name=requirement_name,
+                institution_code=institution_code,
+            )
+            escalation_result = await _run_escalation_async(
+                triggers=triggers,
+                pdf_path=pdf_path,
+                requirement_code=requirement_code,
+                requirement_name=requirement_name,
+                institution_code=institution_code,
+                period_code=period_code,
+                org_id=org_id,
+                document_id=document_id,
+                expected_provider_rfc=expected_provider_rfc,
+                expected_provider_name=expected_provider_name,
+                expected_client_name=expected_client_name,
+                expected_client_rfc=expected_client_rfc,
+                metadata_field_schema=metadata_field_schema,
+            )
+            if isinstance(escalation_result, AnalysisResult):
+                tiers["escalation"] = {**_tier_meta(escalation_result), "triggers": triggers}
+                if escalation_result.error is None:
+                    final_result = escalation_result
+            else:
+                tiers["escalation"] = {**escalation_result, "triggers": triggers}
 
         image_result, image_forensics_meta = await asyncio.to_thread(
             _run_image_forensics,
@@ -1214,6 +1234,71 @@ def _escalation_triggers(
                 )
 
     return triggers
+
+
+def _should_batch_escalation(submission_id: str) -> bool:
+    """B3 — coalesce this document's per-doc deep escalation into the single
+    cross-document expediente pass.
+
+    Defers (returns True) ONLY when ALL hold:
+
+    * the batch flag is on;
+    * the expediente FEATURE is on (without it there is nothing to catch the
+      deferred deep pass);
+    * a debounce window is configured (``EXPEDIENTE_DEBOUNCE_HOURS > 0``) —
+      without it batching would fan out one full expediente per document
+      instead of coalescing;
+    * the submission is a BUNDLE (more than one document);
+    * the after-deep-run expediente trigger would actually RUN, i.e. NOT be
+      debounced by a recent assessment for the same (client, vendor, period).
+      This is the load-bearing guard: deferring when the expediente is already
+      debounced would leave the bundle with NEITHER a per-doc NOR a cross-doc
+      deep pass. When a recent assessment already exists we DON'T defer — the
+      per-doc escalation runs (it covers the doc safely; the running expediente
+      from the first doc already covers the rest).
+
+    Fail-safe to False (run the per-doc escalation) on ANY doubt or read error,
+    so a batched bundle can never silently lose its deep analysis.
+    """
+    if not settings.DOCUMENT_ANALYSIS_BATCH_ESCALATION_ENABLED:
+        return False
+    if not settings.DOCUMENT_ANALYSIS_EXPEDIENTE_ENABLED:
+        return False
+    debounce_hours = int(settings.DOCUMENT_ANALYSIS_EXPEDIENTE_DEBOUNCE_HOURS or 0)
+    if debounce_hours <= 0:
+        return False
+    db = SessionLocal()
+    try:
+        submission = db.get(Submission, submission_id)
+        if submission is None:
+            return False
+        doc_count = db.scalar(
+            select(func.count(Document.id)).where(
+                Document.submission_id == submission_id
+            )
+        )
+        if not (doc_count and doc_count > 1):
+            return False  # not a bundle
+        # Only defer when the triggered expediente will ACTUALLY run — never when
+        # it would be debounced (that is the deep-analysis-loss hole).
+        if recently_assessed(
+            db,
+            client_id=submission.client_id,
+            vendor_id=submission.vendor_id,
+            period_id=submission.period_id,
+            within_hours=debounce_hours,
+        ):
+            return False
+        return True
+    except Exception:  # noqa: BLE001 — a read failure → run the per-doc escalation
+        logger.exception(
+            "Batch-escalation check failed; running per-doc escalation. "
+            "submission_id=%s",
+            submission_id,
+        )
+        return False
+    finally:
+        db.close()
 
 
 def _run_escalation(
