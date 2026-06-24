@@ -136,7 +136,7 @@ def _seed_user(
     db_factory,
     *,
     email: str,
-    role: str = "internal_admin",
+    role: str = "operations_admin",
     org_kind: str = "internal",
     org_name: str = "Test Org",
 ) -> tuple[str, str, str]:
@@ -719,7 +719,7 @@ def test_get_export_404_for_cross_tenant(api_client, db_factory) -> None:
     confirms B's calls 404 (no enumeration).
     """
     pw_a, email_a, org_a = _seed_user(
-        db_factory, email="aa@exp.test", role="internal_admin",
+        db_factory, email="aa@exp.test", role="operations_admin",
         org_kind="internal", org_name="Org A",
     )
     # B is a client_admin — their visible_audiences() is {client_facing}

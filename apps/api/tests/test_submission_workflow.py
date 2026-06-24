@@ -95,7 +95,7 @@ def _seed_user(
     db_factory,
     *,
     email: str = "rev@x.mx",
-    role: str | None = "reviewer",
+    role: str | None = "platform_admin",
     password: str = "Hunter2 Correct horse",
 ) -> tuple[str, str]:
     """Returns (user_id, password). Mirrors the helper used in test_reviewer.py."""
@@ -532,7 +532,7 @@ def test_apply_reviewer_decision_writes_validation_event(db_factory) -> None:
         )
         assert event is not None
         assert event.result == ReviewerAction.REJECT.value
-        assert event.actor_type == "reviewer"
+        assert event.actor_type == "platform_admin"
         assert event.message == "Documento incompleto."
         # Payload threads the from/to status for downstream consumers.
         payload = event.payload or {}
@@ -571,7 +571,7 @@ def test_apply_reviewer_decision_writes_audit_log(db_factory) -> None:
             )
         )
         assert audit is not None, "expected an audit_log row for the reviewer decision"
-        assert audit.actor_type == "reviewer"
+        assert audit.actor_type == "platform_admin"
         assert audit.actor_id == user_id
         assert (audit.before or {}).get("status") == DocumentStatus.PENDIENTE_REVISION.value
         assert (audit.after or {}).get("status") == DocumentStatus.EXCEPCION_LEGAL.value

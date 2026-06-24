@@ -39,7 +39,8 @@ export default function ClientConsentimientoPage() {
     }
     if (
       !session.roles.includes("client_admin") &&
-      !session.roles.includes("internal_admin")
+      !session.roles.includes("platform_admin") &&
+      !session.roles.includes("operations_admin")
     ) {
       router.replace("/admin");
       return;

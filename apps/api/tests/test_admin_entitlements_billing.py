@@ -100,7 +100,7 @@ def _seed_internal_admin(db_factory) -> str:
         db.flush()
         db.add(Membership(
             user_id=user.id, organization_id=org.id,
-            role="internal_admin", status="active",
+            role="operations_admin", status="active",
         ))
         db.commit()
         return email

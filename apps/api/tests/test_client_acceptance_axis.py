@@ -611,7 +611,7 @@ def test_reviewer_detail_includes_reason(api_client, db_factory) -> None:
         json={"action": "reject", "reason": "No cumple nuestro estándar"},
         headers=_h(atok),
     )
-    remail, rpw = _seed_internal(db_factory, role="reviewer")
+    remail, rpw = _seed_internal(db_factory, role="platform_admin")
     rtok = _login(api_client, remail, rpw)
     r = api_client.get(
         f"/api/v1/reviewer/submissions/{ids['submission_id']}", headers=_h(rtok)
@@ -628,7 +628,7 @@ def test_internal_admin_cross_tenant_decision_writes_break_glass(
     """An internal_admin deciding on a tenant they don't belong to leaves a
     client.cross_tenant_access break-glass audit row."""
     ids = _seed_world(db_factory, submission_status=DocumentStatus.APROBADO.value)
-    iemail, ipw = _seed_internal(db_factory, role="internal_admin")
+    iemail, ipw = _seed_internal(db_factory, role="operations_admin")
     itok = _login(api_client, iemail, ipw)
     r = api_client.post(
         f"/api/v1/client/submissions/{ids['submission_id']}/decision",

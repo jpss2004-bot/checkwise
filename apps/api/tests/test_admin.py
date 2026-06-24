@@ -110,12 +110,12 @@ def _login(api_client: TestClient, email: str, password: str) -> str:
 
 
 def _admin_token(api_client: TestClient, db_factory) -> str:
-    pw, email = _seed_user(db_factory, email="adm@checkwise.test", role="internal_admin")
+    pw, email = _seed_user(db_factory, email="adm@checkwise.test", role="operations_admin")
     return _login(api_client, email, pw)
 
 
 def _reviewer_token(api_client: TestClient, db_factory) -> str:
-    pw, email = _seed_user(db_factory, email="rev@checkwise.test", role="reviewer")
+    pw, email = _seed_user(db_factory, email="rev@checkwise.test", role="platform_admin")
     return _login(api_client, email, pw)
 
 
@@ -161,39 +161,35 @@ def test_overview_rejects_unauthenticated(api_client: TestClient) -> None:
     assert resp.status_code == 401
 
 
-def test_overview_rejects_reviewer_only(
+def test_overview_accepts_review_team(
     api_client: TestClient, db_factory
 ) -> None:
+    """Role-model redesign: the CheckWise review team (platform_admin) now
+    owns the compliance surface, so /admin/overview is allowed."""
     token = _reviewer_token(api_client, db_factory)
     resp = api_client.get("/api/v1/admin/overview", headers=_h(token))
-    assert resp.status_code == 403
+    assert resp.status_code == 200, resp.text
 
 
-def test_overview_rejects_platform_admin_only(
+def test_user_directory_rejects_review_team(
     api_client: TestClient, db_factory
 ) -> None:
-    """The load-bearing half of the IT-vs-Ops split: a pure platform_admin
-    must NOT reach the compliance-ops surface.
+    """The load-bearing new boundary: the review team (platform_admin)
+    runs compliance but must NOT reach user/role management, which is
+    superadmin-only (operations_admin).
 
-    /admin/overview is AdminUser-gated (require_role internal_admin). An
-    IT-only account can run the platform but cannot read cross-tenant
-    compliance data.
+    /admin/users is PlatformUser-gated, now require_role(operations_admin).
     """
     token = _platform_admin_token(api_client, db_factory)
-    resp = api_client.get("/api/v1/admin/overview", headers=_h(token))
+    resp = api_client.get("/api/v1/admin/users", headers=_h(token))
     assert resp.status_code == 403, resp.text
 
 
-def test_user_directory_accepts_platform_admin_only(
+def test_user_directory_accepts_operations_admin(
     api_client: TestClient, db_factory
 ) -> None:
-    """The other half: a pure platform_admin CAN reach the IT/user surface.
-
-    /admin/users is PlatformUser-gated (require_any_role internal_admin OR
-    platform_admin). Together with the 403 above this proves the boundary
-    is live, not merely declared in the manifest.
-    """
-    token = _platform_admin_token(api_client, db_factory)
+    """The superadmin (operations_admin) owns user/role management."""
+    token = _admin_token(api_client, db_factory)
     resp = api_client.get("/api/v1/admin/users", headers=_h(token))
     assert resp.status_code == 200, resp.text
 
@@ -346,7 +342,7 @@ def _assert_audit_admin(
             .limit(1)
         )
         assert row is not None, f"expected audit_log row for {action} / {entity_id}"
-        assert row.actor_type == "internal_admin"
+        assert row.actor_type == "operations_admin"
         assert row.actor_id is not None
         meta = row.event_metadata or {}
         assert meta.get("source") == "admin_operations"
@@ -855,12 +851,13 @@ def test_institutions_rejects_unauthenticated(api_client: TestClient) -> None:
     assert resp.status_code == 401
 
 
-def test_institutions_rejects_reviewer_only(
+def test_institutions_accepts_review_team(
     api_client: TestClient, db_factory
 ) -> None:
+    """Review team (platform_admin) has the compliance surface."""
     token = _reviewer_token(api_client, db_factory)
     resp = api_client.get("/api/v1/admin/institutions", headers=_h(token))
-    assert resp.status_code == 403
+    assert resp.status_code == 200, resp.text
 
 
 def test_admin_can_list_requirements(api_client: TestClient, db_factory) -> None:
@@ -1483,12 +1480,15 @@ def test_rollup_and_compliance_reject_unauthenticated(
         "/api/v1/admin/clients/whatever/compliance",
     ],
 )
-def test_rollup_and_compliance_reject_reviewer_only(
+def test_rollup_and_compliance_accept_review_team(
     api_client: TestClient, db_factory, path: str
 ) -> None:
+    """Review team (platform_admin) is no longer fenced out of the
+    compliance surface — the gate must allow it (content may be 200/404,
+    never a 403 gate denial)."""
     token = _reviewer_token(api_client, db_factory)
     resp = api_client.get(path, headers=_h(token))
-    assert resp.status_code == 403
+    assert resp.status_code != 403, resp.text
 
 
 # ---------------------------------------------------------------------------
@@ -1562,7 +1562,7 @@ def _seed_user_directory(db_factory) -> dict[str, str]:
             db_factory,
             email="beto@seeded.test",
             full_name="Beto Dir",
-            role="reviewer",
+            role="platform_admin",
             org_name="LegalShelf Interna",
             org_kind="internal",
         ),
@@ -1640,11 +1640,11 @@ def test_admin_users_list_returns_roles_orgs_and_filters(
     assert disabled["items"][0]["user_id"] == seeded["carla"]
 
     # role= filter (active membership role).
-    reviewers = api_client.get(
-        "/api/v1/admin/users?q=@seeded.test&role=reviewer", headers=_h(token)
+    review_team = api_client.get(
+        "/api/v1/admin/users?q=@seeded.test&role=platform_admin", headers=_h(token)
     ).json()
-    assert reviewers["total"] == 1
-    assert reviewers["items"][0]["user_id"] == seeded["beto"]
+    assert review_team["total"] == 1
+    assert review_team["items"][0]["user_id"] == seeded["beto"]
 
 
 def test_admin_users_total_is_real_count_independent_of_limit(
@@ -1921,7 +1921,7 @@ def test_admin_user_detail_surfaces_soft_delete_fields(
     target_id = _seed_directory_user(
         db_factory,
         email="vive@seeded.test",
-        role="reviewer",
+        role="platform_admin",
         org_name="LegalShelf Interna",
         org_kind="internal",
     )
@@ -2112,7 +2112,7 @@ def test_grant_membership_internal_role(
     uid = _seed_directory_user(
         db_factory,
         email="grant@seeded.test",
-        role="reviewer",
+        role="platform_admin",
         org_name="LegalShelf Interna",
         org_kind="internal",
     )
@@ -2120,22 +2120,22 @@ def test_grant_membership_internal_role(
 
     resp = api_client.post(
         f"/api/v1/admin/users/{uid}/memberships",
-        json={"organization_id": org_id, "role": "platform_admin"},
+        json={"organization_id": org_id, "role": "operations_admin"},
         headers=_h(token),
     )
     assert resp.status_code == 200, resp.text
     body = resp.json()
-    assert body["role"] == "platform_admin"
+    assert body["role"] == "operations_admin"
     assert body["status"] == "active"
     assert body["is_primary"] is False
 
     roles = {m["role"] for m in _detail(api_client, token, uid)["memberships"]}
-    assert {"reviewer", "platform_admin"} <= roles
+    assert {"platform_admin", "operations_admin"} <= roles
 
     # Dedup — granting the same active role again is a 409.
     dup = api_client.post(
         f"/api/v1/admin/users/{uid}/memberships",
-        json={"organization_id": org_id, "role": "platform_admin"},
+        json={"organization_id": org_id, "role": "operations_admin"},
         headers=_h(token),
     )
     assert dup.status_code == 409
@@ -2154,13 +2154,13 @@ def test_grant_membership_reactivates_removed(
 ) -> None:
     token = _admin_token(api_client, db_factory)
     uid = _seed_directory_user(
-        db_factory, email="react@seeded.test", role="reviewer", org_kind="internal"
+        db_factory, email="react@seeded.test", role="platform_admin", org_kind="internal"
     )
     org_id = _detail(api_client, token, uid)["memberships"][0]["organization_id"]
 
     granted = api_client.post(
         f"/api/v1/admin/users/{uid}/memberships",
-        json={"organization_id": org_id, "role": "platform_admin"},
+        json={"organization_id": org_id, "role": "operations_admin"},
         headers=_h(token),
     ).json()
     mid = granted["membership_id"]
@@ -2171,7 +2171,7 @@ def test_grant_membership_reactivates_removed(
     # …then grant the same role again — reactivates the SAME row.
     again = api_client.post(
         f"/api/v1/admin/users/{uid}/memberships",
-        json={"organization_id": org_id, "role": "platform_admin"},
+        json={"organization_id": org_id, "role": "operations_admin"},
         headers=_h(token),
     )
     assert again.status_code == 200, again.text
@@ -2268,12 +2268,61 @@ def test_promote_membership_transfers_primary(
     assert owner_primary is False
 
 
+def test_promote_viewer_to_primary_forces_approver(
+    api_client: TestClient, db_factory
+) -> None:
+    """Making a membership the Primary Owner forces it to the Approver
+    (client_admin) tier — the client seat model's lockout protection relies
+    on 'the Primary Owner is always an Approver'."""
+    token = _admin_token(api_client, db_factory)
+    owner = _provision_client(
+        api_client, token, email="vp-owner@cli.com", client_name="ViewerPrimary SA"
+    )
+    org_id = _detail(api_client, token, owner)["memberships"][0]["organization_id"]
+
+    # Seed a read-only Viewer membership directly (the grant API only issues
+    # Approver/staff roles, so a Viewer can only arise via the seat path).
+    db = db_factory()
+    try:
+        viewer = User(
+            email="vp-viewer@cli.com",
+            password_hash=hash_password("ViewerPrimary!2026"),
+            full_name="Viewer Primary",
+            status="active",
+        )
+        db.add(viewer)
+        db.flush()
+        viewer_membership = Membership(
+            user_id=viewer.id,
+            organization_id=org_id,
+            role="client_viewer",
+            is_primary=False,
+            status="active",
+        )
+        db.add(viewer_membership)
+        db.commit()
+        viewer_id = viewer.id
+        membership_id = viewer_membership.id
+    finally:
+        db.close()
+
+    promoted = api_client.patch(
+        f"/api/v1/admin/users/{viewer_id}/memberships/{membership_id}",
+        json={"is_primary": True},
+        headers=_h(token),
+    )
+    assert promoted.status_code == 200, promoted.text
+    assert promoted.json()["is_primary"] is True
+    # Forced to Approver so the org always retains at least one manager.
+    assert promoted.json()["role"] == "client_admin"
+
+
 def test_membership_404_on_foreign_membership(
     api_client: TestClient, db_factory
 ) -> None:
     token = _admin_token(api_client, db_factory)
     uid = _seed_directory_user(
-        db_factory, email="m404@seeded.test", role="reviewer", org_kind="internal"
+        db_factory, email="m404@seeded.test", role="platform_admin", org_kind="internal"
     )
     resp = api_client.delete(
         f"/api/v1/admin/users/{uid}/memberships/no-such-membership",
@@ -2336,7 +2385,7 @@ def test_delete_user_rejects_self_and_double_delete(
     api_client: TestClient, db_factory
 ) -> None:
     pw, email = _seed_user(
-        db_factory, email="selfdel@checkwise.test", role="internal_admin"
+        db_factory, email="selfdel@checkwise.test", role="operations_admin"
     )
     token = _login(api_client, email, pw)
     me_id = _user_id_by_email(db_factory, email)
@@ -2388,7 +2437,7 @@ def test_restore_user(api_client: TestClient, db_factory) -> None:
         (
             "POST",
             "/api/v1/admin/users/whatever/memberships",
-            {"organization_id": "o", "role": "reviewer"},
+            {"organization_id": "o", "role": "platform_admin"},
         ),
         ("DELETE", "/api/v1/admin/users/whatever/memberships/m", None),
         ("PATCH", "/api/v1/admin/users/whatever/memberships/m", {"is_primary": True}),
@@ -2415,7 +2464,7 @@ def test_user_management_rejects_unauthenticated(
         (
             "POST",
             "/api/v1/admin/users/whatever/memberships",
-            {"organization_id": "o", "role": "reviewer"},
+            {"organization_id": "o", "role": "platform_admin"},
         ),
         ("DELETE", "/api/v1/admin/users/whatever/memberships/m", None),
         ("PATCH", "/api/v1/admin/users/whatever/memberships/m", {"is_primary": True}),

@@ -297,13 +297,20 @@ function decideDestination(
 }
 
 function defaultDestination(session: { roles: string[] }): string {
-  if (session.roles.includes("internal_admin")) return "/admin/dashboard";
-  if (session.roles.includes("reviewer")) return "/admin/reviewer";
-  // A platform-only admin (no compliance role) lands in the IT console.
-  // Users holding both internal_admin and platform_admin already matched
-  // above, so this only catches the pure-platform_admin case.
-  if (session.roles.includes("platform_admin")) return "/platform/dashboard";
-  if (session.roles.includes("client_admin")) return "/client/dashboard";
+  // CheckWise staff (superadmin or review team) land in the Operaciones
+  // console; the superadmin can switch to the IT/Plataforma surface there.
+  if (
+    session.roles.includes("operations_admin") ||
+    session.roles.includes("platform_admin")
+  ) {
+    return "/admin/dashboard";
+  }
+  if (
+    session.roles.includes("client_admin") ||
+    session.roles.includes("client_viewer")
+  ) {
+    return "/client/dashboard";
+  }
   // §4.7 — providers pass through ``entra-a-tu-espacio`` (the legal-consent
   // gate) but ``?continue=1`` lets that page forward straight to the
   // dashboard/onboarding when consent is already accepted, so a returning
@@ -319,15 +326,21 @@ function defaultDestination(session: { roles: string[] }): string {
 function allowedForRoles(next: string, roles: string[]): boolean {
   if (next.startsWith("/portal/")) return true;
   if (next.startsWith("/admin/")) {
-    return roles.includes("internal_admin") || roles.includes("reviewer");
-  }
-  if (next.startsWith("/platform/")) {
     return (
-      roles.includes("internal_admin") || roles.includes("platform_admin")
+      roles.includes("platform_admin") || roles.includes("operations_admin")
     );
   }
+  if (next.startsWith("/platform/")) {
+    // IT/Plataforma surface is superadmin-only.
+    return roles.includes("operations_admin");
+  }
   if (next.startsWith("/client/")) {
-    return roles.includes("client_admin");
+    return (
+      roles.includes("client_admin") ||
+      roles.includes("client_viewer") ||
+      roles.includes("platform_admin") ||
+      roles.includes("operations_admin")
+    );
   }
   // Non-app routes ("/", "/activate", marketing pages, etc.) are fine
   // for any authenticated user — but those aren't where with-portal-

@@ -21,7 +21,7 @@ import {
   readAdminSession,
 } from "@/lib/session/admin";
 
-const REVIEWER_ROLES = ["reviewer", "internal_admin"] as const;
+const REVIEWER_ROLES = ["platform_admin", "operations_admin"] as const;
 
 type Surface = {
   href: string;
@@ -60,7 +60,9 @@ export default function AdminHomePage() {
   const canReview = session.roles.some((r) =>
     (REVIEWER_ROLES as readonly string[]).includes(r),
   );
-  const isAdmin = session.roles.includes("internal_admin");
+  const isAdmin =
+    session.roles.includes("platform_admin") ||
+    session.roles.includes("operations_admin");
 
   return (
     <AdminShell

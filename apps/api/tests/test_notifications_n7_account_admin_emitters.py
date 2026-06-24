@@ -113,7 +113,7 @@ def _seed_internal_admins(
                 Membership(
                     user_id=user.id,
                     organization_id=org.id,
-                    role="internal_admin",
+                    role="operations_admin",
                     status="active",
                 )
             )
@@ -358,7 +358,9 @@ def test_support_ticket_fans_out_to_every_internal_admin(
     assert len(rows) == 2
     assert {r.user_id for r in rows} == set(admin_ids)
     for row in rows:
-        assert row.recipient_role == "internal_admin"
+        # The support-ticket emitter labels every staff recipient as the
+        # review-team role (role-model redesign).
+        assert row.recipient_role == "platform_admin"
         assert row.severity == "important"
         # Admin events are never WhatsApp-eligible per catalog.
         assert row.whatsapp_status == "would_skip"

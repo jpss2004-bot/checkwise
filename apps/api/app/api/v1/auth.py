@@ -416,8 +416,13 @@ _ORG_FROZEN_DETAIL = {
     "message": "Tu plan ha expirado. Mejora tu plan para continuar.",
 }
 # Internal staff are never trial-gated (they aren't on a client plan, and reach
-# client data via audited break-glass, not membership).
-_ORG_FROZEN_EXEMPT_ROLES = frozenset({"internal_admin", "platform_admin", "reviewer"})
+# client data via audited break-glass, not membership). Role-model redesign:
+# the staff slugs are now ``platform_admin`` / ``operations_admin``; the retired
+# ``internal_admin`` / ``reviewer`` are kept for the transition window (old
+# JWTs / pre-migration rows) and drop out once the rename sweep completes.
+_ORG_FROZEN_EXEMPT_ROLES = frozenset(
+    {"platform_admin", "operations_admin", "internal_admin", "reviewer"}
+)
 
 
 _PASSWORD_RESET_REQUIRED_DETAIL = (

@@ -42,7 +42,7 @@ from pydantic import BaseModel, Field
 from sqlalchemy import func, select, update
 from sqlalchemy.orm import Session
 
-from app.api.v1.auth import CurrentUser, require_role
+from app.api.v1.auth import CurrentUser, require_any_role
 from app.constants.roles import MembershipRole
 from app.db.session import get_db
 from app.models import NotificationTemplateVersion
@@ -55,8 +55,21 @@ router = APIRouter(
 )
 DbSession = Annotated[Session, Depends(get_db)]
 AdminUser = Annotated[
-    CurrentUser, Depends(require_role(MembershipRole.INTERNAL_ADMIN))
+    CurrentUser,
+    Depends(
+        require_any_role(
+            MembershipRole.PLATFORM_ADMIN, MembershipRole.OPERATIONS_ADMIN
+        )
+    ),
 ]
+
+
+def _actor_role(current: CurrentUser) -> str:
+    """The acting staff role for an audit row — superadmin if held,
+    otherwise the review team."""
+    if MembershipRole.OPERATIONS_ADMIN.value in current.roles:
+        return MembershipRole.OPERATIONS_ADMIN.value
+    return MembershipRole.PLATFORM_ADMIN.value
 
 TemplateChannel = Literal["email", "whatsapp", "inapp"]
 
@@ -261,7 +274,7 @@ def create_template(
         action="admin.notification_template.created",
         entity_type="notification_template",
         entity_id=row.id,
-        actor_type="internal_admin",
+        actor_type=_actor_role(current),
         actor_id=current.user.id,
         after={
             "event_type": row.event_type,
@@ -312,7 +325,7 @@ def activate_template(
         action="admin.notification_template.activated",
         entity_type="notification_template",
         entity_id=row.id,
-        actor_type="internal_admin",
+        actor_type=_actor_role(current),
         actor_id=current.user.id,
         before={"prior_active_id": prior_active_id},
         after={

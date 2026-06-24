@@ -50,7 +50,11 @@ router = APIRouter(prefix="/reviewer", tags=["reviewer"])
 DbSession = Annotated[Session, Depends(get_db)]
 ReviewerDep = Annotated[
     CurrentUser,
-    Depends(require_any_role(MembershipRole.REVIEWER, MembershipRole.INTERNAL_ADMIN)),
+    Depends(
+        require_any_role(
+            MembershipRole.PLATFORM_ADMIN, MembershipRole.OPERATIONS_ADMIN
+        )
+    ),
 ]
 
 
@@ -1167,7 +1171,7 @@ def get_submission_document(
             action="reviewer.document_downloaded",
             entity_type="submission",
             entity_id=submission.id,
-            actor_type="reviewer",
+            actor_type="platform_admin",
             actor_id=current.user.id,
             metadata={
                 "document_id": document.id,

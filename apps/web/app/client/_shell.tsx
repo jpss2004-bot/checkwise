@@ -27,6 +27,7 @@ import { ClientWiseDock } from "@/components/checkwise/wise/client-wise-dock";
 import { SearchBar } from "@/components/checkwise/search-bar";
 import { UserMenu } from "@/components/checkwise/user-menu";
 import { MetadataStrip } from "@/components/ui/metadata-strip";
+import { roleLabels } from "@/lib/constants/labels";
 import { cn } from "@/lib/utils";
 import {
   ClientApiError,
@@ -59,7 +60,7 @@ import { UpgradeWall } from "@/components/checkwise/plan/upgrade-wall";
 // screen at /client/consentimiento is standalone (no ClientShell) so it
 // never gates itself; internal staff bypass to match the provider gate.
 const CLIENT_CONSENT_PATH = "/client/consentimiento";
-const INTERNAL_ROLES = new Set(["internal_admin", "reviewer"]);
+const INTERNAL_ROLES = new Set(["platform_admin", "operations_admin"]);
 
 function clientLegalConsentRequired(me: {
   legal_consent_accepted_at: string | null;
@@ -164,7 +165,10 @@ export function ClientShell({
     if (
       !current.roles.includes("client_admin") &&
       !current.roles.includes("client_viewer") &&
-      !current.roles.includes("internal_admin")
+      // CheckWise staff (review team / superadmin) reach the client
+      // portal via audited cross-tenant break-glass.
+      !current.roles.includes("platform_admin") &&
+      !current.roles.includes("operations_admin")
     ) {
       router.replace("/admin");
       return;
@@ -357,7 +361,8 @@ export function ClientShell({
   // (client.cross_tenant_access) in _resolve_client_id; this is its
   // visible counterpart.
   const isSupportSession =
-    session.roles.includes("internal_admin") &&
+    (session.roles.includes("platform_admin") ||
+      session.roles.includes("operations_admin")) &&
     !session.roles.includes("client_admin");
 
   return (
@@ -624,10 +629,7 @@ export function ClientShell({
                 { label: "Correo", value: session.user.email, mono: true },
                 {
                   label: "Rol",
-                  value: session.roles
-                    .map((r) => r.replace(/_/g, " "))
-                    .join(", "),
-                  mono: true,
+                  value: roleLabels(session.roles),
                   tone: "teal",
                 },
               ]}

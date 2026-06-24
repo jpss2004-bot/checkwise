@@ -75,7 +75,7 @@ from app.api.v1.portal import (
     _empty_document_counts,
 )
 from app.constants.plans import PLAN_LABELS_ES, Capability
-from app.constants.roles import MembershipRole
+from app.constants.roles import STAFF_ROLES, MembershipRole
 from app.constants.statuses import ClientAcceptance, DocumentStatus, VendorStatus
 from app.core.compliance_catalog import (
     catalog_metadata,
@@ -165,19 +165,27 @@ ClientUser = Annotated[
         require_any_role(
             MembershipRole.CLIENT_ADMIN,
             MembershipRole.CLIENT_VIEWER,
-            MembershipRole.INTERNAL_ADMIN,
+            # CheckWise staff (review team + superadmin) read cross-tenant
+            # for oversight / break-glass support.
+            MembershipRole.PLATFORM_ADMIN,
+            MembershipRole.OPERATIONS_ADMIN,
         )
     ),
 ]
 
-# Write gate (Phase 4 — the "Approver" tier). Portfolio-changing routes
-# (add / archive providers, edit the company profile) require an Approver;
-# a ``client_viewer`` is 403'd here at the dependency layer, so the
+# Write gate (the "Approver" tier). Portfolio-changing routes (add /
+# archive providers, edit the company profile) require an Approver; a
+# ``client_viewer`` is 403'd here at the dependency layer, so the
 # restriction is explicit and visible in the route-policy manifest.
+# CheckWise staff may also mutate cross-tenant for support.
 ClientApprover = Annotated[
     CurrentUser,
     Depends(
-        require_any_role(MembershipRole.CLIENT_ADMIN, MembershipRole.INTERNAL_ADMIN)
+        require_any_role(
+            MembershipRole.CLIENT_ADMIN,
+            MembershipRole.PLATFORM_ADMIN,
+            MembershipRole.OPERATIONS_ADMIN,
+        )
     ),
 ]
 
@@ -253,7 +261,11 @@ def _audit_cross_tenant_access(db: Session, current: CurrentUser, client_id: str
         action="client.cross_tenant_access",
         entity_type="client",
         entity_id=client_id,
-        actor_type="internal_admin",
+        actor_type=(
+            MembershipRole.OPERATIONS_ADMIN.value
+            if MembershipRole.OPERATIONS_ADMIN.value in current.roles
+            else MembershipRole.PLATFORM_ADMIN.value
+        ),
         actor_id=current.user.id,
         metadata={
             "admin_email": current.user.email,
@@ -296,7 +308,7 @@ def _resolve_client_id(
         400 if no client can be resolved.
     """
     visible = _visible_client_ids_for_user(db, current.user.id)
-    is_internal_admin = MembershipRole.INTERNAL_ADMIN.value in current.roles
+    is_internal_admin = bool(STAFF_ROLES & set(current.roles))
 
     if requested:
         if is_internal_admin:
@@ -2639,7 +2651,7 @@ def _resolve_client_id_for_vendor(
     Returns ``(target_client_id, vendor_row)`` so the caller does
     not re-fetch the vendor.
     """
-    is_internal_admin = MembershipRole.INTERNAL_ADMIN.value in current.roles
+    is_internal_admin = bool(STAFF_ROLES & set(current.roles))
     if requested is None and is_internal_admin:
         vendor = db.get(Vendor, vendor_id)
         if vendor is None:
@@ -2737,7 +2749,7 @@ def client_add_provider(
     target_id = _resolve_client_id(db, current, requested=client_id)
     contact_email = payload.contact_email.strip().lower()
     rfc_value = payload.vendor_rfc.strip().upper()
-    is_internal = MembershipRole.INTERNAL_ADMIN.value in current.roles
+    is_internal = bool(STAFF_ROLES & set(current.roles))
 
     # Lock the org row BEFORE counting active providers so two concurrent
     # adds cannot both observe the last free slot (the seat-cap discipline).
@@ -2956,7 +2968,7 @@ def _set_provider_archival(
     # may exceed). Deactivation always frees a slot, so it is never gated.
     reactivate_capacity = None
     if target_status == VendorStatus.ACTIVE.value:
-        reactivate_internal = MembershipRole.INTERNAL_ADMIN.value in current.roles
+        reactivate_internal = bool(STAFF_ROLES & set(current.roles))
         reactivate_org = org_for_client(db, target_id, for_update=True)
         reactivate_capacity = assert_provider_capacity(
             db, reactivate_org, is_internal=reactivate_internal
@@ -2967,11 +2979,12 @@ def _set_provider_archival(
     for ws in workspaces:
         ws.status = target_status
 
-    actor_type = (
-        "internal_admin"
-        if MembershipRole.INTERNAL_ADMIN.value in current.roles
-        else "client_admin"
-    )
+    if MembershipRole.OPERATIONS_ADMIN.value in current.roles:
+        actor_type = MembershipRole.OPERATIONS_ADMIN.value
+    elif bool(STAFF_ROLES & set(current.roles)):
+        actor_type = MembershipRole.PLATFORM_ADMIN.value
+    else:
+        actor_type = MembershipRole.CLIENT_ADMIN.value
     ua = request.headers.get("user-agent")
     add_audit_event(
         db,
@@ -3105,7 +3118,7 @@ def client_plan(
     plan = plan_for_org(org)
     limit = provider_limit_for_org(org)
     used = active_provider_count(db, cid)
-    is_internal = MembershipRole.INTERNAL_ADMIN.value in current.roles
+    is_internal = bool(STAFF_ROLES & set(current.roles))
     holds_primary = db.scalar(
         select(Membership.id).where(
             Membership.organization_id == org.id,
@@ -3384,7 +3397,7 @@ def client_get_submission_document(
             detail="Envío no encontrado.",
         )
 
-    is_internal_admin = MembershipRole.INTERNAL_ADMIN.value in current.roles
+    is_internal_admin = bool(STAFF_ROLES & set(current.roles))
     if not is_internal_admin:
         visible = _visible_client_ids_for_user(db, current.user.id)
         if submission.client_id not in visible:
@@ -3694,7 +3707,7 @@ def client_submission_decision(
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND, detail="Envío no encontrado."
         )
-    is_internal_admin = MembershipRole.INTERNAL_ADMIN.value in current.roles
+    is_internal_admin = bool(STAFF_ROLES & set(current.roles))
     visible = _visible_client_ids_for_user(db, current.user.id)
     if submission.client_id not in visible:
         if not is_internal_admin:
@@ -3767,7 +3780,7 @@ def client_bulk_submission_decision(
     violations, cross-tenant / missing ids surface per-item) and the whole
     batch commits once at the end. De-dupes the id list while preserving order.
     """
-    is_internal_admin = MembershipRole.INTERNAL_ADMIN.value in current.roles
+    is_internal_admin = bool(STAFF_ROLES & set(current.roles))
     visible = set(_visible_client_ids_for_user(db, current.user.id))
 
     seen: set[str] = set()
@@ -4368,7 +4381,7 @@ def mark_client_notification_read(
     row = db.get(ClientNotification, notification_id)
     if row is None:
         raise HTTPException(status.HTTP_404_NOT_FOUND, detail="Notificacion no encontrada.")
-    is_internal_admin = MembershipRole.INTERNAL_ADMIN.value in current.roles
+    is_internal_admin = bool(STAFF_ROLES & set(current.roles))
     if not is_internal_admin:
         visible = _visible_client_ids_for_user(db, current.user.id)
         if row.client_id not in visible:
@@ -4419,7 +4432,7 @@ def mark_all_client_notifications_read(
     if client_id:
         scope_ids = [target_id]
     else:
-        is_internal_admin = MembershipRole.INTERNAL_ADMIN.value in current.roles
+        is_internal_admin = bool(STAFF_ROLES & set(current.roles))
         visible = _visible_client_ids_for_user(db, current.user.id)
         # Internal admins without a default land here only via the
         # ``_resolve_client_id`` 400 above, so ``visible`` is non-empty for

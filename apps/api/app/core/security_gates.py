@@ -22,6 +22,7 @@ from fastapi import Depends, Header, HTTPException, Request, status
 from sqlalchemy.orm import Session
 
 from app.api.v1.auth import CurrentUser, get_current_user
+from app.constants.roles import STAFF_ROLES
 from app.core.config import settings
 from app.db.session import get_db
 
@@ -45,9 +46,9 @@ def require_local_or_internal_admin(
     # when the caller is on the password-reset gate, which is the right
     # behavior.
     current = get_current_user(request, db, authorization=authorization)
-    if "internal_admin" not in current.roles:
+    if not (STAFF_ROLES & set(current.roles)):
         raise HTTPException(
             status.HTTP_403_FORBIDDEN,
-            detail="internal_admin role required",
+            detail="CheckWise staff role required",
         )
     return current

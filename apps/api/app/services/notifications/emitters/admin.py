@@ -169,7 +169,7 @@ def _emit_to_internal_admins(
         event_type=event_type,
         dedupe_key=dedupe_key,
         recipients=tuple(
-            Recipient(user_id=u.id, role="internal_admin") for u in admins
+            Recipient(user_id=u.id, role="platform_admin") for u in admins
         ),
         payload=payload,
     )

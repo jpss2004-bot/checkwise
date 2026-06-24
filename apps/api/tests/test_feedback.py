@@ -92,13 +92,13 @@ def _seed_user_and_token(db_factory) -> str:
             Membership(
                 user_id=user.id,
                 organization_id=org.id,
-                role="internal_admin",
+                role="operations_admin",
                 status="active",
             )
         )
         db.commit()
         return issue_access_token(
-            user_id=user.id, email=user.email, roles=["internal_admin"], orgs=[org.id]
+            user_id=user.id, email=user.email, roles=["operations_admin"], orgs=[org.id]
         )
     finally:
         db.close()
@@ -378,7 +378,7 @@ def test_authenticated_submission_persists_row_with_user_identity(
         assert row.is_public is False
         assert row.user_email == "qa@legalshelf.mx"
         assert row.user_full_name == "QA Tester"
-        assert row.user_roles == "internal_admin"
+        assert row.user_roles == "operations_admin"
         assert row.contact_email is None
         assert row.ip_hash is None
         assert row.status == "new"
@@ -476,7 +476,7 @@ def _seed_admin_token(db_factory: Any) -> str:
             Membership(
                 user_id=user.id,
                 organization_id=org.id,
-                role=MembershipRole.INTERNAL_ADMIN.value,
+                role=MembershipRole.OPERATIONS_ADMIN.value,
                 status="active",
             )
         )
@@ -484,7 +484,7 @@ def _seed_admin_token(db_factory: Any) -> str:
         token = issue_access_token(
             user_id=user.id,
             email=user.email,
-            roles=[MembershipRole.INTERNAL_ADMIN.value],
+            roles=[MembershipRole.OPERATIONS_ADMIN.value],
             orgs=[org.id],
         )
     return token

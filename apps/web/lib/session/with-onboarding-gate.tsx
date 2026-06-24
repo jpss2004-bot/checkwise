@@ -23,7 +23,7 @@ import { readAdminSession } from "./admin";
  * server-side (see ``current_portal_workspace`` in
  * ``apps/api/app/api/v1/portal.py``); this gate is UX-only.
  */
-const INTERNAL_ROLES = new Set(["internal_admin", "reviewer"]);
+const INTERNAL_ROLES = new Set(["platform_admin", "operations_admin"]);
 
 function isInternalStaff(): boolean {
   const admin = readAdminSession();

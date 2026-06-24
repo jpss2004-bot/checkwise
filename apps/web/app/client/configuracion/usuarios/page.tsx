@@ -1,13 +1,13 @@
 "use client";
 
 /**
- * Phase 2 — client seat management UI.
+ * Client seat management UI.
  *
- * First UI over the long-existing `/client/users` seat API (owner-gated
- * server-side). The Primary Account Owner (`is_primary`) invites, disables,
- * removes and resets secondary seats within the org's `seat_limit`;
- * secondaries get a read-only roster. internal_admin support staff also see
- * mutation affordances.
+ * UI over the `/client/users` seat API. Any Approver (`client_admin`) of the
+ * org — and CheckWise support staff — creates, disables, removes, resets and
+ * re-tiers seats within the org's `seat_limit`; read-only Viewers get a
+ * roster without mutation affordances. The tier split is enforced
+ * server-side; hiding controls here is a UX nicety, not the boundary.
  */
 
 import { useCallback, useEffect, useState, type FormEvent } from "react";
@@ -93,7 +93,7 @@ function statusBadge(user: ClientUserItem) {
 
 const TIER_LABEL: Record<ClientUserRole, string> = {
   client_admin: "Aprobador",
-  client_viewer: "Visor",
+  client_viewer: "Solo lectura",
 };
 
 // Tier badge for secondary seats. Brand = write-capable (Approver),
@@ -120,7 +120,7 @@ export default function ClientSeatsPage() {
   const [newName, setNewName] = useState("");
   const [newEmail, setNewEmail] = useState("");
   // New seats default to the least-privilege Viewer (matches the backend
-  // default); the owner promotes to Approver here or later from the roster.
+  // default); an Approver promotes here or later from the roster.
   const [newRole, setNewRole] = useState<ClientUserRole>("client_viewer");
   const [createBusy, setCreateBusy] = useState(false);
   const [createError, setCreateError] = useState<string | null>(null);
@@ -195,7 +195,7 @@ export default function ClientSeatsPage() {
   return (
     <ClientShell
       title="Usuarios y accesos"
-      description="Administra quién puede entrar al portal de tu empresa. Solo el titular de la cuenta puede agregar o quitar usuarios."
+      description="Administra quién puede entrar al portal de tu empresa. Un Aprobador agrega usuarios (Aprobadores o de Solo lectura) hasta el límite de tu plan; los perfiles de Solo lectura solo consultan."
     >
       <div className="space-y-5">
         {loadError ? (
@@ -213,7 +213,7 @@ export default function ClientSeatsPage() {
           icon={Users}
           description={
             data
-              ? `${data.seats_used} de ${data.seat_limit} lugares usados${
+              ? `${data.seats_used} de ${data.seat_limit} usuarios${
                   seatsAvailable > 0
                     ? ` · ${seatsAvailable} disponible${seatsAvailable === 1 ? "" : "s"}`
                     : " · sin lugares libres"
@@ -240,6 +240,8 @@ export default function ClientSeatsPage() {
                         </span>
                         {user.is_primary ? (
                           <Badge variant="brand">Titular</Badge>
+                        ) : user.role === "client_admin" ? (
+                          <Badge variant="info">Aprobador</Badge>
                         ) : (
                           tierBadge(user.role)
                         )}
@@ -252,6 +254,9 @@ export default function ClientSeatsPage() {
 
                     {canManage && !user.is_primary ? (
                       <div className="flex flex-wrap items-center gap-1.5">
+                        {/* Any Approver (or staff) can re-tier a seat — the
+                            block is gated above by canManage; the backend
+                            allows either direction for an Approver. */}
                         <Select
                           aria-label={`Nivel de acceso de ${user.full_name}`}
                           className="h-8 w-auto py-0 text-[13px]"
@@ -269,7 +274,7 @@ export default function ClientSeatsPage() {
                           }
                         >
                           <option value="client_admin">Aprobador</option>
-                          <option value="client_viewer">Visor</option>
+                          <option value="client_viewer">Solo lectura</option>
                         </Select>
                         {user.status === "active" ? (
                           <Button
@@ -399,11 +404,16 @@ export default function ClientSeatsPage() {
           <Surface title="Agregar usuario" icon={UserPlus}>
             {seatsAvailable <= 0 ? (
               <p className="text-[13px] text-[color:var(--text-secondary)]">
-                Has alcanzado el máximo de {data?.seat_limit} usuarios. Quita un
-                usuario para liberar un lugar.
+                Has alcanzado el máximo de {data?.seat_limit} usuarios. Quita
+                uno para liberar un lugar.
               </p>
             ) : (
               <form onSubmit={handleCreate} className="space-y-3">
+                <p className="text-[12px] text-[color:var(--text-secondary)]">
+                  Elige el nivel de acceso. Un <strong>Aprobador</strong>{" "}
+                  administra el portafolio, los proveedores y al equipo; un
+                  perfil de <strong>Solo lectura</strong> únicamente consulta.
+                </p>
                 <div className="grid gap-3 sm:grid-cols-2">
                   <div className="space-y-1">
                     <Label htmlFor="seat-name">Nombre completo</Label>
@@ -427,24 +437,23 @@ export default function ClientSeatsPage() {
                       required
                     />
                   </div>
-                </div>
-                <div className="space-y-1">
-                  <Label htmlFor="seat-role">Nivel de acceso</Label>
-                  <Select
-                    id="seat-role"
-                    value={newRole}
-                    onChange={(e) => setNewRole(e.target.value as ClientUserRole)}
-                  >
-                    <option value="client_viewer">Visor — consulta y exporta</option>
-                    <option value="client_admin">
-                      Aprobador — además administra el portafolio
-                    </option>
-                  </Select>
-                  <p className="text-[12px] text-[color:var(--text-tertiary)]">
-                    Un Visor ve todo y descarga evidencia; un Aprobador además
-                    agrega o archiva proveedores y edita el perfil. Puedes
-                    cambiarlo después.
-                  </p>
+                  <div className="space-y-1 sm:col-span-2">
+                    <Label htmlFor="seat-role">Nivel de acceso</Label>
+                    <Select
+                      id="seat-role"
+                      value={newRole}
+                      onChange={(e) =>
+                        setNewRole(e.target.value as ClientUserRole)
+                      }
+                    >
+                      <option value="client_viewer">
+                        Solo lectura — solo consulta
+                      </option>
+                      <option value="client_admin">
+                        Aprobador — administra el portafolio y al equipo
+                      </option>
+                    </Select>
+                  </div>
                 </div>
                 {createError ? (
                   <p className="text-[12px] text-[color:var(--status-error-text)]">
@@ -462,7 +471,8 @@ export default function ClientSeatsPage() {
           </Surface>
         ) : data ? (
           <p className="text-[12px] text-[color:var(--text-tertiary)]">
-            Solo el titular de la cuenta puede administrar los usuarios.
+            Tu acceso es de Solo lectura. Solo un Aprobador puede administrar
+            los usuarios.
           </p>
         ) : null}
       </div>

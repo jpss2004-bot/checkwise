@@ -42,6 +42,7 @@ import { useUrlClientId } from "@/lib/workspace/use-url-client-id";
 import { useClientPlan } from "@/lib/plan/plan-context";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { useClientApprover } from "@/lib/session/client-tier";
+import { AddProviderForm } from "@/components/checkwise/client/add-provider-form";
 import { BUCKET_LABELS_ES, semaphoreLabel } from "@/lib/constants/statuses";
 import { withReturnTo } from "@/lib/navigation/return-to";
 
@@ -79,7 +80,7 @@ export default function ClientVendorsPage() {
   const router = useRouter();
   const searchParams = useSearchParams();
   const urlClientId = useUrlClientId();
-  const { plan } = useClientPlan();
+  const { plan, refresh: refreshPlan } = useClientPlan();
   const [rows, setRows] = useState<ClientVendorRow[] | null>(null);
   // True portfolio size from the API (not rows.length), so the count never
   // under-reports when the response is capped (audit P2.10).
@@ -97,6 +98,12 @@ export default function ClientVendorsPage() {
     parseSort(searchParams?.get("sort") ?? null),
   );
   const [unreadByVendor, setUnreadByVendor] = useState<Record<string, number>>({});
+  // Inline "add provider" affordance (Approver-only; server enforces the cap).
+  const [showAddProvider, setShowAddProvider] = useState(false);
+  const [lastInvite, setLastInvite] = useState<{
+    email: string;
+    status: string;
+  } | null>(null);
   const vendorsHref = useMemo(() => {
     const params = new URLSearchParams();
     if (urlClientId) params.set("client_id", urlClientId);
@@ -300,6 +307,60 @@ export default function ClientVendorsPage() {
               mejora tu plan para añadir más.
             </AlertDescription>
           </Alert>
+        ) : null}
+
+        {isApprover ? (
+          <Surface
+            title="Agregar proveedor"
+            description="Da de alta un proveedor REPSE. Le enviaremos por correo sus credenciales para que entre y empiece a subir documentos."
+            actions={
+              <Button
+                type="button"
+                size="sm"
+                variant={showAddProvider ? "outline" : "default"}
+                onClick={() => setShowAddProvider((v) => !v)}
+              >
+                {showAddProvider ? "Cancelar" : "Agregar proveedor"}
+              </Button>
+            }
+          >
+            {lastInvite ? (
+              <div
+                role="status"
+                className={
+                  "mb-3 rounded-md border p-3 text-sm " +
+                  (lastInvite.status === "sent" ||
+                  lastInvite.status === "restored"
+                    ? "border-[color:var(--status-success-border)] bg-[color:var(--status-success-bg)] text-[color:var(--status-success-text)]"
+                    : "border-[color:var(--status-warning-border)] bg-[color:var(--status-warning-bg)] text-[color:var(--status-warning-text)]")
+                }
+              >
+                {lastInvite.status === "restored"
+                  ? "Proveedor restaurado en tu portafolio."
+                  : lastInvite.status === "sent"
+                    ? `Invitación enviada a ${lastInvite.email}.`
+                    : `Proveedor creado, pero el correo${lastInvite.email ? ` a ${lastInvite.email}` : ""} no se envió (${lastInvite.status}). Compártele sus credenciales tú.`}
+              </div>
+            ) : null}
+            {showAddProvider ? (
+              <AddProviderForm
+                onCreated={(result) => {
+                  setShowAddProvider(false);
+                  setLastInvite({
+                    email: result.contact_email,
+                    status: result.email_status,
+                  });
+                  void refresh();
+                  void refreshPlan();
+                }}
+              />
+            ) : (
+              <p className="text-[13px] text-[color:var(--text-secondary)]">
+                Agrega un proveedor para que CheckWise empiece a monitorear su
+                expediente REPSE.
+              </p>
+            )}
+          </Surface>
         ) : null}
 
         {/* D4 — "Distribución de riesgo" StackedBars removed; the

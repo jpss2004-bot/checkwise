@@ -633,7 +633,7 @@ def test_dashboard_suggested_action_quotes_reviewer_note_when_rejected(
                 result="rechazado",
                 severity="error",
                 message="El RFC en la imagen no coincide con el RFC del proveedor.",
-                actor_type="reviewer",
+                actor_type="platform_admin",
             )
         )
         db.commit()

@@ -92,7 +92,7 @@ def _seed_user(
     db_factory,
     *,
     email: str = "rev-phase-e@x.mx",
-    role: str = "reviewer",
+    role: str = "platform_admin",
     password: str = "Hunter2 Correct horse",
 ) -> tuple[str, str]:
     db = db_factory()

@@ -110,7 +110,7 @@ def _seed_internal_admin(db_factory) -> tuple[str, str, str]:
             Membership(
                 user_id=user.id,
                 organization_id=org.id,
-                role="internal_admin",
+                role="operations_admin",
                 status="active",
             )
         )
@@ -118,7 +118,7 @@ def _seed_internal_admin(db_factory) -> tuple[str, str, str]:
         token = issue_access_token(
             user_id=user.id,
             email=user.email,
-            roles=["internal_admin"],
+            roles=["operations_admin"],
             orgs=[org.id],
         )
         return user.id, org.id, token

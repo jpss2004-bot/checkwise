@@ -102,7 +102,7 @@ def _seed_user(db_factory) -> tuple[str, str]:
         token = issue_access_token(
             user_id=user.id,
             email=user.email,
-            roles=["internal_admin"],
+            roles=["operations_admin"],
             orgs=[org.id],
         )
         return user.id, token

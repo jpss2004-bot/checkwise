@@ -136,6 +136,10 @@ const SEVERITY_TONE: Record<string, string> = {
 
 function actorIcon(actorType: string) {
   switch (actorType) {
+    // Role-model redesign: review decisions now carry the staff vocabulary;
+    // the legacy values stay for historical timeline rows.
+    case "platform_admin":
+    case "operations_admin":
     case "reviewer":
     case "internal_admin":
       return Gavel;

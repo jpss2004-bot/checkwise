@@ -124,7 +124,7 @@ def test_gate_blocks_admin_routes_when_flag_is_set(
     email = "admin-flag@checkwise.test"
     password = "TempPassword!2026"
     _seed_user_with_must_change(
-        db_factory, email=email, password=password, role="internal_admin"
+        db_factory, email=email, password=password, role="operations_admin"
     )
     token = _login(api_client, email, password)
 
@@ -166,7 +166,7 @@ def test_gate_blocks_reviewer_routes_when_flag_is_set(
     email = "reviewer-flag@checkwise.test"
     password = "TempPassword!2026"
     _seed_user_with_must_change(
-        db_factory, email=email, password=password, role="reviewer"
+        db_factory, email=email, password=password, role="platform_admin"
     )
     token = _login(api_client, email, password)
 
@@ -184,7 +184,7 @@ def test_gate_allows_auth_me_when_flag_is_set(
     email = "me-flag@checkwise.test"
     password = "TempPassword!2026"
     _seed_user_with_must_change(
-        db_factory, email=email, password=password, role="internal_admin"
+        db_factory, email=email, password=password, role="operations_admin"
     )
     token = _login(api_client, email, password)
 
@@ -202,7 +202,7 @@ def test_gate_allows_set_password_when_flag_is_set(
     email = "setpw-flag@checkwise.test"
     password = "TempPassword!2026"
     _seed_user_with_must_change(
-        db_factory, email=email, password=password, role="internal_admin"
+        db_factory, email=email, password=password, role="operations_admin"
     )
     token = _login(api_client, email, password)
 
@@ -223,7 +223,7 @@ def test_gate_clears_after_set_password_and_admin_routes_unlock(
     email = "unlock-flag@checkwise.test"
     password = "TempPassword!2026"
     _seed_user_with_must_change(
-        db_factory, email=email, password=password, role="internal_admin"
+        db_factory, email=email, password=password, role="operations_admin"
     )
     token = _login(api_client, email, password)
 

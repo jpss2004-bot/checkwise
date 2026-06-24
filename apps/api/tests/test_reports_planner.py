@@ -99,7 +99,7 @@ def _seed_admin(db_factory) -> tuple[str, str]:
         db.flush()
         db.add(
             Membership(
-                user_id=user.id, organization_id=org.id, role="internal_admin", status="active"
+                user_id=user.id, organization_id=org.id, role="operations_admin", status="active"
             )
         )
         db.commit()

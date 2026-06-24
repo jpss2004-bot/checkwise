@@ -98,7 +98,8 @@ def resolve_internal_admins(db: Session) -> list[User]:
             .join(Organization, Organization.id == Membership.organization_id)
             .where(
                 Organization.kind == "internal",
-                Membership.role == "internal_admin",
+                # CheckWise review team + superadmin (role-model redesign).
+                Membership.role.in_(("platform_admin", "operations_admin")),
                 Membership.status == "active",
                 User.status == "active",
             )

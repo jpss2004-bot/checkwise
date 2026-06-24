@@ -1,10 +1,12 @@
-"""Multi-user step 2 — owner-managed seats under ``/client/users``.
+"""Client seats under ``/client/users`` — Approver-managed seat tiers.
 
-Covers the 3-seat model end to end: listing with seat counters,
-owner-only mutation guards, the seat cap, disable/reactivate lockout
-semantics, removal + seat reuse (including same-email reinstatement),
-owner-issued password resets, internal_admin support access,
-cross-tenant isolation, and the audit trail every action writes.
+Covers the seat model end to end: listing with seat counters, the
+Approver-only mutation guard (Viewers are read-only), the total-seat
+cap, disable/reactivate lockout semantics, removal + seat reuse
+(including same-email reinstatement), Approver-issued password resets,
+the Approver vs Viewer tier split (an Approver creates/promotes/demotes
+either tier), CheckWise staff support access, cross-tenant isolation,
+and the audit trail every action writes.
 """
 
 from __future__ import annotations
@@ -131,7 +133,9 @@ def _seed_secondary(db_factory, org_id: str) -> dict:
             Membership(
                 user_id=user.id,
                 organization_id=org_id,
-                role="client_admin",
+                # Representative secondary in the redesigned model: a
+                # read-only Viewer seat (self-serve, capped).
+                role="client_viewer",
                 is_primary=False,
                 status="active",
             )
@@ -162,7 +166,7 @@ def _seed_internal_admin(db_factory) -> dict:
             Membership(
                 user_id=user.id,
                 organization_id=org.id,
-                role="internal_admin",
+                role="operations_admin",
                 status="active",
             )
         )
@@ -218,6 +222,7 @@ def test_owner_lists_users_with_seat_counters(db_factory, api_client):
     assert resp.status_code == 200, resp.text
     body = resp.json()
     assert body["seat_limit"] == 3
+    # Every active seat counts, the owner Approver included — 1 of 3 used.
     assert body["seats_used"] == 1
     assert body["seats_available"] == 2
     assert body["can_manage"] is True
@@ -245,6 +250,7 @@ def test_owner_creates_secondary_who_can_log_in(db_factory, api_client):
     resp = _create(api_client, token, email="empleado@checkwise.example")
     assert resp.status_code == 201, resp.text
     body = resp.json()
+    # Two seats now used: the owner Approver + the new Viewer.
     assert body["seats_used"] == 2
     assert body["reinstated"] is False
     temp = body["temp_password"]
@@ -268,10 +274,12 @@ def test_owner_creates_secondary_who_can_log_in(db_factory, api_client):
     assert pending[0]["pending_first_login"] is True
 
 
-def test_seat_cap_blocks_a_fourth_user(db_factory, api_client):
+def test_seat_cap_counts_all_tiers(db_factory, api_client):
     ctx = _seed_client_with_owner(db_factory)
     token = _login(api_client, ctx["owner_email"])
 
+    # The cap counts every seat, the owner Approver included (1 of 3 used),
+    # so two more land and the next one is blocked.
     assert _create(api_client, token, email="a@checkwise.example").status_code == 201
     assert _create(api_client, token, email="b@checkwise.example").status_code == 201
     third = _create(api_client, token, email="c@checkwise.example")
@@ -300,18 +308,21 @@ def test_email_of_another_tenants_user_conflicts(db_factory, api_client):
 # ---------------------------------------------------------------------------
 
 
-def test_secondary_cannot_manage_seats(db_factory, api_client):
+def test_viewer_cannot_manage_seats(db_factory, api_client):
     ctx = _seed_client_with_owner(db_factory)
     sec = _seed_secondary(db_factory, ctx["org_id"])
     token = _login(api_client, sec["email"])
 
     listed = api_client.get("/api/v1/client/users", headers=_h(token))
     assert listed.status_code == 200
+    # A read-only Viewer cannot manage seats at all.
     assert listed.json()["can_manage"] is False
 
+    # Viewers cannot create users (any tier).
     create = _create(api_client, token, email="x@checkwise.example")
-    assert create.status_code == 403
+    assert create.status_code == 403, create.text
 
+    # …nor disable/remove other seats.
     remove = api_client.delete(
         f"/api/v1/client/users/{ctx['owner_id']}", headers=_h(token)
     )
@@ -379,7 +390,8 @@ def test_disable_locks_out_and_reactivate_restores(db_factory, api_client):
         headers=_h(owner_token),
     )
     assert resp.status_code == 200
-    # Seat stays occupied while disabled.
+    # Seat stays occupied while disabled (membership stays active): owner +
+    # the disabled Viewer = 2.
     assert resp.json()["seats_used"] == 2
 
     login = api_client.post(
@@ -429,6 +441,7 @@ def test_remove_frees_seat_and_same_email_reinstates(db_factory, api_client):
         f"/api/v1/client/users/{sec['user_id']}", headers=_h(owner_token)
     )
     assert resp.status_code == 200
+    # The removed Viewer frees its seat — only the owner Approver remains.
     assert resp.json()["seats_used"] == 1
 
     # Removed user loses access immediately (membership gone, user disabled).
@@ -554,7 +567,7 @@ def test_internal_admin_cross_tenant_access_is_audited(db_factory, api_client):
     # …collapse to a single row, attributed to the staff member.
     assert len(rows) == 1, rows
     assert rows[0].actor_id == staff["user_id"]
-    assert rows[0].actor_type == "internal_admin"
+    assert rows[0].actor_type == "operations_admin"
     assert rows[0].entity_type == "client"
 
 
@@ -666,8 +679,11 @@ def test_client_user_audit_captures_request_ip(db_factory, api_client):
 # ---------------------------------------------------------------------------
 
 
-def _roles_by_email(api_client, token) -> dict:
-    body = api_client.get("/api/v1/client/users", headers=_h(token)).json()
+def _roles_by_email(api_client, token, client_id: str | None = None) -> dict:
+    params = {"client_id": client_id} if client_id else {}
+    body = api_client.get(
+        "/api/v1/client/users", params=params, headers=_h(token)
+    ).json()
     return {u["email"]: u["role"] for u in body["users"]}
 
 
@@ -687,6 +703,8 @@ def test_owner_can_create_approver_seat(db_factory, api_client):
     ctx = _seed_client_with_owner(db_factory)
     owner_token = _login(api_client, ctx["owner_email"])
 
+    # An Approver (the org owner) manages their own team and CAN mint another
+    # Approver directly.
     created = _create(
         api_client,
         owner_token,
@@ -694,9 +712,21 @@ def test_owner_can_create_approver_seat(db_factory, api_client):
         role="client_admin",
     )
     assert created.status_code == 201, created.text
-    assert _roles_by_email(api_client, owner_token)["appr@checkwise.example"] == (
-        "client_admin"
+    assert _roles_by_email(api_client, owner_token)[
+        "appr@checkwise.example"
+    ] == "client_admin"
+
+    # CheckWise staff can also grant the Approver tier cross-tenant.
+    staff = _seed_internal_admin(db_factory)
+    staff_token = _login(api_client, staff["email"])
+    created2 = _create(
+        api_client,
+        staff_token,
+        email="appr2@checkwise.example",
+        role="client_admin",
+        client_id=ctx["client_id"],
     )
+    assert created2.status_code == 201, created2.text
 
 
 def test_owner_promotes_and_demotes_seat(db_factory, api_client):
@@ -705,6 +735,7 @@ def test_owner_promotes_and_demotes_seat(db_factory, api_client):
     created = _create(api_client, owner_token, email="promo@checkwise.example")
     user_id = created.json()["user_id"]
 
+    # An Approver promotes a Viewer to Approver directly (manages own team).
     promote = api_client.patch(
         f"/api/v1/client/users/{user_id}/role",
         json={"role": "client_admin"},
@@ -712,10 +743,8 @@ def test_owner_promotes_and_demotes_seat(db_factory, api_client):
     )
     assert promote.status_code == 200, promote.text
     assert promote.json()["role"] == "client_admin"
-    assert _roles_by_email(api_client, owner_token)[
-        "promo@checkwise.example"
-    ] == "client_admin"
 
+    # …and demotes back to Viewer.
     demote = api_client.patch(
         f"/api/v1/client/users/{user_id}/role",
         json={"role": "client_viewer"},
@@ -750,8 +779,9 @@ def test_cannot_change_primary_owner_role(db_factory, api_client):
     assert resp.status_code == 409, resp.text
 
 
-def test_secondary_cannot_change_roles(db_factory, api_client):
-    """Tier changes are owner-only (same _require_can_manage gate)."""
+def test_viewer_cannot_change_roles(db_factory, api_client):
+    """Tier changes need the Approver gate (_require_can_manage); a
+    read-only Viewer is refused."""
     ctx = _seed_client_with_owner(db_factory)
     owner_token = _login(api_client, ctx["owner_email"])
     target = _create(api_client, owner_token, email="t@checkwise.example")

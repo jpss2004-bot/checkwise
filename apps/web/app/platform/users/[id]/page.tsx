@@ -131,7 +131,7 @@ const MEMBERSHIP_STATUS_LABEL: Record<string, string> = {
  *  guard so the form never offers a combination the API would 422. */
 const ROLES_BY_KIND: Record<string, MembershipRoleCode[]> = {
   client: ["client_admin"],
-  internal: ["internal_admin", "reviewer", "platform_admin"],
+  internal: ["platform_admin", "operations_admin"],
 };
 
 /** Plain-Spanish gloss for the audit actions this page surfaces;

@@ -54,14 +54,14 @@ import {
 // internal_admin-only (AdminUser) and would 403 them — so the nav is
 // filtered by role and never dangles a link the API rejects.
 const NAV: { href: string; label: string; icon: Icon; roles: string[] }[] = [
-  { href: "/admin/dashboard", label: "Resumen", icon: Gauge, roles: ["internal_admin"] },
-  { href: "/admin/clients", label: "Clientes", icon: IdentificationCard, roles: ["internal_admin"] },
-  { href: "/admin/vendors", label: "Proveedores", icon: Storefront, roles: ["internal_admin"] },
-  { href: "/admin/requirements", label: "Requisitos", icon: Books, roles: ["internal_admin"] },
-  { href: "/admin/calendar", label: "Calendario", icon: CalendarBlank, roles: ["internal_admin"] },
-  { href: "/admin/reviewer", label: "Bandeja", icon: ClipboardText, roles: ["internal_admin", "reviewer"] },
-  { href: "/admin/reports", label: "Reportes", icon: ChartLineUp, roles: ["internal_admin"] },
-  { href: "/admin/contact-requests", label: "Solicitudes", icon: EnvelopeSimple, roles: ["internal_admin"] },
+  { href: "/admin/dashboard", label: "Resumen", icon: Gauge, roles: ["platform_admin", "operations_admin"] },
+  { href: "/admin/clients", label: "Clientes", icon: IdentificationCard, roles: ["platform_admin", "operations_admin"] },
+  { href: "/admin/vendors", label: "Proveedores", icon: Storefront, roles: ["platform_admin", "operations_admin"] },
+  { href: "/admin/requirements", label: "Requisitos", icon: Books, roles: ["platform_admin", "operations_admin"] },
+  { href: "/admin/calendar", label: "Calendario", icon: CalendarBlank, roles: ["platform_admin", "operations_admin"] },
+  { href: "/admin/reviewer", label: "Bandeja", icon: ClipboardText, roles: ["platform_admin", "operations_admin"] },
+  { href: "/admin/reports", label: "Reportes", icon: ChartLineUp, roles: ["platform_admin", "operations_admin"] },
+  { href: "/admin/contact-requests", label: "Solicitudes", icon: EnvelopeSimple, roles: ["platform_admin", "operations_admin"] },
   {
     href: "/admin/correction-requests",
     label: "Correcciones",
@@ -107,8 +107,8 @@ export function AdminShell({
     // even though /admin/reviewer is the reviewer role's primary
     // landing surface per decideDestination() in /login.
     if (
-      !current.roles.includes("internal_admin") &&
-      !current.roles.includes("reviewer")
+      !current.roles.includes("platform_admin") &&
+      !current.roles.includes("operations_admin")
     ) {
       router.replace("/admin");
       return;
@@ -135,13 +135,11 @@ export function AdminShell({
     item.roles.some((role) => session.roles.includes(role)),
   );
 
-  // The Plataforma console gates on ``platform_admin`` /
-  // ``internal_admin`` (backend ``PlatformUser``). A reviewer reaches
-  // this Operaciones shell but holds neither, so don't dangle a switch
-  // into a console the API would 403.
-  const hasPlatform =
-    session.roles.includes("internal_admin") ||
-    session.roles.includes("platform_admin");
+  // The Plataforma console is superadmin-only (backend ``PlatformUser``
+  // = ``operations_admin``). The review team reaches this Operaciones
+  // shell but is not a superadmin, so don't dangle a switch into a
+  // console the API would 403.
+  const hasPlatform = session.roles.includes("operations_admin");
 
   return (
     <div

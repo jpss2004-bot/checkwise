@@ -95,7 +95,7 @@ def _seed_admin(db_factory) -> tuple[str, str]:
             Membership(
                 user_id=user.id,
                 organization_id=org.id,
-                role="internal_admin",
+                role="operations_admin",
                 status="active",
             )
         )
@@ -103,7 +103,7 @@ def _seed_admin(db_factory) -> tuple[str, str]:
         return user.id, issue_access_token(
             user_id=user.id,
             email=user.email,
-            roles=["internal_admin"],
+            roles=["operations_admin"],
             orgs=[org.id],
         )
     finally:
@@ -546,7 +546,7 @@ def test_create_writes_audit_row(
             )
         ).scalar_one()
         assert row.actor_id == admin_id
-        assert row.actor_type == "internal_admin"
+        assert row.actor_type == "operations_admin"
         assert (row.after or {}).get("event_type") == "renewal.threshold.t-0"
     finally:
         db.close()

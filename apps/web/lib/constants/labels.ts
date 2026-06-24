@@ -40,12 +40,15 @@ function humanizeCode(code: string): string {
 // ---------------------------------------------------------------------------
 
 export const ROLE_LABELS_ES: Record<string, string> = {
-  internal_admin: "Administrador interno",
-  platform_admin: "Administrador de plataforma",
-  reviewer: "Revisor",
-  client_admin: "Administrador de cliente",
-  client_viewer: "Visor de cliente",
+  // Role-model redesign (2026-06-23).
+  operations_admin: "Administrador de operaciones",
+  platform_admin: "Equipo CheckWise",
+  client_admin: "Administrador del cliente",
+  client_viewer: "Solo lectura",
   provider: "Proveedor",
+  // Deprecated (legacy audit rows may still carry these).
+  internal_admin: "Equipo CheckWise",
+  reviewer: "Equipo CheckWise",
 };
 
 export function roleLabel(code: string): string {
@@ -196,12 +199,16 @@ export function entityStatusVariant(
 // ---------------------------------------------------------------------------
 
 export const AUDIT_ACTOR_TYPE_LABELS_ES: Record<string, string> = {
-  internal_admin: "Administrador interno",
-  platform_admin: "Administrador de plataforma",
-  client_admin: "Administrador de cliente",
-  reviewer: "Revisor",
+  // Role-model redesign (2026-06-23).
+  operations_admin: "Administrador de operaciones",
+  platform_admin: "Equipo CheckWise",
+  client_admin: "Administrador del cliente",
+  client_viewer: "Solo lectura",
   provider: "Proveedor",
   system: "Sistema",
+  // Deprecated (legacy audit rows).
+  internal_admin: "Equipo CheckWise",
+  reviewer: "Equipo CheckWise",
 };
 
 export function auditActorTypeLabel(code: string | null | undefined): string {

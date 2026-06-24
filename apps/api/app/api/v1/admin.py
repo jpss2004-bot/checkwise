@@ -146,52 +146,61 @@ from app.services.subscription import (
 
 router = APIRouter(prefix="/admin", tags=["admin"])
 DbSession = Annotated[Session, Depends(get_db)]
+# Compliance-ops surface (the bulk of ``/admin``) — the CheckWise review
+# team (``platform_admin``) plus the superadmin (``operations_admin``).
+# Role-model redesign: this absorbs the retired ``internal_admin`` gate.
 AdminUser = Annotated[
-    CurrentUser, Depends(require_role(MembershipRole.INTERNAL_ADMIN))
-]
-
-# Platform/IT surfaces (user provisioning, audit log, feedback triage)
-# accept either the compliance ``internal_admin`` or the dedicated
-# ``platform_admin`` role (platform rework, Phase 1). Migration 0044
-# backfilled ``platform_admin`` onto every existing internal_admin, so
-# accepting both keeps today's operators working while letting a future
-# IT-only account reach just these endpoints — not the compliance ones,
-# which stay gated on ``AdminUser``.
-PlatformUser = Annotated[
     CurrentUser,
     Depends(
         require_any_role(
-            MembershipRole.INTERNAL_ADMIN, MembershipRole.PLATFORM_ADMIN
+            MembershipRole.PLATFORM_ADMIN, MembershipRole.OPERATIONS_ADMIN
         )
     ),
 ]
 
+# User/role management + feedback triage are SUPERADMIN-only. Redefining
+# ``PlatformUser`` to ``operations_admin`` automatically locks every
+# user-lifecycle + feedback route that depends on it; the few read-only
+# staff surfaces that were on ``PlatformUser`` (audit-log read, metadata
+# catalog, admin search) are re-pointed to ``AdminUser`` so the review
+# team keeps oversight read access (Q-A).
+PlatformUser = Annotated[
+    CurrentUser, Depends(require_role(MembershipRole.OPERATIONS_ADMIN))
+]
+
 # Roles whose grant is itself an escalation: handing one out gives the
-# recipient (possibly the caller) access beyond the IT/platform surface.
+# recipient (possibly the caller) staff or write access. Only the
+# superadmin may grant them.
 _PRIVILEGED_ROLES = frozenset(
-    {MembershipRole.INTERNAL_ADMIN.value, MembershipRole.PLATFORM_ADMIN.value}
+    {
+        MembershipRole.OPERATIONS_ADMIN.value,
+        MembershipRole.PLATFORM_ADMIN.value,
+        MembershipRole.CLIENT_ADMIN.value,
+    }
 )
 
 
 def _assert_can_grant_role(actor: CurrentUser, role: str) -> None:
-    """ADMIN-1 — only a full ``internal_admin`` may create or grant the
-    privileged staff roles (``internal_admin`` / ``platform_admin``).
+    """ADMIN-1 — only the superadmin (``operations_admin``) may create or
+    grant a privileged role (``operations_admin`` / ``platform_admin`` /
+    ``client_admin``).
 
-    The user-management endpoints are gated by ``PlatformUser`` so a
-    future IT-only ``platform_admin`` can provision ordinary client /
-    provider accounts. But granting a *privileged* role is a self- or
-    lateral-escalation: without this check a pure ``platform_admin``
-    could mint itself ``internal_admin`` and reach the entire compliance
-    surface that ``AdminUser`` exists to fence off. Today every operator
-    also holds ``internal_admin`` (migration 0044 backfill), so this is
-    a no-op for current accounts and only bites the first IT-only one.
+    The user-management endpoints are already gated by ``PlatformUser``
+    (now ``operations_admin``-only), so in normal operation every caller
+    here is a superadmin and this is belt-and-suspenders. It still fences
+    off the case where the route gate is ever loosened: granting a
+    privileged role is a self- or lateral-escalation that must stay with
+    the superadmin.
     """
-    if role in _PRIVILEGED_ROLES and MembershipRole.INTERNAL_ADMIN.value not in actor.roles:
+    if (
+        role in _PRIVILEGED_ROLES
+        and MembershipRole.OPERATIONS_ADMIN.value not in actor.roles
+    ):
         raise HTTPException(
             status.HTTP_403_FORBIDDEN,
             detail=(
-                "Solo un internal_admin puede otorgar los roles "
-                "internal_admin o platform_admin."
+                "Solo un operations_admin puede otorgar los roles "
+                "operations_admin, platform_admin o client_admin."
             ),
         )
 
@@ -199,24 +208,21 @@ def _assert_can_grant_role(actor: CurrentUser, role: str) -> None:
 def _assert_can_modify_target(
     db: Session, actor: CurrentUser, target: User
 ) -> None:
-    """ADMIN-1 (symmetric) — only a full ``internal_admin`` may run a
-    destructive user-lifecycle action against a *privileged* target.
+    """ADMIN-1 (symmetric) — only the superadmin (``operations_admin``)
+    may run a destructive user-lifecycle action against a *privileged*
+    target.
 
     The mirror image of :func:`_assert_can_grant_role`: that fences off
     *granting* a privileged role, this fences off *reaching* an account
     that already holds one. The destructive lifecycle endpoints (disable,
     password reset, membership revoke, soft-delete) are gated by
-    ``PlatformUser``, so a future IT-only ``platform_admin`` could
-    otherwise disable / reset / delete an ``internal_admin`` and lock the
-    compliance team out of the surface ``AdminUser`` exists to fence off.
+    ``PlatformUser`` (``operations_admin``-only), so this is normally
+    redundant — it still protects against the gate ever loosening.
 
     The target's roles are read the same way the directory builds them —
     from active ``Membership`` rows (the canonical role store). When the
-    target carries ``internal_admin`` or ``platform_admin``, the actor
-    must hold ``internal_admin``; a pure ``platform_admin`` is refused
-    with 403. No-op for today's accounts (migration 0044 backfilled
-    ``internal_admin`` onto every operator); only bites the first IT-only
-    one.
+    target carries a privileged role, the actor must hold
+    ``operations_admin``; anyone else is refused with 403.
     """
     target_roles = set(
         db.scalars(
@@ -228,13 +234,14 @@ def _assert_can_modify_target(
     )
     if (
         target_roles & _PRIVILEGED_ROLES
-        and MembershipRole.INTERNAL_ADMIN.value not in actor.roles
+        and MembershipRole.OPERATIONS_ADMIN.value not in actor.roles
     ):
         raise HTTPException(
             status.HTTP_403_FORBIDDEN,
             detail=(
-                "Solo un internal_admin puede modificar una cuenta con "
-                "rol internal_admin o platform_admin."
+                "Solo un operations_admin puede modificar una cuenta con "
+                "rol privilegiado (operations_admin, platform_admin o "
+                "client_admin)."
             ),
         )
 
@@ -242,6 +249,15 @@ def _assert_can_modify_target(
 # ---------------------------------------------------------------------------
 # Shared helpers
 # ---------------------------------------------------------------------------
+
+
+def _staff_actor_type(actor: CurrentUser) -> str:
+    """The acting staff role for an audit row — the superadmin
+    (``operations_admin``) when held, otherwise the review team
+    (``platform_admin``)."""
+    if MembershipRole.OPERATIONS_ADMIN.value in actor.roles:
+        return MembershipRole.OPERATIONS_ADMIN.value
+    return MembershipRole.PLATFORM_ADMIN.value
 
 
 def _audit_admin(
@@ -284,7 +300,7 @@ def _audit_admin(
         action=action,
         entity_type=entity_type,
         entity_id=entity_id,
-        actor_type="internal_admin",
+        actor_type=_staff_actor_type(actor),
         actor_id=actor.user.id,
         before=before,
         after=after,
@@ -1226,11 +1242,13 @@ def provision_user(
     Returns the plaintext temp password ONCE for the admin's
     confirmation surface; the User row stores only the bcrypt hash.
     """
-    # ADMIN-1 — provisioning role=="admin" mints an internal_admin; only
-    # a full internal_admin may do so. Checked first, before any inserts
-    # or the email-existence probe.
+    # ADMIN-1 — provisioning role=="admin" mints a ``platform_admin``
+    # (CheckWise review team); only the superadmin may do so. Checked
+    # first, before any inserts or the email-existence probe. The
+    # superadmin (``operations_admin``) itself is migration-granted, not
+    # provisioned through this route.
     if payload.role == "admin":
-        _assert_can_grant_role(current, MembershipRole.INTERNAL_ADMIN.value)
+        _assert_can_grant_role(current, MembershipRole.PLATFORM_ADMIN.value)
 
     full_name = payload.full_name.strip()
     email = payload.email.strip().lower()
@@ -1347,7 +1365,7 @@ def provision_user(
             Membership(
                 user_id=user.id,
                 organization_id=org.id,
-                role=MembershipRole.INTERNAL_ADMIN.value,
+                role=MembershipRole.PLATFORM_ADMIN.value,
                 status="active",
             )
         )
@@ -2106,13 +2124,15 @@ _DEFAULT_CLIENT_SEAT_LIMIT: Final = 3
 _ROLE_ORG_KIND: Final = {
     MembershipRole.CLIENT_ADMIN.value: "client",
     MembershipRole.CLIENT_VIEWER.value: "client",
+    MembershipRole.OPERATIONS_ADMIN.value: "internal",
+    MembershipRole.PLATFORM_ADMIN.value: "internal",
+    # Deprecated (transition only) — kept so legacy rows still classify.
     MembershipRole.INTERNAL_ADMIN.value: "internal",
     MembershipRole.REVIEWER.value: "internal",
-    MembershipRole.PLATFORM_ADMIN.value: "internal",
 }
 
 MembershipRoleLiteral = Literal[
-    "client_admin", "client_viewer", "internal_admin", "reviewer", "platform_admin"
+    "client_admin", "client_viewer", "platform_admin", "operations_admin"
 ]
 
 
@@ -2408,6 +2428,12 @@ def promote_user_membership(
         current_primary.is_primary = False
         demoted_id = current_primary.id
         db.flush()  # clear the old primary before setting the new one
+    # The Primary Owner is always an Approver — the client seat model's
+    # lockout protection (client_users._reject_primary_target +
+    # _holds_approver_seat) relies on this. Force it here, the only route
+    # that can transfer primary ownership, so a Viewer can never become a
+    # primary that no longer counts as a manager.
+    membership.role = MembershipRole.CLIENT_ADMIN.value
     membership.is_primary = True
     db.flush()
 
@@ -2493,17 +2519,21 @@ def _deletion_preview(db: Session, user: User) -> AdminUserDeletionPreview:
         )
         or 0
     )
-    internal_admins = int(
+    # Lockout guard: the superadmin (``operations_admin``) is the role
+    # whose loss locks everyone out of user/role management, so the
+    # "last admin" warning now tracks it. (Field name kept for schema/FE
+    # stability; semantics = last superadmin.)
+    operations_admins = int(
         db.scalar(
             select(func.count(func.distinct(Membership.user_id))).where(
-                Membership.role == MembershipRole.INTERNAL_ADMIN.value,
+                Membership.role == MembershipRole.OPERATIONS_ADMIN.value,
                 Membership.status == "active",
             )
         )
         or 0
     )
-    holds_internal_admin = any(
-        m.role == MembershipRole.INTERNAL_ADMIN.value for m in active
+    holds_operations_admin = any(
+        m.role == MembershipRole.OPERATIONS_ADMIN.value for m in active
     )
     return AdminUserDeletionPreview(
         user_id=user.id,
@@ -2512,7 +2542,7 @@ def _deletion_preview(db: Session, user: User) -> AdminUserDeletionPreview:
         active_memberships=len(active),
         primary_of_orgs=primary_org_names,
         owned_workspaces=owned_workspaces,
-        is_last_internal_admin=holds_internal_admin and internal_admins <= 1,
+        is_last_internal_admin=holds_operations_admin and operations_admins <= 1,
     )
 
 
@@ -3326,9 +3356,11 @@ def update_workspace_admin(
                 )
             )
             privileged_owner_roles = {
-                MembershipRole.INTERNAL_ADMIN.value,
+                MembershipRole.OPERATIONS_ADMIN.value,
                 MembershipRole.PLATFORM_ADMIN.value,
                 MembershipRole.CLIENT_ADMIN.value,
+                # Deprecated (transition only).
+                MembershipRole.INTERNAL_ADMIN.value,
             }
             if owner_roles & privileged_owner_roles:
                 raise HTTPException(
@@ -5458,7 +5490,7 @@ _EXTRACTION_METHOD_LABELS_ES: dict[str, str] = {
 @router.get("/metadata/catalog", response_model=MetadataCatalogResponse)
 def get_metadata_catalog(
     db: DbSession,  # noqa: ARG001 - parity with sibling endpoints
-    current: PlatformUser,
+    current: AdminUser,
 ) -> MetadataCatalogResponse:
     """Operational documentation of the metadata rulebook (P2-09).
 
@@ -6072,7 +6104,7 @@ def _resolve_audit_entity_labels(
 @router.get("/audit-log", response_model=AuditLogResponse)
 def list_audit_log(
     db: DbSession,
-    current: PlatformUser,
+    current: AdminUser,
     actor_id: str | None = None,
     actor_type: str | None = None,
     action: str | None = None,
@@ -6495,7 +6527,7 @@ def admin_vendor_expediente_zip(
         action="admin.vendor_expediente_downloaded",
         entity_type="provider_workspace",
         entity_id=workspace.id,
-        actor_type="internal_admin",
+        actor_type=_staff_actor_type(current),
         actor_id=current.user.id,
         metadata={
             "scope": "admin_vendor",

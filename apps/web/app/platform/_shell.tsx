@@ -20,6 +20,7 @@ import { FeedbackLauncher } from "@/components/feedback/feedback-launcher";
 import { SearchBar } from "@/components/checkwise/search-bar";
 import { UserMenu } from "@/components/checkwise/user-menu";
 import { MetadataStrip } from "@/components/ui/metadata-strip";
+import { roleLabels } from "@/lib/constants/labels";
 import { cn } from "@/lib/utils";
 import {
   type AdminSession,
@@ -75,20 +76,14 @@ export function PlatformShell({
       router.replace("/login");
       return;
     }
-    // Platform/IT surfaces gate on ``platform_admin`` (or the
-    // compliance ``internal_admin``, which migration 0044 backfilled
-    // onto every existing admin). This mirrors the backend
-    // ``PlatformUser`` dep — ``require_any_role(internal_admin,
-    // platform_admin)`` — so the UI never shows a page the API would
-    // 403. A reviewer no longer reaches here; send them to their own
-    // landing surface instead of a dead login bounce.
-    if (
-      !current.roles.includes("internal_admin") &&
-      !current.roles.includes("platform_admin")
-    ) {
-      router.replace(
-        current.roles.includes("reviewer") ? "/admin/reviewer" : "/login",
-      );
+    // Platform/IT surfaces are superadmin-only (backend ``PlatformUser``
+    // = ``require_role(operations_admin)``), so the UI never shows a page
+    // the API would 403. The review team (``platform_admin``) is sent to
+    // its own Operaciones landing instead of a dead login bounce.
+    if (!current.roles.includes("operations_admin")) {
+      const isStaff =
+        current.roles.includes("platform_admin");
+      router.replace(isStaff ? "/admin/dashboard" : "/login");
       return;
     }
     setSession(current);
@@ -114,12 +109,11 @@ export function PlatformShell({
 
   if (!ready || !session) return null;
 
-  // Only offer the jump back to Operaciones when the user actually
-  // holds a compliance role there — a future platform-only admin
-  // shouldn't see a switch into a console the API would 403.
+  // The superadmin always also has the Operaciones console (staff
+  // superset), so offer the jump back there.
   const hasOperations =
-    session.roles.includes("internal_admin") ||
-    session.roles.includes("reviewer");
+    session.roles.includes("operations_admin") ||
+    session.roles.includes("platform_admin");
 
   return (
     <div
@@ -277,10 +271,7 @@ export function PlatformShell({
                 { label: "Correo", value: session.user.email, mono: true },
                 {
                   label: "Roles",
-                  value: session.roles
-                    .map((r) => r.replace(/_/g, " "))
-                    .join(", "),
-                  mono: true,
+                  value: roleLabels(session.roles),
                   tone: "teal",
                 },
               ]}

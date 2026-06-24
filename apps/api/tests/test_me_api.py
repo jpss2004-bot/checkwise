@@ -73,7 +73,7 @@ def _seed_user(db_factory, *, email: str = "user@legalshelf.mx") -> tuple[str, s
         db.add(user)
         db.commit()
         token = issue_access_token(
-            user_id=user.id, email=user.email, roles=["internal_admin"], orgs=[org.id]
+            user_id=user.id, email=user.email, roles=["operations_admin"], orgs=[org.id]
         )
         return user.id, token
     finally:

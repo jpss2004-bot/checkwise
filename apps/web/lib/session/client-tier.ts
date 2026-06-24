@@ -16,7 +16,13 @@ import { readAdminSession } from "@/lib/session/admin";
  */
 export function isClientApprover(roles: readonly string[] | undefined): boolean {
   if (!roles) return false;
-  return roles.includes("client_admin") || roles.includes("internal_admin");
+  // Approver = the client_admin tier, plus CheckWise staff (review team /
+  // superadmin) who hold cross-tenant break-glass write access.
+  return (
+    roles.includes("client_admin") ||
+    roles.includes("platform_admin") ||
+    roles.includes("operations_admin")
+  );
 }
 
 /** Live-session variant for client components. Returns ``false`` until the

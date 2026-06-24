@@ -135,7 +135,7 @@ def _h(token: str) -> dict:
 
 def _admin_token(api_client, db_factory) -> str:
     pw, email, _ = _seed_user(
-        db_factory, email="adm@reports.test", role="internal_admin"
+        db_factory, email="adm@reports.test", role="operations_admin"
     )
     return _login(api_client, email, pw)
 

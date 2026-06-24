@@ -1646,10 +1646,14 @@ def post_report_export(
     except ReportNotFoundError as exc:
         raise HTTPException(status.HTTP_404_NOT_FOUND, str(exc)) from exc
 
-    # Phase B — demo plans cannot export client/vendor-facing reports. Internal
+    # Phase B — demo plans cannot export client/vendor-facing reports. CheckWise
     # staff are never gated (mirrors the provider-limit admin bypass); internal-
-    # audience reports and orgs without a client are never gated.
-    if "internal_admin" not in current.roles and report.audience in (
+    # audience reports and orgs without a client are never gated. Role-model
+    # redesign: staff is STAFF_ROLES (platform_admin / operations_admin), not
+    # the retired ``internal_admin`` slug.
+    from app.constants.roles import STAFF_ROLES
+
+    if not (STAFF_ROLES & set(current.roles)) and report.audience in (
         ReportAudience.CLIENT_FACING.value,
         ReportAudience.VENDOR_FACING.value,
     ):

@@ -823,10 +823,12 @@ export type ClientUserItem = {
 export type ClientUsersList = {
   client_id: string;
   organization_id: string;
+  // Cap on total seats of any tier (the Primary Owner included).
   seat_limit: number;
   seats_used: number;
   seats_available: number;
-  // Whether the requesting user may mutate seats (owner/internal).
+  // Seat management (create / disable / reset / remove / change tier).
+  // True for any Approver of the org or CheckWise staff; false for Viewers.
   can_manage: boolean;
   users: ClientUserItem[];
 };
@@ -872,9 +874,13 @@ export async function listClientUsers(params?: {
 }
 
 export async function createClientUser(
-  // ``role`` defaults to the least-privilege Viewer server-side when
-  // omitted; the owner opts into an Approver explicitly.
-  body: { full_name: string; email: string; role?: ClientUserRole },
+  body: {
+    full_name: string;
+    email: string;
+    // Seat tier. Omit for the default read-only Viewer; an Approver may
+    // pass "client_admin" to create another Approver.
+    role?: ClientUserRole;
+  },
   params?: { client_id?: string },
 ): Promise<CreateClientUserResponse> {
   return fetchJson<CreateClientUserResponse>(

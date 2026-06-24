@@ -49,6 +49,9 @@ EventCategory = Literal[
 RecipientRole = Literal[
     "provider_owner",
     "client_admin",
+    "platform_admin",
+    "operations_admin",
+    # Deprecated (transition only).
     "internal_admin",
     "invitee",
     "user",
@@ -285,21 +288,21 @@ _ADMIN_EVENTS: tuple[EventDefinition, ...] = (
         event_type="support.ticket_opened",
         severity="important",
         category="admin",
-        recipients=("internal_admin",),
+        recipients=("platform_admin",),
         description="Nuevo ticket de soporte/feedback con severidad ≥ media.",
     ),
     EventDefinition(
         event_type="admin.workspace_at_risk",
         severity="important",
         category="admin",
-        recipients=("internal_admin",),
+        recipients=("platform_admin",),
         description="Un workspace acumula ≥3 items rojos sin movimiento reciente.",
     ),
     EventDefinition(
         event_type="admin.cron_health",
         severity="info",
         category="admin",
-        recipients=("internal_admin",),
+        recipients=("platform_admin",),
         description="Resumen diario de salud de los crons de notificación.",
     ),
 )

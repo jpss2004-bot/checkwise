@@ -218,7 +218,7 @@ def test_envelope_rejects_recipient_role_not_in_catalog() -> None:
             event_type="reporting.window.opened",
             dedupe_key="x",
             recipients=(
-                Recipient(user_id="u1", role="internal_admin"),
+                Recipient(user_id="u1", role="operations_admin"),
             ),
         )
 

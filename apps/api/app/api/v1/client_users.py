@@ -1,11 +1,13 @@
 """Client-side user management — the 3-seat model.
 
-Multi-user step 2 (2026-06-10, after migration 0037). A client
-organization holds up to ``seat_limit`` user accounts (3 by default:
-one Primary Account Owner + two secondaries). Every seat carries the
-same ``client_admin`` role, so the rest of the client surface needs
-no changes; *managing* the seats is restricted to the primary owner
-(``memberships.is_primary``) and to ``internal_admin`` support staff.
+Multi-user step 2 (2026-06-10, after migration 0037; seat tiers 2026-06).
+A client organization holds up to ``seat_limit`` user accounts (3 by
+default, the Primary Account Owner included). Each seat carries one of
+two tiers — ``client_admin`` (Approver: full write, manages the team and
+the portfolio) or ``client_viewer`` (read + export only). *Managing* the
+seats (create, disable, remove, reset, change tier) is open to any
+Approver of the org and to CheckWise support staff; Viewers are
+read-only. The cap counts every active seat regardless of tier.
 
 Semantics:
 
@@ -47,7 +49,7 @@ from sqlalchemy.orm import Session
 
 from app.api.v1.auth import CurrentUser
 from app.api.v1.client import ClientUser, DbSession, _resolve_client_id
-from app.constants.roles import MembershipRole
+from app.constants.roles import STAFF_ROLES, MembershipRole
 from app.core.config import settings
 from app.core.rate_limit import client_ip_from_request
 from app.models import Client, Membership, Organization, PasswordHistory, User
@@ -82,11 +84,17 @@ def _request_ctx(request: Request) -> dict:
 
 
 def _is_internal(current: CurrentUser) -> bool:
-    return MembershipRole.INTERNAL_ADMIN.value in current.roles
+    """True for CheckWise staff (review team or superadmin) — they get
+    cross-tenant support access to client seat management."""
+    return bool(STAFF_ROLES & set(current.roles))
 
 
 def _actor_type(current: CurrentUser) -> str:
-    return "internal_admin" if _is_internal(current) else "client_admin"
+    if MembershipRole.OPERATIONS_ADMIN.value in current.roles:
+        return MembershipRole.OPERATIONS_ADMIN.value
+    if MembershipRole.PLATFORM_ADMIN.value in current.roles:
+        return MembershipRole.PLATFORM_ADMIN.value
+    return MembershipRole.CLIENT_ADMIN.value
 
 
 def _org_for_client(
@@ -101,26 +109,39 @@ def _org_for_client(
     return org_for_client(db, client_id, for_update=for_update)
 
 
-def _require_can_manage(
+def _holds_approver_seat(
     db: Session, current: CurrentUser, org: Organization
-) -> None:
-    """Mutations are owner-only (plus internal_admin support access)."""
-    if _is_internal(current):
-        return
-    holds_primary = db.scalar(
+) -> bool:
+    """True when the caller holds an active ``client_admin`` (Approver) seat
+    in this org. Approvers manage their own team — create, disable, remove,
+    reset and change the tier of other seats (the Primary Owner is always
+    protected; see ``_reject_primary_target``)."""
+    seat = db.scalar(
         select(Membership.id).where(
             Membership.organization_id == org.id,
             Membership.user_id == current.user.id,
+            Membership.role == MembershipRole.CLIENT_ADMIN.value,
             Membership.status == "active",
-            Membership.is_primary.is_(True),
         )
     )
-    if holds_primary is None:
+    return seat is not None
+
+
+def _can_manage(db: Session, current: CurrentUser, org: Organization) -> bool:
+    """Seat management is open to any Approver of the org plus CheckWise
+    support staff. Viewers are read-only."""
+    return _is_internal(current) or _holds_approver_seat(db, current, org)
+
+
+def _require_can_manage(
+    db: Session, current: CurrentUser, org: Organization
+) -> None:
+    if not _can_manage(db, current, org):
         raise HTTPException(
             status.HTTP_403_FORBIDDEN,
             detail=(
-                "Solo el titular de la cuenta puede administrar los "
-                "usuarios de la organización."
+                "Solo un Aprobador puede administrar los usuarios de la "
+                "organización."
             ),
         )
 
@@ -232,18 +253,22 @@ class ClientUsersList(BaseModel):
     client_id: str
     organization_id: str
     seat_limit: int
+    """Maximum number of seats (any tier), the Primary Owner included."""
     seats_used: int
+    """Active seats of any tier (against ``seat_limit``)."""
     seats_available: int
     can_manage: bool
-    """Whether the requesting user may mutate seats (owner/internal)."""
+    """Whether the requesting user may manage seats — create, disable, reset,
+    remove, change tier. True for any Approver of the org or CheckWise staff;
+    False for read-only Viewers."""
     users: list[ClientUserItem]
 
 
 class CreateClientUserPayload(BaseModel):
     full_name: str = Field(min_length=2, max_length=255)
     email: EmailStr
-    # Phase 4 — seat tier. Defaults to the least-privilege Viewer; the owner
-    # promotes to client_admin (Approver) explicitly.
+    # Seat tier. Defaults to the least-privilege Viewer; an Approver may
+    # create another Approver by passing ``client_admin`` explicitly.
     role: Literal["client_admin", "client_viewer"] = "client_viewer"
 
 
@@ -322,16 +347,23 @@ def list_client_users(
         .order_by(Membership.is_primary.desc(), Membership.created_at.asc())
     ).all()
 
-    can_manage = _is_internal(current) or any(
-        m.user_id == current.user.id and m.is_primary for m, _ in rows
+    is_staff = _is_internal(current)
+    holds_approver = any(
+        m.user_id == current.user.id
+        and m.role == MembershipRole.CLIENT_ADMIN.value
+        for m, _ in rows
     )
+    # Seat management (create / disable / reset / remove / change tier) is
+    # open to any Approver of the org plus CheckWise support staff.
+    can_manage = is_staff or holds_approver
     limit = _seat_limit(org)
+    seats_used = len(rows)  # active memberships of any tier
     return ClientUsersList(
         client_id=cid,
         organization_id=org.id,
         seat_limit=limit,
-        seats_used=len(rows),
-        seats_available=max(0, limit - len(rows)),
+        seats_used=seats_used,
+        seats_available=max(0, limit - seats_used),
         can_manage=can_manage,
         users=[
             ClientUserItem(
@@ -369,6 +401,9 @@ def create_client_user(
     # Lock the org row BEFORE counting seats so two concurrent creates
     # cannot both observe a free slot.
     org = _org_for_client(db, cid, for_update=True)
+
+    # Seat management (creating either tier) is open to Approvers of the org
+    # and to CheckWise staff. Viewers are read-only.
     _require_can_manage(db, current, org)
 
     full_name = payload.full_name.strip()
@@ -413,13 +448,14 @@ def create_client_user(
                 detail="Ya existe una cuenta con ese correo.",
             )
 
-    seats_used = _active_seats(db, org.id)
-    if seats_used >= limit:
+    # The cap counts every active seat regardless of tier. Both a brand-new
+    # user and a reinstated (previously removed) one occupy a fresh slot.
+    if _active_seats(db, org.id) >= limit:
         raise HTTPException(
             status.HTTP_409_CONFLICT,
             detail=(
-                f"Tu plan permite un máximo de {limit} usuarios. "
-                "Elimina un usuario para liberar un lugar."
+                f"Tu plan permite un máximo de {limit} usuarios. Elimina uno "
+                "para liberar un lugar."
             ),
         )
 
@@ -466,6 +502,10 @@ def create_client_user(
         organization_name=client_row.name if client_row else None,
     )
 
+    # Total active seats AFTER this create.
+    db.flush()
+    seats_used = _active_seats(db, org.id)
+
     add_audit_event(
         db,
         action="client.user_created",
@@ -479,7 +519,8 @@ def create_client_user(
             "organization_id": org.id,
             "user_email": user.email,
             "reinstated": reinstate_user is not None,
-            "seats_used": seats_used + 1,
+            "role": payload.role,
+            "seats_used": seats_used,
             "seat_limit": limit,
             "email_delivery_status": delivery.status,
         },
@@ -516,7 +557,7 @@ def create_client_user(
         email_status=delivery.status,
         email_error=delivery.error,
         reinstated=reinstate_user is not None,
-        seats_used=seats_used + 1,
+        seats_used=seats_used,
         seat_limit=limit,
     )
 
@@ -717,12 +758,21 @@ def update_client_user_role(
     client_id: str | None = Query(default=None),
 ) -> ClientUserRoleResponse:
     """Promote a seat to ``client_admin`` (Approver) or demote it to
-    ``client_viewer`` (read + export only). Owner-only (plus internal_admin).
+    ``client_viewer`` (read + export only).
 
-    The Primary Owner is always an Approver and cannot be demoted here. A
-    promoted/demoted user's JWT still carries the old role until they
-    re-login (claims are minted at login), so the new tier takes effect on
-    their next sign-in — same staleness as every other role change.
+    Both promotion and demotion are open to any Approver of the org (plus
+    CheckWise staff) via ``_require_can_manage`` — a client manages its own
+    team. The Primary Owner is always an Approver and cannot be demoted here.
+
+    Role staleness, by case: a promoted/demoted user's JWT still carries the
+    OLD role until they re-login (claims are minted at login). For a
+    PROMOTION this is harmless (new Approver writes only work after the next
+    sign-in). A DEMOTION is the security-relevant inverse: seat management is
+    revoked immediately (that gate, ``_require_can_manage``, is DB-live), but
+    the claims-based ``ClientApprover`` write gate (provider create/archive,
+    profile edit) keeps honoring the stale token until it expires (≤24h).
+    Closing that window — live role authorization on the client write gate —
+    is tracked as follow-up work alongside client self-review.
     """
     cid = _resolve_client_id(db, current, requested=client_id)
     org = _org_for_client(db, cid)

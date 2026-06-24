@@ -141,7 +141,7 @@ def _seed_internal_admin(db_factory) -> dict:
             Membership(
                 user_id=user.id,
                 organization_id=org.id,
-                role="internal_admin",
+                role="platform_admin",
                 status="active",
             )
         )
