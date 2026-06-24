@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from unittest.mock import MagicMock
 
+import httpx
 import pytest
 from sqlalchemy import create_engine, select
 from sqlalchemy.orm import sessionmaker
@@ -28,6 +29,8 @@ from app.services import folio_verification as fv
 from app.services.sat_cfdi_client import (
     LiveSATCFDIClient,
     StubSATCFDIClient,
+    _build_expresion,
+    _fmt_total,
     build_sat_cfdi_client,
 )
 
@@ -107,9 +110,7 @@ def _seed(db_factory, *, cfdi_uuid: str | None = "UUID-ABC", authenticity_risk=N
         db.add(doc)
         db.flush()
         db.add(
-            DocumentInspection(
-                document_id=doc.id, is_pdf=True, authenticity_risk=authenticity_risk
-            )
+            DocumentInspection(document_id=doc.id, is_pdf=True, authenticity_risk=authenticity_risk)
         )
         if cfdi_uuid:
             db.add(
@@ -138,9 +139,7 @@ def _inspection(db_factory, document_id):
     db = db_factory()
     try:
         return db.scalar(
-            select(DocumentInspection).where(
-                DocumentInspection.document_id == document_id
-            )
+            select(DocumentInspection).where(DocumentInspection.document_id == document_id)
         )
     finally:
         db.close()
@@ -151,18 +150,17 @@ def _inspection(db_factory, document_id):
 
 def test_stub_client_returns_canned_status(monkeypatch):
     monkeypatch.setattr(settings, "SAT_CFDI_STUB_STATUS", "vigente")
-    r = StubSATCFDIClient().consultar(
-        cfdi_uuid="U", emisor_rfc="E", receptor_rfc="R"
-    )
+    r = StubSATCFDIClient().consultar(cfdi_uuid="U", emisor_rfc="E", receptor_rfc="R")
     assert r.status == "vigente"
     assert r.source == "stub"
 
 
 def test_stub_unknown_status_falls_back(monkeypatch):
     monkeypatch.setattr(settings, "SAT_CFDI_STUB_STATUS", "garbage")
-    assert StubSATCFDIClient().consultar(
-        cfdi_uuid="U", emisor_rfc="E", receptor_rfc="R"
-    ).status == "not_verifiable"
+    assert (
+        StubSATCFDIClient().consultar(cfdi_uuid="U", emisor_rfc="E", receptor_rfc="R").status
+        == "not_verifiable"
+    )
 
 
 def test_build_client_defaults_to_stub(monkeypatch):
@@ -170,12 +168,138 @@ def test_build_client_defaults_to_stub(monkeypatch):
     assert isinstance(build_sat_cfdi_client(), StubSATCFDIClient)
 
 
-def test_live_client_is_a_skeleton_that_raises(monkeypatch):
+def test_build_client_returns_live_when_mode_live(monkeypatch):
     monkeypatch.setattr(settings, "SAT_CFDI_CLIENT_MODE", "live")
-    client = build_sat_cfdi_client()
-    assert isinstance(client, LiveSATCFDIClient)
-    with pytest.raises(NotImplementedError):
-        client.consultar(cfdi_uuid="U", emisor_rfc="E", receptor_rfc="R")
+    assert isinstance(build_sat_cfdi_client(), LiveSATCFDIClient)
+
+
+# -- live client (SOAP over httpx.MockTransport — no network) ----------------
+
+
+def _soap_body(*, estado="", codigo="", efos="200") -> str:
+    return (
+        '<s:Envelope xmlns:s="http://schemas.xmlsoap.org/soap/envelope/"><s:Body>'
+        '<ConsultaResponse xmlns="http://tempuri.org/">'
+        '<ConsultaResult xmlns:a="http://schemas.datacontract.org/2004/07/Sat.Cfdi">'
+        f"<a:CodigoEstatus>{codigo}</a:CodigoEstatus>"
+        "<a:EsCancelable>No cancelable</a:EsCancelable>"
+        f"<a:Estado>{estado}</a:Estado>"
+        "<a:EstatusCancelacion></a:EstatusCancelacion>"
+        f"<a:ValidacionEFOS>{efos}</a:ValidacionEFOS>"
+        "</ConsultaResult></ConsultaResponse></s:Body></s:Envelope>"
+    )
+
+
+def _live_client(handler) -> LiveSATCFDIClient:
+    return LiveSATCFDIClient(transport=httpx.MockTransport(handler))
+
+
+def _consult(client):
+    return client.consultar(
+        cfdi_uuid="UUID-1",
+        emisor_rfc="EMI010101AA1",
+        receptor_rfc="REC020202BB2",
+        total="1234.56",
+    )
+
+
+@pytest.mark.parametrize(
+    "estado,codigo,expected",
+    [
+        ("Vigente", "S - Comprobante obtenido satisfactoriamente", "vigente"),
+        ("Cancelado", "S - Comprobante obtenido satisfactoriamente", "cancelado"),
+        ("No Encontrado", "N - 602: Comprobante no encontrado", "no_existe"),
+        ("", "N - 602: Comprobante no encontrado", "no_existe"),
+        # 601 = malformed expresion (likely our input) → never flag the doc.
+        ("", "N - 601: La expresion impresa proporcionada no es valida", "not_verifiable"),
+        # S code but no usable Estado → can't be sure → fail open.
+        ("", "S - Comprobante obtenido satisfactoriamente", "not_verifiable"),
+    ],
+)
+def test_live_maps_sat_status(estado, codigo, expected):
+    client = _live_client(
+        lambda req: httpx.Response(200, text=_soap_body(estado=estado, codigo=codigo))
+    )
+    r = _consult(client)
+    assert r.status == expected
+    assert r.source == "sat_cfdi_live"
+
+
+def test_live_captures_efos_in_raw():
+    client = _live_client(
+        lambda req: httpx.Response(200, text=_soap_body(estado="Vigente", efos="100"))
+    )
+    r = _consult(client)
+    assert r.raw["ValidacionEFOS"] == "100"
+    assert r.raw["Estado"] == "Vigente"
+
+
+def test_live_http_500_fails_open():
+    client = _live_client(lambda req: httpx.Response(500, text="error"))
+    assert _consult(client).status == "not_verifiable"
+
+
+def test_live_timeout_fails_open():
+    def _boom(req):
+        raise httpx.TimeoutException("slow", request=req)
+
+    r = _consult(_live_client(_boom))
+    assert r.status == "not_verifiable"
+    assert r.raw["error"] == "TimeoutException"
+
+
+def test_live_connect_error_fails_open():
+    def _boom(req):
+        raise httpx.ConnectError("down", request=req)
+
+    assert _consult(_live_client(_boom)).status == "not_verifiable"
+
+
+def test_live_soap_fault_fails_open():
+    fault = (
+        '<s:Envelope xmlns:s="http://schemas.xmlsoap.org/soap/envelope/"><s:Body>'
+        "<s:Fault><faultstring>boom</faultstring></s:Fault>"
+        "</s:Body></s:Envelope>"
+    )
+    client = _live_client(lambda req: httpx.Response(200, text=fault))
+    assert _consult(client).status == "not_verifiable"
+
+
+def test_live_malformed_xml_fails_open():
+    client = _live_client(lambda req: httpx.Response(200, text="not xml <<<"))
+    r = _consult(client)
+    assert r.status == "not_verifiable"
+    assert "parse_error" in r.raw
+
+
+def test_live_request_shape_is_correct():
+    captured = {}
+
+    def _handler(req):
+        captured["url"] = str(req.url)
+        captured["action"] = req.headers.get("SOAPAction")
+        captured["body"] = req.content.decode("utf-8")
+        return httpx.Response(200, text=_soap_body(estado="Vigente"))
+
+    _consult(_live_client(_handler))
+    assert captured["url"].endswith("ConsultaCFDIService.svc")
+    assert captured["action"] == "http://tempuri.org/IConsultaCFDIService/Consulta"
+    assert "expresionImpresa" in captured["body"]
+    assert "re=EMI010101AA1" in captured["body"]
+    assert "rr=REC020202BB2" in captured["body"]
+    assert "tt=1234.56" in captured["body"]
+    assert "id=UUID-1" in captured["body"]
+
+
+def test_build_expresion_omits_total_when_absent():
+    expr = _build_expresion(cfdi_uuid="U", emisor_rfc="E", receptor_rfc="R", total=None)
+    assert expr == "?re=E&rr=R&id=U"
+    assert "tt=" not in expr
+
+
+def test_fmt_total_strips_separators():
+    assert _fmt_total(" 1,234.56 ") == "1234.56"
+    assert _fmt_total(None) == ""
 
 
 # -- worker -----------------------------------------------------------------
@@ -355,14 +479,8 @@ def test_reverify_does_not_clobber_other_reasons(db_factory, monkeypatch):
     doc_id = _seed(db_factory, authenticity_risk="high_risk")
     db = db_factory()
     try:
-        insp = db.scalar(
-            select(DocumentInspection).where(
-                DocumentInspection.document_id == doc_id
-            )
-        )
-        insp.risk_reasons = [
-            {"code": "producer_blocklisted", "severity": "high", "detail_es": "x"}
-        ]
+        insp = db.scalar(select(DocumentInspection).where(DocumentInspection.document_id == doc_id))
+        insp.risk_reasons = [{"code": "producer_blocklisted", "severity": "high", "detail_es": "x"}]
         db.commit()
     finally:
         db.close()
@@ -382,9 +500,7 @@ def test_cache_lookup_failure_falls_open_to_consult(db_factory, monkeypatch):
     # through to a fresh consult (the documented "never raises" contract).
     _enable(monkeypatch, status="no_existe")
     doc_id = _seed(db_factory)
-    monkeypatch.setattr(
-        fv, "_lookup_cache", MagicMock(side_effect=RuntimeError("db down"))
-    )
+    monkeypatch.setattr(fv, "_lookup_cache", MagicMock(side_effect=RuntimeError("db down")))
     db = db_factory()
     try:
         out = fv.verify_document_folio(db, doc_id)
