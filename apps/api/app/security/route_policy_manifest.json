@@ -2915,6 +2915,21 @@
       "notes": ""
     },
     {
+      "method": "POST",
+      "path": "/api/v1/reviewer/documents/{document_id}/verify-folio",
+      "function": "verify_document_folio_endpoint",
+      "router": "app.api.v1.reviewer",
+      "file": "api/app/api/v1/reviewer.py",
+      "gate": "platform_admin_or_ops",
+      "tenant_rule": "cross-tenant (reviewer/admin is global)",
+      "audit_rule": "advisory authenticity re-check; persists a folio_verifications cache row (no AuditLog)",
+      "rate_limit_rule": "none (auth-gated)",
+      "error_lang": "es",
+      "must_change_password_allowed": false,
+      "org_frozen_allowed": false,
+      "notes": "B1 reviewer-triggered SAT CFDI folio verification; flag SAT_CFDI_VERIFICATION_ENABLED (default off)"
+    },
+    {
       "method": "GET",
       "path": "/api/v1/reviewer/submissions/{submission_id}/document",
       "function": "get_submission_document",
