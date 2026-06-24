@@ -16,6 +16,7 @@ import {
   Package,
   ShieldWarning,
   Storefront,
+  Tray,
   X,
   type Icon,
 } from "@phosphor-icons/react";
@@ -99,6 +100,7 @@ const NAV: { href: string; label: string; icon: Icon }[] = [
   { href: "/client/vendors", label: "Proveedores", icon: Storefront },
   { href: "/client/calendar", label: "Calendario", icon: CalendarBlank },
   { href: "/client/submissions", label: "Entregas", icon: Files },
+  { href: "/client/bandeja", label: "Bandeja", icon: Tray },
   { href: "/client/reports", label: "Reportes", icon: ChartLineUp },
   { href: "/client/auditoria", label: "Auditoría", icon: Package },
   { href: "/client/notifications", label: "Notificaciones", icon: Bell },

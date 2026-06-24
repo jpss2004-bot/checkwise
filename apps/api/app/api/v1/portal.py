@@ -1095,6 +1095,25 @@ def complete_onboarding(
     """
     _ = workspace_id  # tenant guard already enforced by dependency
     if workspace.onboarding_completed_at is None:
+        # PROV-01: a provider may not declare their expediente complete while
+        # mandatory documents are still missing. A REQUIRED slot with no
+        # submission at all (SlotState.MISSING) blocks completion; a doc that
+        # is uploaded-but-in-review or rejected does NOT block (the document
+        # exists — CheckWise reviews it asynchronously, and corrections flow
+        # through the normal per-document path).
+        missing_required = [
+            s
+            for s in build_workspace_onboarding_slots(db, workspace)
+            if s.required and s.state == SlotState.MISSING
+        ]
+        if missing_required:
+            raise HTTPException(
+                status.HTTP_409_CONFLICT,
+                detail=(
+                    f"Faltan {len(missing_required)} documento(s) obligatorio(s). "
+                    "Súbelos antes de marcar tu expediente como completo."
+                ),
+            )
         workspace.onboarding_completed_at = utc_now()
         db.flush()
         db.commit()

@@ -348,6 +348,60 @@ def _resolve_client_id(
     )
 
 
+def _holds_live_approver_seat(
+    db: Session, current: CurrentUser, client_id: str
+) -> bool:
+    """Whether the caller may currently WRITE / decide for this client.
+
+    The ``ClientApprover`` dependency authorizes from the JWT's role claims,
+    which stay stale for up to a token lifetime (24h) after a demotion — so a
+    just-demoted Approver could keep mutating the portfolio or recording
+    acceptance decisions until their token expires. This re-checks the LIVE
+    membership: CheckWise staff bypass (they reach client tenants via audited
+    break-glass), otherwise the caller must STILL hold an active
+    ``client_admin`` (Approver) seat in this client's organization.
+    """
+    if bool(STAFF_ROLES & set(current.roles)):
+        # CheckWise staff reach client tenants via audited break-glass; their
+        # staff status is taken from the JWT here (the same tradeoff
+        # ``_resolve_client_id`` already makes). A demoted ex-staff member
+        # keeps access until token expiry — accepted as break-glass is rare
+        # and audited; tighten only if staff demotions must be instant.
+        return True
+    # Mirror the READ visibility semantics (``_visible_client_ids_for_user``):
+    # an active ``client_admin`` seat in ANY organization linked to this client
+    # counts. Don't pin to the canonical org (``org_for_client``) — a legacy
+    # tenant that holds two client orgs would wrongly 403 an Approver whose
+    # seat lives in the non-canonical one.
+    seat = db.scalar(
+        select(Membership.id)
+        .join(Organization, Organization.id == Membership.organization_id)
+        .where(
+            Organization.client_id == client_id,
+            Membership.user_id == current.user.id,
+            Membership.role == MembershipRole.CLIENT_ADMIN.value,
+            Membership.status == "active",
+        )
+    )
+    return seat is not None
+
+
+def _assert_live_client_approver(
+    db: Session, current: CurrentUser, client_id: str
+) -> None:
+    """Raise 403 unless the caller holds a live Approver seat (or is staff).
+    Call AFTER the tenant id is resolved, on every portfolio-mutating and
+    acceptance-decision route, to close the stale-JWT demotion window."""
+    if not _holds_live_approver_seat(db, current, client_id):
+        raise HTTPException(
+            status.HTTP_403_FORBIDDEN,
+            detail=(
+                "Tu acceso de Aprobador cambió. Vuelve a iniciar sesión para "
+                "continuar."
+            ),
+        )
+
+
 def _scoped_workspaces(
     db: Session, client_id: str, *, active_only: bool = False
 ) -> list[ProviderWorkspace]:
@@ -1406,6 +1460,7 @@ def update_client_profile(
     a new compliance officer, so the trail matters).
     """
     target_id = _resolve_client_id(db, current, requested=client_id)
+    _assert_live_client_approver(db, current, target_id)
     row = db.get(Client, target_id)
     if row is None:  # pragma: no cover — defensive
         raise HTTPException(
@@ -2747,6 +2802,7 @@ def client_add_provider(
     )
 
     target_id = _resolve_client_id(db, current, requested=client_id)
+    _assert_live_client_approver(db, current, target_id)
     contact_email = payload.contact_email.strip().lower()
     rfc_value = payload.vendor_rfc.strip().upper()
     is_internal = bool(STAFF_ROLES & set(current.roles))
@@ -2941,6 +2997,7 @@ def _set_provider_archival(
     target_id, vendor = _resolve_client_id_for_vendor(
         db, current, vendor_id=vendor_id, requested=requested_client_id
     )
+    _assert_live_client_approver(db, current, target_id)
     # Archive/restore the vendor + its client-scoped workspace(s) in
     # lock-step so the vendor list, compliance counts and calendar all
     # move together.
@@ -3719,6 +3776,7 @@ def client_submission_decision(
         # cross-tenant client write.
         _audit_cross_tenant_access(db, current, submission.client_id)
 
+    _assert_live_client_approver(db, current, submission.client_id)
     result = apply_client_decision(
         db,
         submission=submission,
@@ -3784,6 +3842,9 @@ def client_bulk_submission_decision(
     visible = set(_visible_client_ids_for_user(db, current.user.id))
 
     seen: set[str] = set()
+    # Live-Approver cache per client (the JWT-claims gate can be stale after a
+    # demotion; re-check the DB once per client_id encountered).
+    approver_ok: dict[str, bool] = {}
     decided: list[str] = []
     failed: list[ClientBulkDecisionItemError] = []
     for sub_id in payload.submission_ids:
@@ -3809,6 +3870,21 @@ def client_bulk_submission_decision(
             # internal_admin break-glass — dedup'd to one row per (admin,
             # client) per 30-min window, so per-item calls are safe.
             _audit_cross_tenant_access(db, current, submission.client_id)
+        if not is_internal_admin:
+            cid = submission.client_id
+            if cid not in approver_ok:
+                approver_ok[cid] = _holds_live_approver_seat(db, current, cid)
+            if not approver_ok[cid]:
+                failed.append(
+                    ClientBulkDecisionItemError(
+                        submission_id=sub_id,
+                        detail=(
+                            "Tu acceso de Aprobador cambió. Vuelve a iniciar "
+                            "sesión para continuar."
+                        ),
+                    )
+                )
+                continue
         try:
             apply_client_decision(
                 db,
@@ -3876,6 +3952,7 @@ def client_set_acceptance_prefs(
     existing backlog — it applies to validity decisions made from here on
     (the reviewer-path hook). Bulk-accept covers catching up the backlog."""
     resolved = _resolve_client_id(db, current, requested=client_id)
+    _assert_live_client_approver(db, current, resolved)
     client = db.get(Client, resolved)
     if client is None:
         raise HTTPException(

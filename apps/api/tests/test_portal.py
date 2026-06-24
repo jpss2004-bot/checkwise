@@ -860,11 +860,121 @@ def test_me_returns_in_progress_after_first_submission(
     assert me.json()["expediente_status"] == "in_progress"
 
 
+def _satisfy_required_onboarding(api_client: TestClient, workspace_id: str) -> None:
+    """PROV-01: insert an APROBADO submission for every REQUIRED onboarding
+    slot so the workspace clears the completion gate. Seeds rows in the same
+    SQLite engine the API uses (via the stashed session factory)."""
+    from app.models import Institution, Period, Requirement, RequirementVersion
+    from app.services.evidence_slots import (
+        SlotState,
+        build_workspace_onboarding_slots,
+    )
+
+    session_factory = api_client.app.state.testing_session  # type: ignore[attr-defined]
+    db = session_factory()
+    try:
+        ws = db.get(ProviderWorkspace, workspace_id)
+        required_codes = [
+            s.slot_key.requirement_code
+            for s in build_workspace_onboarding_slots(db, ws)
+            if s.required
+            and s.state == SlotState.MISSING
+            and s.slot_key.requirement_code
+        ]
+        if not required_codes:
+            return
+        # Onboarding slot-matching keys on the requirement_code STRING (the
+        # in-code expediente catalog), not on Requirement rows — so any valid
+        # FK rows satisfy the NOT NULL columns. Create fillers if the test DB
+        # (schema-only, unseeded) has none.
+        inst = db.scalar(select(Institution).limit(1))
+        if inst is None:
+            inst = Institution(code="sat", name="SAT")
+            db.add(inst)
+            db.flush()
+        req = db.scalar(select(Requirement).limit(1))
+        if req is None:
+            req = Requirement(
+                code="prov01:filler",
+                name="Filler",
+                institution_id=inst.id,
+                load_type="unico",
+                frequency="unico",
+                risk_level="medium",
+                current_version=1,
+            )
+            db.add(req)
+            db.flush()
+        ver = db.scalar(
+            select(RequirementVersion).where(
+                RequirementVersion.requirement_id == req.id
+            )
+        )
+        if ver is None:
+            ver = RequirementVersion(requirement_id=req.id, version=1)
+            db.add(ver)
+            db.flush()
+        period = db.scalar(select(Period).limit(1))
+        if period is None:
+            period = Period(
+                code="ONB", year=2026, period_type="unico", period_key="ONB"
+            )
+            db.add(period)
+            db.flush()
+        for code in required_codes:
+            sub = Submission(
+                client_id=ws.client_id,
+                vendor_id=ws.vendor_id,
+                institution_id=req.institution_id,
+                requirement_id=req.id,
+                requirement_version_id=ver.id,
+                period_id=period.id,
+                status=DocumentStatus.APROBADO.value,
+                load_type="unico",
+                requirement_code=code,
+                period_key=None,
+            )
+            db.add(sub)
+            db.flush()
+            db.add(
+                Document(
+                    submission_id=sub.id,
+                    storage_key=f"local://prov01/{sub.id}.pdf",
+                    original_filename="ok.pdf",
+                    mime_type="application/pdf",
+                    size_bytes=1024,
+                    sha256="d" * 64,
+                    status=DocumentStatus.APROBADO.value,
+                )
+            )
+        db.commit()
+    finally:
+        db.close()
+
+
+def test_complete_onboarding_blocked_when_required_docs_missing(
+    api_client: TestClient,
+) -> None:
+    """PROV-01: a provider may NOT mark their expediente complete while
+    mandatory documents are still missing."""
+    access = _setup_workspace_session(api_client)
+    response = api_client.post(
+        f"/api/v1/portal/workspaces/{access['workspace_id']}/complete-onboarding"
+    )
+    assert response.status_code == 409, response.text
+    assert "obligatorio" in response.json()["detail"].lower()
+    # Still incomplete after the blocked attempt.
+    me = api_client.get("/api/v1/portal/me").json()
+    assert me["onboarding_completed_at"] is None
+
+
 def test_complete_onboarding_marks_workspace_complete(
     api_client: TestClient,
 ) -> None:
-    """POST /complete-onboarding sets the timestamp + flips status."""
+    """POST /complete-onboarding sets the timestamp + flips status once the
+    required documents are present."""
     access = _setup_workspace_session(api_client)
+    _satisfy_required_onboarding(api_client, access["workspace_id"])
     response = api_client.post(
         f"/api/v1/portal/workspaces/{access['workspace_id']}/complete-onboarding"
     )
@@ -883,6 +993,7 @@ def test_complete_onboarding_marks_workspace_complete(
 def test_complete_onboarding_is_idempotent(api_client: TestClient) -> None:
     """Calling complete-onboarding twice keeps the original timestamp."""
     access = _setup_workspace_session(api_client)
+    _satisfy_required_onboarding(api_client, access["workspace_id"])
     first = api_client.post(
         f"/api/v1/portal/workspaces/{access['workspace_id']}/complete-onboarding"
     ).json()
