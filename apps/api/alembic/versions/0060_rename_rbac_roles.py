@@ -127,12 +127,11 @@ def upgrade() -> None:
             "WHERE recipient_role IN ('internal_admin', 'reviewer')"
         )
     )
-    bind.execute(
-        text(
-            "UPDATE audit_log SET actor_type = 'platform_admin' "
-            "WHERE actor_type IN ('internal_admin', 'reviewer')"
-        )
-    )
+    # audit_log.actor_type is intentionally NOT rewritten: the table is
+    # append-only (migration 0031 installs ``checkwise_audit_log_block_mutation``
+    # which RAISEs InsufficientPrivilege on any UPDATE/DELETE), and a forensic
+    # trail should preserve the role each actor actually held at the time. Old
+    # slugs there are display-mapped to "Equipo CheckWise" on the frontend.
 
 
 def downgrade() -> None:
@@ -157,9 +156,5 @@ def downgrade() -> None:
             "WHERE recipient_role = 'platform_admin'"
         )
     )
-    bind.execute(
-        text(
-            "UPDATE audit_log SET actor_type = 'internal_admin' "
-            "WHERE actor_type = 'platform_admin'"
-        )
-    )
+    # audit_log was never rewritten on upgrade (append-only) — nothing to
+    # reverse here.
