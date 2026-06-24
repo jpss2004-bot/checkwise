@@ -362,11 +362,22 @@ def _holds_live_approver_seat(
     ``client_admin`` (Approver) seat in this client's organization.
     """
     if bool(STAFF_ROLES & set(current.roles)):
+        # CheckWise staff reach client tenants via audited break-glass; their
+        # staff status is taken from the JWT here (the same tradeoff
+        # ``_resolve_client_id`` already makes). A demoted ex-staff member
+        # keeps access until token expiry — accepted as break-glass is rare
+        # and audited; tighten only if staff demotions must be instant.
         return True
-    org = org_for_client(db, client_id)
+    # Mirror the READ visibility semantics (``_visible_client_ids_for_user``):
+    # an active ``client_admin`` seat in ANY organization linked to this client
+    # counts. Don't pin to the canonical org (``org_for_client``) — a legacy
+    # tenant that holds two client orgs would wrongly 403 an Approver whose
+    # seat lives in the non-canonical one.
     seat = db.scalar(
-        select(Membership.id).where(
-            Membership.organization_id == org.id,
+        select(Membership.id)
+        .join(Organization, Organization.id == Membership.organization_id)
+        .where(
+            Organization.client_id == client_id,
             Membership.user_id == current.user.id,
             Membership.role == MembershipRole.CLIENT_ADMIN.value,
             Membership.status == "active",

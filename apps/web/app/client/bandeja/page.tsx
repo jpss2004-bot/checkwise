@@ -88,12 +88,21 @@ export default function ClientBandejaPage() {
         { submission_ids: validPendingIds, action: "accept" },
         clientParam,
       );
-      setNotice(
-        `Aceptaste ${res.decided_count} documento${
-          res.decided_count === 1 ? "" : "s"
-        } válido${res.decided_count === 1 ? "" : "s"}.` +
-          (res.failed_count ? ` ${res.failed_count} no se pudieron procesar.` : ""),
-      );
+      if (res.decided_count > 0) {
+        setNotice(
+          `Aceptaste ${res.decided_count} documento${
+            res.decided_count === 1 ? "" : "s"
+          } válido${res.decided_count === 1 ? "" : "s"}.` +
+            (res.failed_count
+              ? ` ${res.failed_count} no se pudieron procesar.`
+              : ""),
+        );
+      } else {
+        // Nothing was accepted (e.g. the Approver seat changed mid-session and
+        // the backend rejected every item) — surface the real reason in the
+        // error banner, not a green "success".
+        setError(res.failed[0]?.detail ?? "No se pudo aceptar ningún documento.");
+      }
       await reload();
     } catch (e) {
       setError(apiErrorDetail(e));
@@ -198,7 +207,9 @@ export default function ClientBandejaPage() {
                     clientId={urlClientId ?? undefined}
                     onDecided={() => {
                       // A decision moves the row off "pending" — drop it from
-                      // the queue so the count + list stay accurate.
+                      // the queue so the count + list stay accurate, and clear
+                      // any stale bulk notice.
+                      setNotice(null);
                       setRows((prev) =>
                         prev
                           ? prev.filter(
