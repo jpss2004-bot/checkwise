@@ -612,6 +612,11 @@ class Settings(BaseSettings):
     # A cached verdict older than this is re-checked on the next reviewer trigger
     # (a vigente CFDI can be cancelled later, so the cache is not permanent).
     SAT_CFDI_CACHE_TTL_HOURS: int = 168
+    # Per-call HTTP timeout for the live SAT consulta (seconds). SAT is
+    # intermittently slow/unavailable; on timeout the client fails open to
+    # not_verifiable. Reviewer-triggered + cached, so this never sits on the
+    # provider upload path.
+    SAT_CFDI_TIMEOUT_SECONDS: int = 15
 
     # env_file anchors to the apps/api root for the same reason the
     # storage paths do (audit 2026-06-12): a CWD-relative ".env" meant a
