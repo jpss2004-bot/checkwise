@@ -53,6 +53,11 @@ from app.services.document_analysis.shadow_runner import (
     run_shadow_analysis,
     run_shadow_analysis_async,
 )
+from app.services.document_folios import (
+    apply_cross_period_reason,
+    apply_cross_tenant_reason,
+    persist_document_folios,
+)
 from app.services.document_forensics import (
     analyze_pdf_forensics,
     rollup_authenticity_risk,
@@ -852,6 +857,30 @@ def finalize_intake_submission(
         )
     )
 
+    # Phase 3 — cross-tenant recycled-document detection (first consumer of the
+    # document_folios index). Advisory + fail-open: merges a MEDIUM authenticity
+    # reason when this document's CFDI UUID already exists under another client;
+    # never blocks intake or changes the user-visible status.
+    authenticity_risk, risk_reasons = apply_cross_tenant_reason(
+        db,
+        client_id=client.id,
+        verification=verification_payload,
+        detected_institution=document_signals.detected_institution,
+        authenticity_risk=authenticity_risk,
+        risk_reasons=risk_reasons,
+    )
+
+    # Cross-period folio-reuse detection (advisory HIGH, fail-open): the same
+    # provider's CFDI UUID reused in a different period.
+    authenticity_risk, risk_reasons = apply_cross_period_reason(
+        db,
+        vendor_id=vendor.id,
+        period_id=resolved_period.period.id,
+        verification=verification_payload,
+        authenticity_risk=authenticity_risk,
+        risk_reasons=risk_reasons,
+    )
+
     inspection = DocumentInspection(
         document_id=document.id,
         is_pdf=pdf_inspection.is_pdf,
@@ -881,6 +910,26 @@ def finalize_intake_submission(
         verification=verification_payload,
     )
     db.add(inspection)
+
+    # Phase 2 — promote the extracted folio/UUID anchors into the indexed
+    # ``document_folios`` table. SAVEPOINT-isolated + fail-open: a folio
+    # persistence error rolls back only the nested transaction and never
+    # blocks the upload (mirrors the other intake side-effects).
+    try:
+        with db.begin_nested():
+            persist_document_folios(
+                db,
+                document_id=document.id,
+                client_id=client.id,
+                vendor_id=vendor.id,
+                period_id=resolved_period.period.id,
+                verification=verification_payload,
+            )
+    except Exception:  # noqa: BLE001 — folio indexing must never block intake
+        logger.exception(
+            "document_folios population failed (non-fatal) for document %s",
+            document.id,
+        )
 
     signals = build_initial_validations(
         stored_file,
@@ -1735,6 +1784,26 @@ def finalize_multi_document_submission(
             )
         )
 
+        # Phase 3 — cross-tenant recycled-document detection (advisory,
+        # fail-open; see the single-file path).
+        authenticity_risk, risk_reasons = apply_cross_tenant_reason(
+            db,
+            client_id=client.id,
+            verification=verification_payload,
+            detected_institution=document_signals.detected_institution,
+            authenticity_risk=authenticity_risk,
+            risk_reasons=risk_reasons,
+        )
+        # Cross-period folio-reuse detection (advisory HIGH, fail-open).
+        authenticity_risk, risk_reasons = apply_cross_period_reason(
+            db,
+            vendor_id=vendor.id,
+            period_id=resolved_period.period.id,
+            verification=verification_payload,
+            authenticity_risk=authenticity_risk,
+            risk_reasons=risk_reasons,
+        )
+
         inspection_row = DocumentInspection(
             document_id=document.id,
             is_pdf=pdf_inspection.is_pdf,
@@ -1764,6 +1833,24 @@ def finalize_multi_document_submission(
             verification=verification_payload,
         )
         db.add(inspection_row)
+
+        # Phase 2 — folio/UUID anchors → indexed ``document_folios`` (see the
+        # single-file path). SAVEPOINT-isolated + fail-open per document.
+        try:
+            with db.begin_nested():
+                persist_document_folios(
+                    db,
+                    document_id=document.id,
+                    client_id=client.id,
+                    vendor_id=vendor.id,
+                    period_id=resolved_period.period.id,
+                    verification=verification_payload,
+                )
+        except Exception:  # noqa: BLE001 — folio indexing must never block intake
+            logger.exception(
+                "document_folios population failed (non-fatal) for document %s",
+                document.id,
+            )
 
         signals = build_initial_validations(
             stored,

@@ -573,6 +573,46 @@ class Settings(BaseSettings):
     AUTO_APPROVE_UNLOCKED_REQUIREMENT_CODES: str = ""
     AUTO_APPROVE_MIN_CONFIDENCE: float = 0.97
 
+    # Cross-tenant recycled-document detection (first consumer of the
+    # document_folios index). OFF by default. When ON, intake flags — as an
+    # advisory MEDIUM authenticity reason — a SAT/IMSS document whose CFDI
+    # fiscal UUID already appears under a DIFFERENT client (a strong
+    # recycled-document signal: the UUID is unique per invoice and survives a
+    # re-export where the file sha256 does not). Count-only (never exposes
+    # which/whose tenants); never blocks intake or changes the document status.
+    CROSS_TENANT_RECYCLED_DETECTION_ENABLED: bool = False
+
+    # Cross-period folio-reuse detection (also a document_folios consumer). OFF
+    # by default. When ON, intake flags — as an advisory HIGH authenticity
+    # reason — a document whose CFDI fiscal UUID was already submitted by the
+    # SAME provider in a DIFFERENT period (an invoice can't satisfy two periods,
+    # so reuse across periods is a strong self-recycling signal). Count-only;
+    # never blocks intake or changes the document status.
+    CROSS_PERIOD_REUSE_DETECTION_ENABLED: bool = False
+
+    # B1 — live SAT CFDI folio verification (the moat). A reviewer-triggered
+    # (NEVER intake-blocking) check that asks SAT whether a document's CFDI
+    # fiscal UUID is vigente / cancelado / no_existe, caching the verdict in
+    # ``folio_verifications`` keyed by (cfdi_uuid, emisor_rfc, receptor_rfc).
+    # OFF by default → the worker is a no-op. FAIL-OPEN-TO-REVIEW: only a
+    # cancelado/no_existe result elevates the authenticity verdict (HIGH reason
+    # ``folio_not_found_at_sat``); vigente and not_verifiable NEVER downgrade a
+    # verdict to clean. It never changes the user-visible document status.
+    SAT_CFDI_VERIFICATION_ENABLED: bool = False
+    # Client mode. ``stub`` (default) makes ZERO network calls — it returns a
+    # canned status (``SAT_CFDI_STUB_STATUS``) so the table + worker + verdict
+    # plumbing can be exercised end-to-end without contacting SAT. ``live``
+    # selects ``LiveSATCFDIClient`` — but wiring the real SAT SOAP/REST call AND
+    # accepting the SAT terms of service is an explicit OPERATOR/LEGAL decision;
+    # the live client is a documented skeleton that raises until implemented.
+    SAT_CFDI_CLIENT_MODE: str = "stub"
+    # Canned status the stub returns (vigente | cancelado | no_existe |
+    # not_verifiable). Lets an operator dry-run the verdict plumbing per status.
+    SAT_CFDI_STUB_STATUS: str = "not_verifiable"
+    # A cached verdict older than this is re-checked on the next reviewer trigger
+    # (a vigente CFDI can be cancelled later, so the cache is not permanent).
+    SAT_CFDI_CACHE_TTL_HOURS: int = 168
+
     # env_file anchors to the apps/api root for the same reason the
     # storage paths do (audit 2026-06-12): a CWD-relative ".env" meant a
     # server launched from the repo root silently ran with default
