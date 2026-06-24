@@ -138,6 +138,7 @@ from app.services.evidence_slots import (
     current_onboarding_submission_for_workspace,
     current_submission_for_slot,
 )
+from app.services.intake_queue import enqueue_intake_job
 from app.services.portal_session import (
     PortalSessionError,
     issue_portal_session_token,
@@ -151,6 +152,7 @@ from app.services.submission_service import (
     assert_pdf_upload,
     finalize_intake_submission,
     finalize_intake_submission_background,
+    finalize_intake_submission_background_async,
     finalize_multi_document_submission,
     get_or_create_institution,
     persist_intake_receipt,
@@ -3031,12 +3033,31 @@ async def create_workspace_submission(
     # once the response is flushed (and is re-run by the reconcile cron if
     # this worker dies mid-flight), so a scheduling concern is never
     # masked as a storage failure.
-    background_tasks.add_task(
-        finalize_intake_submission_background,
-        submission_id=receipt.submission_id,
-        storage_key=receipt.storage_key,
-        intake_source=INTAKE_SOURCE_WORKSPACE_PORTAL,
-    )
+    # B2 — durable intake queue. When enabled, persist a durable job (committed)
+    # for a separate worker to drain via the idempotent finalize, and do NOT
+    # schedule an in-process BackgroundTask (which a dyno restart would lose).
+    if settings.INTAKE_QUEUE_CONSUMER_ENABLED:
+        await run_in_threadpool(
+            enqueue_intake_job,
+            submission_id=receipt.submission_id,
+            storage_key=receipt.storage_key,
+            intake_source=INTAKE_SOURCE_WORKSPACE_PORTAL,
+        )
+    else:
+        # A3 — when the async provider is enabled, schedule the async finalize
+        # sibling so the heavy sync work runs in a worker thread and the 30–90s
+        # LLM wait yields the event loop instead of pinning a threadpool thread.
+        _finalize_background = (
+            finalize_intake_submission_background_async
+            if settings.DOCUMENT_ANALYSIS_ASYNC_PROVIDER_ENABLED
+            else finalize_intake_submission_background
+        )
+        background_tasks.add_task(
+            _finalize_background,
+            submission_id=receipt.submission_id,
+            storage_key=receipt.storage_key,
+            intake_source=INTAKE_SOURCE_WORKSPACE_PORTAL,
+        )
     return SubmissionResponse(
         submission_id=receipt.submission_id,
         document_id=receipt.document_id,

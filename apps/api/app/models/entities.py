@@ -514,6 +514,47 @@ class DocumentStatusHistory(Base):
     document: Mapped[Document] = relationship(back_populates="status_history")
 
 
+class IntakeQueueJob(TimestampMixin, Base):
+    """B2 — a durable intake-finalize job.
+
+    The async-intake endpoint persists a ``recibido`` receipt then schedules the
+    heavy back-half (PDF inspection, forensics, QR, status derivation, metadata
+    export, shadow analysis) as an in-process FastAPI BackgroundTask — which is
+    lost if the dyno restarts mid-flight. When ``INTAKE_QUEUE_CONSUMER_ENABLED``
+    is on, the endpoint instead enqueues one of these rows (committed with the
+    receipt) and a separate worker consuming the queue runs the already-idempotent
+    ``finalize_intake_submission_background``.
+
+    One job per submission (``submission_id`` UNIQUE) — enqueue is insert-if-absent
+    so a retried request never duplicates work. ``status`` is
+    ``pending`` | ``claimed`` | ``done`` | ``failed``. ``available_at`` gates both
+    the initial pickup and retry backoff; a ``claimed`` job whose worker died is
+    reclaimed once ``claimed_at`` is older than the visibility timeout. The
+    ``(status, available_at)`` index drives the claim query.
+    """
+
+    __tablename__ = "intake_queue"
+    __table_args__ = (
+        UniqueConstraint("submission_id", name="uq_intake_queue_submission"),
+        Index("ix_intake_queue_claim", "status", "available_at"),
+    )
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=new_id)
+    submission_id: Mapped[str] = mapped_column(
+        ForeignKey("submissions.id"), nullable=False
+    )
+    storage_key: Mapped[str] = mapped_column(String(512), nullable=False)
+    intake_source: Mapped[str] = mapped_column(String(40), nullable=False)
+    status: Mapped[str] = mapped_column(String(20), default="pending", nullable=False)
+    attempts: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+    available_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=utc_now, nullable=False
+    )
+    claimed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    claimed_by: Mapped[str | None] = mapped_column(String(80))
+    last_error: Mapped[str | None] = mapped_column(Text)
+
+
 class ProviderWorkspace(TimestampMixin, Base):
     """Demo-grade provider session/workspace tying a vendor to a client+contract.
 

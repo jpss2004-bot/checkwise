@@ -234,6 +234,27 @@ class Settings(BaseSettings):
     # ``SessionLocal``.
     INTAKE_ASYNC_FINALIZE: bool = True
 
+    # B2 — durable intake queue. The async-finalize path schedules the heavy
+    # back-half as an in-process FastAPI BackgroundTask, which is lost if the web
+    # dyno restarts mid-flight (the reconcile cron is the only backstop). When
+    # ``INTAKE_QUEUE_CONSUMER_ENABLED`` is on, the upload endpoint instead
+    # ENQUEUES a durable ``intake_queue`` row (committed with the receipt) and a
+    # separate worker process consuming the queue runs the ALREADY-idempotent
+    # ``finalize_intake_submission_background`` — so finalize/shadow/metadata move
+    # off the web tier entirely and survive a restart. OFF by default → the
+    # in-process BackgroundTask path is unchanged. PROVISIONING the worker service
+    # (e.g. a Render worker running ``scripts/run_intake_queue_consumer.py``) is
+    # the operator/infra step. Pairs with the Redis fail-closed boot guard to make
+    # multi-worker scaling safe.
+    INTAKE_QUEUE_CONSUMER_ENABLED: bool = False
+    # A claimed job whose worker died is reclaimed after this many minutes
+    # (visibility timeout) so a crash never strands a job ``claimed`` forever.
+    INTAKE_QUEUE_CLAIM_TIMEOUT_MINUTES: int = 15
+    # Give up (status ``failed``) after this many finalize attempts.
+    INTAKE_QUEUE_MAX_ATTEMPTS: int = 5
+    # How many jobs one consumer poll claims at once.
+    INTAKE_QUEUE_BATCH_SIZE: int = 10
+
     # Catalog v2 (2026-05-20) — collapsed recurring catalog feature flag.
     # When True, ``recurring_for_year_v2`` is the authoritative
     # generator: each (institution, period) pair becomes ONE
@@ -379,6 +400,76 @@ class Settings(BaseSettings):
     # Exhaustion skips the escalation gracefully (triage result stands).
     DOCUMENT_ANALYSIS_ESCALATION_DAILY_CAP_PER_ORG: int = 50
 
+    # High-stakes (alto/crítico) escalation gate. OFF by default = current
+    # behavior: every alto/crítico upload gets the deep escalation pass. When ON,
+    # alto/crítico escalates ONLY when triage is actually unsure (no confidence,
+    # or confidence below ``..._HIGH_STAKES_ESCALATION_CONFIDENCE``) or a
+    # per-document signal already fired (LLM flags / intake forensics risk) — a
+    # clean, confident triage on a recurring high-stakes doc no longer burns a
+    # Sonnet call + the escalation cap. Even when OFF the runner LOGS every
+    # risk-level-only escalation so an operator can size the saving first.
+    DOCUMENT_ANALYSIS_GATE_HIGH_STAKES_ESCALATION: bool = False
+    DOCUMENT_ANALYSIS_HIGH_STAKES_ESCALATION_CONFIDENCE: float = 0.85
+    # CSV of org (client) ids that ALWAYS get the deep pass on alto/crítico,
+    # bypassing the gate — for cohorts the business wants deep on every doc.
+    DOCUMENT_ANALYSIS_ALWAYS_ESCALATE_ORG_IDS: str = ""
+
+    # A1 — triage-skip. The always-on cheap triage (Haiku) is an INDEPENDENT
+    # second opinion, not a redundant re-extraction. When the deterministic
+    # intake signal is already confidently clean + aligned + clean-forensics on
+    # a NON-high-stakes requirement, that second opinion is the least likely to
+    # change anything — so OFF by default, but when an operator opts in the
+    # runner skips it (saving the Haiku call + the daily-cap slot). The skip
+    # genuinely FORGOES the model's advisory escalation/elevation (a container-
+    # clean doc the model might still flag as a content forgery no longer draws
+    # the deep pass or the advisory ``suspicious`` shadow verdict) — that is the
+    # accepted tradeoff, NOT a no-op. Skips never touch the deterministic
+    # verdict, never trigger auto-approval, and leave the row reprocess-eligible
+    # (no shadow_* completion columns are stamped). A sampled fraction is
+    # analyzed ANYWAY so heuristic-vs-AI agreement can be measured before
+    # widening the skip.
+    DOCUMENT_ANALYSIS_TRIAGE_SKIP_ENABLED: bool = False
+    # Heuristic requirement-match confidence floor to qualify for a skip. The
+    # intake confidence is CAPPED by every misalignment (identity ≤0.49/0.65,
+    # rfc-absent/period ≤0.69, type/institution ≤0.35/0.45), so a high floor
+    # already implies aligned + no mismatch.
+    DOCUMENT_ANALYSIS_TRIAGE_SKIP_MIN_CONFIDENCE: float = 0.85
+    # Fraction (0..1) of skip-ELIGIBLE documents that are analyzed ANYWAY so the
+    # heuristic's skip decision can be validated against the AI (recorded as a
+    # ``triage_skip_sample`` ValidationEvent). 0.05 = monitor ~5%. 0.0 = skip
+    # every eligible doc (no monitoring); 1.0 = never skip, always analyze +
+    # always record agreement (an effective dry-run of the skip predicate).
+    DOCUMENT_ANALYSIS_TRIAGE_SKIP_SAMPLING_RATE: float = 0.05
+
+    # A2 — global Anthropic concurrency ceiling + circuit breaker. The per-org
+    # daily caps never see the REAL per-worker constraint: how many 30–90s LLM
+    # calls are in flight on this process at once, and whether the upstream is
+    # already failing. OFF by default (``..._ENABLED=False`` → the provider call
+    # is byte-for-byte unwrapped). When ON, a process-global bounded semaphore
+    # admits at most ``ANTHROPIC_MAX_CONCURRENT_REQUESTS`` concurrent
+    # ``messages.create`` calls (others wait up to ``..._ACQUIRE_TIMEOUT_SECONDS``
+    # then fast-fail as ``shadow_error="concurrency_exhausted"``), and a breaker
+    # opens after ``..._FAILURE_THRESHOLD`` CONSECUTIVE call failures, fast-
+    # failing every call as ``breaker_open`` for ``..._COOLDOWN_SECONDS`` so a
+    # broken upstream is not hammered. Fail-open: every fast-fail is just a
+    # shadow_error (advisory) — the deterministic verdict/status never changes.
+    ANTHROPIC_CONCURRENCY_BREAKER_ENABLED: bool = False
+    ANTHROPIC_MAX_CONCURRENT_REQUESTS: int = 4
+    ANTHROPIC_CONCURRENCY_ACQUIRE_TIMEOUT_SECONDS: float = 30.0
+    ANTHROPIC_BREAKER_FAILURE_THRESHOLD: int = 5
+    ANTHROPIC_BREAKER_COOLDOWN_SECONDS: float = 30.0
+
+    # A3 — async provider path. The shadow runner is a FastAPI BackgroundTask;
+    # the sync Anthropic client blocks a Starlette threadpool thread for the
+    # full 30–90s LLM wait, so a burst of uploads starves the bounded threadpool
+    # and the whole web dyno "feels frozen". OFF by default = the sync path runs
+    # exactly as before. When ON, the runner awaits an AsyncAnthropic client so
+    # the long LLM wait yields the event loop, and the surrounding sync DB work
+    # is offloaded to a worker thread — the thread is freed during the wait
+    # rather than pinned. Pure transport change: identical AnalysisResult, no
+    # verdict/status change, fail-open preserved.
+    DOCUMENT_ANALYSIS_ASYNC_PROVIDER_ENABLED: bool = False
+
     # Phase 0 (comprehension) — the escalation/deep tier reasons about the
     # document instead of single-pass extracting it: adaptive thinking +
     # ``effort=high`` + structured outputs need more room and time than the
@@ -408,6 +499,19 @@ class Settings(BaseSettings):
     # triggers one). Keeps active expedientes from re-assessing on every
     # uploaded document.
     DOCUMENT_ANALYSIS_EXPEDIENTE_DEBOUNCE_HOURS: int = 6
+
+    # B3 — expediente-first batching. On a BUNDLED period submission (one
+    # submission with several documents) each document's deep escalation is its
+    # own Sonnet call. When this is on (AND the expediente feature is on, so the
+    # deep analysis is NOT lost — it moves to the bundle pass), the per-document
+    # deep escalation is SKIPPED in favour of the single cross-document
+    # expediente pass that already runs per (client, vendor, period). OFF by
+    # default → every document still gets its own per-doc escalation. It never
+    # defers when the expediente feature is off (that would drop deep analysis),
+    # so the per-doc shadow flow is never regressed. Triage + the local image
+    # forensics still run per document; only the per-doc deep LLM pass is
+    # coalesced.
+    DOCUMENT_ANALYSIS_BATCH_ESCALATION_ENABLED: bool = False
 
     # Phase 3 — pilot-cohort allowlist. CSV of ``client.id`` values
     # that are allowed to receive shadow analysis. Empty string (the

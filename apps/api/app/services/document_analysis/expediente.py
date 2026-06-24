@@ -299,6 +299,30 @@ def _recently_assessed(
     return row is not None
 
 
+def recently_assessed(
+    db: Any,
+    *,
+    client_id: str,
+    vendor_id: str,
+    period_id: str,
+    within_hours: int,
+) -> bool:
+    """Public alias of :func:`_recently_assessed`.
+
+    B3's batch-escalation guard uses it to confirm the after-deep-run expediente
+    trigger would actually RUN (vs be debounced) before deferring a document's
+    per-doc deep pass to it — so the bundle's deep analysis is never lost to the
+    debounce window.
+    """
+    return _recently_assessed(
+        db,
+        client_id=client_id,
+        vendor_id=vendor_id,
+        period_id=period_id,
+        within_hours=within_hours,
+    )
+
+
 def _load_context(
     db: Any,
     *,
