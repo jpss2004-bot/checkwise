@@ -37,8 +37,9 @@ running on prod.
 
 from __future__ import annotations
 
-from alembic import op
 from sqlalchemy import text
+
+from alembic import op
 
 revision = "0060_rename_rbac_roles"
 down_revision = "0059_client_acceptance_axis"
