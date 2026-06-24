@@ -1,7 +1,7 @@
 """Add intake_queue — durable intake-finalize job queue (B2).
 
-Revision ID: 0061_intake_queue
-Revises: 0055_perf_indexes_trgm_search_and_renewals
+Revision ID: 0063_intake_queue
+Revises: 0062_folio_verifications
 Create Date: 2026-06-23
 
 The async-intake endpoint schedules the heavy back-half (PDF inspection,
@@ -33,8 +33,8 @@ import sqlalchemy as sa
 
 from alembic import op
 
-revision = "0061_intake_queue"
-down_revision = "0055_perf_indexes_trgm_search_and_renewals"
+revision = "0063_intake_queue"
+down_revision = "0062_folio_verifications"
 branch_labels = None
 depends_on = None
 

@@ -1,7 +1,7 @@
 """Add document_folios — indexed projection of folio / fiscal-UUID anchors.
 
-Revision ID: 0059_document_folio_index
-Revises: 0055_perf_indexes_trgm_search_and_renewals
+Revision ID: 0061_document_folio_index
+Revises: 0060_rename_rbac_roles
 Create Date: 2026-06-23
 
 The Phase-B verification extractor already pulls each document's folio anchors
@@ -43,8 +43,8 @@ import sqlalchemy as sa
 
 from alembic import op
 
-revision = "0059_document_folio_index"
-down_revision = "0055_perf_indexes_trgm_search_and_renewals"
+revision = "0061_document_folio_index"
+down_revision = "0060_rename_rbac_roles"
 branch_labels = None
 depends_on = None
 

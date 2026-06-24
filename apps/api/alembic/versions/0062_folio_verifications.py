@@ -1,7 +1,7 @@
 """Add folio_verifications — cache of live SAT CFDI consulta verdicts (B1).
 
-Revision ID: 0060_folio_verifications
-Revises: 0059_document_folio_index
+Revision ID: 0062_folio_verifications
+Revises: 0061_document_folio_index
 Create Date: 2026-06-23
 
 The B1 "live SAT folio verification" moat caches, per
@@ -34,8 +34,8 @@ import sqlalchemy as sa
 
 from alembic import op
 
-revision = "0060_folio_verifications"
-down_revision = "0059_document_folio_index"
+revision = "0062_folio_verifications"
+down_revision = "0061_document_folio_index"
 branch_labels = None
 depends_on = None
 

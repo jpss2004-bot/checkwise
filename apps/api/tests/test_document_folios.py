@@ -623,10 +623,10 @@ def test_apply_cross_period_elevates_to_high(db_factory, monkeypatch) -> None:
 
 def test_migration_chains_off_base_head() -> None:
     path = Path(__file__).resolve().parents[1] / (
-        "alembic/versions/0059_document_folio_index.py"
+        "alembic/versions/0061_document_folio_index.py"
     )
     spec = importlib.util.spec_from_file_location("m0059", path)
     mod = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(mod)
-    assert mod.revision == "0059_document_folio_index"
+    assert mod.revision == "0061_document_folio_index"
     assert mod.down_revision == "0055_perf_indexes_trgm_search_and_renewals"
