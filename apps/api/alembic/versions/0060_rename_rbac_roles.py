@@ -92,15 +92,22 @@ def upgrade() -> None:
             seen_groups.add(key)
             keep_ids[mid] = target
 
-    for mid, target in keep_ids.items():
-        bind.execute(
-            text("UPDATE memberships SET role = :role WHERE id = :id"),
-            {"role": target, "id": mid},
-        )
+    # Delete the superseded duplicates BEFORE retargeting the kept row.
+    # Migration 0044 backfilled a ``platform_admin`` row onto every
+    # ``internal_admin``, so a (user, org) staff group usually ALREADY holds a
+    # ``platform_admin`` row. Updating the kept row to ``platform_admin``
+    # first would collide with that not-yet-deleted duplicate on
+    # ``uq_memberships_user_org_role``. Deleting the drops first frees the
+    # (user, org, role) slot so the retarget is safe.
     if drop_ids:
         bind.execute(
             text("DELETE FROM memberships WHERE id = ANY(:ids)"),
             {"ids": drop_ids},
+        )
+    for mid, target in keep_ids.items():
+        bind.execute(
+            text("UPDATE memberships SET role = :role WHERE id = :id"),
+            {"role": target, "id": mid},
         )
 
     # ---- Denormalized role snapshots (display/filter consistency) ----
