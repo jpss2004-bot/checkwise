@@ -278,6 +278,30 @@ services:
       - key: AUTO_APPROVE_UNLOCKED_REQUIREMENT_CODES
         value: ""
 
+      # ---- Tier A — AI/shadow-pipeline efficiency (activated 2026-06-24) ----
+      # The "pure efficiency, lowest risk" tier from the pipeline-improvement
+      # roadmap (merged via PR #40). All three are additive, advisory-path
+      # only (they never change a user-visible verdict), got an adversarial
+      # review, and are independently reversible — flip any back to "false"
+      # and redeploy to roll it off. B3/B2/B1 stay OFF deliberately: B3 is
+      # inert without DOCUMENT_ANALYSIS_EXPEDIENTE_ENABLED (a separate LLM-cost
+      # call), B2 needs the intake-queue consumer worker provisioned, and B1
+      # needs LiveSATCFDIClient + SAT ToS before SAT_CFDI_CLIENT_MODE=live.
+      #
+      # A1 — skip the always-on Haiku triage on confidently-clean, born-digital,
+      # non-high-stakes, never-analyzed intake (leaves shadow_* NULL =
+      # reprocess-eligible; a 5% sample still runs triage to measure agreement).
+      - key: DOCUMENT_ANALYSIS_TRIAGE_SKIP_ENABLED
+        value: "true"
+      # A2 — process-global Anthropic concurrency ceiling + circuit breaker
+      # around messages.create (protective; 4xx-neutral, half-open bounded).
+      - key: ANTHROPIC_CONCURRENCY_BREAKER_ENABLED
+        value: "true"
+      # A3 — AsyncAnthropic path so 30–90s LLM waits stop pinning the
+      # threadpool (shadow analysis + intake finalize run async).
+      - key: DOCUMENT_ANALYSIS_ASYNC_PROVIDER_ENABLED
+        value: "true"
+
   # ──────────────────────────────────────────────────────────────────
   # Phase 6 / Slice 6C — Renewal reminder cron
   # ──────────────────────────────────────────────────────────────────
