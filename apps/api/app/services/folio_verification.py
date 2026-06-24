@@ -30,6 +30,7 @@ from __future__ import annotations
 import logging
 from dataclasses import dataclass
 from datetime import UTC
+from urllib.parse import parse_qs, urlparse
 
 from sqlalchemy import select
 from sqlalchemy.orm import Session
@@ -68,13 +69,9 @@ logger = logging.getLogger(__name__)
 FOLIO_SAT_REASON_CODE = "folio_not_found_at_sat"
 
 _REASON_DETAIL = {
-    STATUS_CANCELADO: (
-        "SAT reporta el CFDI como CANCELADO — el comprobante no es válido."
-    ),
+    STATUS_CANCELADO: ("SAT reporta el CFDI como CANCELADO — el comprobante no es válido."),
     # default (no_existe / anything else invalidating)
-    "_default": (
-        "SAT no encuentra el CFDI (no existe) — folio fiscal no verificable como válido."
-    ),
+    "_default": ("SAT no encuentra el CFDI (no existe) — folio fiscal no verificable como válido."),
 }
 
 
@@ -84,6 +81,7 @@ class _FolioInputs:
     cfdi_uuid: str
     emisor_rfc: str
     receptor_rfc: str
+    total: str | None = None
 
 
 def verify_document_folio(
@@ -114,9 +112,7 @@ def verify_document_folio(
 
     try:
         cached = _lookup_cache(db, inputs)
-        cache_fresh = (
-            cached is not None and not force_refresh and not _is_stale(cached)
-        )
+        cache_fresh = cached is not None and not force_refresh and not _is_stale(cached)
     except Exception:  # noqa: BLE001 — a cache-read failure must not crash the worker
         logger.exception("Folio cache lookup failed; treating as miss. document_id=%s", document_id)
         db.rollback()
@@ -153,11 +149,47 @@ def verify_document_folio(
     }
 
 
-def _gather_inputs(db: Session, document_id: str) -> _FolioInputs | None:
-    """Resolve (cfdi_uuid, emisor_rfc, receptor_rfc) for a document.
+def _sat_qr_params(verification: dict | None, cfdi_uuid: str) -> dict | None:
+    """Pull (re, rr, tt) from the CFDI's own SAT verification QR, if present.
 
-    cfdi_uuid comes from the indexed ``document_folios`` projection. The emisor
-    is the provider (vendor) and the receptor is the client — the common case
+    The SAT QR encodes exactly the ``?re=&rr=&tt=&id=`` *expresión impresa* that
+    SAT's own verifier consumes, so its ``tt`` is SAT-canonical by construction —
+    far more reliable than guessing a total format. We match the QR whose ``id``
+    equals this document's CFDI UUID and require ``re``/``rr`` to be present.
+    Returns ``None`` when no matching CFDI QR was decoded.
+    """
+    if not isinstance(verification, dict) or not cfdi_uuid:
+        return None
+    target = cfdi_uuid.strip().upper()
+    for qr in verification.get("qr_codes") or []:
+        if not isinstance(qr, dict):
+            continue
+        content = qr.get("content")
+        if not isinstance(content, str) or not content:
+            continue
+        try:
+            query = parse_qs(urlparse(content).query)
+        except ValueError:
+            continue
+        flat = {k.lower(): v[0] for k, v in query.items() if v}
+        if (flat.get("id") or "").strip().upper() != target:
+            continue
+        re_rfc = normalize_rfc(flat.get("re") or "") or ""
+        rr_rfc = normalize_rfc(flat.get("rr") or "") or ""
+        if not (re_rfc and rr_rfc):
+            continue
+        return {"re": re_rfc, "rr": rr_rfc, "tt": (flat.get("tt") or "").strip() or None}
+    return None
+
+
+def _gather_inputs(db: Session, document_id: str) -> _FolioInputs | None:
+    """Resolve (cfdi_uuid, emisor_rfc, receptor_rfc, total) for a document.
+
+    cfdi_uuid comes from the indexed ``document_folios`` projection. When the
+    document carries the CFDI's own SAT verification QR, we take emisor/receptor
+    /total straight from that QR's *expresión* — the canonical SAT query string
+    (correct ``tt`` format by construction). Otherwise we fall back to the
+    provider (vendor) emisor + client receptor with no total, the common case
     for a provider's CFDI issued to its client. RFCs are normalized; a missing
     one becomes ``""`` (the SAT consulta would then return not_verifiable).
     """
@@ -174,19 +206,38 @@ def _gather_inputs(db: Session, document_id: str) -> _FolioInputs | None:
     emisor_rfc = normalize_rfc(row[0]) or ""
     receptor_rfc = normalize_rfc(row[1]) or ""
 
-    cfdi_uuid = db.scalar(
-        select(DocumentFolio.value)
-        .where(
-            DocumentFolio.document_id == document_id,
-            DocumentFolio.kind == "cfdi_uuid",
+    cfdi_uuid = (
+        (
+            db.scalar(
+                select(DocumentFolio.value)
+                .where(
+                    DocumentFolio.document_id == document_id,
+                    DocumentFolio.kind == "cfdi_uuid",
+                )
+                .limit(1)
+            )
+            or ""
         )
-        .limit(1)
+        .strip()
+        .upper()
     )
+
+    # Prefer the CFDI's own SAT QR expresión (re/rr/tt) when present — it's the
+    # exact canonical string SAT consumes, so the total format is correct.
+    total: str | None = None
+    verification = db.scalar(
+        select(DocumentInspection.verification).where(DocumentInspection.document_id == document_id)
+    )
+    qr = _sat_qr_params(verification, cfdi_uuid)
+    if qr is not None:
+        emisor_rfc, receptor_rfc, total = qr["re"], qr["rr"], qr["tt"]
+
     return _FolioInputs(
         document_id=document_id,
-        cfdi_uuid=(cfdi_uuid or "").strip().upper(),
+        cfdi_uuid=cfdi_uuid,
         emisor_rfc=emisor_rfc,
         receptor_rfc=receptor_rfc,
+        total=total,
     )
 
 
@@ -218,6 +269,7 @@ def _consultar(inputs: _FolioInputs) -> SATConsultaResult:
             cfdi_uuid=inputs.cfdi_uuid,
             emisor_rfc=inputs.emisor_rfc,
             receptor_rfc=inputs.receptor_rfc,
+            total=inputs.total,
         )
     except Exception as exc:  # noqa: BLE001 — fail-open-to-review on any client error
         logger.exception("SAT CFDI consulta failed; falling open to not_verifiable.")
@@ -228,9 +280,7 @@ def _consultar(inputs: _FolioInputs) -> SATConsultaResult:
         )
     if result.status not in VALID_STATUSES:
         logger.warning("SAT client returned unknown status %r; not_verifiable.", result.status)
-        return SATConsultaResult(
-            status=STATUS_NOT_VERIFIABLE, source=result.source, raw=result.raw
-        )
+        return SATConsultaResult(status=STATUS_NOT_VERIFIABLE, source=result.source, raw=result.raw)
     return result
 
 
