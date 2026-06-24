@@ -629,4 +629,5 @@ def test_migration_chains_off_base_head() -> None:
     mod = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(mod)
     assert mod.revision == "0061_document_folio_index"
-    assert mod.down_revision == "0055_perf_indexes_trgm_search_and_renewals"
+    # Rechained onto main's head at integration (was 0055 on the folio branch).
+    assert mod.down_revision == "0060_rename_rbac_roles"
