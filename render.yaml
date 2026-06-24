@@ -313,16 +313,18 @@ services:
         value: "true"
       - key: DOCUMENT_ANALYSIS_BATCH_ESCALATION_ENABLED
         value: "true"
-      # B1 — SAT CFDI folio verification. STUB mode is the only safe prod mode
-      # today: it makes the reviewer verify-folio endpoint available but every
-      # call returns ``not_verifiable`` (fail-open — never changes a document).
-      # DO NOT set SAT_CFDI_CLIENT_MODE=live until LiveSATCFDIClient.consultar
-      # is implemented AND SAT's ToS is accepted (eng + legal step) — live mode
-      # raises by design. Mode pinned to stub explicitly to prevent drift.
+      # B1 — SAT CFDI folio verification. LIVE as of 2026-06-24: both gates are
+      # cleared — LiveSATCFDIClient.consultar is implemented (PR #42) with the
+      # SAT expresión (re/rr/tt) sourced from the CFDI's own QR (PR #43), and
+      # SAT's ToS is legally accepted. The reviewer verify-folio endpoint now
+      # performs the real SAT consulta. It is reviewer-triggered (never on the
+      # intake path) and FAIL-OPEN: any transport/parse error or non-definitive
+      # SAT answer → not_verifiable, which never changes a document. Rollback =
+      # set SAT_CFDI_CLIENT_MODE back to "stub" and redeploy.
       - key: SAT_CFDI_VERIFICATION_ENABLED
         value: "true"
       - key: SAT_CFDI_CLIENT_MODE
-        value: "stub"
+        value: "live"
 
       # B2 — durable intake queue. When true the provider upload endpoint
       # ENQUEUES a durable intake_queue row instead of finalizing inline; the
