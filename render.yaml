@@ -324,6 +324,197 @@ services:
       - key: SAT_CFDI_CLIENT_MODE
         value: "stub"
 
+      # B2 — durable intake queue. When true the provider upload endpoint
+      # ENQUEUES a durable intake_queue row instead of finalizing inline; the
+      # checkwise-intake-consumer worker (below) drains it. MUST be true on BOTH
+      # this web service (to enqueue) and the worker (to consume). The 15-min
+      # checkwise-intake-reconcile cron backstops any receipt the worker misses.
+      - key: INTAKE_QUEUE_CONSUMER_ENABLED
+        value: "true"
+
+  # ──────────────────────────────────────────────────────────────────
+  # B2 — durable intake-queue consumer worker
+  # ──────────────────────────────────────────────────────────────────
+  #
+  # Drains intake_queue by running the idempotent
+  # finalize_intake_submission_background for each claimed job (FOR UPDATE SKIP
+  # LOCKED → safe to scale to N replicas; a crash mid-finalize reclaims after
+  # the visibility timeout). Its env MIRRORS checkwise-api so finalize behaves
+  # identically off the web tier:
+  #   * DB + R2  — re-reads the uploaded PDF bytes from durable storage.
+  #   * AI/shadow config — or shadow analysis silently stops for ALL uploads.
+  #   * messaging/SMTP   — or email/SMS verdict notifications silently stop
+  #                        (in-app notifications are DB-only and survive).
+  # Secrets come via fromService so they stay paired with the API; non-secret
+  # flags duplicate the API's explicit values. buildCommand skips
+  # ``playwright install`` (the consumer never renders PDFs). OCR env is
+  # intentionally omitted (OCR runs at upload-inspection on the web tier and is
+  # inert in prod) — add it here if OCR is ever enabled.
+  - type: worker
+    name: checkwise-intake-consumer
+    runtime: python
+    plan: starter
+    rootDir: apps/api
+    branch: main
+    autoDeploy: true
+    buildCommand: pip install -e . -c requirements.lock
+    startCommand: python -m scripts.run_intake_queue_consumer
+    envVars:
+      - key: CHECKWISE_ENV
+        value: production
+      - key: PYTHON_VERSION
+        value: "3.11"
+      # The consumer checks this on boot and exits if false — must be true.
+      - key: INTAKE_QUEUE_CONSUMER_ENABLED
+        value: "true"
+      # ---- Database (pooled; the worker never runs alembic) ----
+      - key: DATABASE_URL
+        fromService:
+          type: web
+          name: checkwise-api
+          envVarKey: DATABASE_URL
+      # ---- Boot/link-signing secret (insurance; paired with the API) ----
+      - key: AUTH_JWT_SECRET
+        fromService:
+          type: web
+          name: checkwise-api
+          envVarKey: AUTH_JWT_SECRET
+      # ---- Storage (R2) — finalize re-reads the uploaded PDF bytes ----
+      - key: STORAGE_BACKEND
+        value: s3
+      - key: STORAGE_BUCKET
+        value: checkwise-prod
+      - key: AWS_REGION
+        value: auto
+      - key: AWS_S3_ENDPOINT
+        fromService:
+          type: web
+          name: checkwise-api
+          envVarKey: AWS_S3_ENDPOINT
+      - key: AWS_ACCESS_KEY_ID
+        fromService:
+          type: web
+          name: checkwise-api
+          envVarKey: AWS_ACCESS_KEY_ID
+      - key: AWS_SECRET_ACCESS_KEY
+        fromService:
+          type: web
+          name: checkwise-api
+          envVarKey: AWS_SECRET_ACCESS_KEY
+      # ---- AI / shadow analysis — match the web tier or analysis goes dark ----
+      - key: ANTHROPIC_API_KEY
+        fromService:
+          type: web
+          name: checkwise-api
+          envVarKey: ANTHROPIC_API_KEY
+      - key: CHECKWISE_LLM_BACKEND
+        fromService:
+          type: web
+          name: checkwise-api
+          envVarKey: CHECKWISE_LLM_BACKEND
+      - key: DOCUMENT_ANALYSIS_PROVIDER
+        fromService:
+          type: web
+          name: checkwise-api
+          envVarKey: DOCUMENT_ANALYSIS_PROVIDER
+      - key: DOCUMENT_ANALYSIS_PILOT_ORG_IDS
+        fromService:
+          type: web
+          name: checkwise-api
+          envVarKey: DOCUMENT_ANALYSIS_PILOT_ORG_IDS
+      # ---- AI feature flags — duplicate the web service's explicit values ----
+      - key: DOCUMENT_ANALYSIS_TRIAGE_SKIP_ENABLED
+        value: "true"
+      - key: ANTHROPIC_CONCURRENCY_BREAKER_ENABLED
+        value: "true"
+      - key: DOCUMENT_ANALYSIS_ASYNC_PROVIDER_ENABLED
+        value: "true"
+      - key: DOCUMENT_ANALYSIS_EXPEDIENTE_ENABLED
+        value: "true"
+      - key: DOCUMENT_ANALYSIS_BATCH_ESCALATION_ENABLED
+        value: "true"
+      # ---- Auto-approve runs inside finalize — match the web value ----
+      - key: AUTO_APPROVE_ENABLED
+        value: "false"
+      - key: AUTO_APPROVE_UNLOCKED_REQUIREMENT_CODES
+        value: ""
+      # ---- Verdict notifications (in-app always; email/SMS need these) ----
+      - key: FRONTEND_BASE_URL
+        fromService:
+          type: web
+          name: checkwise-api
+          envVarKey: FRONTEND_BASE_URL
+      - key: MESSAGING_ENABLED
+        fromService:
+          type: web
+          name: checkwise-api
+          envVarKey: MESSAGING_ENABLED
+      - key: TWILIO_ENABLED
+        fromService:
+          type: web
+          name: checkwise-api
+          envVarKey: TWILIO_ENABLED
+      - key: TWILIO_ACCOUNT_SID
+        fromService:
+          type: web
+          name: checkwise-api
+          envVarKey: TWILIO_ACCOUNT_SID
+      - key: TWILIO_AUTH_TOKEN
+        fromService:
+          type: web
+          name: checkwise-api
+          envVarKey: TWILIO_AUTH_TOKEN
+      - key: TWILIO_FROM_NUMBER
+        fromService:
+          type: web
+          name: checkwise-api
+          envVarKey: TWILIO_FROM_NUMBER
+      - key: WHATSAPP_ENABLED
+        fromService:
+          type: web
+          name: checkwise-api
+          envVarKey: WHATSAPP_ENABLED
+      - key: WHATSAPP_NATIVE_TEMPLATES_ENABLED
+        fromService:
+          type: web
+          name: checkwise-api
+          envVarKey: WHATSAPP_NATIVE_TEMPLATES_ENABLED
+      - key: WHATSAPP_ACCESS_TOKEN
+        fromService:
+          type: web
+          name: checkwise-api
+          envVarKey: WHATSAPP_ACCESS_TOKEN
+      - key: WHATSAPP_PHONE_NUMBER_ID
+        fromService:
+          type: web
+          name: checkwise-api
+          envVarKey: WHATSAPP_PHONE_NUMBER_ID
+      - key: WHATSAPP_API_VERSION
+        fromService:
+          type: web
+          name: checkwise-api
+          envVarKey: WHATSAPP_API_VERSION
+      - key: SMTP_HOST
+        fromService:
+          type: web
+          name: checkwise-api
+          envVarKey: SMTP_HOST
+      - key: SMTP_USERNAME
+        fromService:
+          type: web
+          name: checkwise-api
+          envVarKey: SMTP_USERNAME
+      - key: SMTP_PASSWORD
+        fromService:
+          type: web
+          name: checkwise-api
+          envVarKey: SMTP_PASSWORD
+      - key: SMTP_FROM_EMAIL
+        fromService:
+          type: web
+          name: checkwise-api
+          envVarKey: SMTP_FROM_EMAIL
+
   # ──────────────────────────────────────────────────────────────────
   # Phase 6 / Slice 6C — Renewal reminder cron
   # ──────────────────────────────────────────────────────────────────
