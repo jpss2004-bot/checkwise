@@ -333,6 +333,57 @@ def test_reject_then_reset_roundtrip(db_factory) -> None:
     db.close()
 
 
+def test_demoted_approver_stale_jwt_blocked_on_writes_but_can_read(
+    db_factory, api_client
+) -> None:
+    """Live-authz (closes the Inc1 medium finding): after an Approver is
+    demoted to Viewer, their still-valid JWT (which keeps claiming
+    client_admin until expiry) must STOP authorizing writes / acceptance
+    decisions — the routes re-check the live membership — while reads keep
+    working (Viewers may read/export)."""
+    ids = _seed_world(db_factory)
+    token = _login(api_client, ids["approver_email"], ids["approver_pw"])
+
+    # Live Approver: the decision write succeeds.
+    ok = api_client.post(
+        f"/api/v1/client/submissions/{ids['submission_id']}/decision",
+        json={"action": "accept"},
+        headers=_h(token),
+    )
+    assert ok.status_code == 200, ok.text
+
+    # Demote to Viewer in the DB; the JWT still claims client_admin.
+    db = db_factory()
+    try:
+        m = db.scalar(
+            select(Membership).where(Membership.user_id == ids["approver_id"])
+        )
+        m.role = "client_viewer"
+        db.commit()
+    finally:
+        db.close()
+
+    # Reads still work with the (now-stale) token.
+    read = api_client.get("/api/v1/client/submissions", headers=_h(token))
+    assert read.status_code == 200, read.text
+
+    # Writes + decisions are now blocked by the live re-check despite the
+    # stale client_admin JWT claim.
+    blocked = api_client.post(
+        f"/api/v1/client/submissions/{ids['submission_id']}/decision",
+        json={"action": "reset"},
+        headers=_h(token),
+    )
+    assert blocked.status_code == 403, blocked.text
+
+    prof = api_client.patch(
+        "/api/v1/client/profile",
+        json={"phone": "+52 55 0000 0000"},
+        headers=_h(token),
+    )
+    assert prof.status_code == 403, prof.text
+
+
 def test_override_without_reason_is_422(db_factory) -> None:
     """Accepting a NON-valid doc contradicts the verdict → reason required."""
     ids = _seed_world(db_factory, submission_status=DocumentStatus.RECHAZADO.value)
