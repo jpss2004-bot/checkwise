@@ -283,10 +283,9 @@ services:
       # roadmap (merged via PR #40). All three are additive, advisory-path
       # only (they never change a user-visible verdict), got an adversarial
       # review, and are independently reversible — flip any back to "false"
-      # and redeploy to roll it off. B3/B2/B1 stay OFF deliberately: B3 is
-      # inert without DOCUMENT_ANALYSIS_EXPEDIENTE_ENABLED (a separate LLM-cost
-      # call), B2 needs the intake-queue consumer worker provisioned, and B1
-      # needs LiveSATCFDIClient + SAT ToS before SAT_CFDI_CLIENT_MODE=live.
+      # and redeploy to roll it off. (Tier B activated below; B1 stays in
+      # safe stub mode because LiveSATCFDIClient.consultar raises until the
+      # real SAT call is wired + SAT ToS accepted.)
       #
       # A1 — skip the always-on Haiku triage on confidently-clean, born-digital,
       # non-high-stakes, never-analyzed intake (leaves shadow_* NULL =
@@ -301,6 +300,29 @@ services:
       # threadpool (shadow analysis + intake finalize run async).
       - key: DOCUMENT_ANALYSIS_ASYNC_PROVIDER_ENABLED
         value: "true"
+
+      # ---- Tier B (activated 2026-06-24) ----
+      # B3 — coalesce per-document deep (Sonnet) escalations on a bundle into
+      # the single cross-document expediente pass. Batching is INERT unless the
+      # expediente pass itself is on, so both flags flip together. The
+      # expediente pass is a real cross-document Sonnet call (cost), debounced
+      # per workspace by DOCUMENT_ANALYSIS_EXPEDIENTE_DEBOUNCE_HOURS (default 6).
+      # Both only do work where the AI shadow pipeline runs (DOCUMENT_ANALYSIS_
+      # PROVIDER=anthropic + the pilot org gate, both set in the dashboard).
+      - key: DOCUMENT_ANALYSIS_EXPEDIENTE_ENABLED
+        value: "true"
+      - key: DOCUMENT_ANALYSIS_BATCH_ESCALATION_ENABLED
+        value: "true"
+      # B1 — SAT CFDI folio verification. STUB mode is the only safe prod mode
+      # today: it makes the reviewer verify-folio endpoint available but every
+      # call returns ``not_verifiable`` (fail-open — never changes a document).
+      # DO NOT set SAT_CFDI_CLIENT_MODE=live until LiveSATCFDIClient.consultar
+      # is implemented AND SAT's ToS is accepted (eng + legal step) — live mode
+      # raises by design. Mode pinned to stub explicitly to prevent drift.
+      - key: SAT_CFDI_VERIFICATION_ENABLED
+        value: "true"
+      - key: SAT_CFDI_CLIENT_MODE
+        value: "stub"
 
   # ──────────────────────────────────────────────────────────────────
   # Phase 6 / Slice 6C — Renewal reminder cron
