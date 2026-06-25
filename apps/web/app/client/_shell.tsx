@@ -11,6 +11,7 @@ import {
   Files,
   FileXls,
   Gauge,
+  Gear,
   List,
   MagnifyingGlass,
   Package,
@@ -26,6 +27,7 @@ import { BrandLogo } from "@/components/checkwise/brand-logo";
 import { FeedbackLauncher } from "@/components/feedback/feedback-launcher";
 import { ClientWiseDock } from "@/components/checkwise/wise/client-wise-dock";
 import { SearchBar } from "@/components/checkwise/search-bar";
+import { ShellNavMore } from "@/components/checkwise/shell/shell-nav-more";
 import { UserMenu } from "@/components/checkwise/user-menu";
 import { MetadataStrip } from "@/components/ui/metadata-strip";
 import { roleLabels } from "@/lib/constants/labels";
@@ -90,13 +92,12 @@ function httpStatusOf(err: unknown): number | null {
   return null;
 }
 
-// Reportes sits next to the decision loop (Inicio→Proveedores→Calendario
-// →Entregas→Reportes) and Auditoría — the inspector-ready ZIP builder, a
-// headline value prop — is now reachable from every surface instead of
-// only the Proveedores banner. Notificaciones is also reachable via the
-// header bell, so its nav slot is the lower-priority tail alongside
-// Metadata (a power-user export) and Actividad.
-const NAV: { href: string; label: string; icon: Icon }[] = [
+type ClientNavItem = { href: string; label: string; icon: Icon };
+
+// Day-to-day decision loop (Inicio→Proveedores→Calendario→Entregas→
+// Reportes) plus Auditoría — the inspector-ready ZIP builder, a headline
+// value prop. These stay in the primary row (audit Move 3 / F10).
+const PRIMARY_NAV: ClientNavItem[] = [
   { href: "/client/dashboard", label: "Inicio", icon: Gauge },
   { href: "/client/vendors", label: "Proveedores", icon: Storefront },
   { href: "/client/calendar", label: "Calendario", icon: CalendarBlank },
@@ -104,10 +105,25 @@ const NAV: { href: string; label: string; icon: Icon }[] = [
   { href: "/client/bandeja", label: "Bandeja", icon: Tray },
   { href: "/client/reports", label: "Reportes", icon: ChartLineUp },
   { href: "/client/auditoria", label: "Auditoría", icon: Package },
+];
+
+// Occasional surfaces, collapsed into the "Más" overflow. Notificaciones
+// is also reachable via the header bell; Metadata is a power-user export;
+// Actividad is the per-tenant activity log.
+const SECONDARY_NAV: ClientNavItem[] = [
   { href: "/client/notifications", label: "Notificaciones", icon: Bell },
   { href: "/client/metadata", label: "Metadata", icon: FileXls },
   { href: "/client/activity", label: "Actividad", icon: ClockClockwise },
 ];
+
+// Settings keeps a dedicated gear anchor in the primary row (audit F11).
+// The hub folds in the previously avatar-only seats + notification +
+// company pages.
+const SETTINGS_NAV: ClientNavItem = {
+  href: "/client/configuracion",
+  label: "Configuración",
+  icon: Gear,
+};
 
 export function ClientShell({
   title,
@@ -371,6 +387,65 @@ export function ClientShell({
       session.roles.includes("operations_admin")) &&
     !session.roles.includes("client_admin");
 
+  // Nav split (audit Move 3 / F10): a lean day-to-day row + a "Más"
+  // overflow for occasional surfaces + a settings anchor. Hrefs carry
+  // the active ?client_id so break-glass sessions stay scoped; active
+  // state matches on the bare path (pathname has no query).
+  const isPathActive = (href: string) =>
+    pathname === href || pathname?.startsWith(href + "/");
+  const desktopChip = (item: ClientNavItem) => {
+    const isActive = isPathActive(item.href);
+    const IconComponent = item.icon;
+    return (
+      <Link
+        key={item.href}
+        href={withClientId(item.href, urlClientId)}
+        aria-current={isActive ? "page" : undefined}
+        className={cn(
+          "inline-flex shrink-0 items-center gap-1.5 rounded-md border px-2.5 py-1.5 text-[12px] font-medium transition-colors duration-fast",
+          isActive
+            ? "border-[color:var(--border-brand)] bg-[color:var(--surface-brand)] text-[color:var(--text-inverse)] shadow-xs"
+            : "border-transparent bg-transparent text-[color:var(--text-secondary)] hover:bg-[color:var(--surface-hover)] hover:text-[color:var(--text-primary)]",
+        )}
+      >
+        <IconComponent
+          className="h-3.5 w-3.5"
+          weight={isActive ? "fill" : "bold"}
+          aria-hidden="true"
+        />
+        <span>{item.label}</span>
+      </Link>
+    );
+  };
+  const drawerLink = (item: ClientNavItem) => {
+    const isActive = isPathActive(item.href);
+    const IconComponent = item.icon;
+    return (
+      <Link
+        key={item.href}
+        href={withClientId(item.href, urlClientId)}
+        aria-current={isActive ? "page" : undefined}
+        className={cn(
+          "flex items-center gap-2 rounded-md border px-3 py-2 text-sm font-medium transition-colors",
+          isActive
+            ? "border-[color:var(--border-brand)] bg-[color:var(--surface-brand)] text-[color:var(--text-inverse)]"
+            : "border-transparent text-[color:var(--text-secondary)] hover:bg-[color:var(--surface-hover)] hover:text-[color:var(--text-primary)]",
+        )}
+      >
+        <IconComponent
+          className="h-4 w-4"
+          weight={isActive ? "fill" : "bold"}
+          aria-hidden="true"
+        />
+        {item.label}
+      </Link>
+    );
+  };
+  const overflowItems = SECONDARY_NAV.map((item) => ({
+    ...item,
+    href: withClientId(item.href, urlClientId),
+  }));
+
   return (
     <ClientPlanProvider clientId={urlClientId}>
     <div
@@ -423,31 +498,14 @@ export function ClientShell({
               name={session.user.full_name || session.user.email}
               email={session.user.email}
               roles={session.roles}
-              profileHref="/client/onboarding"
-              profileLabel="Datos de mi empresa"
-              secondaryLinks={[
-                {
-                  href: withClientId(
-                    "/client/configuracion/usuarios",
-                    urlClientId,
-                  ),
-                  label: "Usuarios y accesos",
-                },
-                {
-                  href: withClientId(
-                    "/client/configuracion/aceptacion",
-                    urlClientId,
-                  ),
-                  label: "Aceptación de documentos",
-                },
-                {
-                  href: withClientId(
-                    "/client/configuracion/notificaciones",
-                    urlClientId,
-                  ),
-                  label: "Preferencias de notificaciones",
-                },
-              ]}
+              // Settings now live in one hub reachable from the nav
+              // "Configuración" entry; the avatar link points at the same
+              // place instead of the scattered pages (audit F7). The hub's
+              // tabs (clientSettingsTabs) fold in everything the old
+              // secondaryLinks listed, including main's new "Aceptación de
+              // documentos" page.
+              profileHref={withClientId("/client/configuracion", urlClientId)}
+              profileLabel="Configuración"
               onSignOut={onLogout}
             />
             <button
@@ -467,33 +525,21 @@ export function ClientShell({
         </div>
         <nav
           aria-label="Portal cliente"
-          className="mx-auto hidden max-w-7xl gap-1 overflow-x-auto px-3 pb-2 lg:flex"
+          className="mx-auto hidden max-w-7xl items-center gap-1 px-3 pb-2 lg:flex"
         >
-          {NAV.map((item) => {
-            const isActive =
-              pathname === item.href || pathname?.startsWith(item.href + "/");
-            const IconComponent = item.icon;
-            return (
-              <Link
-                key={item.href}
-                href={withClientId(item.href, urlClientId)}
-                aria-current={isActive ? "page" : undefined}
-                className={cn(
-                  "inline-flex shrink-0 items-center gap-1.5 rounded-md border px-2.5 py-1.5 text-[12px] font-medium transition-colors duration-fast",
-                  isActive
-                    ? "border-[color:var(--border-brand)] bg-[color:var(--surface-brand)] text-[color:var(--text-inverse)] shadow-xs"
-                    : "border-transparent bg-transparent text-[color:var(--text-secondary)] hover:bg-[color:var(--surface-hover)] hover:text-[color:var(--text-primary)]",
-                )}
-              >
-                <IconComponent
-                  className="h-3.5 w-3.5"
-                  weight={isActive ? "fill" : "bold"}
-                  aria-hidden="true"
-                />
-                <span>{item.label}</span>
-              </Link>
-            );
-          })}
+          {/* Day-to-day chips scroll within their own container if they
+              don't fit. The utility cluster (settings + "Más") is pinned
+              to the right OUTSIDE that container — otherwise the scroll
+              container's overflow clips the "Más" dropdown panel. */}
+          <div className="flex min-w-0 flex-1 items-center gap-1 overflow-x-auto">
+            {PRIMARY_NAV.map(desktopChip)}
+          </div>
+          <span
+            className="mx-1 h-6 w-px shrink-0 self-center bg-[color:var(--border-subtle)]"
+            aria-hidden="true"
+          />
+          {desktopChip(SETTINGS_NAV)}
+          <ShellNavMore items={overflowItems} />
         </nav>
       </header>
 
@@ -557,31 +603,16 @@ export function ClientShell({
               />
               Buscar
             </Link>
-            {NAV.map((item) => {
-              const isActive =
-                pathname === item.href || pathname?.startsWith(item.href + "/");
-              const IconComponent = item.icon;
-              return (
-                <Link
-                  key={item.href}
-                  href={withClientId(item.href, urlClientId)}
-                  aria-current={isActive ? "page" : undefined}
-                  className={cn(
-                    "flex items-center gap-2 rounded-md border px-3 py-2 text-sm font-medium transition-colors",
-                    isActive
-                      ? "border-[color:var(--border-brand)] bg-[color:var(--surface-brand)] text-[color:var(--text-inverse)]"
-                      : "border-transparent text-[color:var(--text-secondary)] hover:bg-[color:var(--surface-hover)] hover:text-[color:var(--text-primary)]",
-                  )}
-                >
-                  <IconComponent
-                    className="h-4 w-4"
-                    weight={isActive ? "fill" : "bold"}
-                    aria-hidden="true"
-                  />
-                  {item.label}
-                </Link>
-              );
-            })}
+            {PRIMARY_NAV.map(drawerLink)}
+            {/* The overflow has no room to hide on mobile, so the drawer
+                lists everything — grouped under "Más" to mirror desktop. */}
+            <p className="cw-eyebrow mb-1 mt-3">Más</p>
+            {SECONDARY_NAV.map(drawerLink)}
+            <span
+              className="my-2 h-px bg-[color:var(--border-subtle)]"
+              aria-hidden="true"
+            />
+            {drawerLink(SETTINGS_NAV)}
           </nav>
         </div>
       ) : null}

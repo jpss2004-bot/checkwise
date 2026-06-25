@@ -13,6 +13,8 @@ import { useCallback, useEffect, useState } from "react";
 import { CheckCircle, Warning } from "@phosphor-icons/react";
 
 import { ClientShell } from "../../_shell";
+import { SettingsNav } from "@/components/checkwise/settings/settings-nav";
+import { clientSettingsTabs } from "@/components/checkwise/settings/tabs";
 import { Surface } from "@/components/checkwise/dashboard/stat-card";
 import {
   getClientAcceptancePrefs,
@@ -74,10 +76,11 @@ export default function ClientAcceptanceSettingsPage() {
 
   return (
     <ClientShell
-      title="Aceptación de documentos"
+      title="Configuración"
       description="Define cómo tu empresa acepta los documentos de tus proveedores. La aceptación es independiente del dictamen de cumplimiento de CheckWise."
     >
       <div className="space-y-5">
+        <SettingsNav tabs={clientSettingsTabs(urlClientId)} />
         {error ? (
           <div
             role="alert"

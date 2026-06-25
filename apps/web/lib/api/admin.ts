@@ -453,6 +453,17 @@ export async function getAdminCalendarRenewals(params?: {
  * confirmation screen. Email-delivery status surfaces so the UI
  * can warn when SMTP skipped.
  */
+/**
+ * The account-type axis of user provisioning ("which kind of account
+ * are we minting"). This is distinct from ``MembershipRole`` (the RBAC
+ * role a user holds) — it's the provisioning form's selector. Derived
+ * from ``ProvisionUserBody`` so the form, the request body, and the
+ * response all read from ONE source of truth instead of redeclaring the
+ * union (audit F5). ``admin`` mints staff; ``client``/``provider`` mint
+ * the tenant-side stacks.
+ */
+export type ProvisionRole = ProvisionUserBody["role"];
+
 export type ProvisionUserBody = {
   full_name: string;
   email: string;

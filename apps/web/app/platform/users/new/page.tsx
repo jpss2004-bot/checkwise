@@ -33,6 +33,7 @@ import {
   updateUserStatus,
   type AdminClient,
   type ProvisionConflictUser,
+  type ProvisionRole,
   type ProvisionUserBody,
   type ProvisionUserResponse,
 } from "@/lib/api/admin";
@@ -50,10 +51,8 @@ import { roleLabel } from "@/lib/constants/labels";
  * skipped (typical in dev without SMTP).
  */
 
-type Role = "client" | "provider" | "admin";
-
 export default function AdminNewUserPage() {
-  const [role, setRole] = useState<Role>("client");
+  const [role, setRole] = useState<ProvisionRole>("client");
   const [fullName, setFullName] = useState("");
   const [email, setEmail] = useState("");
 

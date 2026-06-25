@@ -42,9 +42,10 @@ import {
  * posts it to /api/v1/auth/set-password.
  *
  * On success the local session is updated to drop the must-change
- * flag and the user is routed to:
- *   * /admin/reviewer if their roles include admin/reviewer, or
- *   * /portal/entra-a-tu-espacio otherwise.
+ * flag and the user is routed (per the 2026-06-23 role model) to:
+ *   * /admin/dashboard for staff (operations_admin | platform_admin),
+ *   * /client/onboarding for client (client_admin | client_viewer), or
+ *   * /portal/entra-a-tu-espacio otherwise (provider).
  */
 export default function ActivatePage() {
   // useSearchParams() forces client-side rendering; Next.js requires

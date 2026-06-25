@@ -26,14 +26,14 @@ import {
  *
  * CheckWise 1.8 collapsed the old 3-role picker into a single
  * email + password form. Anonymous workspace creation has been
- * removed — every user (admin, reviewer, provider) authenticates
- * here. Routing happens after the response based on:
+ * removed — every user (staff, client, provider) authenticates
+ * here. Routing (see ``defaultDestination``) happens after the
+ * response, per the 2026-06-23 role model:
  *
  *   1. ``must_change_password`` → /activate (forced first-login)
- *   2. role contains internal_admin → /admin/dashboard
- *   3. role contains reviewer → /admin/reviewer
- *   4. role contains client_admin → /client/dashboard
- *   5. otherwise → /portal/entra-a-tu-espacio
+ *   2. staff (operations_admin | platform_admin) → /admin/dashboard
+ *   3. client (client_admin | client_viewer) → /client/dashboard
+ *   4. otherwise (provider) → /portal/entra-a-tu-espacio
  */
 export default function LoginPage() {
   // Next 15 requires any component reading useSearchParams to live

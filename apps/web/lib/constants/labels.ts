@@ -55,9 +55,16 @@ export function roleLabel(code: string): string {
   return ROLE_LABELS_ES[code] ?? humanizeCode(code);
 }
 
-/** Join a list of role codes into a readable Spanish string. */
+/**
+ * Join a list of role codes into a readable Spanish string.
+ *
+ * De-duplicates on the *display label*, not the code, so a
+ * transition-window user holding e.g. ``platform_admin`` +
+ * ``internal_admin`` (both → "Equipo CheckWise") renders the label
+ * once instead of "Equipo CheckWise, Equipo CheckWise" (audit F4).
+ */
 export function roleLabels(codes: readonly string[]): string {
-  return codes.map(roleLabel).join(", ");
+  return Array.from(new Set(codes.map(roleLabel))).join(", ");
 }
 
 // ---------------------------------------------------------------------------
