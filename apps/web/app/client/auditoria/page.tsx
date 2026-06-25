@@ -38,6 +38,9 @@ import { downloadAuthenticatedFile, saveBlob } from "@/lib/api/download";
 import { INSTITUTION_LABELS } from "@/lib/api/portal";
 import { statusLabel, statusVariant } from "@/lib/constants/statuses";
 import { useUrlClientId } from "@/lib/workspace/use-url-client-id";
+import { useClientPlan } from "@/lib/plan/plan-context";
+import { parseClientErrorCode } from "@/lib/api/error-detail";
+import { PLAN_UPSELL_COPY } from "@/lib/constants/plan-states";
 
 /**
  * /client/auditoria
@@ -104,6 +107,9 @@ function resolvePreset(key: PresetKey, today: Date): { from: string; to: string 
 
 export default function ClientAuditoriaPage() {
   const urlClientId = useUrlClientId();
+  const { plan } = useClientPlan();
+  // Default-allow while the plan loads (Phase C4).
+  const canAudit = plan?.capabilities.export_audit_package !== false;
   const today = useMemo(() => new Date(), []);
 
   // Default range: Year-to-date so the live counter shows something
@@ -267,7 +273,8 @@ export default function ClientAuditoriaPage() {
     downloading ||
     selectionCount === 0 ||
     overFileCap ||
-    overBytesCap;
+    overBytesCap ||
+    !canAudit;
 
   async function onDownloadClick() {
     if (downloadDisabled || !tree) return;
@@ -295,10 +302,11 @@ export default function ClientAuditoriaPage() {
         saveBlob(blob, filename);
       }
     } catch (err) {
+      const parsed = parseClientErrorCode(err);
       setDownloadError(
-        err instanceof Error
-          ? err.message
-          : "No pudimos preparar la descarga.",
+        parsed.code === "plan_capability_required"
+          ? PLAN_UPSELL_COPY
+          : parsed.detail,
       );
     } finally {
       setDownloading(false);
@@ -637,6 +645,7 @@ export default function ClientAuditoriaPage() {
               aria-busy={downloading || undefined}
               size="lg"
               onClick={onDownloadClick}
+              title={!canAudit ? PLAN_UPSELL_COPY : undefined}
             >
               {downloading ? (
                 <Spinner className="h-4 w-4 text-current" label={null} />

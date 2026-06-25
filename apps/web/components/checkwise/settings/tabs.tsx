@@ -1,6 +1,7 @@
 import {
   Bell,
   Buildings,
+  CheckCircle,
   IdentificationCard,
   Users,
 } from "@phosphor-icons/react";
@@ -54,6 +55,11 @@ export function clientSettingsTabs(
       href: withClientId("/client/configuracion/usuarios", clientId),
       label: "Usuarios y accesos",
       icon: Users,
+    },
+    {
+      href: withClientId("/client/configuracion/aceptacion", clientId),
+      label: "Aceptación de documentos",
+      icon: CheckCircle,
     },
     {
       href: withClientId("/client/configuracion/notificaciones", clientId),

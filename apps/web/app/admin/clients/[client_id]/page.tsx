@@ -19,12 +19,16 @@ import { Button } from "@/components/ui/button";
 import { DataTable } from "@/components/ui/data-table";
 import { MetadataStrip } from "@/components/ui/metadata-strip";
 import {
+  getAdminClientPlan,
   getClient,
   getClientCompliance,
   type AdminClient,
   type ClientCompliance,
   type ClientComplianceVendorRow,
 } from "@/lib/api/admin";
+import { AdminPlanControls } from "@/components/checkwise/admin/plan-controls";
+import { AdminEntitlementsControls } from "@/components/checkwise/admin/entitlements-controls";
+import type { ClientPlan } from "@/lib/api/client";
 import { entityStatusLabel, entityStatusVariant } from "@/lib/constants/labels";
 import {
   bucketLabel,
@@ -62,17 +66,25 @@ function AdminClientDetail({ clientId }: { clientId: string }) {
     null,
   );
   const [reloadKey, setReloadKey] = useState(0);
+  const [plan, setPlan] = useState<ClientPlan | null>(null);
 
   useEffect(() => {
     let cancelled = false;
     setErrorKind(null);
     setClient(null);
     setCompliance(null);
-    Promise.all([getClient(clientId), getClientCompliance(clientId)])
-      .then(([clientData, complianceData]) => {
+    setPlan(null);
+    Promise.all([
+      getClient(clientId),
+      getClientCompliance(clientId),
+      // Tolerate a plan-read failure so it never blanks the page.
+      getAdminClientPlan(clientId).catch(() => null),
+    ])
+      .then(([clientData, complianceData, planData]) => {
         if (cancelled) return;
         setClient(clientData);
         setCompliance(complianceData);
+        setPlan(planData);
       })
       .catch((err: unknown) => {
         if (cancelled) return;
@@ -158,6 +170,16 @@ function AdminClientDetail({ clientId }: { clientId: string }) {
               },
               { label: "Alta", value: formatDate(client.created_at) },
             ]}
+          />
+
+          <AdminPlanControls
+            plan={plan}
+            onChanged={() => setReloadKey((k) => k + 1)}
+          />
+
+          <AdminEntitlementsControls
+            plan={plan}
+            onChanged={() => setReloadKey((k) => k + 1)}
           />
 
           {/* Compliance rollup */}

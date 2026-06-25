@@ -1655,6 +1655,25 @@ def post_report_export(
     except ReportNotFoundError as exc:
         raise HTTPException(status.HTTP_404_NOT_FOUND, str(exc)) from exc
 
+    # Phase B — demo plans cannot export client/vendor-facing reports. CheckWise
+    # staff are never gated (mirrors the provider-limit admin bypass); internal-
+    # audience reports and orgs without a client are never gated. Role-model
+    # redesign: staff is STAFF_ROLES (platform_admin / operations_admin), not
+    # the retired ``internal_admin`` slug.
+    from app.constants.roles import STAFF_ROLES
+
+    if not (STAFF_ROLES & set(current.roles)) and report.audience in (
+        ReportAudience.CLIENT_FACING.value,
+        ReportAudience.VENDOR_FACING.value,
+    ):
+        from app.constants.plans import Capability
+        from app.models.entities import Organization
+        from app.services.subscription import assert_capability
+
+        rep_org = db.get(Organization, report.organization_id)
+        if rep_org is not None and rep_org.kind == "client" and rep_org.client_id:
+            assert_capability(db, rep_org.client_id, Capability.BULK_EXPORT.value)
+
     # Resolve the version to export. Default = the report's current
     # version (set on the Report row). Explicit version_id must belong
     # to this report or we 404 — never confirm cross-report ids.

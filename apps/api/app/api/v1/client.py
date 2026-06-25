@@ -83,8 +83,9 @@ from app.api.v1.portal import (
     _due_in_days_for_period,
     _empty_document_counts,
 )
+from app.constants.plans import PLAN_LABELS_ES, Capability
 from app.constants.roles import STAFF_ROLES, MembershipRole
-from app.constants.statuses import DocumentStatus
+from app.constants.statuses import ClientAcceptance, DocumentStatus, VendorStatus
 from app.core.compliance_catalog import (
     catalog_metadata,
     expediente_for_persona,
@@ -148,19 +149,26 @@ from app.services.reports.insights import (
     approval_trend_points_by_vendor,
 )
 from app.services.search_service import SearchHit, search_submissions
+from app.services.submission_workflow import apply_client_decision
+from app.services.subscription import (
+    active_provider_count,
+    assert_capability,
+    assert_provider_capacity,
+    capabilities_for_org,
+    org_for_client,
+    plan_for_org,
+    provider_limit_for_org,
+)
 
 router = APIRouter(prefix="/client", tags=["client"])
 DbSession = Annotated[Session, Depends(get_db)]
 
-# ``client_admin`` is the primary role. ``internal_admin`` is allowed
-# because LegalShelf staff frequently need to debug a client's view
-# without minting a fake client account. Reviewer / provider sessions
-# get the standard 403.
 # Read / export gate (Phase 4). Every client seat — Approver
 # (``client_admin``) or Viewer (``client_viewer``) — plus internal support
-# may READ and EXPORT. Viewers are oversight users: they see everything and
-# can pull evidence, but the dependency below blocks them from the
-# portfolio-mutating routes (which use ``ClientApprover``).
+# (LegalShelf staff debugging a client view without a fake account) may READ
+# and EXPORT. Viewers are oversight users: they see everything and can pull
+# evidence, but the dependency below blocks them from the portfolio-mutating
+# routes (which use ``ClientApprover``). Reviewer / provider sessions get 403.
 ClientUser = Annotated[
     CurrentUser,
     Depends(
@@ -348,6 +356,60 @@ def _resolve_client_id(
     raise HTTPException(
         status.HTTP_403_FORBIDDEN, detail="No tienes ningún cliente asignado."
     )
+
+
+def _holds_live_approver_seat(
+    db: Session, current: CurrentUser, client_id: str
+) -> bool:
+    """Whether the caller may currently WRITE / decide for this client.
+
+    The ``ClientApprover`` dependency authorizes from the JWT's role claims,
+    which stay stale for up to a token lifetime (24h) after a demotion — so a
+    just-demoted Approver could keep mutating the portfolio or recording
+    acceptance decisions until their token expires. This re-checks the LIVE
+    membership: CheckWise staff bypass (they reach client tenants via audited
+    break-glass), otherwise the caller must STILL hold an active
+    ``client_admin`` (Approver) seat in this client's organization.
+    """
+    if bool(STAFF_ROLES & set(current.roles)):
+        # CheckWise staff reach client tenants via audited break-glass; their
+        # staff status is taken from the JWT here (the same tradeoff
+        # ``_resolve_client_id`` already makes). A demoted ex-staff member
+        # keeps access until token expiry — accepted as break-glass is rare
+        # and audited; tighten only if staff demotions must be instant.
+        return True
+    # Mirror the READ visibility semantics (``_visible_client_ids_for_user``):
+    # an active ``client_admin`` seat in ANY organization linked to this client
+    # counts. Don't pin to the canonical org (``org_for_client``) — a legacy
+    # tenant that holds two client orgs would wrongly 403 an Approver whose
+    # seat lives in the non-canonical one.
+    seat = db.scalar(
+        select(Membership.id)
+        .join(Organization, Organization.id == Membership.organization_id)
+        .where(
+            Organization.client_id == client_id,
+            Membership.user_id == current.user.id,
+            Membership.role == MembershipRole.CLIENT_ADMIN.value,
+            Membership.status == "active",
+        )
+    )
+    return seat is not None
+
+
+def _assert_live_client_approver(
+    db: Session, current: CurrentUser, client_id: str
+) -> None:
+    """Raise 403 unless the caller holds a live Approver seat (or is staff).
+    Call AFTER the tenant id is resolved, on every portfolio-mutating and
+    acceptance-decision route, to close the stale-JWT demotion window."""
+    if not _holds_live_approver_seat(db, current, client_id):
+        raise HTTPException(
+            status.HTTP_403_FORBIDDEN,
+            detail=(
+                "Tu acceso de Aprobador cambió. Vuelve a iniciar sesión para "
+                "continuar."
+            ),
+        )
 
 
 def _scoped_workspaces(
@@ -968,6 +1030,12 @@ class ClientSubmissionItem(BaseModel):
     reviewer_note: str | None
     supersedes_submission_id: str | None
     superseded_by_submission_id: str | None
+    # Phase 5 / Axis 2 — the client's business-acceptance verdict, orthogonal
+    # to ``status`` (Axis 1). ``client_decided_at`` is the decision time;
+    # ``client_decision_reason`` is populated for override decisions.
+    client_acceptance: str = ClientAcceptance.PENDING.value
+    client_decided_at: datetime | None = None
+    client_decision_reason: str | None = None
 
 
 class ClientSubmissionsResponse(BaseModel):
@@ -1402,6 +1470,7 @@ def update_client_profile(
     a new compliance officer, so the trail matters).
     """
     target_id = _resolve_client_id(db, current, requested=client_id)
+    _assert_live_client_approver(db, current, target_id)
     row = db.get(Client, target_id)
     if row is None:  # pragma: no cover — defensive
         raise HTTPException(
@@ -2423,6 +2492,12 @@ def _recent_submissions_for_workspace(
                 "submitted_at": sub.created_at.isoformat(),
                 "supersedes_submission_id": sub.supersedes_submission_id,
                 "superseded_by_submission_id": replacement_by_sub.get(sub.id),
+                # Phase 5 / Axis 2 — client-acceptance verdict (orthogonal to status).
+                "client_acceptance": sub.client_acceptance,
+                "client_decided_at": (
+                    sub.client_decided_at.isoformat() if sub.client_decided_at else None
+                ),
+                "client_decision_reason": sub.client_decision_reason,
             }
         )
     return out
@@ -2738,8 +2813,40 @@ def client_add_provider(
     )
 
     target_id = _resolve_client_id(db, current, requested=client_id)
+    _assert_live_client_approver(db, current, target_id)
     contact_email = payload.contact_email.strip().lower()
     rfc_value = payload.vendor_rfc.strip().upper()
+    is_internal = bool(STAFF_ROLES & set(current.roles))
+
+    # Lock the org row BEFORE counting active providers so two concurrent
+    # adds cannot both observe the last free slot (the seat-cap discipline).
+    org = org_for_client(db, target_id, for_update=True)
+
+    # "Restore instead of re-create": a duplicate (client, RFC) that is
+    # ARCHIVED should route the client to reactivate, not hit an opaque 409.
+    archived_dupe = db.scalar(
+        select(Vendor).where(
+            Vendor.client_id == target_id,
+            Vendor.rfc == rfc_value,
+            Vendor.status == VendorStatus.ARCHIVED.value,
+        )
+    )
+    if archived_dupe is not None:
+        raise HTTPException(
+            status.HTTP_409_CONFLICT,
+            detail={
+                "code": "provider_archived",
+                "vendor_id": archived_dupe.id,
+                "message": (
+                    "Ya tienes un proveedor archivado con ese RFC. "
+                    "Reactívalo para volver a usarlo."
+                ),
+            },
+        )
+
+    # Hard cap for client self-service; internal_admin may exceed (audited
+    # via over_limit_override below).
+    capacity = assert_provider_capacity(db, org, is_internal=is_internal)
 
     existing_user = db.scalar(select(User).where(User.email == contact_email))
     if existing_user is not None:
@@ -2827,6 +2934,9 @@ def client_add_provider(
             "user_id": user.id,
             "user_email": contact_email,
             "email_delivery_status": delivery.status,
+            "provider_limit": capacity.limit,
+            "active_after": capacity.used + 1,
+            "over_limit_override": capacity.over_limit,
         },
     )
 
@@ -2889,6 +2999,7 @@ def _set_provider_archival(
     target_id, vendor = _resolve_client_id_for_vendor(
         db, current, vendor_id=vendor_id, requested=requested_client_id
     )
+    _assert_live_client_approver(db, current, target_id)
     # Archive/restore the vendor + its client-scoped workspace(s) in
     # lock-step so the vendor list, compliance counts and calendar all
     # move together.
@@ -2909,6 +3020,17 @@ def _set_provider_archival(
     if already_set:
         return ClientProviderStatusResponse(
             vendor_id=vendor.id, status=target_status, changed=False
+        )
+
+    # Restoring re-consumes a slot — re-check the plan cap (a client at the
+    # limit cannot reactivate without first archiving another; internal_admin
+    # may exceed). Deactivation always frees a slot, so it is never gated.
+    reactivate_capacity = None
+    if target_status == VendorStatus.ACTIVE.value:
+        reactivate_internal = bool(STAFF_ROLES & set(current.roles))
+        reactivate_org = org_for_client(db, target_id, for_update=True)
+        reactivate_capacity = assert_provider_capacity(
+            db, reactivate_org, is_internal=reactivate_internal
         )
 
     before_status = vendor.status
@@ -2942,6 +3064,18 @@ def _set_provider_archival(
             "client_id": target_id,
             "workspace_ids": [w.id for w in workspaces],
         },
+        # Reactivation re-consumes a slot; flag an internal_admin over-cap
+        # restore so a billing bypass is detectable — in event_metadata,
+        # uniform with the add / admin-create doors.
+        metadata=(
+            {
+                "provider_limit": reactivate_capacity.limit,
+                "active_after": reactivate_capacity.used + 1,
+                "over_limit_override": reactivate_capacity.over_limit,
+            }
+            if reactivate_capacity is not None
+            else None
+        ),
     )
     db.commit()
     return ClientProviderStatusResponse(
@@ -2998,6 +3132,73 @@ def client_reactivate_provider(
         vendor_id=vendor_id,
         requested_client_id=client_id,
         target_status="active",
+    )
+
+
+# ---------------------------------------------------------------------------
+# Phase A — subscription plan + provider-usage meter
+# ---------------------------------------------------------------------------
+
+
+class ClientPlanResponse(BaseModel):
+    """The caller's subscription plan, provider usage and capabilities —
+    powers the plan badge, the "X of Y providers" meter, the demo countdown
+    and (Phase B) export gating. ``provider_limit`` / ``providers_available``
+    are null when the plan is uncapped (legacy / enterprise)."""
+
+    client_id: str
+    organization_id: str
+    plan: str
+    plan_label: str
+    provider_limit: int | None
+    providers_used: int
+    providers_available: int | None
+    demo_expires_at: str | None
+    capabilities: dict[str, bool]
+    can_manage: bool
+    """Whether the requesting user may change the plan / manage seats
+    (primary owner or internal staff) — mirrors the seats surface."""
+
+
+@router.get(
+    "/plan",
+    response_model=ClientPlanResponse,
+    summary="The caller's subscription plan, provider usage and capabilities",
+)
+def client_plan(
+    db: DbSession,
+    current: ClientUser,
+    client_id: str | None = Query(default=None),
+) -> ClientPlanResponse:
+    """Read-only plan snapshot for the client portal. ``providers_used`` is
+    the active (non-archived) vendor count — exactly what the cap counts."""
+    cid = _resolve_client_id(db, current, requested=client_id)
+    org = org_for_client(db, cid)
+    plan = plan_for_org(org)
+    limit = provider_limit_for_org(org)
+    used = active_provider_count(db, cid)
+    is_internal = bool(STAFF_ROLES & set(current.roles))
+    holds_primary = db.scalar(
+        select(Membership.id).where(
+            Membership.organization_id == org.id,
+            Membership.user_id == current.user.id,
+            Membership.status == "active",
+            Membership.is_primary.is_(True),
+        )
+    )
+    return ClientPlanResponse(
+        client_id=cid,
+        organization_id=org.id,
+        plan=plan.value,
+        plan_label=PLAN_LABELS_ES[plan],
+        provider_limit=limit,
+        providers_used=used,
+        providers_available=None if limit is None else max(0, limit - used),
+        demo_expires_at=(
+            org.demo_expires_at.isoformat() if org.demo_expires_at else None
+        ),
+        capabilities=capabilities_for_org(db, org),
+        can_manage=is_internal or holds_primary is not None,
     )
 
 
@@ -3143,6 +3344,8 @@ def client_vendor_expediente_zip(
         per_minute=settings.EXPORT_RATE_LIMIT_PER_MINUTE,
         per_hour=settings.EXPORT_RATE_LIMIT_PER_HOUR,
     )
+    # Demo plans cannot pull a multi-document expediente ZIP (Phase B gate).
+    assert_capability(db, target_id, Capability.BULK_EXPORT.value)
 
     workspace = db.scalar(
         select(ProviderWorkspace).where(
@@ -3280,6 +3483,15 @@ def client_get_submission_document(
     )
 
     if download:
+        # Phase D — the download (attachment) action is gated by the
+        # ``download_documents`` capability. It defaults granted on EVERY tier
+        # (demo included), so this only bites when an admin explicitly REVOKES
+        # it for a tenant via the entitlement table — making the admin toggle
+        # honest instead of a no-op. Inline preview (``download=False``) stays
+        # open; the capability names the download/save action specifically.
+        assert_capability(
+            db, submission.client_id, Capability.DOWNLOAD_DOCUMENTS.value
+        )
         add_audit_event(
             db,
             action="client.document_downloaded",
@@ -3502,6 +3714,270 @@ def client_calendar(
 
 
 # ---------------------------------------------------------------------------
+# /submissions — client acceptance axis (Phase 5)
+# ---------------------------------------------------------------------------
+
+
+class ClientDecisionRequest(BaseModel):
+    """Axis-2 decision a client Approver records on a submission.
+
+    ``reason`` is required when the decision overrides CheckWise's validity
+    verdict (accepting a non-valid doc, or rejecting a valid one) — enforced
+    server-side in ``apply_client_decision`` (422 on violation).
+    """
+
+    action: Literal["accept", "reject", "reset"]
+    reason: str | None = Field(default=None, max_length=2000)
+
+
+class ClientDecisionResponse(BaseModel):
+    submission_id: str
+    previous_acceptance: str
+    new_acceptance: str
+    action: str
+    reason: str | None
+    # True when the decision contradicted the compliance verdict.
+    override: bool
+    decided_at: datetime
+    decided_by_user_id: str
+
+
+@router.post(
+    "/submissions/{submission_id}/decision",
+    response_model=ClientDecisionResponse,
+    summary="Record the client's acceptance-axis decision on a submission",
+)
+def client_submission_decision(
+    submission_id: str,
+    payload: ClientDecisionRequest,
+    db: DbSession,
+    current: ClientApprover,
+) -> ClientDecisionResponse:
+    """Accept / reject (Axis 2) a submission as the client.
+
+    Approver-only — the ``ClientApprover`` dependency 403s a ``client_viewer``
+    at the gate (acceptance is a write). Tenant-scoped: the submission must
+    belong to a client the caller can see, else a uniform 404 (no cross-tenant
+    existence oracle). Orthogonal to the compliance verdict — never mutates
+    ``Submission.status``.
+    """
+    submission = db.get(Submission, submission_id)
+    if submission is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail="Envío no encontrado."
+        )
+    is_internal_admin = bool(STAFF_ROLES & set(current.roles))
+    visible = _visible_client_ids_for_user(db, current.user.id)
+    if submission.client_id not in visible:
+        if not is_internal_admin:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND, detail="Envío no encontrado."
+            )
+        # internal_admin break-glass: a state-changing write on a tenant they
+        # don't belong to leaves the same forensic trail as every other
+        # cross-tenant client write.
+        _audit_cross_tenant_access(db, current, submission.client_id)
+
+    _assert_live_client_approver(db, current, submission.client_id)
+    result = apply_client_decision(
+        db,
+        submission=submission,
+        action=payload.action,
+        reason=payload.reason,
+        client_user_id=current.user.id,
+    )
+    return ClientDecisionResponse(
+        submission_id=result.submission_id,
+        previous_acceptance=result.previous_acceptance,
+        new_acceptance=result.new_acceptance,
+        action=result.action,
+        reason=result.reason,
+        override=result.was_override,
+        decided_at=result.decided_at,
+        decided_by_user_id=result.client_user_id,
+    )
+
+
+class ClientBulkDecisionRequest(BaseModel):
+    """Apply one acceptance-axis action to many submissions at once.
+
+    The common case is "accept every compliance-valid doc for a vendor": the
+    frontend collects those submission ids and sends them here. Items that
+    would be an override without a shared ``reason`` fail individually and are
+    reported back — they do not abort the rest of the batch.
+    """
+
+    submission_ids: list[str] = Field(min_length=1, max_length=500)
+    action: Literal["accept", "reject", "reset"]
+    reason: str | None = Field(default=None, max_length=2000)
+
+
+class ClientBulkDecisionItemError(BaseModel):
+    submission_id: str
+    detail: str
+
+
+class ClientBulkDecisionResponse(BaseModel):
+    decided: list[str]
+    failed: list[ClientBulkDecisionItemError]
+    decided_count: int
+    failed_count: int
+
+
+@router.post(
+    "/submissions/bulk-decision",
+    response_model=ClientBulkDecisionResponse,
+    summary="Apply a client acceptance-axis decision to many submissions",
+)
+def client_bulk_submission_decision(
+    payload: ClientBulkDecisionRequest,
+    db: DbSession,
+    current: ClientApprover,
+) -> ClientBulkDecisionResponse:
+    """Bulk accept / reject / reset (Axis 2). Approver-only, tenant-scoped.
+
+    Partial success: each submission is decided independently (override-reason
+    violations, cross-tenant / missing ids surface per-item) and the whole
+    batch commits once at the end. De-dupes the id list while preserving order.
+    """
+    is_internal_admin = bool(STAFF_ROLES & set(current.roles))
+    visible = set(_visible_client_ids_for_user(db, current.user.id))
+
+    seen: set[str] = set()
+    # Live-Approver cache per client (the JWT-claims gate can be stale after a
+    # demotion; re-check the DB once per client_id encountered).
+    approver_ok: dict[str, bool] = {}
+    decided: list[str] = []
+    failed: list[ClientBulkDecisionItemError] = []
+    for sub_id in payload.submission_ids:
+        if sub_id in seen:
+            continue
+        seen.add(sub_id)
+        submission = db.get(Submission, sub_id)
+        if submission is None:
+            failed.append(
+                ClientBulkDecisionItemError(
+                    submission_id=sub_id, detail="Envío no encontrado."
+                )
+            )
+            continue
+        if submission.client_id not in visible:
+            if not is_internal_admin:
+                failed.append(
+                    ClientBulkDecisionItemError(
+                        submission_id=sub_id, detail="Envío no encontrado."
+                    )
+                )
+                continue
+            # internal_admin break-glass — dedup'd to one row per (admin,
+            # client) per 30-min window, so per-item calls are safe.
+            _audit_cross_tenant_access(db, current, submission.client_id)
+        if not is_internal_admin:
+            cid = submission.client_id
+            if cid not in approver_ok:
+                approver_ok[cid] = _holds_live_approver_seat(db, current, cid)
+            if not approver_ok[cid]:
+                failed.append(
+                    ClientBulkDecisionItemError(
+                        submission_id=sub_id,
+                        detail=(
+                            "Tu acceso de Aprobador cambió. Vuelve a iniciar "
+                            "sesión para continuar."
+                        ),
+                    )
+                )
+                continue
+        try:
+            apply_client_decision(
+                db,
+                submission=submission,
+                action=payload.action,
+                reason=payload.reason,
+                client_user_id=current.user.id,
+                commit=False,
+            )
+            decided.append(sub_id)
+        except HTTPException as exc:
+            failed.append(
+                ClientBulkDecisionItemError(
+                    submission_id=sub_id, detail=str(exc.detail)
+                )
+            )
+
+    db.commit()
+    return ClientBulkDecisionResponse(
+        decided=decided,
+        failed=failed,
+        decided_count=len(decided),
+        failed_count=len(failed),
+    )
+
+
+class ClientAcceptancePrefsResponse(BaseModel):
+    auto_accept_valid: bool
+
+
+class ClientAcceptancePrefsRequest(BaseModel):
+    auto_accept_valid: bool
+
+
+@router.get(
+    "/acceptance-preferences",
+    response_model=ClientAcceptancePrefsResponse,
+    summary="Read the client's acceptance-axis preferences",
+)
+def client_get_acceptance_prefs(
+    db: DbSession,
+    current: ClientUser,
+    client_id: str | None = Query(default=None),
+) -> ClientAcceptancePrefsResponse:
+    """Read-only — any client seat (Viewer included) may see the setting."""
+    resolved = _resolve_client_id(db, current, requested=client_id)
+    client = db.get(Client, resolved)
+    return ClientAcceptancePrefsResponse(
+        auto_accept_valid=bool(client and client.auto_accept_valid)
+    )
+
+
+@router.patch(
+    "/acceptance-preferences",
+    response_model=ClientAcceptancePrefsResponse,
+    summary="Toggle auto-accept-on-valid for the client",
+)
+def client_set_acceptance_prefs(
+    payload: ClientAcceptancePrefsRequest,
+    db: DbSession,
+    current: ClientApprover,
+    client_id: str | None = Query(default=None),
+) -> ClientAcceptancePrefsResponse:
+    """Approver-only. Turning this on does NOT retroactively accept the
+    existing backlog — it applies to validity decisions made from here on
+    (the reviewer-path hook). Bulk-accept covers catching up the backlog."""
+    resolved = _resolve_client_id(db, current, requested=client_id)
+    _assert_live_client_approver(db, current, resolved)
+    client = db.get(Client, resolved)
+    if client is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail="Cliente no encontrado."
+        )
+    before = client.auto_accept_valid
+    client.auto_accept_valid = payload.auto_accept_valid
+    if before != payload.auto_accept_valid:
+        add_audit_event(
+            db,
+            action="client.auto_accept_valid_changed",
+            entity_type="client",
+            entity_id=resolved,
+            actor_type="client_admin",
+            actor_id=current.user.id,
+            before={"auto_accept_valid": before},
+            after={"auto_accept_valid": payload.auto_accept_valid},
+        )
+    db.commit()
+    return ClientAcceptancePrefsResponse(auto_accept_valid=client.auto_accept_valid)
+
+
+# ---------------------------------------------------------------------------
 # /submissions
 # ---------------------------------------------------------------------------
 
@@ -3520,6 +3996,11 @@ def client_submissions(
     # codes return an empty result set rather than 400 so a future
     # catalog addition can ship before this code is updated.
     institution: str | None = None,
+    # Phase 5 / Axis 2 — filter by the client-acceptance state
+    # (``pending`` | ``accepted`` | ``rejected``). Powers the "what needs my
+    # acceptance" worklist + the bulk-accept flow. Unknown values force an
+    # empty result rather than 400 (mirrors the institution filter).
+    client_acceptance: Annotated[str | None, Query(alias="client_acceptance")] = None,
     limit: Annotated[int, Query(ge=1, le=500)] = 100,
     offset: Annotated[int, Query(ge=0)] = 0,
 ) -> ClientSubmissionsResponse:
@@ -3569,6 +4050,15 @@ def client_submissions(
             filters.append(Submission.id == "__nonexistent__")
         else:
             filters.append(Submission.institution_id == inst_id)
+    if client_acceptance:
+        # Validate against the enum; an unknown value force-empties rather
+        # than silently equality-matching a typo (which would read as "none
+        # pending"). Uses the (client_id, client_acceptance) index from 0059.
+        valid_acceptance = {a.value for a in ClientAcceptance}
+        if client_acceptance not in valid_acceptance:
+            filters.append(Submission.id == "__nonexistent__")
+        else:
+            filters.append(Submission.client_acceptance == client_acceptance)
 
     # True total for the filtered set so the client can page (perf audit P1-2),
     # rather than inferring it from a silently-capped page length.
@@ -3666,6 +4156,9 @@ def client_submissions(
                 reviewer_note=note,
                 supersedes_submission_id=sub.supersedes_submission_id,
                 superseded_by_submission_id=replacement_by_sub.get(sub.id),
+                client_acceptance=sub.client_acceptance,
+                client_decided_at=sub.client_decided_at,
+                client_decision_reason=sub.client_decision_reason,
             )
         )
     return ClientSubmissionsResponse(
@@ -4146,6 +4639,7 @@ def download_client_metadata(
     client = db.get(Client, target_id)
     if client is None:
         raise HTTPException(status.HTTP_404_NOT_FOUND, detail="Cliente no encontrado.")
+    assert_capability(db, target_id, Capability.BULK_EXPORT.value)
     path = ensure_local_export(client_master_file_path(client))
     if not path.exists():
         raise HTTPException(
@@ -4177,6 +4671,7 @@ def download_client_vendor_metadata(
     target_id, vendor = _resolve_client_id_for_vendor(
         db, current, vendor_id=vendor_id, requested=client_id
     )
+    assert_capability(db, target_id, Capability.BULK_EXPORT.value)
     client = db.get(Client, target_id)
     if client is None:
         raise HTTPException(status.HTTP_404_NOT_FOUND, detail="Cliente no encontrado.")
@@ -4611,6 +5106,8 @@ def _stream_audit_package_zip(
         per_minute=settings.EXPORT_RATE_LIMIT_PER_MINUTE,
         per_hour=settings.EXPORT_RATE_LIMIT_PER_HOUR,
     )
+    # Demo plans cannot pull the full audit package (Phase B capability gate).
+    assert_capability(db, target_id, Capability.EXPORT_AUDIT_PACKAGE.value)
 
     filters = _build_audit_filters(
         period_from,

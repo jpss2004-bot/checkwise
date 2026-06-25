@@ -762,6 +762,17 @@ def get_submission(
         "supersedes_submission_id": submission.supersedes_submission_id,
         "superseded_by_submission_id": superseded_by_id,
         "suggested_action": _suggested_action(submission.status),
+        # Phase 5 / Axis 2 — the CLIENT's business-acceptance verdict, shown to
+        # internal staff so they can reconcile their compliance verdict (Axis 1)
+        # against a client override. Staff see the full decision INCLUDING the
+        # reason (they are internal; the provider portal deliberately omits it).
+        "client_acceptance": submission.client_acceptance,
+        "client_decided_at": (
+            submission.client_decided_at.isoformat()
+            if submission.client_decided_at
+            else None
+        ),
+        "client_decision_reason": submission.client_decision_reason,
         # Phase A — document-revalidation authenticity block. Reviewer-
         # facing only (the provider portal never exposes it). ``analyzed``
         # is False for legacy rows or when the forensics pass failed open
@@ -1201,3 +1212,31 @@ def get_submission_document(
         # FILE GAP-6 — sensitive evidence bytes: never cache.
         headers={"Cache-Control": "no-store, private"},
     )
+
+
+@router.post("/documents/{document_id}/verify-folio")
+def verify_document_folio_endpoint(
+    document_id: str,
+    db: DbSession,
+    current: ReviewerDep,
+    force_refresh: bool = False,
+) -> dict:
+    """B1 — reviewer-triggered live SAT CFDI folio verification.
+
+    Asks SAT whether the document's CFDI fiscal UUID is vigente / cancelado /
+    no_existe (cached in ``folio_verifications``), elevating the document's
+    authenticity verdict with a HIGH ``folio_not_found_at_sat`` reason when SAT
+    reports it cancelled or non-existent. NEVER intake-blocking; fail-open
+    (``not_verifiable`` never downgrades a verdict to clean). Returns
+    ``{"verified": false, "status": "disabled"}`` when
+    ``SAT_CFDI_VERIFICATION_ENABLED`` is off. ``force_refresh`` bypasses the
+    cache TTL.
+    """
+    _ = current  # RBAC enforced by ReviewerDep
+    if db.get(Document, document_id) is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail="Documento no encontrado."
+        )
+    from app.services.folio_verification import verify_document_folio
+
+    return verify_document_folio(db, document_id, force_refresh=force_refresh)

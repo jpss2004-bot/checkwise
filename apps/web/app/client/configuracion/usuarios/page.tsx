@@ -37,6 +37,7 @@ import {
   updateClientUserRole,
   updateClientUserStatus,
   type ClientUserItem,
+  type ClientUserRole,
   type ClientUsersList,
 } from "@/lib/api/client";
 import { useUrlClientId } from "@/lib/workspace/use-url-client-id";
@@ -92,6 +93,23 @@ function statusBadge(user: ClientUserItem) {
   return <Badge variant="success">Activo</Badge>;
 }
 
+const TIER_LABEL: Record<ClientUserRole, string> = {
+  client_admin: "Aprobador",
+  client_viewer: "Solo lectura",
+};
+
+// Tier badge for secondary seats. Brand = write-capable (Approver),
+// outline = read-only (Viewer) — same colour language as the row's
+// action affordances. The Primary Owner renders the "Titular" badge
+// instead (it's always an Approver).
+function tierBadge(role: ClientUserRole) {
+  return role === "client_admin" ? (
+    <Badge variant="brand">{TIER_LABEL.client_admin}</Badge>
+  ) : (
+    <Badge variant="outline">{TIER_LABEL.client_viewer}</Badge>
+  );
+}
+
 export default function ClientSeatsPage() {
   const urlClientId = useUrlClientId();
   const clientParam = urlClientId ? { client_id: urlClientId } : undefined;
@@ -103,9 +121,9 @@ export default function ClientSeatsPage() {
   // Add-user form.
   const [newName, setNewName] = useState("");
   const [newEmail, setNewEmail] = useState("");
-  const [newRole, setNewRole] = useState<"client_admin" | "client_viewer">(
-    "client_viewer",
-  );
+  // New seats default to the least-privilege Viewer (matches the backend
+  // default); an Approver promotes here or later from the roster.
+  const [newRole, setNewRole] = useState<ClientUserRole>("client_viewer");
   const [createBusy, setCreateBusy] = useState(false);
   const [createError, setCreateError] = useState<string | null>(null);
 
@@ -228,7 +246,7 @@ export default function ClientSeatsPage() {
                         ) : user.role === "client_admin" ? (
                           <Badge variant="info">Aprobador</Badge>
                         ) : (
-                          <Badge variant="outline">Solo lectura</Badge>
+                          tierBadge(user.role)
                         )}
                         {statusBadge(user)}
                       </div>
@@ -239,48 +257,28 @@ export default function ClientSeatsPage() {
 
                     {canManage && !user.is_primary ? (
                       <div className="flex flex-wrap items-center gap-1.5">
-                        {/* Tier toggle. An Approver (or staff) can promote a
-                            Viewer to Approver and demote an Approver back. */}
-                        {user.status === "active" &&
-                        user.role === "client_viewer" ? (
-                          <Button
-                            variant="outline"
-                            size="sm"
-                            disabled={busy}
-                            onClick={() =>
-                              runRowAction(user.user_id, async () => {
-                                await updateClientUserRole(
-                                  user.user_id,
-                                  "client_admin",
-                                  clientParam,
-                                );
-                                await reload();
-                              })
-                            }
-                          >
-                            Hacer Aprobador
-                          </Button>
-                        ) : null}
-                        {user.status === "active" &&
-                        user.role === "client_admin" ? (
-                          <Button
-                            variant="ghost"
-                            size="sm"
-                            disabled={busy}
-                            onClick={() =>
-                              runRowAction(user.user_id, async () => {
-                                await updateClientUserRole(
-                                  user.user_id,
-                                  "client_viewer",
-                                  clientParam,
-                                );
-                                await reload();
-                              })
-                            }
-                          >
-                            Hacer Solo lectura
-                          </Button>
-                        ) : null}
+                        {/* Any Approver (or staff) can re-tier a seat — the
+                            block is gated above by canManage; the backend
+                            allows either direction for an Approver. */}
+                        <Select
+                          aria-label={`Nivel de acceso de ${user.full_name}`}
+                          className="h-8 w-auto py-0 text-[13px]"
+                          value={user.role}
+                          disabled={busy}
+                          onChange={(e) =>
+                            runRowAction(user.user_id, async () => {
+                              await updateClientUserRole(
+                                user.user_id,
+                                e.target.value as ClientUserRole,
+                                clientParam,
+                              );
+                              await reload();
+                            })
+                          }
+                        >
+                          <option value="client_admin">Aprobador</option>
+                          <option value="client_viewer">Solo lectura</option>
+                        </Select>
                         {user.status === "active" ? (
                           <Button
                             variant="outline"
@@ -448,9 +446,7 @@ export default function ClientSeatsPage() {
                       id="seat-role"
                       value={newRole}
                       onChange={(e) =>
-                        setNewRole(
-                          e.target.value as "client_admin" | "client_viewer",
-                        )
+                        setNewRole(e.target.value as ClientUserRole)
                       }
                     >
                       <option value="client_viewer">
