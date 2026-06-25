@@ -32,6 +32,7 @@ import {
   clearAdminSession,
   readAdminSession,
 } from "@/lib/session/admin";
+import { logoutAdmin } from "@/lib/api/auth";
 
 /**
  * AdminShell — premium-dense operations console shell (V2.1).
@@ -121,7 +122,10 @@ export function AdminShell({
     setDrawerOpen(false);
   }, [pathname]);
 
-  function onLogout() {
+  async function onLogout() {
+    // FE-SEC-1 — clear the server-side session cookie too, then drop the
+    // local identity + in-memory bearer and route to /login.
+    await logoutAdmin();
     clearAdminSession();
     router.replace("/login");
   }

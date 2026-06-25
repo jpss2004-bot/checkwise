@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 
-import { readAdminSession } from "@/lib/session/admin";
+import { adminAuthHeader, readAdminSession } from "@/lib/session/admin";
 import type { ReportBlock, ReportContent } from "@/lib/api/reports";
 
 /**
@@ -140,8 +140,7 @@ export function useReportGeneration(reportId: string): UseReportGeneration {
 
   const startGeneration = useCallback(
     async (prompt: string, period?: string) => {
-      const session = readAdminSession();
-      if (!session?.access_token) {
+      if (!readAdminSession()) {
         setState((s) => ({
           ...s,
           status: "error",
@@ -168,9 +167,10 @@ export function useReportGeneration(reportId: string): UseReportGeneration {
           `${API_BASE_URL}/api/v1/reports/${reportId}/generate`,
           {
             method: "POST",
+            credentials: "include",
             headers: {
               "Content-Type": "application/json",
-              Authorization: `Bearer ${session.access_token}`,
+              ...adminAuthHeader(),
               Accept: "text/event-stream",
             },
             body: JSON.stringify({

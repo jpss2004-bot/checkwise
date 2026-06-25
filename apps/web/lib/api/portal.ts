@@ -2,15 +2,16 @@
  * Typed wrapper over the V1.2 portal + compliance endpoints.
  *
  * Auth resolution (CheckWise 1.8):
- *   1. ``Authorization: Bearer <jwt>`` from the admin/user session in
- *      localStorage — primary, cross-origin safe.
+ *   1. ``Authorization: Bearer <jwt>`` from the in-memory admin/user
+ *      session — primary, cross-origin safe.
  *   2. ``credentials: "include"`` so the portal session cookie still
- *      gets sent when the browser allows it.
+ *      gets sent when the browser allows it (and authenticates after a
+ *      reload, when the in-memory bearer is gone).
  *   3. Legacy ``X-Workspace-Token`` header when the caller passes a
  *      PortalSession with a real token (kept for backward compat).
  */
 
-import { readAdminSession } from "@/lib/session/admin";
+import { getAdminAccessToken } from "@/lib/session/admin";
 import { fetchWithTimeout, FetchTimeoutError } from "@/lib/api/fetch-timeout";
 import type { PersonaType, PortalSession } from "@/lib/session/portal";
 
@@ -212,9 +213,9 @@ async function fetchJson<T>(
     headers.set("Content-Type", "application/json");
   }
   // 1. Bearer JWT — the cross-origin-safe primary path.
-  const adminSession = readAdminSession();
-  if (adminSession?.access_token && !headers.has("Authorization")) {
-    headers.set("Authorization", `Bearer ${adminSession.access_token}`);
+  const adminToken = getAdminAccessToken();
+  if (adminToken && !headers.has("Authorization")) {
+    headers.set("Authorization", `Bearer ${adminToken}`);
   }
   // 2. Legacy X-Workspace-Token still supported when a caller passes one.
   if (
@@ -682,9 +683,9 @@ export async function fetchSubmissionDocumentBlob(
   opts: { download?: boolean } = {},
 ): Promise<string> {
   const headers = new Headers();
-  const adminSession = readAdminSession();
-  if (adminSession?.access_token) {
-    headers.set("Authorization", `Bearer ${adminSession.access_token}`);
+  const adminToken = getAdminAccessToken();
+  if (adminToken) {
+    headers.set("Authorization", `Bearer ${adminToken}`);
   }
   if (session.access_token && session.access_token !== "cookie-managed") {
     headers.set("X-Workspace-Token", session.access_token);

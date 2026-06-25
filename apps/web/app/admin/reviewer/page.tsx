@@ -305,7 +305,7 @@ function ReviewerQueueBody() {
   useEffect(() => {
     if (!session) return;
     let cancelled = false;
-    getReviewerQueueFacets(session.access_token, clientId || undefined)
+    getReviewerQueueFacets(clientId || undefined)
       .then((payload) => {
         if (!cancelled) setFacets(payload);
       })
@@ -363,7 +363,7 @@ function ReviewerQueueBody() {
       },
     ],
     queryFn: ({ pageParam }) =>
-      getReviewerQueue(session!.access_token, {
+      getReviewerQueue({
         status: serverStatus,
         institution: institution || undefined,
         risk: risk || undefined,

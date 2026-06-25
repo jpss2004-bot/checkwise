@@ -27,6 +27,7 @@ import {
   clearAdminSession,
   readAdminSession,
 } from "@/lib/session/admin";
+import { logoutAdmin } from "@/lib/api/auth";
 
 /**
  * PlatformShell — IT/platform-admin surface (V2.6).
@@ -102,7 +103,10 @@ export function PlatformShell({
       pathname === item.href || pathname?.startsWith(item.href + "/"),
   ).sort((a, b) => b.href.length - a.href.length)[0]?.href;
 
-  function onLogout() {
+  async function onLogout() {
+    // FE-SEC-1 — clear the server-side session cookie too, then drop the
+    // local identity + in-memory bearer and route to /login.
+    await logoutAdmin();
     clearAdminSession();
     router.replace("/login");
   }

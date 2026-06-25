@@ -15,7 +15,7 @@
  *      cookie still gets sent when the browser permits it.
  */
 
-import { readAdminSession } from "@/lib/session/admin";
+import { adminAuthHeader } from "@/lib/session/admin";
 
 const API_BASE_URL =
   (typeof process !== "undefined" && process.env.NEXT_PUBLIC_API_BASE_URL) ||
@@ -71,13 +71,6 @@ export interface CorrectionRequestResult {
   detail?: string;
 }
 
-function bearerHeader(): Record<string, string> {
-  const session = readAdminSession();
-  return session?.access_token
-    ? { Authorization: `Bearer ${session.access_token}` }
-    : {};
-}
-
 /**
  * Submit a Tier B correction request to the backend.
  *
@@ -120,7 +113,7 @@ export async function submitCorrectionRequest(
         headers: {
           Accept: "application/json",
           "Content-Type": "application/json",
-          ...bearerHeader(),
+          ...adminAuthHeader(),
         },
         body: JSON.stringify(body),
       },

@@ -29,6 +29,7 @@ import { AuthApiError, setPassword } from "@/lib/api/auth";
 import {
   clearAdminSession,
   readAdminSession,
+  setAdminAccessToken,
   writeAdminSession,
 } from "@/lib/session/admin";
 
@@ -148,14 +149,15 @@ function ActivateInner() {
       setError(null);
       setSubmitting(true);
       try {
-        const result = await setPassword(stored.access_token, password);
+        const result = await setPassword(password);
         // CW-AUTH-002 — set-password invalidates the old token (session
-        // epoch bump) and returns a freshly-minted one. Adopt it (and its
-        // new expiry) along with the cleared must-change-password flag, so
-        // the post-activation redirect doesn't 401 on a now-stale token.
+        // epoch bump) and returns a freshly-minted one (and a refreshed
+        // cookie). Adopt the new token into the in-memory store and persist
+        // the new expiry + cleared must-change-password flag, so the
+        // post-activation redirect doesn't 401 on a now-stale token.
+        setAdminAccessToken(result.access_token);
         writeAdminSession({
           ...stored,
-          access_token: result.access_token,
           expires_at: result.expires_at,
           user: {
             ...stored.user,
