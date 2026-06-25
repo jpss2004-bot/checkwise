@@ -12,6 +12,8 @@ import {
 } from "@phosphor-icons/react";
 
 import { ClientShell } from "../_shell";
+import { SettingsNav } from "@/components/checkwise/settings/settings-nav";
+import { clientSettingsTabs } from "@/components/checkwise/settings/tabs";
 import { Surface } from "@/components/checkwise/dashboard/stat-card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -143,6 +145,12 @@ export default function ClientOnboardingPage() {
   return (
     <ClientShell>
       <div className="space-y-6">
+        {/* In ongoing-edit mode this page is the "Datos de la empresa"
+            tab of the Configuración hub, so carry the hub nav. During
+            first-run alta we hide it to keep the setup flow focused. */}
+        {!isFirstTime ? (
+          <SettingsNav tabs={clientSettingsTabs(urlClientId)} />
+        ) : null}
         <header className="space-y-3">
           <div className="flex items-center gap-2 text-xs uppercase tracking-wide text-[color:var(--text-tertiary)]">
             <Link

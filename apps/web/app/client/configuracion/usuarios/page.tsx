@@ -21,6 +21,8 @@ import {
 } from "@phosphor-icons/react";
 
 import { ClientShell } from "../../_shell";
+import { SettingsNav } from "@/components/checkwise/settings/settings-nav";
+import { clientSettingsTabs } from "@/components/checkwise/settings/tabs";
 import { Surface } from "@/components/checkwise/dashboard/stat-card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -176,10 +178,11 @@ export default function ClientSeatsPage() {
 
   return (
     <ClientShell
-      title="Usuarios y accesos"
+      title="Configuración"
       description="Administra quién puede entrar al portal de tu empresa. Un Aprobador agrega usuarios (Aprobadores o de Solo lectura) hasta el límite de tu plan; los perfiles de Solo lectura solo consultan."
     >
       <div className="space-y-5">
+        <SettingsNav tabs={clientSettingsTabs(urlClientId)} />
         {loadError ? (
           <div
             role="alert"
