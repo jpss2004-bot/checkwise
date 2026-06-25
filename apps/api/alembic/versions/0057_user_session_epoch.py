@@ -1,8 +1,15 @@
 """User session epoch (JWT revocation stamp).
 
 Revision ID: 0057_user_session_epoch
-Revises: 0056_rename_rbac_roles
+Revises: 0063_intake_queue
 Create Date: 2026-06-24
+
+Rechained onto main's head ``0063_intake_queue`` during the
+F6/codex → main integration (2026-06-25). It was authored against the
+codex branch's ``0056_rename_rbac_roles``, which main renumbered to
+``0060_rename_rbac_roles`` — so the original down_revision dangled and
+broke ``alembic upgrade head``. The migration itself is purely additive
+(one column), so applying it last is order-independent and safe.
 
 Adds ``users.session_epoch`` so the API can revoke outstanding access
 tokens without waiting for their natural 24h expiry (CW-AUTHZ-001 /
@@ -28,7 +35,7 @@ import sqlalchemy as sa
 from alembic import op
 
 revision = "0057_user_session_epoch"
-down_revision = "0056_rename_rbac_roles"
+down_revision = "0063_intake_queue"
 branch_labels = None
 depends_on = None
 
