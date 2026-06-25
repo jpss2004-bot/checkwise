@@ -129,6 +129,65 @@ def test_client_ip_falls_back_to_real_ip_then_sentinel() -> None:
     assert client_ip_from_request(_Nothing()) == "0.0.0.0"
 
 
+def test_trusted_proxy_hops_default_is_one() -> None:
+    """CW-RATE-002 — the default preserves Render's single-proxy behavior."""
+    from app.core.config import Settings
+
+    assert Settings().RATE_LIMIT_TRUSTED_PROXY_HOPS == 1
+
+
+def test_two_trusted_hops_selects_second_from_right(monkeypatch) -> None:
+    """With two trusted proxies appending, the real client is parts[-2]."""
+    from app.core import rate_limit
+
+    monkeypatch.setattr(rate_limit.settings, "RATE_LIMIT_TRUSTED_PROXY_HOPS", 2)
+
+    class _Req:
+        # attacker=1.2.3.4, real client=203.0.113.50, two proxies append.
+        headers = {"x-forwarded-for": "1.2.3.4, 203.0.113.50, 10.0.0.1"}
+        client = None
+
+    assert rate_limit.client_ip_from_request(_Req()) == "203.0.113.50"
+
+
+def test_zero_hops_ignores_xff_and_uses_socket_peer(monkeypatch) -> None:
+    """hops=0 distrusts XFF entirely (no trusted proxy in front)."""
+    from types import SimpleNamespace
+
+    from app.core import rate_limit
+
+    monkeypatch.setattr(rate_limit.settings, "RATE_LIMIT_TRUSTED_PROXY_HOPS", 0)
+
+    class _Req:
+        headers = {"x-forwarded-for": "9.9.9.9"}
+        client = SimpleNamespace(host="10.0.0.5")
+
+    assert rate_limit.client_ip_from_request(_Req()) == "10.0.0.5"
+
+    class _ReqNoClient:
+        headers = {"x-forwarded-for": "9.9.9.9"}
+        client = None
+
+    assert rate_limit.client_ip_from_request(_ReqNoClient()) == "0.0.0.0"
+
+
+def test_forged_short_chain_does_not_trust_attacker_value(monkeypatch) -> None:
+    """A chain shorter than the trusted hop count is forged — never return
+    the attacker-positioned value; fall through to X-Real-IP / socket peer."""
+    from app.core import rate_limit
+
+    monkeypatch.setattr(rate_limit.settings, "RATE_LIMIT_TRUSTED_PROXY_HOPS", 2)
+
+    class _Req:
+        # Attacker sends only their own IP, hoping parts[-2] logic grabs it.
+        headers = {"x-forwarded-for": "6.6.6.6", "x-real-ip": "203.0.113.9"}
+        client = None
+
+    resolved = rate_limit.client_ip_from_request(_Req())
+    assert resolved != "6.6.6.6"
+    assert resolved == "203.0.113.9"
+
+
 # ─── Share-unlock brute-force limiter ───────────────────────────
 
 

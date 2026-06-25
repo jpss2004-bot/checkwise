@@ -35,6 +35,7 @@ from __future__ import annotations
 
 import hashlib
 import time
+import uuid
 from collections import defaultdict, deque
 from threading import Lock
 from typing import Protocol
@@ -161,11 +162,21 @@ class RedisRateLimiter:
         # the window matters.
         self._counter = member_counter_start
         self._counter_lock = Lock()
+        # CW-RATE-001 — the counter alone is only unique WITHIN one process.
+        # Two workers sharing a Redis bucket both start their counters at 0,
+        # so a same-millisecond burst could emit identical ``ms:counter``
+        # members; the ZADD overwrites instead of incrementing ZCARD and the
+        # burst is undercounted. A per-instance nonce makes every member
+        # globally distinct (no extra Redis round-trip). 48 bits is ample.
+        self._nonce = uuid.uuid4().hex[:12]
 
     def _next_member(self, now_ms: int) -> str:
         with self._counter_lock:
             self._counter = (self._counter + 1) % 1_000_000
-            return f"{now_ms}:{self._counter}"
+            # ``ms:nonce:counter`` — score (ZADD) is still ``now_ms`` so
+            # ordering/pruning by score is unaffected; the member only needs
+            # to be unique within the window, now across workers too.
+            return f"{now_ms}:{self._nonce}:{self._counter}"
 
     def check(self, key: str, *, limit: int, window_seconds: float) -> bool:
         if limit <= 0:
@@ -288,29 +299,46 @@ _RATE_LIMITED_DETAIL = (
 )
 
 
-def client_ip_from_request(request: Request) -> str:
-    """Best-effort client IP for rate-limit bucketing.
-
-    Takes the RIGHTMOST ``X-Forwarded-For`` entry because Render
-    terminates TLS in front of uvicorn and *appends* the real peer to
-    any client-supplied chain — so the leftmost entry is attacker-
-    controlled (rotating it would mint a fresh bucket per request and
-    defeat every rate limit) while the rightmost is the IP Render saw.
-    With Render's single trusted proxy in front, that last hop is the
-    real client. Falls back to ``X-Real-IP`` then to the direct socket
-    peer. Never authoritative for authorization — bucket keys only.
-    """
-    xff = request.headers.get("x-forwarded-for")
-    if xff:
-        last = xff.split(",")[-1].strip()
-        if last:
-            return last
+def _socket_or_real_ip(request: Request) -> str:
+    """X-Real-IP then the direct socket peer then the ``0.0.0.0`` sentinel.
+    Used when ``X-Forwarded-For`` is not trusted or too short to trust."""
     real = request.headers.get("x-real-ip")
     if real:
         return real.strip()
     if request.client and request.client.host:
         return request.client.host
     return "0.0.0.0"
+
+
+def client_ip_from_request(request: Request) -> str:
+    """Best-effort client IP for rate-limit bucketing.
+
+    Honors ``X-Forwarded-For`` only as far as the configured
+    ``RATE_LIMIT_TRUSTED_PROXY_HOPS`` (CW-RATE-002). The leftmost XFF
+    entries are attacker-controlled (rotating them would mint a fresh
+    bucket per request and defeat every rate limit); a trusted proxy
+    *appends* the real peer, so the real client is the Nth-from-right
+    entry where N is the number of trusted proxies in front of the app.
+
+    - ``hops <= 0``: XFF is fully ignored (no trusted proxy) → socket peer.
+    - ``hops >= 1`` with a chain at least that long: take ``parts[-hops]``.
+    - A chain SHORTER than ``hops`` (a forged-short chain trying to land an
+      attacker IP at the trusted position) is not trusted → fall through to
+      X-Real-IP / socket peer.
+
+    Default ``hops=1`` reproduces Render's behavior exactly (rightmost
+    entry). Never authoritative for authorization — bucket keys only.
+    """
+    hops = settings.RATE_LIMIT_TRUSTED_PROXY_HOPS
+    if hops <= 0:
+        return _socket_or_real_ip(request)
+    xff = request.headers.get("x-forwarded-for")
+    if xff:
+        parts = [p.strip() for p in xff.split(",") if p.strip()]
+        if len(parts) >= hops:
+            return parts[-hops]
+        # Chain shorter than the trusted hop count — treat as forged.
+    return _socket_or_real_ip(request)
 
 
 def enforce_share_unlock_rate_limit(

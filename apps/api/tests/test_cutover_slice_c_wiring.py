@@ -57,6 +57,16 @@ def db_factory():
 
 
 @pytest.fixture
+def bg_to_test_session(db_factory, monkeypatch):
+    """Redirect the deferred notification fanout's fresh ``SessionLocal()``
+    (CW-DOS-002) at the per-test in-memory engine so its dispatch-row writes
+    land where the assertions look. Mirrors the report-export bg pattern."""
+    from app.services.notifications import background as bg_module
+
+    monkeypatch.setattr(bg_module, "SessionLocal", db_factory)
+
+
+@pytest.fixture
 def api_client(db_factory) -> Generator[TestClient, None, None]:
     def override_get_db() -> Generator[Session, None, None]:
         db = db_factory()
@@ -131,7 +141,9 @@ def _seed_internal_admin(db_factory) -> tuple[str, str, str]:
 # ===========================================================================
 
 
-def test_forgot_password_fires_emitter(api_client: TestClient, db_factory) -> None:
+def test_forgot_password_fires_emitter(
+    api_client: TestClient, db_factory, bg_to_test_session
+) -> None:
     # Seed an active user so the endpoint actually progresses to the
     # emit call (the generic 202 path short-circuits on unknown email).
     db = db_factory()
@@ -221,7 +233,7 @@ def test_preferences_update_fires_emitter(
 
 
 def test_admin_provision_client_fires_emitter(
-    api_client: TestClient, db_factory
+    api_client: TestClient, db_factory, bg_to_test_session
 ) -> None:
     _admin_id, _org_id, token = _seed_internal_admin(db_factory)
 

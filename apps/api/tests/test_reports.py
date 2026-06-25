@@ -30,6 +30,7 @@ from sqlalchemy import create_engine, select
 from sqlalchemy.orm import Session, sessionmaker
 from sqlalchemy.pool import StaticPool
 
+from app.core.config import settings
 from app.db.base import Base
 from app.db.session import get_db
 from app.main import app
@@ -505,3 +506,119 @@ def test_db_state_after_create(api_client: TestClient, db_factory) -> None:
         assert versions[0].generated_by == "user"
     finally:
         db.close()
+
+
+# ---------------------------------------------------------------------------
+# CW-DOS-001 — report content size caps (write-time)
+# ---------------------------------------------------------------------------
+
+
+def _new_report(api_client: TestClient, token: str) -> str:
+    return api_client.post(
+        "/api/v1/reports",
+        headers=_h(token),
+        json={"title": "T", "audience": "internal_only"},
+    ).json()["id"]
+
+
+def test_create_version_rejects_oversized_content_json(
+    api_client: TestClient, db_factory
+) -> None:
+    token = _admin_token(api_client, db_factory)
+    report_id = _new_report(api_client, token)
+    huge = "A" * (settings.REPORT_CONTENT_MAX_BYTES + 1000)
+    resp = api_client.post(
+        f"/api/v1/reports/{report_id}/versions",
+        headers=_h(token),
+        json={"content_json": {"blocks": [{"type": "text", "data": {"text": huge}}]}},
+    )
+    assert resp.status_code == 413, resp.text
+    # Not persisted — only the seed v1 exists.
+    listing = api_client.get(
+        f"/api/v1/reports/{report_id}/versions", headers=_h(token)
+    ).json()
+    assert listing["total"] == 1
+
+
+def test_create_version_rejects_too_many_blocks(
+    api_client: TestClient, db_factory
+) -> None:
+    token = _admin_token(api_client, db_factory)
+    report_id = _new_report(api_client, token)
+    blocks = [{"type": "divider"} for _ in range(settings.REPORT_CONTENT_MAX_BLOCKS + 1)]
+    resp = api_client.post(
+        f"/api/v1/reports/{report_id}/versions",
+        headers=_h(token),
+        json={"content_json": {"blocks": blocks}},
+    )
+    assert resp.status_code == 413, resp.text
+
+
+def test_create_version_rejects_deep_nesting(
+    api_client: TestClient, db_factory
+) -> None:
+    token = _admin_token(api_client, db_factory)
+    report_id = _new_report(api_client, token)
+    nested: dict = {"x": 1}
+    for _ in range(settings.REPORT_CONTENT_MAX_DEPTH + 5):
+        nested = {"x": nested}
+    resp = api_client.post(
+        f"/api/v1/reports/{report_id}/versions",
+        headers=_h(token),
+        json={"content_json": nested},
+    )
+    assert resp.status_code == 413, resp.text
+
+
+def test_create_version_rejects_oversized_block_text(
+    api_client: TestClient, db_factory
+) -> None:
+    token = _admin_token(api_client, db_factory)
+    report_id = _new_report(api_client, token)
+    # Per-block text over the cap, but total bytes under the byte cap.
+    text = "A" * (settings.REPORT_CONTENT_MAX_TEXT_PER_BLOCK + 100)
+    resp = api_client.post(
+        f"/api/v1/reports/{report_id}/versions",
+        headers=_h(token),
+        json={"content_json": {"blocks": [{"type": "text", "data": {"text": text}}]}},
+    )
+    assert resp.status_code == 413, resp.text
+
+
+def test_create_version_accepts_normal_content(
+    api_client: TestClient, db_factory
+) -> None:
+    token = _admin_token(api_client, db_factory)
+    report_id = _new_report(api_client, token)
+    resp = api_client.post(
+        f"/api/v1/reports/{report_id}/versions",
+        headers=_h(token),
+        json={
+            "content_json": {
+                "schema_version": 1,
+                "blocks": [{"type": "text", "data": {"text": "ok"}}],
+                "global": {},
+            }
+        },
+    )
+    assert resp.status_code == 201, resp.text
+    assert resp.json()["version_number"] == 2
+
+
+def test_post_report_rejects_oversized_initial_content(
+    api_client: TestClient, db_factory
+) -> None:
+    token = _admin_token(api_client, db_factory)
+    huge = "A" * (settings.REPORT_CONTENT_MAX_BYTES + 1000)
+    resp = api_client.post(
+        "/api/v1/reports",
+        headers=_h(token),
+        json={
+            "title": "T",
+            "audience": "internal_only",
+            "initial_content_json": {
+                "blocks": [{"type": "text", "data": {"text": huge}}]
+            },
+        },
+    )
+    assert resp.status_code == 413, resp.text

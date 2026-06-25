@@ -218,8 +218,9 @@ def test_gate_allows_set_password_when_flag_is_set(
 def test_gate_clears_after_set_password_and_admin_routes_unlock(
     api_client: TestClient, db_factory
 ) -> None:
-    """After /auth/set-password flips the flag, the same JWT (still
-    valid) must reach previously-blocked endpoints."""
+    """After /auth/set-password flips the flag, the session continues via
+    the RE-MINTED token the endpoint returns (CW-AUTH-002 bumps the session
+    epoch, so the old token is intentionally invalidated) — no relogin."""
     email = "unlock-flag@checkwise.test"
     password = "TempPassword!2026"
     _seed_user_with_must_change(
@@ -240,9 +241,18 @@ def test_gate_clears_after_set_password_and_admin_routes_unlock(
         headers=_auth_headers(token),
     )
     assert set_resp.status_code == 200, set_resp.text
+    fresh_token = set_resp.json()["access_token"]
 
-    # Unblocked after clearing the flag — same JWT, no relogin.
+    # The pre-set-password token is now revoked (session-epoch bump).
+    assert (
+        api_client.get(
+            "/api/v1/admin/clients", headers=_auth_headers(token)
+        ).status_code
+        == 401
+    )
+
+    # The re-minted token reaches previously-blocked endpoints — no relogin.
     unblocked = api_client.get(
-        "/api/v1/admin/clients", headers=_auth_headers(token)
+        "/api/v1/admin/clients", headers=_auth_headers(fresh_token)
     )
     assert unblocked.status_code == 200, unblocked.text

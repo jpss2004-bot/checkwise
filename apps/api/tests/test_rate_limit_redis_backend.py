@@ -167,6 +167,34 @@ def test_redis_unique_members_let_burst_share_a_millisecond() -> None:
     assert client.zcard("cwrl:k") == 50
 
 
+def test_member_format_includes_per_instance_nonce() -> None:
+    """CW-RATE-001 — the member is ``ms:nonce:counter`` and the nonce
+    segment matches the instance's nonce."""
+    import re
+
+    rl = RedisRateLimiter(fakeredis.FakeRedis())
+    member = rl._next_member(123)
+    assert re.fullmatch(r"123:[0-9a-f]{12}:\d+", member)
+    assert member.split(":")[1] == rl._nonce
+
+
+def test_two_instances_emit_distinct_members_on_shared_redis() -> None:
+    """CW-RATE-001 — two workers (instances) sharing one Redis bucket must
+    not collide on ZSET members; ZCARD must equal the TOTAL checks across
+    both. Without the per-instance nonce, same-ms/same-counter members from
+    the two instances would overwrite and the count would plateau low."""
+    client = fakeredis.FakeRedis()
+    rl_a = RedisRateLimiter(client)
+    rl_b = RedisRateLimiter(client)
+    assert rl_a._nonce != rl_b._nonce
+
+    # Interleave checks from both instances against one high-limit bucket.
+    for _ in range(25):
+        assert rl_a.check("shared", limit=1000, window_seconds=60)
+        assert rl_b.check("shared", limit=1000, window_seconds=60)
+    assert client.zcard("cwrl:shared") == 50
+
+
 # ─── Factory ─────────────────────────────────────────────────────
 
 

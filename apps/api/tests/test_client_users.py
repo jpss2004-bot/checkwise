@@ -767,6 +767,46 @@ def test_owner_promotes_and_demotes_seat(db_factory, api_client):
     assert "client.user_role_changed" in actions
 
 
+def test_demotion_invalidates_seat_holders_live_session(db_factory, api_client):
+    """CW-AUTHZ-001 — demoting an Approver to Viewer bumps the target's
+    session epoch, so the JWT that still carries the ``client_admin`` claim
+    is rejected on the next request (closing the stale-write window) instead
+    of honoring it until token expiry."""
+    ctx = _seed_client_with_owner(db_factory)
+    owner_token = _login(api_client, ctx["owner_email"])
+
+    # An already-active Viewer promoted to Approver, then signs in.
+    sec = _seed_secondary(db_factory, ctx["org_id"])
+    promote = api_client.patch(
+        f"/api/v1/client/users/{sec['user_id']}/role",
+        json={"role": "client_admin"},
+        headers=_h(owner_token),
+    )
+    assert promote.status_code == 200, promote.text
+    approver_token = _login(api_client, sec["email"])
+    # The Approver's session is live before demotion.
+    assert (
+        api_client.get("/api/v1/auth/me", headers=_h(approver_token)).status_code
+        == 200
+    )
+
+    # The owner demotes them back to Viewer.
+    demote = api_client.patch(
+        f"/api/v1/client/users/{sec['user_id']}/role",
+        json={"role": "client_viewer"},
+        headers=_h(owner_token),
+    )
+    assert demote.status_code == 200, demote.text
+
+    # The pre-demotion token (still claiming client_admin) is now rejected.
+    stale = api_client.get("/api/v1/auth/me", headers=_h(approver_token))
+    assert stale.status_code == 401, stale.text
+
+    # A fresh login works and reflects the reduced role.
+    fresh_token = _login(api_client, sec["email"])
+    assert api_client.get("/api/v1/auth/me", headers=_h(fresh_token)).status_code == 200
+
+
 def test_cannot_change_primary_owner_role(db_factory, api_client):
     ctx = _seed_client_with_owner(db_factory)
     owner_token = _login(api_client, ctx["owner_email"])

@@ -2240,6 +2240,43 @@ def test_revoke_membership_and_block_primary(
     assert removed.json()["status"] == "removed"
 
 
+def test_revoke_membership_invalidates_targets_live_token(
+    api_client: TestClient, db_factory
+) -> None:
+    """CW-AUTHZ-001 (HIGH) — revoking a role bumps the target user's session
+    epoch, so the JWT that still carries the revoked role is rejected on the
+    next request instead of authorizing until expiry."""
+    admin_token = _admin_token(api_client, db_factory)
+    owner = _provision_client(
+        api_client, admin_token, email="re-owner@cli.com", client_name="Revoke SA"
+    )
+    org_id = _detail(api_client, admin_token, owner)["memberships"][0][
+        "organization_id"
+    ]
+
+    # A member granted client_admin who has a usable password + live session.
+    member = _seed_directory_user(db_factory, email="re-member@cli.com")
+    granted = api_client.post(
+        f"/api/v1/admin/users/{member}/memberships",
+        json={"organization_id": org_id, "role": "client_admin"},
+        headers=_h(admin_token),
+    ).json()
+    member_token = _login(api_client, "re-member@cli.com", "Seeded!2026")
+    assert (
+        api_client.get("/api/v1/auth/me", headers=_h(member_token)).status_code == 200
+    )
+
+    revoked = api_client.delete(
+        f"/api/v1/admin/users/{member}/memberships/{granted['membership_id']}",
+        headers=_h(admin_token),
+    )
+    assert revoked.status_code == 200, revoked.text
+
+    # The pre-revoke token no longer authorizes anything.
+    stale = api_client.get("/api/v1/auth/me", headers=_h(member_token))
+    assert stale.status_code == 401, stale.text
+
+
 def test_promote_membership_transfers_primary(
     api_client: TestClient, db_factory
 ) -> None:

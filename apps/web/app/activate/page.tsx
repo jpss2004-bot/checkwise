@@ -149,10 +149,14 @@ function ActivateInner() {
       setSubmitting(true);
       try {
         const result = await setPassword(stored.access_token, password);
-        // Refresh local session with the cleared flag so a refresh on
-        // any page doesn't bounce the user back to /activate.
+        // CW-AUTH-002 — set-password invalidates the old token (session
+        // epoch bump) and returns a freshly-minted one. Adopt it (and its
+        // new expiry) along with the cleared must-change-password flag, so
+        // the post-activation redirect doesn't 401 on a now-stale token.
         writeAdminSession({
           ...stored,
+          access_token: result.access_token,
+          expires_at: result.expires_at,
           user: {
             ...stored.user,
             ...result.user,

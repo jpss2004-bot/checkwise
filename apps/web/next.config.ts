@@ -76,12 +76,18 @@ const nextConfig: NextConfig = {
   // API (Render) sets its own headers; these protect the user-facing app
   // (Vercel).
   async headers() {
-    // Content-Security-Policy shipped in REPORT-ONLY mode: the browser
-    // reports violations (console / report-to) but never blocks, so it is
-    // safe to deploy while the marketing v2 work is in flight. Tune the
-    // directives against real reports during QA, then flip the header key
-    // to "Content-Security-Policy" to enforce. connect-src is derived from
-    // the API origin; script/frame allow the Calendly booking embed.
+    // CW-XSS-001 — Content-Security-Policy is ENFORCED in production and
+    // report-only in dev. Enforcing it makes default-src/object-src/
+    // frame-ancestors/base-uri actually block in prod, shrinking the XSS
+    // attack surface (the exfiltration path the localStorage-token finding
+    // depends on). 'unsafe-eval' is only needed by the dev overlay / HMR,
+    // so it is added in DEV ONLY and dropped in prod. 'unsafe-inline' on
+    // script-src must stay until a per-request nonce is wired (Next injects
+    // an un-nonced inline bootstrap script); removing it now would
+    // white-screen the app — a nonce migration is a separate, deliberate
+    // change. connect-src is derived from the API origin; script/frame
+    // allow the Calendly booking embed.
+    const isProd = process.env.NODE_ENV === "production";
     let apiOrigin = "";
     try {
       const raw = process.env.NEXT_PUBLIC_API_BASE_URL;
@@ -95,10 +101,9 @@ const nextConfig: NextConfig = {
       "object-src 'none'",
       "frame-ancestors 'none'",
       "form-action 'self'",
-      // Next injects an inline bootstrap script; without a nonce this
-      // needs 'unsafe-inline'. 'unsafe-eval' is only needed by the dev
-      // overlay and is harmless under report-only.
-      "script-src 'self' 'unsafe-inline' 'unsafe-eval' https://assets.calendly.com",
+      // 'unsafe-inline' stays (un-nonced Next bootstrap). 'unsafe-eval' is
+      // dev-overlay/HMR only → dropped in prod.
+      `script-src 'self' 'unsafe-inline'${isProd ? "" : " 'unsafe-eval'"} https://assets.calendly.com`,
       "style-src 'self' 'unsafe-inline' https://assets.calendly.com",
       "img-src 'self' data: blob: https:",
       "font-src 'self' data:",
@@ -119,7 +124,14 @@ const nextConfig: NextConfig = {
         key: "Strict-Transport-Security",
         value: "max-age=63072000; includeSubDomains; preload",
       },
-      { key: "Content-Security-Policy-Report-Only", value: csp },
+      {
+        // Enforce in production; report-only in dev so the dev overlay / HMR
+        // (which needs 'unsafe-eval') keeps working without being blocked.
+        key: isProd
+          ? "Content-Security-Policy"
+          : "Content-Security-Policy-Report-Only",
+        value: csp,
+      },
     ];
     return [{ source: "/:path*", headers: securityHeaders }];
   },

@@ -36,12 +36,11 @@ import time
 import urllib.error
 import urllib.parse
 import urllib.request
-from collections import deque
-from threading import Lock
 
 from sqlalchemy.orm import Session
 
 from app.core.config import settings
+from app.core.rate_limit import build_rate_limiter, hash_identifier
 from app.db.session import SessionLocal
 from app.models.entities import FeedbackReport, new_id, utc_now
 from app.services.contact_service import hash_ip  # peppered SHA-256 IP hash
@@ -55,14 +54,16 @@ PNG_MAGIC = b"\x89PNG\r\n\x1a\n"
 _SLACK_TIMEOUT_SECONDS = 10
 
 
-# ─── Rate limit (in-memory sliding window) ──────────────────────
+# ─── Rate limit (shared limiter) ────────────────────────────────
 
 
 _RATE_WINDOW_SECONDS = 60
 _RATE_MAX_PER_WINDOW = 10
 
-_rate_buckets: dict[str, deque[float]] = {}
-_rate_lock = Lock()
+# CW-RATE-003 — authenticated feedback throttle on the shared limiter
+# (Redis when configured, in-memory fallback otherwise). The raw user id
+# is hashed into the bucket key so no plaintext id lands in limiter state.
+feedback_limiter = build_rate_limiter()
 
 
 def record_and_check_rate(user_id: str) -> bool:
@@ -71,16 +72,11 @@ def record_and_check_rate(user_id: str) -> bool:
     Returns ``True`` when the submission is allowed (and recorded),
     ``False`` when the user has exceeded the per-minute cap.
     """
-    now = time.monotonic()
-    cutoff = now - _RATE_WINDOW_SECONDS
-    with _rate_lock:
-        bucket = _rate_buckets.setdefault(user_id, deque())
-        while bucket and bucket[0] < cutoff:
-            bucket.popleft()
-        if len(bucket) >= _RATE_MAX_PER_WINDOW:
-            return False
-        bucket.append(now)
-        return True
+    return feedback_limiter.check(
+        f"feedback:user:{hash_identifier(user_id)}",
+        limit=_RATE_MAX_PER_WINDOW,
+        window_seconds=_RATE_WINDOW_SECONDS,
+    )
 
 
 # Public landing-page submissions get a separate, tighter bucket — they
@@ -88,8 +84,10 @@ def record_and_check_rate(user_id: str) -> bool:
 _PUBLIC_RATE_WINDOW_SECONDS = 60 * 60  # 1 hour
 _PUBLIC_RATE_MAX_PER_WINDOW = 5
 
-_public_rate_buckets: dict[str, deque[float]] = {}
-_public_rate_lock = Lock()
+# Separate limiter instance for the anonymous public bucket so a public
+# flood can't deplete the authenticated cap (mirrors the prior two-bucket
+# segregation).
+feedback_public_limiter = build_rate_limiter()
 
 
 def record_and_check_public_rate(ip_hash: str | None) -> bool:
@@ -106,24 +104,17 @@ def record_and_check_public_rate(ip_hash: str | None) -> bool:
     """
     if ip_hash is None:
         return True
-    now = time.monotonic()
-    cutoff = now - _PUBLIC_RATE_WINDOW_SECONDS
-    with _public_rate_lock:
-        bucket = _public_rate_buckets.setdefault(ip_hash, deque())
-        while bucket and bucket[0] < cutoff:
-            bucket.popleft()
-        if len(bucket) >= _PUBLIC_RATE_MAX_PER_WINDOW:
-            return False
-        bucket.append(now)
-        return True
+    return feedback_public_limiter.check(
+        f"feedback:public:{ip_hash}",
+        limit=_PUBLIC_RATE_MAX_PER_WINDOW,
+        window_seconds=_PUBLIC_RATE_WINDOW_SECONDS,
+    )
 
 
 def _reset_rate_limiter_for_tests() -> None:
-    """Test-only hook to clear both in-process rate-limit stores."""
-    with _rate_lock:
-        _rate_buckets.clear()
-    with _public_rate_lock:
-        _public_rate_buckets.clear()
+    """Test-only hook to clear both rate-limit stores."""
+    feedback_limiter.reset()
+    feedback_public_limiter.reset()
 
 
 # ─── Persistence ────────────────────────────────────────────────
@@ -413,12 +404,30 @@ def _is_safe_http_url(value: str) -> bool:
     return value.startswith("https://") or value.startswith("http://")
 
 
+def _is_safe_link_target(value: str) -> bool:
+    """True only for http(s) URLs that cannot break out of Slack's
+    ``<url|label>`` link syntax. CW-SLACK-001 — a URL containing ``<``,
+    ``>``, ``|`` or whitespace could close the link wrapper and inject
+    ``<!channel>``/markup, so those degrade to escaped plain text."""
+    return _is_safe_http_url(value) and not any(c in value for c in "<>|") and not any(
+        c.isspace() for c in value
+    )
+
+
 def _fallback_text(s: dict) -> str:
+    # CW-SLACK-001 — escape every public field interpolated into the
+    # fallback text so a submitter can't inject ``<!channel>`` mentions.
     label = "🐛 Bug" if s.get("type") == "bug" else "💡 Improvement"
     if s.get("is_public"):
-        who = s.get("contact_email") or f"anon:{s.get('ip_hash') or '—'}"
-        return f"CheckWise · {label} (público) · {who} · {s.get('path') or ''}"
-    return f"CheckWise · {label} · {s.get('user_email') or ''} · {s.get('path') or ''}"
+        who = _mrkdwn_escape(s.get("contact_email") or f"anon:{s.get('ip_hash') or '—'}")
+        return (
+            f"CheckWise · {label} (público) · {who} · "
+            f"{_mrkdwn_escape(s.get('path') or '')}"
+        )
+    return (
+        f"CheckWise · {label} · {_mrkdwn_escape(s.get('user_email') or '')} · "
+        f"{_mrkdwn_escape(s.get('path') or '')}"
+    )
 
 
 def _format_blocks(s: dict) -> list[dict]:
@@ -449,9 +458,12 @@ def _format_blocks(s: dict) -> list[dict]:
         ]
     else:
         roles = s.get("user_roles") or []
-        roles_text = ", ".join(roles) if roles else "—"
+        roles_text = ", ".join(_mrkdwn_escape(r) for r in roles) if roles else "—"
         identity_fields = [
-            {"type": "mrkdwn", "text": f"*From*\n{s.get('user_email') or '—'}"},
+            {
+                "type": "mrkdwn",
+                "text": f"*From*\n{_mrkdwn_escape(s.get('user_email') or '—')}",
+            },
             {"type": "mrkdwn", "text": f"*Roles*\n{roles_text}"},
         ]
 
@@ -468,8 +480,14 @@ def _format_blocks(s: dict) -> list[dict]:
             "type": "section",
             "fields": identity_fields
             + [
-                {"type": "mrkdwn", "text": f"*Page*\n`{s.get('path') or '—'}`"},
-                {"type": "mrkdwn", "text": f"*Viewport*\n{s.get('viewport') or '—'}"},
+                {
+                    "type": "mrkdwn",
+                    "text": f"*Page*\n`{_mrkdwn_escape(s.get('path') or '—')}`",
+                },
+                {
+                    "type": "mrkdwn",
+                    "text": f"*Viewport*\n{_mrkdwn_escape(s.get('viewport') or '—')}",
+                },
             ],
         },
         {
@@ -479,7 +497,7 @@ def _format_blocks(s: dict) -> list[dict]:
                     "type": "mrkdwn",
                     "text": (
                         f"<{raw_url}|Open page> · {user_agent or '—'}"
-                        if _is_safe_http_url(raw_url)
+                        if _is_safe_link_target(raw_url)
                         else f"{_mrkdwn_escape(raw_url)} · {user_agent or '—'}"
                     ),
                 },

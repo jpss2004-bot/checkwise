@@ -44,7 +44,16 @@ from typing import TYPE_CHECKING, Annotated, Literal
 if TYPE_CHECKING:
     from app.services.audit_package import AuditPackageFilters
 
-from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response, status
+from fastapi import (
+    APIRouter,
+    BackgroundTasks,
+    Depends,
+    HTTPException,
+    Query,
+    Request,
+    Response,
+    status,
+)
 from fastapi.responses import FileResponse
 from pydantic import BaseModel, EmailStr, Field
 from sqlalchemy import and_, cast, func, or_, select, update
@@ -133,6 +142,7 @@ from app.services.evidence_slots import (
     renewal_status,
 )
 from app.services.metadata_store import ensure_local_export
+from app.services.notifications.background import emit_invitation_in_background
 from app.services.reports.insights import (
     approval_trend_points,
     approval_trend_points_by_vendor,
@@ -2692,6 +2702,7 @@ class ClientProviderCreateResponse(BaseModel):
 def client_add_provider(
     payload: ClientProviderCreate,
     db: DbSession,
+    background: BackgroundTasks,
     current: ClientApprover,
     client_id: str | None = None,
 ) -> ClientProviderCreateResponse:
@@ -2819,34 +2830,25 @@ def client_add_provider(
         },
     )
 
-    # Phase 7 cutover (Slice C) — same companion-emit as
-    # ``admin.provision_user``. Legacy welcome email already landed;
-    # this emit fires the in-app row + SMS confirmation through the
-    # unified fabric and never breaks the response on failure.
-    try:
-        import logging
-
-        from app.services.notifications import emit_invitation_sent
-
-        emit_invitation_sent(
-            db,
-            user=user,
-            invitation_token_id=user.id,
-            invitation_url=login_url,
-            mode="active",
-        )
-        db.flush()
-    except Exception:  # pragma: no cover — defensive during cutover
-        logging.getLogger("checkwise.client").exception(
-            "notif_emit_failed event=account.invitation_sent user=%s", user.id
-        )
-
+    new_user_id = user.id
     db.commit()
+
+    # Phase 7 cutover (Slice C) — same companion-emit as
+    # ``admin.provision_user`` (in-app row + SMS confirmation). Legacy
+    # welcome email already landed.
+    # CW-DOS-002 — deferred off the request path (blocking SMS in active
+    # mode); the user row is committed above and the task re-loads it by id.
+    background.add_task(
+        emit_invitation_in_background,
+        user_id=new_user_id,
+        invitation_token_id=new_user_id,
+        invitation_url=login_url,
+    )
 
     return ClientProviderCreateResponse(
         vendor_id=vendor.id,
         workspace_id=workspace.id,
-        user_id=user.id,
+        user_id=new_user_id,
         contact_email=contact_email,
         email_status=delivery.status,
         email_error=delivery.error,
@@ -4980,7 +4982,8 @@ def ask_client_wise_endpoint(
         per_hour=settings.AI_HEAVY_RATE_LIMIT_PER_HOUR,
     )
 
-    from app.models import Report
+    from app.api.v1.reports import _actor_from
+    from app.services.report_service import ReportNotFoundError, get_report
     from app.services.wise.ai import WiseCta, WiseHistoryTurn, WisePageContext
     from app.services.wise.client_ai import ask_wise_for_client
     from app.services.wise.client_context import (
@@ -5016,8 +5019,20 @@ def ask_client_wise_endpoint(
                 focus_block = render_vendor_focus_block(focus_ctx)
         report_label: str | None = None
         if payload.page_context.report_id:
-            report = db.get(Report, payload.page_context.report_id)
-            if report is not None and report.client_id == target_id:
+            # CW-WISE-001 — resolve through the canonical audience-aware
+            # reader instead of a raw client_id check. A hidden-audience
+            # (or cross-org) report now raises ReportNotFoundError → no
+            # label leaks into the Wise prompt, matching what the client
+            # could actually open in the reports UI.
+            try:
+                report, _ = get_report(
+                    db,
+                    actor=_actor_from(current, db),
+                    report_id=payload.page_context.report_id,
+                )
+            except ReportNotFoundError:
+                report = None
+            if report is not None:
                 report_label = f"{report.title} (estado: {report.status})"
         page_ctx = WisePageContext(
             route=payload.page_context.route,

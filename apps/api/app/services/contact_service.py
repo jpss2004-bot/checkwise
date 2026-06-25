@@ -27,17 +27,15 @@ from __future__ import annotations
 import hashlib
 import json
 import logging
-import time
 import urllib.error
 import urllib.parse
 import urllib.request
-from collections import deque
 from datetime import datetime
-from threading import Lock
 
 from sqlalchemy.orm import Session
 
 from app.core.config import settings
+from app.core.rate_limit import build_rate_limiter
 from app.models.entities import ContactRequest, new_id, utc_now
 
 logger = logging.getLogger(__name__)
@@ -60,45 +58,44 @@ def hash_ip(ip: str | None) -> str | None:
     return digest[:16]
 
 
-# ─── Rate limit (in-memory sliding window) ──────────────────────
+# ─── Rate limit (shared limiter) ────────────────────────────────
 
 
 _RATE_WINDOW_SECONDS = 60 * 60  # 1 hour
 _RATE_MAX_PER_WINDOW = 5  # 5 submissions per hour per IP-hash
 
-_rate_buckets: dict[str, deque[float]] = {}
-_rate_lock = Lock()
+# CW-RATE-003 — back the public contact/booking throttle with the shared
+# rate limiter (Redis when ``REDIS_URL`` is configured, in-memory sliding
+# window otherwise). The previous module-local dict was process-local, so a
+# multi-worker deployment multiplied the effective cap by the worker count
+# and a restart reset every quota window. The limiter degrades to the same
+# in-memory behavior on a single worker / when Redis is unset.
+contact_limiter = build_rate_limiter()
 
 
 def record_and_check_rate(key: str | None) -> bool:
     """Record a submission and report whether it is within quota.
 
-    ``key`` is the hashed-IP. ``None`` (unknown IP) bypasses the
-    limiter so a misconfigured proxy header doesn't lock out
-    everyone behind it — operationally we'd rather log the row and
-    triage in the DB.
+    ``key`` is the hashed-IP (already peppered by :func:`hash_ip`).
+    ``None`` (unknown IP) bypasses the limiter so a misconfigured proxy
+    header doesn't lock out everyone behind it — operationally we'd
+    rather log the row and triage in the DB.
 
     Returns ``True`` when the submission is allowed (and recorded),
     ``False`` when the caller has exceeded the cap.
     """
     if key is None:
         return True
-    now = time.monotonic()
-    cutoff = now - _RATE_WINDOW_SECONDS
-    with _rate_lock:
-        bucket = _rate_buckets.setdefault(key, deque())
-        while bucket and bucket[0] < cutoff:
-            bucket.popleft()
-        if len(bucket) >= _RATE_MAX_PER_WINDOW:
-            return False
-        bucket.append(now)
-        return True
+    return contact_limiter.check(
+        f"contact:{key}",
+        limit=_RATE_MAX_PER_WINDOW,
+        window_seconds=_RATE_WINDOW_SECONDS,
+    )
 
 
 def _reset_rate_limiter_for_tests() -> None:
-    """Test-only hook to clear the in-process rate-limit store."""
-    with _rate_lock:
-        _rate_buckets.clear()
+    """Test-only hook to clear the rate-limit store."""
+    contact_limiter.reset()
 
 
 # ─── Persistence ────────────────────────────────────────────────
@@ -229,8 +226,10 @@ def deliver_to_slack(row_id: str, payload_snapshot: dict) -> None:
 
 
 def _format_slack_fallback_text(p: dict) -> str:
-    name = p.get("name", "")
-    company = p.get("company") or "—"
+    # CW-SLACK-001 — escape the public name/company so a submitter can't
+    # inject ``<!channel>``/``<!here>`` mentions into the fallback text.
+    name = _mrkdwn_escape(p.get("name", ""))
+    company = _mrkdwn_escape(p.get("company") or "—")
     return f"CheckWise · nuevo contacto · {name} ({company})"
 
 
@@ -303,7 +302,8 @@ def deliver_booking_intent_to_slack(*, source: str, user_agent: str | None) -> N
             },
         }
     ]
-    fallback = f"CheckWise · intención de agendar demo · {source}"
+    # CW-SLACK-001 — escape ``source`` in the fallback text too.
+    fallback = f"CheckWise · intención de agendar demo · {safe_source}"
     body = json.dumps({"blocks": blocks, "text": fallback}).encode("utf-8")
     req = urllib.request.Request(
         url,

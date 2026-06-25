@@ -493,6 +493,129 @@ def test_set_password_rejects_short_password(
 
 
 # ---------------------------------------------------------------------------
+# Session epoch — JWT revocation (CW-AUTHZ-001 / CW-AUTH-001 / CW-AUTH-002)
+# ---------------------------------------------------------------------------
+
+
+def test_issue_token_carries_session_epoch() -> None:
+    token = issue_access_token(
+        user_id="u1", email="x@y.mx", roles=[], orgs=[], session_epoch=3
+    )
+    assert decode_access_token(token).session_epoch == 3
+
+
+def test_legacy_token_without_epoch_decodes_as_zero() -> None:
+    """A token minted before the ``se`` claim existed (default) decodes to
+    epoch 0 so it stays valid against a freshly-defaulted column."""
+    token = issue_access_token(user_id="u1", email="x@y.mx", roles=[], orgs=[])
+    assert decode_access_token(token).session_epoch == 0
+
+
+def _bump_epoch(db_factory, user_id: str) -> None:
+    db = db_factory()
+    try:
+        user = db.get(User, user_id)
+        user.session_epoch = (user.session_epoch or 0) + 1
+        db.commit()
+    finally:
+        db.close()
+
+
+def test_stale_epoch_token_rejected_and_fresh_token_accepted(
+    api_client: TestClient, db_factory
+) -> None:
+    """A token minted before a session-epoch bump is rejected; a token
+    minted after the bump (re-login) works."""
+    user_id, _, password = _seed_user(db_factory)
+    stale_token = _login(api_client, "ada@legalshelf.mx", password)
+
+    # Bump the epoch out-of-band (simulates a revoke/reset/demote).
+    _bump_epoch(db_factory, user_id)
+
+    rejected = api_client.get(
+        "/api/v1/auth/me", headers={"Authorization": f"Bearer {stale_token}"}
+    )
+    assert rejected.status_code == 401, rejected.text
+    assert rejected.json()["detail"] == "Tu sesión ya no está activa."
+
+    # A fresh login mints a token carrying the new epoch and is accepted.
+    fresh_token = _login(api_client, "ada@legalshelf.mx", password)
+    ok = api_client.get(
+        "/api/v1/auth/me", headers={"Authorization": f"Bearer {fresh_token}"}
+    )
+    assert ok.status_code == 200, ok.text
+
+
+def test_reset_password_invalidates_existing_token(
+    api_client: TestClient, db_factory
+) -> None:
+    """CW-AUTH-002 — a password reset revokes outstanding sessions."""
+    user_id, _, password = _seed_user(db_factory)
+    token = _login(api_client, "ada@legalshelf.mx", password)
+
+    raw = "reset-token-" + "a" * 40
+    db = db_factory()
+    try:
+        db.add(
+            PasswordResetToken(
+                user_id=user_id,
+                email="ada@legalshelf.mx",
+                token_hash=hash_password_reset_token(raw),
+                expires_at=utc_now() + timedelta(minutes=30),
+                delivery_status="sent",
+            )
+        )
+        db.commit()
+    finally:
+        db.close()
+
+    reset = api_client.post(
+        "/api/v1/auth/reset-password",
+        json={"token": raw, "new_password": "BrandNewPassword!2026"},
+    )
+    assert reset.status_code == 200, reset.text
+
+    # The pre-reset token is now dead.
+    after = api_client.get(
+        "/api/v1/auth/me", headers={"Authorization": f"Bearer {token}"}
+    )
+    assert after.status_code == 401, after.text
+
+
+def test_set_password_remints_current_session_but_kills_others(
+    api_client: TestClient, db_factory
+) -> None:
+    """CW-AUTH-002 — set-password invalidates all existing tokens but
+    returns a fresh token so the active caller is not bounced."""
+    _seed_user(db_factory, email="seat@legalshelf.mx", password="Correct horse battery 4")
+    # Two "devices": the one that will call set-password, and a bystander.
+    caller_token = _login(api_client, "seat@legalshelf.mx", "Correct horse battery 4")
+    other_token = _login(api_client, "seat@legalshelf.mx", "Correct horse battery 4")
+
+    resp = api_client.post(
+        "/api/v1/auth/set-password",
+        json={"new_password": "AnotherStrongPass!2026"},
+        headers={"Authorization": f"Bearer {caller_token}"},
+    )
+    assert resp.status_code == 200, resp.text
+    fresh = resp.json()["access_token"]
+    assert fresh and fresh != caller_token
+
+    # The re-minted token works for the active session.
+    ok = api_client.get(
+        "/api/v1/auth/me", headers={"Authorization": f"Bearer {fresh}"}
+    )
+    assert ok.status_code == 200, ok.text
+
+    # Both pre-change tokens (the caller's old one AND the other device) die.
+    for dead in (caller_token, other_token):
+        gone = api_client.get(
+            "/api/v1/auth/me", headers={"Authorization": f"Bearer {dead}"}
+        )
+        assert gone.status_code == 401, gone.text
+
+
+# ---------------------------------------------------------------------------
 # Forgot password + reset link flow
 # ---------------------------------------------------------------------------
 

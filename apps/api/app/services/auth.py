@@ -20,11 +20,15 @@ import hashlib
 import secrets
 import time
 from dataclasses import dataclass
+from typing import TYPE_CHECKING
 
 import bcrypt
 import jwt
 
 from app.core.config import settings
+
+if TYPE_CHECKING:  # pragma: no cover - typing only, avoids a runtime import cycle
+    from app.models.entities import User
 
 # ---------------------------------------------------------------------------
 # Password hashing
@@ -157,6 +161,12 @@ class TokenClaims:
     orgs: tuple[str, ...]
     issued_at: int
     expires_at: int
+    # CW-AUTHZ-001 — the user's ``session_epoch`` at mint time. Compared
+    # against the live ``users.session_epoch`` in ``get_current_user``; a
+    # token whose epoch is older than the DB value is rejected (401). Pre-
+    # migration tokens carry no ``se`` claim and decode to 0, matching the
+    # column's ``server_default='0'`` so existing sessions survive deploy.
+    session_epoch: int = 0
 
 
 class TokenError(Exception):
@@ -169,9 +179,15 @@ def issue_access_token(
     email: str,
     roles: list[str],
     orgs: list[str],
+    session_epoch: int = 0,
     now: int | None = None,
 ) -> str:
-    """Build a signed JWT for ``user_id``. ``now`` lets tests pin time."""
+    """Build a signed JWT for ``user_id``. ``now`` lets tests pin time.
+
+    ``session_epoch`` is the user's current epoch — embed it so a later
+    bump (password change / role revocation / demotion) invalidates this
+    token at the request boundary.
+    """
     issued_at = int(time.time()) if now is None else now
     expires_at = issued_at + settings.AUTH_JWT_EXPIRES_MINUTES * 60
     payload = {
@@ -179,10 +195,24 @@ def issue_access_token(
         "email": email,
         "roles": sorted(set(roles)),
         "orgs": sorted(set(orgs)),
+        "se": session_epoch,
         "iat": issued_at,
         "exp": expires_at,
     }
     return jwt.encode(payload, settings.AUTH_JWT_SECRET, algorithm=settings.AUTH_JWT_ALGORITHM)
+
+
+def bump_session_epoch(user: User) -> None:
+    """Increment ``user.session_epoch`` so every token minted before this
+    moment is rejected by ``get_current_user``.
+
+    Call this (before the surrounding ``db.commit()``) on any change that
+    must terminate the user's live sessions: password reset / set-password,
+    staff role revocation, and client seat demotion. User-level by design —
+    a single bump logs the principal out of ALL their devices/orgs, which
+    is the intended fail-closed behavior for revocation and recovery.
+    """
+    user.session_epoch = (user.session_epoch or 0) + 1
 
 
 def decode_access_token(token: str) -> TokenClaims:
@@ -212,6 +242,9 @@ def decode_access_token(token: str) -> TokenClaims:
             orgs=tuple(payload.get("orgs") or ()),
             issued_at=int(payload["iat"]),
             expires_at=int(payload["exp"]),
+            # ``.get(..., 0)`` keeps pre-migration tokens (no ``se`` claim)
+            # valid against the column's ``server_default='0'``.
+            session_epoch=int(payload.get("se", 0)),
         )
     except (KeyError, TypeError, ValueError) as exc:
         raise TokenError("token payload malformed") from exc

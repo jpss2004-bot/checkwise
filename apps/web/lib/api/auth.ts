@@ -82,6 +82,12 @@ export async function getCurrentAdmin(token: string): Promise<MeResponse> {
 type SetPasswordResponse = {
   user: AdminSessionUser & { must_change_password: boolean };
   must_change_password: boolean;
+  // CW-AUTH-002 — set-password bumps the server session epoch, invalidating
+  // the token this request authenticated with. The backend re-mints the
+  // current session's token (and refreshes the httpOnly cookie); the caller
+  // MUST adopt this token or the next request 401s.
+  access_token: string;
+  expires_at: string;
 };
 
 export async function setPassword(

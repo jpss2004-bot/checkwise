@@ -103,6 +103,7 @@ from app.models import (
 )
 from app.services.audit_log import add_audit_event
 from app.services.auth import (
+    bump_session_epoch,
     generate_temp_password,
     hash_password,
 )
@@ -122,6 +123,7 @@ from app.services.email_delivery import (
     send_welcome_with_temp_password_email,
 )
 from app.services.metadata_store import ensure_local_export, mirror_enabled
+from app.services.notifications.background import emit_invitation_in_background
 from app.services.search_service import SearchHit, search_submissions
 
 router = APIRouter(prefix="/admin", tags=["admin"])
@@ -1197,6 +1199,7 @@ class ProvisionUserResponse(BaseModel):
 def provision_user(
     payload: ProvisionUserPayload,
     db: DbSession,
+    background: BackgroundTasks,
     current: PlatformUser,
     request: Request,
 ) -> ProvisionUserResponse:
@@ -1438,34 +1441,24 @@ def provision_user(
         request=request,
     )
 
-    # Phase 7 cutover (Slice C) — emit through the unified fabric so
-    # the in-app bell + SMS path light up alongside the legacy
-    # welcome email. The legacy email above is the user-visible
-    # primary delivery; this emit is the audit + SMS companion.
-    # ``user.id`` is the dedupe key suffix so retries / duplicate
-    # provisions never double-fire.
-    try:
-        import logging
-
-        from app.services.notifications import emit_invitation_sent
-
-        emit_invitation_sent(
-            db,
-            user=user,
-            invitation_token_id=user.id,
-            invitation_url=login_url,
-            mode="active",
-        )
-        db.flush()
-    except Exception:  # pragma: no cover — defensive during cutover
-        logging.getLogger("checkwise.admin").exception(
-            "notif_emit_failed event=account.invitation_sent user=%s", user.id
-        )
-
+    new_user_id = user.id
     db.commit()
 
+    # Phase 7 cutover (Slice C) — emit through the unified fabric so the
+    # in-app bell + SMS path light up alongside the legacy welcome email
+    # (the user-visible primary delivery). ``user.id`` is the dedupe suffix
+    # so retries / duplicate provisions never double-fire.
+    # CW-DOS-002 — deferred off the request path (blocking SMS in active
+    # mode); the user row is committed above and the task re-loads it by id.
+    background.add_task(
+        emit_invitation_in_background,
+        user_id=new_user_id,
+        invitation_token_id=new_user_id,
+        invitation_url=login_url,
+    )
+
     return ProvisionUserResponse(
-        user_id=user.id,
+        user_id=new_user_id,
         role=payload.role,
         email=email,
         temp_password=temp_password,
@@ -2315,6 +2308,13 @@ def revoke_user_membership(
     if membership.status != "removed":
         before = _membership_audit_dict(membership)
         membership.status = "removed"
+        # CW-AUTHZ-001 — a revoked role must take effect immediately, not at
+        # token expiry. Bumping the user's session epoch invalidates every
+        # outstanding JWT (which still carries the now-removed role) so the
+        # next request 401s and forces a fresh login with the reduced claim
+        # set. ``target`` is the affected user, loaded above.
+        if target is not None:
+            bump_session_epoch(target)
         db.flush()
         _audit_admin(
             db,
