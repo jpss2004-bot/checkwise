@@ -59,6 +59,18 @@ from app.services.whatsapp_delivery import (
 log = logging.getLogger("checkwise.messaging_delivery")
 
 
+def _mask_phone(phone: str | None) -> str:
+    """Last-4 only, for logs. ``'****1234'`` (or ``'****'`` if <4 digits).
+
+    CW-LOG-001 — delivery logs must not retain full recipient phone
+    numbers (the notification audit path already minimizes to last-4).
+    Filtering to digits also strips any ``+``/spaces and prevents CR/LF in
+    a crafted value from surviving into the log line (log-injection guard).
+    """
+    digits = "".join(ch for ch in (phone or "") if ch.isdigit())
+    return f"****{digits[-4:]}" if len(digits) >= 4 else "****"
+
+
 @dataclass(frozen=True)
 class MessageDeliveryResult:
     delivered: bool
@@ -160,9 +172,9 @@ def send_message(
     # ---- 3. Dry-run / no backend -------------------------------
     if settings.TWILIO_DRY_RUN or settings.WHATSAPP_DRY_RUN:
         log.info(
-            "[messaging_delivery] dry-run sent to=%s body=%r",
-            to_phone,
-            body[:160],
+            "[messaging_delivery] dry-run sent to=%s body_len=%d",
+            _mask_phone(to_phone),
+            len(body or ""),
         )
         return MessageDeliveryResult(
             delivered=True,
@@ -198,9 +210,9 @@ def _send_via_twilio(
     """
     if settings.TWILIO_DRY_RUN:
         log.info(
-            "[messaging_delivery] twilio dry-run to=%s body=%r",
-            to_phone,
-            body[:160],
+            "[messaging_delivery] twilio dry-run to=%s body_len=%d",
+            _mask_phone(to_phone),
+            len(body or ""),
         )
         return MessageDeliveryResult(
             delivered=True,
@@ -247,28 +259,26 @@ def _send_via_twilio(
                 recipient=e164,
             )
     except urllib.error.HTTPError as exc:
-        body_text = ""
-        try:
-            body_text = exc.read().decode("utf-8")[:512]
-        except Exception:  # pragma: no cover — defensive
-            body_text = "<unreadable response body>"
+        # CW-LOG-001 — never log or return the raw provider response body
+        # (it can carry recipient/message detail and reaches the persisted
+        # ``*_reason``/audit fields). The HTTP status code is the sanitized
+        # triage signal; mask the recipient in the log.
         log.warning(
-            "[messaging_delivery] twilio HTTP %s to=%s body=%s",
+            "[messaging_delivery] twilio HTTP %s to=%s",
             exc.code,
-            e164,
-            body_text,
+            _mask_phone(e164),
         )
         return MessageDeliveryResult(
             delivered=False,
             status="failed",
             backend="twilio",
-            error=f"http_{exc.code}: {body_text}",
+            error=f"http_{exc.code}",
             recipient=e164,
         )
     except urllib.error.URLError as exc:
         log.warning(
             "[messaging_delivery] twilio network error to=%s reason=%s",
-            e164,
+            _mask_phone(e164),
             exc.reason,
         )
         return MessageDeliveryResult(
@@ -280,7 +290,8 @@ def _send_via_twilio(
         )
     except Exception as exc:  # pragma: no cover — defensive catch-all
         log.exception(
-            "[messaging_delivery] twilio unexpected error to=%s", e164
+            "[messaging_delivery] twilio unexpected error to=%s",
+            _mask_phone(e164),
         )
         return MessageDeliveryResult(
             delivered=False,

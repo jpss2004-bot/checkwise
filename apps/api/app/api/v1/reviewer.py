@@ -20,7 +20,15 @@ import binascii
 from datetime import UTC, datetime
 from typing import Annotated, Literal
 
-from fastapi import APIRouter, Depends, HTTPException, Query, Response, status
+from fastapi import (
+    APIRouter,
+    BackgroundTasks,
+    Depends,
+    HTTPException,
+    Query,
+    Response,
+    status,
+)
 from pydantic import BaseModel, Field
 from sqlalchemy import and_, func, or_, select
 from sqlalchemy.orm import Session, selectinload
@@ -43,6 +51,7 @@ from app.models import (
 )
 from app.models.entities import utc_now
 from app.services.audit_log import add_audit_event
+from app.services.notifications.background import emit_reviewer_decision_in_background
 from app.services.storage import get_storage_service
 from app.services.submission_workflow import apply_reviewer_decision
 
@@ -1034,6 +1043,7 @@ def submit_decision(
     submission_id: str,
     payload: DecisionRequest,
     db: DbSession,
+    background: BackgroundTasks,
     current: ReviewerDep,
 ) -> DecisionResponse:
     """Record a reviewer decision via the workflow state machine.
@@ -1064,38 +1074,22 @@ def submit_decision(
         accepted_suggestion=payload.accepted_suggestion,
     )
 
-    # Phase 7 cutover (Slice C) — fire the unified-fabric envelope
-    # alongside the legacy notifications the workflow service
-    # already wrote. The emit handles its own idempotency via
-    # ``notification_dispatch`` so a retry against the same
-    # submission+action is a no-op. Failures never break the
-    # decision response — the workflow row + history already landed.
-    try:
-        import logging
-
-        from app.services.notifications import emit_reviewer_decision
-
-        emit_reviewer_decision(
-            db,
-            submission=submission,
-            action=payload.action,
-            reason=payload.reason,
-            mode="active",
-        )
-        db.flush()
-        # Persist the fabric rows (NotificationDispatch idempotency claim,
-        # dispatch_attempted audit, WhatsApp audit). Without this the
-        # get_db teardown rolls them back — losing the audit trail and,
-        # worse, the idempotency claim so a retry re-sends. Mirrors
-        # auto_approval.py's emit→flush→commit. The in-app row + email are
-        # gated to the legacy path (LEGACY_OWNS_DECISION_NOTIFICATIONS), so
-        # committing here does not double-write the bell.
-        db.commit()
-    except Exception:  # pragma: no cover — defensive during cutover
-        logging.getLogger("checkwise.reviewer").exception(
-            "notif_emit_failed event=submission.reviewer_decision submission=%s",
-            submission_id,
-        )
+    # Phase 7 cutover (Slice C) — fire the unified-fabric envelope alongside
+    # the legacy notifications the workflow service already wrote.
+    # CW-DOS-002 — the fabric emit performs blocking SMTP/SMS in active mode,
+    # so it runs AFTER the response as a BackgroundTask on its own fresh
+    # session. The workflow decision + history + legacy notifications are
+    # already committed inside ``apply_reviewer_decision`` above, so deferral
+    # does not affect the decision. The emit's NotificationDispatch
+    # idempotency claim is INSERT-first dedupe and the task commits it on its
+    # own session, so a retry against the same submission+action stays a
+    # no-op even though the claim now lands just after the response.
+    background.add_task(
+        emit_reviewer_decision_in_background,
+        submission_id=submission.id,
+        action=payload.action,
+        reason=payload.reason,
+    )
 
     # "Siguiente pendiente" pointer — the oldest submission still
     # waiting in the queue (FIFO, same ordering as GET /reviewer/queue),

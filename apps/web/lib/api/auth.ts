@@ -6,6 +6,7 @@
  */
 
 import type { AdminSession, AdminSessionUser } from "@/lib/session/admin";
+import { adminAuthHeader } from "@/lib/session/admin";
 
 const API_BASE_URL =
   process.env.NEXT_PUBLIC_API_BASE_URL ?? "http://127.0.0.1:8000";
@@ -24,7 +25,14 @@ async function fetchJson<T>(path: string, init: RequestInit = {}): Promise<T> {
   if (!headers.has("Content-Type") && init.body) {
     headers.set("Content-Type", "application/json");
   }
-  const response = await fetch(`${API_BASE_URL}${path}`, { ...init, headers });
+  // FE-SEC-1 — always send the httpOnly session cookie. On /login this is
+  // what makes the Set-Cookie stick; on cookie-authenticated calls (after
+  // a reload, when the in-memory bearer is gone) it's what authenticates.
+  const response = await fetch(`${API_BASE_URL}${path}`, {
+    ...init,
+    headers,
+    credentials: "include",
+  });
   if (!response.ok) {
     const detail = await response.text().catch(() => "");
     throw new AuthApiError(response.status, detail || response.statusText);
@@ -42,7 +50,16 @@ type LoginResponse = {
   must_change_password?: boolean;
 };
 
-export type LoginResult = AdminSession & { must_change_password: boolean };
+/**
+ * Login result. ``access_token`` is a TRANSIENT field — the caller seeds
+ * it into the in-memory store (``setAdminAccessToken``) and persists only
+ * the identity slice (``AdminSession``). It is never written to
+ * localStorage.
+ */
+export type LoginResult = AdminSession & {
+  access_token: string;
+  must_change_password: boolean;
+};
 
 export async function login(
   email: string,
@@ -82,15 +99,25 @@ export async function getCurrentAdmin(token: string): Promise<MeResponse> {
 type SetPasswordResponse = {
   user: AdminSessionUser & { must_change_password: boolean };
   must_change_password: boolean;
+  // CW-AUTH-002 — set-password bumps the server session epoch, invalidating
+  // the token this request authenticated with. The backend re-mints the
+  // current session's token (and refreshes the httpOnly cookie); the caller
+  // MUST adopt this token or the next request 401s.
+  access_token: string;
+  expires_at: string;
 };
 
 export async function setPassword(
-  token: string,
   newPassword: string,
 ): Promise<SetPasswordResponse> {
+  // JWT-first (in-memory bearer), cookie-fallback. After a reload on
+  // /activate the in-memory token is gone, so the httpOnly cookie
+  // authenticates this POST instead (CSRF-guarded by Origin/Referer
+  // server-side). The response re-mints the token at the new session
+  // epoch — the caller adopts it via setAdminAccessToken.
   return await fetchJson<SetPasswordResponse>("/api/v1/auth/set-password", {
     method: "POST",
-    headers: { Authorization: `Bearer ${token}` },
+    headers: { ...adminAuthHeader() },
     body: JSON.stringify({ new_password: newPassword }),
   });
 }
@@ -152,18 +179,42 @@ type EnterResponse = {
 /**
  * Mint the portal session cookie for an authenticated user.
  *
- * Requires the admin/user JWT issued by /auth/login. Sends
- * credentials:include so the response Set-Cookie is honored by the
- * browser. After this call, /portal/* endpoints work via cookie.
+ * Authenticates with the in-memory admin/user JWT when we hold it
+ * (JWT-first); after a reload it falls back to the httpOnly staff
+ * cookie (``credentials: "include"``). Either way the response
+ * Set-Cookie deposits the portal session cookie. After this call,
+ * /portal/* endpoints work via cookie.
  */
 export async function enterPortal(
-  token: string,
   workspaceId?: string,
 ): Promise<EnterResponse> {
   return await fetchJson<EnterResponse>("/api/v1/portal/enter", {
     method: "POST",
-    credentials: "include",
-    headers: { Authorization: `Bearer ${token}` },
+    headers: { ...adminAuthHeader() },
     body: JSON.stringify(workspaceId ? { workspace_id: workspaceId } : {}),
   });
+}
+
+/**
+ * Clear the server-side staff session cookie (FE-SEC-1). Best-effort and
+ * idempotent — the backend returns 204 even for an anonymous/expired
+ * token. Callers should also drop the local session
+ * (``clearAdminSession``) and route to /login. Bounded so a stalled
+ * request can't hang the logout UX.
+ */
+export async function logoutAdmin(): Promise<void> {
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => controller.abort(), 5_000);
+  try {
+    await fetch(`${API_BASE_URL}/api/v1/auth/logout`, {
+      method: "POST",
+      credentials: "include",
+      headers: { ...adminAuthHeader() },
+      signal: controller.signal,
+    });
+  } catch {
+    /* logout is best-effort — the local session is cleared regardless */
+  } finally {
+    clearTimeout(timeoutId);
+  }
 }

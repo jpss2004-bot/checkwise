@@ -281,6 +281,7 @@ def _session_from_request(
     request: Request,
     *,
     legacy_header: str = "",
+    allow_legacy: bool = True,
 ) -> tuple[str, str]:
     """Resolve (workspace_id, access_token) from cookie or legacy header.
 
@@ -289,6 +290,12 @@ def _session_from_request(
     queue UI which doesn't use this router but might share helpers).
     Returns ("", "") when neither is present so the caller raises the
     right 401 with workspace context.
+
+    CW-PORTAL-001/002 — ``allow_legacy=False`` makes the legacy
+    ``X-Workspace-Token`` header inert. The caller sets this for unsafe
+    (mutating) methods so a leaked legacy workspace token can no longer
+    create/replace/cancel submissions; it remains a read-only transition
+    aid. The cookie path is unaffected.
     """
     cookie_token = request.cookies.get(settings.PORTAL_SESSION_COOKIE_NAME, "")
     if cookie_token:
@@ -298,7 +305,7 @@ def _session_from_request(
         except PortalSessionError:
             # fall through to legacy header below
             pass
-    if legacy_header:
+    if allow_legacy and legacy_header:
         # Caller passed an X-Workspace-Token. We don't know the
         # workspace_id from the header alone — the path must carry it.
         return "", legacy_header
@@ -755,8 +762,11 @@ def current_portal_workspace(
          enforces the path's ``workspace_id`` if any.
       2. ``checkwise_portal_session`` cookie — preferred when the
          browser allows third-party cookies.
-      3. Legacy ``X-Workspace-Token`` header — kept for tests and
-         integration scripts.
+      3. Legacy ``X-Workspace-Token`` header — READ-ONLY transition aid
+         (CW-PORTAL-001/002). It is honored on safe methods (GET/HEAD/
+         OPTIONS) only; mutating requests must present a Bearer JWT or the
+         portal session cookie, so a leaked legacy token can no longer
+         create/replace/cancel submissions.
 
     Raises:
         401 if no valid session is present.
@@ -767,7 +777,13 @@ def current_portal_workspace(
     if via_jwt is not None:
         return _assert_workspace_active(db, via_jwt)
 
-    cookie_ws, cookie_tok = _session_from_request(request, legacy_header=x_workspace_token)
+    # The legacy header authenticates reads only. On any mutating method it
+    # is ignored, so without a Bearer JWT or session cookie the request
+    # falls through to the 401 below.
+    allow_legacy = request.method.upper() not in _MUTATING_METHODS
+    cookie_ws, cookie_tok = _session_from_request(
+        request, legacy_header=x_workspace_token, allow_legacy=allow_legacy
+    )
 
     # Determine effective workspace_id for the lookup.
     if workspace_id is None:
@@ -2876,7 +2892,9 @@ async def create_workspace_submission(
     Tenant guard runs in ``current_portal_workspace``:
       * Authorization: Bearer JWT (primary, cross-origin-safe path).
       * Portal session cookie.
-      * Legacy ``X-Workspace-Token`` header (transition aid).
+      * The legacy ``X-Workspace-Token`` header is NOT accepted here —
+        it authenticates reads only (CW-PORTAL-002). This upload is a
+        mutating method, so it requires the Bearer JWT or session cookie.
 
     Returns 401 when no valid session is presented, 403 when the
     session does not own the path's ``workspace_id``, 404 when the

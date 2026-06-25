@@ -124,7 +124,11 @@ export function withPortalSession<P extends { session: PortalSession }>(
             return;
           }
           try {
-            await enterPortal(admin.access_token);
+            // FE-SEC-1 — enterPortal reads the in-memory staff JWT when we
+            // still hold it; after a reload it falls back to the httpOnly
+            // staff cookie. ``admin`` (identity) presence above is the gate
+            // that we believe a staff session exists.
+            await enterPortal();
           } catch {
             markPortalBootstrapFailed();
             clearAdminSession();

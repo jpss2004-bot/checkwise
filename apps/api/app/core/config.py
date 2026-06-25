@@ -71,6 +71,17 @@ class Settings(BaseSettings):
 
     MAX_UPLOAD_SIZE_BYTES: int = 15 * 1024 * 1024
     ALLOWED_FILE_EXTENSIONS: str = ".pdf"
+
+    # CW-DOS-001 — write-time bounds on report version content so an
+    # authenticated editor can't store an oversized ``content_json`` that
+    # later drives a heavy HTML/PDF (Chromium) export. Defaults are
+    # generous — current real reports are a handful of blocks — so they
+    # never reject legitimate content while killing the abuse vector.
+    REPORT_CONTENT_MAX_BYTES: int = 2 * 1024 * 1024  # serialized content_json
+    REPORT_CONTENT_MAX_BLOCKS: int = 200
+    REPORT_CONTENT_MAX_TEXT_PER_BLOCK: int = 50_000  # chars across one block's strings
+    REPORT_CONTENT_MAX_DEPTH: int = 32
+    REPORT_PLAN_MAX_BYTES: int = 512 * 1024  # plan_json / llm_metadata, each
     SUPPORT_WHATSAPP_URL: str = ""
     SUPPORT_QR_PLACEHOLDER_URL: str = ""
 
@@ -339,6 +350,16 @@ class Settings(BaseSettings):
     # the limiter. See ``RedisRateLimiter`` for the fail-mode
     # contract.
     REDIS_RATE_LIMIT_TIMEOUT_MS: int = 250
+    # CW-RATE-002 — number of trusted reverse proxies that append the real
+    # peer to ``X-Forwarded-For``. Render fronts the API with exactly ONE
+    # proxy, so the rightmost XFF entry is the real client → default 1
+    # (preserves today's behavior byte-for-byte). ``client_ip_from_request``
+    # picks the Nth-from-right entry; ``0`` distrusts XFF entirely and uses
+    # the socket peer (correct when no trusted proxy is in front). A chain
+    # shorter than this many hops is treated as forged and falls through to
+    # X-Real-IP / socket peer rather than trusting an attacker-positioned IP.
+    # Configurable so a topology change is an env edit, not a code change.
+    RATE_LIMIT_TRUSTED_PROXY_HOPS: int = 1
 
     # Phase 3 — Google Document AI OCR fallback for scanned uploads.
     # OCR runs synchronously during intake when ``inspect_pdf`` reports

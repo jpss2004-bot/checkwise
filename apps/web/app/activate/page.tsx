@@ -29,6 +29,7 @@ import { AuthApiError, setPassword } from "@/lib/api/auth";
 import {
   clearAdminSession,
   readAdminSession,
+  setAdminAccessToken,
   writeAdminSession,
 } from "@/lib/session/admin";
 
@@ -148,11 +149,16 @@ function ActivateInner() {
       setError(null);
       setSubmitting(true);
       try {
-        const result = await setPassword(stored.access_token, password);
-        // Refresh local session with the cleared flag so a refresh on
-        // any page doesn't bounce the user back to /activate.
+        const result = await setPassword(password);
+        // CW-AUTH-002 — set-password invalidates the old token (session
+        // epoch bump) and returns a freshly-minted one (and a refreshed
+        // cookie). Adopt the new token into the in-memory store and persist
+        // the new expiry + cleared must-change-password flag, so the
+        // post-activation redirect doesn't 401 on a now-stale token.
+        setAdminAccessToken(result.access_token);
         writeAdminSession({
           ...stored,
+          expires_at: result.expires_at,
           user: {
             ...stored.user,
             ...result.user,

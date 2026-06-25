@@ -38,6 +38,7 @@ from app.models import (
     Membership,
     Organization,
     ProviderWorkspace,
+    Report,
     User,
     Vendor,
     WiseEvent,
@@ -272,6 +273,93 @@ def test_ask_happy_path_returns_validated_cta(api_client: TestClient) -> None:
     assert body["cta_label"] == "Ver proveedores"
     assert body["cta_href"] == "/client/vendors"
     anthro_cls.assert_called_once()
+
+
+def _seed_report(api_client: TestClient, seed: dict, *, audience: str, title: str) -> str:
+    """Insert a Report scoped to the seeded client's own org and return its id."""
+    factory = api_client.app.state.testing_session  # type: ignore[attr-defined]
+    db: Session = factory()
+    try:
+        org = (
+            db.query(Organization)
+            .filter_by(client_id=seed["client_id"], kind="client")
+            .first()
+        )
+        report = Report(
+            organization_id=org.id,
+            client_id=seed["client_id"],
+            title=title,
+            audience=audience,
+            status="draft",
+            created_by_user_id=seed["user_id"],
+        )
+        db.add(report)
+        db.commit()
+        return report.id
+    finally:
+        db.close()
+
+
+def _capturing_anthropic() -> tuple[object, dict]:
+    """A stub Anthropic client that records the messages it is asked to send."""
+    captured: dict = {}
+    fake_block = SimpleNamespace(
+        type="tool_use", name="respond_to_client", input={"body": "ok", "cta_id": None}
+    )
+    fake_response = SimpleNamespace(content=[fake_block])
+
+    def _create(**kwargs):
+        captured["messages"] = kwargs.get("messages")
+        return fake_response
+
+    return SimpleNamespace(messages=SimpleNamespace(create=_create)), captured
+
+
+def _ask_with_report(api_client: TestClient, seed: dict, token: str, report_id: str):
+    fake_client, captured = _capturing_anthropic()
+    with (
+        patch("app.services.wise.ai.Anthropic", return_value=fake_client),
+        patch.object(settings, "ANTHROPIC_API_KEY", "test-key"),
+    ):
+        resp = api_client.post(
+            f"/api/v1/client/wise/ask?client_id={seed['client_id']}",
+            json={
+                "prompt": "¿algo?",
+                "ctas": [],
+                "page_context": {
+                    "route": "/client/reports",
+                    "page_label": "Reportes",
+                    "report_id": report_id,
+                },
+            },
+            headers=_h(token),
+        )
+    assert resp.status_code == 200, resp.text
+    return str(captured.get("messages"))
+
+
+def test_ask_hidden_audience_report_yields_no_label(api_client: TestClient) -> None:
+    """CW-WISE-001 — an internal_only report the client cannot read must not
+    have its title/status leaked into the Wise prompt."""
+    seed = _seed_client_admin(api_client)
+    token = _login(api_client, seed["email"], seed["password"])
+    report_id = _seed_report(
+        api_client, seed, audience="internal_only", title="Reporte Oculto"
+    )
+    prompt = _ask_with_report(api_client, seed, token, report_id)
+    assert "Reporte Oculto" not in prompt
+    assert "(estado:" not in prompt
+
+
+def test_ask_visible_report_is_labeled(api_client: TestClient) -> None:
+    """A client_facing report the client CAN read still grounds the prompt."""
+    seed = _seed_client_admin(api_client)
+    token = _login(api_client, seed["email"], seed["password"])
+    report_id = _seed_report(
+        api_client, seed, audience="client_facing", title="Reporte Visible"
+    )
+    prompt = _ask_with_report(api_client, seed, token, report_id)
+    assert "Reporte Visible" in prompt
 
 
 def test_ask_invented_cta_id_is_dropped(api_client: TestClient) -> None:

@@ -67,6 +67,31 @@ def export_storage_key(path: Path) -> str | None:
     return f"{_PREFIX}/{rel.as_posix()}"
 
 
+def _contained_local_path(key: str) -> Path | None:
+    """Map a mirror ``key`` to its local path, or ``None`` when the
+    resolved path would escape the export root.
+
+    CW-FILE-001 — the read/recovery side (``sync_client_latest_exports``)
+    trusts object-key names returned by ``list_keys``. A bucket key with
+    ``..`` segments (a corrupt or attacker-planted object) would otherwise
+    resolve to a path OUTSIDE ``METADATA_EXPORT_PATH`` and be written there.
+    This mirrors the write-side containment in :func:`export_storage_key`:
+    the write side only ever emits keys whose every segment is a ``_slug``
+    of ``[a-z0-9-]``, so a rejection here means a tampered/corrupt object,
+    never a legitimate slot. ``.resolve()`` collapses the ``..`` so the
+    escape is detected by ``is_relative_to``.
+    """
+    root = _export_root()
+    marker = f"{_PREFIX}/"
+    if not key.startswith(marker):
+        return None
+    candidate = (root / key[len(marker):]).resolve()
+    if not candidate.is_relative_to(root):
+        logger.warning("[metadata_store] rejecting out-of-root mirror key %s", key)
+        return None
+    return candidate
+
+
 def persist_export(path: Path) -> None:
     """Best-effort copy of a freshly written workbook into the mirror."""
     if not mirror_enabled():
@@ -124,19 +149,22 @@ rebuild_client_master_metadata_export` rglobs the local tree, so a
     except Exception:  # noqa: BLE001 — degrade to local-only rebuild
         logger.exception("[metadata_store] mirror listing failed for %s", prefix)
         return
-    root = _export_root()
     # Only materialize slots the local disk is actually missing — a re-upload
     # leaves the prior workbooks in place, so a warm rebuild downloads nothing.
     # The expensive case is the FIRST rebuild after a deploy/restart on
     # ephemeral disk, where every slot is absent; fan those downloads out across
     # a bounded thread pool so the round-trips overlap instead of running
     # strictly one-by-one inside the upload BackgroundTask.
-    pending = [
-        (key, root / key[len(_PREFIX) + 1 :])
-        for key in keys
-        if key.endswith("latest_metadata.xlsx")
-    ]
-    pending = [(key, local) for key, local in pending if not local.exists()]
+    pending: list[tuple[str, Path]] = []
+    for key in keys:
+        if not key.endswith("latest_metadata.xlsx"):
+            continue
+        # CW-FILE-001 — drop any key whose resolved local path escapes the
+        # export root (traversal/corrupt mirror object) before it is written.
+        local = _contained_local_path(key)
+        if local is None or local.exists():
+            continue
+        pending.append((key, local))
     if not pending:
         return
     if len(pending) == 1:
@@ -158,6 +186,15 @@ def _download_to_path(key: str, local: Path) -> None:
     than a download + full re-read + re-write. Best-effort: a miss/failure
     degrades to a local-only rebuild exactly as before.
     """
+    # CW-FILE-001 — belt-and-suspenders: refuse to materialize anything
+    # outside the export root even if a caller hands this an unvalidated
+    # path. ``sync_client_latest_exports`` already filters via
+    # ``_contained_local_path``; this keeps the writer safe in isolation.
+    if not local.resolve().is_relative_to(_export_root()):
+        logger.warning(
+            "[metadata_store] refusing to materialize outside root: %s", local
+        )
+        return
     try:
         temp = Path(get_storage_service().open_for_read(key))
     except Exception:  # noqa: BLE001 — a miss is an expected outcome here

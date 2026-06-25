@@ -166,6 +166,53 @@ def test_sync_client_latest_exports_materializes_only_latest(mirror) -> None:
     assert not (export_root / "otra").exists()
 
 
+def test_sync_rejects_traversal_keys_and_writes_nothing_outside_root(mirror) -> None:
+    """CW-FILE-001 — a mirror key with ``..`` segments must NOT be written
+    outside the export root, while a benign in-root key still materializes."""
+    export_root, svc = mirror
+    svc.save_bytes(
+        storage_key="metadata_exports/acme/v1/latest_metadata.xlsx", data=b"ok"
+    )
+    # A corrupt/attacker-planted key that resolves above the export root.
+    svc.save_bytes(
+        storage_key="metadata_exports/acme/../../escape/latest_metadata.xlsx",
+        data=b"evil",
+    )
+
+    metadata_store.sync_client_latest_exports("acme")
+
+    # The benign slot came back.
+    assert (
+        export_root / "acme" / "v1" / "latest_metadata.xlsx"
+    ).read_bytes() == b"ok"
+    # Nothing was written outside the root.
+    escape = export_root.parent / "escape" / "latest_metadata.xlsx"
+    assert not escape.exists()
+    assert not (export_root.parent / "escape").exists()
+
+
+def test_contained_local_path_rejects_escapes(mirror) -> None:
+    export_root, _ = mirror
+    root = metadata_store._export_root()
+    assert metadata_store._contained_local_path(
+        "metadata_exports/acme/v1/latest_metadata.xlsx"
+    ) == (root / "acme" / "v1" / "latest_metadata.xlsx")
+    assert (
+        metadata_store._contained_local_path(
+            "metadata_exports/acme/../../escape/x.xlsx"
+        )
+        is None
+    )
+    assert (
+        metadata_store._contained_local_path("metadata_exports/../escape.xlsx")
+        is None
+    )
+    assert (
+        metadata_store._contained_local_path("other_prefix/latest_metadata.xlsx")
+        is None
+    )
+
+
 def test_mirror_is_noop_on_local_backend(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:

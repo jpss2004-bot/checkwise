@@ -32,7 +32,16 @@ from datetime import UTC, datetime, timedelta
 from typing import Annotated
 from urllib.parse import quote
 
-from fastapi import APIRouter, Depends, Header, HTTPException, Request, Response, status
+from fastapi import (
+    APIRouter,
+    BackgroundTasks,
+    Depends,
+    Header,
+    HTTPException,
+    Request,
+    Response,
+    status,
+)
 from pydantic import BaseModel, Field, field_validator
 from sqlalchemy import select
 from sqlalchemy.orm import Session
@@ -59,6 +68,7 @@ from app.services.auth import (
     PASSWORD_HISTORY_DEPTH,
     TokenClaims,
     TokenError,
+    bump_session_epoch,
     decode_access_token,
     generate_password_reset_token,
     hash_password,
@@ -68,6 +78,7 @@ from app.services.auth import (
     verify_password,
 )
 from app.services.email_delivery import send_password_reset_email
+from app.services.notifications.background import emit_password_reset_in_background
 from app.services.subscription import is_org_blocked
 
 router = APIRouter(prefix="/auth", tags=["auth"])
@@ -168,6 +179,12 @@ def _apply_password_change(
     # cooldown elapsed (login checks the lock before the password).
     user.failed_login_count = 0
     user.locked_until = None
+    # CW-AUTH-002 — a password reset / set-password must terminate every
+    # existing session (the common compromise-containment action). Bumping
+    # the epoch here invalidates all outstanding tokens; the reset flow
+    # forces a fresh /login, and set-password re-mints the current session's
+    # token below so the active caller is not bounced mid-flow.
+    bump_session_epoch(user)
 
     if old_hash:
         db.add(PasswordHistory(user_id=user.id, password_hash=old_hash))
@@ -230,6 +247,12 @@ class SetPasswordRequest(BaseModel):
 class SetPasswordResponse(BaseModel):
     user: UserOut
     must_change_password: bool
+    # CW-AUTH-002 — set-password bumps the session epoch (invalidating all
+    # other sessions), so it re-mints the CURRENT session's token and
+    # returns it here (and as an httpOnly cookie). The caller must adopt
+    # this token; the one it authenticated with is now stale.
+    access_token: str
+    expires_at: datetime
 
 
 class ForgotPasswordRequest(BaseModel):
@@ -596,6 +619,17 @@ def get_current_user(
     if user is None or user.status != "active":
         raise HTTPException(status.HTTP_401_UNAUTHORIZED, detail="Tu sesión ya no está activa.")
 
+    # CW-AUTHZ-001 / CW-AUTH-001 / CW-AUTH-002 — session-epoch revocation.
+    # Reject any token minted before the user's current epoch (a password
+    # reset / set-password, a staff role revocation, or a client demotion
+    # all bump it). ``<`` (strictly older), never ``!=``, so a future-dated
+    # epoch from a clock/replication race can never brick a valid token. No
+    # extra query — ``user`` is already loaded above.
+    if claims.session_epoch < (user.session_epoch or 0):
+        raise HTTPException(
+            status.HTTP_401_UNAUTHORIZED, detail="Tu sesión ya no está activa."
+        )
+
     # P0 gate: a user flagged ``must_change_password=True`` may only
     # touch the narrow surface needed to clear the flag. Without this,
     # a freshly-activated provider whose token was issued before they
@@ -815,7 +849,11 @@ def login(
     org_ids = sorted({m.organization_id for m in memberships})
 
     token = issue_access_token(
-        user_id=user.id, email=user.email, roles=roles, orgs=org_ids
+        user_id=user.id,
+        email=user.email,
+        roles=roles,
+        orgs=org_ids,
+        session_epoch=user.session_epoch or 0,
     )
     # FE-SEC-1 — also deposit the JWT in an httpOnly cookie so the
     # frontend can move off localStorage (XSS-exfiltratable). The token is
@@ -879,6 +917,7 @@ def login(
 def forgot_password(
     payload: ForgotPasswordRequest,
     request: Request,
+    background: BackgroundTasks,
     db: DbSession,
 ) -> ForgotPasswordResponse:
     """Create a one-time reset link and email it when the account exists.
@@ -960,28 +999,20 @@ def forgot_password(
             "delivery_status": delivery.status,
         },
     )
-    # Phase 7 cutover (Slice C) — also dispatch through the unified
-    # fabric in parallel with the legacy email send. The legacy
-    # ``send_password_reset_email`` above remains the user-visible
-    # delivery during the soak period; the emit writes a
-    # notification_dispatch row + (when active mode + Twilio are
-    # configured) sends an SMS confirmation alongside the email. A
-    # failure here NEVER breaks the request — the password reset
-    # email above already landed.
-    try:
-        from app.services.notifications import emit_password_reset_requested
-
-        emit_password_reset_requested(
-            db,
-            user=user,
-            reset_token_id=reset_token.id,
-            reset_url=reset_url,
-            mode="active",
-        )
-    except Exception:  # pragma: no cover — defensive during cutover
-        log.exception("notif_emit_failed event=account.password_reset_requested")
-
     db.commit()
+
+    # Phase 7 cutover (Slice C) — also dispatch through the unified fabric in
+    # parallel with the legacy email send above (the user-visible delivery).
+    # CW-DOS-002 — the fabric emit performs blocking SMTP/SMS in active mode,
+    # so it runs AFTER the response as a BackgroundTask on its own session
+    # (the reset-token row is committed above; the task re-loads the user by
+    # id). A failure there never affects this request.
+    background.add_task(
+        emit_password_reset_in_background,
+        user_id=user.id,
+        reset_token_id=reset_token.id,
+        reset_url=reset_url,
+    )
 
     return generic
 
@@ -1168,6 +1199,7 @@ def logout(
 def set_password(
     payload: SetPasswordRequest,
     current: Annotated[CurrentUser, Depends(get_current_user)],
+    response: Response,
     db: DbSession,
 ) -> SetPasswordResponse:
     """Update the authenticated user's password and clear the
@@ -1175,19 +1207,24 @@ def set_password(
 
     Used by:
     - The first-login flow at ``/activate`` after a user signs in with
-      seed/temporary credentials. Backend issues a JWT (still valid
-      after the password swap), frontend posts the new password here,
-      then redirects to the workspace entry.
+      seed/temporary credentials. Backend issues a JWT, frontend posts
+      the new password here, then redirects to the workspace entry.
     - Future "change my password" UI for any signed-in user.
 
-    The bearer token issued at login remains valid until its natural
-    expiry — this endpoint does not rotate the JWT.
+    CW-AUTH-002 — the password change bumps the user's ``session_epoch``,
+    which invalidates EVERY outstanding token (including the one this
+    request authenticated with). To avoid bouncing the active caller
+    mid-flow, we re-mint a fresh token carrying the new epoch, deposit it
+    as the httpOnly session cookie, and return it in the body. All OTHER
+    sessions (other devices / stale tokens) are now dead, which is the
+    desired behavior.
     """
     user = db.get(User, current.user.id)
     if user is None or user.status != "active":
         raise HTTPException(status.HTTP_401_UNAUTHORIZED, detail="Tu sesión ya no está activa.")
 
-    # Audit-finding #10 — same reuse guard as /reset-password.
+    # Audit-finding #10 — same reuse guard as /reset-password. This also
+    # bumps user.session_epoch (CW-AUTH-002) via ``_apply_password_change``.
     _apply_password_change(db, user, payload.new_password)
     # Hardening pass (2026-05-26) — write the same canonical audit
     # row the /reset-password endpoint writes. set-password is the
@@ -1205,6 +1242,27 @@ def set_password(
     )
     db.commit()
 
+    # Re-mint the current session's token at the NEW epoch. Roles/orgs are
+    # unchanged by a password set, so reuse the just-validated claims rather
+    # than re-querying memberships.
+    fresh_token = issue_access_token(
+        user_id=user.id,
+        email=user.email,
+        roles=list(current.roles),
+        orgs=list(current.organization_ids),
+        session_epoch=user.session_epoch or 0,
+    )
+    response.set_cookie(
+        key=settings.AUTH_SESSION_COOKIE_NAME,
+        value=fresh_token,
+        max_age=settings.AUTH_JWT_EXPIRES_MINUTES * 60,
+        httponly=True,
+        secure=settings.cookie_secure,
+        samesite=settings.cookie_samesite,
+        path="/",
+    )
+    fresh_claims = decode_access_token(fresh_token)
+
     return SetPasswordResponse(
         user=UserOut(
             id=user.id,
@@ -1215,4 +1273,6 @@ def set_password(
             last_login_at=user.last_login_at,
         ),
         must_change_password=user.must_change_password,
+        access_token=fresh_token,
+        expires_at=datetime.fromtimestamp(fresh_claims.expires_at, tz=UTC),
     )

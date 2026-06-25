@@ -42,6 +42,7 @@ import {
   clearAdminSession,
   readAdminSession,
 } from "@/lib/session/admin";
+import { logoutAdmin } from "@/lib/api/auth";
 import { parseClientErrorCode } from "@/lib/api/error-detail";
 import { ClientPlanProvider } from "@/lib/plan/plan-context";
 import { PlanBadgeConnected } from "@/components/checkwise/plan/plan-badge";
@@ -303,7 +304,10 @@ export function ClientShell({
     };
   }, [session, pathname, router, consentReloadKey]);
 
-  function onLogout() {
+  async function onLogout() {
+    // FE-SEC-1 — clear the server-side session cookie too, then drop the
+    // local identity + in-memory bearer and route to /login.
+    await logoutAdmin();
     clearAdminSession();
     router.replace("/login");
   }

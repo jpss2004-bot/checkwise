@@ -72,6 +72,7 @@ from app.schemas.reports import (
 from app.services.audit_log import add_audit_event
 from app.services.report_service import (
     ReportActor,
+    ReportContentTooLargeError,
     ReportNotFoundError,
     ReportPermissionError,
     ReportScopeError,
@@ -543,6 +544,10 @@ def post_report(
         raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, str(exc)) from exc
     except ReportPermissionError as exc:
         raise HTTPException(status.HTTP_403_FORBIDDEN, str(exc)) from exc
+    except ReportContentTooLargeError as exc:
+        raise HTTPException(
+            status.HTTP_413_REQUEST_ENTITY_TOO_LARGE, str(exc)
+        ) from exc
     return _read(report, version)
 
 
@@ -664,6 +669,10 @@ def post_version(
         raise HTTPException(status.HTTP_404_NOT_FOUND, str(exc)) from exc
     except ReportPermissionError as exc:
         raise HTTPException(status.HTTP_403_FORBIDDEN, str(exc)) from exc
+    except ReportContentTooLargeError as exc:
+        raise HTTPException(
+            status.HTTP_413_REQUEST_ENTITY_TOO_LARGE, str(exc)
+        ) from exc
     return _version_read(version)
 
 

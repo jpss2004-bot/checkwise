@@ -135,7 +135,7 @@ export default function ReviewerSubmissionPage({ params }: PageProps) {
     // mounted page — reset the decided card so the next document opens
     // on a fresh decision panel.
     setDecided(null);
-    getReviewerSubmission(session.access_token, submission_id)
+    getReviewerSubmission(submission_id)
       .then((payload) => {
         if (!cancelled) setDetail(payload);
       })
@@ -172,7 +172,6 @@ export default function ReviewerSubmissionPage({ params }: PageProps) {
       if (!session || !detail) return;
       try {
         const result = await submitDecision(
-          session.access_token,
           detail.submission_id,
           action,
           reason,
@@ -284,7 +283,7 @@ export default function ReviewerSubmissionPage({ params }: PageProps) {
             <VerdictCard detail={detail} />
             <PrevalidationEvidenceCard detail={detail} />
             <VerificationCard detail={detail} />
-            <ReviewerSubmissionPreview detail={detail} session={session} />
+            <ReviewerSubmissionPreview detail={detail} />
             <LineageStrip detail={detail} returnToHref={returnToHref} />
             <LecturaDelDocumento detail={detail} />
             <ExpedienteAssessmentCard detail={detail} />
@@ -1433,10 +1432,8 @@ function formatDate(iso: string): string {
 
 function ReviewerSubmissionPreview({
   detail,
-  session,
 }: {
   detail: SubmissionDetail;
-  session: AdminSession;
 }) {
   const [blobUrl, setBlobUrl] = useState<string | null>(null);
   const [loadError, setLoadError] = useState<string | null>(null);
@@ -1444,7 +1441,6 @@ function ReviewerSubmissionPreview({
 
   const submissionId = detail.submission_id;
   const documentId = detail.document?.document_id ?? null;
-  const token = session.access_token;
 
   useEffect(() => {
     if (!documentId) {
@@ -1454,7 +1450,7 @@ function ReviewerSubmissionPreview({
     let cancelled = false;
     let issuedUrl: string | null = null;
     setLoadError(null);
-    fetchReviewerSubmissionDocumentBlob(token, submissionId)
+    fetchReviewerSubmissionDocumentBlob(submissionId)
       .then((url) => {
         if (cancelled) {
           URL.revokeObjectURL(url);
@@ -1477,13 +1473,13 @@ function ReviewerSubmissionPreview({
       cancelled = true;
       if (issuedUrl) URL.revokeObjectURL(issuedUrl);
     };
-  }, [token, submissionId, documentId]);
+  }, [submissionId, documentId]);
 
   const handleDownload = useCallback(async () => {
     if (!detail.document || downloading) return;
     setDownloading(true);
     try {
-      const url = await fetchReviewerSubmissionDocumentBlob(token, submissionId, {
+      const url = await fetchReviewerSubmissionDocumentBlob(submissionId, {
         download: true,
       });
       const anchor = document.createElement("a");
@@ -1498,7 +1494,7 @@ function ReviewerSubmissionPreview({
     } finally {
       setDownloading(false);
     }
-  }, [detail.document, downloading, submissionId, token]);
+  }, [detail.document, downloading, submissionId]);
 
   if (!detail.document) {
     return (

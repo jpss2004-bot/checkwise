@@ -41,6 +41,16 @@ from app.services.whatsapp_templates import PHONE_OTP_TEMPLATE
 
 log = logging.getLogger("checkwise.whatsapp_delivery")
 
+
+def _mask_phone(phone: str | None) -> str:
+    """Last-4 only, for logs. ``'****1234'`` (or ``'****'`` if <4 digits).
+
+    CW-LOG-001 — delivery logs must not retain full recipient numbers.
+    Digit-filtering also strips any CR/LF so a crafted value can't forge
+    log lines."""
+    digits = "".join(ch for ch in (phone or "") if ch.isdigit())
+    return f"****{digits[-4:]}" if len(digits) >= 4 else "****"
+
 # Meta phone numbers must be E.164 without the leading "+". For
 # Mexico (country code 52) a clean ``5512345678`` becomes
 # ``525512345678``. The normalizer is permissive on input — it accepts
@@ -193,23 +203,24 @@ def send_whatsapp_template(
         # carries the plaintext 6-digit verification code, which must not
         # land in logs regardless of environment. Log a redacted summary
         # for OTP; the full payload is fine for non-secret templates.
-        # Scrub CR/LF from the recipient before logging so a crafted value
-        # can't forge log lines (CodeQL log-injection).
-        safe_to = str(recipient).replace("\r", " ").replace("\n", " ")
+        # CW-LOG-001 — mask the recipient to last-4 and never render the
+        # component array (it carries template params / PII-adjacent values,
+        # and for the OTP template the plaintext code). Both branches now log
+        # only the component COUNT.
         if template_name == PHONE_OTP_TEMPLATE:
             log.info(
                 "whatsapp.dry_run template=%s to=%s components=<redacted "
                 "OTP, %d component(s)>",
                 template_name,
-                safe_to,
+                _mask_phone(recipient),
                 len(components),
             )
         else:
             log.info(
-                "whatsapp.dry_run template=%s to=%s components=%s",
+                "whatsapp.dry_run template=%s to=%s components=<%d component(s)>",
                 template_name,
-                safe_to,
-                json.dumps(components, ensure_ascii=False),
+                _mask_phone(recipient),
+                len(components),
             )
         return WhatsAppDeliveryResult(
             delivered=False,
@@ -248,24 +259,19 @@ def send_whatsapp_template(
             recipient=recipient,
         )
     except urllib.error.HTTPError as exc:
-        # Meta returns useful JSON in the body — surface it to the
-        # caller so the audit log can record *why* the send failed
-        # (template not approved, recipient not opted-in, etc.).
-        detail = ""
-        try:
-            detail = exc.read().decode("utf-8", errors="replace")
-        except Exception:  # pragma: no cover — defensive
-            detail = ""
+        # CW-LOG-001 — the Meta error body can echo the recipient/template
+        # params and reaches the persisted ``whatsapp_reason``/audit fields,
+        # so it is neither logged nor returned. The HTTP status code is the
+        # sanitized triage signal (e.g. 400=invalid template/recipient).
         log.warning(
-            "whatsapp.http_error status=%s template=%s detail=%s",
+            "whatsapp.http_error status=%s template=%s",
             exc.code,
             template_name,
-            detail[:500],
         )
         return WhatsAppDeliveryResult(
             delivered=False,
             status="failed",
-            error=f"http_{exc.code}: {detail[:300]}",
+            error=f"http_{exc.code}",
             recipient=recipient,
         )
     except (urllib.error.URLError, TimeoutError, json.JSONDecodeError) as exc:

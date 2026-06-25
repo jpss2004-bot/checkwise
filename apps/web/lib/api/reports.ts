@@ -4,12 +4,13 @@
  * Phase 3.2 — entity-layer endpoints only. AI / streaming / conversation
  * / share / export wrappers land alongside their sub-phases.
  *
- * Auth: pulls the bearer JWT from readAdminSession(). All seeded
- * users (internal_admin, reviewer, client_admin, providers via the
- * /portal/enter flow) carry a JWT under the same key.
+ * Auth: JWT-first (in-memory bearer via ``adminAuthHeader``),
+ * cookie-fallback (``credentials: "include"``). All seeded users
+ * (internal_admin, reviewer, client_admin, providers via the
+ * /portal/enter flow) authenticate the same way.
  */
 
-import { readAdminSession } from "@/lib/session/admin";
+import { adminAuthHeader } from "@/lib/session/admin";
 import { fetchWithTimeout, FetchTimeoutError } from "@/lib/api/fetch-timeout";
 import { saveBlob } from "@/lib/api/download";
 import type {
@@ -63,15 +64,14 @@ async function fetchJson<T>(
   init: RequestInit = {},
   timeoutMs?: number,
 ): Promise<T> {
-  const session = readAdminSession();
-  if (!session?.access_token) {
-    throw new ReportsApiError(401, "No active session.");
-  }
   const headers = new Headers(init.headers ?? {});
   if (!headers.has("Content-Type") && init.body) {
     headers.set("Content-Type", "application/json");
   }
-  headers.set("Authorization", `Bearer ${session.access_token}`);
+  const auth = adminAuthHeader();
+  if (auth.Authorization && !headers.has("Authorization")) {
+    headers.set("Authorization", auth.Authorization);
+  }
   // When `timeoutMs` is set, abort the request after the deadline and
   // raise a 408 so the caller's existing `.catch` renders an error state.
   // Without this a server-side hang leaves the promise unsettled forever
@@ -84,6 +84,7 @@ async function fetchJson<T>(
     const response = await fetch(`${API_BASE_URL}${path}`, {
       ...init,
       headers,
+      credentials: "include",
       signal: controller?.signal ?? init.signal,
     });
     if (!response.ok) {
@@ -571,16 +572,12 @@ async function getReportExportPresignedUrl(
   exportId: string,
   disposition: "attachment" | "inline",
 ): Promise<{ url: string | null; filename: string }> {
-  const session = readAdminSession();
-  const headers: Record<string, string> = {};
-  if (session?.access_token) {
-    headers.Authorization = `Bearer ${session.access_token}`;
-  }
+  const headers: Record<string, string> = { ...adminAuthHeader() };
   let response: Response;
   try {
     response = await fetchWithTimeout(
       `${API_BASE_URL}/api/v1/reports/exports/${exportId}/download-url?disposition=${disposition}`,
-      { headers },
+      { headers, credentials: "include" },
       BLOB_TIMEOUT_MS,
     );
   } catch (err) {
@@ -607,18 +604,15 @@ async function streamExportAsBlob(
   exportId: string,
   filename: string,
 ): Promise<void> {
-  const session = readAdminSession();
   const headers: Record<string, string> = {
     Accept: "application/octet-stream, application/pdf, text/html",
+    ...adminAuthHeader(),
   };
-  if (session?.access_token) {
-    headers.Authorization = `Bearer ${session.access_token}`;
-  }
   let response: Response;
   try {
     response = await fetchWithTimeout(
       `${API_BASE_URL}/api/v1/reports/exports/${exportId}/download`,
-      { headers },
+      { headers, credentials: "include" },
       BLOB_TIMEOUT_MS,
     );
   } catch (err) {
@@ -721,18 +715,15 @@ export async function fetchReportExportObjectUrl(
   const { url } = await getReportExportPresignedUrl(exportId, "inline");
   if (url) return url;
   // Local-disk storage: stream same-origin and hand back a blob URL.
-  const session = readAdminSession();
   const headers: Record<string, string> = {
     Accept: "application/pdf, application/octet-stream",
+    ...adminAuthHeader(),
   };
-  if (session?.access_token) {
-    headers.Authorization = `Bearer ${session.access_token}`;
-  }
   let response: Response;
   try {
     response = await fetchWithTimeout(
       `${API_BASE_URL}/api/v1/reports/exports/${exportId}/download`,
-      { headers },
+      { headers, credentials: "include" },
       BLOB_TIMEOUT_MS,
     );
   } catch (err) {
@@ -818,14 +809,10 @@ export function listReportShares(
 }
 
 export async function revokeReportShare(shareId: string): Promise<void> {
-  const session = readAdminSession();
-  const headers: Record<string, string> = {};
-  if (session?.access_token) {
-    headers.Authorization = `Bearer ${session.access_token}`;
-  }
+  const headers: Record<string, string> = { ...adminAuthHeader() };
   const response = await fetch(
     `${API_BASE_URL}/api/v1/reports/shares/${shareId}`,
-    { method: "DELETE", headers },
+    { method: "DELETE", headers, credentials: "include" },
   );
   if (response.status !== 204) {
     throw new ReportsApiError(

@@ -20,6 +20,7 @@ exercise here (``SLACK_BOT_TOKEN`` is unset by default in
 
 from __future__ import annotations
 
+import json
 from collections.abc import Generator
 from typing import Any
 
@@ -710,3 +711,55 @@ def test_admin_feedback_endpoints_reject_non_admin_token(
         "/api/v1/admin/feedback-reports", headers=_auth(token)
     )
     assert resp.status_code == 403
+
+
+# ---------------------------------------------------------------------------
+# CW-RATE-003 / CW-SLACK-001 — shared throttle + Slack escaping regressions
+# ---------------------------------------------------------------------------
+
+
+def test_public_record_and_check_rate_none_bypasses() -> None:
+    """The unknown-IP bypass survives the shared-limiter swap."""
+    for _ in range(10):
+        assert feedback_service.record_and_check_public_rate(None) is True
+
+
+def test_auth_and_public_limiters_are_segregated() -> None:
+    """CW-RATE-003 — exhausting the authenticated bucket must not deplete
+    the separate public bucket (two limiter instances)."""
+    feedback_service._reset_rate_limiter_for_tests()  # noqa: SLF001
+    for _ in range(_RATE := feedback_service._RATE_MAX_PER_WINDOW):  # noqa: SLF001
+        assert feedback_service.record_and_check_rate("user-1") is True
+    # Authenticated bucket now full…
+    assert feedback_service.record_and_check_rate("user-1") is False
+    # …but the public bucket is untouched.
+    assert feedback_service.record_and_check_public_rate("ip-hash-abc") is True
+
+
+def test_feedback_fallback_text_escapes_channel_mention() -> None:
+    out = feedback_service._fallback_text(  # noqa: SLF001
+        {"type": "bug", "is_public": True, "contact_email": "<!channel>", "path": "<!here>"}
+    )
+    assert "<!channel>" not in out
+    assert "<!here>" not in out
+
+
+def test_feedback_blocks_escape_path_viewport_and_link() -> None:
+    blocks = feedback_service._format_blocks(  # noqa: SLF001
+        {
+            "type": "bug",
+            "is_public": False,
+            "description": "d",
+            "user_email": "<!channel>@e.com",
+            "user_roles": ["<!channel>"],
+            "path": "/x`<!channel>`",
+            "viewport": "<!here>",
+            "url": "https://evil.com|<!channel>",
+            "user_agent": "ua",
+        }
+    )
+    out = json.dumps(blocks)
+    assert "<!channel>" not in out
+    assert "<!here>" not in out
+    # The unsafe link target degraded to escaped plain text, not a live link.
+    assert "<https://evil.com|" not in out

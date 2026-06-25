@@ -18,6 +18,7 @@ contract every other test relies on).
 
 from __future__ import annotations
 
+import json
 from collections.abc import Generator
 from typing import Any
 
@@ -505,3 +506,43 @@ def test_admin_endpoints_reject_non_admin_token(api_client, db_factory) -> None:
         headers={"Authorization": f"Bearer {token}"},
     )
     assert resp.status_code == 403
+
+
+# ---------------------------------------------------------------------------
+# CW-RATE-003 / CW-SLACK-001 — shared throttle + Slack escaping regressions
+# ---------------------------------------------------------------------------
+
+
+def test_record_and_check_rate_none_key_bypasses() -> None:
+    """The unknown-IP bypass survives the shared-limiter swap."""
+    for _ in range(10):
+        assert contact_service.record_and_check_rate(None) is True
+
+
+def test_slack_fallback_text_escapes_channel_mention() -> None:
+    """CW-SLACK-001 — public name/company can't inject Slack mentions."""
+    out = contact_service._format_slack_fallback_text(  # noqa: SLF001
+        {"name": "<!channel>", "company": "<!here>"}
+    )
+    assert "<!channel>" not in out
+    assert "<!here>" not in out
+    assert "&lt;!channel&gt;" in out
+
+
+def test_slack_blocks_escape_all_public_fields() -> None:
+    out = json.dumps(
+        contact_service._format_slack_blocks(  # noqa: SLF001
+            row_id="r1",
+            payload={
+                "name": "<!channel>",
+                "email": "a@b.com",
+                "company": "`x`",
+                "role": "<b>",
+                "source": "land|ing",
+                "message": "<!here>",
+            },
+        )
+    )
+    assert "<!channel>" not in out
+    assert "<!here>" not in out
+    assert "`x`" not in out  # backtick neutralized

@@ -2,13 +2,14 @@
  * Phase 8 — typed wrapper over the client portal API.
  *
  * Every endpoint requires a JWT carrying the ``client_admin`` role
- * (or ``internal_admin`` for support visibility). The token is
- * pulled from ``readAdminSession()`` — same staff JWT used by the
- * admin + reviewer surfaces. Provider portal pages keep their own
- * cookie-based path; this client is staff-only.
+ * (or ``internal_admin`` for support visibility) — the same staff JWT
+ * used by the admin + reviewer surfaces. Auth is JWT-first (in-memory
+ * bearer), cookie-fallback (``credentials: "include"``). Provider
+ * portal pages keep their own cookie-based path; this client is
+ * staff-only.
  */
 
-import { readAdminSession } from "@/lib/session/admin";
+import { adminAuthHeader } from "@/lib/session/admin";
 import { dedupeRead, invalidateRead } from "@/lib/api/request-cache";
 import { parseContentDispositionFilename } from "@/lib/api/download";
 
@@ -33,15 +34,17 @@ export class ClientApiError extends Error {
 }
 
 async function fetchJson<T>(path: string, init: RequestInit = {}): Promise<T> {
-  const session = readAdminSession();
-  if (!session?.access_token) {
-    throw new ClientApiError(401, "No active staff session.");
-  }
   const headers = new Headers(init.headers ?? {});
   if (!headers.has("Content-Type") && init.body) {
     headers.set("Content-Type", "application/json");
   }
-  headers.set("Authorization", `Bearer ${session.access_token}`);
+  // JWT-first (in-memory bearer); the httpOnly cookie (credentials:
+  // include) authenticates after a reload. A logged-out call 401s from
+  // the server and the caller routes to /login.
+  const auth = adminAuthHeader();
+  if (auth.Authorization && !headers.has("Authorization")) {
+    headers.set("Authorization", auth.Authorization);
+  }
   const controller = init.signal ? null : new AbortController();
   const timeoutId = controller
     ? setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS)
@@ -51,6 +54,7 @@ async function fetchJson<T>(path: string, init: RequestInit = {}): Promise<T> {
     response = await fetch(`${API_BASE_URL}${path}`, {
       ...init,
       headers,
+      credentials: "include",
       signal: init.signal ?? controller?.signal,
     });
   } catch (err) {
@@ -1109,10 +1113,6 @@ export async function getClientMetadata(params?: {
 export async function downloadClientMetadata(params?: {
   client_id?: string;
 }): Promise<Blob> {
-  const session = readAdminSession();
-  if (!session?.access_token) {
-    throw new ClientApiError(401, "No active staff session.");
-  }
   const controller = new AbortController();
   const timeoutId = setTimeout(() => controller.abort(), DOWNLOAD_TIMEOUT_MS);
   let response: Response;
@@ -1120,9 +1120,8 @@ export async function downloadClientMetadata(params?: {
     response = await fetch(
       `${API_BASE_URL}/api/v1/client/metadata/download${qs(params)}`,
       {
-        headers: {
-          Authorization: `Bearer ${session.access_token}`,
-        },
+        headers: { ...adminAuthHeader() },
+        credentials: "include",
         signal: controller.signal,
       },
     );
@@ -1199,12 +1198,7 @@ export async function fetchClientSubmissionDocumentBlob(
   submissionId: string,
   opts: { download?: boolean } = {},
 ): Promise<string> {
-  const session = readAdminSession();
-  if (!session?.access_token) {
-    throw new ClientApiError(401, "No active staff session.");
-  }
-  const headers = new Headers();
-  headers.set("Authorization", `Bearer ${session.access_token}`);
+  const headers = new Headers(adminAuthHeader());
   const controller = new AbortController();
   const timeoutId = setTimeout(() => controller.abort(), DOWNLOAD_TIMEOUT_MS);
   let response: Response;
@@ -1454,12 +1448,7 @@ export async function getClientAuditPackageTree(
 export async function downloadClientAuditPackageZipPost(
   body: AuditPackageFilters & { submission_ids: string[] },
 ): Promise<{ blob: Blob; filename: string }> {
-  const session = readAdminSession();
-  if (!session?.access_token) {
-    throw new ClientApiError(401, "No active staff session.");
-  }
-  const headers = new Headers();
-  headers.set("Authorization", `Bearer ${session.access_token}`);
+  const headers = new Headers(adminAuthHeader());
   headers.set("Content-Type", "application/json");
   // Bound the request the same way the GET download path is: a stalled
   // large-ZIP / headless-Chromium INDICE.pdf stream during a live audit

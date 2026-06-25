@@ -35,6 +35,7 @@ rendered yet — we're only shipping the entity layer.
 
 from __future__ import annotations
 
+import json
 from dataclasses import dataclass
 
 from sqlalchemy import func, or_, select
@@ -46,6 +47,7 @@ from app.constants.reports import (
     ReportVersionOrigin,
 )
 from app.constants.roles import STAFF_ROLES, MembershipRole
+from app.core.config import settings
 from app.models.entities import (
     Membership,
     Organization,
@@ -81,6 +83,79 @@ class ReportPermissionError(ReportServiceError):
 
 class ReportScopeError(ReportServiceError):
     """Audience says client/vendor scope required but neither was provided."""
+
+
+class ReportContentTooLargeError(ReportServiceError):
+    """content_json / plan_json exceeds the configured size, block-count,
+    per-block-text, or nesting limits (CW-DOS-001). Mapped to HTTP 413."""
+
+
+def _max_depth_within(obj: object, limit: int, _depth: int = 1) -> bool:
+    """True if ``obj``'s nesting depth is within ``limit``. Bails as soon as
+    the limit is exceeded so a maliciously deep payload can't blow Python's
+    recursion limit before the check trips."""
+    if _depth > limit:
+        return False
+    if isinstance(obj, dict):
+        return all(_max_depth_within(v, limit, _depth + 1) for v in obj.values())
+    if isinstance(obj, list):
+        return all(_max_depth_within(v, limit, _depth + 1) for v in obj)
+    return True
+
+
+def _sum_str_len(obj: object) -> int:
+    """Total length of all string leaves under ``obj``."""
+    if isinstance(obj, str):
+        return len(obj)
+    if isinstance(obj, dict):
+        return sum(_sum_str_len(v) for v in obj.values())
+    if isinstance(obj, list):
+        return sum(_sum_str_len(v) for v in obj)
+    return 0
+
+
+def _validate_report_content(
+    content_json: dict,
+    *,
+    plan_json: dict | None = None,
+    llm_metadata: dict | None = None,
+) -> None:
+    """Reject over-budget report payloads BEFORE persistence (CW-DOS-001).
+
+    Bounds the serialized size, block count, per-block text length, and
+    nesting depth of ``content_json`` (the input the HTML/PDF renderer
+    walks), plus a coarse byte cap on ``plan_json``/``llm_metadata``.
+    Raises :class:`ReportContentTooLargeError` (→ HTTP 413) on any breach.
+    """
+    try:
+        raw = json.dumps(content_json, ensure_ascii=False, separators=(",", ":"))
+    except (TypeError, ValueError) as exc:
+        raise ReportContentTooLargeError("content_json is not JSON-serializable.") from exc
+    if len(raw.encode("utf-8")) > settings.REPORT_CONTENT_MAX_BYTES:
+        raise ReportContentTooLargeError("content_json exceeds the maximum size.")
+
+    if not _max_depth_within(content_json, settings.REPORT_CONTENT_MAX_DEPTH):
+        raise ReportContentTooLargeError("content_json is nested too deeply.")
+
+    blocks = content_json.get("blocks") if isinstance(content_json, dict) else None
+    if isinstance(blocks, list):
+        if len(blocks) > settings.REPORT_CONTENT_MAX_BLOCKS:
+            raise ReportContentTooLargeError("content_json has too many blocks.")
+        for block in blocks:
+            if _sum_str_len(block) > settings.REPORT_CONTENT_MAX_TEXT_PER_BLOCK:
+                raise ReportContentTooLargeError(
+                    "A report block exceeds the maximum text length."
+                )
+
+    for name, extra in (("plan_json", plan_json), ("llm_metadata", llm_metadata)):
+        if extra is None:
+            continue
+        try:
+            extra_raw = json.dumps(extra, ensure_ascii=False, separators=(",", ":"))
+        except (TypeError, ValueError) as exc:
+            raise ReportContentTooLargeError(f"{name} is not JSON-serializable.") from exc
+        if len(extra_raw.encode("utf-8")) > settings.REPORT_PLAN_MAX_BYTES:
+            raise ReportContentTooLargeError(f"{name} exceeds the maximum size.")
 
 
 # ─── Caller context ─────────────────────────────────────────────
@@ -389,6 +464,8 @@ def create_report(
 
     now = utc_now()
     content = initial_content_json or {"schema_version": 1, "blocks": [], "global": {}}
+    # CW-DOS-001 — bound the seed content too (covers the create vector).
+    _validate_report_content(content)
 
     report = Report(
         id=new_id(),
@@ -653,6 +730,12 @@ def create_version(
         raise ReportPermissionError(
             "User cannot write reports in this organization."
         )
+
+    # CW-DOS-001 — bound the payload before it is persisted and later
+    # rendered. Runs after the permission check so 403 still precedes 413.
+    _validate_report_content(
+        content_json, plan_json=plan_json, llm_metadata=llm_metadata
+    )
 
     next_n = (
         db.scalar(

@@ -42,7 +42,7 @@ from __future__ import annotations
 
 from typing import Literal
 
-from fastapi import APIRouter, HTTPException, Query, Request, status
+from fastapi import APIRouter, BackgroundTasks, HTTPException, Query, Request, status
 from pydantic import BaseModel, EmailStr, Field
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
@@ -54,11 +54,16 @@ from app.core.config import settings
 from app.core.rate_limit import client_ip_from_request
 from app.models import Client, Membership, Organization, PasswordHistory, User
 from app.services.audit_log import add_audit_event
-from app.services.auth import generate_temp_password, hash_password
+from app.services.auth import (
+    bump_session_epoch,
+    generate_temp_password,
+    hash_password,
+)
 from app.services.email_delivery import (
     send_owner_reset_temp_password_email,
     send_welcome_with_temp_password_email,
 )
+from app.services.notifications.background import emit_invitation_in_background
 from app.services.subscription import org_for_client
 
 router = APIRouter(prefix="/client/users", tags=["client-users"])
@@ -393,6 +398,7 @@ def list_client_users(
 def create_client_user(
     payload: CreateClientUserPayload,
     db: DbSession,
+    background: BackgroundTasks,
     current: ClientUser,
     request: Request,
     client_id: str | None = Query(default=None),
@@ -526,27 +532,19 @@ def create_client_user(
         },
     )
 
-    # Same companion emit as the admin provisioning flow (in-app bell
-    # + SMS); never gates the response.
-    try:
-        import logging
-
-        from app.services.notifications import emit_invitation_sent
-
-        emit_invitation_sent(
-            db,
-            user=user,
-            invitation_token_id=user.id,
-            invitation_url=login_url,
-            mode="active",
-        )
-        db.flush()
-    except Exception:  # pragma: no cover — defensive
-        logging.getLogger("checkwise.client_users").exception(
-            "notif_emit_failed event=account.invitation_sent user=%s", user.id
-        )
-
+    new_user_id = user.id
     db.commit()
+
+    # Same companion emit as the admin provisioning flow (in-app bell + SMS).
+    # CW-DOS-002 — deferred off the request path (blocking SMS in active mode);
+    # the user row is committed above and the task re-loads it by id on its
+    # own fresh session.
+    background.add_task(
+        emit_invitation_in_background,
+        user_id=new_user_id,
+        invitation_token_id=new_user_id,
+        invitation_url=login_url,
+    )
 
     return CreateClientUserResponse(
         user_id=user.id,
@@ -764,15 +762,15 @@ def update_client_user_role(
     CheckWise staff) via ``_require_can_manage`` — a client manages its own
     team. The Primary Owner is always an Approver and cannot be demoted here.
 
-    Role staleness, by case: a promoted/demoted user's JWT still carries the
-    OLD role until they re-login (claims are minted at login). For a
-    PROMOTION this is harmless (new Approver writes only work after the next
-    sign-in). A DEMOTION is the security-relevant inverse: seat management is
-    revoked immediately (that gate, ``_require_can_manage``, is DB-live), but
-    the claims-based ``ClientApprover`` write gate (provider create/archive,
-    profile edit) keeps honoring the stale token until it expires (≤24h).
-    Closing that window — live role authorization on the client write gate —
-    is tracked as follow-up work alongside client self-review.
+    Role staleness is closed by the session-epoch mechanism (CW-AUTHZ-001):
+    a role change bumps the target user's ``session_epoch``, so every JWT
+    minted before the change (which still carries the OLD role) is rejected
+    at ``get_current_user`` on the next request. A DEMOTION therefore drops
+    the claims-based ``ClientApprover`` write access (provider create/archive,
+    profile edit) immediately instead of at token expiry (≤24h); a PROMOTION
+    likewise takes effect on the next request. The tradeoff is that the
+    target is logged out of all sessions and must sign in again to pick up
+    the new claims — the intended fail-closed behavior.
     """
     cid = _resolve_client_id(db, current, requested=client_id)
     org = _org_for_client(db, cid)
@@ -784,6 +782,15 @@ def update_client_user_role(
     before_role = membership.role
     if before_role != payload.role:
         membership.role = payload.role
+        # CW-AUTHZ-001 — a seat's access tier lives in the JWT role claim,
+        # minted at login. Bump the TARGET user's session epoch so the role
+        # change takes effect on their next request rather than at token
+        # expiry (≤24h): a DEMOTION (Approver → Viewer) must immediately drop
+        # the claims-based ``ClientApprover`` write access, and a PROMOTION
+        # likewise becomes usable without waiting for a manual re-login.
+        target_user = db.get(User, user_id)
+        if target_user is not None:
+            bump_session_epoch(target_user)
         add_audit_event(
             db,
             action="client.user_role_changed",

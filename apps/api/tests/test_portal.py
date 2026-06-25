@@ -609,6 +609,84 @@ def test_cancel_pending_submission_removes_rows_and_audits(
         db.close()
 
 
+def test_legacy_header_cannot_cancel_submission(api_client: TestClient) -> None:
+    """CW-PORTAL-001 — the legacy X-Workspace-Token must NOT authorize a
+    DELETE. With the session cookie dropped, only the legacy header is
+    presented; the mutation must 401 and the submission must survive."""
+    access = _setup_workspace_session(api_client)
+    submitted = _submit_canonical(api_client, vendor_rfc=access["vendor_rfc"])
+    submission_id = submitted["submission_id"]
+
+    factory = api_client.app.state.testing_session  # type: ignore[attr-defined]
+    db: Session = factory()
+    try:
+        submission = db.get(Submission, submission_id)
+        submission.status = DocumentStatus.PENDIENTE_REVISION.value
+        document = db.scalar(
+            select(Document).where(Document.submission_id == submission_id)
+        )
+        document.status = DocumentStatus.PENDIENTE_REVISION.value
+        db.commit()
+    finally:
+        db.close()
+
+    # Drop the portal cookie so ONLY the legacy header remains.
+    api_client.cookies.clear()
+    cancel = api_client.delete(
+        f"/api/v1/portal/workspaces/{access['workspace_id']}"
+        f"/submissions/{submission_id}",
+        headers={"X-Workspace-Token": access["access_token"]},
+    )
+    assert cancel.status_code == 401, cancel.text
+
+    # The submission was NOT deleted.
+    db = factory()
+    try:
+        assert db.get(Submission, submission_id) is not None
+    finally:
+        db.close()
+
+
+def test_legacy_header_cannot_upload_submission(api_client: TestClient) -> None:
+    """CW-PORTAL-002 — the legacy header must NOT authorize a POST upload."""
+    access = _setup_workspace_session(api_client)
+    from app.core.compliance_catalog import recurring_for_year
+
+    catalog_item = next(
+        item
+        for item in recurring_for_year(2026)
+        if item.institution == "imss" and item.due_month == 5
+    )
+    api_client.cookies.clear()
+    resp = api_client.post(
+        f"/api/v1/portal/workspaces/{access['workspace_id']}/submissions",
+        data={
+            "period_code": "2026-04",
+            "period_key": catalog_item.period_key,
+            "load_type": "mensual",
+            "institution_code": "imss",
+            "requirement_name": catalog_item.name,
+            "requirement_code": catalog_item.code,
+            "initial_status": "pendiente_revision",
+        },
+        files={"file": ("imss.pdf", _pdf_bytes(), "application/pdf")},
+        headers={"X-Workspace-Token": access["access_token"]},
+    )
+    assert resp.status_code == 401, resp.text
+
+
+def test_legacy_header_still_authorizes_reads(api_client: TestClient) -> None:
+    """The legacy header remains a READ-only transition aid — a GET with
+    only X-Workspace-Token (no cookie) still succeeds."""
+    access = _setup_workspace_session(api_client)
+    api_client.cookies.clear()
+    resp = api_client.get(
+        f"/api/v1/portal/workspaces/{access['workspace_id']}",
+        headers={"X-Workspace-Token": access["access_token"]},
+    )
+    assert resp.status_code == 200, resp.text
+
+
 def test_cancel_rejects_reviewed_submission(
     api_client: TestClient,
 ) -> None:

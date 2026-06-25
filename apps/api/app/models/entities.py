@@ -867,6 +867,18 @@ class User(TimestampMixin, Base):
         Integer, default=0, server_default="0", nullable=False
     )
     locked_until: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    # Session epoch (migration 0057, CW-AUTHZ-001 / CW-AUTH-001). Minted
+    # into every access token at login; ``get_current_user`` rejects any
+    # token whose epoch is older than this value. Bumped (incremented) on
+    # every credential/authorization change that must invalidate live
+    # sessions — password reset / set-password, staff role revocation, and
+    # client seat demotion — so a stale-but-unexpired JWT can no longer
+    # carry a privilege the user has lost. ``server_default='0'`` stamps
+    # existing rows to 0, which matches the ``se`` default for pre-migration
+    # tokens, so the deploy does NOT mass-log-out live sessions.
+    session_epoch: Mapped[int] = mapped_column(
+        Integer, default=0, server_default="0", nullable=False
+    )
     # Editable profile fields surfaced on /portal/entra-a-tu-espacio.
     # Phone and job_title are optional; contact_preference defaults to
     # email so existing rows stay valid after migration 0016 backfills
