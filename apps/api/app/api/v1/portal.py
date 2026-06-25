@@ -138,6 +138,7 @@ from app.services.evidence_slots import (
     current_onboarding_submission_for_workspace,
     current_submission_for_slot,
 )
+from app.services.intake_queue import enqueue_intake_job
 from app.services.portal_session import (
     PortalSessionError,
     issue_portal_session_token,
@@ -151,10 +152,12 @@ from app.services.submission_service import (
     assert_pdf_upload,
     finalize_intake_submission,
     finalize_intake_submission_background,
+    finalize_intake_submission_background_async,
     finalize_multi_document_submission,
     get_or_create_institution,
     persist_intake_receipt,
 )
+from app.services.subscription import is_org_blocked, org_for_client_optional
 
 _MUTATING_METHODS: Final[frozenset[str]] = frozenset(
     {"POST", "PUT", "PATCH", "DELETE"}
@@ -723,6 +726,27 @@ def _resolve_workspace_via_jwt(
     return None
 
 
+def _assert_workspace_active(
+    db: Session, ws: ProviderWorkspace
+) -> ProviderWorkspace:
+    """Phase B3 — block portal access when the workspace itself is frozen OR
+    its client organization is frozen/expired. Applied on every auth path so a
+    frozen tenant's providers cannot transact. A legacy orphan client with no
+    Organization is treated as not-frozen."""
+    if ws.status == "frozen":
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Tu espacio está congelado. Contacta al soporte.",
+        )
+    org = org_for_client_optional(db, ws.client_id)
+    if org is not None and is_org_blocked(org):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Tu organización está congelada. Contacta al soporte.",
+        )
+    return ws
+
+
 def current_portal_workspace(
     request: Request,
     db: DbSession,
@@ -751,7 +775,7 @@ def current_portal_workspace(
     """
     via_jwt = _resolve_workspace_via_jwt(db, authorization, workspace_id=workspace_id)
     if via_jwt is not None:
-        return via_jwt
+        return _assert_workspace_active(db, via_jwt)
 
     # The legacy header authenticates reads only. On any mutating method it
     # is ignored, so without a Bearer JWT or session cookie the request
@@ -779,7 +803,9 @@ def current_portal_workspace(
             detail="Sesión de portal requerida.",
         )
 
-    return _load_workspace(db, target_ws, cookie_tok)
+    return _assert_workspace_active(
+        db, _load_workspace(db, target_ws, cookie_tok)
+    )
 
 
 def _scope_from_path(workspace_id: str) -> str:
@@ -1085,6 +1111,25 @@ def complete_onboarding(
     """
     _ = workspace_id  # tenant guard already enforced by dependency
     if workspace.onboarding_completed_at is None:
+        # PROV-01: a provider may not declare their expediente complete while
+        # mandatory documents are still missing. A REQUIRED slot with no
+        # submission at all (SlotState.MISSING) blocks completion; a doc that
+        # is uploaded-but-in-review or rejected does NOT block (the document
+        # exists — CheckWise reviews it asynchronously, and corrections flow
+        # through the normal per-document path).
+        missing_required = [
+            s
+            for s in build_workspace_onboarding_slots(db, workspace)
+            if s.required and s.state == SlotState.MISSING
+        ]
+        if missing_required:
+            raise HTTPException(
+                status.HTTP_409_CONFLICT,
+                detail=(
+                    f"Faltan {len(missing_required)} documento(s) obligatorio(s). "
+                    "Súbelos antes de marcar tu expediente como completo."
+                ),
+            )
         workspace.onboarding_completed_at = utc_now()
         db.flush()
         db.commit()
@@ -1914,6 +1959,14 @@ class SubmissionDetailResponse(BaseModel):
     # "latest reviewer note" stays canonical.
     reviewer_note: str | None = None
     can_cancel: bool = False
+    # Phase 5 / Axis 2 — the CLIENT's business-acceptance verdict, shown
+    # read-only to the provider for transparency (the provider never sets it).
+    # Orthogonal to ``status`` (Axis 1 = CheckWise compliance validity).
+    # Deliberately exposes only the verdict + timestamp, NOT
+    # ``client_decision_reason`` — that reason can carry client-internal
+    # rationale and must not cross the tenant boundary to the provider.
+    client_acceptance: str = "pending"
+    client_decided_at: str | None = None
 
 
 # Statuses that mean "you, the provider, must act now."
@@ -2156,6 +2209,12 @@ def get_workspace_submission(
         suggested_action=_suggested_action(submission.status),  # type: ignore[arg-type]
         reviewer_note=_latest_reviewer_note(db, submission.id),
         can_cancel=_submission_can_be_cancelled(db, submission),
+        client_acceptance=submission.client_acceptance,
+        client_decided_at=(
+            submission.client_decided_at.isoformat()
+            if submission.client_decided_at
+            else None
+        ),
     )
 
 
@@ -3011,12 +3070,31 @@ async def create_workspace_submission(
     # once the response is flushed (and is re-run by the reconcile cron if
     # this worker dies mid-flight), so a scheduling concern is never
     # masked as a storage failure.
-    background_tasks.add_task(
-        finalize_intake_submission_background,
-        submission_id=receipt.submission_id,
-        storage_key=receipt.storage_key,
-        intake_source=INTAKE_SOURCE_WORKSPACE_PORTAL,
-    )
+    # B2 — durable intake queue. When enabled, persist a durable job (committed)
+    # for a separate worker to drain via the idempotent finalize, and do NOT
+    # schedule an in-process BackgroundTask (which a dyno restart would lose).
+    if settings.INTAKE_QUEUE_CONSUMER_ENABLED:
+        await run_in_threadpool(
+            enqueue_intake_job,
+            submission_id=receipt.submission_id,
+            storage_key=receipt.storage_key,
+            intake_source=INTAKE_SOURCE_WORKSPACE_PORTAL,
+        )
+    else:
+        # A3 — when the async provider is enabled, schedule the async finalize
+        # sibling so the heavy sync work runs in a worker thread and the 30–90s
+        # LLM wait yields the event loop instead of pinning a threadpool thread.
+        _finalize_background = (
+            finalize_intake_submission_background_async
+            if settings.DOCUMENT_ANALYSIS_ASYNC_PROVIDER_ENABLED
+            else finalize_intake_submission_background
+        )
+        background_tasks.add_task(
+            _finalize_background,
+            submission_id=receipt.submission_id,
+            storage_key=receipt.storage_key,
+            intake_source=INTAKE_SOURCE_WORKSPACE_PORTAL,
+        )
     return SubmissionResponse(
         submission_id=receipt.submission_id,
         document_id=receipt.document_id,

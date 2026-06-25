@@ -9,6 +9,7 @@ re-validation flows).
 
 from __future__ import annotations
 
+import asyncio
 import logging
 from dataclasses import dataclass
 from pathlib import Path
@@ -48,7 +49,15 @@ from app.services.client_notifications import (
     notify_metadata_ready,
     notify_provider_uploaded,
 )
-from app.services.document_analysis.shadow_runner import run_shadow_analysis
+from app.services.document_analysis.shadow_runner import (
+    run_shadow_analysis,
+    run_shadow_analysis_async,
+)
+from app.services.document_folios import (
+    apply_cross_period_reason,
+    apply_cross_tenant_reason,
+    persist_document_folios,
+)
 from app.services.document_forensics import (
     analyze_pdf_forensics,
     rollup_authenticity_risk,
@@ -127,6 +136,29 @@ def _authenticity_columns_fail_open(
     except Exception:  # noqa: BLE001 — analysis errors never block intake.
         logger.exception("Authenticity analysis failed open (file=%s)", path)
         return None, None, None, None
+
+
+def _shadow_runner_for_background():  # noqa: ANN202 — sync or async callable
+    """The shadow-runner callable to queue as a BackgroundTask.
+
+    A3: returns the async runner when ``DOCUMENT_ANALYSIS_ASYNC_PROVIDER_ENABLED``
+    is on (FastAPI runs an async BackgroundTask on the event loop, so the LLM
+    wait yields instead of pinning a threadpool thread); the sync runner
+    otherwise. Both take the identical primitive kwargs.
+
+    Intentionally keyed on the async flag ALONE (not also ``INTAKE_ASYNC_FINALIZE``):
+    the async runner relieves threadpool pressure on EVERY intake path — the
+    legacy inline ``finalize_intake_submission`` path (this dispatch) and the
+    multi-document path use ``pdf_path`` = the request-owned file (no deferred
+    temp), so scheduling the async coroutine here is safe (Starlette awaits
+    async BackgroundTasks) and beneficial. The async-finalize path uses its own
+    deferred sibling instead of this selector.
+    """
+    return (
+        run_shadow_analysis_async
+        if settings.DOCUMENT_ANALYSIS_ASYNC_PROVIDER_ENABLED
+        else run_shadow_analysis
+    )
 
 
 def _raw_metadata_with_evidence(
@@ -825,6 +857,30 @@ def finalize_intake_submission(
         )
     )
 
+    # Phase 3 — cross-tenant recycled-document detection (first consumer of the
+    # document_folios index). Advisory + fail-open: merges a MEDIUM authenticity
+    # reason when this document's CFDI UUID already exists under another client;
+    # never blocks intake or changes the user-visible status.
+    authenticity_risk, risk_reasons = apply_cross_tenant_reason(
+        db,
+        client_id=client.id,
+        verification=verification_payload,
+        detected_institution=document_signals.detected_institution,
+        authenticity_risk=authenticity_risk,
+        risk_reasons=risk_reasons,
+    )
+
+    # Cross-period folio-reuse detection (advisory HIGH, fail-open): the same
+    # provider's CFDI UUID reused in a different period.
+    authenticity_risk, risk_reasons = apply_cross_period_reason(
+        db,
+        vendor_id=vendor.id,
+        period_id=resolved_period.period.id,
+        verification=verification_payload,
+        authenticity_risk=authenticity_risk,
+        risk_reasons=risk_reasons,
+    )
+
     inspection = DocumentInspection(
         document_id=document.id,
         is_pdf=pdf_inspection.is_pdf,
@@ -854,6 +910,26 @@ def finalize_intake_submission(
         verification=verification_payload,
     )
     db.add(inspection)
+
+    # Phase 2 — promote the extracted folio/UUID anchors into the indexed
+    # ``document_folios`` table. SAVEPOINT-isolated + fail-open: a folio
+    # persistence error rolls back only the nested transaction and never
+    # blocks the upload (mirrors the other intake side-effects).
+    try:
+        with db.begin_nested():
+            persist_document_folios(
+                db,
+                document_id=document.id,
+                client_id=client.id,
+                vendor_id=vendor.id,
+                period_id=resolved_period.period.id,
+                verification=verification_payload,
+            )
+    except Exception:  # noqa: BLE001 — folio indexing must never block intake
+        logger.exception(
+            "document_folios population failed (non-fatal) for document %s",
+            document.id,
+        )
 
     signals = build_initial_validations(
         stored_file,
@@ -1077,7 +1153,7 @@ def finalize_intake_submission(
     # skipped — the heuristic-driven row is already complete.
     if background_tasks is not None:
         background_tasks.add_task(
-            run_shadow_analysis,
+            _shadow_runner_for_background(),
             document_id=document.id,
             submission_id=submission.id,
             pdf_path=str(stored_file.path),
@@ -1286,7 +1362,8 @@ def finalize_intake_submission_background(
     submission_id: str,
     storage_key: str,
     intake_source: str,
-) -> None:
+    _defer_shadow: bool = False,
+):
     """Run the heavy intake pipeline for a ``RECIBIDO`` receipt, off-request.
 
     Mirrors ``run_shadow_analysis``: queued as a FastAPI BackgroundTask
@@ -1302,6 +1379,13 @@ def finalize_intake_submission_background(
 
     Idempotent: a receipt already past ``RECIBIDO`` (finalized by a prior
     run, or by the inline task racing the reconcile cron) is skipped.
+
+    A3: when ``_defer_shadow`` is True the function does ALL the synchronous
+    intake work but does NOT run the inline shadow analysis or clean up the
+    materialized temp file — instead it returns ``(shadow_args, materialized_path)``
+    so the async sibling can ``await`` the async shadow runner off-thread and
+    clean up afterwards. Default False → returns ``None`` and behaves exactly
+    as before (inline shadow + cleanup).
     """
     from app.models import ProviderWorkspace
     from app.services.requirement_service import resolve_period, resolve_requirement
@@ -1442,14 +1526,24 @@ def finalize_intake_submission_background(
     finally:
         db.close()
 
+    # A3 — defer the shadow run + cleanup to the async sibling, which awaits
+    # the async runner off-thread. The materialized PDF must survive until the
+    # shadow run has read it, so cleanup also moves to the sibling.
+    if _defer_shadow:
+        return shadow_args, materialized_path
+
     # Shadow analysis (own session, never raises) runs AFTER the finalize
     # commit and before temp cleanup so the materialized PDF is still
     # present. Mirrors the synchronous path's scheduled shadow run.
     if shadow_args is not None:
         run_shadow_analysis(**shadow_args)
 
-    # Clean up the S3 temp download; the local backend hands back the
-    # durable path, which must never be unlinked.
+    _cleanup_materialized_temp(materialized_path)
+    return None
+
+
+def _cleanup_materialized_temp(materialized_path: Path | None) -> None:
+    """Unlink an S3 temp download; the local backend's durable path is kept."""
     if (
         materialized_path is not None
         and (settings.STORAGE_BACKEND or "local").strip().lower() == "s3"
@@ -1458,6 +1552,46 @@ def finalize_intake_submission_background(
             materialized_path.unlink(missing_ok=True)
         except OSError:
             pass
+
+
+async def finalize_intake_submission_background_async(
+    *,
+    submission_id: str,
+    storage_key: str,
+    intake_source: str,
+) -> None:
+    """A3 async twin of ``finalize_intake_submission_background``.
+
+    Runs the synchronous intake pipeline in a worker thread (so its DB + R2
+    work does not block the event loop), then ``await``s the async shadow
+    runner so the 30–90s LLM wait yields the loop instead of pinning a thread.
+    Cleans up the materialized temp afterwards. Never raises into the worker.
+    """
+    try:
+        result = await asyncio.to_thread(
+            finalize_intake_submission_background,
+            submission_id=submission_id,
+            storage_key=storage_key,
+            intake_source=intake_source,
+            _defer_shadow=True,
+        )
+    except Exception:  # noqa: BLE001 — a background failure must never crash the worker
+        logger.exception(
+            "Async intake finalize (sync core) failed for submission %s", submission_id
+        )
+        return
+    if result is None:
+        return  # receipt already finalized / skipped before shadow
+    shadow_args, materialized_path = result
+    try:
+        if shadow_args is not None:
+            await run_shadow_analysis_async(**shadow_args)
+    except Exception:  # noqa: BLE001 — shadow already never raises; defence in depth
+        logger.exception(
+            "Async shadow run failed for submission %s", submission_id
+        )
+    finally:
+        _cleanup_materialized_temp(materialized_path)
 
 
 # ---------------------------------------------------------------------------
@@ -1650,6 +1784,26 @@ def finalize_multi_document_submission(
             )
         )
 
+        # Phase 3 — cross-tenant recycled-document detection (advisory,
+        # fail-open; see the single-file path).
+        authenticity_risk, risk_reasons = apply_cross_tenant_reason(
+            db,
+            client_id=client.id,
+            verification=verification_payload,
+            detected_institution=document_signals.detected_institution,
+            authenticity_risk=authenticity_risk,
+            risk_reasons=risk_reasons,
+        )
+        # Cross-period folio-reuse detection (advisory HIGH, fail-open).
+        authenticity_risk, risk_reasons = apply_cross_period_reason(
+            db,
+            vendor_id=vendor.id,
+            period_id=resolved_period.period.id,
+            verification=verification_payload,
+            authenticity_risk=authenticity_risk,
+            risk_reasons=risk_reasons,
+        )
+
         inspection_row = DocumentInspection(
             document_id=document.id,
             is_pdf=pdf_inspection.is_pdf,
@@ -1679,6 +1833,24 @@ def finalize_multi_document_submission(
             verification=verification_payload,
         )
         db.add(inspection_row)
+
+        # Phase 2 — folio/UUID anchors → indexed ``document_folios`` (see the
+        # single-file path). SAVEPOINT-isolated + fail-open per document.
+        try:
+            with db.begin_nested():
+                persist_document_folios(
+                    db,
+                    document_id=document.id,
+                    client_id=client.id,
+                    vendor_id=vendor.id,
+                    period_id=resolved_period.period.id,
+                    verification=verification_payload,
+                )
+        except Exception:  # noqa: BLE001 — folio indexing must never block intake
+            logger.exception(
+                "document_folios population failed (non-fatal) for document %s",
+                document.id,
+            )
 
         signals = build_initial_validations(
             stored,
@@ -1950,9 +2122,10 @@ def finalize_multi_document_submission(
     # DocumentInspection row independently; the user-visible flow is
     # unchanged.
     if background_tasks is not None:
+        runner = _shadow_runner_for_background()
         for doc_id, pdf_path in shadow_batch:
             background_tasks.add_task(
-                run_shadow_analysis,
+                runner,
                 document_id=doc_id,
                 submission_id=submission.id,
                 pdf_path=pdf_path,

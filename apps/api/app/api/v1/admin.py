@@ -65,6 +65,7 @@ from app.api.v1.client import (
     _vendor_compliance,
 )
 from app.api.v1.reviewer import QUEUE_STATUSES
+from app.constants.plans import ORG_STATUS_FROZEN, Plan
 from app.constants.roles import MembershipRole
 from app.constants.statuses import DocumentStatus
 from app.core.compliance_catalog import (
@@ -83,6 +84,7 @@ from app.core.time import today_mx
 from app.db.session import get_db
 from app.models import (
     AuditLog,
+    BillingAccount,
     Client,
     ContactRequest,
     Contract,
@@ -91,6 +93,7 @@ from app.models import (
     Institution,
     Membership,
     Organization,
+    OrganizationEntitlement,
     PasswordHistory,
     Period,
     ProviderWorkspace,
@@ -107,6 +110,10 @@ from app.services.auth import (
     generate_temp_password,
     hash_password,
 )
+from app.services.billing import (
+    apply_billing_state,
+    get_or_create_billing_account,
+)
 from app.services.calendar_aggregate import aggregate_client_calendar
 from app.services.calendar_risk import (
     REJECTED_OR_CORRECTION_STATUSES as _REJECTED_OR_CORRECTION_STATUSES,
@@ -122,9 +129,22 @@ from app.services.email_delivery import (
     send_transactional_email,
     send_welcome_with_temp_password_email,
 )
+from app.services.entitlements import (
+    grant_entitlement,
+    list_entitlements,
+    revoke_entitlement,
+)
 from app.services.metadata_store import ensure_local_export, mirror_enabled
 from app.services.notifications.background import emit_invitation_in_background
 from app.services.search_service import SearchHit, search_submissions
+from app.services.subscription import (
+    capabilities_for_org,
+    evaluate_provider_capacity,
+    org_for_client_optional,
+    set_org_status,
+    set_plan,
+    start_demo,
+)
 
 router = APIRouter(prefix="/admin", tags=["admin"])
 DbSession = Annotated[Session, Depends(get_db)]
@@ -1307,6 +1327,10 @@ def provision_user(
             kind="client",
             client_id=client_row.id,
             seat_limit=3,
+            # New client orgs are uncapped 'legacy' until a tier is assigned
+            # (Phase B). Explicit (not NULL) so "every client org has a plan"
+            # holds and legacy status is visible in the DB.
+            plan=Plan.LEGACY.value,
             status="active",
         )
         db.add(org)
@@ -2092,6 +2116,7 @@ _DEFAULT_CLIENT_SEAT_LIMIT: Final = 3
 # attaching ``internal_admin`` to a client tenant (or vice-versa).
 _ROLE_ORG_KIND: Final = {
     MembershipRole.CLIENT_ADMIN.value: "client",
+    MembershipRole.CLIENT_VIEWER.value: "client",
     MembershipRole.OPERATIONS_ADMIN.value: "internal",
     MembershipRole.PLATFORM_ADMIN.value: "internal",
     # Deprecated (transition only) — kept so legacy rows still classify.
@@ -2100,7 +2125,7 @@ _ROLE_ORG_KIND: Final = {
 }
 
 MembershipRoleLiteral = Literal[
-    "client_admin", "platform_admin", "operations_admin"
+    "client_admin", "client_viewer", "platform_admin", "operations_admin"
 ]
 
 
@@ -2702,6 +2727,361 @@ def update_client(
 
 
 # ---------------------------------------------------------------------------
+# Organizations — plan / demo lifecycle (Phase B)
+# ---------------------------------------------------------------------------
+
+
+class OrganizationPlanRead(BaseModel):
+    id: str
+    name: str
+    kind: str
+    plan: str | None
+    provider_limit: int | None
+    demo_expires_at: str | None
+    status: str
+    capabilities: dict[str, bool]
+
+
+class OrganizationPlanUpdate(BaseModel):
+    plan: str | None = None
+    provider_limit: int | None = None
+    status: str | None = None
+
+
+def _org_plan_read(db: Session, org: Organization) -> OrganizationPlanRead:
+    return OrganizationPlanRead(
+        id=org.id,
+        name=org.name,
+        kind=org.kind,
+        plan=org.plan,
+        provider_limit=org.provider_limit,
+        demo_expires_at=(
+            org.demo_expires_at.isoformat() if org.demo_expires_at else None
+        ),
+        status=org.status,
+        capabilities=capabilities_for_org(db, org),
+    )
+
+
+def _org_audit_snapshot(org: Organization) -> dict:
+    return {
+        "plan": org.plan,
+        "provider_limit": org.provider_limit,
+        "demo_expires_at": (
+            org.demo_expires_at.isoformat() if org.demo_expires_at else None
+        ),
+        "status": org.status,
+    }
+
+
+def _locked_client_org_or_404(db: Session, org_id: str) -> Organization:
+    """Row-locked client Organization (FOR UPDATE) so plan/status mutations
+    are race-safe; 404 if missing, 400 if it isn't a client org."""
+    org = db.scalars(
+        select(Organization).where(Organization.id == org_id).with_for_update()
+    ).first()
+    if org is None:
+        raise HTTPException(
+            status.HTTP_404_NOT_FOUND, detail="Organización no encontrada."
+        )
+    if org.kind != "client":
+        raise HTTPException(
+            status.HTTP_400_BAD_REQUEST,
+            detail="Solo las organizaciones de cliente tienen plan.",
+        )
+    return org
+
+
+@router.post(
+    "/organizations/{org_id}/start-demo",
+    response_model=OrganizationPlanRead,
+    summary="Provision a 14-day demo on an existing client organization",
+)
+def admin_start_demo(
+    org_id: str, db: DbSession, current: AdminUser, request: Request
+) -> OrganizationPlanRead:
+    """Convert a client org to a fresh 14-day demo (plan='demo', deadline set,
+    provider cap = demo default 5, status active)."""
+    org = _locked_client_org_or_404(db, org_id)
+    before = _org_audit_snapshot(org)
+    start_demo(db, org)
+    _audit_admin(
+        db,
+        actor=current,
+        action="admin.org.demo_started",
+        entity_type="organization",
+        entity_id=org.id,
+        before=before,
+        after=_org_audit_snapshot(org),
+        request=request,
+    )
+    db.commit()
+    db.refresh(org)
+    return _org_plan_read(db, org)
+
+
+@router.patch(
+    "/organizations/{org_id}",
+    response_model=OrganizationPlanRead,
+    summary="Update a client org's plan / provider-limit / status",
+)
+def admin_update_org_plan(
+    org_id: str,
+    body: OrganizationPlanUpdate,
+    db: DbSession,
+    current: AdminUser,
+    request: Request,
+) -> OrganizationPlanRead:
+    """Upgrade/downgrade a plan, set a per-tenant provider-limit override, or
+    reactivate a frozen org (``status='active'``). Changing the plan always
+    clears any demo deadline. Setting ``status='frozen'`` is rejected —
+    freezing is the expiry cron's job, not a manual side-effect."""
+    org = _locked_client_org_or_404(db, org_id)
+    before = _org_audit_snapshot(org)
+    data = body.model_dump(exclude_unset=True)
+
+    if data.get("plan") is not None:
+        try:
+            new_plan = Plan(data["plan"])
+        except ValueError as exc:
+            raise HTTPException(
+                status.HTTP_400_BAD_REQUEST,
+                detail=f"Plan inválido: {data['plan']!r}.",
+            ) from exc
+        if new_plan is Plan.DEMO:
+            start_demo(db, org)
+        else:
+            set_plan(db, org, plan=new_plan)
+
+    if "provider_limit" in data:
+        # Explicit per-tenant override; null clears it to the tier default.
+        org.provider_limit = data["provider_limit"]
+
+    if data.get("status") is not None:
+        if data["status"] == ORG_STATUS_FROZEN:
+            raise HTTPException(
+                status.HTTP_400_BAD_REQUEST,
+                detail=(
+                    "El congelamiento es automático (expiración del demo). "
+                    "Para reactivar usa status='active'."
+                ),
+            )
+        set_org_status(db, org, status=data["status"])
+
+    db.flush()
+    _audit_admin(
+        db,
+        actor=current,
+        action="admin.org.plan_updated",
+        entity_type="organization",
+        entity_id=org.id,
+        before=before,
+        after=_org_audit_snapshot(org),
+        request=request,
+    )
+    db.commit()
+    db.refresh(org)
+    return _org_plan_read(db, org)
+
+
+# ---------------------------------------------------------------------------
+# Per-tenant entitlements + billing seam (Phase D)
+# ---------------------------------------------------------------------------
+
+
+class EntitlementRead(BaseModel):
+    key: str
+    enabled: bool
+    expires_at: str | None
+    note: str | None
+
+
+class EntitlementGrantBody(BaseModel):
+    enabled: bool = True
+    expires_at: datetime | None = None
+    note: str | None = Field(default=None, max_length=255)
+
+
+def _entitlement_read(e: OrganizationEntitlement) -> EntitlementRead:
+    return EntitlementRead(
+        key=e.key,
+        enabled=e.enabled,
+        expires_at=e.expires_at.isoformat() if e.expires_at else None,
+        note=e.note,
+    )
+
+
+@router.get(
+    "/organizations/{org_id}/entitlements",
+    response_model=list[EntitlementRead],
+    summary="List a client org's per-tenant entitlement overrides",
+)
+def admin_list_entitlements(
+    org_id: str, db: DbSession, current: AdminUser
+) -> list[EntitlementRead]:
+    org = _locked_client_org_or_404(db, org_id)
+    return [_entitlement_read(e) for e in list_entitlements(db, org.id)]
+
+
+@router.put(
+    "/organizations/{org_id}/entitlements/{key}",
+    response_model=EntitlementRead,
+    summary="Grant / override a capability for one client org",
+)
+def admin_grant_entitlement(
+    org_id: str,
+    key: str,
+    body: EntitlementGrantBody,
+    db: DbSession,
+    current: AdminUser,
+    request: Request,
+) -> EntitlementRead:
+    org = _locked_client_org_or_404(db, org_id)
+    row = grant_entitlement(
+        db,
+        org.id,
+        key=key,
+        enabled=body.enabled,
+        expires_at=body.expires_at,
+        note=body.note,
+        granted_by=current.user.id,
+    )
+    _audit_admin(
+        db,
+        actor=current,
+        action="admin.org.entitlement_granted",
+        entity_type="organization",
+        entity_id=org.id,
+        before=None,
+        after={"key": key, "enabled": body.enabled},
+        request=request,
+    )
+    db.commit()
+    db.refresh(row)
+    return _entitlement_read(row)
+
+
+@router.delete(
+    "/organizations/{org_id}/entitlements/{key}",
+    summary="Revoke a capability override (revert to the tier default)",
+)
+def admin_revoke_entitlement(
+    org_id: str,
+    key: str,
+    db: DbSession,
+    current: AdminUser,
+    request: Request,
+) -> dict:
+    org = _locked_client_org_or_404(db, org_id)
+    removed = revoke_entitlement(db, org.id, key=key)
+    if removed:
+        _audit_admin(
+            db,
+            actor=current,
+            action="admin.org.entitlement_revoked",
+            entity_type="organization",
+            entity_id=org.id,
+            before={"key": key},
+            after=None,
+            request=request,
+        )
+    db.commit()
+    return {"key": key, "removed": removed}
+
+
+class BillingRead(BaseModel):
+    organization_id: str
+    provider: str
+    customer_id: str | None
+    subscription_id: str | None
+    status: str
+    current_period_end: str | None
+
+
+class BillingUpdateBody(BaseModel):
+    provider: str | None = None
+    status: str | None = None
+    customer_id: str | None = None
+    subscription_id: str | None = None
+    current_period_end: datetime | None = None
+    plan: str | None = None
+
+
+def _billing_read(acct: BillingAccount) -> BillingRead:
+    return BillingRead(
+        organization_id=acct.organization_id,
+        provider=acct.provider,
+        customer_id=acct.customer_id,
+        subscription_id=acct.subscription_id,
+        status=acct.status,
+        current_period_end=(
+            acct.current_period_end.isoformat()
+            if acct.current_period_end
+            else None
+        ),
+    )
+
+
+@router.get(
+    "/organizations/{org_id}/billing",
+    response_model=BillingRead,
+    summary="Read a client org's billing account (provider + status)",
+)
+def admin_get_billing(
+    org_id: str, db: DbSession, current: AdminUser
+) -> BillingRead:
+    org = _locked_client_org_or_404(db, org_id)
+    return _billing_read(get_or_create_billing_account(db, org))
+
+
+@router.patch(
+    "/organizations/{org_id}/billing",
+    response_model=BillingRead,
+    summary="Update the billing seam (provider/status; optional plan move)",
+)
+def admin_update_billing(
+    org_id: str,
+    body: BillingUpdateBody,
+    db: DbSession,
+    current: AdminUser,
+    request: Request,
+) -> BillingRead:
+    org = _locked_client_org_or_404(db, org_id)
+    plan = None
+    if body.plan is not None:
+        try:
+            plan = Plan(body.plan)
+        except ValueError as exc:
+            raise HTTPException(
+                status.HTTP_400_BAD_REQUEST,
+                detail=f"Plan inválido: {body.plan!r}.",
+            ) from exc
+    acct = apply_billing_state(
+        db,
+        org,
+        provider=body.provider,
+        status_value=body.status,
+        customer_id=body.customer_id,
+        subscription_id=body.subscription_id,
+        current_period_end=body.current_period_end,
+        plan=plan,
+    )
+    _audit_admin(
+        db,
+        actor=current,
+        action="admin.org.billing_updated",
+        entity_type="organization",
+        entity_id=org.id,
+        before=None,
+        after={"provider": acct.provider, "status": acct.status, "plan": org.plan},
+        request=request,
+    )
+    db.commit()
+    db.refresh(acct)
+    return _billing_read(acct)
+
+
+# ---------------------------------------------------------------------------
 # Vendors
 # ---------------------------------------------------------------------------
 
@@ -2785,6 +3165,16 @@ def create_vendor(payload: VendorCreate, db: DbSession, current: AdminUser) -> d
             status.HTTP_404_NOT_FOUND,
             detail="Cliente no encontrado; crea el cliente antes del proveedor.",
         )
+    # Internal admins may exceed a client's plan cap (migrations, support
+    # onboarding) — measure, never block, and flag any over-limit grant in
+    # the audit so a billing bypass is detectable. Orphan legacy clients
+    # with no Organization carry no plan, so there is nothing to enforce.
+    cap_org = org_for_client_optional(db, payload.client_id, for_update=True)
+    capacity = (
+        evaluate_provider_capacity(db, cap_org, is_internal=True)
+        if cap_org is not None
+        else None
+    )
     row = Vendor(
         client_id=payload.client_id,
         name=payload.name.strip(),
@@ -2812,6 +3202,15 @@ def create_vendor(payload: VendorCreate, db: DbSession, current: AdminUser) -> d
         entity_id=row.id,
         before=None,
         after=_vendor_to_dict(row),
+        extra_metadata=(
+            {
+                "provider_limit": capacity.limit,
+                "active_after": capacity.used + 1,
+                "over_limit_override": capacity.over_limit,
+            }
+            if capacity is not None
+            else None
+        ),
     )
     db.commit()
     db.refresh(row)

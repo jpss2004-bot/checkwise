@@ -20,7 +20,6 @@ import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { VendorRef } from "@/components/checkwise/vendor-ref";
 import {
-  createClientProvider,
   getClientProfile,
   listClientVendors,
   updateClientProfile,
@@ -28,6 +27,7 @@ import {
   type ClientVendorRow,
 } from "@/lib/api/client";
 import { useUrlClientId } from "@/lib/workspace/use-url-client-id";
+import { AddProviderForm } from "@/components/checkwise/client/add-provider-form";
 import { useClientApprover } from "@/lib/session/client-tier";
 
 /**
@@ -66,6 +66,12 @@ export default function ClientOnboardingPage() {
   const [saving, setSaving] = useState(false);
   const [saveError, setSaveError] = useState<string | null>(null);
   const [justSaved, setJustSaved] = useState(false);
+
+  // Phase 4 — only an Approver (or internal support) may edit the company
+  // profile; the backend 403s a Viewer on PATCH /client/profile. Render the
+  // form read-only for Viewers (disabled fieldset + no Save) so the page
+  // stays informative without dangling a write they can't perform.
+  const isApprover = useClientApprover();
 
   // Initial load: prefill from the admin alta + any prior edits.
   useEffect(() => {
@@ -215,8 +221,20 @@ export default function ClientOnboardingPage() {
               </div>
             </Surface>
 
+            {!isApprover ? (
+              <div
+                role="note"
+                className="rounded-lg border border-[color:var(--border-subtle)] bg-[color:var(--surface-sunken)] px-4 py-3 text-[13px] text-[color:var(--text-secondary)]"
+              >
+                Tienes acceso de <strong>Visor</strong> (solo lectura). Puedes
+                consultar estos datos, pero para editarlos pide a un Aprobador
+                de tu empresa.
+              </div>
+            ) : null}
+
             <form onSubmit={handleSubmit}>
               <Surface title="Información operativa" icon={IdentificationCard}>
+                <fieldset disabled={!isApprover} className="contents">
                 <div className="grid gap-3 sm:grid-cols-2">
                   <div className="space-y-1">
                     <Label htmlFor="ob-responsible">
@@ -273,6 +291,7 @@ export default function ClientOnboardingPage() {
                     />
                   </div>
                 </div>
+                </fieldset>
                 {saveError ? (
                   <p className="mt-3 text-sm text-[color:var(--status-error-text)]">
                     {saveError}
@@ -320,39 +339,41 @@ export default function ClientOnboardingPage() {
               </Surface>
             ) : null}
 
-            <div className="flex items-center justify-end gap-3">
-              {justSaved ? (
-                <p
-                  className="inline-flex items-center gap-1.5 text-xs font-medium text-[color:var(--status-success-text)]"
-                  role="status"
-                >
-                  <CheckCircle className="h-4 w-4" weight="fill" aria-hidden="true" />
-                  Guardado
-                </p>
-              ) : null}
-              <Button
-                type="button"
-                loading={saving}
-                size="lg"
-                disabled={
-                  saving ||
-                  (isFirstTime &&
-                    (!termsAccepted ||
-                      !responsibleName.trim() ||
-                      !fiscalAddress.trim()))
-                }
-                onClick={(e) => handleSubmit(e as unknown as FormEvent)}
-              >
-                {isFirstTime ? "Activar mi portafolio" : "Guardar cambios"}
-                {!saving ? (
-                  <ArrowRight
-                    className="h-4 w-4"
-                    weight="bold"
-                    aria-hidden="true"
-                  />
+            {isApprover ? (
+              <div className="flex items-center justify-end gap-3">
+                {justSaved ? (
+                  <p
+                    className="inline-flex items-center gap-1.5 text-xs font-medium text-[color:var(--status-success-text)]"
+                    role="status"
+                  >
+                    <CheckCircle className="h-4 w-4" weight="fill" aria-hidden="true" />
+                    Guardado
+                  </p>
                 ) : null}
-              </Button>
-            </div>
+                <Button
+                  type="button"
+                  loading={saving}
+                  size="lg"
+                  disabled={
+                    saving ||
+                    (isFirstTime &&
+                      (!termsAccepted ||
+                        !responsibleName.trim() ||
+                        !fiscalAddress.trim()))
+                  }
+                  onClick={(e) => handleSubmit(e as unknown as FormEvent)}
+                >
+                  {isFirstTime ? "Activar mi portafolio" : "Guardar cambios"}
+                  {!saving ? (
+                    <ArrowRight
+                      className="h-4 w-4"
+                      weight="bold"
+                      aria-hidden="true"
+                    />
+                  ) : null}
+                </Button>
+              </div>
+            ) : null}
 
             {!isFirstTime ? <MyProvidersSection /> : null}
           </>
@@ -401,7 +422,8 @@ function ReadOnlyField({
 function MyProvidersSection() {
   const urlClientId = useUrlClientId();
   // Adding a provider is a portfolio write — Approvers (client_admin) and
-  // CheckWise staff only. Read-only Viewers see the roster without the form.
+  // CheckWise staff only (the backend 403s a Viewer). Hide the add
+  // affordance for Viewers; the roster below stays visible (read).
   const isApprover = useClientApprover();
   const [providers, setProviders] = useState<ClientVendorRow[] | null>(null);
   const [loadError, setLoadError] = useState<string | null>(null);
@@ -446,7 +468,7 @@ function MyProvidersSection() {
           >
             {showForm ? "Cancelar" : "Agregar proveedor"}
           </Button>
-        ) : null
+        ) : undefined
       }
     >
       {lastInviteEmail ? (
@@ -524,141 +546,5 @@ function MyProvidersSection() {
         )}
       </div>
     </Surface>
-  );
-}
-
-function AddProviderForm({
-  onCreated,
-}: {
-  onCreated: (result: { contact_email: string; email_status: string }) => void;
-}) {
-  const urlClientId = useUrlClientId();
-  const [vendorName, setVendorName] = useState("");
-  const [vendorRfc, setVendorRfc] = useState("");
-  const [personaType, setPersonaType] = useState<"moral" | "fisica">("moral");
-  const [contactName, setContactName] = useState("");
-  const [contactEmail, setContactEmail] = useState("");
-  const [contactPhone, setContactPhone] = useState("");
-  const [submitting, setSubmitting] = useState(false);
-  const [err, setErr] = useState<string | null>(null);
-
-  async function handle(e: FormEvent) {
-    e.preventDefault();
-    setSubmitting(true);
-    setErr(null);
-    try {
-      const result = await createClientProvider(
-        {
-          vendor_name: vendorName.trim(),
-          vendor_rfc: vendorRfc.trim().toUpperCase(),
-          persona_type: personaType,
-          contact_name: contactName.trim(),
-          contact_email: contactEmail.trim().toLowerCase(),
-          contact_phone: contactPhone.trim() || null,
-        },
-        urlClientId ? { client_id: urlClientId } : undefined,
-      );
-      onCreated(result);
-      // Reset for the next entry — operators often add several in a row.
-      setVendorName("");
-      setVendorRfc("");
-      setContactName("");
-      setContactEmail("");
-      setContactPhone("");
-    } catch (error) {
-      setErr(
-        error instanceof Error
-          ? error.message
-          : "No pudimos agregar al proveedor.",
-      );
-    } finally {
-      setSubmitting(false);
-    }
-  }
-
-  return (
-    <form onSubmit={handle} className="space-y-3 rounded-md border border-[color:var(--border-subtle)] bg-[color:var(--surface-page)] p-3">
-      <div className="grid gap-3 sm:grid-cols-2">
-        <div className="space-y-1">
-          <Label htmlFor="ap-name">Razón social del proveedor</Label>
-          <Input
-            id="ap-name"
-            value={vendorName}
-            onChange={(e) => setVendorName(e.target.value)}
-            required
-            placeholder="Servicios Especializados, S.A."
-          />
-        </div>
-        <div className="space-y-1">
-          <Label htmlFor="ap-rfc">RFC</Label>
-          <Input
-            id="ap-rfc"
-            value={vendorRfc}
-            onChange={(e) => setVendorRfc(e.target.value.toUpperCase())}
-            minLength={12}
-            maxLength={13}
-            required
-            className="font-mono"
-            placeholder="ABC123456XYZ"
-          />
-        </div>
-        <div className="space-y-1">
-          <Label htmlFor="ap-persona">Tipo de persona</Label>
-          <select
-            id="ap-persona"
-            value={personaType}
-            onChange={(e) => setPersonaType(e.target.value as "moral" | "fisica")}
-            className="h-9 w-full rounded-md border border-[color:var(--border-default)] bg-[color:var(--surface-raised)] px-2 text-sm"
-          >
-            <option value="moral">Persona moral</option>
-            <option value="fisica">Persona física</option>
-          </select>
-        </div>
-        <div className="space-y-1">
-          <Label htmlFor="ap-contact-phone">Teléfono (opcional)</Label>
-          <Input
-            id="ap-contact-phone"
-            type="tel"
-            value={contactPhone}
-            onChange={(e) => setContactPhone(e.target.value)}
-            autoComplete="tel"
-            placeholder="+52 55 1234 5678"
-          />
-        </div>
-        <div className="space-y-1">
-          <Label htmlFor="ap-contact-name">Nombre de contacto</Label>
-          <Input
-            id="ap-contact-name"
-            value={contactName}
-            onChange={(e) => setContactName(e.target.value)}
-            required
-            placeholder="Juan García"
-          />
-        </div>
-        <div className="space-y-1">
-          <Label htmlFor="ap-contact-email">Correo del contacto</Label>
-          <Input
-            id="ap-contact-email"
-            type="email"
-            value={contactEmail}
-            onChange={(e) => setContactEmail(e.target.value)}
-            required
-            autoComplete="email"
-            placeholder="juan@proveedor.com"
-          />
-          <p className="text-[10px] text-[color:var(--text-tertiary)]">
-            Aquí le enviaremos su invitación y credenciales temporales.
-          </p>
-        </div>
-      </div>
-      {err ? (
-        <p className="text-xs text-[color:var(--status-error-text)]">{err}</p>
-      ) : null}
-      <div className="flex justify-end">
-        <Button type="submit" loading={submitting} size="sm">
-          Agregar y enviar invitación
-        </Button>
-      </div>
-    </form>
   );
 }

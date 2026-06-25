@@ -25,7 +25,7 @@ import tempfile
 from datetime import UTC, datetime
 from pathlib import Path
 
-from app.constants.statuses import STATUS_LABELS_ES
+from app.constants.statuses import CLIENT_ACCEPTANCE_LABELS_ES, STATUS_LABELS_ES
 from app.models import Client
 from app.services.audit_package import AuditPackageEntry, AuditPackageFilters
 
@@ -57,6 +57,20 @@ _INSTITUTION_LABELS: dict[str, str] = {
 _STATUS_LABELS: dict[str, str] = {
     status.value: label for status, label in STATUS_LABELS_ES.items()
 }
+
+# Axis 2 — client-acceptance labels for the INDICE table (Phase 5).
+_CLIENT_ACCEPTANCE_LABELS: dict[str, str] = {
+    acceptance.value: label
+    for acceptance, label in CLIENT_ACCEPTANCE_LABELS_ES.items()
+}
+
+
+def _acceptance_tone(acceptance: str) -> str:
+    if acceptance == "accepted":
+        return "accepted"
+    if acceptance == "rejected":
+        return "rejected"
+    return "pending"
 
 
 def render_audit_manifest(
@@ -302,6 +316,10 @@ def _render_manifest_html(
   table.index td.status.approved {{ color: #1b7a3b; font-weight: 600; }}
   table.index td.status.attention {{ color: #b25b0a; font-weight: 600; }}
   table.index td.status.rejected {{ color: #a02020; font-weight: 600; }}
+  table.index td.acceptance {{ white-space: nowrap; }}
+  table.index td.acceptance.accepted {{ color: #1b7a3b; font-weight: 600; }}
+  table.index td.acceptance.rejected {{ color: #a02020; font-weight: 600; }}
+  table.index td.acceptance.pending {{ color: #6b7a93; }}
   footer {{
     margin-top: 18px;
     border-top: 1px solid #d8e2ef;
@@ -364,6 +382,7 @@ def _render_manifest_html(
         <th>Periodo</th>
         <th>Requisito</th>
         <th>Estado</th>
+        <th>Aceptación</th>
         <th>Carga</th>
         <th>Archivo</th>
       </tr>
@@ -395,6 +414,10 @@ def _render_entry_row(entry: AuditPackageEntry) -> str:
     institution_label = _INSTITUTION_LABELS.get(
         entry.institution_code, entry.institution_name or entry.institution_code
     )
+    acceptance_label = _CLIENT_ACCEPTANCE_LABELS.get(
+        entry.client_acceptance, entry.client_acceptance
+    )
+    acceptance_class = _acceptance_tone(entry.client_acceptance)
     return (
         "<tr>"
         f"<td>{html.escape(entry.vendor_name)}</td>"
@@ -403,6 +426,7 @@ def _render_entry_row(entry: AuditPackageEntry) -> str:
         f"<td>{html.escape(entry.period_key)}</td>"
         f"<td>{html.escape(entry.requirement_name or entry.requirement_code or '—')}</td>"
         f'<td class="status {status_class}">{html.escape(status_label)}</td>'
+        f'<td class="acceptance {acceptance_class}">{html.escape(acceptance_label)}</td>'
         f"<td>{html.escape(submitted)}</td>"
         f"<td>{html.escape(entry.filename)}</td>"
         "</tr>"

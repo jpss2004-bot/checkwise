@@ -552,6 +552,12 @@ export type SubmissionDetail = {
    *  renders this as a hero card for actionable statuses so the
    *  reviewer's words aren't buried in the timeline. */
   reviewer_note: string | null;
+  /** Phase 5 / Axis 2 — the client's business-acceptance verdict + when it
+   *  was decided. Read-only on the provider portal. The decision REASON is
+   *  deliberately NOT on this base type — the provider must not see it; only
+   *  the reviewer detail (ReviewerSubmissionDetail) carries the reason. */
+  client_acceptance?: string;
+  client_decided_at?: string | null;
   /** Phase 2 (Claude shadow) — admin-only comparison block. Omitted
    *  on the provider-facing endpoint. */
   shadow_analysis?: ShadowAnalysisPayload | null;

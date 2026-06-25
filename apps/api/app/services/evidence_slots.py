@@ -126,6 +126,14 @@ class SlotView:
     # Authoritative catalog deadline (year + due_month + due_day) for
     # recurring slots; None for onboarding slots (which have no deadline).
     deadline_iso: str | None = None
+    # Phase 5 / Axis 2 — the client's business-acceptance verdict for the
+    # current submission, PURELY ADDITIVE metadata. It is orthogonal to
+    # ``state`` (Axis 1) and MUST NEVER feed slot-state classification,
+    # ``on_track``, the semaphore, or any compliance %. None when the slot
+    # has no submission yet.
+    client_acceptance: str | None = None
+    client_decided_at_iso: str | None = None
+    client_decision_reason: str | None = None
 
 
 # ---------------------------------------------------------------------------
@@ -338,6 +346,17 @@ def _slot_view_from_candidates(
             current.created_at.isoformat() if current is not None else None
         ),
         superseded_count=len(superseded_ids),
+        # Axis 2 — additive only; ``state`` above is still derived purely
+        # from ``current.status`` (Axis 1).
+        client_acceptance=current.client_acceptance if current is not None else None,
+        client_decided_at_iso=(
+            current.client_decided_at.isoformat()
+            if current is not None and current.client_decided_at
+            else None
+        ),
+        client_decision_reason=(
+            current.client_decision_reason if current is not None else None
+        ),
     )
 
 

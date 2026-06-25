@@ -20,7 +20,7 @@ from sqlalchemy import (
 )
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
-from app.constants.statuses import DocumentStatus
+from app.constants.statuses import ClientAcceptance, DocumentStatus
 from app.db.base import Base
 
 
@@ -70,6 +70,13 @@ class Client(TimestampMixin, Base):
         DateTime(timezone=True)
     )
     status: Mapped[str] = mapped_column(String(40), default="active", nullable=False)
+    # Phase 5 — opt-in: when a submission becomes compliance-valid (APROBADO),
+    # auto-record a client ACCEPTED decision. A client preference (set in the
+    # portal), NOT an entitlement. Default off so acceptance stays an explicit
+    # act unless the client chooses to streamline it.
+    auto_accept_valid: Mapped[bool] = mapped_column(
+        Boolean, default=False, server_default=text("false"), nullable=False
+    )
 
     vendors: Mapped[list[Vendor]] = relationship(back_populates="client")
     contracts: Mapped[list[Contract]] = relationship(back_populates="client")
@@ -306,6 +313,27 @@ class Submission(TimestampMixin, Base):
         ForeignKey("submissions.id"), index=True
     )
 
+    # ─── Axis 2 — client acceptance (Phase 5) ──────────────────────
+    # The CLIENT's business-acceptance verdict, orthogonal to ``status``
+    # (Axis 1 = CheckWise compliance validity). Written ONLY by
+    # ``apply_client_decision``; the reviewer path never touches it, and it
+    # never overwrites ``status``. Defaults to PENDING for every submission.
+    client_acceptance: Mapped[str] = mapped_column(
+        String(20),
+        default=ClientAcceptance.PENDING.value,
+        server_default=ClientAcceptance.PENDING.value,
+        nullable=False,
+    )
+    # Actor + time of the LAST acceptance-axis decision (accept / reject /
+    # reset) — "decided", not "accepted", since the axis is two-sided.
+    client_decided_by_user_id: Mapped[str | None] = mapped_column(
+        ForeignKey("users.id")
+    )
+    client_decided_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True)
+    )
+    client_decision_reason: Mapped[str | None] = mapped_column(Text)
+
     client: Mapped[Client] = relationship(back_populates="submissions")
     vendor: Mapped[Vendor] = relationship(back_populates="submissions")
     contract: Mapped[Contract | None] = relationship(back_populates="submissions")
@@ -463,6 +491,100 @@ class DocumentInspection(TimestampMixin, Base):
     document: Mapped[Document] = relationship(back_populates="inspection")
 
 
+class DocumentFolio(Base):
+    """Indexed projection of the folio / fiscal-UUID anchors the Phase-B
+    verification extractor already pulls from each document (stored today only
+    inside ``DocumentInspection.verification["folios"]`` JSON).
+
+    Promoting them out of the JSON blob into an indexed table turns folio-keyed
+    lookups — cross-tenant recycled-document detection, cross-period reuse, and
+    a live-SAT verification cache — into single indexed reads instead of full
+    JSON scans. This row is write-only for now (populated at intake + by a
+    backfill); the consumers are later phases.
+
+    ``cfdi_uuid`` is the strong, format-stable fingerprint — it survives a
+    re-export where the file sha256 does not; the pragmatic ``*_opinion_folio``
+    regex matches are advisory. ``value`` is deliberately NOT globally unique:
+    the same value recurring across documents/tenants IS the signal downstream
+    consumers look for. The uniqueness is only per (document, kind, value), so
+    intake + backfill are idempotent. ``client_id`` / ``vendor_id`` /
+    ``period_id`` are denormalized from the document's submission so the
+    cross-tenant / cross-period scans don't re-join through submissions.
+    """
+
+    __tablename__ = "document_folios"
+    __table_args__ = (
+        # Hot lookup: "who else carries this folio/UUID?" Non-unique by design.
+        Index("ix_document_folios_kind_value", "kind", "value"),
+        # Tenant-scoped scans (e.g. one vendor's folios across periods).
+        Index("ix_document_folios_vendor", "vendor_id"),
+        # Idempotent population/backfill — one row per (document, kind, value).
+        UniqueConstraint(
+            "document_id", "kind", "value", name="uq_document_folios_doc_kind_value"
+        ),
+    )
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=new_id)
+    document_id: Mapped[str] = mapped_column(ForeignKey("documents.id"), nullable=False)
+    client_id: Mapped[str] = mapped_column(ForeignKey("clients.id"), nullable=False)
+    vendor_id: Mapped[str] = mapped_column(ForeignKey("vendors.id"), nullable=False)
+    period_id: Mapped[str | None] = mapped_column(ForeignKey("periods.id"))
+    # ``cfdi_uuid`` | ``sat_opinion_folio`` | ``imss_opinion_folio`` (the
+    # ``FOLIO_PATTERNS`` kinds). Stored verbatim — no kind is special-cased here.
+    kind: Mapped[str] = mapped_column(String(40), nullable=False)
+    value: Mapped[str] = mapped_column(String(120), nullable=False)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=utc_now, nullable=False
+    )
+
+
+class FolioVerification(Base):
+    """B1 — cache of a live SAT CFDI ``consulta`` verdict (the moat).
+
+    Keyed by the triple the SAT consulta actually depends on:
+    ``(cfdi_uuid, emisor_rfc, receptor_rfc)`` — the same UUID with a different
+    emisor/receptor is a different query. A reviewer-triggered worker
+    (``services.folio_verification``) populates this; intake NEVER touches it.
+
+    ``status`` is one of ``vigente`` | ``cancelado`` | ``no_existe`` |
+    ``not_verifiable``. ``not_verifiable`` is the fail-open verdict (stub mode,
+    a transport error, or missing inputs) — it is cached too, so a doomed query
+    is not retried on every reviewer click, but it never elevates the document's
+    authenticity verdict. ``source`` records which client produced it (``stub``
+    vs ``sat_cfdi_live``) for audit. ``raw`` keeps the provider's response.
+    ``last_document_id`` is the most recent document that triggered the check —
+    audit only; the cache row is shared across every document carrying the UUID.
+
+    The RFC columns are NOT NULL and normalized to ``""`` when unresolved so the
+    unique key is deterministic (Postgres treats NULLs as distinct, which would
+    silently defeat the cache).
+    """
+
+    __tablename__ = "folio_verifications"
+    __table_args__ = (
+        # The unique constraint's implicit index already serves the cache's
+        # 3-column equality lookup, so no separate index is declared.
+        UniqueConstraint(
+            "cfdi_uuid",
+            "emisor_rfc",
+            "receptor_rfc",
+            name="uq_folio_verifications_key",
+        ),
+    )
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=new_id)
+    cfdi_uuid: Mapped[str] = mapped_column(String(120), nullable=False)
+    emisor_rfc: Mapped[str] = mapped_column(String(13), nullable=False, default="")
+    receptor_rfc: Mapped[str] = mapped_column(String(13), nullable=False, default="")
+    status: Mapped[str] = mapped_column(String(20), nullable=False)
+    source: Mapped[str] = mapped_column(String(30), nullable=False)
+    raw: Mapped[dict | None] = mapped_column(JSON)
+    last_document_id: Mapped[str | None] = mapped_column(ForeignKey("documents.id"))
+    checked_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=utc_now, nullable=False
+    )
+
+
 class DocumentStatusHistory(Base):
     __tablename__ = "document_status_history"
 
@@ -484,6 +606,47 @@ class DocumentStatusHistory(Base):
     )
 
     document: Mapped[Document] = relationship(back_populates="status_history")
+
+
+class IntakeQueueJob(TimestampMixin, Base):
+    """B2 — a durable intake-finalize job.
+
+    The async-intake endpoint persists a ``recibido`` receipt then schedules the
+    heavy back-half (PDF inspection, forensics, QR, status derivation, metadata
+    export, shadow analysis) as an in-process FastAPI BackgroundTask — which is
+    lost if the dyno restarts mid-flight. When ``INTAKE_QUEUE_CONSUMER_ENABLED``
+    is on, the endpoint instead enqueues one of these rows (committed with the
+    receipt) and a separate worker consuming the queue runs the already-idempotent
+    ``finalize_intake_submission_background``.
+
+    One job per submission (``submission_id`` UNIQUE) — enqueue is insert-if-absent
+    so a retried request never duplicates work. ``status`` is
+    ``pending`` | ``claimed`` | ``done`` | ``failed``. ``available_at`` gates both
+    the initial pickup and retry backoff; a ``claimed`` job whose worker died is
+    reclaimed once ``claimed_at`` is older than the visibility timeout. The
+    ``(status, available_at)`` index drives the claim query.
+    """
+
+    __tablename__ = "intake_queue"
+    __table_args__ = (
+        UniqueConstraint("submission_id", name="uq_intake_queue_submission"),
+        Index("ix_intake_queue_claim", "status", "available_at"),
+    )
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=new_id)
+    submission_id: Mapped[str] = mapped_column(
+        ForeignKey("submissions.id"), nullable=False
+    )
+    storage_key: Mapped[str] = mapped_column(String(512), nullable=False)
+    intake_source: Mapped[str] = mapped_column(String(40), nullable=False)
+    status: Mapped[str] = mapped_column(String(20), default="pending", nullable=False)
+    attempts: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+    available_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=utc_now, nullable=False
+    )
+    claimed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    claimed_by: Mapped[str | None] = mapped_column(String(80))
+    last_error: Mapped[str | None] = mapped_column(Text)
 
 
 class ProviderWorkspace(TimestampMixin, Base):
@@ -578,10 +741,81 @@ class Organization(TimestampMixin, Base):
     # The service-layer check treats NULL on a *client* org as the
     # default 3 defensively.
     seat_limit: Mapped[int | None] = mapped_column(Integer)
+    # Subscription tiering (migration 0056). ``plan`` is NULL on
+    # internal/vendor orgs and 'legacy' on grandfathered (pre-tiering)
+    # clients; the service layer coerces NULL/legacy to "uncapped, full".
+    # ``provider_limit`` NULL means "use the plans.py default for the
+    # tier"; an integer is a per-tenant override (custom/enterprise caps).
+    # ``demo_expires_at`` is populated by Phase B demo provisioning — the
+    # column lands now so Phase B is purely additive.
+    plan: Mapped[str | None] = mapped_column(String(20))
+    provider_limit: Mapped[int | None] = mapped_column(Integer)
+    demo_expires_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True)
+    )
     status: Mapped[str] = mapped_column(String(40), default="active", nullable=False)
 
     memberships: Mapped[list[Membership]] = relationship(
         back_populates="organization", cascade="all, delete-orphan"
+    )
+
+
+class OrganizationEntitlement(TimestampMixin, Base):
+    """Per-tenant override of a capability flag (Phase D, migration 0058).
+
+    The capability shim resolves a tenant's effective capabilities as the
+    tier default merged with these rows (``capabilities_for_org``), so a
+    grant/revoke takes effect with no call-site changes. ``expires_at`` lets a
+    grant lapse automatically; ``key`` is one of ``plans.VALID_ENTITLEMENT_KEYS``.
+    """
+
+    __tablename__ = "organization_entitlements"
+    __table_args__ = (
+        UniqueConstraint(
+            "organization_id", "key", name="uq_org_entitlements_org_key"
+        ),
+        Index("ix_org_entitlements_org", "organization_id"),
+    )
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=new_id)
+    organization_id: Mapped[str] = mapped_column(
+        ForeignKey("organizations.id", ondelete="CASCADE"), nullable=False
+    )
+    key: Mapped[str] = mapped_column(String(80), nullable=False)
+    enabled: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
+    expires_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    note: Mapped[str | None] = mapped_column(String(255))
+    # Not an FK so the granting admin can be removed without orphaning history.
+    granted_by_user_id: Mapped[str | None] = mapped_column(String(36))
+
+
+class BillingAccount(TimestampMixin, Base):
+    """Provider-agnostic billing seam for a client organization (Phase D).
+
+    One row per org. ``provider`` defaults to 'manual' (an internal admin
+    manages the plan by hand — the only wired path). The 'stripe' provider is
+    reserved for the stubbed adapter; the customer/subscription ids + status +
+    period end give a future webhook somewhere to mirror real subscription
+    state, which ``billing.apply_billing_state`` then maps onto the plan.
+    """
+
+    __tablename__ = "billing_accounts"
+    __table_args__ = (
+        UniqueConstraint("organization_id", name="uq_billing_accounts_org"),
+    )
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=new_id)
+    organization_id: Mapped[str] = mapped_column(
+        ForeignKey("organizations.id", ondelete="CASCADE"), nullable=False
+    )
+    provider: Mapped[str] = mapped_column(
+        String(40), nullable=False, default="manual"
+    )
+    customer_id: Mapped[str | None] = mapped_column(String(255))
+    subscription_id: Mapped[str | None] = mapped_column(String(255))
+    status: Mapped[str] = mapped_column(String(40), nullable=False, default="none")
+    current_period_end: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True)
     )
 
 

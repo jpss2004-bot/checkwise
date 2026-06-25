@@ -27,19 +27,22 @@ and historical ``audit_log.actor_type``.
 Postgres-only (tests build the schema via ``create_all`` and seed roles
 directly, so they never run this migration).
 
-MIGRATION-NUMBER NOTE: on branch ``feat/role-model-phase-1`` the alembic head
-is ``0055``. The unmerged provider-limits stack (PR #32) already reserves
-0056/0057/0058 — if that merges first, renumber this revision after it and
-add an alembic merge revision. Snapshot Neon before running on prod.
+MIGRATION-NUMBER NOTE: rechained after merging ``main`` (PR #32's
+0056/0057/0058 + ``0059_client_acceptance_axis`` are now the head). This
+revision is ``0060`` with ``down_revision = 0059_client_acceptance_axis`` —
+a single linear head, no merge revision needed. The rename is lossy on
+downgrade (three staff slugs collapse into one); snapshot Neon before
+running on prod.
 """
 
 from __future__ import annotations
 
-from alembic import op
 from sqlalchemy import text
 
-revision = "0056_rename_rbac_roles"
-down_revision = "0055_perf_indexes_trgm_search_and_renewals"
+from alembic import op
+
+revision = "0060_rename_rbac_roles"
+down_revision = "0059_client_acceptance_axis"
 branch_labels = None
 depends_on = None
 
@@ -89,15 +92,22 @@ def upgrade() -> None:
             seen_groups.add(key)
             keep_ids[mid] = target
 
-    for mid, target in keep_ids.items():
-        bind.execute(
-            text("UPDATE memberships SET role = :role WHERE id = :id"),
-            {"role": target, "id": mid},
-        )
+    # Delete the superseded duplicates BEFORE retargeting the kept row.
+    # Migration 0044 backfilled a ``platform_admin`` row onto every
+    # ``internal_admin``, so a (user, org) staff group usually ALREADY holds a
+    # ``platform_admin`` row. Updating the kept row to ``platform_admin``
+    # first would collide with that not-yet-deleted duplicate on
+    # ``uq_memberships_user_org_role``. Deleting the drops first frees the
+    # (user, org, role) slot so the retarget is safe.
     if drop_ids:
         bind.execute(
             text("DELETE FROM memberships WHERE id = ANY(:ids)"),
             {"ids": drop_ids},
+        )
+    for mid, target in keep_ids.items():
+        bind.execute(
+            text("UPDATE memberships SET role = :role WHERE id = :id"),
+            {"role": target, "id": mid},
         )
 
     # ---- Denormalized role snapshots (display/filter consistency) ----
@@ -117,12 +127,11 @@ def upgrade() -> None:
             "WHERE recipient_role IN ('internal_admin', 'reviewer')"
         )
     )
-    bind.execute(
-        text(
-            "UPDATE audit_log SET actor_type = 'platform_admin' "
-            "WHERE actor_type IN ('internal_admin', 'reviewer')"
-        )
-    )
+    # audit_log.actor_type is intentionally NOT rewritten: the table is
+    # append-only (migration 0031 installs ``checkwise_audit_log_block_mutation``
+    # which RAISEs InsufficientPrivilege on any UPDATE/DELETE), and a forensic
+    # trail should preserve the role each actor actually held at the time. Old
+    # slugs there are display-mapped to "Equipo CheckWise" on the frontend.
 
 
 def downgrade() -> None:
@@ -147,9 +156,5 @@ def downgrade() -> None:
             "WHERE recipient_role = 'platform_admin'"
         )
     )
-    bind.execute(
-        text(
-            "UPDATE audit_log SET actor_type = 'internal_admin' "
-            "WHERE actor_type = 'platform_admin'"
-        )
-    )
+    # audit_log was never rewritten on upgrade (append-only) — nothing to
+    # reverse here.
