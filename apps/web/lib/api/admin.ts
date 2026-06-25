@@ -2,11 +2,12 @@
  * Phase 7 — typed wrapper over the admin operations API.
  *
  * Every endpoint requires an ``internal_admin`` JWT (issued by
- * ``POST /api/v1/auth/login``). The token is pulled from
- * ``readAdminSession()`` so callers don't pass it explicitly.
+ * ``POST /api/v1/auth/login``). Auth is JWT-first (in-memory bearer),
+ * cookie-fallback (``credentials: "include"``) — see
+ * ``lib/session/admin.ts``.
  */
 
-import { readAdminSession } from "@/lib/session/admin";
+import { adminAuthHeader } from "@/lib/session/admin";
 
 const API_BASE_URL =
   process.env.NEXT_PUBLIC_API_BASE_URL ?? "http://127.0.0.1:8000";
@@ -21,16 +22,23 @@ export class AdminApiError extends Error {
 }
 
 async function fetchJson<T>(path: string, init: RequestInit = {}): Promise<T> {
-  const session = readAdminSession();
-  if (!session?.access_token) {
-    throw new AdminApiError(401, "No active admin session.");
-  }
   const headers = new Headers(init.headers ?? {});
   if (!headers.has("Content-Type") && init.body) {
     headers.set("Content-Type", "application/json");
   }
-  headers.set("Authorization", `Bearer ${session.access_token}`);
-  const response = await fetch(`${API_BASE_URL}${path}`, { ...init, headers });
+  // JWT-first when we still hold the in-memory token; otherwise the
+  // httpOnly cookie (credentials:include) authenticates. A fully
+  // logged-out call simply 401s from the server and the caller routes
+  // to /login.
+  const auth = adminAuthHeader();
+  if (auth.Authorization && !headers.has("Authorization")) {
+    headers.set("Authorization", auth.Authorization);
+  }
+  const response = await fetch(`${API_BASE_URL}${path}`, {
+    ...init,
+    headers,
+    credentials: "include",
+  });
   if (!response.ok) {
     const detail = await response.text().catch(() => "");
     throw new AdminApiError(response.status, detail || response.statusText);
@@ -911,13 +919,9 @@ export async function getMetadataExportPreview(
 }
 
 export async function downloadMetadataExport(id: string): Promise<Blob> {
-  const session = readAdminSession();
-  if (!session?.access_token) {
-    throw new AdminApiError(401, "No active admin session.");
-  }
   const response = await fetch(
     `${API_BASE_URL}/api/v1/admin/metadata-exports/${id}/download`,
-    { headers: { Authorization: `Bearer ${session.access_token}` } },
+    { headers: { ...adminAuthHeader() }, credentials: "include" },
   );
   if (!response.ok) {
     const detail = await response.text().catch(() => "");
@@ -935,13 +939,9 @@ export async function getClientMasterMetadataPreview(
 export async function downloadClientMasterMetadata(
   clientId: string,
 ): Promise<Blob> {
-  const session = readAdminSession();
-  if (!session?.access_token) {
-    throw new AdminApiError(401, "No active admin session.");
-  }
   const response = await fetch(
     `${API_BASE_URL}/api/v1/admin/metadata-exports/clients/${clientId}/master/download`,
-    { headers: { Authorization: `Bearer ${session.access_token}` } },
+    { headers: { ...adminAuthHeader() }, credentials: "include" },
   );
   if (!response.ok) {
     const detail = await response.text().catch(() => "");

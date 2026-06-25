@@ -2,9 +2,12 @@
  * Typed wrapper over the Patch 7 reviewer endpoints.
  *
  * All calls expect a JWT (issued by /api/v1/auth/login) carrying either
- * the ``reviewer`` or ``internal_admin`` role.
+ * the ``reviewer`` or ``internal_admin`` role. Auth is JWT-first
+ * (in-memory bearer via ``adminAuthHeader``), cookie-fallback
+ * (``credentials: "include"``).
  */
 
+import { adminAuthHeader } from "@/lib/session/admin";
 import { fetchWithTimeout, FetchTimeoutError } from "@/lib/api/fetch-timeout";
 import type {
   RequirementStatus,
@@ -31,15 +34,21 @@ export class ReviewerApiError extends Error {
 
 async function fetchJson<T>(
   path: string,
-  token: string,
   init: RequestInit = {},
 ): Promise<T> {
   const headers = new Headers(init.headers ?? {});
   if (!headers.has("Content-Type") && init.body) {
     headers.set("Content-Type", "application/json");
   }
-  headers.set("Authorization", `Bearer ${token}`);
-  const response = await fetch(`${API_BASE_URL}${path}`, { ...init, headers });
+  const auth = adminAuthHeader();
+  if (auth.Authorization && !headers.has("Authorization")) {
+    headers.set("Authorization", auth.Authorization);
+  }
+  const response = await fetch(`${API_BASE_URL}${path}`, {
+    ...init,
+    headers,
+    credentials: "include",
+  });
   if (!response.ok) {
     const detail = await response.text().catch(() => "");
     throw new ReviewerApiError(response.status, detail || response.statusText);
@@ -130,7 +139,6 @@ export type QueueFacets = {
 };
 
 export async function getReviewerQueue(
-  token: string,
   filters: QueueFilters = {},
 ): Promise<QueueResponse> {
   const params = new URLSearchParams();
@@ -146,7 +154,6 @@ export async function getReviewerQueue(
   const qs = params.toString();
   return await fetchJson<QueueResponse>(
     `/api/v1/reviewer/queue${qs ? `?${qs}` : ""}`,
-    token,
   );
 }
 
@@ -154,14 +161,10 @@ export async function getReviewerQueue(
 // relationship: the server returns every active vendor of that client, not
 // only those with a row in the queue (P0-02). Omit it for the unscoped list.
 export async function getReviewerQueueFacets(
-  token: string,
   clientId?: string,
 ): Promise<QueueFacets> {
   const qs = clientId ? `?client_id=${encodeURIComponent(clientId)}` : "";
-  return await fetchJson<QueueFacets>(
-    `/api/v1/reviewer/queue/facets${qs}`,
-    token,
-  );
+  return await fetchJson<QueueFacets>(`/api/v1/reviewer/queue/facets${qs}`);
 }
 
 // ---------------------------------------------------------------------------
@@ -298,12 +301,10 @@ export type ReviewerSubmissionDetail = SubmissionDetail & {
 };
 
 export async function getReviewerSubmission(
-  token: string,
   submissionId: string,
 ): Promise<ReviewerSubmissionDetail> {
   return await fetchJson<ReviewerSubmissionDetail>(
     `/api/v1/reviewer/submissions/${submissionId}`,
-    token,
   );
 }
 
@@ -335,7 +336,6 @@ export type DecisionResponse = {
 };
 
 export async function submitDecision(
-  token: string,
   submissionId: string,
   action: DecisionAction,
   reason: string | null,
@@ -348,7 +348,6 @@ export async function submitDecision(
 ): Promise<DecisionResponse> {
   return await fetchJson<DecisionResponse>(
     `/api/v1/reviewer/submissions/${submissionId}/decision`,
-    token,
     {
       method: "POST",
       body: JSON.stringify({
@@ -387,12 +386,10 @@ type DocumentBlobOptions = {
  * the returned string when the iframe unmounts.
  */
 export async function fetchReviewerSubmissionDocumentBlob(
-  token: string,
   submissionId: string,
   options: DocumentBlobOptions = {},
 ): Promise<string> {
-  const headers = new Headers();
-  headers.set("Authorization", `Bearer ${token}`);
+  const headers = new Headers(adminAuthHeader());
   const params = new URLSearchParams({ proxy: "1" });
   if (options.download) params.set("download", "1");
   let response: Response;

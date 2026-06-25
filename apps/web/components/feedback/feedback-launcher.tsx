@@ -384,7 +384,7 @@ export function FeedbackLauncher({
       setSubmitting(true);
       setError(null);
       const result = session
-        ? await submitFeedback(session.access_token, commonPayload)
+        ? await submitFeedback(commonPayload)
         : await submitPublicFeedback({
             ...commonPayload,
             contactEmail: contactEmail.trim() || undefined,

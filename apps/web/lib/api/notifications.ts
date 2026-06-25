@@ -13,7 +13,7 @@
  * a thrown exception.
  */
 
-import { readAdminSession } from "@/lib/session/admin";
+import { adminAuthHeader } from "@/lib/session/admin";
 
 const API_BASE_URL =
   (typeof process !== "undefined" && process.env.NEXT_PUBLIC_API_BASE_URL) ||
@@ -59,13 +59,6 @@ export interface PhoneConfirmResponse {
   whatsapp_opt_in_at: string;
 }
 
-function bearerHeader(): Record<string, string> {
-  const session = readAdminSession();
-  return session?.access_token
-    ? { Authorization: `Bearer ${session.access_token}` }
-    : {};
-}
-
 export async function fetchNotificationPreferences(): Promise<
   NotificationPreferencesResponse | null
 > {
@@ -75,7 +68,7 @@ export async function fetchNotificationPreferences(): Promise<
       {
         method: "GET",
         credentials: "include",
-        headers: { Accept: "application/json", ...bearerHeader() },
+        headers: { Accept: "application/json", ...adminAuthHeader() },
       },
     );
     if (!r.ok) return null;
@@ -97,7 +90,7 @@ export async function updateNotificationPreferences(
         headers: {
           Accept: "application/json",
           "Content-Type": "application/json",
-          ...bearerHeader(),
+          ...adminAuthHeader(),
         },
         body: JSON.stringify(payload),
       },
@@ -129,7 +122,7 @@ export async function requestPhoneVerification(
       headers: {
         Accept: "application/json",
         "Content-Type": "application/json",
-        ...bearerHeader(),
+        ...adminAuthHeader(),
       },
       body: JSON.stringify({ phone }),
     });
@@ -166,7 +159,7 @@ export async function confirmPhoneVerification(
         headers: {
           Accept: "application/json",
           "Content-Type": "application/json",
-          ...bearerHeader(),
+          ...adminAuthHeader(),
         },
         body: JSON.stringify({ phone, code }),
       },

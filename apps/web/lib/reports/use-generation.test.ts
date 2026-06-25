@@ -2,7 +2,15 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { renderHook, act, waitFor } from "@testing-library/react";
 
 vi.mock("@/lib/session/admin", () => ({
-  readAdminSession: () => ({ access_token: "test-token" }),
+  // Identity presence gates the request; the in-memory bearer rides in
+  // via adminAuthHeader (FE-SEC-1 — no token in the persisted session).
+  readAdminSession: () => ({
+    user: { id: "u1" },
+    roles: [],
+    organization_ids: [],
+    expires_at: "2999-01-01T00:00:00Z",
+  }),
+  adminAuthHeader: () => ({ Authorization: "Bearer test-token" }),
 }));
 
 import { useReportGeneration } from "@/lib/reports/use-generation";

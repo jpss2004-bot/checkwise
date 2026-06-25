@@ -16,6 +16,7 @@ import { AuthApiError, login } from "@/lib/api/auth";
 import {
   clearAdminSession,
   readAdminSession,
+  setAdminAccessToken,
   writeAdminSession,
   type AdminSession,
 } from "@/lib/session/admin";
@@ -102,9 +103,12 @@ function LoginInner() {
     setSubmitting(true);
     try {
       const result = await login(email, password);
-      // Always store the session so /activate or /portal/* can read the JWT.
+      // FE-SEC-1 — hold the bearer JWT in memory only (gone on reload,
+      // where the httpOnly cookie set by /auth/login takes over). Persist
+      // just the non-secret identity slice so the shells render
+      // synchronously and /activate / /portal/* can read who's logged in.
+      setAdminAccessToken(result.access_token);
       writeAdminSession({
-        access_token: result.access_token,
         expires_at: result.expires_at,
         user: result.user,
         roles: result.roles,

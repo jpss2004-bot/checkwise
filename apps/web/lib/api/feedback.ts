@@ -3,9 +3,9 @@
  *
  * Two backends, same response shape:
  *
- * - ``submitFeedback(token, payload)`` → ``POST /api/v1/feedback``.
- *   Requires a JWT. Used by the launcher when mounted inside an
- *   authenticated shell.
+ * - ``submitFeedback(payload)`` → ``POST /api/v1/feedback``. Requires a
+ *   session: JWT-first (in-memory bearer), cookie-fallback. Used by the
+ *   launcher when mounted inside an authenticated shell.
  *
  * - ``submitPublicFeedback(payload)`` → ``POST /api/v1/feedback/public``.
  *   Anonymous; the backend identifies the submitter by peppered
@@ -15,6 +15,8 @@
  * Both surface 429 / 413 / 415 (and 401 on the auth route) as tagged
  * errors so the launcher can show the right Spanish toast copy.
  */
+
+import { adminAuthHeader } from "@/lib/session/admin";
 
 const API_BASE_URL =
   process.env.NEXT_PUBLIC_API_BASE_URL ?? "http://127.0.0.1:8000";
@@ -46,7 +48,6 @@ export interface FeedbackFailure {
 export type FeedbackResult = FeedbackSuccess | FeedbackFailure;
 
 export async function submitFeedback(
-  token: string,
   payload: FeedbackPayload,
 ): Promise<FeedbackResult> {
   const body = new FormData();
@@ -65,7 +66,8 @@ export async function submitFeedback(
   try {
     res = await fetch(`${API_BASE_URL}/api/v1/feedback`, {
       method: "POST",
-      headers: { Authorization: `Bearer ${token}` },
+      headers: { ...adminAuthHeader() },
+      credentials: "include",
       body,
     });
   } catch {

@@ -4,7 +4,7 @@
  * enforces the data scope — the frontend just passes the query string.
  */
 
-import { readAdminSession } from "@/lib/session/admin";
+import { getAdminAccessToken } from "@/lib/session/admin";
 import { fetchWithTimeout, FetchTimeoutError } from "@/lib/api/fetch-timeout";
 
 const API_BASE_URL =
@@ -88,15 +88,11 @@ async function searchFetch(
 
 /**
  * Admin-scope search. Sees every submission CheckWise stores.
- * Reads the staff JWT from localStorage (the same session the rest of
- * the admin surfaces use).
+ * JWT-first (in-memory bearer), cookie-fallback — same dual-auth path
+ * as the rest of the admin surfaces.
  */
 export async function adminSearch(query: string): Promise<SearchResponse> {
-  const session = readAdminSession();
-  if (!session?.access_token) {
-    throw new SearchApiError(401, "No active admin session.");
-  }
-  return searchFetch("/api/v1/admin/search", query, session.access_token);
+  return searchFetch("/api/v1/admin/search", query, getAdminAccessToken());
 }
 
 /**
@@ -104,23 +100,14 @@ export async function adminSearch(query: string): Promise<SearchResponse> {
  * reachable client_ids.
  */
 export async function clientSearch(query: string): Promise<SearchResponse> {
-  const session = readAdminSession();
-  if (!session?.access_token) {
-    throw new SearchApiError(401, "No active client session.");
-  }
-  return searchFetch("/api/v1/client/search", query, session.access_token);
+  return searchFetch("/api/v1/client/search", query, getAdminAccessToken());
 }
 
 /**
  * Portal-scope search. Backend filters to the active workspace's
  * vendor. Uses the portal session cookie (credentials: 'include') plus
- * the JWT in localStorage to satisfy the dual-auth path.
+ * the in-memory JWT to satisfy the dual-auth path.
  */
 export async function portalSearch(query: string): Promise<SearchResponse> {
-  const session = readAdminSession();
-  return searchFetch(
-    "/api/v1/portal/search",
-    query,
-    session?.access_token ?? null,
-  );
+  return searchFetch("/api/v1/portal/search", query, getAdminAccessToken());
 }

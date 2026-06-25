@@ -14,7 +14,7 @@
  * (``lib/api/portal.ts``) — its endpoints accept the session cookie.
  */
 
-import { readAdminSession } from "@/lib/session/admin";
+import { adminAuthHeader } from "@/lib/session/admin";
 
 /**
  * File downloads (ZIPs, large PDFs) can legitimately take longer than a JSON
@@ -73,16 +73,12 @@ export async function downloadAuthenticatedFile(
   url: string,
   fallbackFilename: string,
 ): Promise<void> {
-  const session = readAdminSession();
-  if (!session?.access_token) {
-    throw new DownloadError(401, "No active staff session.");
-  }
   const controller = new AbortController();
   const timeoutId = setTimeout(() => controller.abort(), DOWNLOAD_TIMEOUT_MS);
   let response: Response;
   try {
     response = await fetch(url, {
-      headers: { Authorization: `Bearer ${session.access_token}` },
+      headers: { ...adminAuthHeader() },
       credentials: "include",
       signal: controller.signal,
     });

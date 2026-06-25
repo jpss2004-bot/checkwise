@@ -41,6 +41,7 @@ import {
   clearAdminSession,
   readAdminSession,
 } from "@/lib/session/admin";
+import { logoutAdmin } from "@/lib/api/auth";
 
 /**
  * ClientShell — premium-dense cliente corporativo console (V2.1).
@@ -281,7 +282,10 @@ export function ClientShell({
     };
   }, [session, pathname, router, consentReloadKey]);
 
-  function onLogout() {
+  async function onLogout() {
+    // FE-SEC-1 — clear the server-side session cookie too, then drop the
+    // local identity + in-memory bearer and route to /login.
+    await logoutAdmin();
     clearAdminSession();
     router.replace("/login");
   }

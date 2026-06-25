@@ -64,7 +64,7 @@ import {
 } from "@/lib/api/portal";
 import { DocumentStatus } from "@/lib/constants/statuses";
 import type { DocumentStateCode } from "@/lib/types";
-import { readAdminSession } from "@/lib/session/admin";
+import { getAdminAccessToken } from "@/lib/session/admin";
 import {
   fetchCurrentSession,
   readPortalSession,
@@ -753,9 +753,9 @@ export function IntakeWizard({
 
     const headers = new Headers();
     if (session) {
-      const adminSession = readAdminSession();
-      if (adminSession?.access_token) {
-        headers.set("Authorization", `Bearer ${adminSession.access_token}`);
+      const adminToken = getAdminAccessToken();
+      if (adminToken) {
+        headers.set("Authorization", `Bearer ${adminToken}`);
       }
       if (session.access_token && session.access_token !== "cookie-managed") {
         headers.set("X-Workspace-Token", session.access_token);

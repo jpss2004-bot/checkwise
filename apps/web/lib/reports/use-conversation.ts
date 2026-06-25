@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 
-import { readAdminSession } from "@/lib/session/admin";
+import { adminAuthHeader, readAdminSession } from "@/lib/session/admin";
 
 /**
  * Hook: useReportConversation.
@@ -53,14 +53,13 @@ export function useReportConversation(reportId: string): UseReportConversation {
   const abortRef = useRef<AbortController | null>(null);
 
   const reload = useCallback(async () => {
-    const session = readAdminSession();
-    if (!session?.access_token || !reportId) return;
+    if (!readAdminSession() || !reportId) return;
     setStatus("loading");
     setError(null);
     try {
       const resp = await fetch(
         `${API_BASE_URL}/api/v1/reports/${reportId}/conversation`,
-        { headers: { Authorization: `Bearer ${session.access_token}` } },
+        { headers: { ...adminAuthHeader() }, credentials: "include" },
       );
       if (!resp.ok) {
         setStatus("error");
@@ -106,8 +105,7 @@ export function useReportConversation(reportId: string): UseReportConversation {
 
   const send = useCallback(
     async (message: string, canvasSummary?: unknown) => {
-      const session = readAdminSession();
-      if (!session?.access_token || !reportId || !message.trim()) return;
+      if (!readAdminSession() || !reportId || !message.trim()) return;
 
       // Optimistic user turn.
       const optimisticUserTurn: ConversationTurn = {
@@ -137,9 +135,10 @@ export function useReportConversation(reportId: string): UseReportConversation {
           `${API_BASE_URL}/api/v1/reports/${reportId}/conversation`,
           {
             method: "POST",
+            credentials: "include",
             headers: {
               "Content-Type": "application/json",
-              Authorization: `Bearer ${session.access_token}`,
+              ...adminAuthHeader(),
               Accept: "text/event-stream",
             },
             body: JSON.stringify({
