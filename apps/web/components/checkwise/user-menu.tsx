@@ -12,6 +12,7 @@ import {
 } from "@phosphor-icons/react";
 
 import { cn } from "@/lib/utils";
+import { roleLabel } from "@/lib/constants/labels";
 
 /**
  * Junta 2026-05-23 — LinkedIn-style profile dropdown shared across
@@ -30,8 +31,8 @@ import { cn } from "@/lib/utils";
  * - Escape closes; click-outside closes. ``role="menu"`` +
  *   ``role="menuitem"`` so screen readers announce it properly.
  * - The shell decides the profile destination (provider →
- *   /portal/entra-a-tu-espacio; client_admin → /client/onboarding;
- *   internal_admin → /admin). Pass ``null`` to hide the row.
+ *   /portal/perfil; client_admin/viewer → /client/configuracion/cuenta;
+ *   staff → /admin/configuracion/cuenta). Pass ``null`` to hide the row.
  */
 
 export type UserMenuProps = {
@@ -149,7 +150,7 @@ export function UserMenu({
             </p>
             {roles && roles.length > 0 ? (
               <p className="mt-1 truncate text-[10px] uppercase tracking-wide text-[color:var(--text-tertiary)]">
-                {roles.map(humanizeRole).join(" · ")}
+                {Array.from(new Set(roles.map(roleLabel))).join(" · ")}
               </p>
             ) : null}
           </div>
@@ -242,11 +243,4 @@ function computeInitials(value: string | undefined): string {
   const first = tokens[0]?.[0] ?? "";
   const second = tokens.length > 1 ? tokens[tokens.length - 1][0] : "";
   return (first + second).toUpperCase();
-}
-
-function humanizeRole(role: string): string {
-  // Display-friendly role labels. Mirrors the existing copy on the
-  // shells ("internal admin", "reviewer", "client admin") but keeps
-  // the values stable for any future role-name change.
-  return role.replace(/_/g, " ");
 }

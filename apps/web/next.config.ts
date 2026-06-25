@@ -135,21 +135,22 @@ const nextConfig: NextConfig = {
     ];
     return [{ source: "/:path*", headers: securityHeaders }];
   },
-  // Operaciones ↔ Plataforma split (2026-05-26). The three IT-side
-  // pages moved from /admin/* to /platform/*. Permanent 308 redirects
-  // keep old emails, bookmarks, and audit-log links pointing at the
-  // legacy URLs working. Drop these once we have telemetry showing
-  // zero hits for a month.
+  // Operaciones ↔ Plataforma split (2026-05-26). The IT-side pages
+  // moved from /admin/* to /platform/*. Permanent 308 redirects keep
+  // old emails and bookmarks pointing at the legacy URLs working. Drop
+  // these once we have telemetry showing zero hits for a month.
+  //
+  // NOTE: /admin/audit-log is intentionally NOT redirected. The audit
+  // log lives at /admin/audit-log again (in the Operaciones shell) so
+  // the review team (platform_admin) — which roles.py grants a read
+  // permission but which cannot enter the superadmin-only /platform
+  // shell — has a UI path to it (audit F2). A redirect here would bounce
+  // them straight back into the 403.
   async redirects() {
     return [
       {
         source: "/admin/users/new",
         destination: "/platform/users/new",
-        permanent: true,
-      },
-      {
-        source: "/admin/audit-log",
-        destination: "/platform/audit-log",
         permanent: true,
       },
       {
