@@ -28,6 +28,7 @@ Usage::
 from __future__ import annotations
 
 import argparse
+import logging
 import os
 import sys
 import time
@@ -40,6 +41,8 @@ from app.services.intake_queue import (  # noqa: E402
     prune_terminal_intake_jobs,
     run_intake_queue_consumer_once,
 )
+
+logger = logging.getLogger(__name__)
 
 
 def _worker_id() -> str:
@@ -89,9 +92,21 @@ def main() -> int:
     done_total = 0
     requeued_total = 0
     while True:
-        result = run_intake_queue_consumer_once(
-            worker_id=worker_id, batch_size=args.batch_size
-        )
+        try:
+            result = run_intake_queue_consumer_once(
+                worker_id=worker_id, batch_size=args.batch_size
+            )
+        except Exception:  # noqa: BLE001
+            # A poll-time failure (e.g. SessionLocal() can't reach the DB during
+            # a transient outage) is raised BEFORE the inner per-job try/except
+            # can swallow it. In --once mode let it propagate so a cron surfaces
+            # the error; as a daemon, log and back off so the worker self-heals
+            # instead of crash-looping on the platform supervisor.
+            if args.once:
+                raise
+            logger.exception("intake-queue poll failed; backing off and retrying")
+            time.sleep(max(0.1, args.poll_seconds))
+            continue
         done_total += result["done"]
         requeued_total += result["requeued"]
         if result["claimed"]:
