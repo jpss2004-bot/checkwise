@@ -108,7 +108,13 @@ const nextConfig: NextConfig = {
       "img-src 'self' data: blob: https:",
       "font-src 'self' data:",
       `connect-src 'self' ${apiOrigin} https://calendly.com`.replace(/\s+/g, " ").trim(),
-      "frame-src 'self' https://calendly.com https://*.calendly.com https://calendar.app.google",
+      // 'blob:' lets the document-upload wizard preview the just-selected
+      // PDF in an <iframe src> built from URL.createObjectURL. Blob URLs are
+      // same-origin (minted by the page itself), so this does NOT permit
+      // arbitrary external frames. Without it the ENFORCED prod CSP silently
+      // blocks the in-memory preview → blank "Vista previa del PDF"
+      // (bug 2026-06-26: "No permite la visualización del documento").
+      "frame-src 'self' blob: https://calendly.com https://*.calendly.com https://calendar.app.google",
       "worker-src 'self' blob:",
     ].join("; ");
 

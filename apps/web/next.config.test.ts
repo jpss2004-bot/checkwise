@@ -51,6 +51,16 @@ describe("next.config CSP", () => {
     expect(csp).toContain("object-src 'none'");
     expect(csp).toContain("frame-ancestors 'none'");
     expect(csp).toContain("base-uri 'self'");
+    // The document-upload wizard previews the just-selected PDF via an
+    // <iframe src=blob:…>. frame-src MUST allow blob: or the enforced prod
+    // CSP blocks the preview (bug 2026-06-26 "No permite la visualización
+    // del documento"). object-src stays 'none' — preview uses <iframe>.
+    const frameSrc = csp
+      .split(";")
+      .map((d) => d.trim())
+      .find((d) => d.startsWith("frame-src"));
+    expect(frameSrc).toBeDefined();
+    expect(frameSrc).toContain("blob:");
   });
 
   it("stays REPORT-ONLY in dev and keeps unsafe-eval for the overlay", async () => {
