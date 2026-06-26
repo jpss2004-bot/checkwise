@@ -105,6 +105,18 @@ services:
       - key: AUTH_JWT_SECRET
         sync: false
 
+      # ---- Rate limiting (shared limiter) ----
+      # Optional but RECOMMENDED in production. When unset, the auth and
+      # public-endpoint rate limiter falls back to per-process in-memory
+      # state (the API logs a boot warning — see config.py). With more than
+      # one web instance the effective ceiling is multiplied by the instance
+      # count and resets on every redeploy, so the limit is best-effort, not
+      # a hard global cap. Provision a Render Key Value (Redis) instance and
+      # paste its connection URL here so the limiter is genuinely shared.
+      # (Audit 2026-06-26.)
+      - key: REDIS_URL
+        sync: false
+
       # ---- Frontend base URL (audit P4-03, 2026-05-25) ----
       # The hostname every outbound transactional email links to —
       # password-reset CTAs, reviewer-decision notifications, renewal
