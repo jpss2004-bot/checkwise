@@ -3,7 +3,9 @@
   "version": "2.5.1",
   "private": true,
   "scripts": {
+    "predev": "node scripts/copy-pdf-worker.mjs",
     "dev": "next dev",
+    "prebuild": "node scripts/copy-pdf-worker.mjs",
     "build": "next build",
     "start": "next start",
     "lint": "eslint .",
@@ -32,6 +34,7 @@
     "lenis": "^1.3.23",
     "motion": "^12.39.0",
     "next": "^15.0.0",
+    "pdfjs-dist": "4.10.38",
     "react": "^19.0.0",
     "react-dom": "^19.0.0",
     "sonner": "^2.0.7",

@@ -1,12 +1,9 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
-import {
-  ArrowSquareOut,
-  DownloadSimple,
-  Eye,
-  Warning,
-} from "@phosphor-icons/react";
+import { useCallback, useEffect, useState } from "react";
+import { ArrowSquareOut, DownloadSimple, Eye } from "@phosphor-icons/react";
+
+import { PdfCanvas } from "@/components/checkwise/pdf-canvas";
 
 /**
  * Shared PDF preview surface.
@@ -21,22 +18,26 @@ import {
  *       renderer at all.
  *     - A managed/enterprise browser with the built-in PDF viewer disabled.
  *     - A blob whose Content-Type is not `application/pdf`.
- *   The enforced production CSP separately blocked the blob iframe until the
- *   `frame-src 'self' blob:` fix shipped — but that only covered desktop
- *   Chromium. The component below makes the failure *recoverable everywhere*:
- *   it ALWAYS renders an open-in-new-tab / download affordance, never a silent
- *   blank box, and on environments known to blank the native iframe it leads
- *   with that affordance instead of the (useless) frame.
  *
- * This component is intentionally *presentational*: the caller owns minting
- * and revoking `blobUrl` (each surface already does, with different auth /
- * lifecycle rules). Pass a ready-to-use same-origin blob URL.
+ * Strategy (most robust → graceful degradation), always with an escape hatch:
+ *   1. Desktop browsers that render PDFs in an <iframe> keep the native viewer
+ *      (free zoom/print/search toolbar).
+ *   2. Environments known to blank the native iframe (iOS/iPadOS, in-app
+ *      webviews) — and any iframe that silently fails on desktop — fall to a
+ *      pdf.js <canvas> renderer (<PdfCanvas>), which renders everywhere.
+ *   3. If even canvas can't render (e.g. a JPEG2000 scan that would need WASM
+ *      we deliberately don't enable), show an open-in-new-tab card.
+ *   In every branch a persistent "Abrir en una pestaña nueva" link is rendered,
+ *   so the user is never stuck on a silent blank box.
+ *
+ * This component is *presentational*: the caller owns minting and revoking
+ * `blobUrl` (each surface already does, with different auth / lifecycle rules).
  */
 
 type PdfPreviewProps = {
   /** A ready same-origin `blob:` URL. The caller owns revoke(). */
   blobUrl: string | null;
-  /** Used for a11y labels (and the iframe title when `title` is omitted). */
+  /** Used for a11y labels. */
   fileName?: string;
   /** Accessible title for the iframe. */
   title?: string;
@@ -55,9 +56,8 @@ type PdfPreviewProps = {
 
 /**
  * Environments where a native `<iframe>` PDF render is known to be unreliable
- * (blank or first-page-only) no matter what the CSP says. We skip the iframe
- * there and lead with the open/download card. The fallback link is rendered in
- * every branch, so a wrong guess here never strands the user.
+ * (blank or first-page-only) no matter what the CSP says. There we skip the
+ * iframe and go straight to the pdf.js canvas renderer.
  */
 function nativePdfIframeUnsupported(): boolean {
   if (typeof navigator === "undefined") return false;
@@ -72,10 +72,10 @@ function nativePdfIframeUnsupported(): boolean {
   return isAppleTouch || isInAppWebview;
 }
 
-// If the iframe has neither fired `onLoad` nor `onError` within this window,
-// treat it as a silent blank (CSP-blocked frames frequently fire neither) and
-// surface the escape-hatch hint more prominently.
-const LOAD_TIMEOUT_MS = 4000;
+// If the iframe neither loads nor errors within this window, treat it as a
+// silent blank (CSP-blocked / disabled-viewer frames fire neither) and escalate
+// to the pdf.js canvas renderer.
+const IFRAME_ESCALATE_MS = 7000;
 
 export function PdfPreview({
   blobUrl,
@@ -85,34 +85,40 @@ export function PdfPreview({
   onDownload,
   downloading = false,
 }: PdfPreviewProps) {
-  const [loaded, setLoaded] = useState(false);
-  const [errored, setErrored] = useState(false);
-  const [timedOut, setTimedOut] = useState(false);
   // Resolved on the client only, to avoid an SSR/CSR hydration mismatch.
   const [unsupported, setUnsupported] = useState(false);
-  const timerRef = useRef<number | null>(null);
+  const [iframeLoaded, setIframeLoaded] = useState(false);
+  const [iframeFailed, setIframeFailed] = useState(false);
+  const [canvasFailed, setCanvasFailed] = useState(false);
 
   useEffect(() => {
     setUnsupported(nativePdfIframeUnsupported());
   }, []);
 
-  // Reset load state whenever the source changes, and arm the silent-blank
-  // timeout for the iframe path.
+  // Reset the renderer state whenever the source changes.
   useEffect(() => {
-    setLoaded(false);
-    setErrored(false);
-    setTimedOut(false);
-    if (!blobUrl || unsupported) return;
-    if (timerRef.current) window.clearTimeout(timerRef.current);
-    timerRef.current = window.setTimeout(() => setTimedOut(true), LOAD_TIMEOUT_MS);
-    return () => {
-      if (timerRef.current) window.clearTimeout(timerRef.current);
-    };
-  }, [blobUrl, unsupported]);
+    setIframeLoaded(false);
+    setIframeFailed(false);
+    setCanvasFailed(false);
+  }, [blobUrl]);
+
+  const showIframe = !!blobUrl && !unsupported && !iframeFailed;
+
+  // Escalate a silently-blank iframe to the canvas renderer.
+  useEffect(() => {
+    if (!showIframe || iframeLoaded) return;
+    const timer = window.setTimeout(
+      () => setIframeFailed(true),
+      IFRAME_ESCALATE_MS,
+    );
+    return () => window.clearTimeout(timer);
+  }, [showIframe, iframeLoaded]);
+
+  const handleCanvasFail = useCallback(() => setCanvasFailed(true), []);
 
   if (!blobUrl) return null;
 
-  const showBlankHint = errored || (timedOut && !loaded);
+  const useCanvas = (unsupported || iframeFailed) && !canvasFailed;
 
   // A persistent escape hatch — rendered in EVERY branch. A `target="_blank"`
   // navigation to a blob: is a top-level navigation and works even when the
@@ -123,7 +129,7 @@ export function PdfPreview({
         href={blobUrl}
         target="_blank"
         rel="noreferrer"
-        aria-label={`Abrir ${fileName ?? "el PDF"} en una pestaña nueva`}
+        aria-label={`Abrir ${fileName} en una pestaña nueva`}
         className="inline-flex items-center gap-1.5 font-medium text-primary hover:underline"
       >
         <ArrowSquareOut className="h-3.5 w-3.5" aria-hidden="true" />
@@ -150,14 +156,28 @@ export function PdfPreview({
         Vista previa del PDF
       </div>
 
-      {unsupported ? (
-        // Known-blank environment (iOS / in-app webview): lead with the
-        // open/download card instead of a blank frame.
+      {showIframe ? (
+        <iframe
+          src={blobUrl}
+          title={title}
+          className={`block bg-white ${className}`}
+          onLoad={() => setIframeLoaded(true)}
+          onError={() => setIframeFailed(true)}
+        />
+      ) : useCanvas ? (
+        <PdfCanvas
+          blobUrl={blobUrl}
+          onFail={handleCanvasFail}
+          heightClassName={className}
+        />
+      ) : (
+        // Last resort: nothing could render inline (e.g. a JPEG2000 scan that
+        // would need WASM we deliberately don't enable under the strict CSP).
         <div className="flex flex-col items-center gap-3 px-4 py-10 text-center">
           <Eye className="h-8 w-8 text-muted-foreground" aria-hidden="true" />
           <p className="text-sm text-muted-foreground">
-            Tu navegador no puede mostrar el PDF aquí mismo. Ábrelo en una
-            pestaña nueva para revisarlo.
+            No pudimos mostrar el PDF aquí mismo. Ábrelo en una pestaña nueva
+            para revisarlo.
           </p>
           <a
             href={blobUrl}
@@ -169,28 +189,6 @@ export function PdfPreview({
             Abrir el PDF
           </a>
         </div>
-      ) : (
-        <>
-          {showBlankHint ? (
-            <div className="flex items-start gap-2 border-b border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-900">
-              <Warning
-                className="mt-0.5 h-3.5 w-3.5 shrink-0 text-amber-700"
-                aria-hidden="true"
-              />
-              <span>
-                Si no ves el documento, ábrelo en una pestaña nueva con el
-                enlace de abajo.
-              </span>
-            </div>
-          ) : null}
-          <iframe
-            src={blobUrl}
-            title={title}
-            className={`block bg-white ${className}`}
-            onLoad={() => setLoaded(true)}
-            onError={() => setErrored(true)}
-          />
-        </>
       )}
 
       {fallbackRow}
