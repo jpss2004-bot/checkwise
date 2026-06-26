@@ -2724,6 +2724,12 @@ def _resolve_client_id_for_vendor(
                 status.HTTP_404_NOT_FOUND,
                 detail="Proveedor no encontrado para este cliente.",
             )
+        if vendor.client_id not in _visible_client_ids_for_user(db, current.user.id):
+            # Break-glass: staff reached a vendor in a tenant they do NOT
+            # belong to via the no-?client_id admin deep-link. The read is
+            # authorized by role, but leave a forensic trail (dedup-windowed)
+            # so cross-tenant access is accountable. Mirrors _resolve_client_id.
+            _audit_cross_tenant_access(db, current, vendor.client_id)
         return vendor.client_id, vendor
     target_id = _resolve_client_id(db, current, requested=requested)
     vendor = db.get(Vendor, vendor_id)
@@ -3467,6 +3473,13 @@ def client_get_submission_document(
                 status_code=status.HTTP_404_NOT_FOUND,
                 detail="Envío no encontrado.",
             )
+    elif submission.client_id not in _visible_client_ids_for_user(
+        db, current.user.id
+    ):
+        # Break-glass: staff streaming a document from a tenant they do NOT
+        # belong to. Authorized by role, but record the cross-tenant read
+        # (dedup-windowed) so document access stays accountable.
+        _audit_cross_tenant_access(db, current, submission.client_id)
 
     document = db.scalar(
         select(Document).where(Document.submission_id == submission.id).limit(1)
@@ -4469,6 +4482,11 @@ def mark_client_notification_read(
             raise HTTPException(
                 status.HTTP_404_NOT_FOUND, detail="Notificacion no encontrada."
             )
+    elif row.client_id not in _visible_client_ids_for_user(db, current.user.id):
+        # Break-glass: staff marking a notification read in a tenant they do
+        # NOT belong to. Authorized by role, but record the cross-tenant
+        # write (dedup-windowed) so the action stays accountable.
+        _audit_cross_tenant_access(db, current, row.client_id)
     target_id = row.client_id
     if row.read_at is None:
         row.read_at = datetime.now(UTC)

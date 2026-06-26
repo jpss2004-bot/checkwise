@@ -28,11 +28,18 @@ isolated OPERATOR/LEGAL decision:
 from __future__ import annotations
 
 import logging
-import xml.etree.ElementTree as ET
 from dataclasses import dataclass
 from typing import Protocol
 
 import httpx
+
+# defusedxml hardens the only XML-attack surface: the SOAP response parsed in
+# ``_parse_consulta``. It forbids DTDs / external entities / entity expansion,
+# closing the billion-laughs DoS vector on an attacker-influenced response
+# (MITM, malicious staging endpoint). It is a drop-in for fromstring and raises
+# Exception subclasses, so the broad fail-open catch at the call site still
+# yields ``not_verifiable``.
+from defusedxml.ElementTree import fromstring as _safe_fromstring
 
 from app.core.config import settings
 
@@ -155,7 +162,7 @@ def _parse_consulta(xml_text: str) -> dict:
     """Pull the ConsultaResult fields out of the SOAP response by localname
     (namespace-prefix agnostic). Raises on a SOAP Fault so the caller fails
     open to not_verifiable."""
-    root = ET.fromstring(xml_text)
+    root = _safe_fromstring(xml_text)
     fields: dict[str, str] = {}
     fault = False
     for el in root.iter():
