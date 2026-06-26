@@ -40,6 +40,10 @@ dependencies = [
   "zxing-cpp>=2.2",
   "pillow>=10.0",
   "python-multipart>=0.0.9",
+  # Hardened XML parsing for the SAT/CFDI SOAP response (sat_cfdi_client).
+  # Was already present as a transitive; declaring it directly because
+  # Render installs via `pip install -e .` and the code now imports it.
+  "defusedxml>=0.7.1",
   # M4 (2026-06-02) — Redis backend for the shared rate limiter.
   # Optional at runtime: when ``settings.REDIS_URL`` is empty the
   # import is still required but the client is never constructed, so
