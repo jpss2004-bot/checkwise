@@ -9,7 +9,6 @@ import {
   CheckCircle,
   CaretLeft,
   CaretRight,
-  Eye,
   FileText,
   CircleNotch,
   Lock,
@@ -52,6 +51,7 @@ import { Select } from "@/components/ui/select";
 import { Textarea } from "@/components/ui/textarea";
 import { RequirementStatusBadge } from "@/components/checkwise/portal/requirement-status-badge";
 import { ValidationSignal } from "@/components/checkwise/validation-summary";
+import { PdfPreview } from "@/components/checkwise/pdf-preview";
 import { GroupedValidationSummary } from "@/components/checkwise/portal/grouped-validation-summary";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import {
@@ -1916,17 +1916,11 @@ function UploadStep({
           ) : null}
 
           {filePreviewUrl ? (
-            <div className="overflow-hidden rounded-md border border-border bg-muted/30">
-              <div className="flex items-center gap-2 border-b border-border bg-white px-3 py-2 text-xs font-medium text-muted-foreground">
-                <Eye className="h-3.5 w-3.5" aria-hidden="true" />
-                Vista previa del PDF
-              </div>
-              <iframe
-                src={filePreviewUrl}
-                title="Vista previa del PDF seleccionado"
-                className="block h-[420px] w-full"
-              />
-            </div>
+            <PdfPreview
+              blobUrl={filePreviewUrl}
+              fileName={file?.name}
+              title="Vista previa del PDF seleccionado"
+            />
           ) : null}
 
           {/* Stage 2.7-b — additional-files (annex) picker. Flag-gated.

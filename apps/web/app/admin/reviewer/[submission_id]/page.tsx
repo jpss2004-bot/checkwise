@@ -25,6 +25,7 @@ import {
 import { LecturaDelDocumento } from "@/components/checkwise/admin/lectura-del-documento";
 import { ExpedienteAssessmentCard } from "@/components/checkwise/admin/expediente-assessment-card";
 import { SubmissionTimeline } from "@/components/checkwise/portal/submission-timeline";
+import { PdfPreview } from "@/components/checkwise/pdf-preview";
 import { FeedbackLauncher } from "@/components/feedback/feedback-launcher";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -1543,25 +1544,12 @@ function ReviewerSubmissionPreview({
       </CardHeader>
       <CardContent>
         {blobUrl ? (
-          <>
-            <iframe
-              src={blobUrl}
-              title={`Vista previa de ${detail.document.filename}`}
-              className="h-[640px] w-full rounded-md border border-border bg-white"
-            />
-            <p className="mt-2 text-xs text-muted-foreground">
-              Si la vista previa no carga,{" "}
-              <a
-                href={blobUrl}
-                target="_blank"
-                rel="noreferrer"
-                className="text-primary hover:underline"
-              >
-                ábrelo en una pestaña nueva
-              </a>
-              .
-            </p>
-          </>
+          <PdfPreview
+            blobUrl={blobUrl}
+            fileName={detail.document.filename}
+            title={`Vista previa de ${detail.document.filename}`}
+            className="h-[640px] w-full"
+          />
         ) : loadError ? (
           <p className="text-sm text-[color:var(--status-error-text)]">
             {loadError}

@@ -9,6 +9,7 @@
 
 import { adminAuthHeader } from "@/lib/session/admin";
 import { fetchWithTimeout, FetchTimeoutError } from "@/lib/api/fetch-timeout";
+import { toPdfBlob } from "@/lib/api/pdf-blob";
 import type {
   RequirementStatus,
   RfcAlignment,
@@ -430,5 +431,5 @@ export async function fetchReviewerSubmissionDocumentBlob(
     );
   }
   const blob = await response.blob();
-  return URL.createObjectURL(blob);
+  return URL.createObjectURL(await toPdfBlob(blob));
 }

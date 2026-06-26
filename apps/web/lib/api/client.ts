@@ -12,6 +12,7 @@
 import { adminAuthHeader } from "@/lib/session/admin";
 import { dedupeRead, invalidateRead } from "@/lib/api/request-cache";
 import { parseContentDispositionFilename } from "@/lib/api/download";
+import { toPdfBlob } from "@/lib/api/pdf-blob";
 
 const API_BASE_URL =
   process.env.NEXT_PUBLIC_API_BASE_URL ?? "http://127.0.0.1:8000";
@@ -1227,7 +1228,7 @@ export async function fetchClientSubmissionDocumentBlob(
     throw new ClientApiError(response.status, detail || response.statusText);
   }
   const blob = await response.blob();
-  return URL.createObjectURL(blob);
+  return URL.createObjectURL(await toPdfBlob(blob));
 }
 
 /**

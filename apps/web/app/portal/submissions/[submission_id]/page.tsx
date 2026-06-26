@@ -24,6 +24,7 @@ import {
   SubmissionDetailSkeleton,
 } from "@/components/checkwise/portal/state-surfaces";
 import { SubmissionTimeline } from "@/components/checkwise/portal/submission-timeline";
+import { PdfPreview } from "@/components/checkwise/pdf-preview";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { PageHeader } from "@/components/ui/page-header";
@@ -801,25 +802,12 @@ function SubmissionPreview({
       </CardHeader>
       <CardContent>
         {blobUrl ? (
-          <>
-            <iframe
-              src={blobUrl}
-              title={`Vista previa de ${detail.document.filename}`}
-              className="h-[640px] w-full rounded-md border border-border bg-white"
-            />
-            <p className="mt-2 text-xs text-muted-foreground">
-              Si la vista previa no carga,{" "}
-              <a
-                href={blobUrl}
-                target="_blank"
-                rel="noreferrer"
-                className="text-primary hover:underline"
-              >
-                ábrelo en una pestaña nueva
-              </a>
-              .
-            </p>
-          </>
+          <PdfPreview
+            blobUrl={blobUrl}
+            fileName={detail.document.filename}
+            title={`Vista previa de ${detail.document.filename}`}
+            className="h-[640px] w-full"
+          />
         ) : loadError ? (
           <p className="text-sm text-muted-foreground">
             No pudimos cargar la vista previa. Recarga la página o inténtalo de

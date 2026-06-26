@@ -13,6 +13,7 @@
 
 import { getAdminAccessToken } from "@/lib/session/admin";
 import { fetchWithTimeout, FetchTimeoutError } from "@/lib/api/fetch-timeout";
+import { toPdfBlob } from "@/lib/api/pdf-blob";
 import type { PersonaType, PortalSession } from "@/lib/session/portal";
 
 const API_BASE_URL =
@@ -723,7 +724,7 @@ export async function fetchSubmissionDocumentBlob(
     throw new PortalApiError(response.status, detail || response.statusText);
   }
   const blob = await response.blob();
-  return URL.createObjectURL(blob);
+  return URL.createObjectURL(await toPdfBlob(blob));
 }
 
 export type WorkspaceSubmissionListItem = {
