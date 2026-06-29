@@ -13,6 +13,7 @@ import {
   ListMagnifyingGlass,
   PencilSimple,
   Storefront,
+  Table,
 } from "@phosphor-icons/react";
 
 import { AdminWiseMount } from "@/components/checkwise/wise/admin-wise-mount";
@@ -56,6 +57,9 @@ const PRIMARY_NAV: ConsoleNavItem[] = [
 const SECONDARY_NAV: ConsoleNavItem[] = [
   { href: "/admin/contact-requests", label: "Solicitudes", icon: EnvelopeSimple, roles: STAFF_ROLES },
   { href: "/admin/correction-requests", label: "Correcciones", icon: PencilSimple, roles: STAFF_ROLES },
+  // Audit metadata-rules — a fully-built rulebook page that previously had
+  // no nav entry (audit routing-nav "Orphan route /admin/metadata").
+  { href: "/admin/metadata", label: "Metadata", icon: Table, roles: STAFF_ROLES },
   { href: "/admin/audit-log", label: "Audit log", icon: ListMagnifyingGlass, roles: STAFF_ROLES },
 ];
 
@@ -100,7 +104,7 @@ export function AdminShell({
       navAriaLabel="Operaciones admin"
       nav={{ primary: PRIMARY_NAV, secondary: SECONDARY_NAV, settings: SETTINGS_NAV }}
       searchResultsHref="/admin/buscar"
-      profileHref="/admin/configuracion/cuenta"
+      profileHref="/admin/configuracion"
       profileLabel="Mi cuenta"
       // The superadmin also has the Plataforma console; the review team
       // (platform_admin) is not a superadmin, so don't dangle a switch
