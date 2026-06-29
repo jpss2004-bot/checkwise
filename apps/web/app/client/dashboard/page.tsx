@@ -147,7 +147,11 @@ export default function ClientDashboardPage() {
         me && me.visible_client_ids.length > 1 ? (
           <ClientSwitcher
             value={clientId ?? ""}
-            options={me.visible_client_ids}
+            options={
+              me.visible_clients && me.visible_clients.length > 0
+                ? me.visible_clients
+                : me.visible_client_ids.map((id) => ({ id, name: id }))
+            }
             onChange={setClientId}
           />
         ) : overview ? (
@@ -208,7 +212,7 @@ function ClientSwitcher({
   onChange,
 }: {
   value: string;
-  options: string[];
+  options: { id: string; name: string }[];
   onChange: (v: string) => void;
 }) {
   return (
@@ -220,9 +224,9 @@ function ClientSwitcher({
         onChange={(e) => onChange(e.target.value)}
         className="bg-transparent font-medium text-[color:var(--text-primary)] focus:outline-none"
       >
-        {options.map((cid) => (
-          <option key={cid} value={cid}>
-            {cid}
+        {options.map((opt) => (
+          <option key={opt.id} value={opt.id}>
+            {opt.name}
           </option>
         ))}
       </select>

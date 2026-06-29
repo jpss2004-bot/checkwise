@@ -97,7 +97,11 @@ from app.core.compliance_catalog import (
 from app.core.config import settings
 from app.core.http_utils import content_disposition_header
 from app.core.period_validation import MAX_YEAR, MIN_YEAR, validate_period_key
-from app.core.rate_limit import enforce_ai_heavy_rate_limit, enforce_export_rate_limit
+from app.core.rate_limit import (
+    client_ip_from_request,
+    enforce_ai_heavy_rate_limit,
+    enforce_export_rate_limit,
+)
 from app.core.text_search import normalize_for_search
 from app.core.time import today_mx
 from app.db.session import get_db
@@ -713,11 +717,22 @@ def _current_submissions_by_returned_row(
 # ---------------------------------------------------------------------------
 
 
+class ClientRef(BaseModel):
+    """A client org the user can see — id + human name for the switcher."""
+
+    id: str
+    name: str
+
+
 class ClientMe(BaseModel):
     user_id: str
     email: str
     roles: list[str]
     visible_client_ids: list[str]
+    # Audit (client switcher) — id+name pairs so the multi-tenant switcher
+    # renders org names instead of raw UUIDs. Same order/membership as
+    # ``visible_client_ids``.
+    visible_clients: list[ClientRef] = []
     default_client_id: str | None
     # Client-side legal-consent gate (v2+). The frontend blocks the
     # dashboard until ``legal_consent_version == current_legal_consent_version``.
@@ -1260,11 +1275,20 @@ def client_me(db: DbSession, current: ClientUser) -> ClientMe:
         if user_row and user_row.legal_consent_accepted_at
         else None
     )
+    # Resolve human names for the switcher (audit: it rendered raw UUIDs).
+    name_by_id: dict[str, str] = {}
+    if visible:
+        for row in db.scalars(select(Client).where(Client.id.in_(visible))).all():
+            name_by_id[row.id] = row.name
+    visible_clients = [
+        ClientRef(id=cid, name=name_by_id.get(cid, cid)) for cid in visible
+    ]
     return ClientMe(
         user_id=current.user.id,
         email=current.user.email,
         roles=current.roles,
         visible_client_ids=visible,
+        visible_clients=visible_clients,
         default_client_id=visible[0] if visible else None,
         legal_consent_accepted_at=accepted_at,
         legal_consent_version=user_row.legal_consent_version if user_row else None,
@@ -1273,15 +1297,16 @@ def client_me(db: DbSession, current: ClientUser) -> ClientMe:
 
 
 def _client_ip(request: Request) -> str | None:
-    """Best-effort client IP. Prefers the first ``X-Forwarded-For`` hop
-    (Render/Vercel sit behind proxies) and falls back to the socket
-    peer. Mirrors ``app.api.v1.portal._client_ip``."""
-    fwd = request.headers.get("x-forwarded-for")
-    if fwd:
-        first = fwd.split(",", 1)[0].strip()
-        if first:
-            return first
-    return request.client.host if request.client else None
+    """Client IP for audit logging.
+
+    Audit (CW-RATE-002) — delegates to the shared ``client_ip_from_request``
+    resolver, which only honours ``X-Forwarded-For`` as far as
+    ``RATE_LIMIT_TRUSTED_PROXY_HOPS`` (the rightmost trusted hop behind
+    Render's single proxy) then ``X-Real-IP`` / the socket peer. The previous
+    implementation trusted the LEFTMOST, attacker-controllable XFF entry,
+    letting a caller spoof its logged IP. Mirrors the portal-side fix.
+    """
+    return client_ip_from_request(request)
 
 
 @router.post(

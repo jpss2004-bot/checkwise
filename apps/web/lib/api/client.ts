@@ -109,11 +109,15 @@ function qs(params?: Record<string, string | number | boolean | undefined | null
 // Types
 // ---------------------------------------------------------------------------
 
+export type ClientRef = { id: string; name: string };
+
 export type ClientMe = {
   user_id: string;
   email: string;
   roles: string[];
   visible_client_ids: string[];
+  /** id+name pairs for the multi-tenant switcher (same order as ids). */
+  visible_clients?: ClientRef[];
   default_client_id: string | null;
   // Client-side legal-consent gate (v2+). The shell blocks the
   // dashboard until legal_consent_version === current_legal_consent_version.
