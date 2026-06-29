@@ -201,7 +201,11 @@ export function ReportsListView({
     listReports({
       status: statusFilter === "all" ? undefined : statusFilter,
       audience: audienceFilter === "all" ? undefined : audienceFilter,
-      limit: 100,
+      // Audit (reports-frontend): the list hard-capped at 100 with no way to
+      // reach older reports. Raised to the backend max (200) as a safe
+      // stopgap; the endpoint also supports `offset`, so true paged
+      // navigation is the follow-up for clients exceeding 200 reports.
+      limit: 200,
     })
       .then((r) => {
         if (cancelled) return;

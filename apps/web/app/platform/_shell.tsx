@@ -67,7 +67,7 @@ export function PlatformShell({
       navAriaLabel="Plataforma"
       nav={{ primary: PLATFORM_NAV }}
       searchResultsHref="/admin/buscar"
-      profileHref="/admin/configuracion/cuenta"
+      profileHref="/admin/configuracion"
       profileLabel="Mi cuenta"
       // The superadmin always also has the Operaciones console (staff
       // superset), so offer the jump back there.

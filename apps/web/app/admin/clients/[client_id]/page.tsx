@@ -28,6 +28,7 @@ import {
 } from "@/lib/api/admin";
 import { AdminPlanControls } from "@/components/checkwise/admin/plan-controls";
 import { AdminEntitlementsControls } from "@/components/checkwise/admin/entitlements-controls";
+import { readAdminSession } from "@/lib/session/admin";
 import type { ClientPlan } from "@/lib/api/client";
 import { entityStatusLabel, entityStatusVariant } from "@/lib/constants/labels";
 import {
@@ -67,6 +68,14 @@ function AdminClientDetail({ clientId }: { clientId: string }) {
   );
   const [reloadKey, setReloadKey] = useState(0);
   const [plan, setPlan] = useState<ClientPlan | null>(null);
+  // Plan / billing / entitlement mutations are superadmin-only on the API
+  // (operations_admin) — separation of duties on revenue-bearing actions.
+  // Hide the controls for the review team (platform_admin) so they don't
+  // see buttons that would 403. Resolved after mount (localStorage).
+  const [isOps, setIsOps] = useState(false);
+  useEffect(() => {
+    setIsOps(readAdminSession()?.roles.includes("operations_admin") ?? false);
+  }, []);
 
   useEffect(() => {
     let cancelled = false;
@@ -172,15 +181,19 @@ function AdminClientDetail({ clientId }: { clientId: string }) {
             ]}
           />
 
-          <AdminPlanControls
-            plan={plan}
-            onChanged={() => setReloadKey((k) => k + 1)}
-          />
+          {isOps && (
+            <>
+              <AdminPlanControls
+                plan={plan}
+                onChanged={() => setReloadKey((k) => k + 1)}
+              />
 
-          <AdminEntitlementsControls
-            plan={plan}
-            onChanged={() => setReloadKey((k) => k + 1)}
-          />
+              <AdminEntitlementsControls
+                plan={plan}
+                onChanged={() => setReloadKey((k) => k + 1)}
+              />
+            </>
+          )}
 
           {/* Compliance rollup */}
           <Surface

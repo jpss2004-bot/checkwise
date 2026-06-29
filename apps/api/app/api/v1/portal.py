@@ -81,7 +81,10 @@ from app.core.period_validation import (
     MIN_YEAR,
     validate_period_key,
 )
-from app.core.rate_limit import enforce_ai_heavy_rate_limit
+from app.core.rate_limit import (
+    client_ip_from_request,
+    enforce_ai_heavy_rate_limit,
+)
 from app.core.time import today_mx
 from app.db.session import get_db
 from app.models import (
@@ -930,6 +933,12 @@ def enter_workspace(
             )
         workspace = owned[0]
 
+    # Audit api-portal — do not mint a session for a frozen workspace or a
+    # frozen/expired client org. current_portal_workspace already guards
+    # every subsequent call, but without this /portal/enter handed a frozen
+    # tenant a working session cookie + tenant data on the way in.
+    _assert_workspace_active(db, workspace)
+
     # Rotate the access token so any prior cookie tied to this
     # workspace becomes invalid the moment the user re-enters.
     workspace.access_token = secrets.token_urlsafe(32)
@@ -1408,18 +1417,18 @@ class CorrectionRequestResponse(BaseModel):
 
 
 def _client_ip(request: Request) -> str | None:
-    """Resolve the calling client IP, preferring proxy headers."""
-    xff = request.headers.get("x-forwarded-for")
-    if xff:
-        first = xff.split(",")[0].strip()
-        if first:
-            return first
-    real = request.headers.get("x-real-ip")
-    if real:
-        return real.strip()
-    if request.client and request.client.host:
-        return request.client.host
-    return None
+    """Resolve the calling client IP for audit + rate-limit hashing.
+
+    Audit api-portal (CW-RATE-002) — delegates to the shared
+    ``client_ip_from_request`` resolver, which only honours
+    ``X-Forwarded-For`` as far as ``RATE_LIMIT_TRUSTED_PROXY_HOPS`` (the
+    rightmost trusted hop behind Render's single proxy) and falls back to
+    ``X-Real-IP`` / the socket peer. The previous implementation trusted
+    the LEFTMOST, attacker-controllable XFF entry, letting a client spoof
+    its logged/rate-limited IP. Returns the resolver's sentinel for an
+    unresolvable peer rather than ``None``.
+    """
+    return client_ip_from_request(request)
 
 
 @router.post(

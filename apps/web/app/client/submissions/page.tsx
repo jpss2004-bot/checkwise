@@ -135,7 +135,10 @@ export default function ClientSubmissionsPage() {
   // vendors page uses, scoped to the active client.
   useEffect(() => {
     let cancelled = false;
-    listClientVendors(clientId ? { client_id: clientId } : undefined)
+    listClientVendors({
+      ...(clientId ? { client_id: clientId } : {}),
+      limit: 500, // audit: don't truncate the vendor filter at 100
+    })
       .then((data) => {
         if (cancelled) return;
         setVendors(data.items);

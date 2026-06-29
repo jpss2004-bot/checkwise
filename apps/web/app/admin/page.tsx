@@ -39,7 +39,7 @@ const ADMIN_SURFACES: Surface[] = [
   { href: "/admin/requirements", icon: Books, label: "Requisitos", helper: "Catálogo regulatorio REPSE." },
   { href: "/admin/calendar", icon: CalendarBlank, label: "Calendario", helper: "Periodos y obligaciones." },
   { href: "/admin/reports", icon: ChartLineUp, label: "Reportes", helper: "Genera y consulta reportes." },
-  { href: "/platform/audit-log", icon: ListMagnifyingGlass, label: "Bitácora de auditoría", helper: "Eventos del sistema." },
+  { href: "/admin/audit-log", icon: ListMagnifyingGlass, label: "Bitácora de auditoría", helper: "Eventos del sistema." },
 ];
 
 export default function AdminHomePage() {

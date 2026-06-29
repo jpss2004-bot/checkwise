@@ -11,6 +11,7 @@
  */
 
 import { adminAuthHeader } from "@/lib/session/admin";
+import { redirectToLoginIfSessionLost } from "@/lib/session/expiry";
 import { fetchWithTimeout, FetchTimeoutError } from "@/lib/api/fetch-timeout";
 import { saveBlob } from "@/lib/api/download";
 import type {
@@ -88,6 +89,12 @@ async function fetchJson<T>(
       signal: controller?.signal ?? init.signal,
     });
     if (!response.ok) {
+      if (redirectToLoginIfSessionLost(response.status)) {
+        throw new ReportsApiError(
+          401,
+          "Tu sesión expiró. Vuelve a iniciar sesión.",
+        );
+      }
       const raw = await response.text().catch(() => "");
       // FastAPI serialises errors as ``{"detail": "..."}``. Unwrap that
       // envelope so callers (and the UI alert) surface the human sentence

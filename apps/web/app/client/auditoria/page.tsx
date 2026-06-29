@@ -148,7 +148,10 @@ export default function ClientAuditoriaPage() {
   // and to map vendor_id → vendor_name on the preview breakdown.
   useEffect(() => {
     let cancelled = false;
-    listClientVendors(urlClientId ? { client_id: urlClientId } : undefined)
+    listClientVendors({
+      ...(urlClientId ? { client_id: urlClientId } : {}),
+      limit: 500, // audit: don't truncate the audit-package vendor list at 100
+    })
       .then((data) => {
         if (cancelled) return;
         setVendorsList(data);

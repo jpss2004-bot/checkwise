@@ -10,6 +10,10 @@
  */
 
 import { adminAuthHeader } from "@/lib/session/admin";
+import {
+  humanizeApiError,
+  redirectToLoginIfSessionLost,
+} from "@/lib/session/expiry";
 import { dedupeRead, invalidateRead } from "@/lib/api/request-cache";
 import { parseContentDispositionFilename } from "@/lib/api/download";
 import { toPdfBlob } from "@/lib/api/pdf-blob";
@@ -78,7 +82,13 @@ async function fetchJson<T>(path: string, init: RequestInit = {}): Promise<T> {
   }
   if (!response.ok) {
     const detail = await response.text().catch(() => "");
-    throw new ClientApiError(response.status, detail || response.statusText);
+    if (redirectToLoginIfSessionLost(response.status)) {
+      throw new ClientApiError(401, "Tu sesión expiró. Vuelve a iniciar sesión.");
+    }
+    throw new ClientApiError(
+      response.status,
+      humanizeApiError(detail, response.statusText),
+    );
   }
   if (response.status === 204) return undefined as unknown as T;
   return (await response.json()) as T;
@@ -99,11 +109,15 @@ function qs(params?: Record<string, string | number | boolean | undefined | null
 // Types
 // ---------------------------------------------------------------------------
 
+export type ClientRef = { id: string; name: string };
+
 export type ClientMe = {
   user_id: string;
   email: string;
   roles: string[];
   visible_client_ids: string[];
+  /** id+name pairs for the multi-tenant switcher (same order as ids). */
+  visible_clients?: ClientRef[];
   default_client_id: string | null;
   // Client-side legal-consent gate (v2+). The shell blocks the
   // dashboard until legal_consent_version === current_legal_consent_version.
@@ -1139,7 +1153,13 @@ export async function downloadClientMetadata(params?: {
   }
   if (!response.ok) {
     const detail = await response.text().catch(() => "");
-    throw new ClientApiError(response.status, detail || response.statusText);
+    if (redirectToLoginIfSessionLost(response.status)) {
+      throw new ClientApiError(401, "Tu sesión expiró. Vuelve a iniciar sesión.");
+    }
+    throw new ClientApiError(
+      response.status,
+      humanizeApiError(detail, response.statusText),
+    );
   }
   return response.blob();
 }
@@ -1225,7 +1245,13 @@ export async function fetchClientSubmissionDocumentBlob(
   }
   if (!response.ok) {
     const detail = await response.text().catch(() => "");
-    throw new ClientApiError(response.status, detail || response.statusText);
+    if (redirectToLoginIfSessionLost(response.status)) {
+      throw new ClientApiError(401, "Tu sesión expiró. Vuelve a iniciar sesión.");
+    }
+    throw new ClientApiError(
+      response.status,
+      humanizeApiError(detail, response.statusText),
+    );
   }
   const blob = await response.blob();
   return URL.createObjectURL(await toPdfBlob(blob));
@@ -1488,7 +1514,13 @@ export async function downloadClientAuditPackageZipPost(
   }
   if (!response.ok) {
     const detail = await response.text().catch(() => "");
-    throw new ClientApiError(response.status, detail || response.statusText);
+    if (redirectToLoginIfSessionLost(response.status)) {
+      throw new ClientApiError(401, "Tu sesión expiró. Vuelve a iniciar sesión.");
+    }
+    throw new ClientApiError(
+      response.status,
+      humanizeApiError(detail, response.statusText),
+    );
   }
   // Parse a filename hint from Content-Disposition when present so
   // the user gets the same auditoria-<rfc>-<date>.zip naming.
