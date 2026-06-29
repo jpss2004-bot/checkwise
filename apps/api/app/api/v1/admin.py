@@ -2798,7 +2798,7 @@ def _locked_client_org_or_404(db: Session, org_id: str) -> Organization:
     summary="Provision a 14-day demo on an existing client organization",
 )
 def admin_start_demo(
-    org_id: str, db: DbSession, current: AdminUser, request: Request
+    org_id: str, db: DbSession, current: PlatformUser, request: Request
 ) -> OrganizationPlanRead:
     """Convert a client org to a fresh 14-day demo (plan='demo', deadline set,
     provider cap = demo default 5, status active)."""
@@ -2829,7 +2829,7 @@ def admin_update_org_plan(
     org_id: str,
     body: OrganizationPlanUpdate,
     db: DbSession,
-    current: AdminUser,
+    current: PlatformUser,
     request: Request,
 ) -> OrganizationPlanRead:
     """Upgrade/downgrade a plan, set a per-tenant provider-limit override, or
@@ -2933,7 +2933,7 @@ def admin_grant_entitlement(
     key: str,
     body: EntitlementGrantBody,
     db: DbSession,
-    current: AdminUser,
+    current: PlatformUser,
     request: Request,
 ) -> EntitlementRead:
     org = _locked_client_org_or_404(db, org_id)
@@ -2969,7 +2969,7 @@ def admin_revoke_entitlement(
     org_id: str,
     key: str,
     db: DbSession,
-    current: AdminUser,
+    current: PlatformUser,
     request: Request,
 ) -> dict:
     org = _locked_client_org_or_404(db, org_id)
@@ -3043,7 +3043,7 @@ def admin_update_billing(
     org_id: str,
     body: BillingUpdateBody,
     db: DbSession,
-    current: AdminUser,
+    current: PlatformUser,
     request: Request,
 ) -> BillingRead:
     org = _locked_client_org_or_404(db, org_id)
