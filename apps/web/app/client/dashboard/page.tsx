@@ -80,13 +80,14 @@ export default function ClientDashboardPage() {
     };
   }, [urlClientId]);
 
+  // Identity (visible clients for the switcher + legal-consent state). This is
+  // url-independent and NO LONGER gates the data fetches below — see the
+  // waterfall note on the overview effect. Fetched once.
   useEffect(() => {
     let cancelled = false;
     getClientMe()
       .then((meData) => {
-        if (cancelled) return;
-        setMe(meData);
-        setClientId(urlClientId ?? meData.default_client_id);
+        if (!cancelled) setMe(meData);
       })
       .catch((err: unknown) => {
         if (cancelled) return;
@@ -95,10 +96,24 @@ export default function ClientDashboardPage() {
     return () => {
       cancelled = true;
     };
+  }, []);
+
+  // Keep the viewed client in sync with the URL. The in-page switcher
+  // (setClientId) persists until the URL changes. A null clientId means
+  // "default tenant": the overview fetch omits client_id and the backend
+  // resolves visible[0] — which is exactly me.default_client_id — so we never
+  // need to wait on getClientMe to know which client to load.
+  useEffect(() => {
+    setClientId(urlClientId);
   }, [urlClientId]);
 
+  // Perf (audit "client dashboard request waterfall"): the headline used to be
+  // gated on getClientMe resolving the default client before overview/
+  // notifications could fire — a serial waterfall on every default-tenant load.
+  // It now fires immediately (in parallel with getClientMe); a null clientId
+  // sends no client_id and the backend resolves the default tenant. Switching
+  // via the switcher (clientId change) refetches.
   useEffect(() => {
-    if (!me && !clientId) return;
     let cancelled = false;
     setError(null);
     const params = clientId ? { client_id: clientId } : undefined;
@@ -119,12 +134,12 @@ export default function ClientDashboardPage() {
     return () => {
       cancelled = true;
     };
-  }, [clientId, me, reloadKey]);
+  }, [clientId, reloadKey]);
 
   // Trajectory is lazy + independent: a slow or empty history never blocks or
-  // breaks the headline. Failures just hide the sparkline.
+  // breaks the headline. Failures just hide the sparkline. Same no-waterfall
+  // fetch path as the overview above.
   useEffect(() => {
-    if (!me && !clientId) return;
     let cancelled = false;
     const params = clientId ? { client_id: clientId } : undefined;
     getClientOverviewTrajectory(params)
@@ -137,7 +152,7 @@ export default function ClientDashboardPage() {
     return () => {
       cancelled = true;
     };
-  }, [clientId, me, reloadKey]);
+  }, [clientId, reloadKey]);
 
   return (
     <ClientShell
@@ -146,7 +161,7 @@ export default function ClientDashboardPage() {
       actions={
         me && me.visible_client_ids.length > 1 ? (
           <ClientSwitcher
-            value={clientId ?? ""}
+            value={clientId ?? me.default_client_id ?? ""}
             options={
               me.visible_clients && me.visible_clients.length > 0
                 ? me.visible_clients
