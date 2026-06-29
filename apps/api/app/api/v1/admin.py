@@ -83,6 +83,7 @@ from app.core.text_search import accent_ci_contains
 from app.core.time import today_mx
 from app.db.session import get_db
 from app.models import (
+    AdminRollupSnapshot,
     AuditLog,
     BillingAccount,
     Client,
@@ -610,6 +611,10 @@ class AdminRollup(BaseModel):
     throughput: RollupThroughput
     vendors_at_risk: list[RollupVendorAtRisk]
     inbox: RollupInbox
+    # ISO timestamp of the cached per-client scan when served from the
+    # stale-while-revalidate snapshot; null when computed live (cold cache or
+    # ?refresh=true). The queue/throughput/inbox counters are always live.
+    snapshot_at: str | None = None
 
 
 class AdminClientComplianceVendorRow(BaseModel):
@@ -812,27 +817,27 @@ def _rollup_client_vendor_rows_bulk(
     return rows_by_client
 
 
-@router.get("/rollup", response_model=AdminRollup)
-def get_rollup(db: DbSession, current: AdminUser) -> AdminRollup:
-    """Everything the ops-console dashboard renders, in one call.
+# --- Ops-dashboard rollup snapshot (stale-while-revalidate) -----------------
+# The per-client compliance scan in _compute_rollup_clients is O(clients ×
+# vendors) and used to run on every /admin/rollup hit. We cache just that heavy
+# part in admin_rollup_snapshots (one row per year) and serve it
+# stale-while-revalidate; the cheap now-anchored counters stay live. Mirrors the
+# admin_calendar_snapshots pattern (services/calendar_snapshot.py).
+_ROLLUP_STALE_AFTER_SECONDS = 600  # 10 min — the portfolio map can lag this much.
+_rollup_refreshing: set[int] = set()
 
-    Per-client semáforo rollup (worst first), reviewer-queue ageing,
-    7-day throughput (mirrors the reviewer queue's stat-strip
-    counters), the 8 worst at-risk vendors (red, then yellow —
-    green vendors are not "at risk" and are excluded), and the
-    triage inbox counters.
+
+def _compute_rollup_clients(
+    db: Session, *, today: date, year: int
+) -> tuple[list[RollupClientRow], list[RollupVendorAtRisk]]:
+    """The heavy per-client compliance scan: worst-first client rollup rows +
+    the worst-8 at-risk vendors. Pure read; shared by the live path and the
+    snapshot refresh.
+
+    Prefetched in a constant number of queries (was ~6 per client: workspaces,
+    vendors, submissions, two activity aggregates and a per-client
+    ``COUNT(Vendor)`` N+1). All clients are returned — no truncation.
     """
-    _ = current
-    today = today_mx()
-    year = today.year
-    now = datetime.now(UTC)
-
-    # --- Per-client compliance rollup + at-risk vendor collection ----
-    # Both the per-client compliance rows and the vendor counts are
-    # prefetched in a constant number of queries (was ~6 queries per
-    # client: workspaces, vendors, submissions, two activity aggregates
-    # and a per-client ``COUNT(Vendor)`` N+1) so this scan stays cheap as
-    # the portfolio grows. All clients are still returned — no truncation.
     clients = list(db.scalars(select(Client).order_by(Client.created_at.desc())))
     rows_by_client = _rollup_client_vendor_rows_bulk(
         db, clients, today=today, year=year
@@ -883,9 +888,6 @@ def get_rollup(db: DbSession, current: AdminUser) -> AdminRollup:
         # over the scored workspace rows and ``green/yellow/red`` sum to
         # that same set, so ``vendors_total`` reports the scored-vendor
         # count (== green+yellow+red) rather than a raw ``COUNT(Vendor)``.
-        # Otherwise a client with vendors that have no workspace yet shows
-        # a count larger than the colored chips and a % that doesn't cover
-        # it — three numbers describing different denominators in one row.
         vendors_total = green + yellow + red
         client_rows.append(
             RollupClientRow(
@@ -906,7 +908,114 @@ def get_rollup(db: DbSession, current: AdminUser) -> AdminRollup:
     risk_rows.sort(
         key=lambda r: (_SEMAPHORE_LEVEL_ORDER[r.semaphore_level], r.compliance_pct)
     )
-    vendors_at_risk = risk_rows[:8]
+    return client_rows, risk_rows[:8]
+
+
+def _rollup_clients_payload(db: Session, *, today: date, year: int) -> dict:
+    """JSON-safe snapshot body: the per-client rows + worst-8 at-risk vendors.
+    All fields are str/int (see RollupClientRow / RollupVendorAtRisk), so
+    ``model_dump()`` round-trips cleanly through JSON."""
+    client_rows, vendors_at_risk = _compute_rollup_clients(db, today=today, year=year)
+    return {
+        "clients": [r.model_dump() for r in client_rows],
+        "vendors_at_risk": [r.model_dump() for r in vendors_at_risk],
+    }
+
+
+def _load_rollup_snapshot(db: Session, year: int) -> AdminRollupSnapshot | None:
+    return db.scalar(
+        select(AdminRollupSnapshot).where(AdminRollupSnapshot.year == year).limit(1)
+    )
+
+
+def _refresh_rollup_snapshot(db: Session, *, year: int, today: date) -> None:
+    """Recompute + fully replace the snapshot row for ``year``."""
+    payload = _rollup_clients_payload(db, today=today, year=year)
+    db.query(AdminRollupSnapshot).filter(AdminRollupSnapshot.year == year).delete(
+        synchronize_session=False
+    )
+    db.add(
+        AdminRollupSnapshot(year=year, payload=payload, computed_at=datetime.now(UTC))
+    )
+    db.commit()
+
+
+def _rollup_snapshot_is_stale(computed_at: datetime, now: datetime) -> bool:
+    return (now - _as_utc(computed_at)).total_seconds() > _ROLLUP_STALE_AFTER_SECONDS
+
+
+def _refresh_rollup_snapshot_background(year: int) -> None:
+    """Background-task entry: own session, deduped so a read burst past the
+    staleness edge doesn't pile up identical full scans."""
+    if year in _rollup_refreshing:
+        return
+    _rollup_refreshing.add(year)
+    try:
+        from app.db.session import SessionLocal
+
+        db = SessionLocal()
+        try:
+            _refresh_rollup_snapshot(db, year=year, today=today_mx())
+        finally:
+            db.close()
+    except Exception:
+        # Never let a background refresh failure surface; the next read retries.
+        pass
+    finally:
+        _rollup_refreshing.discard(year)
+
+
+@router.get("/rollup", response_model=AdminRollup)
+def get_rollup(
+    db: DbSession,
+    current: AdminUser,
+    background_tasks: BackgroundTasks,
+    refresh: Annotated[bool, Query()] = False,
+) -> AdminRollup:
+    """Everything the ops-console dashboard renders, in one call.
+
+    Per-client semáforo rollup (worst first), reviewer-queue ageing,
+    7-day throughput (mirrors the reviewer queue's stat-strip
+    counters), the 8 worst at-risk vendors (red, then yellow —
+    green vendors are not "at risk" and are excluded), and the
+    triage inbox counters.
+
+    The per-client compliance scan is served stale-while-revalidate from
+    ``admin_rollup_snapshots`` (``?refresh=true`` forces a recompute); the
+    now-anchored counters are always live.
+    """
+    _ = current
+    today = today_mx()
+    year = today.year
+    now = datetime.now(UTC)
+
+    # --- Per-client compliance rollup (snapshot, stale-while-revalidate) ----
+    # The per-client × per-vendor scan is the heavy part of this endpoint. It is
+    # cached in admin_rollup_snapshots (one row per year) and served
+    # stale-while-revalidate so the ops dashboard stays fast at portfolio scale.
+    # The now-anchored counters below (queue/throughput/inbox) are always live,
+    # so the portfolio map can lag minutes but nothing else does.
+    snapshot_at: str | None = None
+    snap = None if refresh else _load_rollup_snapshot(db, year)
+    if refresh:
+        _refresh_rollup_snapshot(db, year=year, today=today)
+        snap = _load_rollup_snapshot(db, year)
+    if snap is not None:
+        payload = snap.payload or {}
+        client_rows = [RollupClientRow(**r) for r in payload.get("clients", [])]
+        vendors_at_risk = [
+            RollupVendorAtRisk(**r) for r in payload.get("vendors_at_risk", [])
+        ]
+        snapshot_at = _as_utc(snap.computed_at).isoformat()
+        if _rollup_snapshot_is_stale(snap.computed_at, now):
+            background_tasks.add_task(_refresh_rollup_snapshot_background, year)
+    else:
+        # Cold cache: compute live once and schedule a populate so the next hit
+        # is served from the snapshot.
+        client_rows, vendors_at_risk = _compute_rollup_clients(
+            db, today=today, year=year
+        )
+        background_tasks.add_task(_refresh_rollup_snapshot_background, year)
 
     # --- Reviewer queue ageing ----------------------------------------
     pending_created = list(
@@ -1019,6 +1128,7 @@ def get_rollup(db: DbSession, current: AdminUser) -> AdminRollup:
             correction_requests_pending=correction_requests_pending,
             feedback_reports_new=feedback_reports_new,
         ),
+        snapshot_at=snapshot_at,
     )
 
 

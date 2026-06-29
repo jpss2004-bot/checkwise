@@ -1,5 +1,6 @@
 from app.models.entities import (
     AdminCalendarSnapshot,
+    AdminRollupSnapshot,
     AuditLog,
     BillingAccount,
     Client,
@@ -46,6 +47,7 @@ from app.models.entities import (
 
 __all__ = [
     "AdminCalendarSnapshot",
+    "AdminRollupSnapshot",
     "AuditLog",
     "Client",
     "ClientNotification",

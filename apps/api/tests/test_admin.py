@@ -1337,6 +1337,75 @@ def test_rollup_queue_is_empty_safe(api_client: TestClient, db_factory) -> None:
     assert queue["oldest_age_hours"] is None
 
 
+def test_rollup_snapshot_roundtrip_matches_live_and_staleness(db_factory) -> None:
+    """The cached snapshot payload reconstructs to exactly the live per-client
+    scan (no serialization drift), and the staleness window behaves."""
+    from datetime import UTC, datetime, timedelta
+
+    from app.api.v1.admin import (
+        _compute_rollup_clients,
+        _load_rollup_snapshot,
+        _refresh_rollup_snapshot,
+        _rollup_snapshot_is_stale,
+    )
+    from app.core.time import today_mx
+
+    _seed_rollup_world(db_factory)
+    today = today_mx()
+    year = today.year
+    db = db_factory()
+    try:
+        live_clients, live_risk = _compute_rollup_clients(db, today=today, year=year)
+        _refresh_rollup_snapshot(db, year=year, today=today)
+        snap = _load_rollup_snapshot(db, year)
+        assert snap is not None
+        # Snapshot is byte-equal to the live compute round-tripped through JSON.
+        assert snap.payload["clients"] == [c.model_dump() for c in live_clients]
+        assert snap.payload["vendors_at_risk"] == [v.model_dump() for v in live_risk]
+        # A second refresh replaces (still one row per year), never duplicates.
+        _refresh_rollup_snapshot(db, year=year, today=today)
+        assert _load_rollup_snapshot(db, year) is not None
+    finally:
+        db.close()
+
+    now = datetime.now(UTC)
+    assert _rollup_snapshot_is_stale(now, now) is False
+    assert _rollup_snapshot_is_stale(now - timedelta(hours=1), now) is True
+
+
+def test_rollup_serves_from_snapshot_when_present(
+    api_client: TestClient, db_factory
+) -> None:
+    """When a fresh snapshot exists the endpoint serves it (snapshot_at set) and
+    the cached client rows match the seeded world; ?refresh forces a recompute."""
+    from app.api.v1.admin import _refresh_rollup_snapshot
+    from app.core.time import today_mx
+
+    seeded = _seed_rollup_world(db_factory)
+    token = _admin_token(api_client, db_factory)
+
+    today = today_mx()
+    db = db_factory()
+    try:
+        _refresh_rollup_snapshot(db, year=today.year, today=today)
+    finally:
+        db.close()
+
+    body = api_client.get("/api/v1/admin/rollup", headers=_h(token)).json()
+    assert body["snapshot_at"] is not None  # served from the cache, not live
+    row = next(c for c in body["clients"] if c["client_id"] == seeded["client_id"])
+    assert row["vendors_total"] == 2
+    assert row["red_count"] == 1
+    # Live counters ride alongside the cached scan.
+    assert body["queue"]["pending_total"] == 2
+
+    # ?refresh=true recomputes inline and still serves a snapshot timestamp.
+    forced = api_client.get(
+        "/api/v1/admin/rollup?refresh=true", headers=_h(token)
+    ).json()
+    assert forced["snapshot_at"] is not None
+
+
 def test_rollup_counts_pending_correction_requests_in_sql(
     api_client: TestClient, db_factory
 ) -> None:
