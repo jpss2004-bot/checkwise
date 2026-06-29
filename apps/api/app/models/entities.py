@@ -1896,3 +1896,30 @@ class AdminCalendarSnapshot(TimestampMixin, Base):
         ),
         Index("ix_admin_calendar_snapshots_year", "year"),
     )
+
+
+class AdminRollupSnapshot(TimestampMixin, Base):
+    """Precomputed admin ops-dashboard rollup cache (stale-while-revalidate).
+
+    ``GET /admin/rollup`` scans every client's per-vendor compliance into
+    memory on each load — ``O(clients × vendors)`` and seconds per hit at
+    portfolio scale. This caches the heavy part (the per-client rollup rows +
+    the worst-8 at-risk vendors) as JSON, one row per ``year``. The cheap
+    "now"-anchored counters (review-queue ageing, 7-day throughput, triage
+    inbox) stay LIVE on every request, so only the per-client portfolio map can
+    lag by minutes. Refreshed stale-while-revalidate on read; a full replace
+    per refresh.
+    """
+
+    __tablename__ = "admin_rollup_snapshots"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=new_id)
+    year: Mapped[int] = mapped_column(Integer, nullable=False)
+    payload: Mapped[dict] = mapped_column(JSON, nullable=False)
+    computed_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False
+    )
+
+    __table_args__ = (
+        UniqueConstraint("year", name="uq_admin_rollup_snapshots_year"),
+    )
