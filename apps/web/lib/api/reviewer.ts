@@ -8,6 +8,10 @@
  */
 
 import { adminAuthHeader } from "@/lib/session/admin";
+import {
+  humanizeApiError,
+  redirectToLoginIfSessionLost,
+} from "@/lib/session/expiry";
 import { fetchWithTimeout, FetchTimeoutError } from "@/lib/api/fetch-timeout";
 import { toPdfBlob } from "@/lib/api/pdf-blob";
 import type {
@@ -52,7 +56,16 @@ async function fetchJson<T>(
   });
   if (!response.ok) {
     const detail = await response.text().catch(() => "");
-    throw new ReviewerApiError(response.status, detail || response.statusText);
+    if (redirectToLoginIfSessionLost(response.status)) {
+      throw new ReviewerApiError(
+        401,
+        "Tu sesión expiró. Vuelve a iniciar sesión.",
+      );
+    }
+    throw new ReviewerApiError(
+      response.status,
+      humanizeApiError(detail, response.statusText),
+    );
   }
   return (await response.json()) as T;
 }
