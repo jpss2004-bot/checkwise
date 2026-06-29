@@ -85,6 +85,10 @@ export default function GlobalError({
             >
               Reintentar
             </button>
+            {/* A crashed-root boundary must do a FULL-PAGE reload to recover —
+                next/link client-side nav can't be trusted once the app shell
+                has thrown. The plain anchor is intentional here. */}
+            {/* eslint-disable-next-line @next/next/no-html-link-for-pages */}
             <a
               href="/"
               style={{

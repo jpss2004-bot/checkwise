@@ -18,6 +18,11 @@ const eslintConfig = [
       "out/**",
       "dist/**",
       "next-env.d.ts",
+      // Static + vendored assets are not source to lint. The vendored,
+      // minified pdf.js worker (copied into public/ by copy-pdf-worker.mjs)
+      // was producing 7 no-this-alias errors that reddened CI for no signal.
+      "public/**",
+      "tmp/**",
     ],
   },
   ...compat.extends("next/core-web-vitals", "next/typescript"),
