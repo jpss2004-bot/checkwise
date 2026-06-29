@@ -21,7 +21,7 @@ from collections.abc import Callable
 from datetime import date
 from typing import Any
 
-from sqlalchemy import func, select
+from sqlalchemy import and_, case, func, select
 from sqlalchemy.orm import Session
 
 from app.constants.statuses import DocumentStatus
@@ -534,43 +534,61 @@ def _compute_compliance_history_6mo(
     on quiet months.
     """
     today = today_mx()
-    points: list[dict[str, Any]] = []
 
-    # Walk back 6 months including the current one.
+    # Build the six month windows [start, next_start), oldest -> newest, with
+    # the same naive arithmetic as before (no dateutil for a 6-month span).
+    windows: list[tuple[int, int, date, date]] = []
     for offset in range(5, -1, -1):
-        # Naive month arithmetic — works for the 6-month window we
-        # care about without dragging in dateutil.relativedelta.
         year = today.year
         month = today.month - offset
         while month <= 0:
             month += 12
             year -= 1
-        # Build month bounds [start, next_start).
         start = date(year, month, 1)
-        if month == 12:
-            next_start = date(year + 1, 1, 1)
-        else:
-            next_start = date(year, month + 1, 1)
+        next_start = (
+            date(year + 1, 1, 1) if month == 12 else date(year, month + 1, 1)
+        )
+        windows.append((year, month, start, next_start))
 
-        total = db.scalar(
-            select(func.count(Submission.id))
-            .join(Vendor, Vendor.id == Submission.vendor_id)
-            .where(
-                Vendor.client_id == client_id,
-                Submission.created_at >= start,
-                Submission.created_at < next_start,
-            )
-        ) or 0
-        approved = db.scalar(
-            select(func.count(Submission.id))
-            .join(Vendor, Vendor.id == Submission.vendor_id)
-            .where(
-                Vendor.client_id == client_id,
-                Submission.status == DocumentStatus.APROBADO,
-                Submission.created_at >= start,
-                Submission.created_at < next_start,
-            )
-        ) or 0
+    # Perf (audit 2026-06-29): one grouped query of conditional sums instead
+    # of 12 sequential COUNTs (2 per month). Dialect-safe — SUM(CASE ...),
+    # no extract/strftime. Behavior is locked by
+    # tests/test_compliance_history_trend.py.
+    cols: list[Any] = []
+    for i, (_, _, start, next_start) in enumerate(windows):
+        in_month = and_(
+            Submission.created_at >= start,
+            Submission.created_at < next_start,
+        )
+        cols.append(func.sum(case((in_month, 1), else_=0)).label(f"t{i}"))
+        cols.append(
+            func.sum(
+                case(
+                    (
+                        and_(
+                            in_month,
+                            Submission.status == DocumentStatus.APROBADO,
+                        ),
+                        1,
+                    ),
+                    else_=0,
+                )
+            ).label(f"a{i}")
+        )
+    row = db.execute(
+        select(*cols)
+        .join(Vendor, Vendor.id == Submission.vendor_id)
+        .where(
+            Vendor.client_id == client_id,
+            Submission.created_at >= windows[0][2],
+            Submission.created_at < windows[-1][3],
+        )
+    ).one()
+
+    points: list[dict[str, Any]] = []
+    for i, (year, month, _, _) in enumerate(windows):
+        total = row[2 * i] or 0
+        approved = row[2 * i + 1] or 0
         if total == 0:
             # Skip silent months — keeps the line shape honest.
             continue
