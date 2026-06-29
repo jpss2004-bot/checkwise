@@ -15,6 +15,7 @@ from pathlib import Path
 from typing import Annotated, Any
 
 from fastapi import APIRouter, Depends, File, Form, HTTPException, Request, UploadFile
+from starlette.concurrency import run_in_threadpool
 
 from app.core.config import settings
 from app.core.metadata_rules import UnknownDocumentTypeError
@@ -78,7 +79,14 @@ async def create_pdf_metadata_dry_run(
         pdf_path = Path(temp_dir) / original_filename
         pdf_path.write_bytes(content)
         try:
-            return build_pdf_metadata_dry_run_payload(
+            # Audit (performance): the rulebook + (optional) OCR parse is
+            # synchronous and CPU-bound. Run it in a worker thread so it
+            # doesn't block the event loop and stall every other request on
+            # this worker. Pure-compute over a temp file — no shared DB
+            # session — so threadpool execution is safe. The TemporaryDirectory
+            # stays alive because we await inside the `with` block.
+            return await run_in_threadpool(
+                build_pdf_metadata_dry_run_payload,
                 pdf_path=pdf_path,
                 document_type_code=document_type_code,
                 context=context,
