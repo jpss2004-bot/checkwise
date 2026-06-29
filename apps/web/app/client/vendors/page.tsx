@@ -129,6 +129,14 @@ export default function ClientVendorsPage() {
           search: debouncedSearch || undefined,
           semaphore_level: level || undefined,
           sort,
+          // Audit (data-density): the default backend limit is 100, which
+          // silently truncated large portfolios AND made the roll-up strip
+          // counts (computed from the loaded rows) under-report. Request the
+          // backend max so the table + roll-up are accurate for all realistic
+          // tenants (Growth caps at 50); the "Mostrando X de Y" badge still
+          // honestly surfaces the residual for uncapped Enterprise/Legacy
+          // accounts that exceed 500 — those warrant true offset pagination.
+          limit: 500,
         }),
         listClientNotifications({ ...scope, unread_only: true, limit: 200 }),
       ]);

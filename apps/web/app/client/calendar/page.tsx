@@ -101,7 +101,13 @@ export default function ClientCalendarPage() {
 
   useEffect(() => {
     let cancelled = false;
-    listClientVendors(urlClientId ? { client_id: urlClientId } : undefined)
+    // Audit (data-density): request the backend max so the calendar's
+    // per-provider matrix + filter chips cover the whole portfolio, not just
+    // the first 100 (Growth caps at 50; >500 needs true pagination).
+    listClientVendors({
+      ...(urlClientId ? { client_id: urlClientId } : {}),
+      limit: 500,
+    })
       .then((res) => {
         if (!cancelled) setVendorsList(res);
       })
