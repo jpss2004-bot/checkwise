@@ -193,10 +193,32 @@ describe("LecturaDelDocumento", () => {
     ).toBeInTheDocument();
   });
 
-  it("shows the pending verdict when the shadow run hasn't finished", () => {
-    const detail = makeDetail({
-      shadowOverride: { completed_at: null, signals: null, error: null },
-    });
+  it("shows the pending verdict when neither tier has produced signals yet", () => {
+    // Genuinely pending = the shadow run is still in flight AND the
+    // heuristic fallback hasn't produced signals either. If the heuristic
+    // already has a reading, the card surfaces THAT (see fallback path)
+    // rather than a spinner, so the pending copy only renders in the brief
+    // window before either tier completes.
+    const base = makeDetail();
+    const detail = {
+      ...base,
+      shadow_analysis: {
+        heuristic: {
+          provider_id: "heuristic:v1",
+          completed_at: null,
+          signals: null,
+        },
+        shadow: {
+          ...base.shadow_analysis!.shadow,
+          completed_at: null,
+          signals: null,
+          error: null,
+        },
+      },
+      // ``heuristic.signals`` is optimistically typed non-null, but the
+      // component guards against its absence to render this pending state;
+      // cast through ``unknown`` to construct that genuinely-empty payload.
+    } as unknown as SubmissionDetail;
     render(<LecturaDelDocumento detail={detail} />);
     expect(
       screen.getByText(/Procesando la lectura automática/i),
