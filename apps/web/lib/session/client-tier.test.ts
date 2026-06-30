@@ -14,8 +14,12 @@ describe("isClientApprover", () => {
     expect(isClientApprover(["client_admin"])).toBe(true);
   });
 
-  it("treats internal_admin (support) as a writer", () => {
-    expect(isClientApprover(["internal_admin"])).toBe(true);
+  it("treats platform_admin (CheckWise support) as a writer", () => {
+    expect(isClientApprover(["platform_admin"])).toBe(true);
+  });
+
+  it("treats operations_admin (superadmin) as a writer", () => {
+    expect(isClientApprover(["operations_admin"])).toBe(true);
   });
 
   it("does NOT treat client_viewer (Viewer) as a writer", () => {
