@@ -3053,3 +3053,161 @@ def test_calendar_grid_serves_from_snapshot(
     # Per-institution cell detail survives the round-trip through the cache.
     for c in cached["cells"]:
         assert sum(v["count"] for v in c["by_institution"].values()) == c["count"]
+
+
+# ---------------------------------------------------------------------------
+# Side co-admins (full operations_admin peers) + owner-lock
+# 2026-06-30 — operations-console consolidation. Provisioning a staff
+# account now defaults to a full co-administrator (operations_admin); the
+# protected platform owner can never be disabled / demoted / deleted /
+# password-reset through these routes, even by a peer co-admin.
+# ---------------------------------------------------------------------------
+
+OWNER_EMAIL = "jsamano@legalshelf.mx"
+
+
+def _provision_admin(
+    api_client: TestClient,
+    token: str,
+    *,
+    email: str,
+    full_name: str = "Co Admin",
+    admin_role: str | None = None,
+) -> str:
+    """Provision a staff account via ``POST /admin/users`` (role=admin).
+
+    Omitting ``admin_role`` exercises the default — a full
+    co-administrator (operations_admin)."""
+    body: dict = {"role": "admin", "full_name": full_name, "email": email}
+    if admin_role is not None:
+        body["admin_role"] = admin_role
+    resp = api_client.post("/api/v1/admin/users", json=body, headers=_h(token))
+    assert resp.status_code == 201, resp.text
+    return resp.json()["user_id"]
+
+
+def _active_membership_roles(db_factory, user_id: str) -> set[str]:
+    db = db_factory()
+    try:
+        return set(
+            db.scalars(
+                select(Membership.role).where(
+                    Membership.user_id == user_id,
+                    Membership.status == "active",
+                )
+            )
+        )
+    finally:
+        db.close()
+
+
+def test_provision_admin_defaults_to_full_co_admin(
+    api_client: TestClient, db_factory
+) -> None:
+    """A staff account provisioned with no explicit tier is a full
+    co-administrator (operations_admin), not the review team."""
+    token = _admin_token(api_client, db_factory)
+    uid = _provision_admin(api_client, token, email="coadmin@example.com")
+    assert _active_membership_roles(db_factory, uid) == {"operations_admin"}
+
+
+def test_provision_admin_can_request_review_team_tier(
+    api_client: TestClient, db_factory
+) -> None:
+    """``admin_role=platform_admin`` still provisions a review-only
+    staffer for callers who want the narrower tier."""
+    token = _admin_token(api_client, db_factory)
+    uid = _provision_admin(
+        api_client,
+        token,
+        email="reviewer2@example.com",
+        admin_role="platform_admin",
+    )
+    assert _active_membership_roles(db_factory, uid) == {"platform_admin"}
+
+
+def test_co_admin_can_manage_a_peer_co_admin(
+    api_client: TestClient, db_factory
+) -> None:
+    """Full co-admins are real peers: one operations_admin may disable
+    another (non-owner) operations_admin. The protected owner is the only
+    account fenced off (asserted below)."""
+    token = _admin_token(api_client, db_factory)  # adm@… , operations_admin
+    peer = _seed_directory_user(
+        db_factory,
+        email="peer@seeded.test",
+        role="operations_admin",
+        org_kind="internal",
+    )
+    resp = api_client.patch(
+        f"/api/v1/admin/users/{peer}",
+        json={"status": "disabled"},
+        headers=_h(token),
+    )
+    assert resp.status_code == 200, resp.text
+
+
+def _owner_and_peer(api_client: TestClient, db_factory) -> tuple[str, str]:
+    """Seed the protected owner; return (peer co-admin token, owner id)."""
+    _seed_user(db_factory, email=OWNER_EMAIL, role="operations_admin")
+    owner_id = _user_id_by_email(db_factory, OWNER_EMAIL)
+    peer_token = _admin_token(api_client, db_factory)  # a different ops_admin
+    return peer_token, owner_id
+
+
+def test_owner_cannot_be_disabled_by_a_peer_co_admin(
+    api_client: TestClient, db_factory
+) -> None:
+    token, owner_id = _owner_and_peer(api_client, db_factory)
+    resp = api_client.patch(
+        f"/api/v1/admin/users/{owner_id}",
+        json={"status": "disabled"},
+        headers=_h(token),
+    )
+    assert resp.status_code == 403, resp.text
+    assert "propietaria" in resp.json()["detail"]
+    db = db_factory()
+    try:
+        assert db.get(User, owner_id).status == "active"
+    finally:
+        db.close()
+
+
+def test_owner_password_cannot_be_reset_by_a_peer_co_admin(
+    api_client: TestClient, db_factory
+) -> None:
+    token, owner_id = _owner_and_peer(api_client, db_factory)
+    resp = api_client.post(
+        f"/api/v1/admin/users/{owner_id}/reset-password", headers=_h(token)
+    )
+    assert resp.status_code == 403, resp.text
+
+
+def test_owner_cannot_be_soft_deleted_by_a_peer_co_admin(
+    api_client: TestClient, db_factory
+) -> None:
+    token, owner_id = _owner_and_peer(api_client, db_factory)
+    resp = api_client.delete(
+        f"/api/v1/admin/users/{owner_id}", headers=_h(token)
+    )
+    assert resp.status_code == 403, resp.text
+    db = db_factory()
+    try:
+        assert db.get(User, owner_id).deleted_at is None
+    finally:
+        db.close()
+
+
+def test_owner_role_cannot_be_revoked_by_a_peer_co_admin(
+    api_client: TestClient, db_factory
+) -> None:
+    token, owner_id = _owner_and_peer(api_client, db_factory)
+    membership_id = _detail(api_client, token, owner_id)["memberships"][0][
+        "membership_id"
+    ]
+    resp = api_client.delete(
+        f"/api/v1/admin/users/{owner_id}/memberships/{membership_id}",
+        headers=_h(token),
+    )
+    assert resp.status_code == 403, resp.text
+    assert _active_membership_roles(db_factory, owner_id) == {"operations_admin"}

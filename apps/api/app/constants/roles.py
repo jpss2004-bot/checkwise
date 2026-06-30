@@ -52,3 +52,17 @@ STAFF_ROLES: frozenset[str] = frozenset(
 SUPERADMIN_ROLES: frozenset[str] = frozenset(
     {MembershipRole.OPERATIONS_ADMIN.value}
 )
+
+# Protected platform owner(s). Side co-admins are full ``operations_admin``
+# peers (they may provision and manage every other account), but the owner
+# account is sacrosanct: it can never be disabled, demoted, soft-deleted, or
+# have its password reset through the admin user-lifecycle endpoints — by
+# anyone, including a peer co-admin. This guarantees at least one
+# ``operations_admin`` always survives, so the platform can't be locked out.
+# The owner manages their own profile/password through self-service account
+# settings, not these admin routes.
+#
+# Mirrors the migration-0060 superadmin allowlist (``_OPERATIONS_ADMIN_EMAILS``)
+# but is the RUNTIME source of truth for owner-protection guards. Compared
+# case-insensitively against the lowercased account email.
+PROTECTED_OWNER_EMAILS: frozenset[str] = frozenset({"jsamano@legalshelf.mx"})

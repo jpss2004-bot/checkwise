@@ -66,7 +66,7 @@ from app.api.v1.client import (
 )
 from app.api.v1.reviewer import QUEUE_STATUSES
 from app.constants.plans import ORG_STATUS_FROZEN, Plan
-from app.constants.roles import MembershipRole
+from app.constants.roles import PROTECTED_OWNER_EMAILS, MembershipRole
 from app.constants.statuses import DocumentStatus
 from app.core.compliance_catalog import (
     catalog_metadata,
@@ -245,6 +245,31 @@ def _assert_can_modify_target(
                 "Solo un operations_admin puede modificar una cuenta con "
                 "rol privilegiado (operations_admin, platform_admin o "
                 "client_admin)."
+            ),
+        )
+
+
+def _assert_target_not_protected_owner(target: User) -> None:
+    """OWNER-LOCK — the protected platform owner (``PROTECTED_OWNER_EMAILS``)
+    can never be disabled, demoted, soft-deleted, or password-reset through
+    the admin user-lifecycle routes — by ANYONE, including a peer co-admin.
+
+    Side co-admins are full ``operations_admin`` peers, so
+    :func:`_assert_can_modify_target` (which only fences privileged targets
+    off from *non*-superadmins) would happily let one co-admin disable or
+    demote another — including the owner. This guard is the stricter,
+    actor-independent rule that keeps the owner account sacrosanct, which in
+    turn guarantees at least one ``operations_admin`` always survives (no
+    lockout). The owner rotates their own password / edits their own profile
+    through self-service account settings, not these routes.
+    """
+    if (target.email or "").strip().lower() in PROTECTED_OWNER_EMAILS:
+        raise HTTPException(
+            status.HTTP_403_FORBIDDEN,
+            detail=(
+                "Esta cuenta es la propietaria de la plataforma y no puede "
+                "deshabilitarse, degradarse ni eliminarse. Gestiona tu "
+                "propia cuenta desde Configuración."
             ),
         )
 
@@ -1267,8 +1292,10 @@ class ProvisionUserPayload(BaseModel):
       * ``client`` → Client + Organization(kind=client) + Membership(client_admin)
       * ``provider`` → Vendor + ProviderWorkspace(owner_user_id=user.id)
         attached to the requested ``client_id``.
-      * ``admin`` → Membership(internal_admin) on the internal
-        LegalShelf organisation. No client/vendor fields needed.
+      * ``admin`` → Membership on the internal LegalShelf organisation
+        with the staff tier from ``admin_role`` (default
+        ``operations_admin`` = full co-administrator). No client/vendor
+        fields needed.
 
     Email + name are common to all roles. Role-specific fields are
     optional at the Pydantic layer; the handler validates the right
@@ -1294,6 +1321,18 @@ class ProvisionUserPayload(BaseModel):
             "Required when role=='provider'. The Vendor row is anchored "
             "under this client; the provider's portal session will see "
             "the documents belonging to this client's workspace."
+        ),
+    )
+
+    # --- admin/staff-only field ---
+    admin_role: Literal["operations_admin", "platform_admin"] = Field(
+        default="operations_admin",
+        description=(
+            "Staff tier, used only when role=='admin'. ``operations_admin`` "
+            "(default) provisions a full co-administrator — same powers as "
+            "the platform owner, including provisioning and managing other "
+            "accounts. ``platform_admin`` provisions a read/review-team "
+            "member (no account management). Ignored for client/provider."
         ),
     )
 
@@ -1355,13 +1394,16 @@ def provision_user(
     Returns the plaintext temp password ONCE for the admin's
     confirmation surface; the User row stores only the bcrypt hash.
     """
-    # ADMIN-1 — provisioning role=="admin" mints a ``platform_admin``
-    # (CheckWise review team); only the superadmin may do so. Checked
-    # first, before any inserts or the email-existence probe. The
-    # superadmin (``operations_admin``) itself is migration-granted, not
-    # provisioned through this route.
+    # ADMIN-1 — provisioning role=="admin" mints a staff account at the
+    # tier in ``payload.admin_role`` (default ``operations_admin`` = full
+    # co-administrator; ``platform_admin`` = review team). Both are
+    # privileged roles, so only the superadmin may grant them — checked
+    # first, before any inserts or the email-existence probe. Co-admins
+    # ARE ``operations_admin``, so a co-admin may provision further
+    # co-admins; the owner account stays protected from demotion/lockout
+    # by ``_assert_target_not_protected_owner`` on the lifecycle routes.
     if payload.role == "admin":
-        _assert_can_grant_role(current, MembershipRole.PLATFORM_ADMIN.value)
+        _assert_can_grant_role(current, payload.admin_role)
 
     full_name = payload.full_name.strip()
     email = payload.email.strip().lower()
@@ -1459,9 +1501,11 @@ def provision_user(
         organization_id = org.id
         welcome_org_name = name
     elif payload.role == "admin":
-        # Internal LegalShelf admin. Get-or-create the shared internal
-        # organisation (mirrors scripts/add_internal_admin.py), then
-        # bind an internal_admin membership. No Client/Vendor stack.
+        # Internal LegalShelf staff. Get-or-create the shared internal
+        # organisation (mirrors scripts/add_internal_admin.py), then bind
+        # a membership at the requested staff tier (``payload.admin_role``;
+        # default ``operations_admin`` = full co-administrator). No
+        # Client/Vendor stack.
         org = db.scalar(
             select(Organization).where(
                 Organization.name == INTERNAL_ORG_NAME,
@@ -1478,7 +1522,7 @@ def provision_user(
             Membership(
                 user_id=user.id,
                 organization_id=org.id,
-                role=MembershipRole.PLATFORM_ADMIN.value,
+                role=payload.admin_role,
                 status="active",
             )
         )
@@ -1564,6 +1608,7 @@ def provision_user(
         before=None,
         after={
             "role": payload.role,
+            "admin_role": payload.admin_role if payload.role == "admin" else None,
             "user_id": user.id,
             "user_email": user.email,
             "client_id": client_id,
@@ -1878,6 +1923,9 @@ def update_user_status(
     # privileged (internal_admin / platform_admin) account. Only fences
     # the destructive DISABLE path — reactivation stays open.
     if payload.status == "disabled":
+        # OWNER-LOCK: the platform owner can't be disabled by anyone (a
+        # peer co-admin included); reactivation stays open.
+        _assert_target_not_protected_owner(target)
         _assert_can_modify_target(db, current, target)
 
     before_status = target.status
@@ -1936,6 +1984,10 @@ def reset_user_password(
             status.HTTP_409_CONFLICT,
             detail="Reactiva al usuario antes de restablecer su contraseña.",
         )
+    # OWNER-LOCK: no admin (peer co-admin included) may mint and read back
+    # the owner's temp password — that would be account takeover. The owner
+    # rotates their own password through self-service account settings.
+    _assert_target_not_protected_owner(target)
     # ADMIN-1 (symmetric): a pure platform_admin must not seize a
     # privileged account by minting (and reading back) its temp password.
     _assert_can_modify_target(db, current, target)
@@ -2427,10 +2479,13 @@ def revoke_user_membership(
     ``admin.user.membership_revoked``.
     """
     membership = _membership_for_user_or_404(db, user_id, membership_id)
-    # ADMIN-1 (symmetric): a pure platform_admin must not strip roles from
-    # a privileged (internal_admin / platform_admin) account.
     target = db.get(User, user_id)
     if target is not None:
+        # OWNER-LOCK: revoking the owner's role would strip their
+        # operations_admin and lock the platform out — blocked for everyone.
+        _assert_target_not_protected_owner(target)
+        # ADMIN-1 (symmetric): a pure platform_admin must not strip roles
+        # from a privileged (internal_admin / platform_admin) account.
         _assert_can_modify_target(db, current, target)
     if membership.is_primary and membership.status == "active":
         raise HTTPException(
@@ -2704,6 +2759,9 @@ def delete_user(
         raise HTTPException(
             status.HTTP_409_CONFLICT, detail="La cuenta ya está eliminada."
         )
+    # OWNER-LOCK: the platform owner can't be soft-deleted by anyone (a peer
+    # co-admin included), so the platform can never be left ownerless.
+    _assert_target_not_protected_owner(target)
     # ADMIN-1 (symmetric): a pure platform_admin must not soft-delete a
     # privileged (internal_admin / platform_admin) account.
     _assert_can_modify_target(db, current, target)
