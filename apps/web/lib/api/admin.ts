@@ -481,6 +481,10 @@ export type ProvisionUserBody = {
   full_name: string;
   email: string;
   role: "client" | "provider" | "admin";
+  // staff-only (role === "admin"): the tier the new staffer is minted at.
+  // Omitted defaults to a full co-administrator (operations_admin) — same
+  // powers as the owner. "platform_admin" mints a review-only staffer.
+  admin_role?: "operations_admin" | "platform_admin";
   // client-only
   client_name?: string;
   client_rfc?: string | null;

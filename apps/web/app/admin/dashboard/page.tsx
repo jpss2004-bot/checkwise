@@ -639,7 +639,7 @@ function OperationalInbox({ inbox }: { inbox: AdminRollup["inbox"] }) {
       value: inbox.correction_requests_pending,
     },
     {
-      href: "/platform/feedback-reports",
+      href: "/admin/feedback-reports",
       icon: Megaphone,
       label: "Feedback nuevo",
       caption: "Reportes de bugs y mejoras sin triage.",

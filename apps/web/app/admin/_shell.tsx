@@ -3,6 +3,7 @@
 import { Suspense } from "react";
 import {
   Books,
+  Bug,
   CalendarBlank,
   ChartLineUp,
   ClipboardText,
@@ -14,6 +15,7 @@ import {
   PencilSimple,
   Storefront,
   Table,
+  UsersThree,
 } from "@phosphor-icons/react";
 
 import { AdminWiseMount } from "@/components/checkwise/wise/admin-wise-mount";
@@ -36,6 +38,14 @@ import {
 // (``apps/api/app/constants/roles.py``).
 const STAFF_ROLES = ["platform_admin", "operations_admin"] as const;
 
+// Superadmin-only surfaces (account provisioning + the user directory,
+// product-feedback triage). The backend gates these on operations_admin
+// (the ``PlatformUser`` dependency); the matching nav entries + a tighter
+// page gate (``requireRoles`` below) keep the review team (platform_admin)
+// out of a UI the API would only 403. These moved here from the retired
+// /platform console (2026-06-30 consolidation into one Operaciones console).
+const SUPERADMIN_ROLES = ["operations_admin"] as const;
+
 // Day-to-day decision loop — the ≤7 surfaces a staffer touches every
 // shift. ``GET /admin/*`` authorizes both staff roles, so every item is
 // gated to STAFF_ROLES and the nav never dangles a link the API 403s.
@@ -55,12 +65,17 @@ const PRIMARY_NAV: ConsoleNavItem[] = [
 // ``platform_admin`` a documented read permission it otherwise had no UI
 // path to (audit F2).
 const SECONDARY_NAV: ConsoleNavItem[] = [
+  // Account provisioning + the user directory — superadmin-only. Moved
+  // here from the retired /platform console (2026-06-30 consolidation).
+  { href: "/admin/cuentas", label: "Cuentas", icon: UsersThree, roles: SUPERADMIN_ROLES },
   { href: "/admin/contact-requests", label: "Solicitudes", icon: EnvelopeSimple, roles: STAFF_ROLES },
   { href: "/admin/correction-requests", label: "Correcciones", icon: PencilSimple, roles: STAFF_ROLES },
   // Audit metadata-rules — a fully-built rulebook page that previously had
   // no nav entry (audit routing-nav "Orphan route /admin/metadata").
   { href: "/admin/metadata", label: "Metadata", icon: Table, roles: STAFF_ROLES },
   { href: "/admin/audit-log", label: "Audit log", icon: ListMagnifyingGlass, roles: STAFF_ROLES },
+  // Product-feedback triage — superadmin-only, also moved from /platform.
+  { href: "/admin/feedback-reports", label: "Feedback", icon: Bug, roles: SUPERADMIN_ROLES },
 ];
 
 // Settings keeps a dedicated gear anchor in the primary row (audit F11).
@@ -77,6 +92,7 @@ export function AdminShell({
   actions,
   children,
   unframed = false,
+  requireRoles = STAFF_ROLES,
 }: {
   title?: string;
   description?: React.ReactNode;
@@ -88,14 +104,26 @@ export function AdminShell({
    * its own complete header — e.g. the shared <ReportEditor>.
    */
   unframed?: boolean;
+  /**
+   * Tighten the entry gate for superadmin-only sub-sections that live in
+   * the Operaciones chrome (account provisioning, feedback triage). Defaults
+   * to both staff roles; pass ``["operations_admin"]`` to fence the review
+   * team out of a page whose API is operations_admin-only. A denied staffer
+   * lands on the Operaciones home rather than a dead /login bounce.
+   */
+  requireRoles?: readonly string[];
 }) {
   return (
     <ConsoleShell
       gate={{
-        // Operaciones is the staff console; anyone else is bounced to
-        // /admin, which re-routes them to their own surface.
-        roles: STAFF_ROLES,
-        onDenied: () => "/admin",
+        // Operaciones is the staff console. A staffer who lacks the tighter
+        // (superadmin) role lands on the Operaciones home; anyone non-staff
+        // is bounced to /admin, which re-routes them to their own surface.
+        roles: requireRoles,
+        onDenied: (session) =>
+          STAFF_ROLES.some((role) => session.roles.includes(role))
+            ? "/admin/dashboard"
+            : "/admin",
       }}
       surfaceLabel="Operaciones internas"
       homeHref="/admin"
@@ -106,14 +134,6 @@ export function AdminShell({
       searchResultsHref="/admin/buscar"
       profileHref="/admin/configuracion"
       profileLabel="Mi cuenta"
-      // The superadmin also has the Plataforma console; the review team
-      // (platform_admin) is not a superadmin, so don't dangle a switch
-      // into a console the API would 403.
-      shellSwitch={(session) =>
-        session.roles.includes("operations_admin")
-          ? { href: "/platform/dashboard", label: "Cambiar a Plataforma" }
-          : null
-      }
       // Wise mounts only when the URL carries a ``?client_id=`` so the
       // backend's _resolve_client_id can scope answers; hidden on
       // cross-tenant pages like the admin dashboard.

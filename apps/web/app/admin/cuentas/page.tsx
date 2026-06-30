@@ -28,7 +28,7 @@ import {
 import { SearchInput } from "@/components/ui/search-input";
 import { Select } from "@/components/ui/select";
 
-import { PlatformShell } from "../_shell";
+import { AdminShell } from "@/app/admin/_shell";
 import {
   AdminApiError,
   type AdminResetPasswordResponse,
@@ -41,9 +41,9 @@ import { roleLabel } from "@/lib/constants/labels";
 import { formatDateTime } from "@/lib/format/datetime";
 
 /**
- * /platform/users — listing + lifecycle surface for existing users
+ * /admin/cuentas — listing + lifecycle surface for existing users
  * (P3 audit, 2026-06-10). Closes the write-only gap: until this page
- * the only user-management surface was /platform/users/new, so a
+ * the only user-management surface was /admin/cuentas/new, so a
  * departed employee couldn't be disabled and a forgotten password
  * couldn't be reset without touching the database.
  *
@@ -298,12 +298,13 @@ export default function PlatformUsersPage() {
   const anyFilterActive = Boolean(q.trim() || statusFilter || roleFilter);
 
   return (
-    <PlatformShell
+    <AdminShell
+      requireRoles={["operations_admin"]}
       title="Usuarios"
       description="Todas las cuentas del sistema: clientes, proveedores y equipo interno. Desde aquí puedes restablecer contraseñas y desactivar o reactivar cuentas."
       actions={
         <Button asChild size="sm">
-          <Link href="/platform/users/new">
+          <Link href="/admin/cuentas/new">
             <UserPlus className="h-4 w-4" weight="bold" aria-hidden="true" />
             Nuevo usuario
             <ArrowRight className="h-3.5 w-3.5" weight="bold" aria-hidden="true" />
@@ -408,7 +409,7 @@ export default function PlatformUsersPage() {
               header: "Nombre",
               cell: (row) => (
                 <Link
-                  href={`/platform/users/${row.user_id}`}
+                  href={`/admin/cuentas/${row.user_id}`}
                   className="font-medium text-[color:var(--text-primary)] underline-offset-2 hover:text-[color:var(--text-brand)] hover:underline"
                 >
                   {row.full_name || row.email}
@@ -791,6 +792,6 @@ export default function PlatformUsersPage() {
           </DialogFooter>
         </DialogContent>
       </Dialog>
-    </PlatformShell>
+    </AdminShell>
   );
 }

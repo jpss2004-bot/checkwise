@@ -37,7 +37,7 @@ import { Label } from "@/components/ui/label";
 import { Select } from "@/components/ui/select";
 import { Skeleton } from "@/components/ui/skeleton";
 
-import { PlatformShell } from "../../_shell";
+import { AdminShell } from "@/app/admin/_shell";
 import {
   AdminApiError,
   type AdminResetPasswordResponse,
@@ -58,7 +58,7 @@ import {
 import { roleLabel } from "@/lib/constants/labels";
 
 /**
- * /platform/users/[id] — full account picture (Phase 2 of the platform
+ * /admin/cuentas/[id] — full account picture (Phase 2 of the platform
  * rework). Until this page the only user surfaces were the directory
  * list and the create form; there was nowhere to see one user's
  * memberships, seat usage, and their slice of the audit trail in one
@@ -435,7 +435,8 @@ export default function PlatformUserDetailPage() {
       : [];
 
   return (
-    <PlatformShell
+    <AdminShell
+      requireRoles={["operations_admin"]}
       title={user ? user.full_name || user.email : "Usuario"}
       description={
         user
@@ -445,7 +446,7 @@ export default function PlatformUserDetailPage() {
       actions={
         <>
           <Button asChild size="sm" variant="outline">
-            <Link href="/platform/users">
+            <Link href="/admin/cuentas">
               <ArrowLeft className="h-3.5 w-3.5" weight="bold" aria-hidden="true" />
               Volver a usuarios
             </Link>
@@ -545,7 +546,7 @@ export default function PlatformUserDetailPage() {
           </p>
           <div className="mt-3">
             <Button asChild size="sm" variant="outline">
-              <Link href="/platform/users">Volver a usuarios</Link>
+              <Link href="/admin/cuentas">Volver a usuarios</Link>
             </Button>
           </div>
         </Surface>
@@ -848,7 +849,7 @@ export default function PlatformUserDetailPage() {
             icon={ListMagnifyingGlass}
             actions={
               <Button asChild size="sm" variant="ghost">
-                <Link href="/platform/audit-log">
+                <Link href="/admin/audit-log">
                   Ver Audit log
                   <ArrowSquareOut
                     className="h-3.5 w-3.5"
@@ -1228,7 +1229,7 @@ export default function PlatformUserDetailPage() {
           </DialogFooter>
         </DialogContent>
       </Dialog>
-    </PlatformShell>
+    </AdminShell>
   );
 }
 

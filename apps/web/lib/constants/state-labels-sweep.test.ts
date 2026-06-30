@@ -24,7 +24,6 @@ const ROOTS = [
   "app/client",
   "app/portal",
   "app/admin",
-  "app/platform",
   "app/reports",
   "components/checkwise",
 ];

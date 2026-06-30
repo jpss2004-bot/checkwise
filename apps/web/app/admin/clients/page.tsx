@@ -68,7 +68,7 @@ export default function AdminClientsPage() {
       description="Empresas dadas de alta en CheckWise. Cada cliente puede tener uno o varios proveedores REPSE bajo gestión."
       actions={
         <Button asChild size="sm">
-          <Link href="/platform/users/new">
+          <Link href="/admin/cuentas/new">
             <UserPlus className="h-4 w-4" weight="bold" aria-hidden="true" />
             Nuevo cliente
             <ArrowRight className="h-3.5 w-3.5" weight="bold" aria-hidden="true" />

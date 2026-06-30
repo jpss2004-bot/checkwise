@@ -23,7 +23,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 
-import { PlatformShell } from "../../_shell";
+import { AdminShell } from "@/app/admin/_shell";
 import {
   AdminApiError,
   listClients,
@@ -113,7 +113,7 @@ export default function AdminNewUserPage() {
               client_rfc: clientRfc.trim().toUpperCase() || null,
             }
           : role === "admin"
-            ? { ...base, role: "admin" }
+            ? { ...base, role: "admin", admin_role: "operations_admin" }
             : {
                 ...base,
                 role: "provider",
@@ -207,13 +207,14 @@ export default function AdminNewUserPage() {
   }
 
   return (
-    <PlatformShell
+    <AdminShell
+      requireRoles={["operations_admin"]}
       title="Nuevo usuario"
       description="Crea una cuenta nueva de cliente, proveedor o administrador. CheckWise genera una contraseña temporal, la muestra una vez en pantalla y la envía por correo."
       actions={
         <>
           <Button asChild size="sm" variant="outline">
-            <Link href="/platform/users">
+            <Link href="/admin/cuentas">
               <UsersThree className="h-3.5 w-3.5" weight="bold" aria-hidden="true" />
               Ver usuarios
             </Link>
@@ -283,7 +284,7 @@ export default function AdminNewUserPage() {
 
               <div className="flex flex-wrap gap-2">
                 <Button asChild size="sm">
-                  <Link href={`/platform/users/${conflict.user_id}`}>
+                  <Link href={`/admin/cuentas/${conflict.user_id}`}>
                     Ver y administrar cuenta
                     <ArrowRight className="h-3.5 w-3.5" weight="bold" aria-hidden="true" />
                   </Link>
@@ -349,8 +350,8 @@ export default function AdminNewUserPage() {
                 active={role === "admin"}
                 onClick={() => setRole("admin")}
                 icon={ShieldCheck}
-                label="Administrador"
-                caption="Un miembro del equipo LegalShelf con acceso al portal de administración."
+                label="Co-administrador"
+                caption="Un perfil con acceso total a Operaciones — los mismos permisos que tú, con sus propias credenciales: gestiona clientes, proveedores, demos y cuentas."
               />
             </div>
           </Surface>
@@ -614,7 +615,7 @@ export default function AdminNewUserPage() {
           </div>
         ) : null}
       </div>
-    </PlatformShell>
+    </AdminShell>
   );
 }
 

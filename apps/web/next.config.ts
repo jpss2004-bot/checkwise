@@ -141,29 +141,27 @@ const nextConfig: NextConfig = {
     ];
     return [{ source: "/:path*", headers: securityHeaders }];
   },
-  // Operaciones ↔ Plataforma split (2026-05-26). The IT-side pages
-  // moved from /admin/* to /platform/*. Permanent 308 redirects keep
-  // old emails and bookmarks pointing at the legacy URLs working. Drop
-  // these once we have telemetry showing zero hits for a month.
-  //
-  // NOTE: /admin/audit-log is intentionally NOT redirected. The audit
-  // log lives at /admin/audit-log again (in the Operaciones shell) so
-  // the review team (platform_admin) — which roles.py grants a read
-  // permission but which cannot enter the superadmin-only /platform
-  // shell — has a UI path to it (audit F2). A redirect here would bounce
-  // them straight back into the 403.
+  // Operaciones consolidation (2026-06-30). The separate Plataforma
+  // (/platform/*) superadmin console was retired and folded into the one
+  // Operaciones console: account provisioning + the user directory now
+  // live at /admin/cuentas, and feedback triage at /admin/feedback-reports
+  // (both gated to operations_admin). These permanent redirects keep old
+  // emails, bookmarks, and the prior /admin/users/new alias working. The
+  // most specific sources come first (Next matches in array order), so
+  // /platform/users/new wins over the /platform/users/:id param and the
+  // /platform/:path* catch-all is the last resort.
   async redirects() {
     return [
-      {
-        source: "/admin/users/new",
-        destination: "/platform/users/new",
-        permanent: true,
-      },
-      {
-        source: "/admin/feedback-reports",
-        destination: "/platform/feedback-reports",
-        permanent: true,
-      },
+      { source: "/admin/users/new", destination: "/admin/cuentas/new", permanent: true },
+      { source: "/platform/users/new", destination: "/admin/cuentas/new", permanent: true },
+      { source: "/platform/users/:id", destination: "/admin/cuentas/:id", permanent: true },
+      { source: "/platform/users", destination: "/admin/cuentas", permanent: true },
+      { source: "/platform/feedback-reports", destination: "/admin/feedback-reports", permanent: true },
+      { source: "/platform/audit-log", destination: "/admin/audit-log", permanent: true },
+      { source: "/platform/dashboard", destination: "/admin/dashboard", permanent: true },
+      { source: "/platform", destination: "/admin/dashboard", permanent: true },
+      // Safety net for any other legacy /platform/* deep link.
+      { source: "/platform/:path*", destination: "/admin/dashboard", permanent: true },
     ];
   },
 };

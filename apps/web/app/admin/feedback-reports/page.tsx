@@ -27,7 +27,7 @@ import { Field } from "@/components/ui/field";
 import { Select } from "@/components/ui/select";
 import { Textarea } from "@/components/ui/textarea";
 
-import { PlatformShell } from "../_shell";
+import { AdminShell } from "@/app/admin/_shell";
 import {
   type AdminFeedbackReport,
   type FeedbackKind,
@@ -377,7 +377,8 @@ export default function AdminFeedbackReportsPage() {
   );
 
   return (
-    <PlatformShell
+    <AdminShell
+      requireRoles={["operations_admin"]}
       title="Reportes de feedback"
       description="Bug reports y sugerencias enviadas desde el botón Reportar. Cada reporte queda persistido aquí (DB es la fuente de verdad) y opcionalmente notificado en #checkwise-feedback. Mueve los reportes por el flujo nuevo → triaged → en progreso → resuelto."
       actions={
@@ -522,7 +523,7 @@ export default function AdminFeedbackReportsPage() {
         onClose={closeDetail}
         onSubmit={onStatusSubmit}
       />
-    </PlatformShell>
+    </AdminShell>
   );
 }
 
